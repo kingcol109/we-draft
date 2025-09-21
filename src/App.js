@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react"; // ✅ add import
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
 import CommunityBoard from "./pages/CommunityBoard";
@@ -17,10 +18,10 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/community" element={<CommunityBoard />} />
-        
+
         {/* ✅ Dynamic route now uses slug */}
-        <Route path="/player/:slug" element={<PlayerProfile />} />
-        
+        <Route path="/player/:Slug" element={<PlayerProfile />} />
+
         <Route path="/boards" element={<UserBoards />} />
         <Route path="/profile" element={<UserProfile />} /> {/* ✅ new route */}
 
@@ -34,6 +35,9 @@ function App() {
           }
         />
       </Routes>
+
+      {/* ✅ Analytics active across all routes */}
+      <Analytics />
     </Router>
   );
 }
