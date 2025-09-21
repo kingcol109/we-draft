@@ -1,24 +1,40 @@
-import logo from './logo.svg';
-import './App.css';
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Navbar from "./components/Navbar";
+import Home from "./pages/Home";
+import CommunityBoard from "./pages/CommunityBoard";
+import PlayerProfile from "./pages/PlayerProfile";
+import UserBoards from "./pages/UserBoards";
+import UserProfile from "./pages/UserProfile"; // ✅ import profile page
 
 function App() {
+  console.log("✅ App.js loaded, routes mounted");
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <Router>
+      {/* Navbar always visible */}
+      <Navbar />
+
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/community" element={<CommunityBoard />} />
+        
+        {/* ✅ Dynamic route now uses slug */}
+        <Route path="/player/:slug" element={<PlayerProfile />} />
+        
+        <Route path="/boards" element={<UserBoards />} />
+        <Route path="/profile" element={<UserProfile />} /> {/* ✅ new route */}
+
+        {/* ✅ Catch-all 404 route */}
+        <Route
+          path="*"
+          element={
+            <div style={{ marginTop: "80px", textAlign: "center", color: "red" }}>
+              404 – Route not found
+            </div>
+          }
+        />
+      </Routes>
+    </Router>
   );
 }
 
