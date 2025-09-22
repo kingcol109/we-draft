@@ -424,32 +424,32 @@ export default function CommunityBoard() {
         </div>
 
         {/* Filters */}
-        <div className="flex gap-4 mb-4 justify-center">
-          <DropdownChecklist
-            title="Position"
-            options={[...new Set(players.map((p) => p.Position).filter(Boolean))]}
-            selected={selectedPositions}
-            setSelected={setSelectedPositions}
-          />
-          <DropdownChecklist
-            title="School"
-            options={[...new Set(players.map((p) => p.School).filter(Boolean))].sort()}
-            selected={selectedSchools}
-            setSelected={setSelectedSchools}
-          />
-          <DropdownChecklist
-            title="Community Grade"
-            options={gradeOrder}
-            selected={selectedGrades}
-            setSelected={setSelectedGrades}
-            ordered
-          />
-          <TraitsFilter
-            traitFilters={traitFilters}
-            setTraitFilters={setTraitFilters}
-            resetFilters={resetFilters}
-          />
-        </div>
+<div className="flex flex-col md:flex-row gap-4 md:gap-6 mb-4 items-center md:justify-center">
+  <DropdownChecklist
+    title="Position"
+    options={[...new Set(players.map((p) => p.Position).filter(Boolean))]}
+    selected={selectedPositions}
+    setSelected={setSelectedPositions}
+  />
+  <DropdownChecklist
+    title="School"
+    options={[...new Set(players.map((p) => p.School).filter(Boolean))].sort()}
+    selected={selectedSchools}
+    setSelected={setSelectedSchools}
+  />
+  <DropdownChecklist
+    title="Community Grade"
+    options={gradeOrder}
+    selected={selectedGrades}
+    setSelected={setSelectedGrades}
+    ordered
+  />
+  <TraitsFilter
+    traitFilters={traitFilters}
+    setTraitFilters={setTraitFilters}
+    resetFilters={resetFilters}
+  />
+</div>
 
         {/* ✅ Search */}
         <div className="flex justify-center mb-6">

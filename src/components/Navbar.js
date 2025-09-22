@@ -6,15 +6,14 @@ export default function Navbar() {
   const { user, login } = useAuth();
   const [show, setShow] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
       if (window.scrollY > lastScrollY) {
-        // scrolling down → hide
-        setShow(false);
+        setShow(false); // scrolling down → hide
       } else {
-        // scrolling up → show
-        setShow(true);
+        setShow(true); // scrolling up → show
       }
       setLastScrollY(window.scrollY);
     };
@@ -58,7 +57,7 @@ export default function Navbar() {
     <nav
       style={{
         position: "fixed",
-        top: show ? "0" : "-100px", // slide up when hidden
+        top: show ? "0" : "-100px",
         left: 0,
         right: 0,
         backgroundColor: "#0055a5",
@@ -71,46 +70,127 @@ export default function Navbar() {
         zIndex: 1000,
       }}
     >
-      {/* Standard links */}
-      {[
-        { path: "/", label: "Home" },
-        { path: "/community", label: "Community Board" },
-        { path: "/boards", label: "My Boards" },
-      ].map((link, index) => (
-        <Link
-          key={index}
-          to={link.path}
-          style={baseStyle}
-          onMouseEnter={(e) => Object.assign(e.target.style, hoverStyle)}
-          onMouseLeave={(e) => Object.assign(e.target.style, baseStyle)}
-        >
-          {link.label}
-        </Link>
-      ))}
+      {/* ✅ PC / Desktop Navbar (unchanged) */}
+      <div className="hidden md:flex">
+        {[
+          { path: "/", label: "Home" },
+          { path: "/community", label: "Community Board" },
+          { path: "/boards", label: "My Boards" },
+        ].map((link, index) => (
+          <Link
+            key={index}
+            to={link.path}
+            style={baseStyle}
+            onMouseEnter={(e) => Object.assign(e.target.style, hoverStyle)}
+            onMouseLeave={(e) => Object.assign(e.target.style, baseStyle)}
+          >
+            {link.label}
+          </Link>
+        ))}
 
-      {/* Profile link if signed in */}
-      {user && (
-        <Link
-          to="/profile"
-          style={baseStyle}
-          onMouseEnter={(e) => Object.assign(e.target.style, hoverStyle)}
-          onMouseLeave={(e) => Object.assign(e.target.style, baseStyle)}
-        >
-          Profile
-        </Link>
-      )}
+        {user && (
+          <Link
+            to="/profile"
+            style={baseStyle}
+            onMouseEnter={(e) => Object.assign(e.target.style, hoverStyle)}
+            onMouseLeave={(e) => Object.assign(e.target.style, baseStyle)}
+          >
+            Profile
+          </Link>
+        )}
 
-      {/* Auth button */}
-      {!user && (
+        {!user && (
+          <button
+            onClick={login}
+            style={authStyle}
+            onMouseEnter={(e) => Object.assign(e.target.style, authHoverStyle)}
+            onMouseLeave={(e) => Object.assign(e.target.style, authStyle)}
+          >
+            Sign In
+          </button>
+        )}
+      </div>
+
+      {/* ✅ Mobile Navbar (hamburger) */}
+      <div className="md:hidden w-full flex justify-between items-center">
+        <Link
+          to="/"
+          style={{
+            color: "#fff",
+            fontWeight: "bold",
+            fontSize: "1.25rem",
+            textDecoration: "none",
+          }}
+        >
+          We-Draft
+        </Link>
+
         <button
-          onClick={login}
-          style={authStyle}
-          onMouseEnter={(e) => Object.assign(e.target.style, authHoverStyle)}
-          onMouseLeave={(e) => Object.assign(e.target.style, authStyle)}
+          onClick={() => setMenuOpen(!menuOpen)}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#fff",
+            fontSize: "1.5rem",
+            cursor: "pointer",
+          }}
         >
-          Sign In
+          ☰
         </button>
-      )}
+
+        {menuOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: "100%",
+              right: "1rem",
+              backgroundColor: "#ffffff",
+              border: "2px solid #f6a21d",
+              borderRadius: "8px",
+              marginTop: "0.5rem",
+              boxShadow: "0 4px 8px rgba(0,0,0,0.15)",
+              padding: "0.5rem",
+            }}
+          >
+            {[
+              { path: "/", label: "Home" },
+              { path: "/community", label: "Community Board" },
+              { path: "/boards", label: "My Boards" },
+            ].map((link, index) => (
+              <Link
+                key={index}
+                to={link.path}
+                style={{ ...baseStyle, margin: "0.25rem 0" }}
+                onClick={() => setMenuOpen(false)}
+              >
+                {link.label}
+              </Link>
+            ))}
+
+            {user && (
+              <Link
+                to="/profile"
+                style={{ ...baseStyle, margin: "0.25rem 0" }}
+                onClick={() => setMenuOpen(false)}
+              >
+                Profile
+              </Link>
+            )}
+
+            {!user && (
+              <button
+                onClick={() => {
+                  login();
+                  setMenuOpen(false);
+                }}
+                style={{ ...authStyle, margin: "0.25rem 0" }}
+              >
+                Sign In
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </nav>
   );
 }

@@ -409,43 +409,43 @@ export default function UserBoards() {
         </div>
 
         {/* Filters */}
-        <div className="flex gap-4 mb-4 justify-center flex-wrap">
-          <DropdownChecklist
-            title="Position"
-            options={[
-              ...new Set(gradedPlayers.map((p) => p.Position).filter(Boolean)),
-            ]}
-            selected={selectedPositions}
-            setSelected={setSelectedPositions}
-          />
-          <DropdownChecklist
-            title="School"
-            options={[
-              ...new Set(gradedPlayers.map((p) => p.School).filter(Boolean)),
-            ].sort()}
-            selected={selectedSchools}
-            setSelected={setSelectedSchools}
-          />
-          <DropdownChecklist
-            title="Your Grade"
-            options={gradeOrder}
-            selected={selectedGrades}
-            setSelected={setSelectedGrades}
-            ordered
-          />
-          <TraitsFilter
-            traitFilters={traitFilters}
-            setTraitFilters={setTraitFilters}
-            resetFilters={() => {
-              setSelectedSchools([]);
-              setSelectedPositions([]);
-              setSelectedGrades([]);
-              setTraitFilters(JSON.parse(JSON.stringify(defaultRanges)));
-              setSearchQuery("");
-              setEligibleYear("2026");
-            }}
-          />
-        </div>
+<div className="flex gap-4 mb-4 justify-center flex-wrap">
+  <DropdownChecklist
+    title="Position"
+    options={[
+      ...new Set(gradedPlayers.map((p) => p.Position).filter(Boolean)),
+    ]}
+    selected={selectedPositions}
+    setSelected={setSelectedPositions}
+  />
+  <DropdownChecklist
+    title="School"
+    options={[
+      ...new Set(gradedPlayers.map((p) => p.School).filter(Boolean)),
+    ].sort()}
+    selected={selectedSchools}
+    setSelected={setSelectedSchools}
+  />
+  <DropdownChecklist
+    title="Your Grade"
+    options={gradeOrder}
+    selected={selectedGrades}
+    setSelected={setSelectedGrades}
+    ordered
+  />
+  <TraitsFilter
+    traitFilters={traitFilters}
+    setTraitFilters={setTraitFilters}
+    resetFilters={() => {
+      setSelectedSchools([]);
+      setSelectedPositions([]);
+      setSelectedGrades([]);
+      setTraitFilters(JSON.parse(JSON.stringify(defaultRanges)));
+      setSearchQuery("");
+      setEligibleYear("2026");
+    }}
+  />
+</div>
 
         {/* Search */}
         <div className="flex justify-center mb-6">
