@@ -111,7 +111,7 @@ export default function Navbar() {
         )}
       </div>
 
-      {/* ✅ Mobile Navbar (hamburger) */}
+      {/* ✅ Mobile Navbar (hamburger + vertical dropdown) */}
       <div className="md:hidden w-full flex justify-between items-center">
         <Link
           to="/"
@@ -143,13 +143,16 @@ export default function Navbar() {
             style={{
               position: "absolute",
               top: "100%",
-              right: "1rem",
+              left: 0,
+              right: 0,
               backgroundColor: "#ffffff",
-              border: "2px solid #f6a21d",
-              borderRadius: "8px",
-              marginTop: "0.5rem",
+              borderTop: "2px solid #f6a21d",
               boxShadow: "0 4px 8px rgba(0,0,0,0.15)",
-              padding: "0.5rem",
+              padding: "1rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
+              textAlign: "center",
             }}
           >
             {[
@@ -160,7 +163,7 @@ export default function Navbar() {
               <Link
                 key={index}
                 to={link.path}
-                style={{ ...baseStyle, margin: "0.25rem 0" }}
+                style={{ ...baseStyle, width: "100%" }}
                 onClick={() => setMenuOpen(false)}
               >
                 {link.label}
@@ -170,7 +173,7 @@ export default function Navbar() {
             {user && (
               <Link
                 to="/profile"
-                style={{ ...baseStyle, margin: "0.25rem 0" }}
+                style={{ ...baseStyle, width: "100%" }}
                 onClick={() => setMenuOpen(false)}
               >
                 Profile
@@ -183,7 +186,7 @@ export default function Navbar() {
                   login();
                   setMenuOpen(false);
                 }}
-                style={{ ...authStyle, margin: "0.25rem 0" }}
+                style={{ ...authStyle, width: "100%" }}
               >
                 Sign In
               </button>
