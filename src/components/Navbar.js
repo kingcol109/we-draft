@@ -7,8 +7,18 @@ export default function Navbar() {
   const [show, setShow] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  useEffect(() => {
+    if (isMobile) return; // disable scroll effect on mobile
+
     const handleScroll = () => {
       if (window.scrollY > lastScrollY) {
         setShow(false); // scrolling down → hide
@@ -20,7 +30,7 @@ export default function Navbar() {
 
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [lastScrollY]);
+  }, [lastScrollY, isMobile]);
 
   const baseStyle = {
     margin: "0 0.5rem",
@@ -57,7 +67,7 @@ export default function Navbar() {
     <nav
       style={{
         position: "fixed",
-        top: show ? "0" : "-100px",
+        top: isMobile ? "0" : show ? "0" : "-100px",
         left: 0,
         right: 0,
         backgroundColor: "#0055a5",
@@ -66,11 +76,11 @@ export default function Navbar() {
         justifyContent: "center",
         alignItems: "center",
         gap: "1rem",
-        transition: "top 0.3s ease-in-out",
+        transition: isMobile ? "none" : "top 0.3s ease-in-out",
         zIndex: 1000,
       }}
     >
-      {/* ✅ PC / Desktop Navbar (unchanged) */}
+      {/* ✅ PC / Desktop Navbar */}
       <div className="hidden md:flex">
         {[
           { path: "/", label: "Home" },
@@ -101,7 +111,13 @@ export default function Navbar() {
 
         {!user && (
           <button
-            onClick={login}
+            onClick={async () => {
+              try {
+                await login();
+              } catch (err) {
+                console.error(err);
+              }
+            }}
             style={authStyle}
             onMouseEnter={(e) => Object.assign(e.target.style, authHoverStyle)}
             onMouseLeave={(e) => Object.assign(e.target.style, authStyle)}
@@ -182,9 +198,13 @@ export default function Navbar() {
 
             {!user && (
               <button
-                onClick={() => {
-                  login();
-                  setMenuOpen(false);
+                onClick={async () => {
+                  try {
+                    await login();
+                    setMenuOpen(false);
+                  } catch (err) {
+                    console.error(err);
+                  }
                 }}
                 style={{ ...authStyle, width: "100%" }}
               >
