@@ -20,7 +20,7 @@ function App() {
         <Route path="/community" element={<CommunityBoard />} />
 
         {/* ✅ Dynamic route now uses slug */}
-        <Route path="/player/:Slug" element={<PlayerProfile />} />
+        <Route path="/player/:slug" element={<PlayerProfile />} />
 
         <Route path="/boards" element={<UserBoards />} />
         <Route path="/profile" element={<UserProfile />} /> {/* ✅ new route */}
