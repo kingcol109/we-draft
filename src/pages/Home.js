@@ -71,15 +71,13 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="bg-white text-[#0055a5] min-h-screen flex flex-col items-center text-center pt-20 px-4">
-      {/* Logo Box */}
-      <div className="border-4 border-[#f6a21d] rounded-2xl p-4 bg-white mb-8 shadow-lg">
-        <img
-          src={logo}
-          alt="We-Draft Logo"
-          className="w-[280px] md:w-[380px] max-w-[90vw] h-auto"
-        />
-      </div>
+    <div className="bg-white text-[#0055a5] min-h-screen flex flex-col items-center text-center pt-12 px-4">
+      {/* Logo */}
+      <img
+        src={logo}
+        alt="We-Draft Logo"
+        className="w-[340px] md:w-[440px] max-w-[95vw] h-auto mb-6"
+      />
 
       {/* Tagline */}
       <p className="text-lg md:text-xl max-w-2xl mb-12 font-medium">
@@ -88,13 +86,13 @@ export default function Home() {
 
       {/* Trending Players */}
       <div className="bg-white border-4 border-[#f6a21d] rounded-lg shadow p-6 mb-12 w-full max-w-3xl">
-        <h2 className="text-2xl font-bold text-[#0055a5] mb-4">
+        <h2 className="text-3xl font-bold text-[#0055a5] mb-6">
           🔥 Trending Players
         </h2>
         {trending.length > 0 ? (
-          <ul className="space-y-3">
+          <ul className="space-y-4">
             {trending.map((p, idx) => (
-              <li key={p.id} className="font-semibold text-lg">
+              <li key={p.id} className="font-semibold text-xl">
                 {idx + 1}.{" "}
                 <Link
                   to={`/player/${p.slug || p.id}`}
