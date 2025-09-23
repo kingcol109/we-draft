@@ -1,6 +1,7 @@
 // src/pages/PlayerProfile.js
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
+import Logo1 from "../assets/Logo1.png";
 import {
   doc,
   getDoc,
@@ -310,12 +311,18 @@ export default function PlayerProfile() {
         </h1>
       </div>
 
-      <p className="text-2xl text-center italic font-bold mb-8 text-[#f6a21d]">
-        {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
-      </p>
+      <p className="text-2xl text-center italic font-bold mb-4 text-[#f6a21d]">
+  {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
+</p>
 
-      {/* Measurements Table */}
-      <div className="overflow-x-auto mb-10">
+{/* Logo under player info */}
+<div className="flex justify-center mb-6">
+  <img src={Logo1} alt="Player Logo" className="w-96 h-auto" />
+</div>
+
+{/* Measurements Table */}
+<div className="overflow-x-auto mb-10">
+
         <table className="min-w-full border-collapse text-center">
           <thead>
             <tr className="bg-[#0055a5] text-white border-4 border-[#f6a21d]">

@@ -24,28 +24,21 @@ export default function UserProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // ✅ New state for player request
+  // ✅ Player request state
   const [playerName, setPlayerName] = useState("");
   const [school, setSchool] = useState("");
   const [position, setPosition] = useState("");
   const [requestMsg, setRequestMsg] = useState("");
 
+  // ✅ Issue/Suggestion form state
+  const [issueText, setIssueText] = useState("");
+  const [issueMsg, setIssueMsg] = useState("");
+
   // ✅ Make your own list of banned words here
   const bannedWords = [
-    "fuck",
-    "shit",
-    "bitch",
-    "tits",
-    "cunt",
-    "nigger",
-    "nigga",
-    "faggot",
-    "fucc",
-    "niga",
-    "vagina",
-    "penis",
-    "asshole",
-    "retard",
+    "fuck","shit","bitch","tits","cunt",
+    "nigger","nigga","faggot","fucc","niga",
+    "vagina","penis","asshole","retard",
   ];
 
   useEffect(() => {
@@ -144,6 +137,36 @@ export default function UserProfile() {
     }
   };
 
+  // ✅ Handle issue/suggestion submission
+  const submitIssue = async () => {
+    if (!issueText.trim()) {
+      setIssueMsg("❌ Please enter a message.");
+      return;
+    }
+
+    const containsBad = bannedWords.some((badWord) =>
+      issueText.toLowerCase().includes(badWord.toLowerCase())
+    );
+    if (containsBad) {
+      setIssueMsg("❌ Message contains inappropriate language.");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "userReports"), {
+        message: issueText.trim(),
+        submittedBy: user.uid,
+        email: user.email,
+        createdAt: serverTimestamp(),
+      });
+      setIssueMsg("✅ Report submitted! Thank you.");
+      setIssueText("");
+    } catch (err) {
+      console.error("Error submitting report:", err);
+      setIssueMsg("❌ Error submitting report. Try again.");
+    }
+  };
+
   if (!user) {
     return <p className="text-center text-red-600">Please sign in first.</p>;
   }
@@ -239,9 +262,39 @@ export default function UserProfile() {
 
         <button
           onClick={submitRequest}
-          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
+          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition mb-8"
         >
           Submit Request
+        </button>
+
+        {/* ✅ Report Issues / Suggestions Form */}
+        <h2 className="text-xl font-bold text-[#0055a5] mb-4 text-center">
+          Report an Issue / Suggestion
+        </h2>
+        <textarea
+          value={issueText}
+          onChange={(e) => setIssueText(e.target.value)}
+          className="w-full border-2 border-[#0055a5] rounded px-3 py-2 h-28 mb-2"
+          placeholder="Describe the issue or suggestion..."
+        />
+
+        {issueMsg && (
+          <p
+            className={`text-sm mb-3 ${
+              issueMsg.startsWith("✅")
+                ? "text-green-600"
+                : "text-red-600"
+            }`}
+          >
+            {issueMsg}
+          </p>
+        )}
+
+        <button
+          onClick={submitIssue}
+          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
+        >
+          Submit Report
         </button>
       </div>
     </div>
