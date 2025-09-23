@@ -45,6 +45,7 @@ export default function PlayerProfile() {
 
   // Public feed
   const [publicFeed, setPublicFeed] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(3);
 
   // Grade mapping
   const gradeScale = {
@@ -422,8 +423,12 @@ export default function PlayerProfile() {
       </div>
 
       {/* Evaluation Form */}
-      <div className="bg-white border-4 border-[#f6a21d] rounded-lg p-6 shadow mb-10">
-        <h2 className="text-2xl font-bold text-[#0055a5] mb-4 text-center">Your Evaluation</h2>
+<div className="bg-white border-4 border-[#f6a21d] rounded-lg p-6 shadow mb-10">
+  <h2 className="text-3xl font-extrabold text-center text-[#0055a5] mb-2">
+    {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+  </h2>
+  <h2 className="text-2xl font-bold text-[#0055a5] mb-4 text-center">Your Evaluation</h2>
+
 
         {!user ? (
           <p className="text-center text-red-600 font-semibold">
@@ -600,51 +605,71 @@ export default function PlayerProfile() {
 
       {/* Public Feed */}
       <div>
-        <h2 className="text-3xl font-bold text-[#0055a5] mb-4">🌍 Public Evaluations</h2>
-        {publicFeed.length > 0 ? (
-          publicFeed.map((ev) => (
-            <div
-              key={ev.uid}
-              className="bg-white border-4 border-[#f6a21d] rounded-lg p-4 mb-4 shadow"
-            >
-              <p className="font-bold text-[#0055a5] flex items-center">
-                {ev.username}
-                {ev.verified && (
-                  <img
-                    src={verifiedBadge}
-                    alt="Verified"
-                    className="ml-2 w-5 h-5 inline-block"
-                  />
-                )}
-              </p>
-              <p className="mb-2">
-                <span className="font-bold">Grade:</span>{" "}
-                <span className="font-bold">{ev.grade || "N/A"}</span>
-              </p>
-              {ev.strengths?.length > 0 && (
-                <p>
-                  <span className="font-semibold">Strengths:</span> {ev.strengths.join(", ")}
-                </p>
-              )}
-              {ev.weaknesses?.length > 0 && (
-                <p>
-                  <span className="font-semibold">Weaknesses:</span> {ev.weaknesses.join(", ")}
-                </p>
-              )}
-              {ev.nflFit && (
-                <p>
-                  <span className="font-semibold">NFL Fit:</span> {ev.nflFit}
-                </p>
-              )}
-              {ev.evaluation && <p className="italic mt-2">"{ev.evaluation}"</p>}
-              {ev.updatedAt && (
-                <p className="text-xs text-gray-500 mt-3">{renderDate(ev.updatedAt)}</p>
-              )}
-            </div>
-          ))
-        ) : (
-          <p className="italic text-gray-500">No public evaluations yet.</p>
-        )}
+<div>
+  <h2 className="text-3xl font-bold text-[#0055a5] mb-4">🌍 Public Evaluations</h2>
+  {publicFeed.length > 0 ? (
+    <>
+      {publicFeed.slice(0, visibleCount).map((ev) => (
+        <div
+          key={ev.uid}
+          className="bg-white border-4 border-[#f6a21d] rounded-lg p-4 mb-4 shadow"
+        >
+          <p className="font-bold text-[#0055a5] flex items-center">
+            {ev.username}
+            {ev.verified && (
+              <img
+                src={verifiedBadge}
+                alt="Verified"
+                className="ml-2 w-5 h-5 inline-block"
+              />
+            )}
+          </p>
+          <p className="font-bold text-black">
+            {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+          </p>
+          <p className="mb-2">
+            <span className="font-bold">Grade:</span>{" "}
+            <span className="font-bold">{ev.grade || "N/A"}</span>
+          </p>
+          {ev.strengths?.length > 0 && (
+            <p>
+              <span className="font-semibold">Strengths:</span>{" "}
+              {ev.strengths.join(", ")}
+            </p>
+          )}
+          {ev.weaknesses?.length > 0 && (
+            <p>
+              <span className="font-semibold">Weaknesses:</span>{" "}
+              {ev.weaknesses.join(", ")}
+            </p>
+          )}
+          {ev.nflFit && (
+            <p>
+              <span className="font-semibold">NFL Fit:</span> {ev.nflFit}
+            </p>
+          )}
+          {ev.evaluation && <p className="italic mt-2">"{ev.evaluation}"</p>}
+          {ev.updatedAt && (
+            <p className="text-xs text-gray-500 mt-3">
+              {renderDate(ev.updatedAt)}
+            </p>
+          )}
+        </div>
+      ))}
+
+      {visibleCount < publicFeed.length && (
+        <button
+          onClick={() => setVisibleCount((prev) => prev + 3)}
+          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
+        >
+          Show More
+        </button>
+      )}
+    </>
+  ) : (
+    <p className="italic text-gray-500">No public evaluations yet.</p>
+  )}
+</div>
       </div>
     </div>
   );
