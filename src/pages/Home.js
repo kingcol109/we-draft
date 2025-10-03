@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { collectionGroup, getDocs, getDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
 import logo from "../assets/Logo1.png";
-import { Link } from "react-router-dom"; // ✅ import Link
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext"; // ✅ auth hook
 
 export default function Home() {
   const [trending, setTrending] = useState([]);
+  const { user, login } = useAuth(); // ✅ bring in auth
 
   useEffect(() => {
     const fetchTrending = async () => {
@@ -33,13 +35,12 @@ export default function Home() {
           counts[pid] = (counts[pid] || 0) + 1;
         });
 
-        // Sort top 3
+        // top 3
         const topIds = Object.entries(counts)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 3)
           .map(([id]) => id);
 
-        // Fetch player info for each
         const playersData = await Promise.all(
           topIds.map(async (pid) => {
             try {
@@ -48,7 +49,7 @@ export default function Home() {
                 const p = snap.data();
                 return {
                   id: pid,
-                  slug: p.Slug, // ✅ add slug
+                  slug: p.Slug,
                   name: `${p.First || ""} ${p.Last || ""}`.trim(),
                   position: p.Position || "-",
                   school: p.School || "-",
@@ -79,10 +80,29 @@ export default function Home() {
         className="w-[340px] md:w-[440px] max-w-[95vw] h-auto mb-6"
       />
 
-      {/* Tagline */}
-      <p className="text-lg md:text-xl max-w-2xl mb-12 font-medium">
-        Create and store your own evaluations
-      </p>
+      {/* Auth Button or Welcome Message */}
+      {!user ? (
+        <button
+          onClick={async () => {
+            try {
+              await login(); // ✅ same as navbar
+            } catch (err) {
+              console.error("Login failed:", err);
+            }
+          }}
+          className="bg-[#0055a5] text-white px-6 py-3 rounded-lg font-semibold text-lg shadow hover:bg-[#004080] transition mb-12"
+        >
+          Login/Create an account to create and store your own evaluations
+        </button>
+      ) : (
+        <p className="text-lg md:text-xl max-w-2xl mb-12 font-medium">
+          Welcome back! Head over to{" "}
+          <Link to="/boards" className="underline">
+            My Boards
+          </Link>{" "}
+          to manage your evaluations.
+        </p>
+      )}
 
       {/* Trending Players */}
       <div className="bg-white border-4 border-[#f6a21d] rounded-lg shadow p-6 mb-12 w-full max-w-3xl">
@@ -132,12 +152,12 @@ export default function Home() {
         </Link>
 
         <Link
-          to="/community" // ✅ or a dedicated player list page
+          to="/community" // or a dedicated player list page
           className="bg-white border-4 border-[#f6a21d] rounded-lg shadow hover:shadow-xl transition p-6 block"
         >
           <h2 className="text-2xl font-bold mb-4">Player Profiles</h2>
           <p className="text-sm md:text-base">
-            Dive deep into player evaluations with measurables, strengths, 
+            Dive deep into player evaluations with measurables, strengths,
             weaknesses, and community feedback — all in one place.
           </p>
         </Link>
@@ -149,7 +169,7 @@ export default function Home() {
           🚀 Coming Soon
         </h2>
         <p className="text-lg md:text-xl">
-          Exclusive draft content, highlight videos, and featured fan 
+          Exclusive draft content, highlight videos, and featured fan
           submissions will be showcased here. Stay tuned!
         </p>
       </div>
