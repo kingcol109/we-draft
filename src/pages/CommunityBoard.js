@@ -255,7 +255,7 @@ function TraitsFilter({ traitFilters, setTraitFilters, resetFilters }) {
 // --- main board ---
 export default function CommunityBoard() {
   const [players, setPlayers] = useState([]);
-  const [sortKey, setSortKey] = useState("Last");
+  const [sortKey, setSortKey] = useState("CommunityGrade");
   const [sortOrder, setSortOrder] = useState("asc");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSchools, setSelectedSchools] = useState([]);
@@ -349,10 +349,28 @@ export default function CommunityBoard() {
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
   if (sortKey === "CommunityGrade") {
-    const aVal = gradeScale[a.CommunityGrade] || 999;
-    const bVal = gradeScale[b.CommunityGrade] || 999;
-    return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
+    const aHasGrade = gradeScale[a.CommunityGrade];
+    const bHasGrade = gradeScale[b.CommunityGrade];
+
+    // If both have grades → sort by grade
+    if (aHasGrade && bHasGrade) {
+      const aVal = gradeScale[a.CommunityGrade];
+      const bVal = gradeScale[b.CommunityGrade];
+      return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
+    }
+
+    // If one has grade → prioritize the one that has it
+    if (aHasGrade && !bHasGrade) return -1;
+    if (!aHasGrade && bHasGrade) return 1;
+
+    // If neither have grade → sort alphabetically by last name
+    const aLast = (a.Last || "").toLowerCase();
+    const bLast = (b.Last || "").toLowerCase();
+    if (aLast < bLast) return -1;
+    if (aLast > bLast) return 1;
+    return 0;
   }
+
 
   if (sortKey === "Player") {
     const aLast = (a.Last || "").toLowerCase();

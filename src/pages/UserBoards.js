@@ -384,12 +384,26 @@ export default function UserBoards() {
     <div className="flex justify-center p-6">
       <div className="w-full max-w-7xl">
         {/* Logo + title */}
-        <div className="flex justify-center mb-2">
-          <img src={Logo1} alt="Logo" className="h-20 object-contain" />
-        </div>
-        <h1 className="text-4xl font-black text-[#0055a5] mb-4 text-center">
-          Your Boards
-        </h1>
+<div className="flex justify-center mb-2">
+  <img src={Logo1} alt="Logo" className="h-20 object-contain" />
+</div>
+
+{/* Add Players via Community Board button */}
+<div className="flex justify-center mb-4">
+  <Link to="/community" className="inline-block" aria-label="Add players via Community Board">
+    <button
+      type="button"
+      className="px-6 py-3 font-extrabold uppercase tracking-wide text-white rounded-full bg-[#0055a5] border-4 border-[#f6a21d] shadow hover:brightness-110 transition"
+    >
+      Add players via Community Board
+    </button>
+  </Link>
+</div>
+
+<h1 className="text-4xl font-black text-[#0055a5] mb-4 text-center">
+  Your Boards
+</h1>
+
 
         {/* Eligible buttons */}
         <div className="flex justify-center gap-4 mb-6">

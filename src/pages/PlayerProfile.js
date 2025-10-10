@@ -14,13 +14,57 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
-import verifiedBadge from "../assets/verified.png"; // ✅ added badge import
+import verifiedBadge from "../assets/verified.png";
+// --- image URL helpers ---
+function sanitizeImgur(url) {
+  if (!url) return "";
+  // If it's already a direct i.imgur link, return as-is
+  if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
+
+  // If it's a single-image page like https://imgur.com/abc123, convert to i.imgur.com/abc123.png
+  const singleMatch = url.match(/^https?:\/\/imgur\.com\/(?!a\/|gallery\/)([A-Za-z0-9]+)$/i);
+  if (singleMatch) return `https://i.imgur.com/${singleMatch[1]}.png`;
+
+  // Album/gallery pages don't have a single direct image — can't auto-fix
+  if (/^https?:\/\/imgur\.com\/(a|gallery)\//i.test(url)) return "";
+
+  return url;
+}
+
+function sanitizeGoogleDrive(url) {
+  if (!url) return "";
+  // Drive share link → direct content link
+  // e.g. https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+  const m = url.match(/https?:\/\/drive\.google\.com\/file\/d\/([^/]+)\//i);
+  if (m) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
+  return url;
+}
+
+function sanitizeUrl(url) {
+  let u = (url || "").trim();
+  if (!u) return "";
+
+  // Try known hosts first
+  if (u.includes("imgur.com")) u = sanitizeImgur(u);
+  if (u.includes("drive.google.com")) u = sanitizeGoogleDrive(u);
+
+  // No protocol? add https
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+  return u;
+}
+
+
+const SITE_BLUE = "#0055a5";
+const SITE_GOLD = "#f6a21d";
 
 export default function PlayerProfile() {
-  const { slug } = useParams(); // ✅ slug from URL
+  const { slug } = useParams();
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
   const { user } = useAuth();
+
+  // Branding (school)
+  const [branding, setBranding] = useState(null);
 
   // Evaluation form state
   const [grade, setGrade] = useState("");
@@ -74,8 +118,8 @@ export default function PlayerProfile() {
     10: "UDFA",
   };
 
-  // ✅ simple profanity filter (customize this list)
-  const bannedWords = ["faggot", "nigger", "monkey", "nigga", "fuck"]; // add your list here
+  // simple profanity filter
+  const bannedWords = ["faggot", "nigger", "monkey", "nigga", "fuck"];
   const containsProfanity = (text) => {
     if (!text) return false;
     const lower = text.toLowerCase();
@@ -90,7 +134,7 @@ export default function PlayerProfile() {
         const snap = await getDocs(q);
         if (!snap.empty) {
           const d = snap.docs[0];
-          setPlayer({ id: d.id, ...d.data() }); // ✅ keep id for evaluations
+          setPlayer({ id: d.id, ...d.data() });
         }
       } catch (err) {
         console.error("Error fetching player:", err);
@@ -98,6 +142,39 @@ export default function PlayerProfile() {
     };
     fetchPlayer();
   }, [slug]);
+
+  // Fetch school branding once we know the player's school
+  useEffect(() => {
+    const fetchBranding = async () => {
+      if (!player?.School) {
+        setBranding(null);
+        return;
+      }
+      try {
+        const sRef = doc(db, "schools", player.School);
+        const sSnap = await getDoc(sRef);
+        if (sSnap.exists()) {
+          const b = sSnap.data();
+          setBranding({
+            color1: b.Color1 || SITE_BLUE,
+            color2: b.Color2 || SITE_GOLD,
+            logo1: b.Logo1 || "",
+            logo2: b.Logo2 || "",
+          });
+        } else {
+          setBranding(null);
+        }
+      } catch (e) {
+        console.error("Error loading school branding:", e);
+        setBranding(null);
+      }
+    };
+    fetchBranding();
+  }, [player]);
+
+  // Derive colors (fallback to site theme)
+  const color1 = branding?.color1 || SITE_BLUE;
+  const color2 = branding?.color2 || SITE_GOLD;
 
   // Fetch traits
   useEffect(() => {
@@ -170,7 +247,7 @@ export default function PlayerProfile() {
               data.weaknesses.forEach((w) => (weaknessCounts[w] = (weaknessCounts[w] || 0) + 1));
             if (data.nflFit) fitCounts[data.nflFit] = (fitCounts[data.nflFit] || 0) + 1;
 
-            // ✅ only allow into public feed if: evaluation text exists AND no profanity
+            // only allow into public feed if: evaluation text exists AND no profanity
             if (
               data.visibility === "public" &&
               data.evaluation &&
@@ -192,7 +269,7 @@ export default function PlayerProfile() {
               const u = snap.data();
               usernameMap[snap.id] = {
                 name: u.username || u.email || snap.id,
-                verified: u.verified || false, // ✅ pick up verified flag
+                verified: u.verified || false,
               };
             }
           });
@@ -205,7 +282,7 @@ export default function PlayerProfile() {
             .map((ev) => ({
               ...ev,
               username: usernameMap[ev.uid]?.name || ev.email || "User",
-              verified: usernameMap[ev.uid]?.verified || false, // ✅ pass down verified
+              verified: usernameMap[ev.uid]?.verified || false,
             }))
             .sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
 
@@ -241,7 +318,7 @@ export default function PlayerProfile() {
   const handleSaveEvaluation = async () => {
     if (!user || !player?.id) return alert("You must sign in first.");
 
-    // ✅ block public saves with profanity
+    // block public saves with profanity
     if (visibility === "public" && containsProfanity(evaluation)) {
       return alert("❌ Your evaluation contains inappropriate language.");
     }
@@ -291,7 +368,7 @@ export default function PlayerProfile() {
 
   if (!player) {
     return (
-      <div className="flex justify-center items-center h-screen text-xl font-bold text-[#0055a5]">
+      <div className="flex justify-center items-center h-screen text-xl font-bold" style={{ color: SITE_BLUE }}>
         Loading Player...
       </div>
     );
@@ -299,60 +376,98 @@ export default function PlayerProfile() {
 
   return (
     <div className="max-w-6xl mx-auto p-6 pb-40">
-      {/* Header */}
-      <div className="flex items-center justify-center mb-2">
-        <button
-          onClick={() => navigate(-1)}
-          className="mr-4 text-[#0055a5] hover:text-[#f6a21d] text-3xl font-bold"
-        >
-          ←
-        </button>
-        <h1 className="text-5xl font-extrabold text-center text-[#0055a5]">
-          {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
-        </h1>
-      </div>
+      {/* ===== Header (logos left/right, info + We-Draft in the middle) ===== */}
+<div className="mb-8">
+  <div className="flex items-center justify-between gap-6">
+    {/* Left logo */}
+    <div className="basis-1/3 flex justify-start">
+      {branding?.logo1 ? (
+        <img
+          src={sanitizeUrl(branding.logo1)}
+          alt={`${player.School} Logo 1`}
+          className="h-40 md:h-48 w-auto object-contain"
+          referrerPolicy="no-referrer"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          loading="lazy"
+        />
+      ) : (
+        <div className="h-40 md:h-48" />
+      )}
+    </div>
 
-      <p className="text-2xl text-center italic font-bold mb-4 text-[#f6a21d]">
-  {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
-</p>
+    {/* Center column: back arrow + name + subtitle + We-Draft logo */}
+    <div className="basis-1/3 flex flex-col items-center text-center">
+      <button
+        onClick={() => navigate(-1)}
+        className="text-3xl font-bold mb-1"
+        style={{ color: color1 }}
+      >
+        ←
+      </button>
 
-{/* Logo under player info */}
-<div className="flex justify-center mb-6">
-  <img src={Logo1} alt="Player Logo" className="w-96 h-auto" />
+      <h1 className="text-5xl font-extrabold" style={{ color: color1 }}>
+        {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+      </h1>
+
+      <p className="text-2xl italic font-bold mt-1" style={{ color: color1 }}>
+        {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
+      </p>
+
+      {/* We-Draft logo stays BETWEEN the school logos by living in this center column */}
+      <img
+        src={Logo1}
+        alt="We-Draft Logo"
+        className="h-16 md:h-20 w-auto object-contain mt-3"
+      />
+    </div>
+
+    {/* Right logo */}
+    <div className="basis-1/3 flex justify-end">
+      {branding?.logo2 ? (
+        <img
+          src={sanitizeUrl(branding.logo2)}
+          alt={`${player.School} Logo 2`}
+          className="h-40 md:h-48 w-auto object-contain"
+          referrerPolicy="no-referrer"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          loading="lazy"
+        />
+      ) : (
+        <div className="h-40 md:h-48" />
+      )}
+    </div>
+  </div>
 </div>
 
-{/* Measurements Table */}
-<div className="overflow-x-auto mb-10">
-
+      {/* Measurements Table */}
+      <div className="overflow-x-auto mb-10">
         <table className="min-w-full border-collapse text-center">
           <thead>
-            <tr className="bg-[#0055a5] text-white border-4 border-[#f6a21d]">
-              <th className="p-3">HT</th>
-              <th className="p-3">WT</th>
-              <th className="p-3">WING</th>
-              <th className="p-3">ARM</th>
-              <th className="p-3">HAND</th>
-              <th className="p-3">40</th>
-              <th className="p-3">VERT</th>
-              <th className="p-3">BROAD</th>
-              <th className="p-3">3C</th>
-              <th className="p-3">SHUTT</th>
-              <th className="p-3">BENCH</th>
+            <tr style={{ backgroundColor: color1, color: "#fff", border: `4px solid ${color2}` }}>
+              {["HT","WT","WING","ARM","HAND","40","VERT","BROAD","3C","SHUTT","BENCH"].map((h) => (
+                <th key={h} className="p-3">{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             <tr className="odd:bg-white even:bg-white hover:bg-[#e6f0fa]">
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Height || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Weight || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Wingspan || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player["Arm Length"] || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player["Hand Size"] || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player["40 Yard"] || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Vertical || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Broad || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player["3-Cone"] || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Shuttle || "-"}</td>
-              <td className="p-3 border border-[#f6a21d] text-sm">{player.Bench || "-"}</td>
+              {[
+                player.Height,
+                player.Weight,
+                player.Wingspan,
+                player["Arm Length"],
+                player["Hand Size"],
+                player["40 Yard"],
+                player.Vertical,
+                player.Broad,
+                player["3-Cone"],
+                player.Shuttle,
+                player.Bench,
+              ].map((val, i) => (
+                <td key={i} className="p-3 text-sm" style={{ border: `1px solid ${color2}` }}>
+                  {val || "-"}
+                </td>
+              ))}
             </tr>
           </tbody>
         </table>
@@ -360,11 +475,15 @@ export default function PlayerProfile() {
 
       {/* Community Grades */}
       <div className="mb-10">
-        <h2 className="text-3xl font-bold text-[#0055a5] mb-4">Community Grades</h2>
+        <h2 className="text-3xl font-bold mb-4" style={{ color: color1 }}>
+          Community Grades
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {/* Grade */}
-          <div className="bg-white border-4 border-[#f6a21d] rounded-lg shadow text-center">
-            <div className="bg-[#0055a5] text-white font-bold py-2 rounded-t">GRADE</div>
+          <div className="bg-white rounded-lg shadow text-center border-4" style={{ borderColor: color2 }}>
+            <div className="font-bold py-2 rounded-t" style={{ backgroundColor: color1, color: "#fff" }}>
+              GRADE
+            </div>
             <div className="p-4 text-xl font-bold">
               {community.avgGrade
                 ? gradeLabels[Math.round(community.avgGrade)] || "No grade yet"
@@ -373,8 +492,10 @@ export default function PlayerProfile() {
           </div>
 
           {/* Strengths */}
-          <div className="bg-white border-4 border-[#f6a21d] rounded-lg shadow text-center">
-            <div className="bg-[#0055a5] text-white font-bold py-2 rounded-t">STRENGTHS</div>
+          <div className="bg-white rounded-lg shadow text-center border-4" style={{ borderColor: color2 }}>
+            <div className="font-bold py-2 rounded-t" style={{ backgroundColor: color1, color: "#fff" }}>
+              STRENGTHS
+            </div>
             <div className="p-4 text-left">
               {community.topStrengths.length > 0 ? (
                 <ol className="list-decimal ml-5">
@@ -389,8 +510,10 @@ export default function PlayerProfile() {
           </div>
 
           {/* Weaknesses */}
-          <div className="bg-white border-4 border-[#f6a21d] rounded-lg shadow text-center">
-            <div className="bg-[#0055a5] text-white font-bold py-2 rounded-t">WEAKNESSES</div>
+          <div className="bg-white rounded-lg shadow text-center border-4" style={{ borderColor: color2 }}>
+            <div className="font-bold py-2 rounded-t" style={{ backgroundColor: color1, color: "#fff" }}>
+              WEAKNESSES
+            </div>
             <div className="p-4 text-left">
               {community.topWeaknesses.length > 0 ? (
                 <ol className="list-decimal ml-5">
@@ -405,8 +528,10 @@ export default function PlayerProfile() {
           </div>
 
           {/* NFL Fit */}
-          <div className="bg-white border-4 border-[#f6a21d] rounded-lg shadow text-center">
-            <div className="bg-[#0055a5] text-white font-bold py-2 rounded-t">NFL FIT</div>
+          <div className="bg-white rounded-lg shadow text-center border-4" style={{ borderColor: color2 }}>
+            <div className="font-bold py-2 rounded-t" style={{ backgroundColor: color1, color: "#fff" }}>
+              NFL FIT
+            </div>
             <div className="p-4 text-left">
               {community.topFits.length > 0 ? (
                 <ol className="list-decimal ml-5">
@@ -423,15 +548,16 @@ export default function PlayerProfile() {
       </div>
 
       {/* Evaluation Form */}
-<div className="bg-white border-4 border-[#f6a21d] rounded-lg p-6 shadow mb-10">
-  <h2 className="text-3xl font-extrabold text-center text-[#0055a5] mb-2">
-    {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
-  </h2>
-  <h2 className="text-2xl font-bold text-[#0055a5] mb-4 text-center">Your Evaluation</h2>
-
+      <div className="bg-white rounded-lg p-6 shadow mb-10 border-4" style={{ borderColor: color2 }}>
+        <h2 className="text-3xl font-extrabold text-center mb-2" style={{ color: color1 }}>
+          {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+        </h2>
+        <h2 className="text-2xl font-bold mb-4 text-center" style={{ color: color1 }}>
+          Your Evaluation
+        </h2>
 
         {!user ? (
-          <p className="text-center text-red-600 font-semibold">
+          <p className="text-center font-semibold" style={{ color: "#dc2626" }}>
             Please sign in to submit an evaluation.
           </p>
         ) : (
@@ -441,7 +567,8 @@ export default function PlayerProfile() {
             <select
               value={grade}
               onChange={(e) => setGrade(e.target.value)}
-              className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-4"
+              className="w-full rounded px-3 py-2 mb-4 border-2"
+              style={{ borderColor: color1 }}
             >
               <option value="">Select a grade</option>
               {[
@@ -464,18 +591,18 @@ export default function PlayerProfile() {
             </select>
 
             {/* Strengths & Weaknesses */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               {/* Strengths */}
               <div>
                 <label className="block font-semibold mb-2">Strengths (max 3)</label>
-                <details className="w-full border-2 border-[#0055a5] rounded">
+                <details className="w-full rounded border-2" style={{ borderColor: color1 }}>
                   <summary className="cursor-pointer px-3 py-2 bg-white">
                     {strengths.length > 0 ? strengths.join(", ") : "Select strengths"}
                   </summary>
                   <div className="max-h-40 overflow-y-auto px-3 py-2 bg-white">
                     {Object.entries(traits).map(([label, options]) => (
                       <div key={label} className="mb-2">
-                        <p className="font-bold text-[#0055a5]">{label}</p>
+                        <p className="font-bold" style={{ color: color1 }}>{label}</p>
                         {options.map((trait) => (
                           <label key={trait} className="block text-sm">
                             <input
@@ -506,14 +633,14 @@ export default function PlayerProfile() {
               {/* Weaknesses */}
               <div>
                 <label className="block font-semibold mb-2">Weaknesses (max 3)</label>
-                <details className="w-full border-2 border-[#0055a5] rounded">
+                <details className="w-full rounded border-2" style={{ borderColor: color1 }}>
                   <summary className="cursor-pointer px-3 py-2 bg-white">
                     {weaknesses.length > 0 ? weaknesses.join(", ") : "Select weaknesses"}
                   </summary>
                   <div className="max-h-40 overflow-y-auto px-3 py-2 bg-white">
                     {Object.entries(traits).map(([label, options]) => (
                       <div key={label} className="mb-2">
-                        <p className="font-bold text-[#0055a5]">{label}</p>
+                        <p className="font-bold" style={{ color: color1 }}>{label}</p>
                         {options.map((trait) => (
                           <label key={trait} className="block text-sm">
                             <input
@@ -547,7 +674,8 @@ export default function PlayerProfile() {
             <select
               value={nflFit}
               onChange={(e) => setNflFit(e.target.value)}
-              className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-4"
+              className="w-full rounded px-3 py-2 mb-4 border-2"
+              style={{ borderColor: color1 }}
             >
               <option value="">Select an NFL team</option>
               {[
@@ -572,7 +700,8 @@ export default function PlayerProfile() {
               value={evaluation}
               onChange={(e) => setEvaluation(e.target.value)}
               placeholder="Write your evaluation..."
-              className="w-full border-2 border-[#0055a5] rounded px-3 py-2 h-32 mb-4"
+              className="w-full rounded px-3 py-2 h-32 mb-4 border-2"
+              style={{ borderColor: color1 }}
             />
 
             {/* Visibility */}
@@ -580,7 +709,8 @@ export default function PlayerProfile() {
             <select
               value={visibility}
               onChange={(e) => setVisibility(e.target.value)}
-              className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-4"
+              className="w-full rounded px-3 py-2 mb-4 border-2"
+              style={{ borderColor: color1 }}
             >
               <option value="public">🌍 Public</option>
               <option value="private">🔒 Private</option>
@@ -589,7 +719,8 @@ export default function PlayerProfile() {
             <button
               onClick={handleSaveEvaluation}
               disabled={saving}
-              className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
+              className="w-full text-white font-bold py-2 rounded border-2 transition"
+              style={{ backgroundColor: color1, borderColor: color2 }}
             >
               {saving ? "Saving..." : "Save Evaluation"}
             </button>
@@ -605,71 +736,73 @@ export default function PlayerProfile() {
 
       {/* Public Feed */}
       <div>
-<div>
-  <h2 className="text-3xl font-bold text-[#0055a5] mb-4">🌍 Public Evaluations</h2>
-  {publicFeed.length > 0 ? (
-    <>
-      {publicFeed.slice(0, visibleCount).map((ev) => (
-        <div
-          key={ev.uid}
-          className="bg-white border-4 border-[#f6a21d] rounded-lg p-4 mb-4 shadow"
-        >
-          <p className="font-bold text-[#0055a5] flex items-center">
-            {ev.username}
-            {ev.verified && (
-              <img
-                src={verifiedBadge}
-                alt="Verified"
-                className="ml-2 w-5 h-5 inline-block"
-              />
-            )}
-          </p>
-          <p className="font-bold text-black">
-            {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
-          </p>
-          <p className="mb-2">
-            <span className="font-bold">Grade:</span>{" "}
-            <span className="font-bold">{ev.grade || "N/A"}</span>
-          </p>
-          {ev.strengths?.length > 0 && (
-            <p>
-              <span className="font-semibold">Strengths:</span>{" "}
-              {ev.strengths.join(", ")}
-            </p>
-          )}
-          {ev.weaknesses?.length > 0 && (
-            <p>
-              <span className="font-semibold">Weaknesses:</span>{" "}
-              {ev.weaknesses.join(", ")}
-            </p>
-          )}
-          {ev.nflFit && (
-            <p>
-              <span className="font-semibold">NFL Fit:</span> {ev.nflFit}
-            </p>
-          )}
-          {ev.evaluation && <p className="italic mt-2">"{ev.evaluation}"</p>}
-          {ev.updatedAt && (
-            <p className="text-xs text-gray-500 mt-3">
-              {renderDate(ev.updatedAt)}
-            </p>
-          )}
-        </div>
-      ))}
+        <h2 className="text-3xl font-bold mb-4" style={{ color: color1 }}>
+          🌍 Public Evaluations
+        </h2>
+        {publicFeed.length > 0 ? (
+          <>
+            {publicFeed.slice(0, visibleCount).map((ev) => (
+              <div
+                key={ev.uid}
+                className="bg-white rounded-lg p-4 mb-4 shadow border-4"
+                style={{ borderColor: color2 }}
+              >
+                <p className="font-bold flex items-center" style={{ color: color1 }}>
+                  {ev.username}
+                  {ev.verified && (
+                    <img
+                      src={verifiedBadge}
+                      alt="Verified"
+                      className="ml-2 w-5 h-5 inline-block"
+                    />
+                  )}
+                </p>
+                <p className="font-bold text-black">
+                  {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+                </p>
+                <p className="mb-2">
+                  <span className="font-bold">Grade:</span>{" "}
+                  <span className="font-bold">{ev.grade || "N/A"}</span>
+                </p>
+                {ev.strengths?.length > 0 && (
+                  <p>
+                    <span className="font-semibold">Strengths:</span>{" "}
+                    {ev.strengths.join(", ")}
+                  </p>
+                )}
+                {ev.weaknesses?.length > 0 && (
+                  <p>
+                    <span className="font-semibold">Weaknesses:</span>{" "}
+                    {ev.weaknesses.join(", ")}
+                  </p>
+                )}
+                {ev.nflFit && (
+                  <p>
+                    <span className="font-semibold">NFL Fit:</span> {ev.nflFit}
+                  </p>
+                )}
+                {ev.evaluation && <p className="italic mt-2">"{ev.evaluation}"</p>}
+                {ev.updatedAt && (
+                  <p className="text-xs text-gray-500 mt-3">
+                    {renderDate(ev.updatedAt)}
+                  </p>
+                )}
+              </div>
+            ))}
 
-      {visibleCount < publicFeed.length && (
-        <button
-          onClick={() => setVisibleCount((prev) => prev + 3)}
-          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
-        >
-          Show More
-        </button>
-      )}
-    </>
-  ) : (
-    <p className="italic text-gray-500">No public evaluations yet.</p>
-  )}
-</div>
+            {visibleCount < publicFeed.length && (
+              <button
+                onClick={() => setVisibleCount((prev) => prev + 3)}
+                className="w-full text-white font-bold py-2 rounded border-2 transition"
+                style={{ backgroundColor: color1, borderColor: color2 }}
+              >
+                Show More
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="italic text-gray-500">No public evaluations yet.</p>
+        )}
       </div>
     </div>
   );
