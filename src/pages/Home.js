@@ -1,15 +1,31 @@
 // src/pages/Home.js
 import { useEffect, useState } from "react";
-import { getDoc, doc, getDocs, collection, query, where } from "firebase/firestore";
+import {
+  getDoc,
+  doc,
+  getDocs,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+} from "firebase/firestore";
 import { db } from "../firebase";
 import logo from "../assets/Logo1.png";
+import verifiedBadge from "../assets/verified.png";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+const SITE_BLUE = "#0055a5";
+const SITE_GOLD = "#f6a21d";
+
 export default function Home() {
   const [featured, setFeatured] = useState([]);
+  const [recentEvals, setRecentEvals] = useState([]);
+  const [loading, setLoading] = useState(true);
   const { user, login } = useAuth();
 
+  // 🧩 Fetch featured players
   useEffect(() => {
     const fetchFeatured = async () => {
       try {
@@ -23,7 +39,6 @@ export default function Home() {
         const idsOrSlugs = Array.isArray(cfg.playerIds) ? cfg.playerIds.slice(0, 10) : [];
 
         const getPlayer = async (idOrSlug) => {
-          // Try by document ID
           try {
             const byId = await getDoc(doc(db, "players", idOrSlug));
             if (byId.exists()) {
@@ -40,24 +55,21 @@ export default function Home() {
             }
           } catch (_) {}
 
-          // Try by Slug field
-          try {
-            const q = query(collection(db, "players"), where("Slug", "==", idOrSlug));
-            const res = await getDocs(q);
-            if (!res.empty) {
-              const snap = res.docs[0];
-              const p = snap.data();
-              return {
-                id: snap.id,
-                slug: p.Slug || snap.id,
-                first: p.First || "",
-                last: p.Last || "",
-                position: p.Position || "-",
-                school: p.School || "-",
-                eligible: p.Eligible || "",
-              };
-            }
-          } catch (_) {}
+          const q = query(collection(db, "players"), where("Slug", "==", idOrSlug));
+          const res = await getDocs(q);
+          if (!res.empty) {
+            const snap = res.docs[0];
+            const p = snap.data();
+            return {
+              id: snap.id,
+              slug: p.Slug || snap.id,
+              first: p.First || "",
+              last: p.Last || "",
+              position: p.Position || "-",
+              school: p.School || "-",
+              eligible: p.Eligible || "",
+            };
+          }
 
           return null;
         };
@@ -73,7 +85,70 @@ export default function Home() {
     fetchFeatured();
   }, []);
 
-  // Today's date: "October 10, 2025"
+  // 🧩 Fetch recent evaluations
+  useEffect(() => {
+    const fetchRecentEvals = async () => {
+      try {
+        const playersSnap = await getDocs(collection(db, "players"));
+        const evalPromises = [];
+
+        playersSnap.forEach((playerDoc) => {
+          const evalsRef = collection(db, "players", playerDoc.id, "evaluations");
+          const q = query(evalsRef, orderBy("updatedAt", "desc"), limit(2));
+          evalPromises.push(
+            getDocs(q).then((snap) =>
+              snap.docs.map((d) => ({
+                ...d.data(),
+                playerId: playerDoc.id,
+                playerName: `${playerDoc.data().First || ""} ${playerDoc.data().Last || ""}`.trim(),
+              }))
+            )
+          );
+        });
+
+        const results = await Promise.all(evalPromises);
+        const allEvals = results.flat();
+
+        const publicEvals = allEvals
+          .filter((e) => e.visibility === "public" && e.evaluation?.trim() !== "")
+          .sort((a, b) => {
+            const aTime = a.updatedAt?.toDate?.()?.getTime?.() || 0;
+            const bTime = b.updatedAt?.toDate?.()?.getTime?.() || 0;
+            return bTime - aTime;
+          })
+          .slice(0, 10);
+
+        // resolve usernames + verified flags
+        const uniqueUids = [...new Set(publicEvals.map((ev) => ev.uid))];
+        const userDocs = await Promise.all(uniqueUids.map((uid) => getDoc(doc(db, "users", uid))));
+        const userMap = {};
+        userDocs.forEach((snap) => {
+          if (snap.exists()) {
+            const u = snap.data();
+            userMap[snap.id] = {
+              username: u.username || u.email || "User",
+              verified: u.verified || false,
+            };
+          }
+        });
+
+        const withNames = publicEvals.map((ev) => ({
+          ...ev,
+          username: userMap[ev.uid]?.username || "User",
+          verified: userMap[ev.uid]?.verified || false,
+        }));
+
+        setRecentEvals(withNames);
+      } catch (err) {
+        console.error("Error fetching recent evaluations:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecentEvals();
+  }, []);
+
   const formattedDate = new Date().toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
@@ -83,33 +158,27 @@ export default function Home() {
   return (
     <div className="bg-white text-[#0055a5] min-h-screen flex flex-col items-center pt-12 px-4">
       {/* Logo */}
-<img
-  src={logo}
-  alt="We-Draft Logo"
-  className="w-[360px] md:w-[460px] max-w-[95vw] h-auto mb-4"
-/>
+      <img src={logo} alt="We-Draft Logo" className="w-[360px] md:w-[460px] max-w-[95vw] h-auto mb-4" />
 
-{/* Tagline */}
-<p className="text-xl md:text-2xl font-semibold text-[#0055a5] mb-6">
-  <Link
-    to="/boards"
-    className="text-[#f6a21d] underline hover:text-[#d88f18] transition"
-  >
-    Create + Store
-  </Link>{" "}
-  your own evaluations and view{" "}
-  <Link
-    to="/community"
-    className="text-[#f6a21d] underline hover:text-[#d88f18] transition"
-  >
-    Community Grades
-  </Link>
-  !
-</p>
+      {/* Tagline */}
+      <p className="text-xl md:text-2xl font-semibold text-[#0055a5] mb-6">
+        <Link
+          to="/boards"
+          className="text-[#f6a21d] underline hover:text-[#d88f18] transition"
+        >
+          Create + Store
+        </Link>{" "}
+        your own evaluations and view{" "}
+        <Link
+          to="/community"
+          className="text-[#f6a21d] underline hover:text-[#d88f18] transition"
+        >
+          Community Grades
+        </Link>
+        !
+      </p>
 
-
-{/* Auth Button or Welcome Message */}
-
+      {/* Auth Button or Welcome Message */}
       {!user ? (
         <button
           onClick={async () => {
@@ -135,7 +204,6 @@ export default function Home() {
 
       {/* Featured Players Section */}
       <div className="bg-white border-4 border-[#f6a21d] rounded-2xl shadow-lg p-10 mb-16 w-full max-w-5xl">
-        {/* Centered date + label */}
         <h2 className="text-4xl md:text-5xl font-extrabold text-[#0055a5] mb-1 uppercase tracking-wide text-center">
           {formattedDate}
         </h2>
@@ -145,70 +213,95 @@ export default function Home() {
 
         {featured.length > 0 ? (
           <ul className="flex flex-col items-center space-y-1 md:space-y-2">
-            {featured.map((p, idx) => {
-              const isTop3 = idx < 3;
-              return (
-                <li key={p.id} className="w-full max-w-3xl">
-                  <Link
-                    to={`/player/${p.slug}`}
-                    className={`block text-center transition hover:bg-[#e6f0fa] rounded-lg px-4 ${
-                      isTop3
-                        ? "py-2 text-2xl md:text-3xl font-extrabold"
-                        : "py-1 text-xl md:text-2xl font-bold"
-                    }`}
+            {featured.map((p, idx) => (
+              <li key={p.id} className="w-full max-w-3xl">
+                <Link
+                  to={`/player/${p.slug}`}
+                  className={`block text-center transition hover:bg-[#e6f0fa] rounded-lg px-4 ${
+                    idx < 3
+                      ? "py-2 text-2xl md:text-3xl font-extrabold"
+                      : "py-1 text-xl md:text-2xl font-bold"
+                  }`}
+                >
+                  <span
+                    className={`mr-2 font-black ${idx < 3 ? "text-[#f6a21d]" : ""}`}
                   >
-                    <span
-                      className={`mr-2 font-black ${
-                        isTop3 ? "text-[#f6a21d]" : ""
-                      }`}
-                    >
-                      {idx + 1}.
-                    </span>
-                    {`${p.first} ${p.last} - ${p.school} ${p.position} ${
-                      p.eligible ? `(${p.eligible})` : ""
-                    }`}
-                  </Link>
-                </li>
-              );
-            })}
+                    {idx + 1}.
+                  </span>
+                  {`${p.first} ${p.last} - ${p.school} ${p.position} ${
+                    p.eligible ? `(${p.eligible})` : ""
+                  }`}
+                </Link>
+              </li>
+            ))}
           </ul>
         ) : (
-          <p className="italic text-gray-500 text-lg text-center">No featured players set yet.</p>
+          <p className="italic text-gray-500 text-lg text-center">
+            No featured players set yet.
+          </p>
         )}
       </div>
 
-      {/* Promo Section */}
-      <div className="grid md:grid-cols-3 gap-10 w-full max-w-6xl mb-16">
-        <Link
-          to="/community"
-          className="bg-white border-4 border-[#f6a21d] rounded-xl shadow hover:shadow-xl transition p-8 block"
+      {/* 🏈 Recent Evaluations Feed */}
+      <div className="w-full max-w-5xl mb-16">
+        <h2
+          className="text-3xl font-extrabold mb-6 flex items-center gap-2"
+          style={{ color: SITE_BLUE }}
         >
-          <h2 className="text-2xl font-bold mb-4 text-[#0055a5]">Community Boards</h2>
-          <p className="text-base">
-            See what the public thinks about the best players in the country.
-          </p>
-        </Link>
+          🌍 Recent Evaluations
+        </h2>
 
-        <Link
-          to="/boards"
-          className="bg-white border-4 border-[#f6a21d] rounded-xl shadow hover:shadow-xl transition p-8 block"
-        >
-          <h2 className="text-2xl font-bold mb-4 text-[#0055a5]">My Boards</h2>
-          <p className="text-base">
-            Create and store all your evaluations in one place.
-          </p>
-        </Link>
-
-        <Link
-          to="/community"
-          className="bg-white border-4 border-[#f6a21d] rounded-xl shadow hover:shadow-xl transition p-8 block"
-        >
-          <h2 className="text-2xl font-bold mb-4 text-[#0055a5]">Player Profiles</h2>
-          <p className="text-base">
-            Dive deep into player evaluations with measurables, strengths,
-            weaknesses, and community feedback — all in one place.
-          </p>
-        </Link>
+        {loading ? (
+          <p className="text-gray-500 italic text-center">Loading recent evaluations...</p>
+        ) : recentEvals.length > 0 ? (
+          <div className="flex flex-col gap-6">
+            {recentEvals.map((ev, i) => (
+              <div
+                key={i}
+                className="bg-white border-4 rounded-xl shadow p-4 md:p-6"
+                style={{ borderColor: SITE_GOLD }}
+              >
+                <p className="font-bold flex items-center mb-1 text-lg" style={{ color: SITE_BLUE }}>
+                  {ev.username}
+                  {ev.verified && (
+                    <img src={verifiedBadge} alt="Verified" className="ml-2 w-5 h-5 inline-block" />
+                  )}
+                </p>
+                <p className="font-extrabold text-lg uppercase mb-1">{ev.playerName}</p>
+                <p className="font-semibold mb-1">
+                  Grade: <span className="font-bold">{ev.grade || "N/A"}</span>
+                </p>
+                {ev.strengths?.length > 0 && (
+                  <p className="text-sm mb-1">
+                    <span className="font-semibold">Strengths:</span>{" "}
+                    {ev.strengths.join(", ")}
+                  </p>
+                )}
+                {ev.weaknesses?.length > 0 && (
+                  <p className="text-sm mb-1">
+                    <span className="font-semibold">Weaknesses:</span>{" "}
+                    {ev.weaknesses.join(", ")}
+                  </p>
+                )}
+                {ev.nflFit && (
+                  <p className="text-sm mb-1">
+                    <span className="font-semibold">NFL Fit:</span> {ev.nflFit}
+                  </p>
+                )}
+                {ev.evaluation && (
+                  <p className="italic text-gray-800 mt-2">"{ev.evaluation}"</p>
+                )}
+                {ev.updatedAt && (
+                  <p className="text-xs text-gray-500 mt-3">
+                    {ev.updatedAt?.toDate?.()?.toLocaleString?.() || ""}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center italic text-gray-500">No recent evaluations yet.</p>
+        )}
       </div>
 
       {/* Future Promo Block */}
@@ -217,8 +310,7 @@ export default function Home() {
           🚀 Coming Soon
         </h2>
         <p className="text-lg md:text-xl">
-          Exclusive draft content, highlight videos, and featured fan
-          submissions will be showcased here. Stay tuned!
+          Exclusive draft content, highlight videos, and featured fan submissions will be showcased here. Stay tuned!
         </p>
       </div>
     </div>

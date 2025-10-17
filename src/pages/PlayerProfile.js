@@ -352,6 +352,36 @@ export default function PlayerProfile() {
       setSaving(false);
     }
   };
+// Remove evaluation
+async function handleRemoveEvaluation() {
+  if (!user || !player?.id) return alert("You must sign in first.");
+
+  const confirmDelete = window.confirm("Remove your evaluation from your board?");
+  if (!confirmDelete) return;
+
+  try {
+    const { deleteDoc, doc } = await import("firebase/firestore");
+
+    await Promise.all([
+      deleteDoc(doc(db, "players", player.id, "evaluations", user.uid)),
+      deleteDoc(doc(db, "users", user.uid, "evaluations", player.id)),
+    ]);
+
+    // Clear local state
+    setGrade("");
+    setStrengths([]);
+    setWeaknesses([]);
+    setNflFit("");
+    setEvaluation("");
+    setVisibility("public");
+    setLastUpdated(null);
+
+    alert("🗑️ Evaluation removed from your board.");
+  } catch (err) {
+    console.error("Error removing evaluation:", err);
+    alert("❌ Failed to remove evaluation. Try again.");
+  }
+}
 
   const renderDate = (ts) => {
     if (!ts) return "";
@@ -395,31 +425,39 @@ export default function PlayerProfile() {
       )}
     </div>
 
-    {/* Center column: back arrow + name + subtitle + We-Draft logo */}
-    <div className="basis-1/3 flex flex-col items-center text-center">
-      <button
-        onClick={() => navigate(-1)}
-        className="text-3xl font-bold mb-1"
-        style={{ color: color1 }}
-      >
-        ←
-      </button>
+    {/* Center column: back button, name, position, and We-Draft logo */}
+<div className="basis-1/3 flex flex-col items-center text-center">
 
-      <h1 className="text-5xl font-extrabold" style={{ color: color1 }}>
-        {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
-      </h1>
+  {/* Back button */}
+  <button
+    onClick={() => navigate(-1)}
+    className="mb-3 px-4 py-1 text-sm font-semibold rounded-full border-2 transition hover:opacity-90"
+    style={{
+      backgroundColor: color1,
+      borderColor: color2,
+      color: "white",
+    }}
+  >
+    Back
+  </button>
 
-      <p className="text-2xl italic font-bold mt-1" style={{ color: color1 }}>
-        {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
-      </p>
+  <h1 className="text-5xl font-extrabold" style={{ color: color1 }}>
+    {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+  </h1>
 
-      {/* We-Draft logo stays BETWEEN the school logos by living in this center column */}
-      <img
-        src={Logo1}
-        alt="We-Draft Logo"
-        className="h-16 md:h-20 w-auto object-contain mt-3"
-      />
-    </div>
+  <p className="text-2xl italic font-bold mt-1" style={{ color: color1 }}>
+    {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
+  </p>
+
+  {/* We-Draft logo stays BETWEEN the school logos */}
+  <img
+    src={Logo1}
+    alt="We-Draft Logo"
+    className="h-16 md:h-20 w-auto object-contain mt-3"
+  />
+</div>
+
+
 
     {/* Right logo */}
     <div className="basis-1/3 flex justify-end">
@@ -549,12 +587,28 @@ export default function PlayerProfile() {
 
       {/* Evaluation Form */}
       <div className="bg-white rounded-lg p-6 shadow mb-10 border-4" style={{ borderColor: color2 }}>
-        <h2 className="text-3xl font-extrabold text-center mb-2" style={{ color: color1 }}>
-          {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
-        </h2>
-        <h2 className="text-2xl font-bold mb-4 text-center" style={{ color: color1 }}>
-          Your Evaluation
-        </h2>
+        <h2
+  className="text-4xl md:text-5xl font-extrabold text-center mb-1 tracking-wide"
+  style={{ color: color1 }}
+>
+  {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+</h2>
+
+        <h2 className="text-2xl font-bold text-center mb-2" style={{ color: color1 }}>
+  Your Evaluation
+</h2>
+
+{/* Smaller We-Draft logo above Grade */}
+<div className="flex flex-col items-center mb-3">
+  <img
+    src={Logo1}
+    alt="We-Draft Logo"
+    className="h-10 md:h-12 w-auto object-contain mb-1 opacity-90"
+  />
+  <label className="block font-semibold mb-2 text-center">Grade</label>
+</div>
+
+
 
         {!user ? (
           <p className="text-center font-semibold" style={{ color: "#dc2626" }}>
@@ -717,13 +771,22 @@ export default function PlayerProfile() {
             </select>
 
             <button
-              onClick={handleSaveEvaluation}
-              disabled={saving}
-              className="w-full text-white font-bold py-2 rounded border-2 transition"
-              style={{ backgroundColor: color1, borderColor: color2 }}
-            >
-              {saving ? "Saving..." : "Save Evaluation"}
-            </button>
+  onClick={handleSaveEvaluation}
+  disabled={saving}
+  className="w-full text-white font-bold py-2 rounded border-2 transition"
+  style={{ backgroundColor: color1, borderColor: color2 }}
+>
+  {saving ? "Saving..." : "Save Evaluation"}
+</button>
+
+{lastUpdated && (
+  <button
+    onClick={handleRemoveEvaluation}
+    className="mt-2 w-full text-xs text-gray-400 hover:text-red-500 font-medium underline transition"
+  >
+    Remove from Board
+  </button>
+)}
 
             {lastUpdated && (
               <p className="text-sm text-gray-500 text-center mt-2">
