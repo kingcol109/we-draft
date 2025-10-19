@@ -356,7 +356,7 @@ export default function PlayerProfile() {
 async function handleRemoveEvaluation() {
   if (!user || !player?.id) return alert("You must sign in first.");
 
-  const confirmDelete = window.confirm("Remove your evaluation from your board?");
+  const confirmDelete = window.confirm("Remove evaluation from your board?");
   if (!confirmDelete) return;
 
   try {
@@ -595,7 +595,7 @@ async function handleRemoveEvaluation() {
 </h2>
 
         <h2 className="text-2xl font-bold text-center mb-2" style={{ color: color1 }}>
-  Your Evaluation
+  My Evaluation
 </h2>
 
 {/* Smaller We-Draft logo above Grade */}
@@ -605,7 +605,7 @@ async function handleRemoveEvaluation() {
     alt="We-Draft Logo"
     className="h-10 md:h-12 w-auto object-contain mb-1 opacity-90"
   />
-  <label className="block font-semibold mb-2 text-center">Grade</label>
+  
 </div>
 
 
@@ -648,7 +648,7 @@ async function handleRemoveEvaluation() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               {/* Strengths */}
               <div>
-                <label className="block font-semibold mb-2">Strengths (max 3)</label>
+                <label className="block font-semibold mb-2">Strengths (max 5)</label>
                 <details className="w-full rounded border-2" style={{ borderColor: color1 }}>
                   <summary className="cursor-pointer px-3 py-2 bg-white">
                     {strengths.length > 0 ? strengths.join(", ") : "Select strengths"}
@@ -663,7 +663,7 @@ async function handleRemoveEvaluation() {
                               type="checkbox"
                               checked={strengths.includes(trait)}
                               disabled={
-                                (!strengths.includes(trait) && strengths.length >= 3) ||
+                                (!strengths.includes(trait) && strengths.length >= 5) ||
                                 weaknesses.includes(trait)
                               }
                               onChange={() =>
@@ -686,7 +686,7 @@ async function handleRemoveEvaluation() {
 
               {/* Weaknesses */}
               <div>
-                <label className="block font-semibold mb-2">Weaknesses (max 3)</label>
+                <label className="block font-semibold mb-2">Weaknesses (max 5)</label>
                 <details className="w-full rounded border-2" style={{ borderColor: color1 }}>
                   <summary className="cursor-pointer px-3 py-2 bg-white">
                     {weaknesses.length > 0 ? weaknesses.join(", ") : "Select weaknesses"}
@@ -701,7 +701,7 @@ async function handleRemoveEvaluation() {
                               type="checkbox"
                               checked={weaknesses.includes(trait)}
                               disabled={
-                                (!weaknesses.includes(trait) && weaknesses.length >= 3) ||
+                                (!weaknesses.includes(trait) && weaknesses.length >= 5) ||
                                 strengths.includes(trait)
                               }
                               onChange={() =>
