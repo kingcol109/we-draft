@@ -1,4 +1,3 @@
-// src/pages/Home.js
 import { useEffect, useState } from "react";
 import {
   getDoc,
@@ -97,11 +96,15 @@ export default function Home() {
           const q = query(evalsRef, orderBy("updatedAt", "desc"), limit(2));
           evalPromises.push(
             getDocs(q).then((snap) =>
-              snap.docs.map((d) => ({
-                ...d.data(),
-                playerId: playerDoc.id,
-                playerName: `${playerDoc.data().First || ""} ${playerDoc.data().Last || ""}`.trim(),
-              }))
+              snap.docs.map((d) => {
+                const playerData = playerDoc.data();
+                return {
+                  ...d.data(),
+                  playerId: playerDoc.id,
+                  playerName: `${playerData.First || ""} ${playerData.Last || ""}`.trim(),
+                  playerSlug: playerData.Slug || playerDoc.id,
+                };
+              })
             )
           );
         });
@@ -162,23 +165,17 @@ export default function Home() {
 
       {/* Tagline */}
       <p className="text-xl md:text-2xl font-semibold text-[#0055a5] mb-6">
-        <Link
-          to="/boards"
-          className="text-[#f6a21d] underline hover:text-[#d88f18] transition"
-        >
+        <Link to="/boards" className="text-[#f6a21d] underline hover:text-[#d88f18] transition">
           Create + Store
         </Link>{" "}
         your own evaluations and view{" "}
-        <Link
-          to="/community"
-          className="text-[#f6a21d] underline hover:text-[#d88f18] transition"
-        >
+        <Link to="/community" className="text-[#f6a21d] underline hover:text-[#d88f18] transition">
           Community Grades
         </Link>
         !
       </p>
 
-      {/* Auth Button or Welcome Message */}
+      {/* Auth Section */}
       {!user ? (
         <button
           onClick={async () => {
@@ -223,9 +220,7 @@ export default function Home() {
                       : "py-1 text-xl md:text-2xl font-bold"
                   }`}
                 >
-                  <span
-                    className={`mr-2 font-black ${idx < 3 ? "text-[#f6a21d]" : ""}`}
-                  >
+                  <span className={`mr-2 font-black ${idx < 3 ? "text-[#f6a21d]" : ""}`}>
                     {idx + 1}.
                   </span>
                   {`${p.first} ${p.last} - ${p.school} ${p.position} ${
@@ -244,10 +239,7 @@ export default function Home() {
 
       {/* 🏈 Recent Evaluations Feed */}
       <div className="w-full max-w-5xl mb-16">
-        <h2
-          className="text-3xl font-extrabold mb-6 flex items-center gap-2"
-          style={{ color: SITE_BLUE }}
-        >
+        <h2 className="text-3xl font-extrabold mb-6 flex items-center gap-2" style={{ color: SITE_BLUE }}>
           🌍 Recent Evaluations
         </h2>
 
@@ -267,20 +259,27 @@ export default function Home() {
                     <img src={verifiedBadge} alt="Verified" className="ml-2 w-5 h-5 inline-block" />
                   )}
                 </p>
-                <p className="font-extrabold text-lg uppercase mb-1">{ev.playerName}</p>
+
+                {/* 🔗 Player name now clickable */}
+                <Link
+                  to={`/player/${ev.playerSlug}`}
+                  className="font-extrabold text-lg uppercase mb-1 text-[#0055a5] hover:text-[#f6a21d] transition underline"
+                >
+                  {ev.playerName}
+                </Link>
+
                 <p className="font-semibold mb-1">
                   Grade: <span className="font-bold">{ev.grade || "N/A"}</span>
                 </p>
+
                 {ev.strengths?.length > 0 && (
                   <p className="text-sm mb-1">
-                    <span className="font-semibold">Strengths:</span>{" "}
-                    {ev.strengths.join(", ")}
+                    <span className="font-semibold">Strengths:</span> {ev.strengths.join(", ")}
                   </p>
                 )}
                 {ev.weaknesses?.length > 0 && (
                   <p className="text-sm mb-1">
-                    <span className="font-semibold">Weaknesses:</span>{" "}
-                    {ev.weaknesses.join(", ")}
+                    <span className="font-semibold">Weaknesses:</span> {ev.weaknesses.join(", ")}
                   </p>
                 )}
                 {ev.nflFit && (
@@ -306,9 +305,7 @@ export default function Home() {
 
       {/* Future Promo Block */}
       <div className="bg-[#0055a5] text-white rounded-2xl p-10 max-w-5xl w-full shadow-md mb-16">
-        <h2 className="text-3xl md:text-4xl font-extrabold mb-4 text-[#f6a21d]">
-          🚀 Coming Soon
-        </h2>
+        <h2 className="text-3xl md:text-4xl font-extrabold mb-4 text-[#f6a21d]">🚀 Coming Soon</h2>
         <p className="text-lg md:text-xl">
           Exclusive draft content, highlight videos, and featured fan submissions will be showcased here. Stay tuned!
         </p>
