@@ -477,8 +477,8 @@ async function handleRemoveEvaluation() {
   </div>
 </div>
 
-      {/* Measurements Table */}
-      <div className="overflow-x-auto mb-10">
+            {/* Measurements Table */}
+      <div className="overflow-x-auto mb-6">
         <table className="min-w-full border-collapse text-center">
           <thead>
             <tr style={{ backgroundColor: color1, color: "#fff", border: `4px solid ${color2}` }}>
@@ -510,6 +510,31 @@ async function handleRemoveEvaluation() {
           </tbody>
         </table>
       </div>
+
+      {/* 🎥 Film Button */}
+      {player.Link && (
+        <div className="text-center mb-10">
+          <button
+            onClick={() => {
+              // If Link is an array, open the first link
+              if (Array.isArray(player.Link)) {
+                window.open(player.Link[0], "_blank", "noopener,noreferrer");
+              } else {
+                window.open(player.Link, "_blank", "noopener,noreferrer");
+              }
+            }}
+            className="px-6 py-2 font-semibold rounded-full border-2 transition hover:opacity-90"
+            style={{
+              backgroundColor: color1,
+              borderColor: color2,
+              color: "white",
+            }}
+          >
+            Film
+          </button>
+        </div>
+      )}
+
 
       {/* Community Grades */}
       <div className="mb-10">
