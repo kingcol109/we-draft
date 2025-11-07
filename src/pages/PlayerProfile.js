@@ -15,6 +15,8 @@ import {
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
+import { Helmet } from "react-helmet";
+
 // --- image URL helpers ---
 function sanitizeImgur(url) {
   if (!url) return "";
@@ -405,7 +407,41 @@ async function handleRemoveEvaluation() {
   }
 
   return (
+  <>
+    <Helmet>
+      <title>
+        {`${player.First || ""} ${player.Last || ""} Draft Scouting Report | We-Draft`}
+      </title>
+
+      <meta
+        name="description"
+        content={`Detailed scouting report, traits, and community evaluations for ${player.First || ""} ${player.Last || ""}, ${player.Position || ""} from ${player.School || ""}.`}
+      />
+
+      <meta
+        property="og:title"
+        content={`${player.First || ""} ${player.Last || ""} Scouting Report`}
+      />
+
+      <meta
+        property="og:description"
+        content={`Draft profile, evaluation, and film for ${player.First || ""} ${player.Last || ""}.`}
+      />
+
+      <meta
+        property="og:url"
+        content={`https://we-draft.com/player/${slug}`}
+      />
+
+      <link
+        rel="canonical"
+        href={`https://we-draft.com/player/${slug}`}
+      />
+    </Helmet>
+
     <div className="max-w-6xl mx-auto p-6 pb-40">
+
+      
       {/* ===== Header (logos left/right, info + We-Draft in the middle) ===== */}
 <div className="mb-8">
   <div className="flex items-center justify-between gap-6">
@@ -892,6 +928,7 @@ async function handleRemoveEvaluation() {
           <p className="italic text-gray-500">No public evaluations yet.</p>
         )}
       </div>
-    </div>
-  );
+        </div>
+  </>
+);
 }
