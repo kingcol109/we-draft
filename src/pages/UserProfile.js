@@ -1,4 +1,3 @@
-// src/pages/UserProfile.js
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -13,14 +12,14 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import Logo from "../assets/Logo1.png"; // ✅ import logo
-import verifiedBadge from "../assets/verified.png"; // ✅ import badge
+import Logo from "../assets/Logo1.png";
+import verifiedBadge from "../assets/verified.png";
 
 export default function UserProfile() {
   const { user, logout } = useAuth();
   const [username, setUsername] = useState("");
   const [displayedUsername, setDisplayedUsername] = useState("");
-  const [verified, setVerified] = useState(false); 
+  const [verified, setVerified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -34,11 +33,15 @@ export default function UserProfile() {
   const [issueText, setIssueText] = useState("");
   const [issueMsg, setIssueMsg] = useState("");
 
-  // ✅ Make your own list of banned words here
+  // ✅ Toggle states
+  const [showRequest, setShowRequest] = useState(false);
+  const [showIssue, setShowIssue] = useState(false);
+
+  // ✅ Banned words list
   const bannedWords = [
-    "fuck","shit","bitch","tits","cunt",
-    "nigger","nigga","faggot","fucc","niga",
-    "vagina","penis","asshole","retard",
+    "fuck", "shit", "bitch", "tits", "cunt",
+    "nigger", "nigga", "faggot", "fucc", "niga",
+    "vagina", "penis", "asshole", "retard",
   ];
 
   useEffect(() => {
@@ -50,7 +53,7 @@ export default function UserProfile() {
         const savedName = snap.data().username || "";
         setUsername(savedName);
         setDisplayedUsername(savedName);
-        setVerified(snap.data().verified || false); 
+        setVerified(snap.data().verified || false);
       }
       setLoading(false);
     };
@@ -137,7 +140,6 @@ export default function UserProfile() {
     }
   };
 
-  // ✅ Handle issue/suggestion submission
   const submitIssue = async () => {
     if (!issueText.trim()) {
       setIssueMsg("❌ Please enter a message.");
@@ -193,6 +195,7 @@ export default function UserProfile() {
           )}
         </h1>
 
+        {/* ✅ Profile edit */}
         <h2 className="text-xl font-bold text-[#0055a5] mb-4 text-center">
           Edit Profile
         </h2>
@@ -222,80 +225,102 @@ export default function UserProfile() {
           Log Out
         </button>
 
-        {/* ✅ Player Request Form */}
-        <h2 className="text-xl font-bold text-[#0055a5] mb-4 text-center">
-          Request a Player
-        </h2>
-        <input
-          type="text"
-          value={playerName}
-          onChange={(e) => setPlayerName(e.target.value)}
-          className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-2"
-          placeholder="Player Name"
-        />
-        <input
-          type="text"
-          value={school}
-          onChange={(e) => setSchool(e.target.value)}
-          className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-2"
-          placeholder="School"
-        />
-        <input
-          type="text"
-          value={position}
-          onChange={(e) => setPosition(e.target.value)}
-          className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-2"
-          placeholder="Position"
-        />
-
-        {requestMsg && (
-          <p
-            className={`text-sm mb-3 ${
-              requestMsg.startsWith("✅")
-                ? "text-green-600"
-                : "text-red-600"
-            }`}
+        {/* ✅ Collapsible Player Request Section */}
+        <div className="mb-8">
+          <button
+            onClick={() => setShowRequest((prev) => !prev)}
+            className="w-full text-xl font-bold text-[#0055a5] border-b-2 border-[#f6a21d] py-2 flex justify-between items-center"
           >
-            {requestMsg}
-          </p>
-        )}
+            Request a Player
+            <span>{showRequest ? "▲" : "▼"}</span>
+          </button>
 
-        <button
-          onClick={submitRequest}
-          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition mb-8"
-        >
-          Submit Request
-        </button>
+          {showRequest && (
+            <div className="mt-4">
+              <input
+                type="text"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-2"
+                placeholder="Player Name"
+              />
+              <input
+                type="text"
+                value={school}
+                onChange={(e) => setSchool(e.target.value)}
+                className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-2"
+                placeholder="School"
+              />
+              <input
+                type="text"
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+                className="w-full border-2 border-[#0055a5] rounded px-3 py-2 mb-2"
+                placeholder="Position"
+              />
 
-        {/* ✅ Report Issues / Suggestions Form */}
-        <h2 className="text-xl font-bold text-[#0055a5] mb-4 text-center">
-          Report an Issue / Suggestion
-        </h2>
-        <textarea
-          value={issueText}
-          onChange={(e) => setIssueText(e.target.value)}
-          className="w-full border-2 border-[#0055a5] rounded px-3 py-2 h-28 mb-2"
-          placeholder="Describe the issue or suggestion..."
-        />
+              {requestMsg && (
+                <p
+                  className={`text-sm mb-3 ${
+                    requestMsg.startsWith("✅")
+                      ? "text-green-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {requestMsg}
+                </p>
+              )}
 
-        {issueMsg && (
-          <p
-            className={`text-sm mb-3 ${
-              issueMsg.startsWith("✅")
-                ? "text-green-600"
-                : "text-red-600"
-            }`}
+              <button
+                onClick={submitRequest}
+                className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
+              >
+                Submit Request
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ✅ Collapsible Issue/Suggestion Section */}
+        <div>
+          <button
+            onClick={() => setShowIssue((prev) => !prev)}
+            className="w-full text-xl font-bold text-[#0055a5] border-b-2 border-[#f6a21d] py-2 flex justify-between items-center"
           >
-            {issueMsg}
-          </p>
-        )}
+            Report an Issue / Suggestion
+            <span>{showIssue ? "▲" : "▼"}</span>
+          </button>
 
-        <button
-          onClick={submitIssue}
-          className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
-        >
-          Submit Report
-        </button>
+          {showIssue && (
+            <div className="mt-4">
+              <textarea
+                value={issueText}
+                onChange={(e) => setIssueText(e.target.value)}
+                className="w-full border-2 border-[#0055a5] rounded px-3 py-2 h-28 mb-2"
+                placeholder="Describe the issue or suggestion..."
+              />
+
+              {issueMsg && (
+                <p
+                  className={`text-sm mb-3 ${
+                    issueMsg.startsWith("✅")
+                      ? "text-green-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {issueMsg}
+                </p>
+              )}
+
+              <button
+                onClick={submitIssue}
+                className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition"
+              >
+                Submit Report
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
