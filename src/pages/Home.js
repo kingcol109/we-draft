@@ -192,7 +192,7 @@ export default function Home() {
             }}
             className="bg-[#0055a5] text-white px-6 py-3 rounded-lg font-semibold text-lg shadow hover:bg-[#004080] transition mb-12"
           >
-            Login with Google to create and store your own evaluations
+            Login with Google to create and store your own evaluations!
           </button>
         ) : (
           <p className="text-lg md:text-xl max-w-2xl mb-12 font-medium text-center">
