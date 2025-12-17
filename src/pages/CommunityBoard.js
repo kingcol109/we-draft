@@ -4,6 +4,7 @@ import { db } from "../firebase";
 import { Range } from "react-range";
 import { Link } from "react-router-dom"; 
 import Logo1 from "../assets/Logo1.png"; 
+import { Helmet } from "react-helmet-async";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -413,7 +414,13 @@ export default function CommunityBoard() {
   ];
 
   return (
+  <>
+    <Helmet>
+      <title>Community Board</title>
+    </Helmet>
+
     <div className="flex justify-center p-6">
+
       <div className="w-full max-w-7xl">
         {/* ✅ Logo above title */}
         <div className="flex justify-center mb-2">
@@ -529,7 +536,8 @@ export default function CommunityBoard() {
             </tbody>
           </table>
         </div>
+              </div>
       </div>
-    </div>
+    </>
   );
 }
