@@ -14,8 +14,6 @@ import UserProfile from "./pages/UserProfile";
 import TeamPage from "./pages/TeamPage";
 
 function App() {
-  console.log("✅ App.js loaded, routes mounted");
-
   return (
     <HelmetProvider>
       <Router>
@@ -35,18 +33,25 @@ function App() {
           <Route path="/boards" element={<UserBoards />} />
           <Route path="/profile" element={<UserProfile />} />
 
-          {/* Catch-all 404 route */}
+          {/* Catch-all 404 */}
           <Route
             path="*"
             element={
-              <div style={{ marginTop: "80px", textAlign: "center", color: "red" }}>
+              <div
+                style={{
+                  marginTop: "80px",
+                  textAlign: "center",
+                  color: "red",
+                  fontWeight: "bold",
+                }}
+              >
                 404 – Route not found
               </div>
             }
           />
         </Routes>
 
-        {/* Analytics active across all routes */}
+        {/* Analytics across all routes */}
         <Analytics />
       </Router>
     </HelmetProvider>
