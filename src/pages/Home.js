@@ -10,11 +10,11 @@ import {
   limit,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import logo from "../assets/Logo1.png";
+import logo from "../assets/outlinelogo.png";
 import verifiedBadge from "../assets/verified.png";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { Helmet } from "react-helmet";
+import { Helmet } from "react-helmet-async";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -166,8 +166,11 @@ export default function Home() {
 
       <div className="bg-white text-[#0055a5] min-h-screen flex flex-col items-center pt-12 px-4">
         {/* Logo */}
-        <img src={logo} alt="We-Draft Logo" className="w-[360px] md:w-[460px] max-w-[95vw] h-auto mb-4" />
-
+        <img
+  src={logo}
+  alt="We-Draft Logo"
+  className="w-[420px] md:w-[720px] max-w-[95vw] h-auto mb-4"
+/>
         {/* Tagline */}
         <p className="text-xl md:text-2xl font-semibold text-[#0055a5] mb-6">
           <Link to="/boards" className="text-[#f6a21d] underline hover:text-[#d88f18] transition">
@@ -203,6 +206,22 @@ export default function Home() {
             to manage your evaluations.
           </p>
         )}
+{/* 🔔 Announcement */}
+<div className="text-center mb-12 px-4">
+  <p className="text-lg md:text-xl font-semibold">
+    New draft content coming <span className="font-bold">January 20th!</span>{" "}
+    Follow us on{" "}
+    <a
+      href="https://www.instagram.com/wedraftsite"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[#E1306C] underline font-bold hover:opacity-80 transition"
+    >
+      Instagram
+    </a>{" "}
+    to stay updated.
+  </p>
+</div>
 
         {/* Featured Players */}
         <div className="bg-white border-4 border-[#f6a21d] rounded-2xl shadow-lg p-10 mb-16 w-full max-w-5xl">
