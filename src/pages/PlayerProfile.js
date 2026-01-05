@@ -15,7 +15,7 @@ import {
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
-import { Helmet } from "react-helmet";
+import { Helmet } from "react-helmet-async";
 
 // --- image URL helpers ---
 function sanitizeImgur(url) {
@@ -512,6 +512,15 @@ async function handleRemoveEvaluation() {
     </div>
   </div>
 </div>
+{/* ===== Player Bio ===== */}
+{player.bio && (
+  <div className="mt-0 mb-3">
+    <div className="text-gray-800 text-lg leading-relaxed whitespace-pre-line">
+      {player.bio}
+    </div>
+  </div>
+)}
+
 
             {/* Measurements Table */}
       <div className="overflow-x-auto mb-6">
@@ -668,8 +677,6 @@ async function handleRemoveEvaluation() {
   />
   
 </div>
-
-
 
         {!user ? (
           <p className="text-center font-semibold" style={{ color: "#dc2626" }}>
