@@ -204,19 +204,19 @@ useEffect(() => {
         <img
           src={logo}
           alt="We-Draft Logo"
-          className="w-[420px] md:w-[720px] max-w-[95vw] h-auto mb-4"
+          className="w-[420px] md:w-[720px] max-w-[95vw] h-auto mb-0"
         />
 
         {/* Auth */}
         {!user ? (
           <button
             onClick={login}
-            className="bg-[#0055a5] text-white px-6 py-3 rounded-lg font-semibold text-lg shadow hover:bg-[#004080] transition mb-12"
+            className="bg-[#0055a5] text-white px-6 py-3 rounded-lg font-semibold text-lg shadow hover:bg-[#004080] transition mb-0"
           >
             Login with Google to create and store your own evaluations!
           </button>
         ) : (
-          <p className="text-lg md:text-xl max-w-2xl mb-12 font-medium text-center">
+          <p className="text-lg md:text-xl max-w-2xl mb-2 font-medium text-center">
             Welcome back! Head over to{" "}
             <Link to="/boards" className="underline">
               My Boards
