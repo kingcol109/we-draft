@@ -40,7 +40,7 @@ export default function Home() {
 
         const cfg = cfgSnap.data() || {};
         const slugs = Array.isArray(cfg.playerIds)
-          ? cfg.playerIds.slice(0, 5)
+          ? cfg.playerIds.slice(0, 10)
           : [];
 
         if (!slugs.length) {
@@ -61,10 +61,14 @@ export default function Home() {
               const p = d.data();
 
               return {
-                id: d.id,
-                slug: p.Slug,
-                imageUrl: p.imageUrl || null,
-              };
+  id: d.id,
+  slug: p.Slug,
+  imageUrl: p.imageUrl || null,
+  name: `${p.First || ""} ${p.Last || ""}`.trim(),
+  position: p.Position || "",
+  school: p.School || "",
+};
+
             })
           )
         ).filter(Boolean);
@@ -226,74 +230,145 @@ useEffect(() => {
         )}
 
         
-        {/* Featured Players */}
-        <div className="p-10 mb-16 w-full max-w-6xl">
-          <h2 className="text-4xl md:text-5xl font-extrabold text-[#0055a5] mb-1 uppercase tracking-wide text-center">
-            {formattedDate}
-          </h2>
-          <h3 className="text-2xl md:text-3xl font-extrabold text-[#f6a21d] mb-10 text-center">
-            FEATURED PLAYERS
-          </h3>
+        {/* Featured Players + Social Box */}
+<div className="mb-16 w-full max-w-7xl relative">
 
-          {featured.length > 0 ? (
-  <div className="flex flex-col items-center gap-12">
-    {/* Top row — 2 featured (bigger) */}
-    <div className="flex justify-center gap-12">
-      {featured.slice(0, 2).map((p) => (
-        <Link key={p.id} to={`/player/${p.slug}`}>
-          <img
-            src={p.imageUrl || "/placeholders/player-card.png"}
-            alt="Featured Player"
-            className="
-              w-[300px]
-              h-auto
-              object-contain
-              rounded-xl
-              shadow-2xl
-              transition
-              hover:scale-105
-            "
-            loading="lazy"
-            onError={(e) => {
-              e.currentTarget.src = "/placeholders/player-card.png";
-            }}
-          />
-        </Link>
-      ))}
-    </div>
+  {/* Social Follow Box (does NOT affect centering) */}
+  <div className="hidden lg:block absolute left-0 top-6 w-[260px]">
+    <div className="bg-[#f9fbff] border-2 border-[#e0e8f5] rounded-xl px-6 pt-6 pb-4 shadow-sm">
+      <p
+        className="text-2xl font-extrabold leading-snug text-center mb-4"
+        style={{ color: SITE_BLUE }}
+      >
+        Follow us on social media for draft content and website updates & developments!
+      </p>
 
-    {/* Bottom row — 3 featured */}
-    <div className="flex justify-center gap-10">
-      {featured.slice(2, 5).map((p) => (
-        <Link key={p.id} to={`/player/${p.slug}`}>
-          <img
-            src={p.imageUrl || "/placeholders/player-card.png"}
-            alt="Featured Player"
-            className="
-              w-[240px]
-              h-auto
-              object-contain
-              rounded-xl
-              shadow-xl
-              transition
-              hover:scale-105
-            "
-            loading="lazy"
-            onError={(e) => {
-              e.currentTarget.src = "/placeholders/player-card.png";
-            }}
-          />
-        </Link>
-      ))}
+      <ul className="space-y-4 text-3xl font-bold text-center">
+        <li>
+          <a
+            href="https://www.instagram.com/wedraftsite"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-[#f6a21d] hover:underline"
+          >
+            Instagram
+          </a>
+        </li>
+
+        <li>
+          <a
+            href="https://twitter.com/wedraftsite"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-[#f6a21d] hover:underline"
+          >
+            X (Twitter)
+          </a>
+        </li>
+
+        <li>
+          <a
+            href="https://www.youtube.com/@kingcoldsports"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-[#f6a21d] hover:underline"
+          >
+            YouTube
+          </a>
+        </li>
+      </ul>
     </div>
   </div>
-) : (
-  <p className="italic text-gray-500 text-lg text-center">
-    No featured players set yet.
-  </p>
+
+  {/* Featured Players (stays centered) */}
+  <div className="w-full flex justify-center">
+    <div className="w-full max-w-6xl p-10">
+
+      <h2 className="text-4xl md:text-5xl font-extrabold text-[#0055a5] mb-1 uppercase tracking-wide text-center">
+        {formattedDate}
+      </h2>
+
+      <h3 className="text-2xl md:text-3xl font-extrabold text-[#f6a21d] mb-10 text-center">
+        FEATURED PLAYERS
+      </h3>
+
+      {featured.length > 0 ? (
+        <div className="flex flex-col items-center gap-12">
+
+          {/* Top row — 2 featured */}
+          <div className="flex justify-center gap-12">
+            {featured.slice(0, 2).map((p) => (
+              <Link key={p.id} to={`/player/${p.slug}`}>
+                <img
+                  src={p.imageUrl || "/placeholders/player-card.png"}
+                  alt="Featured Player"
+                  className="w-[300px] h-auto object-contain rounded-xl shadow-2xl hover:scale-105 transition"
+                  onError={(e) => {
+                    e.currentTarget.src = "/placeholders/player-card.png";
+                  }}
+                />
+              </Link>
+            ))}
+          </div>
+
+          {/* Bottom row — 3 featured */}
+          <div className="flex justify-center gap-10">
+            {featured.slice(2, 5).map((p) => (
+              <Link key={p.id} to={`/player/${p.slug}`}>
+                <img
+                  src={p.imageUrl || "/placeholders/player-card.png"}
+                  alt="Featured Player"
+                  className="w-[240px] h-auto object-contain rounded-xl shadow-xl hover:scale-105 transition"
+                  onError={(e) => {
+                    e.currentTarget.src = "/placeholders/player-card.png";
+                  }}
+                />
+              </Link>
+            ))}
+          </div>
+{/* Also Featured (6–10) */}
+{featured.length > 5 && (
+  <div className="mt-6 w-full max-w-4xl text-center">
+    <h4
+      className="text-3xl font-extrabold mb-2 uppercase tracking-wide"
+      style={{ color: SITE_BLUE }}
+    >
+      Also Featured This Week
+    </h4>
+
+    <ul className="space-y-3">
+      {featured.slice(5, 10).map((p) => (
+        <li key={p.id}>
+          <Link
+            to={`/player/${p.slug}`}
+            className="
+              text-2xl
+              font-bold
+              hover:underline
+              transition
+            "
+            style={{ color: SITE_GOLD }}
+          >
+            {p.name} · {p.position} · {p.school}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  </div>
 )}
 
+
         </div>
+      ) : (
+        <p className="italic text-gray-500 text-lg text-center">
+          No featured players set yet.
+        </p>
+      )}
+    </div>
+  </div>
+</div>
+
+
 {/* 📰 News Feed */}
 {news.length > 0 && (
   <div className="w-full max-w-5xl mb-20">

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useEffect, useState } from "react";
+import Logo2 from "../assets/Logo2.png";
 
 export default function Navbar() {
   const { user, login } = useAuth();
@@ -17,14 +18,10 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    if (isMobile) return; // disable scroll effect on mobile
+    if (isMobile) return;
 
     const handleScroll = () => {
-      if (window.scrollY > lastScrollY) {
-        setShow(false); // scrolling down → hide
-      } else {
-        setShow(true); // scrolling up → show
-      }
+      setShow(window.scrollY < lastScrollY);
       setLastScrollY(window.scrollY);
     };
 
@@ -71,17 +68,36 @@ export default function Navbar() {
         left: 0,
         right: 0,
         backgroundColor: "#0055a5",
-        padding: "1rem",
+        padding: "0.75rem 1.5rem",
         display: "flex",
-        justifyContent: "center",
         alignItems: "center",
-        gap: "1rem",
         transition: isMobile ? "none" : "top 0.3s ease-in-out",
         zIndex: 1000,
       }}
     >
-      {/* ✅ PC / Desktop Navbar */}
-      <div className="hidden md:flex">
+      {/* 🔷 Logo pinned left */}
+      <Link to="/" style={{ display: "flex", alignItems: "center" }}>
+        <img
+          src={Logo2}
+          alt="We-Draft Logo"
+          style={{
+            height: "42px",
+            width: "auto",
+            cursor: "pointer",
+          }}
+        />
+      </Link>
+
+      {/* ✅ Desktop Nav — truly centered */}
+      <div
+        className="hidden md:flex"
+        style={{
+          position: "absolute",
+          left: "50%",
+          transform: "translateX(-50%)",
+          alignItems: "center",
+        }}
+      >
         {[
           { path: "/", label: "Home" },
           { path: "/community", label: "Community Board" },
@@ -127,27 +143,15 @@ export default function Navbar() {
         )}
       </div>
 
-      {/* ✅ Mobile Navbar (hamburger + vertical dropdown) */}
-      <div className="md:hidden w-full flex justify-between items-center">
-        <Link
-          to="/"
-          style={{
-            color: "#fff",
-            fontWeight: "bold",
-            fontSize: "1.25rem",
-            textDecoration: "none",
-          }}
-        >
-          We-Draft
-        </Link>
-
+      {/* ✅ Mobile Navbar */}
+      <div className="md:hidden ml-auto">
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           style={{
             background: "none",
             border: "none",
             color: "#fff",
-            fontSize: "1.5rem",
+            fontSize: "1.75rem",
             cursor: "pointer",
           }}
         >
@@ -186,25 +190,11 @@ export default function Navbar() {
               </Link>
             ))}
 
-            {user && (
-              <Link
-                to="/profile"
-                style={{ ...baseStyle, width: "100%" }}
-                onClick={() => setMenuOpen(false)}
-              >
-                Profile
-              </Link>
-            )}
-
             {!user && (
               <button
                 onClick={async () => {
-                  try {
-                    await login();
-                    setMenuOpen(false);
-                  } catch (err) {
-                    console.error(err);
-                  }
+                  await login();
+                  setMenuOpen(false);
                 }}
                 style={{ ...authStyle, width: "100%" }}
               >
