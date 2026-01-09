@@ -85,7 +85,7 @@ export default function Home() {
 useEffect(() => {
   const fetchNews = async () => {
     try {
-      const headlinesRef = collection(db, "headlines");
+      const headlinesRef = collection(db, "news");
 
       // 1) Can we read ANY docs from the collection?
       const allSnap = await getDocs(headlinesRef);
@@ -279,6 +279,79 @@ useEffect(() => {
       </ul>
     </div>
   </div>
+{/* News Feed Box (RIGHT SIDE) */}
+<div className="hidden lg:block absolute right-0 top-6 w-[300px]">
+  <div
+    className="bg-white rounded-xl shadow-sm border-4"
+    style={{ borderColor: SITE_GOLD }}
+  >
+    {/* Header */}
+    <div
+      className="px-4 py-3 rounded-t-lg text-center font-extrabold text-lg uppercase"
+      style={{ backgroundColor: SITE_BLUE, color: "white" }}
+    >
+      News
+    </div>
+
+    {/* Body */}
+    <div className="divide-y">
+      {news.length > 0 ? (
+        news.map((n) => (
+          <div key={n.id} className="p-4 hover:bg-[#f9fbff] transition">
+           {n.long && n.slug ? (
+  <Link
+    to={`/news/${n.slug}`}
+    className="font-bold text-sm hover:underline leading-snug"
+    style={{ color: SITE_BLUE }}
+  >
+    <span className="mr-1 font-extrabold">
+      {n.publishedAt
+        ?.toDate?.()
+        .toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })}
+      :
+    </span>
+    {n.title}
+  </Link>
+) : (
+  <div className="font-bold text-sm text-gray-500 leading-snug">
+    <span className="mr-1 font-extrabold">
+      {n.publishedAt
+        ?.toDate?.()
+        .toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })}
+      :
+    </span>
+    {n.title}
+  </div>
+)}
+
+          </div>
+        ))
+      ) : (
+        <p className="p-4 italic text-gray-500 text-sm text-center">
+          No news available
+        </p>
+      )}
+    </div>
+
+    {/* Footer */}
+    <div className="p-3 text-center bg-[#f9fbff] rounded-b-lg">
+      <Link
+  to="/news"
+  className="text-lg font-extrabold uppercase hover:underline"
+  style={{ color: SITE_BLUE }}
+>
+  Show More
+</Link>
+
+    </div>
+  </div>
+</div>
 
   {/* Featured Players (stays centered) */}
   <div className="w-full flex justify-center">
@@ -367,62 +440,6 @@ useEffect(() => {
     </div>
   </div>
 </div>
-
-
-{/* 📰 News Feed */}
-{news.length > 0 && (
-  <div className="w-full max-w-5xl mb-20">
-    <div className="flex items-center justify-between mb-4">
-      <h2
-        className="text-3xl font-extrabold tracking-wide"
-        style={{ color: SITE_BLUE }}
-      >
-        NEWS
-      </h2>
-    </div>
-
-    <div className="bg-white border border-[#e0e8f5] rounded-xl shadow-sm divide-y">
-      {news.map((n) => (
-        <div key={n.id} className="p-4 hover:bg-[#f9fbff] transition">
-          <a
-            href={n.Url || "#"}
-            target={n.Url ? "_blank" : "_self"}
-            rel="noopener noreferrer"
-            className="font-semibold text-[#0055a5] hover:underline block"
-          >
-            {n.Title}
-          </a>
-
-          <div className="text-xs text-gray-500 mt-1 flex gap-2">
-            {n.Source && <span>{n.Source}</span>}
-            {n.publishedAt && (
-              <span>
-                ·{" "}
-                {n.publishedAt.toDate().toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
-            )}
-          </div>
-        </div>
-      ))}
-
-      {/* Show More */}
-      <div className="p-4 text-center bg-[#f9fbff]">
-        <button
-          className="font-semibold text-[#0055a5] hover:underline"
-          onClick={() => {
-            // TODO: route to /news
-            console.log("Go to full news page");
-          }}
-        >
-          Show more →
-        </button>
-      </div>
-    </div>
-  </div>
-)}
 
         {/* Recent Evaluations (unchanged) */}
         <div className="w-full max-w-5xl mb-16">

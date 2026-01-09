@@ -7,6 +7,8 @@ import Navbar from "./components/Navbar";
 
 // Pages
 import Home from "./pages/Home";
+import News from "./pages/News";
+import NewsArticle from "./pages/NewsArticle";
 import CommunityBoard from "./pages/CommunityBoard";
 import PlayerProfile from "./pages/PlayerProfile";
 import UserBoards from "./pages/UserBoards";
@@ -22,6 +24,11 @@ function App() {
 
         <Routes>
           <Route path="/" element={<Home />} />
+
+          {/* News */}
+          <Route path="/news" element={<News />} />
+          <Route path="/news/:id" element={<NewsArticle />} />
+
           <Route path="/community" element={<CommunityBoard />} />
 
           {/* Dynamic player profile by slug */}

@@ -1,6 +1,6 @@
 // src/pages/PlayerProfile.js
-import { useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { useEffect, useState, useRef } from "react";
 import Logo1 from "../assets/Logo1.png";
 import {
   doc,
@@ -10,12 +10,14 @@ import {
   getDocs,
   query,
   where,
+  orderBy,          // ✅ ADD THIS
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
 import { Helmet } from "react-helmet-async";
+
 
 // --- image URL helpers ---
 function sanitizeImgur(url) {
@@ -64,6 +66,10 @@ export default function PlayerProfile() {
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
   const { user } = useAuth();
+const evaluationRef = useRef(null);
+
+// In the News
+const [playerNews, setPlayerNews] = useState([]);
 
   // Branding (school)
   const [branding, setBranding] = useState(null);
@@ -144,6 +150,35 @@ export default function PlayerProfile() {
     };
     fetchPlayer();
   }, [slug]);
+// Fetch news articles mentioning this player
+useEffect(() => {
+  if (!slug) return;
+
+  const fetchPlayerNews = async () => {
+    try {
+      const q = query(
+        collection(db, "news"),
+        where("active", "==", true),
+        where("slugs", "array-contains", slug),
+        orderBy("publishedAt", "desc")
+      );
+
+      const snap = await getDocs(q);
+
+      setPlayerNews(
+        snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }))
+      );
+    } catch (err) {
+      console.error("Error fetching player news:", err);
+      setPlayerNews([]);
+    }
+  };
+
+  fetchPlayerNews();
+}, [slug]);
 
   // Fetch school branding once we know the player's school
   useEffect(() => {
@@ -486,11 +521,7 @@ async function handleRemoveEvaluation() {
   </p>
 
   {/* We-Draft logo stays BETWEEN the school logos */}
-  <img
-    src={Logo1}
-    alt="We-Draft Logo"
-    className="h-16 md:h-20 w-auto object-contain mt-3"
-  />
+  
 </div>
 
 
@@ -512,14 +543,47 @@ async function handleRemoveEvaluation() {
     </div>
   </div>
 </div>
-{/* ===== Player Bio ===== */}
+
+{/* Evaluate Button */}
+<div className="flex justify-center my-6">
+  <button
+    onClick={() => {
+      evaluationRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }}
+    className="px-8 py-2 text-lg font-bold rounded-full border-2 transition hover:opacity-90"
+    style={{
+      backgroundColor: color1,
+      borderColor: color2,
+      color: "white",
+    }}
+  >
+    Evaluate
+  </button>
+</div>
+
+
+{/* ===== Player Background ===== */}
 {player.bio && (
-  <div className="mt-0 mb-3">
-    <div className="text-gray-800 text-lg leading-relaxed whitespace-pre-line">
+  <div className="mb-6 border-4 rounded-lg overflow-hidden" style={{ borderColor: color2 }}>
+    
+    {/* Header strip */}
+    <div
+      className="py-2 px-4 text-center font-extrabold tracking-wide"
+      style={{ backgroundColor: color1, color: "#ffffff" }}
+    >
+      PLAYER BACKGROUND
+    </div>
+
+    {/* Bio content */}
+    <div className="p-5 text-black text-lg leading-relaxed whitespace-pre-line bg-white">
       {player.bio}
     </div>
   </div>
 )}
+
 
 
             {/* Measurements Table */}
@@ -655,8 +719,51 @@ async function handleRemoveEvaluation() {
         </div>
       </div>
 
+      {/* 📰 In the News */}
+{playerNews.length > 0 && (
+  <div
+    className="mb-10 border-4 rounded-lg overflow-hidden"
+    style={{ borderColor: color2 }}
+  >
+    {/* Header */}
+    <div
+      className="py-2 px-4 text-center font-extrabold tracking-wide uppercase"
+      style={{ backgroundColor: color1, color: "#ffffff" }}
+    >
+      In the News
+    </div>
+
+    {/* Articles */}
+    <div className="divide-y bg-white">
+      {playerNews.map((n) => (
+        <div key={n.slug || n.id} className="p-4 hover:bg-[#f9fbff] transition">
+          <Link
+  to={`/news/${n.slug}`}
+  className="font-bold text-black hover:underline"
+>
+
+            <span className="mr-2 font-extrabold">
+              {n.publishedAt?.toDate?.().toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}
+              :
+            </span>
+            {n.title}
+          </Link>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
       {/* Evaluation Form */}
-      <div className="bg-white rounded-lg p-6 shadow mb-10 border-4" style={{ borderColor: color2 }}>
+<div
+  ref={evaluationRef}
+  className="bg-white rounded-lg p-6 shadow mb-10 border-4"
+  style={{ borderColor: color2 }}
+>
+
         <h2
   className="text-4xl md:text-5xl font-extrabold text-center mb-1 tracking-wide"
   style={{ color: color1 }}
