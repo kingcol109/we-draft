@@ -251,7 +251,7 @@ export default function UserBoards() {
   const { user } = useAuth();
   const [evaluations, setEvaluations] = useState([]);
   const [players, setPlayers] = useState([]);
-  const [sortKey, setSortKey] = useState("Last");
+  const [sortKey, setSortKey] = useState("UserGrade");
   const [sortOrder, setSortOrder] = useState("asc");
   const [view, setView] = useState("table");
 
@@ -342,17 +342,41 @@ export default function UserBoards() {
     );
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
-    if (sortKey === "UserGrade") {
-      const rank = (g) =>
-        gradeOrder.includes(g) ? gradeOrder.indexOf(g) : gradeOrder.length;
-      return (rank(a.UserGrade) - rank(b.UserGrade)) * (sortOrder === "asc" ? 1 : -1);
+  // ✅ Sort by draft grade
+  if (sortKey === "UserGrade") {
+    const rank = (g) =>
+      gradeOrder.includes(g) ? gradeOrder.indexOf(g) : gradeOrder.length;
+    return (rank(a.UserGrade) - rank(b.UserGrade)) * (sortOrder === "asc" ? 1 : -1);
+  }
+
+  // ✅ Sort PLAYER by Last name, then First
+  if (sortKey === "Player") {
+    const aLast = (a.Last || "").toLowerCase();
+    const bLast = (b.Last || "").toLowerCase();
+
+    if (aLast !== bLast) {
+      return sortOrder === "asc"
+        ? aLast.localeCompare(bLast)
+        : bLast.localeCompare(aLast);
     }
-    const aVal = a[sortKey] ?? "";
-    const bVal = b[sortKey] ?? "";
-    if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
-    if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
-    return 0;
-  });
+
+    const aFirst = (a.First || "").toLowerCase();
+    const bFirst = (b.First || "").toLowerCase();
+
+    return sortOrder === "asc"
+      ? aFirst.localeCompare(bFirst)
+      : bFirst.localeCompare(aFirst);
+  }
+
+  // 🔁 Default sorting
+  const aVal = a[sortKey] ?? "";
+  const bVal = b[sortKey] ?? "";
+
+  if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
+  if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
+  return 0;
+});
+
 
   const headers = [
     { key: "Player", label: "PLAYER" },

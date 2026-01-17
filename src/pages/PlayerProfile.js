@@ -17,7 +17,8 @@ import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
 import { Helmet } from "react-helmet-async";
-
+import * as htmlToImage from "html-to-image";
+import confetti from "canvas-confetti";
 
 // --- image URL helpers ---
 function sanitizeImgur(url) {
@@ -66,10 +67,13 @@ export default function PlayerProfile() {
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
   const { user } = useAuth();
-const evaluationRef = useRef(null);
+const evaluationFormRef = useRef(null);
+const exportCardRef = useRef(null);
 
 // In the News
 const [playerNews, setPlayerNews] = useState([]);
+
+const [scoutName, setScoutName] = useState("");
 
   // Branding (school)
   const [branding, setBranding] = useState(null);
@@ -150,6 +154,29 @@ const [playerNews, setPlayerNews] = useState([]);
     };
     fetchPlayer();
   }, [slug]);
+
+  // Fetch scout username (fallback to email)
+useEffect(() => {
+  const fetchScoutName = async () => {
+    if (!user?.uid) return;
+
+    try {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (snap.exists()) {
+        const data = snap.data();
+        setScoutName(data.username || user.email || "Anonymous Scout");
+      } else {
+        setScoutName(user.email || "Anonymous Scout");
+      }
+    } catch (err) {
+      console.error("Error fetching scout name:", err);
+      setScoutName(user.email || "Anonymous Scout");
+    }
+  };
+
+  fetchScoutName();
+}, [user]);
+
 // Fetch news articles mentioning this player
 useEffect(() => {
   if (!slug) return;
@@ -351,6 +378,25 @@ useEffect(() => {
     fetchCommunity();
   }, [player]);
 
+const handleExportImage = async () => {
+  if (!exportCardRef.current) return;
+
+  try {
+    const dataUrl = await htmlToImage.toPng(exportCardRef.current, {
+      pixelRatio: 2,
+      backgroundColor: "#ffffff",
+    });
+
+    const link = document.createElement("a");
+    link.download = `${player.First}_${player.Last}_Evaluation.png`;
+    link.href = dataUrl;
+    link.click();
+  } catch (err) {
+    console.error("Export failed:", err);
+    alert("Failed to export image.");
+  }
+};
+
   // Save evaluation
   const handleSaveEvaluation = async () => {
     if (!user || !player?.id) return alert("You must sign in first.");
@@ -379,9 +425,15 @@ useEffect(() => {
 
       await setDoc(doc(db, "players", player.id, "evaluations", user.uid), evalData);
       await setDoc(doc(db, "users", user.uid, "evaluations", player.id), evalData);
+// ✅ Confetti (school colors) — only after save succeeds
+confetti({
+  particleCount: 140,
+  spread: 75,
+  origin: { y: 0.65 },
+  colors: [color1, color2, "#ffffff"],
+});
 
       setLastUpdated(Date.now());
-      alert("✅ Evaluation saved!");
     } catch (err) {
       console.error("Error saving evaluation:", err);
       alert("❌ Failed to save evaluation. Try again.");
@@ -548,10 +600,11 @@ async function handleRemoveEvaluation() {
 <div className="flex justify-center my-6">
   <button
     onClick={() => {
-      evaluationRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+      evaluationFormRef.current?.scrollIntoView({
+  behavior: "smooth",
+  block: "start",
+});
+
     }}
     className="px-8 py-2 text-lg font-bold rounded-full border-2 transition hover:opacity-90"
     style={{
@@ -756,10 +809,97 @@ async function handleRemoveEvaluation() {
     </div>
   </div>
 )}
+{/* ===== Hidden Export Card ===== */}
+<div style={{ position: "absolute", left: "-9999px", top: 0 }}>
+  <div
+    ref={exportCardRef}
+    className="bg-white border-4 p-6"
+    style={{
+      width: "700px",
+      borderColor: color2,
+    }}
+  >
+    <div
+      className="text-center py-2 mb-4 font-extrabold text-xl"
+      style={{ backgroundColor: color1, color: "white" }}
+    >
+      WE-DRAFT PLAYER EVALUATION
+    </div>
+    <p className="text-center font-bold text-black mb-1">
+  Scouted by {scoutName}
+</p>
+
+    <h2
+  className="font-black text-center mb-2"
+  style={{
+    color: color1,
+    fontSize: "56px",
+    lineHeight: "1.1",
+    letterSpacing: "0.02em",
+  }}
+>
+  {player.First} {player.Last}
+</h2>
+
+
+    <p className="text-center font-semibold text-gray-700 mb-4">
+      {player.Position} · {player.School}
+    </p>
+
+    <div className="text-center mb-4">
+      <span className="font-bold" style={{ color: color1 }}>
+  Grade:
+</span>{" "}
+<span className="font-extrabold text-xl text-black">
+  {grade || "N/A"}
+</span>
+
+    </div>
+
+    {strengths.length > 0 && (
+      <div className="mb-3">
+        <p className="font-bold text-lg mb-1" style={{ color: color1 }}>
+  Strengths
+</p>
+
+        <p className="text-black">{strengths.join(", ")}</p>
+      </div>
+    )}
+
+    {weaknesses.length > 0 && (
+      <div className="mb-3">
+        <p className="font-bold text-lg mb-1" style={{ color: color1 }}>
+  Weaknesses
+</p>
+
+        <p className="text-black">{weaknesses.join(", ")}</p>
+      </div>
+    )}
+
+    {evaluation && (
+      <div className="mb-4">
+        <p className="font-bold text-lg mb-1" style={{ color: color1 }}>
+  Evaluation
+</p>
+
+        <p className="italic text-black">"{evaluation}"</p>
+      </div>
+    )}
+
+    <div className="flex justify-center mt-6">
+  <img
+    src={Logo1}
+    alt="We-Draft Logo"
+    className="h-20 opacity-80"
+  />
+</div>
+
+  </div>
+</div>
 
       {/* Evaluation Form */}
 <div
-  ref={evaluationRef}
+  ref={evaluationFormRef}
   className="bg-white rounded-lg p-6 shadow mb-10 border-4"
   style={{ borderColor: color2 }}
 >
@@ -952,6 +1092,17 @@ async function handleRemoveEvaluation() {
   style={{ backgroundColor: color1, borderColor: color2 }}
 >
   {saving ? "Saving..." : "Save Evaluation"}
+</button>
+<button
+  onClick={handleExportImage}
+  className="mt-2 w-full font-bold py-2 rounded border-2 transition hover:opacity-90"
+  style={{
+    backgroundColor: "#ffffff",
+    borderColor: color2,
+    color: color1,
+  }}
+>
+  Export Evaluation as Image
 </button>
 
 {lastUpdated && (
