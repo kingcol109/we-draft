@@ -7,3 +7,27 @@
     @apply pt-20; /* add padding-top so content isn't hidden behind fixed navbar */
   }
 }
+@keyframes shimmerSweep {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  30% {
+    transform: translateX(120%);
+    opacity: 0.6;
+  }
+  40% {
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+
+.draft-shimmer {
+  animation: shimmerSweep 10s ease-in-out infinite;
+}

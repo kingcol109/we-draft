@@ -13,7 +13,17 @@ import CommunityBoard from "./pages/CommunityBoard";
 import PlayerProfile from "./pages/PlayerProfile";
 import UserBoards from "./pages/UserBoards";
 import UserProfile from "./pages/UserProfile";
+
+// College Teams
 import TeamPage from "./pages/TeamPage";
+
+// NFL Teams
+import NFLTeamPage from "./pages/NFLTeamPage";
+
+// Mock Draft Pages
+import MockDraftHub from "./pages/MockDraftHub";
+import MyMocksPage from "./pages/MyMocksPage";
+import CreateMock from "./pages/CreateMock";
 
 function App() {
   return (
@@ -22,43 +32,54 @@ function App() {
         {/* Navbar always visible */}
         <Navbar />
 
-        <Routes>
-          <Route path="/" element={<Home />} />
+        {/* 🔧 Offset for fixed navbar + ticker */}
+        <div style={{ paddingTop: "25px" }}>
+          <Routes>
+            <Route path="/" element={<Home />} />
 
-          {/* News */}
-          <Route path="/news" element={<News />} />
-          <Route path="/news/:id" element={<NewsArticle />} />
+            {/* News */}
+            <Route path="/news" element={<News />} />
+            <Route path="/news/:id" element={<NewsArticle />} />
 
-          <Route path="/community" element={<CommunityBoard />} />
+            <Route path="/community" element={<CommunityBoard />} />
 
-          {/* Dynamic player profile by slug */}
-          <Route path="/player/:slug" element={<PlayerProfile />} />
+            {/* Dynamic player profile */}
+            <Route path="/player/:slug" element={<PlayerProfile />} />
 
-          {/* Dynamic team page */}
-          <Route path="/team/:teamId" element={<TeamPage />} />
+            {/* College Team Pages */}
+            <Route path="/team/:teamId" element={<TeamPage />} />
 
-          <Route path="/boards" element={<UserBoards />} />
-          <Route path="/profile" element={<UserProfile />} />
+            {/* NFL Team Pages */}
+            <Route path="/nfl/:teamId" element={<NFLTeamPage />} />
 
-          {/* Catch-all 404 */}
-          <Route
-            path="*"
-            element={
-              <div
-                style={{
-                  marginTop: "80px",
-                  textAlign: "center",
-                  color: "red",
-                  fontWeight: "bold",
-                }}
-              >
-                404 – Route not found
-              </div>
-            }
-          />
-        </Routes>
+            <Route path="/boards" element={<UserBoards />} />
+            <Route path="/profile" element={<UserProfile />} />
 
-        {/* Analytics across all routes */}
+            {/* Mock Drafts */}
+            <Route path="/mocks" element={<MockDraftHub />} />
+            <Route path="/mocks/my" element={<MyMocksPage />} />
+            <Route path="/mocks/create" element={<CreateMock />} />
+            <Route path="/mocks/:mockId" element={<CreateMock />} />
+
+            {/* Catch-all 404 */}
+            <Route
+              path="*"
+              element={
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "red",
+                    fontWeight: "bold",
+                  }}
+                >
+                  404 – Route not found
+                </div>
+              }
+            />
+          </Routes>
+        </div>
+
+        {/* Analytics */}
         <Analytics />
       </Router>
     </HelmetProvider>

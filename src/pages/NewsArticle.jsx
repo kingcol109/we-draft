@@ -60,11 +60,44 @@ export default function NewsArticle() {
     );
   }
 
+  const description =
+    article.summary ||
+    article.long.slice(0, 160).replace(/\n/g, " ");
+
+  const canonicalUrl = `https://we-draft.com/news/${article.slug}`;
+
   return (
     <>
+      {/* ================= SEO ================= */}
       <Helmet>
         <title>{article.title} | We-Draft</title>
+
+        <meta name="description" content={description} />
+
+        {/* Canonical */}
+        <link rel="canonical" href={canonicalUrl} />
+
+        {/* Open Graph */}
+        <meta property="og:type" content="article" />
+        <meta property="og:title" content={article.title} />
+        <meta property="og:description" content={description} />
+        <meta property="og:url" content={canonicalUrl} />
+        <meta property="og:site_name" content="We-Draft" />
+
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={article.title} />
+        <meta name="twitter:description" content={description} />
+
+        {/* Article metadata */}
+        {article.publishedAt?.toDate && (
+          <meta
+            property="article:published_time"
+            content={article.publishedAt.toDate().toISOString()}
+          />
+        )}
       </Helmet>
+      {/* ======================================= */}
 
       <div className="min-h-screen bg-white px-4 pt-10 flex justify-center">
         <div className="w-full max-w-3xl">
@@ -86,18 +119,18 @@ export default function NewsArticle() {
             </div>
 
             <div className="p-6">
-                <div className="mb-4 flex justify-end">
-  <Link
-    to="/news"
-    className="px-4 py-2 rounded-lg font-extrabold uppercase text-sm hover:underline"
-    style={{
-      backgroundColor: SITE_GOLD,
-      color: SITE_BLUE,
-    }}
-  >
-    News
-  </Link>
-</div>
+              <div className="mb-4 flex justify-end">
+                <Link
+                  to="/news"
+                  className="px-4 py-2 rounded-lg font-extrabold uppercase text-sm hover:underline"
+                  style={{
+                    backgroundColor: SITE_GOLD,
+                    color: SITE_BLUE,
+                  }}
+                >
+                  News
+                </Link>
+              </div>
 
               <h1 className="text-3xl font-extrabold text-[#0055a5] mb-4">
                 {article.title}

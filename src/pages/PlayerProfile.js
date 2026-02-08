@@ -61,6 +61,44 @@ function sanitizeUrl(url) {
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
+function teamNameFromAbbr(abbr) {
+  const map = {
+    ARI: "Arizona Cardinals",
+    ATL: "Atlanta Falcons",
+    BAL: "Baltimore Ravens",
+    BUF: "Buffalo Bills",
+    CAR: "Carolina Panthers",
+    CHI: "Chicago Bears",
+    CIN: "Cincinnati Bengals",
+    CLE: "Cleveland Browns",
+    DAL: "Dallas Cowboys",
+    DEN: "Denver Broncos",
+    DET: "Detroit Lions",
+    GB: "Green Bay Packers",
+    HOU: "Houston Texans",
+    IND: "Indianapolis Colts",
+    JAX: "Jacksonville Jaguars",
+    KC: "Kansas City Chiefs",
+    LV: "Las Vegas Raiders",
+    LAC: "Los Angeles Chargers",
+    LAR: "Los Angeles Rams",
+    MIA: "Miami Dolphins",
+    MIN: "Minnesota Vikings",
+    NE: "New England Patriots",
+    NO: "New Orleans Saints",
+    NYG: "New York Giants",
+    NYJ: "New York Jets",
+    PHI: "Philadelphia Eagles",
+    PIT: "Pittsburgh Steelers",
+    SF: "San Francisco 49ers",
+    SEA: "Seattle Seahawks",
+    TB: "Tampa Bay Buccaneers",
+    TEN: "Tennessee Titans",
+    WAS: "Washington Commanders",
+  };
+
+  return map[abbr] || abbr;
+}
 
 export default function PlayerProfile() {
   const { slug } = useParams();
@@ -69,6 +107,9 @@ export default function PlayerProfile() {
   const { user } = useAuth();
 const evaluationFormRef = useRef(null);
 const exportCardRef = useRef(null);
+// Draft status (NFL team abbreviation like "ARI", "LV")
+const [draftedBy, setDraftedBy] = useState(null);
+const [draftInfo, setDraftInfo] = useState(null);
 
 // In the News
 const [playerNews, setPlayerNews] = useState([]);
@@ -155,6 +196,34 @@ const [scoutName, setScoutName] = useState("");
     fetchPlayer();
   }, [slug]);
 
+useEffect(() => {
+  if (!slug) return;
+
+  const fetchDraftInfo = async () => {
+    try {
+      const q = query(
+        collection(db, "draftOrder"),
+        where("Selection", "==", slug)
+      );
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+  const d = snap.docs[0].data();
+  setDraftedBy(d.Team);
+  setDraftInfo({
+    round: d.Round,
+    pick: d.Pick,
+  });
+}
+
+    } catch (err) {
+      console.error("Error fetching draft info:", err);
+    }
+  };
+
+  fetchDraftInfo();
+}, [slug]);
+
   // Fetch scout username (fallback to email)
 useEffect(() => {
   const fetchScoutName = async () => {
@@ -235,10 +304,35 @@ useEffect(() => {
     };
     fetchBranding();
   }, [player]);
+  
+// Fetch NFL branding if drafted
+useEffect(() => {
+  if (!draftedBy) return;
+
+  const fetchNFLBranding = async () => {
+    try {
+      const snap = await getDoc(doc(db, "nfl", draftedBy));
+      if (snap.exists()) {
+        const n = snap.data();
+
+        setBranding({
+          color1: n.Color1,
+          color2: n.Color2,
+          nflLogo: n.Logo1,
+          cfbLogo: branding?.logo1 || "",
+        });
+      }
+    } catch (err) {
+      console.error("Error loading NFL branding:", err);
+    }
+  };
+
+  fetchNFLBranding();
+}, [draftedBy]);
 
   // Derive colors (fallback to site theme)
-  const color1 = branding?.color1 || SITE_BLUE;
-  const color2 = branding?.color2 || SITE_GOLD;
+const color1 = draftedBy ? branding?.color1 : branding?.color1 || SITE_BLUE;
+const color2 = draftedBy ? branding?.color2 : branding?.color2 || SITE_GOLD;
 
   // Fetch traits
   useEffect(() => {
@@ -425,6 +519,7 @@ const handleExportImage = async () => {
 
       await setDoc(doc(db, "players", player.id, "evaluations", user.uid), evalData);
       await setDoc(doc(db, "users", user.uid, "evaluations", player.id), evalData);
+      
 // ✅ Confetti (school colors) — only after save succeeds
 confetti({
   particleCount: 140,
@@ -534,7 +629,14 @@ async function handleRemoveEvaluation() {
   <div className="flex items-center justify-between gap-6">
     {/* Left logo */}
     <div className="basis-1/3 flex justify-start">
-      {branding?.logo1 ? (
+     {draftedBy ? (
+  <img
+    src={sanitizeUrl(branding?.nflLogo)}
+    alt="NFL Team Logo"
+    className="h-40 md:h-48 w-auto object-contain"
+  />
+) : branding?.logo1 ? (
+
         <img
           src={sanitizeUrl(branding.logo1)}
           alt={`${player.School} Logo 1`}
@@ -580,7 +682,14 @@ async function handleRemoveEvaluation() {
 
     {/* Right logo */}
     <div className="basis-1/3 flex justify-end">
-      {branding?.logo2 ? (
+      {draftedBy ? (
+  <img
+    src={sanitizeUrl(branding?.cfbLogo)}
+    alt="College Logo"
+    className="h-40 md:h-48 w-auto object-contain"
+  />
+) : branding?.logo2 ? (
+
         <img
           src={sanitizeUrl(branding.logo2)}
           alt={`${player.School} Logo 2`}
@@ -596,26 +705,100 @@ async function handleRemoveEvaluation() {
   </div>
 </div>
 
-{/* Evaluate Button */}
+{/* Draft Card OR Evaluate Button */}
 <div className="flex justify-center my-6">
-  <button
-    onClick={() => {
-      evaluationFormRef.current?.scrollIntoView({
-  behavior: "smooth",
-  block: "start",
-});
+  {draftedBy ? (
+    <div
+  className="relative w-full max-w-xl border-4 rounded-lg overflow-hidden text-center"
+  style={{ borderColor: color2 }}
+>
+<div className="draft-shimmer" style={{ zIndex: 2 }} />
 
-    }}
-    className="px-8 py-2 text-lg font-bold rounded-full border-2 transition hover:opacity-90"
-    style={{
-      backgroundColor: color1,
-      borderColor: color2,
-      color: "white",
-    }}
-  >
-    Evaluate
-  </button>
+
+      {/* Top band */}
+     <div
+  className="py-3 font-extrabold uppercase tracking-widest cursor-pointer text-white"
+  style={{
+    backgroundColor: "#bf9b30",
+    fontFamily: "'Bebas Neue', sans-serif",
+    textDecoration: "underline",
+    textUnderlineOffset: "6px",
+    borderBottom: `4px solid ${color2}`, // ✅ DIVIDER LINE
+  }}
+  onClick={() => navigate(`/nfl/${draftedBy.toLowerCase()}`)}
+>
+  {teamNameFromAbbr(draftedBy)} SELECTION
 </div>
+
+
+
+      {/* Card body */}
+      <div
+  className="p-6"
+  style={{
+    backgroundColor: color1, // ✅ TEAM COLOR INSIDE
+    color: "#ffffff",        // ✅ WHITE TEXT
+  }}
+>
+
+        {/* Player name */}
+        <div
+  className="font-black uppercase"
+  style={{
+    fontSize: "40px",
+    color: "#ffffff",
+
+    lineHeight: 1.05,
+    letterSpacing: "0.04em",
+  }}
+>
+  {player.First} {player.Last}
+</div>
+
+
+        {/* Position / School */}
+        <div className="text-lg font-bold mt-1 text-white opacity-90">
+
+          {player.Position}, {player.School}
+        </div>
+
+        {/* Draft slot */}
+        <div
+  className="mt-3 font-extrabold uppercase"
+  style={{
+    color: "#ffffff",
+
+    fontSize: "20px",
+    letterSpacing: "0.12em",
+  }}
+>
+  ROUND {draftInfo.round} · PICK {draftInfo.pick}
+</div>
+
+
+       
+      </div>
+    </div>
+  ) : (
+    <button
+      onClick={() =>
+        evaluationFormRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        })
+      }
+      className="px-8 py-2 text-lg font-bold rounded-full border-2 transition hover:opacity-90"
+      style={{
+        backgroundColor: color1,
+        borderColor: color2,
+        color: "white",
+      }}
+    >
+      Evaluate
+    </button>
+  )}
+</div>
+
 
 
 {/* ===== Player Background ===== */}
