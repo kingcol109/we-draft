@@ -26,13 +26,13 @@ export default function Navbar() {
   const [show, setShow] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  // ✅ IMPORTANT: initialize with fallback so ticker starts instantly
+  // Start instantly with fallback
   const [tickerText, setTickerText] = useState(FALLBACK_MESSAGE);
-const [menuOpen, setMenuOpen] = useState(false);
 
   /* ======================
-     MOBILE / SCROLL LOGIC
+     MOBILE DETECTION
   ====================== */
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -41,25 +41,28 @@ const [menuOpen, setMenuOpen] = useState(false);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  /* ======================
+     SCROLL HIDE (DESKTOP)
+  ====================== */
   useEffect(() => {
     if (isMobile) return;
+
     const handleScroll = () => {
       setShow(window.scrollY < lastScrollY);
       setLastScrollY(window.scrollY);
     };
+
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, [lastScrollY, isMobile]);
 
   /* ======================
      LOAD TICKER CONTENT
-     (APPENDS — NEVER REPLACES)
   ====================== */
   useEffect(() => {
     const loadTicker = async () => {
       const parts = [];
 
-      /* ---------- PRIORITY NEWS ---------- */
       try {
         const newsQ = query(
           collection(db, "news"),
@@ -67,66 +70,37 @@ const [menuOpen, setMenuOpen] = useState(false);
           where("priority", "==", 1),
           orderBy("publishedAt", "desc")
         );
-
         const newsSnap = await getDocs(newsQ);
         newsSnap.forEach((d) => {
           if (d.data().title) {
             parts.push(`NEWS: ${d.data().title.toUpperCase()}`);
           }
         });
-      } catch (e) {
-        console.error("News ticker error:", e);
-      }
+      } catch {}
 
-      /* ---------- FEATURED PLAYERS ---------- */
       try {
         const featuredSnap = await getDoc(doc(db, "config", "featured"));
         if (featuredSnap.exists()) {
           const data = featuredSnap.data();
 
-          if (Array.isArray(data.featured) && data.featured.length > 0) {
+          if (Array.isArray(data.featured)) {
             parts.push("THIS WEEK'S FEATURED PLAYERS");
 
             data.featured.forEach((p) => {
-              let line = `${p.first || ""} ${p.last || ""}`.trim().toUpperCase();
+              let line = `${p.first || ""} ${p.last || ""}`
+                .trim()
+                .toUpperCase();
 
               if (p.position && p.school) {
                 line += `, ${p.position}, ${p.school.toUpperCase()}`;
               }
 
-              if (p.height || p.weight) {
-                line += ` ${[p.height, p.weight].filter(Boolean).join(" ")}`;
-              }
-
               if (line) parts.push(line);
-
-              if (p.grade) {
-                parts.push(`COMMUNITY DRAFT GRADE: ${p.grade.toUpperCase()}`);
-              }
-
-              if (Array.isArray(p.strengths) && p.strengths.length) {
-                parts.push(
-                  `STRENGTHS: ${p.strengths.join(", ").toUpperCase()}`
-                );
-              }
-
-              if (Array.isArray(p.weaknesses) && p.weaknesses.length) {
-                parts.push(
-                  `WEAKNESSES: ${p.weaknesses.join(", ").toUpperCase()}`
-                );
-              }
-
-              if (p.nflFit) {
-                parts.push(`NFL FIT: ${p.nflFit.toUpperCase()}`);
-              }
             });
           }
         }
-      } catch (e) {
-        console.error("Featured ticker error:", e);
-      }
+      } catch {}
 
-      /* ---------- DRAFT ORDER (ROUNDS 1–2) ---------- */
       try {
         const draftQ = query(
           collection(db, "draftOrder"),
@@ -154,15 +128,10 @@ const [menuOpen, setMenuOpen] = useState(false);
             parts.push(`PICK ${p.Pick}: ${p.Team}`);
           }
         });
-      } catch (e) {
-        console.error("Draft ticker error:", e);
-      }
+      } catch {}
 
-      // ✅ APPEND to fallback — DO NOT REPLACE
       if (parts.length > 0) {
-        setTickerText(
-          FALLBACK_MESSAGE + "  •  " + parts.join("  •  ")
-        );
+        setTickerText(FALLBACK_MESSAGE + "  •  " + parts.join("  •  "));
       }
     };
 
@@ -170,7 +139,7 @@ const [menuOpen, setMenuOpen] = useState(false);
   }, []);
 
   /* ======================
-     STYLES
+     NAV LINK STYLE
   ====================== */
   const baseStyle = {
     margin: "0 0.5rem",
@@ -196,21 +165,23 @@ const [menuOpen, setMenuOpen] = useState(false);
           transition: isMobile ? "none" : "top 0.3s ease-in-out",
         }}
       >
-        {/* NAVBAR */}
+        {/* ================= NAVBAR ================= */}
         <nav
           style={{
             backgroundColor: "#0055a5",
             padding: "0.75rem 1.5rem",
             display: "flex",
             alignItems: "center",
-             justifyContent: "space-between", // 👈 ADD THIS
+            justifyContent: "space-between",
             position: "relative",
           }}
         >
+          {/* LOGO */}
           <Link to="/">
             <img src={Logo2} alt="We-Draft" style={{ height: 42 }} />
           </Link>
 
+          {/* DESKTOP NAV */}
           <div
             className="hidden md:flex"
             style={{
@@ -219,70 +190,6 @@ const [menuOpen, setMenuOpen] = useState(false);
               transform: "translateX(-50%)",
             }}
           >
-            {/* MOBILE HAMBURGER */}
-<div className="md:hidden">
-  <button
-    onClick={() => setMenuOpen(!menuOpen)}
-    style={{
-      background: "none",
-      border: "none",
-      color: "#ffffff",
-      fontSize: "1.9rem",
-      cursor: "pointer",
-    }}
-  >
-    ☰
-  </button>
-
-  {menuOpen && (
-    <div
-      style={{
-        position: "absolute",
-        top: "100%",
-        left: 0,
-        right: 0,
-        backgroundColor: "#ffffff",
-        borderTop: "2px solid #f6a21d",
-        boxShadow: "0 4px 8px rgba(0,0,0,0.15)",
-        padding: "1rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.75rem",
-        textAlign: "center",
-        zIndex: 2000,
-      }}
-    >
-      {[
-        { path: "/", label: "Home" },
-        { path: "/community", label: "Community Board" },
-        { path: "/boards", label: "My Boards" },
-        { path: "/mocks", label: "Mock Drafts" },
-      ].map((l) => (
-        <Link
-          key={l.path}
-          to={l.path}
-          style={{ ...baseStyle, width: "100%" }}
-          onClick={() => setMenuOpen(false)}
-        >
-          {l.label}
-        </Link>
-      ))}
-
-      {!user && (
-        <button
-          onClick={() => {
-            login();
-            setMenuOpen(false);
-          }}
-          style={{ ...baseStyle, width: "100%" }}
-        >
-          Sign In
-        </button>
-      )}
-    </div>
-  )}
-</div>
-
             {[
               { path: "/", label: "Home" },
               { path: "/community", label: "Community Board" },
@@ -304,9 +211,73 @@ const [menuOpen, setMenuOpen] = useState(false);
               </button>
             )}
           </div>
+
+          {/* MOBILE HAMBURGER */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#ffffff",
+                fontSize: "2rem",
+                cursor: "pointer",
+              }}
+            >
+              ☰
+            </button>
+
+            {menuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  backgroundColor: "#ffffff",
+                  borderTop: "2px solid #f6a21d",
+                  boxShadow: "0 4px 8px rgba(0,0,0,0.15)",
+                  padding: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.75rem",
+                  textAlign: "center",
+                  zIndex: 2000,
+                }}
+              >
+                {[
+                  { path: "/", label: "Home" },
+                  { path: "/community", label: "Community Board" },
+                  { path: "/boards", label: "My Boards" },
+                  { path: "/mocks", label: "Mock Drafts" },
+                ].map((l) => (
+                  <Link
+                    key={l.path}
+                    to={l.path}
+                    style={{ ...baseStyle, width: "100%" }}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {l.label}
+                  </Link>
+                ))}
+
+                {!user && (
+                  <button
+                    onClick={() => {
+                      login();
+                      setMenuOpen(false);
+                    }}
+                    style={{ ...baseStyle, width: "100%" }}
+                  >
+                    Sign In
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </nav>
 
-        {/* TICKER */}
+        {/* ================= TICKER ================= */}
         <div
           style={{
             background: "#ffffff",
@@ -322,7 +293,7 @@ const [menuOpen, setMenuOpen] = useState(false);
               padding: "0.55rem 0",
               fontWeight: 800,
               color: "#0055a5",
-              animation: "tickerMove 360s linear infinite",
+              animation: "tickerMove 220s linear infinite",
               willChange: "transform",
             }}
           >
