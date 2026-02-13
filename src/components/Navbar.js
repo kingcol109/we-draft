@@ -29,6 +29,7 @@ export default function Navbar() {
 
   // ✅ IMPORTANT: initialize with fallback so ticker starts instantly
   const [tickerText, setTickerText] = useState(FALLBACK_MESSAGE);
+const [menuOpen, setMenuOpen] = useState(false);
 
   /* ======================
      MOBILE / SCROLL LOGIC
@@ -218,6 +219,70 @@ export default function Navbar() {
               transform: "translateX(-50%)",
             }}
           >
+            {/* MOBILE HAMBURGER */}
+<div className="md:hidden">
+  <button
+    onClick={() => setMenuOpen(!menuOpen)}
+    style={{
+      background: "none",
+      border: "none",
+      color: "#ffffff",
+      fontSize: "1.9rem",
+      cursor: "pointer",
+    }}
+  >
+    ☰
+  </button>
+
+  {menuOpen && (
+    <div
+      style={{
+        position: "absolute",
+        top: "100%",
+        left: 0,
+        right: 0,
+        backgroundColor: "#ffffff",
+        borderTop: "2px solid #f6a21d",
+        boxShadow: "0 4px 8px rgba(0,0,0,0.15)",
+        padding: "1rem",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.75rem",
+        textAlign: "center",
+        zIndex: 2000,
+      }}
+    >
+      {[
+        { path: "/", label: "Home" },
+        { path: "/community", label: "Community Board" },
+        { path: "/boards", label: "My Boards" },
+        { path: "/mocks", label: "Mock Drafts" },
+      ].map((l) => (
+        <Link
+          key={l.path}
+          to={l.path}
+          style={{ ...baseStyle, width: "100%" }}
+          onClick={() => setMenuOpen(false)}
+        >
+          {l.label}
+        </Link>
+      ))}
+
+      {!user && (
+        <button
+          onClick={() => {
+            login();
+            setMenuOpen(false);
+          }}
+          style={{ ...baseStyle, width: "100%" }}
+        >
+          Sign In
+        </button>
+      )}
+    </div>
+  )}
+</div>
+
             {[
               { path: "/", label: "Home" },
               { path: "/community", label: "Community Board" },
