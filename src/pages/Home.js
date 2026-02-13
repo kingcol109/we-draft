@@ -472,9 +472,50 @@ useEffect(() => {
                       {ev.playerName}
                     </Link>
 
-                    {ev.evaluation && (
-                      <p className="italic text-gray-800 mt-2">"{ev.evaluation}"</p>
-                    )}
+                    {/* Grade */}
+{ev.grade && (
+  <p className="mt-2 font-semibold text-black">
+    Grade: {ev.grade}
+  </p>
+)}
+
+{/* Strengths */}
+{ev.strengths && (
+  <p className="mt-1 text-black">
+    <span className="font-semibold">Strengths:</span>{" "}
+    {Array.isArray(ev.strengths)
+      ? ev.strengths.join(", ")
+      : ev.strengths
+          .replace(/([a-z])([A-Z])/g, "$1, $2")}
+  </p>
+)}
+
+{/* Weaknesses */}
+{ev.weaknesses && (
+  <p className="mt-1 text-black">
+    <span className="font-semibold">Weaknesses:</span>{" "}
+    {Array.isArray(ev.weaknesses)
+      ? ev.weaknesses.join(", ")
+      : ev.weaknesses
+          .replace(/([a-z])([A-Z])/g, "$1, $2")}
+  </p>
+)}
+
+
+{/* NFL Fit */}
+{ev.nflFit && (
+  <p className="mt-1 text-black">
+    <span className="font-semibold">NFL Fit:</span> {ev.nflFit}
+  </p>
+)}
+
+{/* Main Evaluation Text */}
+{ev.evaluation && (
+  <p className="italic text-gray-800 mt-3">
+    "{ev.evaluation}"
+  </p>
+)}
+
                   </div>
                 ))}
               </div>

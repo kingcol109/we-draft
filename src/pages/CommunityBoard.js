@@ -273,6 +273,15 @@ export default function CommunityBoard() {
       const data = await Promise.all(
         querySnapshot.docs.map(async (docSnap) => {
           const p = { id: docSnap.id, ...docSnap.data() };
+// Normalize height to numeric inches
+if (p.Height) {
+  const match = String(p.Height).match(/^(\d+)'(\d+)"/);
+  if (match) {
+    const ft = parseInt(match[1], 10);
+    const inch = parseInt(match[2], 10);
+    p.HeightInches = ft * 12 + inch;
+  }
+}
 
           // fetch evaluations for community grade
           try {
@@ -342,7 +351,11 @@ export default function CommunityBoard() {
     )
     .filter((p) =>
       Object.entries(traitFilters).every(([trait, [min, max]]) => {
-        const val = parseValue(trait, p[trait]);
+        const val =
+  trait === "Height"
+    ? p.HeightInches
+    : parseValue(trait, p[trait]);
+
         if (isNaN(val)) return true;
         return val >= min && val <= max;
       })
@@ -387,8 +400,16 @@ export default function CommunityBoard() {
     return 0;
   }
 
-  const aVal = a[sortKey] ?? "";
-  const bVal = b[sortKey] ?? "";
+  let aVal, bVal;
+
+if (sortKey === "Height") {
+  aVal = a.HeightInches ?? 0;
+  bVal = b.HeightInches ?? 0;
+} else {
+  aVal = a[sortKey] ?? "";
+  bVal = b[sortKey] ?? "";
+}
+
   if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
   if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
   return 0;
@@ -520,7 +541,10 @@ export default function CommunityBoard() {
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Position || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.School || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.CommunityGrade || "-"}</td>
-                  <td className="p-3 border border-[#f6a21d] text-sm">{p.Height || "-"}</td>
+                  <td className="p-3 border border-[#f6a21d] text-sm">
+  {p.HeightInches ? formatHeight(p.HeightInches) : "-"}
+</td>
+
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Weight || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Wingspan || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p["Arm Length"] || "-"}</td>
