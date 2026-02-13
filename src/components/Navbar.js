@@ -202,6 +202,7 @@ export default function Navbar() {
             padding: "0.75rem 1.5rem",
             display: "flex",
             alignItems: "center",
+             justifyContent: "space-between", // 👈 ADD THIS
             position: "relative",
           }}
         >
