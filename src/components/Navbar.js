@@ -87,16 +87,29 @@ export default function Navbar() {
             parts.push("THIS WEEK'S FEATURED PLAYERS");
 
             data.featured.forEach((p) => {
-              let line = `${p.first || ""} ${p.last || ""}`
-                .trim()
-                .toUpperCase();
+  let line = `${p.first || ""} ${p.last || ""}`
+    .trim()
+    .toUpperCase();
 
-              if (p.position && p.school) {
-                line += `, ${p.position}, ${p.school.toUpperCase()}`;
-              }
+  if (p.position && p.school) {
+    line += `, ${p.position}, ${p.school.toUpperCase()}`;
+  }
 
-              if (line) parts.push(line);
-            });
+  if (p.strengths?.length) {
+    line += ` | STRENGTHS: ${p.strengths.join(", ").toUpperCase()}`;
+  }
+
+  if (p.weaknesses?.length) {
+    line += ` | WEAKNESSES: ${p.weaknesses.join(", ").toUpperCase()}`;
+  }
+
+  if (p.nflFit) {
+    line += ` | NFL FIT: ${p.nflFit.toUpperCase()}`;
+  }
+
+  if (line) parts.push(line);
+});
+
           }
         }
       } catch {}
@@ -293,7 +306,7 @@ export default function Navbar() {
               padding: "0.55rem 0",
               fontWeight: 800,
               color: "#0055a5",
-              animation: "tickerMove 220s linear infinite",
+              animation: "tickerMove 300s linear infinite",
               willChange: "transform",
             }}
           >
