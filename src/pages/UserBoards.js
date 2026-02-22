@@ -445,7 +445,17 @@ export default function UserBoards() {
             </button>
           ))}
         </div>
-
+{/* My Whiteboards Button */}
+<div className="flex justify-center mb-6">
+  <Link to="/whiteboard">
+    <button
+      type="button"
+      className="px-6 py-3 font-extrabold uppercase tracking-wide text-white rounded-full bg-[#0055a5] border-4 border-[#f6a21d] shadow hover:brightness-110 transition"
+    >
+      My Whiteboards
+    </button>
+  </Link>
+</div>
         {/* Filters */}
 <div className="flex gap-4 mb-4 justify-center flex-wrap">
   <DropdownChecklist

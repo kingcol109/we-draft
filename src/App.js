@@ -25,6 +25,9 @@ import MockDraftHub from "./pages/MockDraftHub";
 import MyMocksPage from "./pages/MyMocksPage";
 import CreateMock from "./pages/CreateMock";
 
+// 🆕 Whiteboard Page
+import Whiteboard from "./pages/Whiteboard";
+
 function App() {
   return (
     <HelmetProvider>
@@ -32,7 +35,7 @@ function App() {
         {/* Navbar always visible */}
         <Navbar />
 
-        {/* 🔧 Offset for fixed navbar + ticker */}
+        {/* Offset for fixed navbar + ticker */}
         <div style={{ paddingTop: "25px" }}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -60,6 +63,9 @@ function App() {
             <Route path="/mocks/my" element={<MyMocksPage />} />
             <Route path="/mocks/create" element={<CreateMock />} />
             <Route path="/mocks/:mockId" element={<CreateMock />} />
+
+            {/* 🆕 Draft Whiteboard */}
+            <Route path="/whiteboard" element={<Whiteboard />} />
 
             {/* Catch-all 404 */}
             <Route
