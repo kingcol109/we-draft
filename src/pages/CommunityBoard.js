@@ -79,15 +79,15 @@ const formatValue = (trait, value) => {
 
 const parseValue = (trait, val) => {
   if (!val) return NaN;
-  if (trait === "Height") {
-    const match = val.match(/(\d+)'(\d+)?/);
-    if (match) {
-      const ft = parseInt(match[1], 10);
-      const inches = parseInt(match[2] || "0", 10);
-      return ft * 12 + inches;
-    }
-    return parseFloat(val);
+if (trait === "Height") {
+  const match = val.match(/(\d+)'([\d.]+)?/);
+  if (match) {
+    const ft = parseInt(match[1], 10);
+    const inches = parseFloat(match[2] || "0"); // <-- allow decimals
+    return ft * 12 + inches;
   }
+  return parseFloat(val);
+}
   return parseFloat(val);
 };
 
@@ -273,12 +273,12 @@ export default function CommunityBoard() {
       const data = await Promise.all(
         querySnapshot.docs.map(async (docSnap) => {
           const p = { id: docSnap.id, ...docSnap.data() };
-// Normalize height to numeric inches
+// Normalize height to numeric inches (supports decimals like 6'3.5")
 if (p.Height) {
-  const match = String(p.Height).match(/^(\d+)'(\d+)"/);
+  const match = String(p.Height).match(/^(\d+)'([\d.]+)"/);
   if (match) {
     const ft = parseInt(match[1], 10);
-    const inch = parseInt(match[2], 10);
+    const inch = parseFloat(match[2]); // <-- allow decimals
     p.HeightInches = ft * 12 + inch;
   }
 }
@@ -542,7 +542,7 @@ if (sortKey === "Height") {
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.School || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.CommunityGrade || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">
-  {p.HeightInches ? formatHeight(p.HeightInches) : "-"}
+  {p.HeightInches != null ? formatHeight(p.HeightInches) : "-"}
 </td>
 
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Weight || "-"}</td>
