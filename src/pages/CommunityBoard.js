@@ -78,19 +78,25 @@ const formatValue = (trait, value) => {
 };
 
 const parseValue = (trait, val) => {
-  if (!val) return NaN;
-if (trait === "Height") {
-  const match = val.match(/(\d+)'([\d.]+)?/);
-  if (match) {
-    const ft = parseInt(match[1], 10);
-    const inches = parseFloat(match[2] || "0"); // <-- allow decimals
-    return ft * 12 + inches;
-  }
-  return parseFloat(val);
-}
-  return parseFloat(val);
-};
+  if (val === undefined || val === null || val === "") return NaN;
 
+  // If already a number, just return it
+  if (typeof val === "number") return val;
+
+  // Clean string (removes quotes, spaces, trailing 's', etc.)
+  const cleaned = String(val).replace(/[^0-9.]/g, "");
+
+  if (trait === "Height") {
+    const match = String(val).match(/(\d+)'([\d.]+)?/);
+    if (match) {
+      const ft = parseInt(match[1], 10);
+      const inches = parseFloat(match[2] || "0");
+      return ft * 12 + inches;
+    }
+  }
+
+  return parseFloat(cleaned);
+};
 // --- dropdown checklist ---
 function DropdownChecklist({ title, options, selected, setSelected, ordered = false }) {
   const [open, setOpen] = useState(false);
@@ -272,7 +278,14 @@ export default function CommunityBoard() {
       const querySnapshot = await getDocs(collection(db, "players"));
       const data = await Promise.all(
         querySnapshot.docs.map(async (docSnap) => {
-          const p = { id: docSnap.id, ...docSnap.data() };
+          const raw = docSnap.data();
+const p = { id: docSnap.id };
+
+// Normalize all keys (remove double spaces, trim, fix weird spacing)
+Object.keys(raw).forEach((key) => {
+  const cleanKey = key.replace(/\s+/g, " ").trim();
+  p[cleanKey] = raw[key];
+});
 // Normalize height to numeric inches (supports decimals like 6'3.5")
 if (p.Height) {
   const match = String(p.Height).match(/^(\d+)'([\d.]+)"/);
