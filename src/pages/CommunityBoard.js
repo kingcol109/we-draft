@@ -278,6 +278,11 @@ const [traitFilters, setTraitFilters] = useState(null);
         querySnapshot.docs.map(async (docSnap) => {
           const p = { id: docSnap.id, ...docSnap.data() };
 // Normalize height to numeric inches (supports decimals like 6'3.5")
+// normalize 40 Yard key
+const fortyKey = Object.keys(p).find(k => k.replace(/\s/g, "") === "40Yard");
+if (fortyKey) {
+  p["40 Yard"] = p[fortyKey];
+}
 if (p.Height) {
   const match = String(p.Height).match(/^(\d+)'([\d.]+)"/);
   if (match) {
@@ -554,7 +559,11 @@ if (sortKey === "Height") {
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Wingspan || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p["Arm Length"] || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p["Hand Size"] || "-"}</td>
-                  <td className="p-3 border border-[#f6a21d] text-sm">{p["40 Yard"] || "-"}</td>
+                  <td className="p-3 border border-[#f6a21d] text-sm">
+  {p["40 Yard"] != null && p["40 Yard"] !== ""
+    ? parseValue("40 Yard", p["40 Yard"]).toFixed(2)
+    : "-"}
+</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Vertical || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p.Broad || "-"}</td>
                   <td className="p-3 border border-[#f6a21d] text-sm">{p["3-Cone"] || "-"}</td>
