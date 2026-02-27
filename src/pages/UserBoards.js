@@ -266,17 +266,30 @@ export default function UserBoards() {
   const [eligibleYear, setEligibleYear] = useState("2026");
 
   // Fetch players
-  useEffect(() => {
-    const fetchPlayers = async () => {
-      const querySnapshot = await getDocs(collection(db, "players"));
-      const data = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setPlayers(data);
-    };
-    fetchPlayers();
-  }, []);
+useEffect(() => {
+  const fetchPlayers = async () => {
+    const querySnapshot = await getDocs(collection(db, "players"));
+
+    const data = querySnapshot.docs.map((doc) => {
+      const raw = { id: doc.id, ...doc.data() };
+
+      // 🔥 normalize 40 Yard key (handles hidden whitespace)
+      const fortyKey = Object.keys(raw).find(
+        (k) => k.replace(/\s/g, "") === "40Yard"
+      );
+
+      if (fortyKey) {
+        raw["40 Yard"] = raw[fortyKey];
+      }
+
+      return raw;
+    });
+
+    setPlayers(data);
+  };
+
+  fetchPlayers();
+}, []);
 
   // Fetch user evaluations
   useEffect(() => {

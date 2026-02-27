@@ -185,10 +185,21 @@ const [scoutName, setScoutName] = useState("");
       try {
         const q = query(collection(db, "players"), where("Slug", "==", slug));
         const snap = await getDocs(q);
-        if (!snap.empty) {
-          const d = snap.docs[0];
-          setPlayer({ id: d.id, ...d.data() });
-        }
+       if (!snap.empty) {
+  const d = snap.docs[0];
+  const data = { ...d.data() };
+
+  // 🔥 normalize 40 Yard key (handles hidden spaces)
+  const fortyKey = Object.keys(data).find(
+    (k) => k.replace(/\s/g, "") === "40Yard"
+  );
+
+  if (fortyKey) {
+    data["40 Yard"] = data[fortyKey];
+  }
+
+  setPlayer({ id: d.id, ...data });
+}
       } catch (err) {
         console.error("Error fetching player:", err);
       }
