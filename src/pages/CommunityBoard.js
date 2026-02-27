@@ -268,9 +268,7 @@ export default function CommunityBoard() {
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedGrades, setSelectedGrades] = useState([]);
-  const [traitFilters, setTraitFilters] = useState(() =>
-    JSON.parse(JSON.stringify(defaultRanges))
-  );
+const [traitFilters, setTraitFilters] = useState(null);
   const [eligibleYear, setEligibleYear] = useState("2026");
 
   useEffect(() => {
@@ -278,14 +276,7 @@ export default function CommunityBoard() {
       const querySnapshot = await getDocs(collection(db, "players"));
       const data = await Promise.all(
         querySnapshot.docs.map(async (docSnap) => {
-          const raw = docSnap.data();
-const p = { id: docSnap.id };
-
-// Normalize all keys (remove double spaces, trim, fix weird spacing)
-Object.keys(raw).forEach((key) => {
-  const cleanKey = key.replace(/\s+/g, " ").trim();
-  p[cleanKey] = raw[key];
-});
+          const p = { id: docSnap.id, ...docSnap.data() };
 // Normalize height to numeric inches (supports decimals like 6'3.5")
 if (p.Height) {
   const match = String(p.Height).match(/^(\d+)'([\d.]+)"/);
@@ -295,7 +286,6 @@ if (p.Height) {
     p.HeightInches = ft * 12 + inch;
   }
 }
-
           // fetch evaluations for community grade
           try {
             const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
@@ -362,17 +352,19 @@ if (p.Height) {
     .filter((p) =>
       p.Eligible ? p.Eligible.toString() === eligibleYear : true
     )
-    .filter((p) =>
-      Object.entries(traitFilters).every(([trait, [min, max]]) => {
-        const val =
-  trait === "Height"
-    ? p.HeightInches
-    : parseValue(trait, p[trait]);
+.filter((p) => {
+  if (!traitFilters) return true;
 
-        if (isNaN(val)) return true;
-        return val >= min && val <= max;
-      })
-    );
+  return Object.entries(traitFilters).every(([trait, [min, max]]) => {
+    const val =
+      trait === "Height"
+        ? p.HeightInches
+        : parseValue(trait, p[trait]);
+
+    if (isNaN(val)) return true;
+    return val >= min && val <= max;
+  });
+})
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
   if (sortKey === "CommunityGrade") {
