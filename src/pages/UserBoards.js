@@ -354,15 +354,20 @@ useEffect(() => {
       })
     );
 
-  const sortedPlayers = [...filteredPlayers].sort((a, b) => {
-  // ✅ Sort by draft grade
+const sortedPlayers = [...filteredPlayers].sort((a, b) => {
+
+  // ---- USER GRADE SORT ----
   if (sortKey === "UserGrade") {
     const rank = (g) =>
       gradeOrder.includes(g) ? gradeOrder.indexOf(g) : gradeOrder.length;
-    return (rank(a.UserGrade) - rank(b.UserGrade)) * (sortOrder === "asc" ? 1 : -1);
+
+    const aRank = rank(a.UserGrade);
+    const bRank = rank(b.UserGrade);
+
+    return sortOrder === "asc" ? aRank - bRank : bRank - aRank;
   }
 
-  // ✅ Sort PLAYER by Last name, then First
+  // ---- PLAYER NAME ----
   if (sortKey === "Player") {
     const aLast = (a.Last || "").toLowerCase();
     const bLast = (b.Last || "").toLowerCase();
@@ -381,13 +386,55 @@ useEffect(() => {
       : bFirst.localeCompare(aFirst);
   }
 
-  // 🔁 Default sorting
-  const aVal = a[sortKey] ?? "";
-  const bVal = b[sortKey] ?? "";
+  // ---- NUMERIC TRAITS ----
+  const numericTraits = [
+    "Height",
+    "Weight",
+    "Wingspan",
+    "Arm Length",
+    "Hand Size",
+    "40 Yard",
+    "Vertical",
+    "Broad",
+    "3-Cone",
+    "Shuttle",
+    "Bench",
+  ];
+
+  if (numericTraits.includes(sortKey)) {
+
+    const aVal = parseValue(sortKey, a[sortKey]);
+    const bVal = parseValue(sortKey, b[sortKey]);
+
+    const aHas = !isNaN(aVal);
+    const bHas = !isNaN(bVal);
+
+    // Both have numbers
+    if (aHas && bHas) {
+      return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
+    }
+
+    // Only one has number
+    if (aHas && !bHas) return -1;
+    if (!aHas && bHas) return 1;
+
+    // Neither have numbers → alphabetical by last name
+    const aLast = (a.Last || "").toLowerCase();
+    const bLast = (b.Last || "").toLowerCase();
+
+    if (aLast < bLast) return -1;
+    if (aLast > bLast) return 1;
+    return 0;
+  }
+
+  // ---- DEFAULT STRING SORT ----
+  const aVal = (a[sortKey] || "").toString().toLowerCase();
+  const bVal = (b[sortKey] || "").toString().toLowerCase();
 
   if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
   if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
   return 0;
+
 });
 
 

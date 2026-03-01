@@ -371,23 +371,22 @@ if (p.Height) {
   });
 })
 
-  const sortedPlayers = [...filteredPlayers].sort((a, b) => {
-  if (sortKey === "CommunityGrade") {
-    const aHasGrade = gradeScale[a.CommunityGrade];
-    const bHasGrade = gradeScale[b.CommunityGrade];
+const sortedPlayers = [...filteredPlayers].sort((a, b) => {
 
-    // If both have grades → sort by grade
-    if (aHasGrade && bHasGrade) {
+  // ---- COMMUNITY GRADE ----
+  if (sortKey === "CommunityGrade") {
+    const aHas = gradeScale[a.CommunityGrade];
+    const bHas = gradeScale[b.CommunityGrade];
+
+    if (aHas && bHas) {
       const aVal = gradeScale[a.CommunityGrade];
       const bVal = gradeScale[b.CommunityGrade];
       return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
     }
 
-    // If one has grade → prioritize the one that has it
-    if (aHasGrade && !bHasGrade) return -1;
-    if (!aHasGrade && bHasGrade) return 1;
+    if (aHas && !bHas) return -1;
+    if (!aHas && bHas) return 1;
 
-    // If neither have grade → sort alphabetically by last name
     const aLast = (a.Last || "").toLowerCase();
     const bLast = (b.Last || "").toLowerCase();
     if (aLast < bLast) return -1;
@@ -395,34 +394,78 @@ if (p.Height) {
     return 0;
   }
 
-
+  // ---- PLAYER NAME ----
   if (sortKey === "Player") {
     const aLast = (a.Last || "").toLowerCase();
     const bLast = (b.Last || "").toLowerCase();
+
     if (aLast < bLast) return sortOrder === "asc" ? -1 : 1;
     if (aLast > bLast) return sortOrder === "asc" ? 1 : -1;
 
-    // tie-breaker by first name
     const aFirst = (a.First || "").toLowerCase();
     const bFirst = (b.First || "").toLowerCase();
+
     if (aFirst < bFirst) return sortOrder === "asc" ? -1 : 1;
     if (aFirst > bFirst) return sortOrder === "asc" ? 1 : -1;
     return 0;
   }
 
-  let aVal, bVal;
+  // ---- NUMERIC TRAITS ----
+  const numericTraits = [
+    "Height",
+    "Weight",
+    "Wingspan",
+    "Arm Length",
+    "Hand Size",
+    "40 Yard",
+    "Vertical",
+    "Broad",
+    "3-Cone",
+    "Shuttle",
+    "Bench",
+  ];
 
-if (sortKey === "Height") {
-  aVal = a.HeightInches ?? 0;
-  bVal = b.HeightInches ?? 0;
-} else {
-  aVal = a[sortKey] ?? "";
-  bVal = b[sortKey] ?? "";
-}
+  if (numericTraits.includes(sortKey)) {
+
+    const aVal =
+      sortKey === "Height"
+        ? a.HeightInches
+        : parseValue(sortKey, a[sortKey]);
+
+    const bVal =
+      sortKey === "Height"
+        ? b.HeightInches
+        : parseValue(sortKey, b[sortKey]);
+
+    const aHas = !isNaN(aVal);
+    const bHas = !isNaN(bVal);
+
+    // Both have numbers
+    if (aHas && bHas) {
+      return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
+    }
+
+    // Only one has number
+    if (aHas && !bHas) return -1;
+    if (!aHas && bHas) return 1;
+
+    // Neither has number → alphabetical by last name
+    const aLast = (a.Last || "").toLowerCase();
+    const bLast = (b.Last || "").toLowerCase();
+
+    if (aLast < bLast) return -1;
+    if (aLast > bLast) return 1;
+    return 0;
+  }
+
+  // ---- DEFAULT STRING SORT ----
+  const aVal = (a[sortKey] || "").toString().toLowerCase();
+  const bVal = (b[sortKey] || "").toString().toLowerCase();
 
   if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
   if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
   return 0;
+
 });
 
 

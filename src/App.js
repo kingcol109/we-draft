@@ -11,6 +11,7 @@ import News from "./pages/News";
 import NewsArticle from "./pages/NewsArticle";
 import CommunityBoard from "./pages/CommunityBoard";
 import PlayerProfile from "./pages/PlayerProfile";
+import PlayerPage2 from "./pages/PlayerPage2"; // 🆕 NEW LAYOUT
 import UserBoards from "./pages/UserBoards";
 import UserProfile from "./pages/UserProfile";
 
@@ -25,7 +26,7 @@ import MockDraftHub from "./pages/MockDraftHub";
 import MyMocksPage from "./pages/MyMocksPage";
 import CreateMock from "./pages/CreateMock";
 
-// 🆕 Whiteboard Page
+// Whiteboard Page
 import Whiteboard from "./pages/Whiteboard";
 
 function App() {
@@ -46,8 +47,11 @@ function App() {
 
             <Route path="/community" element={<CommunityBoard />} />
 
-            {/* Dynamic player profile */}
+            {/* Original Player Page (SEO Safe) */}
             <Route path="/player/:slug" element={<PlayerProfile />} />
+
+            {/* 🆕 Experimental 70/30 Player Layout */}
+            <Route path="/player2/:slug" element={<PlayerPage2 />} />
 
             {/* College Team Pages */}
             <Route path="/team/:teamId" element={<TeamPage />} />
@@ -64,7 +68,7 @@ function App() {
             <Route path="/mocks/create" element={<CreateMock />} />
             <Route path="/mocks/:mockId" element={<CreateMock />} />
 
-            {/* 🆕 Draft Whiteboard */}
+            {/* Draft Whiteboard */}
             <Route path="/whiteboard" element={<Whiteboard />} />
 
             {/* Catch-all 404 */}
