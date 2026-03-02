@@ -86,13 +86,18 @@ export default function Navbar() {
           if (Array.isArray(data.featured)) {
             parts.push("THIS WEEK'S FEATURED PLAYERS");
 
-            data.featured.forEach((p) => {
+data.featured.forEach((p) => {
   let line = `${p.first || ""} ${p.last || ""}`
     .trim()
     .toUpperCase();
 
   if (p.position && p.school) {
     line += `, ${p.position}, ${p.school.toUpperCase()}`;
+  }
+
+  // 🔥 ADD THIS BLOCK
+  if (p.grade) {
+    line += ` | GRADE: ${p.grade.toUpperCase()}`;
   }
 
   if (p.strengths?.length) {
