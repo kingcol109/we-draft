@@ -28,6 +28,7 @@ export default function TeamPage() {
   // 2027-only interactive state (wipes on refresh)
   const [declaredIds, setDeclaredIds] = useState(() => new Set()); // moved to LEAVES
   const [redshirtOverrideIds, setRedshirtOverrideIds] = useState(() => new Set()); // force RS "Yes" for projection + move down a class
+const [hoveredPlayer, setHoveredPlayer] = useState(null);
 
   const formatTeamId = (str) =>
     str
@@ -113,17 +114,42 @@ export default function TeamPage() {
   };
 
   // Sort A -> Z by last name within each position+class cell
-  const sortLastNameAZ = (arr) => {
-    return [...arr].sort((a, b) => {
-      const la = (a.Last || "").toString().toLowerCase();
-      const lb = (b.Last || "").toString().toLowerCase();
-      if (!la) return 1;
-      if (!lb) return -1;
-      if (la < lb) return -1;
-      if (la > lb) return 1;
-      return 0;
-    });
+const sortRosterPlayers = (arr) => {
+  const gradeRank = (g) => {
+    if (!g) return 100;
+
+    const grade = g.toString().toUpperCase().trim();
+
+    // numeric grades
+    if (/^[1-5]$/.test(grade)) return Number(grade);
+
+    // letter grades
+    if (grade === "A") return 10;
+    if (grade === "B") return 11;
+    if (grade === "C") return 12;
+    if (grade === "D") return 13;
+
+    // walk-on
+    if (grade === "WO") return 20;
+
+    return 90;
   };
+
+  return [...arr].sort((a, b) => {
+    const ga = gradeRank(a.Grade);
+    const gb = gradeRank(b.Grade);
+
+    if (ga !== gb) return ga - gb;
+
+    const la = (a.Last || "").toLowerCase();
+    const lb = (b.Last || "").toLowerCase();
+
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+
+    return 0;
+  });
+};
 
   // Aging 2026 -> 2027
   const ageForward = (year) => {
@@ -323,10 +349,9 @@ export default function TeamPage() {
 
               {/* POSITION CELLS */}
               {positions.map((pos) => {
-                const posPlayers = sortLastNameAZ(
-                  yearPlayers.filter((p) => p.Position === pos)
-                );
-
+const posPlayers = sortRosterPlayers(
+  yearPlayers.filter((p) => p.Position === pos)
+);
                 return (
                   <div
                     key={pos}
@@ -359,68 +384,144 @@ export default function TeamPage() {
                             marginBottom: 10,
                           }}
                         >
-                          <div
-                            style={{
-                              width: "92%",
-                              background: primary,
-                              border: `3px solid ${secondary}`,
-                              borderRadius: 10,
-                              padding: "10px 10px 8px",
-                              textAlign: "center",
-                              boxShadow: "0 1px 0 rgba(0,0,0,0.08)",
-                              color: "#fff",
-                            }}
-                          >
-                            {/* NAME (stacked) */}
-                            {slugged ? (
-                              <a
-                                href={`/player/${p.Slug}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{
-                                  color: "#fff",
-                                  fontWeight: 700, // less bold than before
-                                  fontSize: "1.05rem",
-                                  textDecoration: "underline",
-                                  fontStyle: italic ? "italic" : "normal",
-                                  display: "block",
-                                  lineHeight: 1.1,
-                                }}
-                              >
-                                <div>{p.First}</div>
-                                <div>{p.Last}</div>
-                              </a>
-                            ) : (
-                              <div
-                                style={{
-                                  fontWeight: 700,
-                                  fontSize: "1.05rem",
-                                  fontStyle: italic ? "italic" : "normal",
-                                  lineHeight: 1.1,
-                                }}
-                              >
-                                <div>{p.First}</div>
-                                <div>{p.Last}</div>
-                              </div>
-                            )}
+<div
+  style={{
+    width: "92%",
+    background: primary,
+    border: `3px solid ${secondary}`,
+    borderRadius: 10,
+    padding: "10px 10px 8px",
+    boxShadow: "0 1px 0 rgba(0,0,0,0.08)",
+    color: "#fff",
+    display: "flex",
+    alignItems: "stretch",
+    justifyContent: "center",
+    gap: 8,
+    position: "relative",
+  }}
+>
+{/* GRADE + NAME ROW */}
+<div
+  style={{
+    display: "flex",
+    alignItems: "stretch",
+    justifyContent: "center",
+    gap: 10,
+    width: "100%",
+  }}
+>
 
-                            {/* Draft Prospect label if slug exists */}
-                            {slugged && (
-                              <div
-                                style={{
-                                  marginTop: 4,
-                                  fontSize: 11,
-                                  fontWeight: 800,
-                                  color: "#fff",
-                                  opacity: 0.9,
-                                  letterSpacing: 0.4,
-                                  textTransform: "uppercase",
-                                }}
-                              >
-                                Draft Prospect
-                              </div>
-                            )}
+{/* GRADE INDICATOR */}
+{p.Grade && (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontWeight: 900,
+      fontSize: 18,
+      color: "#fff",
+      borderRight: "4px solid #fff",
+      paddingRight: 8,
+      minWidth: 18,
+    }}
+  >
+    {p.Grade}
+  </div>
+)}
 
+{/* NAME + POPUP */}
+<div
+  style={{
+    position: "relative",
+    textAlign: "center",
+    flex: 1,
+  }}
+  onMouseEnter={() => setHoveredPlayer(p._id)}
+  onMouseLeave={() => setHoveredPlayer(null)}
+>
+
+{slugged ? (
+  <a
+    href={`/player/${p.Slug}`}
+    target="_blank"
+    rel="noopener noreferrer"
+    style={{
+      color: "#fff",
+      fontWeight: 700,
+      fontSize: "1.05rem",
+      textDecoration: "underline",
+      fontStyle: italic ? "italic" : "normal",
+      lineHeight: 1.1,
+      display: "block",
+    }}
+  >
+    <div>{p.First}</div>
+    <div>{p.Last}</div>
+  </a>
+) : (
+  <div
+    style={{
+      fontWeight: 700,
+      fontSize: "1.05rem",
+      fontStyle: italic ? "italic" : "normal",
+      lineHeight: 1.1,
+    }}
+  >
+    <div>{p.First}</div>
+    <div>{p.Last}</div>
+  </div>
+)}
+
+{/* PLAYER POPUP */}
+{hoveredPlayer === p._id && (p.Notes || p.Notes2) && (
+<div
+  style={{
+    position: "absolute",
+    bottom: "120%",
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "#111",
+    color: "#fff",
+    padding: "10px 12px",
+    borderRadius: 6,
+    fontSize: 13,
+    width: 220,
+    zIndex: 50,
+    textAlign: "left",
+    boxShadow: "0 6px 14px rgba(0,0,0,0.4)",
+    display: "flex",
+    flexDirection: "column",
+  }}
+>
+
+{/* HEIGHT / WEIGHT */}
+{p.Notes && (
+  <div style={{ fontWeight: 800 }}>
+    {p.Notes}
+  </div>
+)}
+
+{/* FROM (OWN ROW UNDER HT/WT) */}
+{p.From && (
+  <div style={{ fontWeight: 800, marginBottom: 6 }}>
+    {p.From}
+  </div>
+)}
+
+{/* SHORT BIO */}
+{p.Notes2 && (
+  <div style={{ lineHeight: 1.4 }}>
+    {p.Notes2}
+  </div>
+)}
+
+  </div>
+)}
+
+</div>
+
+</div>
                             {/* ICON ROW (2027 only) — NFL + Shirt side-by-side */}
                             {showIcons && (showNFL || showShirt) && (
                               <div
@@ -483,42 +584,77 @@ export default function TeamPage() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 pb-40">
-      {/* ===== HEADER WITH LOGOS (kept) ===== */}
-      <div
-        className="flex items-center justify-between gap-10 mb-10 flex-wrap"
-        style={{ marginTop: 10 }}
-      >
-        <div className="flex-1 flex justify-start">
-          {team?.Logo1 && (
-            <img
-              src={sanitizeImgur(team.Logo1)}
-              alt={`${team.School} logo`}
-              className="h-32 w-auto object-contain"
-              loading="lazy"
-            />
-          )}
-        </div>
+{/* ===== HEADER WITH LOGOS ===== */}
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "260px 1fr 260px",
+    alignItems: "center",
+    marginBottom: 40,
+    marginTop: 10,
+  }}
+>
 
-        <div className="flex-1 flex justify-center">
-          <h1
-            className="text-5xl font-extrabold text-center"
-            style={{ color: primary }}
-          >
-            {team?.School} {team?.Mascot}
-          </h1>
-        </div>
+  {/* LEFT LOGO */}
+  <div style={{ textAlign: "center" }}>
+    {team?.Logo1 && (
+      <img
+        src={sanitizeImgur(team.Logo1)}
+        alt={`${team.School} logo`}
+        style={{
+          height: 190,
+          objectFit: "contain",
+        }}
+        loading="lazy"
+      />
+    )}
+  </div>
 
-        <div className="flex-1 flex justify-end">
-          {team?.Logo2 && (
-            <img
-              src={sanitizeImgur(team.Logo2)}
-              alt={`${team.School} alt logo`}
-              className="h-32 w-auto object-contain"
-              loading="lazy"
-            />
-          )}
-        </div>
-      </div>
+  {/* STACKED TEAM NAME */}
+  <div style={{ textAlign: "center" }}>
+    <div
+      style={{
+        fontSize: 60,
+        fontWeight: 900,
+        color: primary,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        lineHeight: 1,
+      }}
+    >
+      {team?.School}
+    </div>
+
+    <div
+      style={{
+        fontSize: 60,
+        fontWeight: 900,
+        color: primary,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        lineHeight: 1,
+      }}
+    >
+      {team?.Mascot}
+    </div>
+  </div>
+
+  {/* RIGHT LOGO */}
+  <div style={{ textAlign: "center" }}>
+    {team?.Logo2 && (
+      <img
+        src={sanitizeImgur(team.Logo2)}
+        alt={`${team.School} alt logo`}
+        style={{
+          height: 190,
+          objectFit: "contain",
+        }}
+        loading="lazy"
+      />
+    )}
+  </div>
+
+</div>
 
       {/* ===== VIEW TOGGLE (kept) ===== */}
       <div className="mb-10 text-center relative">
@@ -558,148 +694,197 @@ export default function TeamPage() {
       {viewMode === "current" && (
         <>
           {/* Year selector (2026 static vs 2027 interactive) */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: 12,
-              marginBottom: 28,
-              flexWrap: "wrap",
-            }}
-          >
-            <button
-              onClick={() => {
-                setRosterYearMode(2026);
-                // keep states, but they won’t show in 2026 anyway
-              }}
-              style={{
-                background: rosterYearMode === 2026 ? primary : "#fff",
-                color: rosterYearMode === 2026 ? "#fff" : primary,
-                border: `2px solid ${secondary}`,
-                padding: "10px 16px",
-                borderRadius: 8,
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              2026
-            </button>
+<div
+  style={{
+    display: "flex",
+    justifyContent: "center",
+    gap: 18,
+    marginBottom: 30,
+    flexWrap: "wrap",
+  }}
+>
 
-            <button
-              onClick={() => setRosterYearMode(2027)}
-              style={{
-                background: rosterYearMode === 2027 ? primary : "#fff",
-                color: rosterYearMode === 2027 ? "#fff" : primary,
-                border: `2px solid ${secondary}`,
-                padding: "10px 16px",
-                borderRadius: 8,
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              2027 (Projection Tool)
-            </button>
-          </div>
+  {/* 2026 */}
+  <button
+    onClick={() => setRosterYearMode(2026)}
+    style={{
+      background: rosterYearMode === 2026 ? primary : "#fff",
+      color: rosterYearMode === 2026 ? "#fff" : primary,
+      border: `3px solid ${secondary}`,
+      padding: "18px 34px",
+      borderRadius: 10,
+      fontWeight: 900,
+      fontSize: 22,
+      cursor: "pointer",
+    }}
+  >
+    2026
+  </button>
+
+  {/* 2027 */}
+  <button
+    onClick={() => setRosterYearMode(2027)}
+    style={{
+      background: rosterYearMode === 2027 ? primary : "#fff",
+      color: rosterYearMode === 2027 ? "#fff" : primary,
+      border: `3px solid ${secondary}`,
+      padding: "14px 34px",
+      borderRadius: 10,
+      fontWeight: 900,
+      cursor: "pointer",
+      textAlign: "center",
+      lineHeight: 1.1,
+    }}
+  >
+    <div style={{ fontSize: 22 }}>2027</div>
+    <div style={{ fontSize: 14 }}>Projection</div>
+  </button>
+
+</div>
 
           {renderSection(OFFENSE_POS, "OFFENSE")}
           {renderSection(DEFENSE_POS, "DEFENSE")}
 
-          {/* LEAVES IN 2027 (only shows in 2027 mode) */}
-          {rosterYearMode === 2027 && (
-            <div style={{ marginTop: 60 }}>
-              <div
-                style={{
-                  fontSize: 26,
-                  fontWeight: 900,
-                  color: primary,
-                  marginBottom: 14,
-                }}
-              >
-                LEAVES IN 2027
-              </div>
+{/* LEAVES IN 2027 (only shows in 2027 mode) */}
+{rosterYearMode === 2027 && (
+  <div style={{ marginTop: 60, textAlign: "center" }}>
+    
+    <div
+      style={{
+        fontSize: 30,
+        fontWeight: 900,
+        color: primary,
+        marginBottom: 18,
+      }}
+    >
+      LEAVES IN 2027
+    </div>
 
+    <div
+      style={{
+        border: `3px solid ${secondary}`,
+        borderRadius: 10,
+        overflow: "hidden",
+        background: "#fff",
+        maxWidth: 720,
+        margin: "0 auto",
+      }}
+    >
+
+      {/* HEADER */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 80px 140px 60px",
+          background: primary,
+          color: "#fff",
+          fontWeight: 900,
+          padding: "14px 18px",
+          fontSize: 18,
+          alignItems: "center",
+        }}
+      >
+        <div style={{ textAlign: "left" }}>Player</div>
+        <div style={{ textAlign: "center" }}>Pos</div>
+        <div style={{ textAlign: "center" }}>Reason</div>
+        <div />
+      </div>
+
+      {leavesIn2027.length === 0 ? (
+        <div
+          style={{
+            padding: 18,
+            fontSize: 18,
+            color: "#444",
+          }}
+        >
+          No players currently marked as leaving.
+        </div>
+      ) : (
+        leavesIn2027
+          .slice()
+          .sort((a, b) => (a.Last || "").localeCompare(b.Last || ""))
+          .map((p) => {
+            const isDeclared = declaredIds.has(p._id);
+            const reason = isDeclared ? "Draft" : "Graduates";
+
+            return (
               <div
+                key={p._id}
                 style={{
-                  border: `3px solid ${secondary}`,
-                  borderRadius: 10,
-                  overflow: "hidden",
-                  background: "#fff",
+                  display: "grid",
+                  gridTemplateColumns: "1fr 80px 140px 60px",
+                  padding: "12px 18px",
+                  borderTop: "1px solid #eee",
+                  alignItems: "center",
+                  fontSize: 18,
                 }}
               >
+
+                {/* PLAYER */}
                 <div
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 120px 60px",
-                    background: primary,
-                    color: "#fff",
                     fontWeight: 900,
-                    padding: "12px 14px",
+                    color: primary,
+                    textAlign: "left",
                   }}
                 >
-                  <div>Player</div>
-                  <div style={{ textAlign: "center" }}>Pos</div>
-                  <div style={{ textAlign: "center" }}></div>
+                  {p.First} {p.Last}
                 </div>
 
-                {leavesIn2027.length === 0 ? (
-                  <div style={{ padding: 14, color: "#444" }}>
-                    No players currently marked as leaving.
-                  </div>
-                ) : (
-                  leavesIn2027
-                    .slice()
-                    .sort((a, b) => (a.Last || "").localeCompare(b.Last || ""))
-                    .map((p) => {
-                      const isDeclared = declaredIds.has(p._id);
+                {/* POSITION */}
+                <div
+                  style={{
+                    textAlign: "center",
+                    fontWeight: 800,
+                  }}
+                >
+                  {p.Position || "-"}
+                </div>
 
-                      return (
-                        <div
-                          key={p._id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 120px 60px",
-                            padding: "12px 14px",
-                            borderTop: "1px solid #eee",
-                            alignItems: "center",
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, color: primary }}>
-                            {p.First} {p.Last}
-                          </div>
-                          <div style={{ textAlign: "center" }}>
-                            {p.Position || "-"}
-                          </div>
+                {/* REASON */}
+                <div
+                  style={{
+                    textAlign: "center",
+                    fontWeight: 800,
+                    color: isDeclared ? "#b45309" : "#444",
+                  }}
+                >
+                  {reason}
+                </div>
 
-                          {/* X only for drafted/declared players (not natural seniors leaving) */}
-                          <div style={{ textAlign: "center" }}>
-                            {isDeclared ? (
-                              <button
-                                onClick={() => toggleDeclare(p._id)}
-                                title="Remove from Leaves (put back on roster)"
-                                style={{
-                                  background: "#fff",
-                                  border: `2px solid ${secondary}`,
-                                  color: "#b91c1c",
-                                  fontWeight: 900,
-                                  borderRadius: 8,
-                                  width: 34,
-                                  height: 34,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                ✕
-                              </button>
-                            ) : (
-                              <span style={{ color: "#999" }}>—</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                )}
+                {/* REMOVE BUTTON */}
+                <div style={{ textAlign: "center" }}>
+                  {isDeclared ? (
+                    <button
+                      onClick={() => toggleDeclare(p._id)}
+                      title="Return player to roster"
+                      style={{
+                        background: "#fff",
+                        border: `2px solid ${secondary}`,
+                        color: "#b91c1c",
+                        fontWeight: 900,
+                        borderRadius: 6,
+                        width: 30,
+                        height: 30,
+                        cursor: "pointer",
+                        fontSize: 18,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <span style={{ color: "#999", fontSize: 18 }}>—</span>
+                  )}
+                </div>
+
               </div>
-            </div>
-          )}
+            );
+          })
+      )}
+    </div>
+  </div>
+)}
         </>
       )}
 
