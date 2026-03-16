@@ -29,13 +29,20 @@ export default function TeamPage() {
   const [declaredIds, setDeclaredIds] = useState(() => new Set()); // moved to LEAVES
   const [redshirtOverrideIds, setRedshirtOverrideIds] = useState(() => new Set()); // force RS "Yes" for projection + move down a class
 const [hoveredPlayer, setHoveredPlayer] = useState(null);
+const [hoveredGrade, setHoveredGrade] = useState(null);
+const formatTeamId = (str) => {
+  const upper = str.toUpperCase();
 
-  const formatTeamId = (str) =>
-    str
-      .toLowerCase()
-      .split("-")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
+  const abbreviations = ["USC", "UNC", "BYU", "UNLV", "JMU"];
+
+  if (abbreviations.includes(upper)) return upper;
+
+  return str
+    .toLowerCase()
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
 
   const sanitizeImgur = (url) =>
     url?.includes("imgur.com")
@@ -56,8 +63,8 @@ const [hoveredPlayer, setHoveredPlayer] = useState(null);
     const fetchData = async () => {
       setLoading(true);
 
-      const formattedId = formatTeamId(teamId);
-      const teamRef = doc(db, "schools", formattedId);
+const formattedId = formatTeamId(teamId);
+const teamRef = doc(db, "schools", formattedId);
       const teamSnap = await getDoc(teamRef);
 
       if (!teamSnap.exists()) {
@@ -120,8 +127,8 @@ const sortRosterPlayers = (arr) => {
 
     const grade = g.toString().toUpperCase().trim();
 
-    // numeric grades
-    if (/^[1-5]$/.test(grade)) return Number(grade);
+// numeric grades (5 first, 1 last)
+if (/^[1-5]$/.test(grade)) return 6 - Number(grade);
 
     // letter grades
     if (grade === "A") return 10;
@@ -130,7 +137,7 @@ const sortRosterPlayers = (arr) => {
     if (grade === "D") return 13;
 
     // walk-on
-    if (grade === "WO") return 20;
+    if (grade === "W") return 20;
 
     return 90;
   };
@@ -210,7 +217,38 @@ const sortRosterPlayers = (arr) => {
       };
     });
   }, [players, rosterYearMode, redshirtOverrideIds]);
+const getGradeColor = (grade) => {
+  const g = grade?.toString().toUpperCase().trim();
 
+  if (g === "5") return "#0026ff";
+  if (g === "4") return "#00a83e";
+  if (g === "3") return "#eab308";
+  if (g === "2") return "#f97316";
+  if (g === "1") return "#ef4444";
+
+  if (g === "A") return "#00d9ff";
+  if (g === "B") return "#dc00f0";
+  if (g === "C") return "#a74300";
+  if (g === "D") return "#850000";
+
+  if (g === "W") return "#000000";
+
+  return "#111";
+};
+const gradeDescriptions = {
+  "5": "Player is one of the best in college football and can make an impact on any play. 'First round or early day 2 talent.'",
+  "4": "Player has proven to be a high-end starter. 'Day 2 talent.'",
+  "3": "Player has played a lot and/or can be trusted to contribute. 'Day 3 talent.'",
+  "2": "Player has played some and/or is depth.",
+  "1": "Player has not played much.",
+
+  "A": "Player has the talent to make an impact sooner than later. '5-Star.'",
+  "B": "Player has multiple traits that will help him contribute early. '4-Star.'",
+  "C": "Player has potential but needs some time before he is ready to see the field. '3-Star.'",
+  "D": "Player is a ways off from contributing.",
+
+  "W": "Walk-on: Player is not on scholarship."
+};
   // Leaves list (2027 mode only): includes aged seniors + declared
   const leavesIn2027 = useMemo(() => {
     if (rosterYearMode !== 2027) return [];
@@ -414,19 +452,49 @@ const posPlayers = sortRosterPlayers(
 {/* GRADE INDICATOR */}
 {p.Grade && (
   <div
+    onMouseEnter={() => setHoveredGrade(p._id)}
+    onMouseLeave={() => setHoveredGrade(null)}
     style={{
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
       fontWeight: 900,
       fontSize: 18,
-      color: "#fff",
-      borderRight: "4px solid #fff",
-      paddingRight: 8,
-      minWidth: 18,
+      color: getGradeColor(p.Grade),
+      background: "#fff",
+      padding: "0 10px",
+      margin: "-10px 0 -8px -10px",
+      borderRadius: "7px 0 0 7px",
+      borderRight: `3px solid ${secondary}`,
+      minWidth: 30,
+      position: "relative"
     }}
   >
     {p.Grade}
+
+    {hoveredGrade === p._id && (
+      <div
+        style={{
+          position: "absolute",
+          bottom: "120%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#111",
+          color: "#fff",
+          padding: "10px 12px",
+          borderRadius: 6,
+          fontSize: 13,
+          width: 240,
+          textAlign: "left",
+          zIndex: 60,
+          boxShadow: "0 6px 14px rgba(0,0,0,0.4)",
+          lineHeight: 1.4
+        }}
+      >
+        <b>{p.Grade}</b>: {gradeDescriptions[p.Grade]}
+      </div>
+    )}
+
   </div>
 )}
 
@@ -494,7 +562,31 @@ const posPlayers = sortRosterPlayers(
     flexDirection: "column",
   }}
 >
+{/* PLAYER HEADER */}
 
+<div style={{ fontWeight: 900 }}>
+  {p.First} {p.Last}
+</div>
+
+{/* ELITE PROSPECT BADGE */}
+{p.Grade === "5" && (
+  <div
+    style={{
+      marginTop: 4,
+      marginBottom: 6,
+      fontWeight: 900,
+      fontSize: 13,
+      color: "#ffd700",
+      letterSpacing: 1,
+    }}
+  >
+    ★ IMPACT PLAYER ★
+  </div>
+)}
+
+<div style={{ marginBottom: 6 }}>
+  {p.Year}{isRedshirtDisplay(p) ? " (RS)" : ""} {p.Position}
+</div>
 {/* HEIGHT / WEIGHT */}
 {p.Notes && (
   <div style={{ fontWeight: 800 }}>
@@ -511,7 +603,12 @@ const posPlayers = sortRosterPlayers(
 
 {/* SHORT BIO */}
 {p.Notes2 && (
-  <div style={{ lineHeight: 1.4 }}>
+  <div
+    style={{
+      lineHeight: 1.4,
+      whiteSpace: "pre-line",
+    }}
+  >
     {p.Notes2}
   </div>
 )}
