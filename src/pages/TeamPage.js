@@ -17,7 +17,7 @@ export default function TeamPage() {
   const [players, setPlayers] = useState([]);
   const [historical, setHistorical] = useState([]);
   const [loading, setLoading] = useState(true);
-
+const [positionRanks, setPositionRanks] = useState(null);
   // Current roster vs archive
   const [viewMode, setViewMode] = useState("current"); // 'current' | 'archive'
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -31,12 +31,31 @@ export default function TeamPage() {
 const [hoveredPlayer, setHoveredPlayer] = useState(null);
 const [hoveredGrade, setHoveredGrade] = useState(null);
 const formatTeamId = (str) => {
-  const upper = str.toUpperCase();
+  const lower = str.toLowerCase();
 
-  const abbreviations = ["USC", "UNC", "BYU", "UNLV", "JMU"];
+  // 🔥 HARD FIXES (problem schools)
+  const map = {
+    "army": "Army West Point",
+    "nc-state": "NC State",
+    "uconn": "UConn",
+    "troy": "Troy",
 
-  if (abbreviations.includes(upper)) return upper;
+    // already working but safe to include
+    "lsu": "LSU",
+    "smu": "SMU",
+    "tcu": "TCU",
+    "ucla": "UCLA",
+    "ucf": "UCF",
+  };
 
+  if (map[lower]) return map[lower];
+
+  // 🔥 abbreviations (LSU, BYU, etc.)
+  if (/^[a-z]{2,5}$/i.test(str)) {
+    return str.toUpperCase();
+  }
+
+  // 🔥 normal schools (florida-state → Florida State)
   return str
     .toLowerCase()
     .split("-")
@@ -55,7 +74,7 @@ const formatTeamId = (str) => {
   const YEARS = ["Senior", "Junior", "Sophomore", "Freshman"];
   const OFFENSE_POS = ["QB", "RB", "WR", "TE", "OL"];
   const DEFENSE_POS = ["EDGE", "DL", "LB", "DB"];
-
+const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "DE", "DT", "LB", "CB", "S"];
   /* ===============================
      FETCH TEAM + CURRENT ROSTER + ARCHIVE
   =============================== */
@@ -64,16 +83,63 @@ const formatTeamId = (str) => {
       setLoading(true);
 
 const formattedId = formatTeamId(teamId);
+let teamData = null;
+
+// 🔹 FIRST TRY (your existing method)
 const teamRef = doc(db, "schools", formattedId);
-      const teamSnap = await getDoc(teamRef);
+const teamSnap = await getDoc(teamRef);
 
-      if (!teamSnap.exists()) {
-        setLoading(false);
-        return;
-      }
+if (teamSnap.exists()) {
+  teamData = teamSnap.data();
+} else {
+  // 🔥 FALLBACK (handles Army, Miami, etc.)
+  const schoolsRef = collection(db, "schools");
+  const snapshot = await getDocs(schoolsRef);
 
-      const teamData = teamSnap.data();
-      setTeam(teamData);
+  const normalize = (str) =>
+    (str || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const target = normalize(teamId);
+
+  snapshot.forEach((doc) => {
+    const school = doc.data().School;
+    const s = normalize(school);
+
+let bestMatch = null;
+
+// 🔥 PRIORITY MATCHING
+snapshot.forEach((doc) => {
+  const school = doc.data().School;
+  const s = normalize(school);
+
+  // 1. EXACT MATCH (best)
+  if (s === target) {
+    bestMatch = doc.data();
+    return;
+  }
+
+  // 2. STARTS WITH (Texas vs Texas Tech)
+  if (!bestMatch && s.startsWith(target)) {
+    bestMatch = doc.data();
+  }
+
+  // 3. LAST RESORT (very loose)
+  if (!bestMatch && s.includes(target)) {
+    bestMatch = doc.data();
+  }
+});
+
+teamData = bestMatch;
+  });
+}
+
+if (!teamData) {
+  console.log("❌ No matching school:", teamId);
+  setLoading(false);
+  return;
+}
+
+setTeam(teamData);
 
       // current roster (from rosters/{teamId})
       const rosterRef = doc(db, "rosters", teamId.toLowerCase());
@@ -98,7 +164,13 @@ const teamRef = doc(db, "schools", formattedId);
           ...d.data(),
         }))
       );
+// 🔥 FETCH POSITION RANKS
+const rankRef = doc(db, "teamPositionRanks", teamId.toLowerCase());
+const rankSnap = await getDoc(rankRef);
 
+if (rankSnap.exists()) {
+  setPositionRanks(rankSnap.data());
+}
       setLoading(false);
     };
 
@@ -272,7 +344,20 @@ const gradeDescriptions = {
       (p) => p._displayYear !== "LEAVES" && !declaredIds.has(p._id)
     );
   }, [players, displayPlayers, rosterYearMode, declaredIds]);
+const positionCounts = useMemo(() => {
+  if (!historical.length) return {};
 
+  const counts = {};
+
+  historical.forEach((p) => {
+    const pos = p.Position;
+    if (!pos) return;
+
+    counts[pos] = (counts[pos] || 0) + 1;
+  });
+
+  return counts;
+}, [historical]);
   /* ===============================
      INTERACTIONS (2027 ONLY)
   =============================== */
@@ -984,13 +1069,196 @@ const posPlayers = sortRosterPlayers(
 )}
         </>
       )}
-
-      {/* ===== ARCHIVE VIEW (left as your existing system) ===== */}
       {viewMode === "archive" && (
-        <div className="text-center text-gray-500">
-          Archive view unchanged (use your existing table UI here).
+  <div
+    style={{
+      textAlign: "center",
+      fontSize: 28,
+      fontWeight: 900,
+      color: primary,
+      marginBottom: 10,
+      marginTop: 10,
+      letterSpacing: 1,
+    }}
+  >
+    PLAYERS DRAFTED SINCE 2000
+  </div>
+)}
+{/* ===== PLAYERS DRAFTED BY POSITION ===== */}
+{viewMode === "archive" && positionRanks && (
+  <div
+    style={{
+      maxWidth: 1100,
+      margin: "0 auto 30px",
+      border: `3px solid ${secondary}`,
+      borderRadius: 10,
+      overflow: "hidden",
+      background: "#fff",
+    }}
+  >
+
+    {/* HEADER */}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `160px repeat(${POSITION_ORDER.length}, 1fr)`,
+        background: primary,
+        color: "#fff",
+        fontWeight: 900,
+        padding: "14px 10px",
+        fontSize: 16,
+        textAlign: "center",
+      }}
+    >
+      <div></div>
+      {POSITION_ORDER.map((pos) => (
+        <div key={pos}>{pos}</div>
+      ))}
+    </div>
+
+    {/* AMOUNT */}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `160px repeat(${POSITION_ORDER.length}, 1fr)`,
+        borderTop: "1px solid #eee",
+        textAlign: "center",
+        fontWeight: 800,
+      }}
+    >
+      <div style={{ padding: 12 }}>Amount</div>
+      {POSITION_ORDER.map((pos) => (
+        <div key={pos} style={{ padding: 12 }}>
+          {positionCounts[pos] || 0}
         </div>
-      )}
+      ))}
+    </div>
+
+    {/* NATIONAL */}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `160px repeat(${POSITION_ORDER.length}, 1fr)`,
+        borderTop: "1px solid #eee",
+        textAlign: "center",
+        fontWeight: 800,
+      }}
+    >
+      <div style={{ padding: 12 }}>National Rank</div>
+      {POSITION_ORDER.map((pos) => (
+        <div key={pos} style={{ padding: 12 }}>
+          {positionRanks?.[pos]?.natRank || "-"}
+        </div>
+      ))}
+    </div>
+
+    {/* CONFERENCE */}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `160px repeat(${POSITION_ORDER.length}, 1fr)`,
+        borderTop: "1px solid #eee",
+        textAlign: "center",
+        fontWeight: 800,
+      }}
+    >
+      <div style={{ padding: 12 }}>
+        {team?.Conference} Rank
+      </div>
+      {POSITION_ORDER.map((pos) => (
+        <div key={pos} style={{ padding: 12 }}>
+          {positionRanks?.[pos]?.confRank || "-"}
+        </div>
+      ))}
+    </div>
+
+  </div>
+)}
+      {/* ===== ARCHIVE VIEW (left as your existing system) ===== */}
+{viewMode === "archive" && (
+  <div
+    style={{
+      maxWidth: 1000,
+      margin: "0 auto",
+      border: `3px solid ${secondary}`,
+      borderRadius: 10,
+      overflow: "hidden",
+      background: "#fff",
+    }}
+  >
+    {/* HEADER */}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "80px 100px 1fr 100px 200px",
+        background: primary,
+        color: "#fff",
+        fontWeight: 900,
+        padding: "14px 18px",
+        fontSize: 18,
+        alignItems: "center",
+      }}
+    >
+      <div>Year</div>
+      <div>Round</div>
+      <div>Player</div>
+      <div>Pos</div>
+      <div>NFL Team</div>
+    </div>
+
+    {/* ROWS */}
+    {historical.length === 0 ? (
+      <div style={{ padding: 20, fontSize: 18 }}>
+        No draft history available.
+      </div>
+    ) : (
+      historical
+        .slice()
+        .sort((a, b) => {
+          // newest year first, then round, then pick
+          if (a.Year !== b.Year) return b.Year - a.Year;
+          if (a.Round !== b.Round) return a.Round - b.Round;
+          return a.Pick - b.Pick;
+        })
+        .map((p) => (
+          <div
+            key={p.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "80px 100px 1fr 100px 200px",
+              padding: "12px 18px",
+              borderTop: "1px solid #eee",
+              alignItems: "center",
+              fontSize: 18,
+            }}
+          >
+            {/* YEAR */}
+            <div style={{ fontWeight: 800 }}>{p.Year}</div>
+
+            {/* ROUND */}
+            <div style={{ fontWeight: 800 }}>
+              R{p.Round}
+            </div>
+
+            {/* PLAYER */}
+            <div style={{ fontWeight: 900, color: primary }}>
+              {p.Player}
+            </div>
+
+            {/* POSITION */}
+            <div style={{ textAlign: "center", fontWeight: 800 }}>
+              {p.Position}
+            </div>
+
+            {/* NFL TEAM */}
+            <div style={{ fontWeight: 700 }}>
+              {p["NFL Team"]}
+            </div>
+          </div>
+        ))
+    )}
+  </div>
+)}
     </div>
   );
 }

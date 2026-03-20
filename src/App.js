@@ -15,6 +15,9 @@ import PlayerPage2 from "./pages/PlayerPage2"; // 🆕 NEW LAYOUT
 import UserBoards from "./pages/UserBoards";
 import UserProfile from "./pages/UserProfile";
 
+// 🆕 CFB Landing Page
+import CFBPage from "./pages/CFBPage";
+
 // College Teams
 import TeamPage from "./pages/TeamPage";
 
@@ -40,6 +43,9 @@ function App() {
         <div style={{ paddingTop: "25px" }}>
           <Routes>
             <Route path="/" element={<Home />} />
+
+            {/* 🆕 College Football Hub */}
+            <Route path="/cfb" element={<CFBPage />} />
 
             {/* News */}
             <Route path="/news" element={<News />} />

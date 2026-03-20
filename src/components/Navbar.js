@@ -30,7 +30,9 @@ export default function Navbar() {
 
   // Start instantly with fallback
   const [tickerText, setTickerText] = useState(FALLBACK_MESSAGE);
-
+const [schools, setSchools] = useState([]);
+const [cfbOpen, setCfbOpen] = useState(false);
+const [cfbTimeout, setCfbTimeout] = useState(null);
   /* ======================
      MOBILE DETECTION
   ====================== */
@@ -155,21 +157,56 @@ data.featured.forEach((p) => {
 
     loadTicker();
   }, []);
+useEffect(() => {
+  async function fetchSchools() {
+    try {
+      const snapshot = await getDocs(collection(db, "schools"));
+      const data = snapshot.docs.map((doc) => doc.data());
 
+const filtered = data.filter((school) =>
+  conferenceOrder.includes(school.Conference)
+);
+
+filtered.sort((a, b) => a.School.localeCompare(b.School));
+
+setSchools(filtered);
+    } catch (err) {
+      console.error("Error loading schools:", err);
+    }
+  }
+
+  fetchSchools();
+}, []);
+const conferenceOrder = [
+  "ACC",
+  "Big 10",
+  "Big 12",
+  "SEC",
+  "Pac 12",
+  "Independent",
+  "AAC",
+  "CUSA",
+  "MAC",
+  "Mountain West",
+  "Sun Belt",
+];
   /* ======================
      NAV LINK STYLE
   ====================== */
-  const baseStyle = {
-    margin: "0 0.5rem",
-    padding: "0.5rem 1rem",
-    color: "#0055a5",
-    border: "2px solid #f6a21d",
-    borderRadius: "6px",
-    textDecoration: "none",
-    fontWeight: "bold",
-    backgroundColor: "#ffffff",
-    cursor: "pointer",
-  };
+const baseStyle = {
+  margin: "0 0.5rem",
+  padding: "0.5rem 1rem",
+  color: "#0055a5",
+  border: "2px solid #f6a21d",
+  borderRadius: "6px",
+  textDecoration: "none",
+  fontWeight: "bold",
+  backgroundColor: "#ffffff",
+  cursor: "pointer",
+  display: "flex",            // 🔥 key fix
+  alignItems: "center",       // 🔥 vertical alignment
+  justifyContent: "center",   // optional but clean
+};
 
   return (
     <>
@@ -179,21 +216,22 @@ data.featured.forEach((p) => {
           top: show || isMobile ? 0 : "-140px",
           left: 0,
           right: 0,
-          zIndex: 1000,
+          zIndex: 10000,
           transition: isMobile ? "none" : "top 0.3s ease-in-out",
         }}
       >
         {/* ================= NAVBAR ================= */}
-        <nav
-          style={{
-            backgroundColor: "#0055a5",
-            padding: "0.75rem 1.5rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            position: "relative",
-          }}
-        >
+<nav
+  style={{
+    backgroundColor: "#0055a5",
+    padding: "0.75rem 1.5rem",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    position: "relative",
+    zIndex: 10001, // 🔥 critical
+  }}
+>
           {/* LOGO */}
           <Link to="/">
             <img src={Logo2} alt="We-Draft" style={{ height: 42 }} />
@@ -209,16 +247,78 @@ data.featured.forEach((p) => {
             }}
           >
             {[
-              { path: "/", label: "Home" },
-              { path: "/community", label: "Community Board" },
-              { path: "/boards", label: "My Boards" },
-              { path: "/mocks", label: "Mock Drafts" },
-            ].map((l) => (
+  { path: "/community", label: "Community Board" },
+  { path: "/boards", label: "My Boards" },
+  { path: "/mocks", label: "Mock Drafts" },
+].map((l) => (
               <Link key={l.path} to={l.path} style={baseStyle}>
                 {l.label}
               </Link>
             ))}
+{/* ✅ CFB DROPDOWN */}
+<div
+  style={{ position: "relative" }}
+  onMouseEnter={() => {
+    if (cfbTimeout) clearTimeout(cfbTimeout);
+    setCfbOpen(true);
+  }}
+  onMouseLeave={() => {
+    const timeout = setTimeout(() => {
+      setCfbOpen(false);
+    }, 150);
+    setCfbTimeout(timeout);
+  }}
+>
+  <Link to="/cfb" style={baseStyle}>
+    CFB
+  </Link>
 
+{cfbOpen && (
+  <div
+    onMouseEnter={() => {
+      if (cfbTimeout) clearTimeout(cfbTimeout);
+      setCfbOpen(true);
+    }}
+    onMouseLeave={() => setCfbOpen(false)}
+    style={{
+  position: "absolute", // ✅ back to absolute
+  top: "calc(100% + 10px)", // sits below navbar
+  left: "50%",
+  transform: "translateX(-50%)",
+  width: "300px",
+  maxHeight: "400px",
+  overflowY: "auto",
+  background: "#ffffff",
+  border: "2px solid #f6a21d",
+  borderRadius: "8px",
+  boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
+  padding: "10px",
+  zIndex: 10002, // ✅ strong but not insane
+}}
+    >
+      {schools.map((team) => {
+        const slug = team.School.toLowerCase().replace(/\s+/g, "-");
+
+        return (
+          <Link
+            key={team.School}
+            to={`/team/${slug}`}
+            style={{
+              display: "block",
+              padding: "8px",
+              textDecoration: "none",
+              color: "#000",
+              borderRadius: "6px",
+            }}
+            onClick={() => setCfbOpen(false)}
+          >
+            {team.School}
+          </Link>
+        );
+      })}
+    </div>
+  )}
+</div>
             {user ? (
               <Link to="/profile" style={baseStyle}>
                 Profile
@@ -260,15 +360,15 @@ data.featured.forEach((p) => {
                   flexDirection: "column",
                   gap: "0.75rem",
                   textAlign: "center",
-                  zIndex: 2000,
+                  zIndex: 9999,
                 }}
               >
                 {[
-                  { path: "/", label: "Home" },
-                  { path: "/community", label: "Community Board" },
-                  { path: "/boards", label: "My Boards" },
-                  { path: "/mocks", label: "Mock Drafts" },
-                ].map((l) => (
+  { path: "/community", label: "Community Board" },
+  { path: "/boards", label: "My Boards" },
+  { path: "/mocks", label: "Mock Drafts" },
+  { path: "/cfb", label: "CFB" }, // ✅ NEW (between mocks + profile)
+].map((l) => (
                   <Link
                     key={l.path}
                     to={l.path}
@@ -296,25 +396,28 @@ data.featured.forEach((p) => {
         </nav>
 
         {/* ================= TICKER ================= */}
-        <div
-          style={{
-            background: "#ffffff",
-            borderTop: "2px solid #f6a21d",
-            borderBottom: "2px solid #f6a21d",
-            overflow: "hidden",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <div
-            style={{
-              display: "inline-block",
-              padding: "0.55rem 0",
-              fontWeight: 800,
-              color: "#0055a5",
-              animation: "tickerMove 300s linear infinite",
-              willChange: "transform",
-            }}
-          >
+<div
+  style={{
+    background: "#ffffff",
+    borderTop: "2px solid #f6a21d",
+    borderBottom: "2px solid #f6a21d",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    position: "relative",
+    zIndex: 1, // ✅ force ticker BELOW everything
+  }}
+>
+<div
+  style={{
+    display: "inline-block",
+    padding: "0.55rem 0",
+    fontWeight: 800,
+    color: "#0055a5",
+    animation: "tickerMove 300s linear infinite",
+    willChange: "transform",
+    position: "relative",
+  }}
+>
             {tickerText}
           </div>
         </div>
