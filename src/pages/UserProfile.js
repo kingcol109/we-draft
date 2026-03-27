@@ -28,7 +28,7 @@ export default function UserProfile() {
   const [school, setSchool] = useState("");
   const [position, setPosition] = useState("");
   const [requestMsg, setRequestMsg] = useState("");
-
+const [role, setRole] = useState(null);
   // ✅ Issue/Suggestion form state
   const [issueText, setIssueText] = useState("");
   const [issueMsg, setIssueMsg] = useState("");
@@ -44,21 +44,30 @@ export default function UserProfile() {
     "vagina", "penis", "asshole", "retard",
   ];
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user) return;
-      const ref = doc(db, "users", user.uid);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const savedName = snap.data().username || "";
-        setUsername(savedName);
-        setDisplayedUsername(savedName);
-        setVerified(snap.data().verified || false);
-      }
-      setLoading(false);
-    };
-    fetchProfile();
-  }, [user]);
+useEffect(() => {
+  const fetchProfile = async () => {
+    if (!user) return;
+
+    const ref = doc(db, "users", user.uid);
+    const snap = await getDoc(ref);
+
+    if (snap.exists()) {
+      const data = snap.data();
+
+      const savedName = data.username || "";
+      setUsername(savedName);
+      setDisplayedUsername(savedName);
+      setVerified(data.verified || false);
+
+      // ✅ ADD ROLE HERE (inside snap.exists)
+      setRole(data.role || "public");
+    }
+
+    setLoading(false);
+  };
+
+  fetchProfile();
+}, [user]);
 
   const saveProfile = async () => {
     if (!user) return;
@@ -224,7 +233,14 @@ export default function UserProfile() {
         >
           Log Out
         </button>
-
+{(role === "admin" || role === "writer") && (
+  <button
+    onClick={() => window.location.href = "/admin/articles"}
+    className="w-full bg-[#0055a5] text-white font-bold py-2 rounded border-2 border-[#f6a21d] hover:bg-[#003f7d] transition mb-6"
+  >
+    Article Dashboard
+  </button>
+)}
         {/* ✅ Collapsible Player Request Section */}
         <div className="mb-8">
           <button

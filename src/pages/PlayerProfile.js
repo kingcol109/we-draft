@@ -61,6 +61,16 @@ function sanitizeUrl(url) {
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
+const toTeamSlug = (school) => {
+  if (!school) return "";
+
+  return school
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9\s]/g, "") // remove special chars
+    .trim()
+    .replace(/\s+/g, "-"); // spaces → dashes
+};
 function teamNameFromAbbr(abbr) {
   const map = {
     ARI: "Arizona Cardinals",
@@ -677,13 +687,20 @@ async function handleRemoveEvaluation() {
     Back
   </button>
 
-  <h1 className="text-5xl font-extrabold" style={{ color: color1 }}>
-    {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
-  </h1>
+<h1 className="text-5xl font-extrabold" style={{ color: color1 }}>
+  {`${player.First || ""} ${player.Last || ""}`.toUpperCase()}
+</h1>
 
-  <p className="text-2xl italic font-bold mt-1" style={{ color: color1 }}>
-    {`${player.Position || ""} - ${player.School || ""} - ${player.Eligible || ""}`}
-  </p>
+<p className="text-2xl italic font-bold mt-1" style={{ color: color1 }}>
+  {player.Position} -{" "}
+  <Link
+    to={`/team/${toTeamSlug(player.School)}`}
+    className="underline hover:opacity-80"
+  >
+    {player.School}
+  </Link>{" "}
+  - {player.Eligible}
+</p>
 
   {/* We-Draft logo stays BETWEEN the school logos */}
   
@@ -727,19 +744,19 @@ async function handleRemoveEvaluation() {
 
 
       {/* Top band */}
-     <div
-  className="py-3 font-extrabold uppercase tracking-widest cursor-pointer text-white"
+<Link
+  to={`/nfl/${draftedBy.toLowerCase()}`}
+  className="block py-3 font-extrabold uppercase tracking-widest text-white text-center"
   style={{
     backgroundColor: "#bf9b30",
     fontFamily: "'Bebas Neue', sans-serif",
     textDecoration: "underline",
     textUnderlineOffset: "6px",
-    borderBottom: `4px solid ${color2}`, // ✅ DIVIDER LINE
+    borderBottom: `4px solid ${color2}`,
   }}
-  onClick={() => navigate(`/nfl/${draftedBy.toLowerCase()}`)}
 >
   {teamNameFromAbbr(draftedBy)} SELECTION
-</div>
+</Link>
 
 
 

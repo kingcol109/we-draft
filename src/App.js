@@ -11,40 +11,41 @@ import News from "./pages/News";
 import NewsArticle from "./pages/NewsArticle";
 import CommunityBoard from "./pages/CommunityBoard";
 import PlayerProfile from "./pages/PlayerProfile";
-import PlayerPage2 from "./pages/PlayerPage2"; // 🆕 NEW LAYOUT
+import PlayerPage2 from "./pages/PlayerPage2";
 import UserBoards from "./pages/UserBoards";
 import UserProfile from "./pages/UserProfile";
 
-// 🆕 CFB Landing Page
+// CFB
 import CFBPage from "./pages/CFBPage";
 
-// College Teams
+// Teams
 import TeamPage from "./pages/TeamPage";
-
-// NFL Teams
 import NFLTeamPage from "./pages/NFLTeamPage";
 
-// Mock Draft Pages
+// Mock Draft
 import MockDraftHub from "./pages/MockDraftHub";
 import MyMocksPage from "./pages/MyMocksPage";
 import CreateMock from "./pages/CreateMock";
 
-// Whiteboard Page
+// Whiteboard
 import Whiteboard from "./pages/Whiteboard";
+
+// 🆕 ARTICLES SYSTEM
+import AdminArticles from "./pages/AdminArticles";
+import EditArticle from "./pages/EditArticle";     // 🔥 NEW
+import ArticlePage from "./pages/ArticlePage";     // 🔥 NEW (public)
 
 function App() {
   return (
     <HelmetProvider>
       <Router>
-        {/* Navbar always visible */}
         <Navbar />
 
-        {/* Offset for fixed navbar + ticker */}
         <div style={{ paddingTop: "25px" }}>
           <Routes>
             <Route path="/" element={<Home />} />
 
-            {/* 🆕 College Football Hub */}
+            {/* College Football */}
             <Route path="/cfb" element={<CFBPage />} />
 
             {/* News */}
@@ -53,31 +54,35 @@ function App() {
 
             <Route path="/community" element={<CommunityBoard />} />
 
-            {/* Original Player Page (SEO Safe) */}
+            {/* Players */}
             <Route path="/player/:slug" element={<PlayerProfile />} />
-
-            {/* 🆕 Experimental 70/30 Player Layout */}
             <Route path="/player2/:slug" element={<PlayerPage2 />} />
 
-            {/* College Team Pages */}
+            {/* Teams */}
             <Route path="/team/:teamId" element={<TeamPage />} />
-
-            {/* NFL Team Pages */}
             <Route path="/nfl/:teamId" element={<NFLTeamPage />} />
 
+            {/* User */}
             <Route path="/boards" element={<UserBoards />} />
             <Route path="/profile" element={<UserProfile />} />
 
-            {/* Mock Drafts */}
+            {/* Mock Draft */}
             <Route path="/mocks" element={<MockDraftHub />} />
             <Route path="/mocks/my" element={<MyMocksPage />} />
             <Route path="/mocks/create" element={<CreateMock />} />
             <Route path="/mocks/:mockId" element={<CreateMock />} />
 
-            {/* Draft Whiteboard */}
+            {/* Whiteboard */}
             <Route path="/whiteboard" element={<Whiteboard />} />
 
-            {/* Catch-all 404 */}
+            {/* 🆕 ADMIN CMS */}
+            <Route path="/admin/articles" element={<AdminArticles />} />
+            <Route path="/admin/articles/:id" element={<EditArticle />} />
+
+            {/* 🆕 PUBLIC ARTICLES */}
+            <Route path="/article/:slug" element={<ArticlePage />} />
+
+            {/* 404 */}
             <Route
               path="*"
               element={
@@ -95,7 +100,6 @@ function App() {
           </Routes>
         </div>
 
-        {/* Analytics */}
         <Analytics />
       </Router>
     </HelmetProvider>
