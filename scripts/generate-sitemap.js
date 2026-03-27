@@ -35,7 +35,24 @@ function isValidSlug(slug) {
     /^[a-z0-9-]+$/.test(slug)
   );
 }
+function toTeamSlug(school) {
+  if (!school) return "";
 
+  const map = {
+    "Army West Point": "army",
+    "NC State": "nc-state",
+    "UConn": "uconn",
+  };
+
+  if (map[school]) return map[school];
+
+  return school
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
 /**
  * Fetch all docs from a collection that uses `Slug` (players)
  */
@@ -70,7 +87,11 @@ async function getAllNews() {
   const snapshot = await getDocs(q);
   return snapshot.docs;
 }
-
+async function getAllTeams() {
+  const colRef = collection(db, "schools");
+  const snapshot = await getDocs(colRef);
+  return snapshot.docs;
+}
 async function generateSitemap() {
   const baseUrl = "https://we-draft.com";
   const today = new Date().toISOString().split("T")[0];
@@ -129,7 +150,32 @@ async function generateSitemap() {
       lastmod,
     });
   }
+/* =========================
+   TEAM PAGES
+========================= */
+console.log("🔄 Fetching team data from Firestore...");
+const allTeams = await getAllTeams();
+console.log(`✅ Found ${allTeams.length} teams.`);
 
+const teamPages = [];
+
+for (const doc of allTeams) {
+  const data = doc.data();
+  const school = data?.School;
+
+  const slug = toTeamSlug(school);
+
+  if (!isValidSlug(slug)) {
+    console.warn("⚠️ Skipping invalid team slug:", slug);
+    continue;
+  }
+
+  teamPages.push({
+    path: `/team/${slug}`,
+    priority: 0.65,
+    lastmod: today,
+  });
+}
   /* =========================
      STATIC PAGES
   ========================= */
@@ -144,7 +190,7 @@ async function generateSitemap() {
   /* =========================
      BUILD XML
   ========================= */
-  const urls = [...staticPages, ...playerPages, ...newsPages]
+const urls = [...staticPages, ...teamPages, ...playerPages, ...newsPages]
     .map(
       (u) => `
   <url>
@@ -165,12 +211,13 @@ ${urls}
   ========================= */
   fs.writeFileSync("public/sitemap.xml", xml);
 
-  console.log(
-    `✅ sitemap.xml generated
-    - ${staticPages.length} static pages
-    - ${playerPages.length} player pages
-    - ${newsPages.length} news articles`
-  );
+console.log(
+  `✅ sitemap.xml generated
+  - ${staticPages.length} static pages
+  - ${teamPages.length} team pages
+  - ${playerPages.length} player pages
+  - ${newsPages.length} news articles`
+);
 }
 
 // Run
