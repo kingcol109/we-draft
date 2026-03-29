@@ -298,6 +298,7 @@ const getGradeColor = (grade) => {
   if (g === "2") return "#f97316";
   if (g === "1") return "#ef4444";
 
+  if (g === "A+") return "#00ff40";
   if (g === "A") return "#00d9ff";
   if (g === "B") return "#dc00f0";
   if (g === "C") return "#a74300";
@@ -540,23 +541,42 @@ const posPlayers = sortRosterPlayers(
   <div
     onMouseEnter={() => setHoveredGrade(p._id)}
     onMouseLeave={() => setHoveredGrade(null)}
-    style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontWeight: 900,
-      fontSize: 18,
-      color: getGradeColor(p.Grade),
-      background: "#fff",
-      padding: "0 10px",
-      margin: "-10px 0 -8px -10px",
-      borderRadius: "7px 0 0 7px",
-      borderRight: `3px solid ${secondary}`,
-      minWidth: 30,
-      position: "relative"
-    }}
+style={{
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontWeight: 900,
+  fontSize: 18,
+
+  // 🔥 A+ SPECIAL STYLING
+color: p.Grade === "A+" ? "#ffffff" : getGradeColor(p.Grade),
+background: p.Grade === "A+" ? "#f6a21d" : "#ffffff",
+
+  padding: "0 10px",
+  margin: "-10px 0 -8px -10px",
+  borderRadius: "7px 0 0 7px",
+  borderRight: `3px solid ${secondary}`,
+  minWidth: 30,
+  position: "relative"
+}}
   >
-    {p.Grade}
+    {p.Grade === "A+" ? (
+  <>
+    <span>A</span>
+    <span
+      style={{
+        fontSize: 12,
+        marginLeft: 1,
+        position: "relative",
+        top: -2,
+      }}
+    >
+      +
+    </span>
+  </>
+) : (
+  p.Grade
+)}
 
     {hoveredGrade === p._id && (
       <div
@@ -635,8 +655,9 @@ const posPlayers = sortRosterPlayers(
     bottom: "120%",
     left: "50%",
     transform: "translateX(-50%)",
-    background: "#111",
-    color: "#fff",
+background: p.Grade === "A+" ? "#0055a5" : "#111",
+color: "#fff",
+border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
     padding: "10px 12px",
     borderRadius: 6,
     fontSize: 13,
@@ -650,9 +671,53 @@ const posPlayers = sortRosterPlayers(
 >
 {/* PLAYER HEADER */}
 
-<div style={{ fontWeight: 900 }}>
+<div
+  style={{
+    fontWeight: p.Grade === "A+" ? 1000 : 900,
+    textAlign: p.Grade === "A+" ? "center" : "left",
+    width: "100%",
+
+    // 🔥 NEW
+    fontSize: p.Grade === "A+" ? 16 : 14,
+  }}
+>
   {p.First} {p.Last}
 </div>
+
+{p.Grade === "A+" && (
+  <div
+    style={{
+      marginTop: 4,
+      marginBottom: 6,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 2,
+    }}
+  >
+    <div
+      style={{
+        fontWeight: 700,
+        fontSize: 12,
+        color: "#f6a21d",
+        letterSpacing: 0.5,
+      }}
+    >
+      We-Draft.com
+    </div>
+
+    <div
+      style={{
+        fontWeight: 900,
+        fontSize: 13,
+        color: "#f6a21d",
+        letterSpacing: 1,
+      }}
+    >
+      BLUECHIP PROSPECT
+    </div>
+  </div>
+)}
 
 {/* ELITE PROSPECT BADGE */}
 {p.Grade === "5" && (
