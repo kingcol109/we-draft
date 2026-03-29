@@ -314,6 +314,7 @@ const gradeDescriptions = {
   "2": "Player has played some and/or is depth.",
   "1": "Player has not played much.",
 
+  "A+": "Player has rare talent and is a bluechip prospect according to We-Draft.com",
   "A": "Player has the talent to make an impact sooner than later. '5-Star.'",
   "B": "Player has multiple traits that will help him contribute early. '4-Star.'",
   "C": "Player has potential but needs some time before he is ready to see the field. '3-Star.'",
