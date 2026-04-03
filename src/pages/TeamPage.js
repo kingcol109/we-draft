@@ -203,6 +203,7 @@ const sortRosterPlayers = (arr) => {
 if (/^[1-5]$/.test(grade)) return 6 - Number(grade);
 
     // letter grades
+    if (grade === "A+") return 9;
     if (grade === "A") return 10;
     if (grade === "B") return 11;
     if (grade === "C") return 12;
