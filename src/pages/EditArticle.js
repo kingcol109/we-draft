@@ -5,6 +5,8 @@ import {
   doc,
   getDoc,
   updateDoc,
+  author,
+  deleteDoc, // ✅ ADD THIS
   serverTimestamp,
   collection,
   getDocs,
@@ -23,6 +25,7 @@ export default function EditArticle() {
   const [status, setStatus] = useState("draft");
   const [priority, setPriority] = useState(2);
   const [slug, setSlug] = useState("");
+  const [author, setAuthor] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [players, setPlayers] = useState([]);
@@ -61,7 +64,7 @@ export default function EditArticle() {
         setStatus(data.status || "draft");
         setPriority(data.priority || 2);
         setSlug(data.slug || "");
-
+setAuthor(data.author || "");
         editor.commands.setContent(data.content || "");
       }
 
@@ -139,33 +142,32 @@ export default function EditArticle() {
   }, []);
 
   // 🔥 INSERT FUNCTIONS
-  const insertPlayer = (player) => {
-    if (!editor) return;
+const insertPlayer = (player) => {
+  if (!editor) return;
 
-    editor
-      .chain()
-      .focus()
-      .setLink({ href: `/player/${player.slug}` })
-      .insertContent(player.name + " ")
-      .unsetLink()
-      .run();
+  editor
+    .chain()
+    .focus()
+    .insertContent(
+      `<a href="/player/${player.slug}">${player.name}</a> `
+    )
+    .run();
 
-    setShowPlayerPicker(false);
-  };
+  setShowPlayerPicker(false);
+};
+const insertTeam = (team) => {
+  if (!editor) return;
 
-  const insertTeam = (team) => {
-    if (!editor) return;
+  editor
+    .chain()
+    .focus()
+    .insertContent(
+      `<a href="/team/${team.slug}">${team.name}</a> `
+    )
+    .run();
 
-    editor
-      .chain()
-      .focus()
-      .setLink({ href: `/team/${team.slug}` })
-      .insertContent(team.name + " ")
-      .unsetLink()
-      .run();
-
-    setShowTeamPicker(false);
-  };
+  setShowTeamPicker(false);
+};
 
   const insertImage = () => {
     if (!editor || !imageUrl) return;
@@ -175,22 +177,65 @@ export default function EditArticle() {
     setImageUrl("");
     setShowImageInput(false);
   };
+const handleDelete = async () => {
+  const confirmDelete = window.confirm(
+    "Are you sure you want to delete this article? This cannot be undone."
+  );
 
+  if (!confirmDelete) return;
+
+  await deleteDoc(doc(db, "articles", id));
+
+  alert("Article deleted");
+
+window.location.href = "/admin/articles";
+};
   // 🔥 SAVE
-  const handleSave = async () => {
-    const ref = doc(db, "articles", id);
+const handleSave = async () => {
+  const ref = doc(db, "articles", id);
 
-    await updateDoc(ref, {
-      title,
-      slug,
-      priority,
-      content: editor?.getHTML() || "",
-      status,
-      updatedAt: serverTimestamp(),
-    });
+  const html = editor?.getHTML() || "";
 
-    alert("Saved!");
-  };
+  const div = document.createElement("div");
+  div.innerHTML = html;
+
+  // 🔵 PLAYER SLUGS
+  const playerLinks = div.querySelectorAll("a[href^='/player/']");
+  const playerSet = new Set();
+
+  playerLinks.forEach((link) => {
+    const href = link.getAttribute("href");
+    const slug = href.split("/player/")[1];
+    if (slug) playerSet.add(slug);
+  });
+
+  const slugs = Array.from(playerSet);
+
+  // 🟡 TEAM SLUGS
+  const teamLinks = div.querySelectorAll("a[href^='/team/']");
+  const teamSet = new Set();
+
+  teamLinks.forEach((link) => {
+    const href = link.getAttribute("href");
+    const slug = href.split("/team/")[1];
+    if (slug) teamSet.add(slug);
+  });
+
+  const teamSlugs = Array.from(teamSet);
+
+  await updateDoc(ref, {
+    title,
+    slug,
+    priority,
+    content: html,
+    status,
+    slugs,      // players
+    teamSlugs,  // teams ✅ NEW
+    updatedAt: serverTimestamp(),
+  });
+
+  alert("Saved!");
+};
 
   if (loading) return <p>Loading...</p>;
 
@@ -214,7 +259,12 @@ export default function EditArticle() {
         placeholder="article-url-slug"
         style={input}
       />
-
+<input
+  value={author}
+  onChange={(e) => setAuthor(e.target.value)}
+  placeholder="Author"
+  style={input}
+/>
       <select value={status} onChange={(e) => setStatus(e.target.value)}>
         <option value="draft">Draft</option>
         <option value="pending">Pending</option>
@@ -306,6 +356,17 @@ export default function EditArticle() {
       <button onClick={handleSave} style={{ ...btn, marginTop: "10px" }}>
         Save Changes
       </button>
+      <button
+  onClick={handleDelete}
+  style={{
+    ...btn,
+    marginTop: "10px",
+    background: "#b91c1c", // red
+    border: "2px solid #f6a21d",
+  }}
+>
+  Delete Article
+</button>
     </div>
   );
 }

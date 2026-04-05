@@ -18,6 +18,7 @@ export default function TeamPage() {
   const [historical, setHistorical] = useState([]);
   const [loading, setLoading] = useState(true);
 const [positionRanks, setPositionRanks] = useState(null);
+const [teamArticles, setTeamArticles] = useState([]);
   // Current roster vs archive
   const [viewMode, setViewMode] = useState("current"); // 'current' | 'archive'
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -30,6 +31,7 @@ const [positionRanks, setPositionRanks] = useState(null);
   const [redshirtOverrideIds, setRedshirtOverrideIds] = useState(() => new Set()); // force RS "Yes" for projection + move down a class
 const [hoveredPlayer, setHoveredPlayer] = useState(null);
 const [hoveredGrade, setHoveredGrade] = useState(null);
+const [hoveredIcon, setHoveredIcon] = useState(null);
 const formatTeamId = (str) => {
   const lower = str.toLowerCase();
 
@@ -170,6 +172,21 @@ const rankSnap = await getDoc(rankRef);
 
 if (rankSnap.exists()) {
   setPositionRanks(rankSnap.data());
+  // 🔥 FETCH TEAM ARTICLES
+const articleQuery = query(
+  collection(db, "articles"),
+  where("status", "==", "published"),
+  where("teamSlugs", "array-contains", teamId.toLowerCase())
+);
+
+const articleSnap = await getDocs(articleQuery);
+
+setTeamArticles(
+  articleSnap.docs.map((d) => ({
+    id: d.id,
+    ...d.data(),
+  }))
+);
 }
       setLoading(false);
     };
@@ -505,8 +522,9 @@ const posPlayers = sortRosterPlayers(
                         <div
                           key={p._id}
                           style={{
-                            display: "flex",
-                            justifyContent: "center",
+display: "flex",
+flexDirection: "column",
+alignItems: "center",
                             marginBottom: 10,
                           }}
                         >
@@ -600,9 +618,11 @@ background: p.Grade === "A+" ? "#f6a21d" : "#ffffff",
       >
         <b>{p.Grade}</b>: {gradeDescriptions[p.Grade]}
       </div>
+      
     )}
 
   </div>
+  
 )}
 
 {/* NAME + POPUP */}
@@ -670,6 +690,7 @@ border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
     flexDirection: "column",
   }}
 >
+  
 {/* PLAYER HEADER */}
 
 <div
@@ -769,54 +790,99 @@ border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
 )}
 
 </div>
+</div>
+</div>
+
+{/* EMOJIS UNDER CARD */}
+{showIcons && (showNFL || showShirt) && (
+  <div
+    style={{
+      marginTop: 4,
+      display: "flex",
+      justifyContent: "center",
+      gap: 10,
+    }}
+  >
+    {showNFL && (
+      <div
+        style={{ position: "relative" }}
+        onMouseEnter={() => setHoveredIcon(`nfl-${p._id}`)}
+        onMouseLeave={() => setHoveredIcon(null)}
+      >
+        <span
+          onClick={() => toggleDeclare(p._id)}
+          style={{ cursor: "pointer", fontSize: 16 }}
+        >
+          🏈
+        </span>
+
+        {hoveredIcon === `nfl-${p._id}` && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "130%",
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "#111",
+              color: "#fff",
+              padding: "8px 10px",
+              borderRadius: 6,
+              fontSize: 12,
+              whiteSpace: "nowrap",
+              zIndex: 50,
+              boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+            }}
+          >
+            Declare for Draft (moves to LEAVES)
+          </div>
+        )}
+      </div>
+    )}
+
+    {showShirt && (
+      <div
+        style={{ position: "relative" }}
+        onMouseEnter={() => setHoveredIcon(`shirt-${p._id}`)}
+        onMouseLeave={() => setHoveredIcon(null)}
+      >
+        <span
+          onClick={() => toggleRedshirt(p)}
+          style={{
+            cursor: "pointer",
+            fontSize: 16,
+            opacity: redshirtOverrideIds.has(p._id) ? 1 : 0.9,
+          }}
+        >
+          👕
+        </span>
+
+        {hoveredIcon === `shirt-${p._id}` && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "130%",
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "#111",
+              color: "#fff",
+              padding: "8px 10px",
+              borderRadius: 6,
+              fontSize: 12,
+              whiteSpace: "nowrap",
+              zIndex: 50,
+              boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+            }}
+          >
+            Project Redshirt (moves player down a class)
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+)}
 
 </div>
-                            {/* ICON ROW (2027 only) — NFL + Shirt side-by-side */}
-                            {showIcons && (showNFL || showShirt) && (
-                              <div
-                                style={{
-                                  marginTop: 6,
-                                  display: "flex",
-                                  justifyContent: "center",
-                                  gap: 10,
-                                }}
-                              >
-                                {showNFL && (
-                                  <span
-                                    title="Declare / leave in 2027"
-                                    onClick={() => toggleDeclare(p._id)}
-                                    style={{
-                                      cursor: "pointer",
-                                      userSelect: "none",
-                                      fontSize: 16,
-                                      lineHeight: "16px",
-                                    }}
-                                  >
-                                    🏈
-                                  </span>
-                                )}
-
-                                {showShirt && (
-                                  <span
-                                    title="Project redshirt (toggle)"
-                                    onClick={() => toggleRedshirt(p)}
-                                    style={{
-                                      cursor: "pointer",
-                                      userSelect: "none",
-                                      fontSize: 16,
-                                      lineHeight: "16px",
-                                      opacity: redshirtOverrideIds.has(p._id)
-                                        ? 1
-                                        : 0.9,
-                                    }}
-                                  >
-                                    👕
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        
                       );
                     })}
                   </div>
@@ -904,7 +970,69 @@ border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
   </div>
 
 </div>
+{/* ===== TEAM ARTICLES ===== */}
+{teamArticles.length > 0 && (
+  <div
+    style={{
+      maxWidth: 900,
+      margin: "0 auto 30px",
+      border: `3px solid ${secondary}`,
+      borderRadius: 10,
+      overflow: "hidden",
+      background: "#fff",
+    }}
+  >
+    {/* HEADER */}
+    <div
+      style={{
+        background: primary,
+        color: "#fff",
+        fontWeight: 900,
+        padding: "12px",
+        textAlign: "center",
+        fontSize: 18,
+        letterSpacing: 1,
+      }}
+    >
+      IN THE NEWS
+    </div>
 
+    {/* ARTICLES */}
+    {teamArticles
+      .slice()
+      .sort((a, b) => b.updatedAt?.seconds - a.updatedAt?.seconds)
+      .map((a) => (
+        <div
+          key={a.id}
+          style={{
+            padding: "12px 16px",
+            borderTop: "1px solid #eee",
+            fontWeight: 800,
+            fontSize: 18,
+          }}
+        >
+          <a
+            href={`/news/${a.slug}`}
+            style={{
+              color: primary,
+              textDecoration: "underline",
+            }}
+          >
+            <>
+  <span style={{ marginRight: 6 }}>
+    {a.updatedAt?.toDate?.().toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    })}
+    :
+  </span>
+  {a.title}
+</>
+          </a>
+        </div>
+      ))}
+  </div>
+)}
       {/* ===== VIEW TOGGLE (kept) ===== */}
       <div className="mb-10 text-center relative">
         <button

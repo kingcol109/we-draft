@@ -23,6 +23,7 @@ export default function Home() {
   const [featured, setFeatured] = useState([]);
   const [recentEvals, setRecentEvals] = useState([]);
   const [news, setNews] = useState([]);
+  const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const { user, login } = useAuth();
 
@@ -110,7 +111,13 @@ useEffect(() => {
         snap.docs.map((d) => ({ id: d.id, ...d.data() }))
       );
 
-      setNews(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setNews(
+  snap.docs.map((d) => ({
+    id: d.id,
+    ...d.data(),
+    type: "news", // 🔥 important
+  }))
+);
     } catch (err) {
       console.error("Error fetching news:", err);
     }
@@ -118,7 +125,32 @@ useEffect(() => {
 
   fetchNews();
 }, []);
+useEffect(() => {
+  const fetchArticles = async () => {
+    try {
+      const q = query(
+        collection(db, "articles"),
+        where("status", "==", "published"),
+        orderBy("updatedAt", "desc"),
+        limit(5)
+      );
 
+      const snap = await getDocs(q);
+
+      setArticles(
+        snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+          type: "article", // 🔥 important
+        }))
+      );
+    } catch (err) {
+      console.error("Error fetching articles:", err);
+    }
+  };
+
+  fetchArticles();
+}, []);
   /* =========================
      Fetch recent evaluations
      ========================= */
@@ -196,7 +228,21 @@ useEffect(() => {
     month: "long",
     day: "numeric",
   });
+const combinedNews = [...news, ...articles]
+  .sort((a, b) => {
+    const aTime =
+      a.updatedAt?.seconds ||
+      a.publishedAt?.seconds ||
+      0;
 
+    const bTime =
+      b.updatedAt?.seconds ||
+      b.publishedAt?.seconds ||
+      0;
+
+    return bTime - aTime;
+  })
+  .slice(0, 5);
   return (
     <>
       <Helmet>
@@ -295,17 +341,17 @@ useEffect(() => {
 
     {/* Body */}
     <div className="divide-y">
-      {news.length > 0 ? (
-        news.map((n) => (
+{combinedNews.length > 0 ? (
+  combinedNews.map((n) => (
           <div key={n.id} className="p-4 hover:bg-[#f9fbff] transition">
-           {n.long && n.slug ? (
+{n.slug ? (
   <Link
     to={`/news/${n.slug}`}
     className="font-bold text-sm hover:underline leading-snug"
     style={{ color: SITE_BLUE }}
   >
     <span className="mr-1 font-extrabold">
-      {n.publishedAt
+      {(n.publishedAt || n.updatedAt)
         ?.toDate?.()
         .toLocaleDateString(undefined, {
           month: "short",
@@ -318,7 +364,7 @@ useEffect(() => {
 ) : (
   <div className="font-bold text-sm text-gray-500 leading-snug">
     <span className="mr-1 font-extrabold">
-      {n.publishedAt
+      {(n.publishedAt || n.updatedAt)
         ?.toDate?.()
         .toLocaleDateString(undefined, {
           month: "short",

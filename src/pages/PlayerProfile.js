@@ -273,21 +273,47 @@ useEffect(() => {
 
   const fetchPlayerNews = async () => {
     try {
-      const q = query(
+      // 🔵 NEWS
+      const newsQuery = query(
         collection(db, "news"),
         where("active", "==", true),
         where("slugs", "array-contains", slug),
         orderBy("publishedAt", "desc")
       );
 
-      const snap = await getDocs(q);
+      const newsSnap = await getDocs(newsQuery);
 
-      setPlayerNews(
-        snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        }))
+      const newsItems = newsSnap.docs.map((d) => ({
+        id: d.id,
+        type: "news",
+        ...d.data(),
+      }));
+
+      // 🟡 ARTICLES
+      const articleQuery = query(
+        collection(db, "articles"),
+        where("status", "==", "published"),
+        where("slugs", "array-contains", slug),
+        orderBy("updatedAt", "desc")
       );
+
+      const articleSnap = await getDocs(articleQuery);
+
+      const articleItems = articleSnap.docs.map((d) => ({
+        id: d.id,
+        type: "article",
+        ...d.data(),
+        publishedAt: d.data().updatedAt, // normalize
+      }));
+
+      // 🔥 MERGE + SORT
+      const combined = [...newsItems, ...articleItems].sort((a, b) => {
+        const aTime = a.publishedAt?.toMillis?.() || 0;
+        const bTime = b.publishedAt?.toMillis?.() || 0;
+        return bTime - aTime;
+      });
+
+      setPlayerNews(combined);
     } catch (err) {
       console.error("Error fetching player news:", err);
       setPlayerNews([]);

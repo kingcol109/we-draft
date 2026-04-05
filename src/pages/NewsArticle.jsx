@@ -13,6 +13,45 @@ const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
 export default function NewsArticle() {
+  useEffect(() => {
+  const style = document.createElement("style");
+
+  style.innerHTML = `
+    .article-content a {
+      color: #f6a21d;
+      font-weight: 600;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .article-content a:hover {
+      color: #d48806;
+      text-decoration: none;
+    }
+      .article-content p {
+  margin-bottom: 16px;
+}
+
+.article-content strong {
+  font-weight: 700;
+}
+
+.article-content h1,
+.article-content h2,
+.article-content h3 {
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+  .article-content {
+  max-width: 700px;
+  margin: 0 auto;
+}
+  `;
+
+  document.head.appendChild(style);
+
+  return () => document.head.removeChild(style);
+}, []);
   const { id } = useParams(); // id = ArticleSlug
   const [article, setArticle] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -20,20 +59,38 @@ export default function NewsArticle() {
   useEffect(() => {
     const fetchArticle = async () => {
       try {
-        const q = query(
-          collection(db, "news"),
-          where("slug", "==", id),
-          where("active", "==", true)
-        );
+// 🔵 TRY NEWS FIRST
+const newsQuery = query(
+  collection(db, "news"),
+  where("slug", "==", id),
+  where("active", "==", true)
+);
 
-        const snap = await getDocs(q);
+const newsSnap = await getDocs(newsQuery);
 
-        if (!snap.empty) {
-          setArticle({
-            id: snap.docs[0].id,
-            ...snap.docs[0].data(),
-          });
-        }
+if (!newsSnap.empty) {
+  setArticle({
+    id: newsSnap.docs[0].id,
+    ...newsSnap.docs[0].data(),
+  });
+  return;
+}
+
+// 🟡 FALLBACK TO ARTICLES
+const articleQuery = query(
+  collection(db, "articles"),
+  where("slug", "==", id),
+  where("status", "==", "published")
+);
+
+const articleSnap = await getDocs(articleQuery);
+
+if (!articleSnap.empty) {
+  setArticle({
+    id: articleSnap.docs[0].id,
+    ...articleSnap.docs[0].data(),
+  });
+}
       } catch (err) {
         console.error("Error loading article:", err);
       } finally {
@@ -52,7 +109,7 @@ export default function NewsArticle() {
     );
   }
 
-  if (!article || !article.long) {
+if (!article) {
     return (
       <p className="text-center mt-20">
         Article not found.
@@ -60,9 +117,11 @@ export default function NewsArticle() {
     );
   }
 
-  const description =
-    article.summary ||
-    article.long.slice(0, 160).replace(/\n/g, " ");
+const rawText =
+  article.summary ||
+  (article.content || article.long || "").replace(/<[^>]+>/g, "");
+
+const description = rawText.slice(0, 160);
 
   const canonicalUrl = `https://we-draft.com/news/${article.slug}`;
 
@@ -119,26 +178,67 @@ export default function NewsArticle() {
             </div>
 
             <div className="p-6">
-              <div className="mb-4 flex justify-end">
-                <Link
-                  to="/news"
-                  className="px-4 py-2 rounded-lg font-extrabold uppercase text-sm hover:underline"
-                  style={{
-                    backgroundColor: SITE_GOLD,
-                    color: SITE_BLUE,
-                  }}
-                >
-                  News
-                </Link>
-              </div>
-
-              <h1 className="text-3xl font-extrabold text-[#0055a5] mb-4">
-                {article.title}
-              </h1>
-
-              <p className="text-gray-800 leading-relaxed whitespace-pre-line">
-                {article.long}
-              </p>
+<div
+  style={{
+    position: "relative",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: "20px",
+  }}
+>
+  {/* TITLE */}
+  <h1
+    className="text-3xl font-extrabold"
+    style={{
+      color: SITE_BLUE,
+      textAlign: "center",
+    }}
+  >
+    {article.title}
+  </h1>
+{article.author && (
+  <div
+    style={{
+      textAlign: "center",
+      fontWeight: 700,
+      fontSize: 16,
+      marginTop: 6,
+      color: "#444",
+    }}
+  >
+    By {article.author}
+  </div>
+)}
+  {/* NEWS BUTTON */}
+  <Link
+    to="/news"
+    style={{
+      position: "absolute",
+      right: 0,
+      backgroundColor: SITE_GOLD,
+      color: SITE_BLUE,
+      fontWeight: "bold",
+      padding: "6px 12px",
+      borderRadius: "8px",
+      textTransform: "uppercase",
+      fontSize: "12px",
+    }}
+  >
+    News
+  </Link>
+</div>
+              
+<div
+  className="text-gray-800 article-content"
+  style={{
+    fontSize: "18px",
+    lineHeight: "1.8",
+  }}
+  dangerouslySetInnerHTML={{
+    __html: article.content || article.long,
+  }}
+/>
 
               {/* Mentioned Players */}
               {Array.isArray(article.slugs) && article.slugs.length > 0 && (

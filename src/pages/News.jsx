@@ -17,31 +17,60 @@ export default function News() {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchNews = async () => {
-      try {
-        const q = query(
-          collection(db, "news"),
-          where("active", "==", true),
-          orderBy("publishedAt", "desc")
-        );
+useEffect(() => {
+  const fetchNews = async () => {
+    try {
+      // 🔵 NEWS (existing)
+      const newsQuery = query(
+        collection(db, "news"),
+        where("active", "==", true),
+        orderBy("publishedAt", "desc")
+      );
 
-        const snap = await getDocs(q);
-        setNews(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-      } catch (err) {
-        console.error("Error fetching news:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
+      const newsSnap = await getDocs(newsQuery);
 
-    fetchNews();
-  }, []);
+      const newsItems = newsSnap.docs.map((d) => ({
+        id: d.id,
+        type: "news",
+        ...d.data(),
+      }));
+
+      // 🟡 ARTICLES (NEW)
+      const articlesQuery = query(
+        collection(db, "articles"),
+        where("status", "==", "published"),
+        orderBy("updatedAt", "desc")
+      );
+
+      const articlesSnap = await getDocs(articlesQuery);
+
+      const articleItems = articlesSnap.docs.map((d) => ({
+        id: d.id,
+        type: "article",
+        title: d.data().title,
+        slug: d.data().slug,
+        summary: "",
+        publishedAt: d.data().updatedAt,
+        long: true,
+      }));
+
+      // 🔥 MERGE + SORT
+      const combined = [...newsItems, ...articleItems].sort((a, b) => {
+        const aTime = a.publishedAt?.toMillis?.() || 0;
+        const bTime = b.publishedAt?.toMillis?.() || 0;
+        return bTime - aTime;
+      });
+
+      setNews(combined);
+    } catch (err) {
+      console.error("Error fetching news:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchNews();
+}, []);
 
   return (
     <>
