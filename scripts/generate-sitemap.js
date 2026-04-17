@@ -87,6 +87,13 @@ async function getAllNews() {
   const snapshot = await getDocs(q);
   return snapshot.docs;
 }
+
+async function getAllArticles() {
+  const colRef = collection(db, "articles");
+  const q = query(colRef, where("status", "==", "published"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs;
+}
 async function getAllTeams() {
   const colRef = collection(db, "schools");
   const snapshot = await getDocs(colRef);
@@ -124,13 +131,14 @@ async function generateSitemap() {
   /* =========================
      NEWS ARTICLES
   ========================= */
-  console.log("🔄 Fetching news articles from Firestore...");
+console.log("🔄 Fetching news articles from Firestore...");
   const allNews = await getAllNews();
-  console.log(`✅ Found ${allNews.length} articles.`);
+  const allArticles = await getAllArticles();
+  console.log(`✅ Found ${allNews.length} news + ${allArticles.length} articles.`);
 
   const newsPages = [];
 
-  for (const doc of allNews) {
+  for (const doc of [...allNews, ...allArticles]) {
     const data = doc.data();
     const slug = data?.slug;
 
@@ -140,15 +148,20 @@ async function generateSitemap() {
     }
 
     const lastmod =
-      data.publishedAt?.toDate?.()
+      data.updatedAt?.toDate?.()
+        ? data.updatedAt.toDate().toISOString().split("T")[0]
+        : data.publishedAt?.toDate?.()
         ? data.publishedAt.toDate().toISOString().split("T")[0]
         : today;
 
-    newsPages.push({
-      path: `/news/${slug}`,
-      priority: 0.6,
-      lastmod,
-    });
+    // avoid duplicates if same slug exists in both collections
+    if (!newsPages.find(p => p.path === `/news/${slug}`)) {
+      newsPages.push({
+        path: `/news/${slug}`,
+        priority: 0.8, // bumped up — articles are high value SEO
+        lastmod,
+      });
+    }
   }
 /* =========================
    TEAM PAGES
@@ -209,7 +222,39 @@ ${urls}
   /* =========================
      WRITE FILE
   ========================= */
-  fs.writeFileSync("public/sitemap.xml", xml);
+// Split into chunks of 1000
+  const chunkSize = 1000;
+  const allUrls = [...staticPages, ...teamPages, ...playerPages, ...newsPages];
+  const chunks = [];
+  
+  for (let i = 0; i < allUrls.length; i += chunkSize) {
+    chunks.push(allUrls.slice(i, i + chunkSize));
+  }
+
+  chunks.forEach((chunk, idx) => {
+    const chunkXml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${chunk.map(u => `
+  <url>
+    <loc>${baseUrl}${u.path}</loc>
+    <lastmod>${u.lastmod}</lastmod>
+    <priority>${u.priority}</priority>
+  </url>`).join("")}
+</urlset>`;
+    fs.writeFileSync(`public/sitemap-${idx + 1}.xml`, chunkXml);
+  });
+
+  // Write sitemap index
+  const sitemapIndex = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${chunks.map((_, idx) => `
+  <sitemap>
+    <loc>${baseUrl}/sitemap-${idx + 1}.xml</loc>
+    <lastmod>${today}</lastmod>
+  </sitemap>`).join("")}
+</sitemapindex>`;
+
+  fs.writeFileSync("public/sitemap.xml", sitemapIndex);
 
 console.log(
   `✅ sitemap.xml generated

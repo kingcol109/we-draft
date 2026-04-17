@@ -166,56 +166,31 @@ const description = rawText.slice(0, 160);
             className="border-4 rounded-xl mb-6"
             style={{ borderColor: SITE_GOLD }}
           >
-            <div
-              className="rounded-t-lg px-6 py-4 text-center font-extrabold text-2xl"
-              style={{ backgroundColor: SITE_BLUE, color: "white" }}
-            >
-              {article.publishedAt?.toDate?.().toLocaleDateString(undefined, {
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}
-            </div>
-
-            <div className="p-6">
 <div
+  className="rounded-t-lg px-6 py-4 font-extrabold text-2xl"
   style={{
-    position: "relative",
+    backgroundColor: SITE_BLUE,
+    color: "white",
     display: "flex",
-    justifyContent: "center",
     alignItems: "center",
-    marginBottom: "20px",
   }}
 >
-  {/* TITLE */}
-  <h1
-    className="text-3xl font-extrabold"
-    style={{
-      color: SITE_BLUE,
-      textAlign: "center",
-    }}
-  >
-    {article.title}
-  </h1>
-{article.author && (
-  <div
-    style={{
-      textAlign: "center",
-      fontWeight: 700,
-      fontSize: 16,
-      marginTop: 6,
-      color: "#444",
-    }}
-  >
-    By {article.author}
+  {/* LEFT SPACER (keeps date centered) */}
+  <div style={{ width: "80px" }} />
+
+  {/* DATE */}
+  <div style={{ flex: 1, textAlign: "center" }}>
+    {article.publishedAt?.toDate?.().toLocaleDateString(undefined, {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    })}
   </div>
-)}
+
   {/* NEWS BUTTON */}
   <Link
     to="/news"
     style={{
-      position: "absolute",
-      right: 0,
       backgroundColor: SITE_GOLD,
       color: SITE_BLUE,
       fontWeight: "bold",
@@ -227,6 +202,38 @@ const description = rawText.slice(0, 160);
   >
     News
   </Link>
+</div>
+
+            <div className="p-6">
+<div style={{ position: "relative", marginBottom: "20px" }}>
+  {/* TITLE */}
+  <h1
+    className="text-3xl font-extrabold"
+    style={{
+      color: SITE_BLUE,
+      textAlign: "center",
+      marginBottom: "6px",
+    }}
+  >
+    {article.title}
+  </h1>
+
+  {/* AUTHOR */}
+  {article.author && (
+    <div
+      style={{
+        textAlign: "center",
+        fontWeight: 700,
+        fontSize: 16,
+        color: "#444",
+        marginBottom: "10px",
+      }}
+    >
+      By {article.author}
+    </div>
+  )}
+
+
 </div>
               
 <div
@@ -240,34 +247,6 @@ const description = rawText.slice(0, 160);
   }}
 />
 
-              {/* Mentioned Players */}
-              {Array.isArray(article.slugs) && article.slugs.length > 0 && (
-                <div className="mt-8 pt-4 border-t">
-                  <h3 className="font-extrabold text-lg mb-2">
-                    Mentioned Players:
-                  </h3>
-
-                  <ul className="space-y-1">
-                    {article.slugs.map((slug) => {
-                      const name = slug
-                        .replace(/-\d{4}.*/, "")
-                        .replace(/-/g, " ")
-                        .replace(/\b\w/g, (l) => l.toUpperCase());
-
-                      return (
-                        <li key={slug}>
-                          <Link
-                            to={`/player/${slug}`}
-                            className="font-bold text-[#0055a5] hover:underline"
-                          >
-                            {name}
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
             </div>
           </div>
 

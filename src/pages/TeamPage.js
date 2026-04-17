@@ -1,6 +1,8 @@
 import { useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
+import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
+import { getAuth } from "firebase/auth";
 import {
   doc,
   getDoc,
@@ -8,6 +10,9 @@ import {
   query,
   where,
   getDocs,
+  setDoc,
+  updateDoc,
+  increment,
 } from "firebase/firestore";
 
 export default function TeamPage() {
@@ -30,8 +35,75 @@ const [teamArticles, setTeamArticles] = useState([]);
   const [declaredIds, setDeclaredIds] = useState(() => new Set()); // moved to LEAVES
   const [redshirtOverrideIds, setRedshirtOverrideIds] = useState(() => new Set()); // force RS "Yes" for projection + move down a class
 const [hoveredPlayer, setHoveredPlayer] = useState(null);
-const [hoveredGrade, setHoveredGrade] = useState(null);
 const [hoveredIcon, setHoveredIcon] = useState(null);
+const [userVotes, setUserVotes] = useState({});
+useEffect(() => {
+  const auth = getAuth();
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const loadVotes = async () => {
+    const rosterRef = doc(db, "rosters", teamId.toLowerCase());
+    const rosterSnap = await getDoc(rosterRef);
+    const rosterPlayers = rosterSnap.exists() ? rosterSnap.data().players || [] : [];
+
+    const votesMap = {};
+    await Promise.all(
+      rosterPlayers.map(async (p, idx) => {
+        const voteId = getVoteId({ ...p, _id: idx });
+        try {
+          const userVoteRef = doc(db, "votes", voteId, "users", user.uid);
+          const snap = await getDoc(userVoteRef);
+          if (snap.exists()) {
+            votesMap[voteId] = snap.data().value;
+          }
+        } catch {}
+      })
+    );
+    setUserVotes(votesMap);
+  };
+
+  loadVotes();
+}, [teamId]);
+
+const getVoteId = (p) => {
+  const normalize = (str) =>
+    (str || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .trim()
+      .replace(/\s+/g, "-");
+
+  return `${normalize(p.First)}-${normalize(p.Last)}-${normalize(p.School)}`;
+};
+const handleVote = async (p, value) => {
+  const auth = getAuth();
+  const user = auth.currentUser;
+
+if (!user) {
+    const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
+    const auth2 = getAuth();
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth2, provider);
+    } catch {
+      return;
+    }
+  }
+
+  const voteId = getVoteId(p);
+  const oldValue = userVotes[voteId] || 0;
+  const newValue = oldValue === value ? 0 : value;
+  const delta = newValue - oldValue;
+
+  const voteRef = doc(db, "votes", voteId);
+  const userVoteRef = doc(db, "votes", voteId, "users", user.uid);
+
+  await setDoc(voteRef, { voteScore: increment(delta) }, { merge: true });
+  await setDoc(userVoteRef, { value: newValue });
+
+  setUserVotes((prev) => ({ ...prev, [voteId]: newValue }));
+};
 const formatTeamId = (str) => {
   const lower = str.toLowerCase();
 
@@ -326,21 +398,7 @@ const getGradeColor = (grade) => {
 
   return "#111";
 };
-const gradeDescriptions = {
-  "5": "Player is one of the best in college football and can make an impact on any play. 'First round or early day 2 talent.'",
-  "4": "Player has proven to be a high-end starter. 'Day 2 talent.'",
-  "3": "Player has played a lot and/or can be trusted to contribute. 'Day 3 talent.'",
-  "2": "Player has played some and/or is depth.",
-  "1": "Player has not played much.",
 
-  "A+": "Player has rare talent and is a bluechip prospect according to We-Draft.com",
-  "A": "Player has the talent to make an impact sooner than later. '5-Star.'",
-  "B": "Player has multiple traits that will help him contribute early. '4-Star.'",
-  "C": "Player has potential but needs some time before he is ready to see the field. '3-Star.'",
-  "D": "Player is a ways off from contributing.",
-
-  "W": "Walk-on: Player is not on scholarship."
-};
   // Leaves list (2027 mode only): includes aged seniors + declared
   const leavesIn2027 = useMemo(() => {
     if (rosterYearMode !== 2027) return [];
@@ -555,74 +613,104 @@ alignItems: "center",
   }}
 >
 
-{/* GRADE INDICATOR */}
+{/* GRADE INDICATOR WITH VOTING */}
 {p.Grade && (
   <div
-    onMouseEnter={() => setHoveredGrade(p._id)}
-    onMouseLeave={() => setHoveredGrade(null)}
 style={{
   display: "flex",
+  flexDirection: "column",
   alignItems: "center",
-  justifyContent: "center",
-  fontWeight: 900,
-  fontSize: 18,
-
-  // 🔥 A+ SPECIAL STYLING
-color: p.Grade === "A+" ? "#ffffff" : getGradeColor(p.Grade),
-background: p.Grade === "A+" ? "#f6a21d" : "#ffffff",
-
-  padding: "0 10px",
   margin: "-10px 0 -8px -10px",
-  borderRadius: "7px 0 0 7px",
-  borderRight: `3px solid ${secondary}`,
-  minWidth: 30,
-  position: "relative"
+  alignSelf: "stretch",
 }}
   >
-    {p.Grade === "A+" ? (
-  <>
-    <span>A</span>
-    <span
-      style={{
-        fontSize: 12,
-        marginLeft: 1,
-        position: "relative",
-        top: -2,
-      }}
-    >
-      +
-    </span>
-  </>
-) : (
-  p.Grade
-)}
 
-    {hoveredGrade === p._id && (
-      <div
-        style={{
-          position: "absolute",
-          bottom: "120%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "#111",
-          color: "#fff",
-          padding: "10px 12px",
-          borderRadius: 6,
-          fontSize: 13,
-          width: 240,
-          textAlign: "left",
-          zIndex: 60,
-          boxShadow: "0 6px 14px rgba(0,0,0,0.4)",
-          lineHeight: 1.4
-        }}
-      >
-        <b>{p.Grade}</b>: {gradeDescriptions[p.Grade]}
-      </div>
-      
+
+    {/* GRADE BOX */}
+    <div
+style={{
+  display: "flex",
+  alignItems: "stretch",
+  justifyContent: "flex-start",
+  fontWeight: 900,
+  fontSize: 18,
+  color: p.Grade === "A+" ? "#ffffff" : getGradeColor(p.Grade),
+  background: p.Grade === "A+" ? "#f6a21d" : "#ffffff",
+  padding: 0,
+  width: 28,
+  minWidth: 28,
+  height: "100%",
+  borderRadius: "7px 0 0 7px",
+  borderRight: `3px solid ${secondary}`,
+  position: "relative",
+
+}}
+    >
+<div
+style={{
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "space-between",
+  width: "100%",
+  minHeight: 52,
+  padding: "4px 0",
+  lineHeight: 1,
+}}
+>
+  {/* ▲ */}
+<span
+    onClick={() => handleVote(p, 1)}
+    style={{
+      cursor: "pointer",
+      fontSize: 10,
+      color: userVotes[getVoteId(p)] === 1 ? "#00c94f" : "#aaa",
+      fontWeight: userVotes[getVoteId(p)] === 1 ? 900 : 400,
+      marginBottom: -2,
+    }}
+  >
+    ▲
+  </span>
+
+  {/* GRADE */}
+  <div style={{ display: "flex", alignItems: "center" }}>
+    {p.Grade === "A+" ? (
+      <>
+        <span>A</span>
+        <span
+          style={{
+            fontSize: 10,
+            marginLeft: 1,
+            position: "relative",
+            top: -2,
+          }}
+        >
+          +
+        </span>
+      </>
+    ) : (
+      p.Grade
     )}
+  </div>
+
+  {/* ▼ */}
+<span
+    onClick={() => handleVote(p, -1)}
+    style={{
+      cursor: "pointer",
+      fontSize: 9,
+      color: userVotes[getVoteId(p)] === -1 ? "#ff4444" : "#aaa",
+      fontWeight: userVotes[getVoteId(p)] === -1 ? 900 : 400,
+      lineHeight: 1,
+    }}
+  >
+    ▼
+  </span>
+</div>
+
+    </div>
 
   </div>
-  
 )}
 
 {/* NAME + POPUP */}
@@ -895,9 +983,34 @@ border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
     );
   };
 
-  if (loading) return <p>Loading team data...</p>;
+if (loading) return <p>Loading team data...</p>;
 
   return (
+    <>
+    <Helmet>
+      <title>{team?.School} {team?.Mascot} 2026 Roster & Draft Prospects | We-Draft</title>
+      <meta
+        name="description"
+        content={`Full 2026 roster, player grades, and NFL draft prospects for the ${team?.School} ${team?.Mascot}. See which players are projected for the 2027 NFL Draft.`}
+      />
+      <link rel="canonical" href={`https://we-draft.com/team/${teamId}`} />
+      <meta property="og:title" content={`${team?.School} ${team?.Mascot} 2026 Roster | We-Draft`} />
+      <meta property="og:description" content={`NFL draft prospects and full roster breakdown for ${team?.School}.`} />
+      <meta property="og:url" content={`https://we-draft.com/team/${teamId}`} />
+      <script type="application/ld+json">
+        {JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "SportsTeam",
+          "name": `${team?.School} ${team?.Mascot}`,
+          "sport": "American Football",
+          "url": `https://we-draft.com/team/${teamId}`,
+          "memberOf": {
+            "@type": "SportsOrganization",
+            "name": team?.Conference || "NCAA"
+          }
+        })}
+      </script>
+    </Helmet>
     <div className="max-w-7xl mx-auto p-6 pb-40">
 {/* ===== HEADER WITH LOGOS ===== */}
 <div
@@ -1117,6 +1230,118 @@ border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
     <div style={{ fontSize: 14 }}>Projection</div>
   </button>
 
+</div>
+
+{/* PLAYER GRADES BUTTON */}
+<div style={{ display: "flex", justifyContent: "center", marginBottom: 30 }}>
+  <div style={{ position: "relative", display: "inline-block" }}>
+    <button
+      style={{
+        background: "#fff",
+        color: primary,
+        border: `3px solid ${secondary}`,
+        padding: "10px 28px",
+        borderRadius: 10,
+        fontWeight: 900,
+        fontSize: 16,
+        cursor: "pointer",
+        letterSpacing: 0.5,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.nextSibling.style.display = "block";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.nextSibling.style.display = "none";
+      }}
+    >
+      Player Grades ▾
+    </button>
+
+    <div
+      style={{
+        display: "none",
+        position: "absolute",
+        top: "110%",
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: "#fff",
+        border: `3px solid ${secondary}`,
+        borderRadius: 10,
+        padding: "20px 24px",
+        width: 420,
+        zIndex: 100,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+        textAlign: "left",
+        fontSize: 14,
+        lineHeight: 1.6,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.display = "block";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.display = "none";
+      }}
+    >
+
+      {/* PRODUCTION GRADES */}
+      <div style={{ fontWeight: 900, fontSize: 16, color: primary, marginBottom: 4 }}>
+        Production Grades <span style={{ fontWeight: 400, fontSize: 13 }}>(number system)</span>
+      </div>
+      <div style={{ marginBottom: 8, color: "#444", fontSize: 13 }}>
+        Given by <strong>We-Draft.com</strong> editors based on a player's experience, production, and skillset. These reflect a player's degree of production at the college level — draft grades are given only to provide a sense of scale.
+      </div>
+
+      {[
+        { grade: "5", color: "#0026ff", desc: 'Player is one of the best in the country and can make an impact on any given play. "First or early second round talent"' },
+        { grade: "4", color: "#00a83e", desc: 'Player has proven to be a high-end starter. "Day 2 talent"' },
+        { grade: "3", color: "#eab308", desc: 'Player has played a lot and can be trusted to contribute. "Day 3 talent"' },
+        { grade: "2", color: "#f97316", desc: "Player has played some and/or is depth." },
+        { grade: "1", color: "#ef4444", desc: "Player has not played much." },
+        { grade: "W", color: "#000", desc: "Walk-on. Player is not on scholarship." },
+      ].map(({ grade, color, desc }) => (
+        <div key={grade} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
+          <span style={{ fontWeight: 900, color, minWidth: 20, fontSize: 15 }}>{grade}</span>
+          <span style={{ color: "#333", fontSize: 13 }}>{desc}</span>
+        </div>
+      ))}
+
+      {/* DIVIDER */}
+      <div style={{ borderTop: `2px solid ${secondary}`, margin: "14px 0" }} />
+
+      {/* DEVELOPMENT GRADES */}
+      <div style={{ fontWeight: 900, fontSize: 16, color: primary, marginBottom: 4 }}>
+        Development Grades <span style={{ fontWeight: 400, fontSize: 13 }}>(letter system)</span>
+      </div>
+      <div style={{ marginBottom: 8, color: "#444", fontSize: 13 }}>
+        Given to players with 3+ years of eligibility remaining, based on recruiting rankings, high school film, and college experience. A 3-star player can be elevated if he played well in limited action. A player who plays a lot as an underclassman will receive a production grade instead.
+      </div>
+
+      {[
+        { grade: "A+", color: "#f6a21d", desc: 'Player has rare talent and is a bluechip prospect according to We-Draft.com' },
+        { grade: "A", color: "#00d9ff", desc: 'Player has the talent to make an impact sooner than later. "5-Star"' },
+        { grade: "B", color: "#dc00f0", desc: 'Player has multiple traits that will help him contribute early. "4-Star"' },
+        { grade: "C", color: "#a74300", desc: 'Player has potential but needs some time before he is ready to see the field. "3-Star"' },
+{ grade: "D", color: "#850000", desc: "Player needs a lot of time before he can see the field." },
+      ].map(({ grade, color, desc }) => (
+        <div key={grade} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
+          <span style={{ fontWeight: 900, color, minWidth: 20, fontSize: 15 }}>{grade}</span>
+          <span style={{ color: "#333", fontSize: 13 }}>{desc}</span>
+        </div>
+      ))}
+
+      {/* DIVIDER */}
+      <div style={{ borderTop: `2px solid ${secondary}`, margin: "14px 0" }} />
+
+      {/* COMMUNITY VOTES */}
+      <div style={{ fontWeight: 900, fontSize: 16, color: primary, marginBottom: 6 }}>
+        Community Votes
+      </div>
+      <div style={{ color: "#444", fontSize: 13, lineHeight: 1.6 }}>
+        Vote on any player that you think <strong>We-Draft.com</strong> is underrating or overrating. If a player receives enough votes one way or the other, we will change their ranking. Just sign in to your <strong>We-Draft.com</strong> account!
+      </div>
+
+    </div>
+  </div>
 </div>
 
           {renderSection(OFFENSE_POS, "OFFENSE")}
@@ -1454,6 +1679,7 @@ border: p.Grade === "A+" ? "2px solid #f6a21d" : "none",
     )}
   </div>
 )}
-    </div>
+</div>
+    </>
   );
 }

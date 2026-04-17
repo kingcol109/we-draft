@@ -17,6 +17,48 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Extension } from "@tiptap/core";
+
+const FontSize = Extension.create({
+  name: "fontSize",
+
+  addOptions() {
+    return {
+      types: ["textStyle"],
+    };
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          fontSize: {
+            default: null,
+            parseHTML: (element) =>
+              element.style.fontSize?.replace("px", ""),
+            renderHTML: (attributes) => {
+              if (!attributes.fontSize) return {};
+              return {
+                style: `font-size: ${attributes.fontSize}px`,
+              };
+            },
+          },
+        },
+      },
+    ];
+  },
+
+  addCommands() {
+    return {
+      setFontSize:
+        (size) =>
+        ({ chain }) =>
+          chain().setMark("textStyle", { fontSize: size }).run(),
+    };
+  },
+});
 
 export default function EditArticle() {
   const { id } = useParams();
@@ -26,6 +68,7 @@ export default function EditArticle() {
   const [priority, setPriority] = useState(2);
   const [slug, setSlug] = useState("");
   const [author, setAuthor] = useState("");
+  const [publishedAt, setPublishedAt] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [players, setPlayers] = useState([]);
@@ -40,12 +83,14 @@ export default function EditArticle() {
   const [imageUrl, setImageUrl] = useState("");
 
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Underline,
-      Link.configure({ openOnClick: false }),
-      Image,
-    ],
+extensions: [
+  StarterKit,
+  Underline,
+  Link.configure({ openOnClick: false }),
+  Image,
+  TextStyle,
+  FontSize, // ✅ ADD
+],
     content: "",
   });
 
@@ -65,6 +110,11 @@ export default function EditArticle() {
         setPriority(data.priority || 2);
         setSlug(data.slug || "");
 setAuthor(data.author || "");
+setPublishedAt(
+  data.publishedAt?.toDate
+    ? data.publishedAt.toDate().toISOString().split("T")[0]
+    : ""
+);
         editor.commands.setContent(data.content || "");
       }
 
@@ -115,7 +165,7 @@ setAuthor(data.author || "");
         width: 100%;
         cursor: text;
         outline: none;
-        font-size: 16px;
+        font-size: inherit;
         line-height: 1.6;
       }
 
@@ -223,16 +273,18 @@ const handleSave = async () => {
 
   const teamSlugs = Array.from(teamSet);
 
-  await updateDoc(ref, {
-    title,
-    slug,
-    priority,
-    content: html,
-    status,
-    slugs,      // players
-    teamSlugs,  // teams ✅ NEW
-    updatedAt: serverTimestamp(),
-  });
+await updateDoc(ref, {
+  title,
+  slug,
+  priority,
+  content: html,
+  status,
+  author, // ✅ you were missing this
+  publishedAt: publishedAt ? new Date(publishedAt) : null, // ✅ ADD THIS
+  slugs,
+  teamSlugs,
+  updatedAt: serverTimestamp(),
+});
 
   alert("Saved!");
 };
@@ -265,6 +317,12 @@ const handleSave = async () => {
   placeholder="Author"
   style={input}
 />
+<input
+  type="date"
+  value={publishedAt}
+  onChange={(e) => setPublishedAt(e.target.value)}
+  style={input}
+/>
       <select value={status} onChange={(e) => setStatus(e.target.value)}>
         <option value="draft">Draft</option>
         <option value="pending">Pending</option>
@@ -283,6 +341,27 @@ const handleSave = async () => {
 
       {/* TOOLBAR */}
       <div style={{ marginTop: "10px" }}>
+<button
+  style={btn}
+  onClick={() => {
+    const current = editor.getAttributes("textStyle").fontSize || 18;
+    const next = Math.max(12, Number(current) - 2);
+    editor.chain().focus().setFontSize(next).run();
+  }}
+>
+  A-
+</button>
+
+<button
+  style={{ ...btn, marginLeft: "6px" }}
+  onClick={() => {
+    const current = editor.getAttributes("textStyle").fontSize || 18;
+    const next = Math.min(36, Number(current) + 2);
+    editor.chain().focus().setFontSize(next).run();
+  }}
+>
+  A+
+</button>
         <button style={btn} onClick={() => setShowPlayerPicker(true)}>
           + Player
         </button>
