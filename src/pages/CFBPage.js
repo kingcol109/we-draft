@@ -3,9 +3,15 @@ import { Link } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 
+const SITE_BLUE = "#0055a5";
+const SITE_GOLD = "#f6a21d";
+
 export default function CFBPage() {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 768
+  );
 
   const conferenceOrder = [
     "ACC",
@@ -22,19 +28,19 @@ export default function CFBPage() {
   ];
 
   useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  useEffect(() => {
     async function fetchSchools() {
       try {
         const snapshot = await getDocs(collection(db, "schools"));
-
-        const data = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-
+        const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         const filtered = data.filter((school) =>
           conferenceOrder.includes(school.Conference)
         );
-
         setSchools(filtered);
       } catch (err) {
         console.error("Error fetching schools:", err);
@@ -42,7 +48,6 @@ export default function CFBPage() {
         setLoading(false);
       }
     }
-
     fetchSchools();
   }, []);
 
@@ -53,88 +58,214 @@ export default function CFBPage() {
     return acc;
   }, {});
 
-  if (loading) return <div style={{ padding: 20 }}>Loading teams...</div>;
+  if (loading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+          fontSize: 20,
+          fontWeight: 900,
+          color: SITE_BLUE,
+          fontFamily: "'Arial Black', Arial, sans-serif",
+        }}
+      >
+        Loading Teams...
+      </div>
+    );
+  }
 
   return (
     <div
       style={{
-        padding: "20px",
         maxWidth: "1200px",
         margin: "0 auto",
+        padding: isMobile ? "12px 12px 60px" : "24px 24px 60px",
+        fontFamily: "'Arial Black', Arial, sans-serif",
       }}
     >
-      <h1>College Football Teams</h1>
+      <style>{`
+        .team-card {
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        .team-card:hover {
+          transform: translateY(-5px) scale(1.04);
+          box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+          opacity: 1 !important;
+        }
+        .team-card:hover .team-logo {
+          transform: scale(1.12);
+        }
+        .team-logo {
+          transition: transform 0.18s ease;
+        }
+        .team-card:hover .team-accent {
+          height: 5px !important;
+        }
+        .team-accent {
+          transition: height 0.18s ease;
+        }
+      `}</style>
+      {/* ===== Page Header ===== */}
+      <div className="mb-8">
+        <div
+          style={{
+            fontSize: isMobile ? "22px" : "30px",
+            fontWeight: 900,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            color: SITE_BLUE,
+            marginBottom: "6px",
+          }}
+        >
+          College Football Teams
+        </div>
+        <div
+          style={{
+            height: "3px",
+            backgroundColor: SITE_BLUE,
+            borderRadius: "2px",
+            marginBottom: "4px",
+          }}
+        />
+        <div
+          style={{
+            height: "3px",
+            backgroundColor: SITE_GOLD,
+            borderRadius: "2px",
+          }}
+        />
+      </div>
 
+      {/* ===== Conference Sections ===== */}
       {conferenceOrder.map((conf) => {
         const teams = grouped[conf];
         if (!teams || teams.length === 0) return null;
 
         return (
-          <div key={conf} style={{ marginTop: "30px" }}>
-            {/* Conference Header */}
-            <h2
-              style={{
-                borderBottom: "2px solid #ccc",
-                paddingBottom: "5px",
-              }}
-            >
-              {conf}
-            </h2>
+          <div key={conf} style={{ marginBottom: isMobile ? "28px" : "40px" }}>
 
-            {/* Teams Grid */}
+            {/* Conference header */}
+            <div style={{ marginBottom: isMobile ? "10px" : "14px" }}>
+              <div
+                style={{
+                  fontSize: isMobile ? "16px" : "20px",
+                  fontWeight: 900,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  color: SITE_BLUE,
+                  marginBottom: "5px",
+                }}
+              >
+                {conf}
+              </div>
+              <div
+                style={{
+                  height: "3px",
+                  backgroundColor: SITE_BLUE,
+                  borderRadius: "2px",
+                }}
+              />
+            </div>
+
+            {/* Teams grid */}
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: "12px",
-                marginTop: "15px",
+                gridTemplateColumns: isMobile
+                  ? "repeat(3, 1fr)"
+                  : "repeat(auto-fill, minmax(140px, 1fr))",
+                gap: isMobile ? "8px" : "12px",
               }}
             >
               {teams.map((team) => {
-                const slug = team.School.toLowerCase().replace(/\s+/g, "-");
+                const slug = team.School.toLowerCase()
+                  .replace(/&/g, "and")
+                  .replace(/[^a-z0-9\s]/g, "")
+                  .trim()
+                  .replace(/\s+/g, "-");
+
+                const primary = team.Color1 || SITE_BLUE;
+                const secondary = team.Color2 || SITE_GOLD;
 
                 return (
                   <Link
                     key={team.id}
                     to={`/team/${slug}`}
+                    className="team-card"
                     style={{
-                      padding: "12px",
-                      borderRadius: "10px",
-                      background: "#f5f5f5",
-                      border: `2px solid ${team.Color1 || "#ddd"}`,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: isMobile ? "10px 6px" : "14px 10px",
+                      borderRadius: "8px",
+                      backgroundColor: "#fff",
+                      border: `2px solid ${primary}`,
                       textDecoration: "none",
-                      color: "#000",
                       textAlign: "center",
-                      fontWeight: "500",
-                      transition: "all 0.15s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = "scale(1.03)";
-                      e.currentTarget.style.boxShadow = `0 4px 12px ${
-                        team.Color1 || "#999"
-                      }40`;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = "scale(1)";
-                      e.currentTarget.style.boxShadow = "none";
+                      gap: isMobile ? "5px" : "8px",
                     }}
                   >
                     {/* Logo */}
-                    {team.Logo1 && (
+                    {team.Logo1 ? (
                       <img
                         src={team.Logo1}
                         alt={team.School}
+                        className="team-logo"
                         style={{
-                          width: "40px",
-                          height: "40px",
+                          width: isMobile ? "36px" : "48px",
+                          height: isMobile ? "36px" : "48px",
                           objectFit: "contain",
-                          marginBottom: "6px",
                         }}
+                        loading="lazy"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
                       />
+                    ) : (
+                      <div
+                        style={{
+                          width: isMobile ? "36px" : "48px",
+                          height: isMobile ? "36px" : "48px",
+                          borderRadius: "50%",
+                          backgroundColor: primary,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#fff",
+                          fontSize: isMobile ? "10px" : "12px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {team.School.charAt(0)}
+                      </div>
                     )}
 
-                    {/* Name */}
-                    <div>{team.School}</div>
+                    {/* School name */}
+                    <div
+                      style={{
+                        fontSize: isMobile ? "10px" : "12px",
+                        fontWeight: 900,
+                        color: primary,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {team.School}
+                    </div>
+
+                    {/* Color accent bar */}
+                    <div
+                      className="team-accent"
+                      style={{
+                        width: "100%",
+                        height: "3px",
+                        backgroundColor: secondary,
+                        borderRadius: "2px",
+                      }}
+                    />
                   </Link>
                 );
               })}

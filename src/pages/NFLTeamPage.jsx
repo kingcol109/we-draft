@@ -105,11 +105,13 @@ export default function NFLTeamPage() {
         />
 
         <div style={{ textAlign: "center" }}>
-          <div
+<div
             style={{
-              fontSize: 42,
-              fontWeight: 500,
-              color: team.Color1,
+              fontSize: 28,
+              fontWeight: 700,
+              color: team.Color2,
+              letterSpacing: 6,
+              textTransform: "uppercase",
             }}
           >
             {team.City}
@@ -122,9 +124,27 @@ export default function NFLTeamPage() {
               lineHeight: 1,
               color: team.Color1,
               WebkitTextStroke: `3px ${team.Color2}`,
+              letterSpacing: 2,
+              textTransform: "uppercase",
             }}
           >
             {team.Team}
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 16,
+              fontWeight: 800,
+              color: team.Color1,
+              letterSpacing: 4,
+              textTransform: "uppercase",
+              borderTop: `2px solid ${team.Color2}`,
+              borderBottom: `2px solid ${team.Color2}`,
+              padding: "6px 20px",
+            }}
+          >
+            {team.Conference} · {team.Division}
           </div>
         </div>
 
@@ -133,18 +153,6 @@ export default function NFLTeamPage() {
           alt="alt logo"
           style={{ position: "absolute", right: 0, width: 300 }}
         />
-      </div>
-
-      {/* CONFERENCE */}
-      <div
-        style={{
-          textAlign: "center",
-          fontSize: 18,
-          fontWeight: 700,
-          color: team.Color1,
-        }}
-      >
-        {team.Conference} {team.Division}
       </div>
 
       {/* STAFF */}
@@ -197,37 +205,97 @@ export default function NFLTeamPage() {
           DRAFT PICKS
         </div>
 
-        {/* PICKS */}
-        <div style={{ padding: 28, textAlign: "center" }}>
+{/* PICKS */}
+        <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 12 }}>
           {picks.map((p, i) => {
             const player = playersBySlug[p.Selection];
 
             return (
               <div
                 key={i}
+                onClick={() => player && navigate(`/player/${player.Slug}`)}
                 style={{
-                  marginBottom: 18,
-                  fontSize: player ? 26 : 20,
-                  fontWeight: player ? 900 : 800,
-                  color: team.Color1,
-                  textTransform: "uppercase",
+                  display: "grid",
+                  gridTemplateColumns: "140px 1fr auto",
+                  alignItems: "center",
+                  border: `2px solid ${team.Color2}`,
+                  borderRadius: 10,
+                  overflow: "hidden",
+                  cursor: player ? "pointer" : "default",
+                  transition: "opacity 0.15s",
                 }}
+                onMouseEnter={(e) => { if (player) e.currentTarget.style.opacity = "0.85"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
               >
-                {player ? (
-                  <>
-                    ROUND {p.Round} PICK {p.Pick}:{" "}
-                    <span
+                {/* ROUND/PICK BADGE */}
+                <div
+                  style={{
+                    background: team.Color1,
+                    color: "#fff",
+                    padding: "14px 10px",
+                    textAlign: "center",
+                    fontWeight: 900,
+                    fontSize: 14,
+                    letterSpacing: 0.5,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  <div>ROUND {p.Round}</div>
+                  <div style={{ fontSize: 20 }}>PICK {p.Pick}</div>
+                </div>
+
+                {/* PLAYER INFO */}
+                <div style={{ padding: "12px 18px" }}>
+                  {player ? (
+                    <>
+                      <div
+                        style={{
+                          fontSize: 22,
+                          fontWeight: 900,
+                          color: team.Color1,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        {player.First} {player.Last}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#555",
+                          marginTop: 2,
+                        }}
+                      >
+                        {player.Position} · {player.School}
+                      </div>
+                    </>
+                  ) : (
+                    <div
                       style={{
-                        textDecoration: "underline",
-                        cursor: "pointer",
+                        fontSize: 16,
+                        fontWeight: 700,
+                        color: "#999",
+                        fontStyle: "italic",
                       }}
-                      onClick={() => navigate(`/player/${player.Slug}`)}
                     >
-                      {player.First} {player.Last}
-                    </span>
-                  </>
-                ) : (
-                  <>ROUND {p.Round} PICK {p.Pick}</>
+                      Pick not yet made
+                    </div>
+                  )}
+                </div>
+
+                {/* ARROW */}
+                {player && (
+                  <div
+                    style={{
+                      paddingRight: 18,
+                      fontSize: 20,
+                      color: team.Color2,
+                      fontWeight: 900,
+                    }}
+                  >
+                    →
+                  </div>
                 )}
               </div>
             );
@@ -243,19 +311,35 @@ function StaffCard({ label, value, scheme, color }) {
   return (
     <div
       style={{
-        border: `2px solid ${color}`,
+        border: `3px solid ${color}`,
         borderRadius: 10,
-        padding: 16,
+        overflow: "hidden",
         background: "#fff",
       }}
     >
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 600 }}>{value || "—"}</div>
-      {scheme && (
-        <div style={{ marginTop: 4, fontSize: 12, opacity: 0.6 }}>
-          {scheme}
+      <div
+        style={{
+          background: color,
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 900,
+          letterSpacing: 1,
+          textTransform: "uppercase",
+          padding: "6px 12px",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ padding: "12px 14px" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#111" }}>
+          {value || "—"}
         </div>
-      )}
+        {scheme && (
+          <div style={{ marginTop: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
+            {scheme}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
