@@ -20,6 +20,9 @@ import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
 
+// ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
+const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
+
 function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
@@ -363,9 +366,25 @@ export default function PlayerProfile() {
   const handleSaveEvaluation = async () => {
     if (!user||!player?.id) return alert("You must sign in first.");
     if (visibility==="public"&&containsProfanity(evaluation)) return alert("❌ Your evaluation contains inappropriate language.");
+
+    // If grade is locked, save everything EXCEPT grade — preserve the stored grade
+    const gradeLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
+
     setSaving(true);
     try {
-      const evalData = { uid:user.uid, email:user.email, playerId:player.id, playerName:`${player.First||""} ${player.Last||""}`.trim(), grade, strengths, weaknesses, nflFit, evaluation, visibility, updatedAt:serverTimestamp() };
+      // Fetch existing grade if locked so we don't overwrite it
+      let savedGrade = grade;
+      if (gradeLocked) {
+        const existing = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
+        savedGrade = existing.exists() ? (existing.data().grade || grade) : grade;
+      }
+
+      const evalData = {
+        uid:user.uid, email:user.email, playerId:player.id,
+        playerName:`${player.First||""} ${player.Last||""}`.trim(),
+        grade: savedGrade, strengths, weaknesses, nflFit, evaluation, visibility,
+        updatedAt:serverTimestamp(),
+      };
       await setDoc(doc(db,"players",player.id,"evaluations",user.uid), evalData);
       await setDoc(doc(db,"users",user.uid,"evaluations",player.id), evalData);
       confetti({ particleCount:140, spread:75, origin:{y:0.65}, colors:[color1,color2,"#ffffff"] });
@@ -392,6 +411,9 @@ export default function PlayerProfile() {
   };
 
   if (!player) return <div className="flex justify-center items-center h-screen text-xl font-bold" style={{color:SITE_BLUE}}>Loading Player...</div>;
+
+  // ── Grade lock check ────────────────────────────────────────────────────────
+  const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
 
   const physicalMeasurements = [
     {val:player.Height,label:"Height"},{val:player.Weight,label:"Weight"},
@@ -447,8 +469,6 @@ export default function PlayerProfile() {
 
         {/* ===== HERO CARD ===== */}
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border:`3px solid ${color1}` }}>
-
-          {/* Top bar */}
           <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"8px 12px":"10px 20px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold rounded-full transition hover:opacity-80"
               style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
@@ -472,9 +492,7 @@ export default function PlayerProfile() {
             </div>
           </div>
 
-          {/* Logos + Name */}
           <div className="bg-white flex items-center" style={{ gap:isMobile?"8px":"16px", padding:isMobile?"12px 10px 8px":"20px 24px 10px" }}>
-            {/* Left logo */}
             <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:"1px solid #eee", borderRadius:"8px" }}>
               {draftedBy ? (
                 branding?.nflLogo ? <img src={sanitizeUrl(branding.nflLogo)} alt="NFL" style={{ height:isMobile?50:96, objectFit:"contain" }} /> : null
@@ -485,7 +503,6 @@ export default function PlayerProfile() {
               ) : null}
             </div>
 
-            {/* Center */}
             <div className="flex-1 text-center">
               <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:color1, letterSpacing:"0.02em" }}>
                 {`${player.First||""} ${player.Last||""}`}
@@ -517,7 +534,6 @@ export default function PlayerProfile() {
               )}
             </div>
 
-            {/* Right logo */}
             <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:"1px solid #eee", borderRadius:"8px" }}>
               {draftedBy ? (
                 branding?.cfbLogo ? (
@@ -533,7 +549,6 @@ export default function PlayerProfile() {
             </div>
           </div>
 
-          {/* Measurement pills */}
           {physicalMeasurements.length > 0 && (
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>
               {isMobile ? (
@@ -575,7 +590,6 @@ export default function PlayerProfile() {
           <SectionTitle>Community Scouting Report</SectionTitle>
           {isMobile ? (
             <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
-              {/* Grade + NFL Fit row */}
               <div className="flex items-start gap-4 px-3 py-3" style={{ borderBottom:"1px solid #e5e7eb" }}>
                 <div style={{ flex:"0 0 100px" }}>
                   <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Grade</div>
@@ -611,7 +625,6 @@ export default function PlayerProfile() {
                   ) : <p className="italic text-gray-400 text-xs text-center">No fits</p>}
                 </div>
               </div>
-              {/* Strengths + Weaknesses */}
               <div className="flex">
                 <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
                   <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Strengths</div>
@@ -776,13 +789,46 @@ export default function PlayerProfile() {
               </div>
             ) : (
               <div style={{ padding:isMobile?"12px":"24px" }}>
+
+                {/* Grade lock notice */}
+                {gradeIsLocked && (
+                  <div style={{
+                    display:"flex", alignItems:"center", gap:"10px",
+                    background:"#fff8e1", border:`2px solid ${SITE_GOLD}`,
+                    borderRadius:"8px", padding:"10px 14px", marginBottom:"16px",
+                  }}>
+                    <span style={{ fontSize:"18px" }}>🔒</span>
+                    <div>
+                      <div style={{ fontWeight:900, fontSize:"13px", color:"#7a5c00", textTransform:"uppercase", letterSpacing:"0.06em" }}>Grade Locked</div>
+                      <div style={{ fontWeight:700, fontSize:"12px", color:"#9a7a00", marginTop:"2px" }}>
+                        2026 draft grades were locked at 8PM ET on April 23rd. You can still edit your scouting notes, strengths, weaknesses, and NFL fit.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className={isMobile?"flex flex-col gap-4 mb-4":"grid grid-cols-2 gap-6 mb-6"}>
                   <div>
-                    <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Grade</div>
-                    <select value={grade} onChange={(e)=>setGrade(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:color1, color:grade?"#111":"#999" }}>
-                      <option value="">Select a grade</option>
-                      {["Watchlist","Early First Round","Middle First Round","Late First Round","Second Round","Third Round","Fourth Round","Fifth Round","Sixth Round","Seventh Round","UDFA"].map((g)=><option key={g} value={g}>{g}</option>)}
-                    </select>
+                    <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>
+                      Grade {gradeIsLocked && <span style={{ fontSize:"11px", color:"#aaa", fontWeight:700, textTransform:"none", letterSpacing:0 }}>— locked</span>}
+                    </div>
+                    {gradeIsLocked ? (
+                      // Show the locked grade as a static display, not an editable select
+                      <div style={{
+                        width:"100%", borderRadius:"6px", padding:"10px 12px",
+                        border:`2px solid #ddd`, background:"#f9f9f9",
+                        fontWeight:700, fontSize:"14px", color:"#888",
+                        display:"flex", alignItems:"center", gap:"8px",
+                      }}>
+                        <span>🔒</span>
+                        <span>{grade || "No grade set"}</span>
+                      </div>
+                    ) : (
+                      <select value={grade} onChange={(e)=>setGrade(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:color1, color:grade?"#111":"#999" }}>
+                        <option value="">Select a grade</option>
+                        {["Watchlist","Early First Round","Middle First Round","Late First Round","Second Round","Third Round","Fourth Round","Fifth Round","Sixth Round","Seventh Round","UDFA"].map((g)=><option key={g} value={g}>{g}</option>)}
+                      </select>
+                    )}
                   </div>
                   <div>
                     <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Visibility</div>
@@ -854,7 +900,6 @@ export default function PlayerProfile() {
         {/* ===== Public Feed ===== */}
         <div className="mb-10">
           <SectionTitle>Public Evaluations</SectionTitle>
-
           {publicFeed.length > 0 ? (
             <>
               {publicFeed.slice(0, visibleCount).map((ev) => (
@@ -866,7 +911,6 @@ export default function PlayerProfile() {
                     </div>
                     {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.6)", fontSize:"10px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
                   </div>
-
                   {isMobile ? (
                     <div>
                       {ev.grade && (() => { const { short, bg, border } = gradeDisplay(ev.grade); return (

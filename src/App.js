@@ -30,10 +30,13 @@ import CreateMock from "./pages/CreateMock";
 // Whiteboard
 import Whiteboard from "./pages/Whiteboard";
 
+// Draft
+import DraftPage from "./pages/DraftPage";
+
 // 🆕 ARTICLES SYSTEM
 import AdminArticles from "./pages/AdminArticles";
-import EditArticle from "./pages/EditArticle";     // 🔥 NEW
-import ArticlePage from "./pages/ArticlePage";     // 🔥 NEW (public)
+import EditArticle from "./pages/EditArticle";
+import ArticlePage from "./pages/ArticlePage";
 
 function App() {
   return (
@@ -74,6 +77,9 @@ function App() {
 
             {/* Whiteboard */}
             <Route path="/whiteboard" element={<Whiteboard />} />
+
+            {/* Draft */}
+            <Route path="/draft" element={<DraftPage />} />
 
             {/* 🆕 ADMIN CMS */}
             <Route path="/admin/articles" element={<AdminArticles />} />
