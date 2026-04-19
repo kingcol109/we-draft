@@ -22,6 +22,11 @@ const conferenceOrder = [
   "AAC", "CUSA", "MAC", "Mountain West", "Sun Belt",
 ];
 
+const NFL_DIVISIONS = [
+  { conf: "AFC", divisions: ["AFC East", "AFC North", "AFC South", "AFC West"] },
+  { conf: "NFC", divisions: ["NFC East", "NFC North", "NFC South", "NFC West"] },
+];
+
 export default function Navbar() {
   const { user, login } = useAuth();
 
@@ -31,9 +36,11 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tickerText, setTickerText] = useState(FALLBACK_MESSAGE);
   const [schools, setSchools] = useState([]);
+  const [nflTeams, setNflTeams] = useState([]);
   const [cfbOpen, setCfbOpen] = useState(false);
   const [cfbTimeout, setCfbTimeout] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [nflOpen, setNflOpen] = useState(false);
+  const [nflTimeout, setNflTimeout] = useState(null);
 
   /* ======================
      MOBILE DETECTION
@@ -135,14 +142,38 @@ export default function Navbar() {
     fetchSchools();
   }, []);
 
+  /* ======================
+     LOAD NFL TEAMS
+  ====================== */
+  useEffect(() => {
+    async function fetchNFLTeams() {
+      try {
+        const snapshot = await getDocs(collection(db, "nfl"));
+        const data = snapshot.docs.map((d) => ({ _id: d.id, ...d.data() }));
+        setNflTeams(data);
+      } catch (err) {
+        console.error("Error loading NFL teams:", err);
+      }
+    }
+    fetchNFLTeams();
+  }, []);
+
   const grouped = conferenceOrder.reduce((acc, conf) => {
     acc[conf] = schools.filter((s) => s.Conference === conf);
     return acc;
   }, {});
 
-  const filteredSchools = searchTerm.trim()
-    ? schools.filter((s) => s.School.toLowerCase().includes(searchTerm.toLowerCase()))
-    : null;
+  // Group NFL teams by division
+  const nflGrouped = {};
+  NFL_DIVISIONS.forEach(({ divisions }) => {
+    divisions.forEach((div) => {
+      const [conf, ...rest] = div.split(" ");
+      const divName = rest.join(" ");
+      nflGrouped[div] = nflTeams
+        .filter((t) => t.Conference === conf && t.Division === divName)
+        .sort((a, b) => (a.Team || "").localeCompare(b.Team || ""));
+    });
+  });
 
   const toSlug = (school) =>
     school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
@@ -185,10 +216,21 @@ export default function Navbar() {
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .cfb-team-link:hover {
-          background: #f0f5ff;
-          color: #0055a5;
+        .cfb-team-link:hover { background: #f0f5ff; color: #0055a5; }
+        .nfl-team-link {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 6px;
+          text-decoration: none;
+          color: #222;
+          border-radius: 5px;
+          font-weight: 700;
+          font-size: 12px;
+          transition: background 0.12s ease;
+          white-space: nowrap;
         }
+        .nfl-team-link:hover { background: #f0f5ff; color: #0055a5; }
         .mobile-nav-link {
           display: flex;
           align-items: center;
@@ -205,9 +247,7 @@ export default function Navbar() {
           border: 2px solid #f6a21d;
           transition: background 0.12s ease;
         }
-        .mobile-nav-link:active {
-          background: #f0f5ff;
-        }
+        .mobile-nav-link:active { background: #f0f5ff; }
       `}</style>
 
       <div
@@ -255,7 +295,90 @@ export default function Navbar() {
               <Link key={l.path} to={l.path} style={baseStyle}>{l.label}</Link>
             ))}
 
-            {/* CFB DROPDOWN */}
+            {/* ── NFL DROPDOWN ── */}
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
+              onMouseLeave={() => { const t = setTimeout(() => setNflOpen(false), 150); setNflTimeout(t); }}
+            >
+              <Link to="/nfl" style={baseStyle}>NFL</Link>
+
+              {nflOpen && (
+                <div
+                  onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
+                  onMouseLeave={() => setNflOpen(false)}
+                  style={{
+                    position: "fixed",
+                    top: "60px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: "min(640px, 96vw)",
+                    background: "#ffffff",
+                    border: "2px solid #0055a5",
+                    borderRadius: "10px",
+                    boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                    zIndex: 10002,
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>NFL Teams</div>
+                    <Link to="/nfl" onClick={() => setNflOpen(false)}
+                      style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                      View All →
+                    </Link>
+                  </div>
+                  <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
+
+                  {/* AFC + NFC stacked, 4 divisions across each */}
+                  <div style={{ padding: "12px 10px" }}>
+                    {NFL_DIVISIONS.map(({ conf, divisions }, ci) => (
+                      <div key={conf} style={{ marginBottom: ci === 0 ? "14px" : 0 }}>
+                        {/* Conf label */}
+                        <div style={{ fontSize: "11px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #f6a21d", paddingBottom: "3px", marginBottom: "8px" }}>
+                          {conf}
+                        </div>
+                        {/* 4 divisions side by side — 2 cols on narrow */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 6px" }}>
+                          {divisions.map((div) => {
+                            const divLabel = div.replace(`${conf} `, "");
+                            const divTeams = nflGrouped[div] || [];
+                            return (
+                              <div key={div}>
+                                <div style={{ fontSize: "9px", fontWeight: 900, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>
+                                  {divLabel}
+                                </div>
+                                {divTeams.map((team) => {
+                                  const abbr = team.Abbreviation || team._id;
+                                  return (
+                                    <Link
+                                      key={team._id}
+                                      to={`/nfl/${abbr.toLowerCase()}`}
+                                      className="nfl-team-link"
+                                      onClick={() => setNflOpen(false)}
+                                    >
+                                      {team.Logo1 && (
+                                        <img src={team.Logo1} alt={team.Team}
+                                          style={{ width: 14, height: 14, objectFit: "contain", flexShrink: 0 }}
+                                          onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                                      )}
+                                      {team.City} {team.Team}
+                                    </Link>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── CFB DROPDOWN ── */}
             <div
               style={{ position: "relative" }}
               onMouseEnter={() => { if (cfbTimeout) clearTimeout(cfbTimeout); setCfbOpen(true); }}
@@ -268,11 +391,11 @@ export default function Navbar() {
                   onMouseEnter={() => { if (cfbTimeout) clearTimeout(cfbTimeout); setCfbOpen(true); }}
                   onMouseLeave={() => setCfbOpen(false)}
                   style={{
-                    position: "absolute",
-                    top: "calc(100% + 8px)",
+                    position: "fixed",
+                    top: "60px",
                     left: "50%",
                     transform: "translateX(-50%)",
-                    width: "580px",
+                    width: "min(580px, 96vw)",
                     maxHeight: "480px",
                     background: "#ffffff",
                     border: "2px solid #0055a5",
@@ -284,107 +407,46 @@ export default function Navbar() {
                     flexDirection: "column",
                   }}
                 >
-                  {/* Dropdown header */}
-                  <div style={{
-                    backgroundColor: "#0055a5",
-                    padding: "10px 14px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "10px",
-                    flexShrink: 0,
-                  }}>
-                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                      College Football
-                    </div>
-                    {/* Search */}
-                    <input
-                      type="text"
-                      placeholder="Search team..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      style={{
-                        flex: 1,
-                        maxWidth: "200px",
-                        padding: "5px 10px",
-                        borderRadius: "6px",
-                        border: "2px solid #f6a21d",
-                        fontSize: "13px",
-                        fontWeight: 700,
-                        outline: "none",
-                      }}
-                      onClick={(e) => e.preventDefault()}
-                    />
-                    <Link
-                      to="/cfb"
-                      onClick={() => setCfbOpen(false)}
-                      style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}
-                    >
+                  {/* Header */}
+                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>College Football</div>
+                    <Link to="/cfb" onClick={() => setCfbOpen(false)}
+                      style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
                       View All →
                     </Link>
                   </div>
-
-                  {/* Accent bar */}
                   <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
 
-                  {/* Team list */}
+                  {/* Team list grouped by conference */}
                   <div style={{ overflowY: "auto", padding: "10px 12px", flex: 1 }}>
-                    {filteredSchools ? (
-                      // Search results flat list
-                      filteredSchools.length > 0 ? (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px" }}>
-                          {filteredSchools.map((team) => (
-                            <Link
-                              key={team.School}
-                              to={`/team/${toSlug(team.School)}`}
-                              className="cfb-team-link"
-                              onClick={() => { setCfbOpen(false); setSearchTerm(""); }}
-                            >
-                              {team.Logo1 && (
-                                <img src={team.Logo1} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain", flexShrink: 0 }}
-                                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                              )}
-                              {team.School}
-                            </Link>
-                          ))}
-                        </div>
-                      ) : (
-                        <p style={{ color: "#999", fontSize: "13px", fontStyle: "italic", padding: "8px" }}>No teams found</p>
-                      )
-                    ) : (
-                      // Grouped by conference
-                      conferenceOrder.map((conf) => {
-                        const teams = grouped[conf];
-                        if (!teams || teams.length === 0) return null;
-                        return (
-                          <div key={conf} style={{ marginBottom: "12px" }}>
-                            <div style={{
-                              fontSize: "10px", fontWeight: 900, color: "#0055a5",
-                              textTransform: "uppercase", letterSpacing: "0.12em",
-                              borderBottom: "2px solid #0055a5", paddingBottom: "3px", marginBottom: "6px",
-                            }}>
-                              {conf}
-                            </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px" }}>
-                              {teams.map((team) => (
-                                <Link
-                                  key={team.School}
-                                  to={`/team/${toSlug(team.School)}`}
-                                  className="cfb-team-link"
-                                  onClick={() => setCfbOpen(false)}
-                                >
-                                  {team.Logo1 && (
-                                    <img src={team.Logo1} alt={team.School} style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }}
-                                      onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                                  )}
-                                  {team.School}
-                                </Link>
-                              ))}
-                            </div>
+                    {conferenceOrder.map((conf) => {
+                      const teams = grouped[conf];
+                      if (!teams || teams.length === 0) return null;
+                      return (
+                        <div key={conf} style={{ marginBottom: "12px" }}>
+                          <div style={{ fontSize: "10px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #0055a5", paddingBottom: "3px", marginBottom: "6px" }}>
+                            {conf}
                           </div>
-                        );
-                      })
-                    )}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px" }}>
+                            {teams.map((team) => (
+                              <Link
+                                key={team.School}
+                                to={`/team/${toSlug(team.School)}`}
+                                className="cfb-team-link"
+                                onClick={() => setCfbOpen(false)}
+                              >
+                                {team.Logo1 && (
+                                  <img src={team.Logo1} alt={team.School}
+                                    style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }}
+                                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                                )}
+                                {team.School}
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -428,28 +490,19 @@ export default function Navbar() {
               { path: "/community", label: "Community Board" },
               { path: "/boards", label: "My Boards" },
               { path: "/mocks", label: "Mock Drafts" },
+              { path: "/nfl", label: "NFL Teams" },
               { path: "/cfb", label: "CFB Teams" },
             ].map((l) => (
-              <Link
-                key={l.path}
-                to={l.path}
-                className="mobile-nav-link"
-                onClick={() => setMenuOpen(false)}
-              >
+              <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
                 {l.label}
               </Link>
             ))}
 
             {user ? (
-              <Link to="/profile" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
-                Profile
-              </Link>
+              <Link to="/profile" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>Profile</Link>
             ) : (
-              <button
-                onClick={() => { login(); setMenuOpen(false); }}
-                className="mobile-nav-link"
-                style={{ border: "2px solid #f6a21d", cursor: "pointer" }}
-              >
+              <button onClick={() => { login(); setMenuOpen(false); }} className="mobile-nav-link"
+                style={{ border: "2px solid #f6a21d", cursor: "pointer" }}>
                 Sign In
               </button>
             )}

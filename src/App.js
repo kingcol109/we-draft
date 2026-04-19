@@ -18,6 +18,9 @@ import UserProfile from "./pages/UserProfile";
 // CFB
 import CFBPage from "./pages/CFBPage";
 
+// NFL
+import NFLPage from "./pages/NFLPage";
+
 // Teams
 import TeamPage from "./pages/TeamPage";
 import NFLTeamPage from "./pages/NFLTeamPage";
@@ -33,7 +36,7 @@ import Whiteboard from "./pages/Whiteboard";
 // Draft
 import DraftPage from "./pages/DraftPage";
 
-// 🆕 ARTICLES SYSTEM
+// Articles
 import AdminArticles from "./pages/AdminArticles";
 import EditArticle from "./pages/EditArticle";
 import ArticlePage from "./pages/ArticlePage";
@@ -50,6 +53,9 @@ function App() {
 
             {/* College Football */}
             <Route path="/cfb" element={<CFBPage />} />
+
+            {/* NFL */}
+            <Route path="/nfl" element={<NFLPage />} />
 
             {/* News */}
             <Route path="/news" element={<News />} />
@@ -81,24 +87,18 @@ function App() {
             {/* Draft */}
             <Route path="/draft" element={<DraftPage />} />
 
-            {/* 🆕 ADMIN CMS */}
+            {/* Admin CMS */}
             <Route path="/admin/articles" element={<AdminArticles />} />
             <Route path="/admin/articles/:id" element={<EditArticle />} />
 
-            {/* 🆕 PUBLIC ARTICLES */}
+            {/* Public Articles */}
             <Route path="/article/:slug" element={<ArticlePage />} />
 
             {/* 404 */}
             <Route
               path="*"
               element={
-                <div
-                  style={{
-                    textAlign: "center",
-                    color: "red",
-                    fontWeight: "bold",
-                  }}
-                >
+                <div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>
                   404 – Route not found
                 </div>
               }
