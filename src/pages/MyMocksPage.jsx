@@ -1,314 +1,307 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { getAuth } from "firebase/auth";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  deleteDoc,
-  doc,
-} from "firebase/firestore";
+import { collection, getDocs, query, where, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
+import Logo1 from "../assets/Logo1.png";
+import { Helmet } from "react-helmet-async";
 
-/* ================= CONSTANTS ================= */
-
-const MAX_MOCKS = 5;
-const SITE_BLUE = "#0055a5";
-const SITE_GOLD = "#f6a21d";
+const MAX_MOCKS_PER_CLASS = 5;
+const DRAFT_CLASSES = ["2026", "2027"];
+const BLUE = "#0055a5";
+const GOLD = "#f6a21d";
 
 export default function MyMocksPage() {
   const navigate = useNavigate();
   const auth = getAuth();
-
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mocks, setMocks] = useState([]);
   const [error, setError] = useState("");
-
-  /* ================= AUTH ================= */
+  const [classFilter, setClassFilter] = useState("2026");
+  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((u) => {
-      setUser(u);
-      setLoading(false);
-    });
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((u) => { setUser(u); setLoading(false); });
     return unsub;
   }, [auth]);
 
-  /* ================= LOAD MOCKS ================= */
-
   useEffect(() => {
     if (!user) return;
-
-    const loadMocks = async () => {
-      const q = query(
-        collection(db, "mockDrafts"),
-        where("ownerId", "==", user.uid)
-      );
-      const snap = await getDocs(q);
-
-      const data = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
-
-      // sort newest first
-      data.sort(
-        (a, b) =>
-          (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)
-      );
-
+    const load = async () => {
+      const snap = await getDocs(query(collection(db, "mockDrafts"), where("ownerId", "==", user.uid)));
+      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      data.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
       setMocks(data);
     };
-
-    loadMocks();
+    load();
   }, [user]);
 
-  /* ================= DELETE MOCK ================= */
+  useEffect(() => {
+    const handler = (e) => {
+      if (!e.target.closest("[data-class-dropdown]")) setClassDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleDelete = async (id) => {
-    const ok = window.confirm(
-      "Are you sure you want to delete this mock draft? This cannot be undone."
-    );
-    if (!ok) return;
-
+    if (!window.confirm("Delete this mock draft? This cannot be undone.")) return;
     await deleteDoc(doc(db, "mockDrafts", id));
     setMocks((prev) => prev.filter((m) => m.id !== id));
   };
 
-  /* ================= GUARDS ================= */
+  const filteredMocks = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
+  const atLimit = filteredMocks.length >= MAX_MOCKS_PER_CLASS;
 
-  if (loading) {
-    return (
-      <div style={styles.page}>
-        <div style={{ textAlign: "center", fontWeight: 700 }}>Loading…</div>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      Loading…
+    </div>
+  );
 
-  if (!user) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.loginGate}>
-          PLEASE LOG IN TO MAKE A MOCK DRAFT
+  if (!user) return (
+    <div style={{ maxWidth: "600px", margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "14px 20px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.1em" }}>Mock Drafts</div>
         </div>
-      </div>
-    );
-  }
-
-  const atLimit = mocks.length >= MAX_MOCKS;
-
-  /* ================= RENDER ================= */
-
-  return (
-    <div style={styles.page}>
-      {/* Header */}
-      <div style={styles.header}>
-        <h1 style={styles.title}>My Mock Drafts</h1>
-      </div>
-
-      {/* Action Buttons */}
-      <div style={styles.actionStack}>
-        <button
-          style={styles.secondaryButton}
-          onClick={() => navigate("/mocks")}
-        >
-          MOCK DRAFT HUB
-        </button>
-
-        <button
-          style={{
-            ...styles.primaryButton,
-            opacity: atLimit ? 0.5 : 1,
-            cursor: atLimit ? "not-allowed" : "pointer",
-          }}
-          disabled={atLimit}
-          onClick={() => {
-            if (atLimit) {
-              setError("Please delete a mock to create a new one.");
-            } else {
-              navigate("/mocks/create");
-            }
-          }}
-        >
-          <span style={styles.plus}>＋</span>
-          CREATE MOCK
-        </button>
-
-        {error && <div style={styles.error}>{error}</div>}
-      </div>
-
-      {/* Section Header */}
-      <div style={styles.sectionHeader}>MY MOCKS</div>
-
-      {/* Mocks List */}
-      <div style={styles.list}>
-        {mocks.length === 0 ? (
-          <div style={styles.emptyState}>
-            You haven’t created a mock draft yet.
+        <div style={{ height: "3px", background: GOLD }} />
+        <div style={{ padding: "40px 24px", background: "#fff" }}>
+          <div style={{ fontWeight: 900, fontSize: "18px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Please log in to create and manage mock drafts
           </div>
-        ) : (
-          mocks.map((mock) => (
-            <div key={mock.id} style={styles.mockRow}>
-              <div>
-                <div
-                  style={styles.mockLink}
-                  onClick={() => navigate(`/mocks/${mock.id}`)}
-                >
-                  {mock.name || "Untitled Mock Draft"}
-                </div>
-
-                <div style={styles.mockDate}>
-                  Last saved{" "}
-                  {mock.updatedAt?.seconds
-                    ? new Date(
-                        mock.updatedAt.seconds * 1000
-                      ).toLocaleDateString()
-                    : "—"}
-                </div>
-              </div>
-
-              <button
-                onClick={() => handleDelete(mock.id)}
-                style={styles.deleteButton}
-              >
-                Delete
-              </button>
-            </div>
-          ))
-        )}
+        </div>
       </div>
     </div>
   );
+
+  return (
+    <>
+      <Helmet><title>My Mock Drafts | We-Draft</title></Helmet>
+
+      <div style={{ maxWidth: "900px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+
+        {/* ===== Header ===== */}
+        <div style={{ marginBottom: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
+            <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+              My Mock Drafts
+            </div>
+          </div>
+          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        </div>
+
+        {/* ===== Action buttons ===== */}
+        <div style={{ display: "flex", gap: "10px", marginBottom: "20px", flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            onClick={() => {
+              if (atLimit) { setError(`You've reached the ${MAX_MOCKS_PER_CLASS} mock limit for the ${classFilter} class — delete one to create a new one.`); return; }
+              setError("");
+              navigate("/mocks/create");
+            }}
+            style={{
+              backgroundColor: atLimit ? "#ccc" : BLUE, color: "#fff",
+              border: `2px solid ${atLimit ? "#bbb" : GOLD}`, borderRadius: "8px",
+              padding: isMobile ? "10px 20px" : "12px 28px",
+              fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+              textTransform: "uppercase", letterSpacing: "0.06em",
+              cursor: atLimit ? "not-allowed" : "pointer",
+            }}
+          >
+            + Create Mock
+          </button>
+          <button
+            onClick={() => navigate("/mocks")}
+            style={{
+              backgroundColor: "#fff", color: BLUE, border: `2px solid ${BLUE}`,
+              borderRadius: "8px", padding: isMobile ? "10px 20px" : "12px 28px",
+              fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+              textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+            }}
+          >
+            Mock Hub
+          </button>
+
+          {/* Draft class dropdown */}
+          <div data-class-dropdown="true" style={{ position: "relative", marginLeft: "auto" }}>
+            <button
+              onClick={() => setClassDropdownOpen((o) => !o)}
+              style={{
+                background: BLUE, color: GOLD, border: `2px solid ${GOLD}`,
+                borderRadius: "8px", padding: isMobile ? "10px 16px" : "12px 20px",
+                fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: "8px",
+              }}
+            >
+              {classFilter} Class ▾
+            </button>
+            {classDropdownOpen && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 6px)", right: 0,
+                background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
+                overflow: "hidden", zIndex: 50, minWidth: "170px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+              }}>
+                <div style={{ background: BLUE, padding: "7px 12px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                  Draft Class
+                </div>
+                <div style={{ height: "3px", background: GOLD }} />
+                {DRAFT_CLASSES.map((yr, i) => {
+                  const count = mocks.filter((m) => (m.draftClass || "2026") === yr).length;
+                  const full = count >= MAX_MOCKS_PER_CLASS;
+                  return (
+                    <div
+                      key={yr}
+                      onClick={() => { setClassFilter(yr); setClassDropdownOpen(false); setError(""); }}
+                      style={{
+                        padding: "11px 14px", cursor: "pointer", fontWeight: 900,
+                        fontSize: "14px", color: BLUE,
+                        background: classFilter === yr ? "#f0f5ff" : "#fff",
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        borderBottom: i < DRAFT_CLASSES.length - 1 ? "1px solid #eee" : "none",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = classFilter === yr ? "#f0f5ff" : "#fff"; }}
+                    >
+                      <span>{yr} Class</span>
+                      <span style={{
+                        fontSize: "10px", fontWeight: 900, padding: "2px 8px", borderRadius: "10px",
+                        background: full ? "#ffebee" : "#e8f5e9",
+                        color: full ? "#c0392b" : "#2e7d32",
+                      }}>
+                        {count}/{MAX_MOCKS_PER_CLASS}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ background: "#fff3f3", border: "2px solid #e74c3c", borderRadius: "8px", padding: "10px 14px", marginBottom: "16px", fontWeight: 700, fontSize: "13px", color: "#c0392b" }}>
+            {error}
+          </div>
+        )}
+
+        {/* ===== Mocks list ===== */}
+        <div style={{ marginBottom: "14px" }}>
+          <div style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+            {classFilter} Class Drafts
+          </div>
+          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        </div>
+
+        {filteredMocks.length === 0 ? (
+          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: BLUE, padding: "8px 16px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{classFilter} Class</div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+            <div style={{ padding: "40px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
+              You haven't created a {classFilter} mock draft yet.
+            </div>
+          </div>
+        ) : (
+          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: BLUE, padding: "8px 16px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                {filteredMocks.length} / {MAX_MOCKS_PER_CLASS} {classFilter} Drafts
+              </div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+
+            {filteredMocks.map((mock, i) => {
+              const date = mock.updatedAt?.seconds
+                ? new Date(mock.updatedAt.seconds * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                : null;
+              const rounds = mock.rounds || 1;
+
+              return (
+                <div key={mock.id} style={{
+                  display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px",
+                  padding: isMobile ? "12px 12px" : "14px 18px",
+                  borderBottom: i < filteredMocks.length - 1 ? "1px solid #f0f0f0" : "none",
+                  background: "#fff",
+                }}>
+                  {/* Round badge */}
+                  <div style={{
+                    flexShrink: 0, width: isMobile ? "44px" : "54px", height: isMobile ? "44px" : "54px",
+                    background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    color: "#fff", lineHeight: 1,
+                  }}>
+                    <span style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900 }}>{rounds}</span>
+                    <span style={{ fontSize: "8px", fontWeight: 800, opacity: 0.8, textTransform: "uppercase" }}>
+                      {rounds === 1 ? "Round" : "Rnds"}
+                    </span>
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      onClick={() => navigate(`/mocks/${mock.id}`)}
+                      style={{ fontWeight: 900, fontSize: isMobile ? "14px" : "17px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: "3px", cursor: "pointer" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+                    >
+                      {mock.name || "Untitled Mock Draft"}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      {date && <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb" }}>Last saved {date}</div>}
+                      {mock.visibility === "public" && (
+                        <span style={{ background: "#e8f5e9", color: "#2e7d32", fontSize: "8px", fontWeight: 900, padding: "1px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                          Public
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Buttons */}
+                  <div style={{ flexShrink: 0, display: "flex", gap: "6px" }}>
+                    <button
+                      onClick={() => navigate(`/mocks/${mock.id}`)}
+                      style={{
+                        backgroundColor: GOLD, color: "#fff", border: `2px solid #c98a10`,
+                        borderRadius: "8px", padding: isMobile ? "6px 12px" : "7px 16px",
+                        fontWeight: 900, fontSize: "12px", textTransform: "uppercase",
+                        letterSpacing: "0.06em", cursor: "pointer",
+                      }}
+                    >
+                      Edit →
+                    </button>
+                    <button
+                      onClick={() => handleDelete(mock.id)}
+                      style={{
+                        backgroundColor: "#fff", color: "#c0392b",
+                        border: "2px solid #e74c3c", borderRadius: "8px",
+                        padding: isMobile ? "6px 10px" : "7px 14px",
+                        fontWeight: 900, fontSize: "12px", textTransform: "uppercase",
+                        letterSpacing: "0.06em", cursor: "pointer",
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
 }
-
-/* ================= STYLES ================= */
-
-const styles = {
-  page: {
-    maxWidth: "900px",
-    margin: "0 auto",
-    padding: "40px 20px",
-  },
-
-  header: {
-    marginBottom: "30px",
-    textAlign: "center",
-  },
-
-  title: {
-    fontSize: "28px",
-    fontWeight: "800",
-  },
-
-  actionStack: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "14px",
-    marginBottom: "40px",
-  },
-
-  primaryButton: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    backgroundColor: SITE_BLUE,
-    color: "#ffffff",
-    fontSize: "20px",
-    fontWeight: "900",
-    padding: "18px 40px",
-    borderRadius: "999px",
-    border: `4px solid ${SITE_GOLD}`,
-    letterSpacing: "1px",
-    textTransform: "uppercase",
-  },
-
-  secondaryButton: {
-    backgroundColor: "#ffffff",
-    color: SITE_BLUE,
-    fontSize: "16px",
-    fontWeight: "800",
-    padding: "14px 32px",
-    borderRadius: "999px",
-    border: `3px solid ${SITE_GOLD}`,
-    cursor: "pointer",
-    textTransform: "uppercase",
-  },
-
-  plus: {
-    fontSize: "26px",
-    lineHeight: "1",
-  },
-
-  error: {
-    marginTop: 6,
-    fontWeight: 700,
-    color: "#c0392b",
-  },
-
-  sectionHeader: {
-    textAlign: "center",
-    fontSize: "22px",
-    fontWeight: "900",
-    color: SITE_BLUE,
-    marginBottom: "24px",
-    textTransform: "uppercase",
-  },
-
-  list: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "18px",
-  },
-
-  mockRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingBottom: 12,
-    borderBottom: "1px solid #eee",
-  },
-
-  mockLink: {
-    fontSize: "18px",
-    fontWeight: "800",
-    color: SITE_BLUE,
-    cursor: "pointer",
-  },
-
-  mockDate: {
-    fontSize: "13px",
-    color: "#777",
-    marginTop: 4,
-  },
-
-  deleteButton: {
-    background: "transparent",
-    color: "#c0392b",
-    border: "none",
-    fontWeight: "800",
-    cursor: "pointer",
-  },
-
-  loginGate: {
-    textAlign: "center",
-    fontSize: "22px",
-    fontWeight: "900",
-    color: SITE_BLUE,
-    border: `4px solid ${SITE_GOLD}`,
-    borderRadius: "999px",
-    padding: "20px 30px",
-    maxWidth: "480px",
-    margin: "80px auto",
-    textTransform: "uppercase",
-  },
-
-  emptyState: {
-    textAlign: "center",
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#777",
-  },
-};

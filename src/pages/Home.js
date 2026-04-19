@@ -183,7 +183,7 @@ export default function Home() {
             gap: "10px", flexWrap: "wrap", textAlign: "center",
           }}>
             <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🔒 User grades lock at 8PM ET on April 23rd — submit your evaluations before the draft starts!
+              🔒 Community grades lock at 8PM ET on April 23rd — submit your evaluations before the draft starts!
             </span>
             <Link
               to="/community"
@@ -223,7 +223,7 @@ export default function Home() {
               {combinedNews.length > 0 ? combinedNews.map((n, i) => {
                 const ts = n.publishedAt || n.updatedAt;
                 const dateStr = ts?.toDate?.().toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                const to = n.type === "article" ? `/article/${n.slug}` : `/news/${n.slug}`;
+                const to = `/news/${n.slug}`;
                 return (
                   <Link
                     key={n.id}

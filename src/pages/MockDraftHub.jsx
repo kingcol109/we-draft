@@ -1,258 +1,202 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  collection,
-  getDocs,
-  query,
-  orderBy,
-  where,
-} from "firebase/firestore";
-
+import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
 import { db } from "../firebase";
-import OutlineLogo from "../assets/outlinelogo.png";
+import Logo1 from "../assets/Logo1.png";
+import { Helmet } from "react-helmet-async";
 
-const SITE_BLUE = "#0055a5";
-const SITE_GOLD = "#f6a21d";
+const BLUE = "#0055a5";
+const GOLD = "#f6a21d";
 
 export default function MockDraftHub() {
   const navigate = useNavigate();
-
   const [mocks, setMocks] = useState([]);
   const [loading, setLoading] = useState(true);
-const [userMap, setUserMap] = useState({});
-
-  /* ================= LOAD MOCKS ================= */
+  const [userMap, setUserMap] = useState({});
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const [classFilter, setClassFilter] = useState("2026");
 
   useEffect(() => {
-    const loadMocks = async () => {
-      try {
-        const q = query(
-  collection(db, "mockDrafts"),
-  where("visibility", "==", "public"),
-  orderBy("updatedAt", "desc")
-);
-
-
-        const snap = await getDocs(q);
-
-        setMocks(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-      } catch (err) {
-        console.error("Failed to load mock drafts", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadMocks();
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
   }, []);
-useEffect(() => {
-  const loadUsers = async () => {
-    try {
-      const snap = await getDocs(collection(db, "users"));
-      const map = {};
 
-      snap.forEach((docSnap) => {
-        const data = docSnap.data();
-        map[docSnap.id] =
-          data.username || data.email || docSnap.id;
-      });
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "mockDrafts"), where("visibility", "==", "public"), orderBy("updatedAt", "desc")));
+        setMocks(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (err) { console.error("Failed to load mock drafts", err); }
+      finally { setLoading(false); }
+    };
+    load();
+  }, []);
 
-      setUserMap(map);
-    } catch (err) {
-      console.error("Failed to load users", err);
-    }
-  };
-
-  loadUsers();
-}, []);
-
-  /* ================= RENDER ================= */
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const map = {};
+        snap.forEach((d) => { const u = d.data(); map[d.id] = u.username || u.email || d.id; });
+        setUserMap(map);
+      } catch (err) { console.error("Failed to load users", err); }
+    };
+    load();
+  }, []);
 
   return (
-    <div style={styles.page}>
-      {/* HEADER */}
-      <div style={styles.header}>
-        <div style={styles.logoWrap}>
-          <img
-            src={OutlineLogo}
-            alt="We-Draft Logo"
-            style={styles.logo}
-          />
-        </div>
+    <>
+      <Helmet><title>Mock Draft Hub | We-Draft</title></Helmet>
 
-        <h1 style={styles.title}>MOCK DRAFT HUB</h1>
-      </div>
+      <div style={{ maxWidth: "900px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
-      {/* MY MOCKS BUTTON */}
-      <div style={styles.myMocksWrap}>
-        <button
-          style={styles.myMocksButton}
-          onClick={() => navigate("/mocks/my")}
-        >
-          My Mocks
-        </button>
-      </div>
-
-      {/* SECTION TITLE */}
-      <div style={styles.sectionTitle}>New Mock Drafts</div>
-
-      {/* LIST */}
-      {loading ? (
-        <div style={styles.loading}>Loading…</div>
-      ) : mocks.length === 0 ? (
-        <div style={styles.empty}>
-          No mock drafts yet.
-        </div>
-      ) : (
-        <div style={styles.list}>
-          {mocks.map((mock) => (
-            <div key={mock.id} style={styles.item}>
-              <div style={styles.mockName}>
-                {mock.name || "Untitled Mock Draft"}
-              </div>
-
-             <div style={styles.author}>
-  by {userMap[mock.ownerId] || "Unknown User"}
-</div>
-
-
-              <div style={styles.meta}>
-                {(mock.rounds || 1)} Round{(mock.rounds || 1) > 1 ? "s" : ""} •{" "}
-                {mock.updatedAt?.toDate
-                  ? mock.updatedAt.toDate().toLocaleDateString()
-                  : "—"}
-              </div>
-
-              <button
-                style={styles.viewButton}
-                onClick={() => navigate(`/mocks/${mock.id}`)}
-              >
-                View
-              </button>
+        {/* ===== Header ===== */}
+        <div style={{ marginBottom: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
+            <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+              Mock Draft Hub
             </div>
+          </div>
+          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        </div>
+
+        {/* ===== Action buttons ===== */}
+        <div style={{ display: "flex", gap: "10px", marginBottom: "20px", flexWrap: "wrap" }}>
+          <button
+            onClick={() => navigate("/mocks/create")}
+            style={{
+              backgroundColor: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+              borderRadius: "8px", padding: isMobile ? "10px 20px" : "12px 28px",
+              fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+              textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+            }}
+          >
+            + Create Mock
+          </button>
+          <button
+            onClick={() => navigate("/mocks/my")}
+            style={{
+              backgroundColor: "#fff", color: BLUE, border: `2px solid ${BLUE}`,
+              borderRadius: "8px", padding: isMobile ? "10px 20px" : "12px 28px",
+              fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+              textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+            }}
+          >
+            My Mocks
+          </button>
+        </div>
+
+        {/* ===== Class filter tabs ===== */}
+        <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
+          {["2026", "2027"].map((year) => (
+            <button
+              key={year}
+              onClick={() => setClassFilter(year)}
+              style={{
+                padding: isMobile ? "7px 18px" : "8px 24px",
+                fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+                textTransform: "uppercase", letterSpacing: "0.06em",
+                border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+                background: classFilter === year ? BLUE : "#fff",
+                color: classFilter === year ? "#fff" : BLUE,
+              }}
+            >
+              {year} Class
+            </button>
           ))}
         </div>
-      )}
-    </div>
+
+        {/* ===== Mock list ===== */}
+        <div style={{ marginBottom: "14px" }}>
+          <div style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+            Recent Mock Drafts
+          </div>
+          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        </div>
+
+        {loading ? (
+          <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>Loading…</div>
+        ) : (() => {
+          const filtered = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
+          return filtered.length === 0 ? (
+            <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>No public {classFilter} mock drafts yet.</div>
+          ) : (
+          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: BLUE, padding: "8px 16px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                {filtered.length} Mock{filtered.length !== 1 ? "s" : ""} — {classFilter} Class
+              </div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+
+            {filtered.map((mock, i) => {
+              const date = mock.updatedAt?.toDate?.()?.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+              const rounds = mock.rounds || 1;
+              const author = userMap[mock.ownerId] || "Unknown";
+
+              return (
+                <div
+                  key={mock.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px",
+                    padding: isMobile ? "12px 12px" : "14px 18px",
+                    borderBottom: i < filtered.length - 1 ? "1px solid #f0f0f0" : "none",
+                    background: "#fff",
+                  }}
+                >
+                  {/* Round badge */}
+                  <div style={{
+                    flexShrink: 0, width: isMobile ? "44px" : "54px", height: isMobile ? "44px" : "54px",
+                    background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    color: "#fff", lineHeight: 1,
+                  }}>
+                    <span style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900 }}>{rounds}</span>
+                    <span style={{ fontSize: "8px", fontWeight: 800, opacity: 0.8, textTransform: "uppercase" }}>
+                      {rounds === 1 ? "Round" : "Rnds"}
+                    </span>
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: isMobile ? "14px" : "17px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: "3px" }}>
+                      {mock.name || "Untitled Mock Draft"}
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+                      by {author}
+                      {date && <span style={{ color: "#bbb", marginLeft: "8px" }}>· {date}</span>}
+                    </div>
+                    {mock.description && (
+                      <div style={{ fontSize: "11px", fontWeight: 600, color: "#999", marginTop: "3px", lineHeight: 1.4 }}>
+                        {mock.description.length > 80 ? mock.description.slice(0, 80) + "…" : mock.description}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* View button */}
+                  <button
+                    onClick={() => navigate(`/mocks/${mock.id}`)}
+                    style={{
+                      flexShrink: 0, backgroundColor: GOLD, color: "#fff",
+                      border: `2px solid #c98a10`, borderRadius: "8px",
+                      padding: isMobile ? "7px 14px" : "8px 18px",
+                      fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    View →
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          );
+        })()}
+      </div>
+    </>
   );
 }
-
-/* ================= STYLES ================= */
-
-const styles = {
-  page: {
-    maxWidth: "900px",
-    margin: "0 auto",
-    padding: "60px 20px",
-  },
-
-  header: {
-    textAlign: "center",
-    marginBottom: "60px",
-  },
-
-  logoWrap: {
-    display: "flex",
-    justifyContent: "center",
-    marginBottom: "26px",
-  },
-
-  logo: {
-    width: "1000px",
-    maxWidth: "90%",
-    height: "auto",
-  },
-
-  title: {
-    fontSize: "52px",
-    fontWeight: "900",
-    letterSpacing: "2px",
-    color: SITE_BLUE,
-  },
-
-  myMocksWrap: {
-    display: "flex",
-    justifyContent: "center",
-    marginBottom: "40px",
-  },
-
-  myMocksButton: {
-    backgroundColor: SITE_BLUE,
-    color: "#ffffff",
-    fontSize: "18px",
-    fontWeight: "900",
-    padding: "14px 36px",
-    borderRadius: "999px",
-    border: `4px solid ${SITE_GOLD}`,
-    cursor: "pointer",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-
-  sectionTitle: {
-    fontSize: "22px",
-    fontWeight: "900",
-    color: SITE_BLUE,
-    marginBottom: "22px",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-
-  list: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "22px",
-  },
-
-  item: {
-    paddingBottom: "18px",
-    borderBottom: "1px solid #e5e5e5",
-  },
-
-  mockName: {
-    fontSize: "20px",
-    fontWeight: "800",
-    color: SITE_BLUE,
-    marginBottom: "4px",
-  },
-
-  author: {
-    fontSize: "14px",
-    fontWeight: "600",
-    color: "#555",
-    marginBottom: "2px",
-  },
-
-  meta: {
-    fontSize: "13px",
-    color: "#777",
-    fontWeight: "600",
-    marginBottom: "10px",
-  },
-
-  viewButton: {
-    backgroundColor: SITE_GOLD,
-    border: "none",
-    borderRadius: "8px",
-    padding: "6px 14px",
-    fontWeight: "800",
-    cursor: "pointer",
-  },
-
-  loading: {
-    textAlign: "center",
-    fontWeight: "700",
-    color: "#777",
-  },
-
-  empty: {
-    textAlign: "center",
-    fontWeight: "700",
-    color: "#777",
-  },
-};
