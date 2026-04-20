@@ -206,7 +206,7 @@ export default function DraftFeed() {
             The Draft Starts
           </div>
           <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>
-            Wednesday, April 23rd at 8PM ET
+            Thursday, April 23rd at 8PM ET
           </div>
           <div style={{ fontSize: isMobile ? "15px" : "20px", fontWeight: 900, color: "#fff", marginTop: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
             🏈 The Las Vegas Raiders Are On The Clock
