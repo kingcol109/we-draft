@@ -289,10 +289,11 @@ export default function PlayerProfile() {
           });
           const userDocs = await Promise.all(Array.from(pubUids).map((uid) => getDoc(doc(db,"users",uid))));
           const uMap = {};
-          userDocs.forEach((snap) => { if (snap.exists()) { const u=snap.data(); uMap[snap.id]={name:u.username||u.email||snap.id, verified:u.verified||false}; } });
+          // ── FIX: show "Anonymous User" instead of email for users without a display name ──
+          userDocs.forEach((snap) => { if (snap.exists()) { const u=snap.data(); uMap[snap.id]={name:u.username||"Anonymous User", verified:u.verified||false}; } });
           const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
           const pubWithNames = pubEvals
-            .map((ev) => ({ ...ev, username:uMap[ev.uid]?.name||ev.email||"User", verified:uMap[ev.uid]?.verified||false }))
+            .map((ev) => ({ ...ev, username:uMap[ev.uid]?.name||"Anonymous User", verified:uMap[ev.uid]?.verified||false }))
             .sort((a,b) => { if (a.verified&&!b.verified) return -1; if (!a.verified&&b.verified) return 1; return toMs(b.updatedAt)-toMs(a.updatedAt); });
           setCommunity({
             avgGrade: grades.length>0 ? (grades.reduce((a,b)=>a+b,0)/grades.length).toFixed(1) : null,
@@ -367,12 +368,10 @@ export default function PlayerProfile() {
     if (!user||!player?.id) return alert("You must sign in first.");
     if (visibility==="public"&&containsProfanity(evaluation)) return alert("❌ Your evaluation contains inappropriate language.");
 
-    // If grade is locked, save everything EXCEPT grade — preserve the stored grade
     const gradeLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
 
     setSaving(true);
     try {
-      // Fetch existing grade if locked so we don't overwrite it
       let savedGrade = grade;
       if (gradeLocked) {
         const existing = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
@@ -412,7 +411,6 @@ export default function PlayerProfile() {
 
   if (!player) return <div className="flex justify-center items-center h-screen text-xl font-bold" style={{color:SITE_BLUE}}>Loading Player...</div>;
 
-  // ── Grade lock check ────────────────────────────────────────────────────────
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
 
   const physicalMeasurements = [
@@ -790,13 +788,8 @@ export default function PlayerProfile() {
             ) : (
               <div style={{ padding:isMobile?"12px":"24px" }}>
 
-                {/* Grade lock notice */}
                 {gradeIsLocked && (
-                  <div style={{
-                    display:"flex", alignItems:"center", gap:"10px",
-                    background:"#fff8e1", border:`2px solid ${SITE_GOLD}`,
-                    borderRadius:"8px", padding:"10px 14px", marginBottom:"16px",
-                  }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"10px", background:"#fff8e1", border:`2px solid ${SITE_GOLD}`, borderRadius:"8px", padding:"10px 14px", marginBottom:"16px" }}>
                     <span style={{ fontSize:"18px" }}>🔒</span>
                     <div>
                       <div style={{ fontWeight:900, fontSize:"13px", color:"#7a5c00", textTransform:"uppercase", letterSpacing:"0.06em" }}>Grade Locked</div>
@@ -813,13 +806,7 @@ export default function PlayerProfile() {
                       Grade {gradeIsLocked && <span style={{ fontSize:"11px", color:"#aaa", fontWeight:700, textTransform:"none", letterSpacing:0 }}>— locked</span>}
                     </div>
                     {gradeIsLocked ? (
-                      // Show the locked grade as a static display, not an editable select
-                      <div style={{
-                        width:"100%", borderRadius:"6px", padding:"10px 12px",
-                        border:`2px solid #ddd`, background:"#f9f9f9",
-                        fontWeight:700, fontSize:"14px", color:"#888",
-                        display:"flex", alignItems:"center", gap:"8px",
-                      }}>
+                      <div style={{ width:"100%", borderRadius:"6px", padding:"10px 12px", border:`2px solid #ddd`, background:"#f9f9f9", fontWeight:700, fontSize:"14px", color:"#888", display:"flex", alignItems:"center", gap:"8px" }}>
                         <span>🔒</span>
                         <span>{grade || "No grade set"}</span>
                       </div>

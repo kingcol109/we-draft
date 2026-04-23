@@ -7,21 +7,6 @@ import { Link } from "react-router-dom";
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
-// Round 1 pick order: pick# -> team abbreviation
-const ROUND_1_ORDER = [
-  { pick: 1,  team: "LV"  }, { pick: 2,  team: "NYJ" }, { pick: 3,  team: "ARI" },
-  { pick: 4,  team: "TEN" }, { pick: 5,  team: "NYG" }, { pick: 6,  team: "CLE" },
-  { pick: 7,  team: "CAR" }, { pick: 8,  team: "NE"  }, { pick: 9,  team: "NO"  },
-  { pick: 10, team: "CHI" }, { pick: 11, team: "SF"  }, { pick: 12, team: "DAL" },
-  { pick: 13, team: "MIA" }, { pick: 14, team: "IND" }, { pick: 15, team: "ATL" },
-  { pick: 16, team: "SEA" }, { pick: 17, team: "JAX" }, { pick: 18, team: "CIN" },
-  { pick: 19, team: "LAR" }, { pick: 20, team: "MIN" }, { pick: 21, team: "PIT" },
-  { pick: 22, team: "LAC" }, { pick: 23, team: "GB"  }, { pick: 24, team: "HOU" },
-  { pick: 25, team: "WAS" }, { pick: 26, team: "BUF" }, { pick: 27, team: "DET" },
-  { pick: 28, team: "BAL" }, { pick: 29, team: "PHI" }, { pick: 30, team: "TB"  },
-  { pick: 31, team: "KC"  }, { pick: 32, team: "DEN" },
-];
-
 const gradeDisplay = (g) => {
   const map = {
     "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
@@ -73,9 +58,10 @@ function GradeBadge({ grade }) {
   );
 }
 
-export default function DraftFeed() {
-  const [picks, setPicks] = useState([]);        // enriched picks with player/team data
-  const [teamDataMap, setTeamDataMap] = useState({}); // abbr -> nfl doc
+export default function DraftFeed({ onOpenDraftPopup }) {
+  const [picks, setPicks] = useState([]);
+  const [round1Order, setRound1Order] = useState([]);
+  const [teamDataMap, setTeamDataMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [newPickId, setNewPickId] = useState(null);
   const prevPickIds = useRef(new Set());
@@ -87,11 +73,12 @@ export default function DraftFeed() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // Pre-fetch all 32 round 1 team logos/colors
   useEffect(() => {
+    if (round1Order.length === 0) return;
+    const uniqueTeams = [...new Set(round1Order.map((p) => p.Team).filter(Boolean))];
     const fetchTeams = async () => {
       const entries = await Promise.all(
-        ROUND_1_ORDER.map(async ({ team }) => {
+        uniqueTeams.map(async (team) => {
           try {
             const snap = await getDoc(doc(db, "nfl", team));
             return [team, snap.exists() ? snap.data() : null];
@@ -101,25 +88,26 @@ export default function DraftFeed() {
       setTeamDataMap(Object.fromEntries(entries));
     };
     fetchTeams();
-  }, []);
+  }, [round1Order]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "draftOrder"), async (snap) => {
-      const raw = snap.docs
+      const all = snap.docs
         .map((d) => ({ docId: d.id, ...d.data() }))
-        .filter((p) => p.Selection && p.Selection.trim() !== "")
         .sort((a, b) => a.Round !== b.Round ? a.Round - b.Round : a.Pick - b.Pick);
 
-      // Detect new pick for animation
-      const currentIds = new Set(raw.map((p) => p.docId));
+      const r1 = all.filter((p) => p.Round === 1);
+      setRound1Order(r1);
+
+      const made = all.filter((p) => p.Selection && p.Selection.trim() !== "");
+
+      const currentIds = new Set(made.map((p) => p.docId));
       const added = [...currentIds].find((id) => !prevPickIds.current.has(id));
       if (added) setNewPickId(added);
       prevPickIds.current = currentIds;
 
-      // Take the last 10 picks (most recent 10 in order)
-      const last10 = raw.slice(-10).reverse(); // newest first
+      const last10 = made.slice(-10).reverse();
 
-      // Enrich each
       const enriched = await Promise.all(
         last10.map(async (pick) => {
           let player = null;
@@ -167,6 +155,10 @@ export default function DraftFeed() {
 
   const noPicks = picks.length === 0;
 
+  const onTheClock = round1Order.find((p) => !p.Selection || p.Selection.trim() === "");
+  const onTheClockTeam = onTheClock?.Team || null;
+  const onTheClockTD = teamDataMap[onTheClockTeam] || null;
+
   return (
     <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", width: "100%" }}>
 
@@ -187,9 +179,31 @@ export default function DraftFeed() {
               </div>
             )}
           </div>
-          <Link to="/draft" style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline", flexShrink: 0 }}>
-            Full Board →
-          </Link>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {/* Pop Out — opens real separate browser window */}
+            <button
+              onClick={() => {
+                window.open(
+                  "/draft-tracker",
+                  "DraftTracker",
+                  "width=300,height=520,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no"
+                );
+              }}
+              title="Open draft tracker in a separate window"
+              style={{
+                background: BLUE, color: GOLD, border: `2px solid ${GOLD}`,
+                borderRadius: "6px", padding: "4px 10px",
+                fontWeight: 900, fontSize: "11px", cursor: "pointer",
+                letterSpacing: "0.06em", textTransform: "uppercase",
+                fontFamily: "'Arial Black', Arial, sans-serif",
+              }}
+            >
+              ⧉ Pop Out
+            </button>
+            <Link to="/draft" style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline", flexShrink: 0 }}>
+              Full Board →
+            </Link>
+          </div>
         </div>
         <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
         <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
@@ -208,28 +222,31 @@ export default function DraftFeed() {
           <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>
             Thursday, April 23rd at 8PM ET
           </div>
-          <div style={{ fontSize: isMobile ? "15px" : "20px", fontWeight: 900, color: "#fff", marginTop: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            🏈 The Las Vegas Raiders Are On The Clock
-          </div>
+          {onTheClockTeam && (
+            <div style={{ fontSize: isMobile ? "15px" : "20px", fontWeight: 900, color: "#fff", marginTop: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🏈 The {onTheClockTD?.Name || onTheClockTeam} Are On The Clock
+            </div>
+          )}
         </div>
       )}
 
-      {/* Pre-draft: 4×8 grid of all 32 round 1 teams */}
-      {noPicks && !loading && (
+      {/* Pre-draft: grid of all round 1 teams from Firestore */}
+      {noPicks && !loading && round1Order.length > 0 && (
         <div style={{ marginBottom: "20px" }}>
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "repeat(4, 1fr)" : "repeat(8, 1fr)",
             gap: isMobile ? "6px" : "8px",
           }}>
-            {ROUND_1_ORDER.map(({ pick, team }) => {
+            {round1Order.map((slot) => {
+              const team = slot.Team;
               const td = teamDataMap[team];
               const color = td?.Color1 || BLUE;
               const color2 = td?.Color2 || GOLD;
               const logo = td?.Logo1 || null;
               return (
                 <div
-                  key={pick}
+                  key={slot.docId}
                   style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
                     justifyContent: "center", padding: isMobile ? "8px 4px" : "10px 6px",
@@ -237,7 +254,7 @@ export default function DraftFeed() {
                     background: "#fff", gap: "4px",
                   }}
                 >
-                  <div style={{ fontSize: "9px", fontWeight: 900, color: "#bbb", letterSpacing: "0.06em" }}>#{pick}</div>
+                  <div style={{ fontSize: "9px", fontWeight: 900, color: "#bbb", letterSpacing: "0.06em" }}>#{slot.Pick}</div>
                   {logo ? (
                     <img src={sanitizeUrl(logo)} alt={team}
                       style={{ width: isMobile ? "28px" : "36px", height: isMobile ? "28px" : "36px", objectFit: "contain" }}
@@ -256,7 +273,7 @@ export default function DraftFeed() {
         </div>
       )}
 
-      {/* Live picks feed — shows once picks start */}
+      {/* Live picks feed */}
       {!noPicks && (
         <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", marginBottom: "16px" }}>
           <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -284,7 +301,6 @@ export default function DraftFeed() {
                   transition: "background 1s ease",
                 }}
               >
-                {/* Round + pick badge */}
                 <div style={{
                   flexShrink: 0, width: isMobile ? 44 : 54, height: isMobile ? 44 : 54,
                   borderRadius: "8px", background: teamColor1, border: `2px solid ${teamColor2}`,
@@ -295,7 +311,6 @@ export default function DraftFeed() {
                   <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: "#fff", lineHeight: 1, marginTop: "1px" }}>{pick.Pick}</div>
                 </div>
 
-                {/* Team logo */}
                 <div style={{ flexShrink: 0, width: isMobile ? 36 : 46, height: isMobile ? 36 : 46, display: "flex", alignItems: "center", justifyContent: "center", marginRight: isMobile ? "10px" : "14px" }}>
                   {teamLogo ? (
                     <img src={sanitizeUrl(teamLogo)} alt={teamName} style={{ width: "100%", height: "100%", objectFit: "contain" }}
@@ -307,7 +322,6 @@ export default function DraftFeed() {
                   )}
                 </div>
 
-                {/* Player info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <Link
                     to={`/player/${pick.Selection}`}
@@ -327,7 +341,6 @@ export default function DraftFeed() {
                   </div>
                 </div>
 
-                {/* Grade badge */}
                 {pick.commGrade && (
                   <div style={{ flexShrink: 0, marginLeft: "10px" }}>
                     <GradeBadge grade={pick.commGrade} />
@@ -339,7 +352,6 @@ export default function DraftFeed() {
         </div>
       )}
 
-      {/* View full board button */}
       <div style={{ textAlign: "center" }}>
         <Link
           to="/draft"

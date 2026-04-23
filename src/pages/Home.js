@@ -286,7 +286,6 @@ export default function Home() {
                       borderBottom: i < recentEvals.length - 1 ? "1px solid #f0f0f0" : "none",
                     }}
                   >
-                    {/* User + player */}
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
                       <span style={{ fontWeight: 900, fontSize: "12px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ev.username}</span>
                       {ev.verified && <img src={verifiedBadge} alt="Verified" style={{ width: "14px", height: "14px" }} />}
@@ -296,7 +295,6 @@ export default function Home() {
                       </Link>
                     </div>
 
-                    {/* Grade badge + eval text */}
                     <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
                       {gd && <GradeBadge grade={ev.grade} />}
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -306,9 +304,17 @@ export default function Home() {
                           </p>
                         )}
                         {(ev.strengths?.length > 0 || ev.weaknesses?.length > 0) && (
-                          <div style={{ fontSize: "11px", fontWeight: 700, color: "#777", marginTop: "4px" }}>
-                            {ev.strengths?.length > 0 && <span>S: {Array.isArray(ev.strengths) ? ev.strengths.join(", ") : ev.strengths} </span>}
-                            {ev.weaknesses?.length > 0 && <span>W: {Array.isArray(ev.weaknesses) ? ev.weaknesses.join(", ") : ev.weaknesses}</span>}
+                          <div style={{ fontSize: "11px", fontWeight: 700, marginTop: "4px" }}>
+                            {ev.strengths?.length > 0 && (
+                              <div style={{ color: "#2e7d32", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                S: {(Array.isArray(ev.strengths) ? ev.strengths.slice(0, 5) : [ev.strengths]).join(", ")}
+                              </div>
+                            )}
+                            {ev.weaknesses?.length > 0 && (
+                              <div style={{ color: "#c0392b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                W: {(Array.isArray(ev.weaknesses) ? ev.weaknesses.slice(0, 5) : [ev.weaknesses]).join(", ")}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

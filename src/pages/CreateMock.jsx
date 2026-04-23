@@ -12,7 +12,7 @@ import Logo1 from "../assets/Logo1.png";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
-const MOCK_LOCK_DATE = new Date("2026-04-24T19:55:00-04:00"); // Thu Apr 24 7:55PM ET — just before draft starts
+const MOCK_LOCK_DATE = new Date("2026-04-24T19:55:00-04:00");
 
 const gradeScale = {
   "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
@@ -110,12 +110,12 @@ export default function CreateMock() {
   const [visibility, setVisibility] = useState("public");
   const [visibilityOpen, setVisibilityOpen] = useState(false);
   const [ownerLabel, setOwnerLabel] = useState("");
-  const [activeRound, setActiveRound] = useState(1); // for view mode
-  const [activeEditRound, setActiveEditRound] = useState(1); // for edit mode
-  const [showBank, setShowBank] = useState(true); // for mobile bank toggle
+  const [activeRound, setActiveRound] = useState(1);
+  const [activeEditRound, setActiveEditRound] = useState(1);
+  const [showBank, setShowBank] = useState(true);
   const [communityData, setCommunityData] = useState({});
   const [communityLoading, setCommunityLoading] = useState(false);
-  const [draftClass, setDraftClass] = useState(null); // "2026" | "2027" — null = not yet chosen for new mocks
+  const [draftClass, setDraftClass] = useState(null);
 
   const assignedPlayerIds = useMemo(() => new Set(Object.values(assignedPlayers).map((p) => p.id)), [assignedPlayers]);
   const isOwner = userId && mockOwnerId === userId;
@@ -146,13 +146,11 @@ export default function CreateMock() {
 
   useEffect(() => {
     const loadDraft = async () => {
-      // Always load NFL teams for logos/colors
       const teamSnap = await getDocs(collection(db, "nfl"));
       const teamMap = {};
       teamSnap.forEach((t) => (teamMap[t.id] = t.data()));
       setTeams(teamMap);
 
-      // Only load draft order for NEW mocks, and only once class is chosen
       if (!mockId && draftClass) {
         const orderCollection = draftClass === "2027" ? "draftOrder2027" : "draftOrder";
         const draftSnap = await getDocs(collection(db, orderCollection));
@@ -166,7 +164,7 @@ export default function CreateMock() {
             tradedFrom: d.Traded ? d.Team : null,
           }));
         setPicks(loaded);
-        if (draftClass === "2027") setRounds(1); // 2027 is 1 round only
+        if (draftClass === "2027") setRounds(1);
       }
 
       setLoading(false);
@@ -184,7 +182,7 @@ export default function CreateMock() {
       setMockName(data.name || "Untitled Mock Draft");
       setRounds(data.rounds || 1);
       setVisibility(data.visibility || "private");
-      setDraftClass(data.draftClass || "2026"); // restore class, default to 2026
+      setDraftClass(data.draftClass || "2026");
       const picksArray = Object.values(data.picks || {}).sort((a, b) => a.pickNumber - b.pickNumber);
       setPicks(picksArray);
       const assigned = {};
@@ -240,14 +238,11 @@ export default function CreateMock() {
     return arr;
   }, [filteredPlayers, gradeView]);
 
-  // Fetch community grades/S/W for view mode, only for the active round's picks
   useEffect(() => {
     if (isOwner || !mockId) return;
-    setCommunityData({}); // reset cache on round change so fresh data loads
+    setCommunityData({});
     const roundPicks = visiblePicks.filter((p) => p.round === activeRound);
-    const playerIds = roundPicks
-      .map((p) => assignedPlayers[p.pickNumber]?.id)
-      .filter(Boolean);
+    const playerIds = roundPicks.map((p) => assignedPlayers[p.pickNumber]?.id).filter(Boolean);
     if (!playerIds.length) return;
     const fetchCommunity = async () => {
       setCommunityLoading(true);
@@ -291,7 +286,6 @@ export default function CreateMock() {
     setTimeout(() => setSaveStatus("idle"), 2000);
   };
 
-  // New mock — show class selector before anything loads
   if (!mockId && !draftClass) {
     const isLocked = new Date() >= MOCK_LOCK_DATE;
     const availableClasses = isLocked
@@ -339,14 +333,14 @@ export default function CreateMock() {
     </div>
   );
 
-  /* ===================== VIEW MODE (non-owner) ===================== */
-  // Also force view mode for 2026 mocks after lock date (even for owner)
+  /* ===================== VIEW MODE ===================== */
   const mock2026Locked = draftClass === "2026" && new Date() >= MOCK_LOCK_DATE;
   if ((!isOwner && mockId) || mock2026Locked) {
     const picksArray = visiblePicks;
     const availableRounds = [...new Set(picksArray.map((p) => p.round))].sort((a, b) => a - b);
     const roundPicks = picksArray.filter((p) => p.round === activeRound);
     const totalPicks = Object.values(assignedPlayers).length;
+    const filledRoundPicks = roundPicks.filter((p) => assignedPlayers[p.pickNumber]);
 
     return (
       <>
@@ -367,7 +361,6 @@ export default function CreateMock() {
           <div style={{ height: "3px", background: SITE_GOLD, borderRadius: "2px" }} />
         </div>
 
-        {/* Lock banner for owner */}
         {mock2026Locked && isOwner && (
           <div style={{ background: "#fff8e1", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: "10px 16px", marginBottom: "16px", fontSize: 13, fontWeight: 700, color: "#7a5c00", display: "flex", alignItems: "center", gap: 8 }}>
             🔒 2026 mock drafts are locked for editing after the draft began.
@@ -389,8 +382,8 @@ export default function CreateMock() {
           )}
         </div>
 
-        {/* Round tabs */}
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "20px" }}>
+        {/* Round tabs + Export button */}
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginBottom: "20px" }}>
           {availableRounds.map((r) => (
             <button key={r} onClick={() => setActiveRound(r)} style={{
               padding: "8px 20px", fontWeight: 900, fontSize: "14px",
@@ -404,7 +397,7 @@ export default function CreateMock() {
           ))}
         </div>
 
-        {/* Picks */}
+        {/* Picks list */}
         <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
           <div style={{ background: SITE_BLUE, padding: "8px 16px" }}>
             <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Round {activeRound}</div>
@@ -427,30 +420,18 @@ export default function CreateMock() {
                 borderBottom: i < roundPicks.length - 1 ? "1px solid #f0f0f0" : "none",
                 background: "#fff", opacity: hasPick ? 1 : 0.4,
               }}>
-                {/* LEFT HALF — pick info */}
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "14px", minWidth: 0 }}>
-                  {/* Pick badge */}
-                  <div style={{
-                    flexShrink: 0, width: "60px", height: "60px",
-                    borderRadius: "8px", background: teamColor1, border: `2px solid ${teamColor2}`,
-                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                  }}>
+                  <div style={{ flexShrink: 0, width: "60px", height: "60px", borderRadius: "8px", background: teamColor1, border: `2px solid ${teamColor2}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                     <div style={{ fontSize: "24px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{pick.pickNumber}</div>
                     <div style={{ fontSize: "8px", fontWeight: 800, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pick</div>
                   </div>
-
-                  {/* Team logo */}
                   <div style={{ flexShrink: 0, width: "52px", height: "52px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {teamLogo ? (
                       <img src={sanitizeUrl(teamLogo)} alt={teamName} style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                     ) : (
-                      <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: teamColor1, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: "10px" }}>
-                        {pick.currentTeam}
-                      </div>
+                      <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: teamColor1, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: "10px" }}>{pick.currentTeam}</div>
                     )}
                   </div>
-
-                  {/* Player info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {hasPick ? (
                       <>
@@ -459,9 +440,7 @@ export default function CreateMock() {
                           onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
                           {player.First} {player.Last}
                         </Link>
-                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#555", marginTop: "2px" }}>
-                          {player.Position} · {player.School}
-                        </div>
+                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#555", marginTop: "2px" }}>{player.Position} · {player.School}</div>
                       </>
                     ) : null}
                     <div style={{ fontSize: "12px", fontWeight: 800, color: teamColor1, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: hasPick ? "2px" : 0 }}>
@@ -470,21 +449,16 @@ export default function CreateMock() {
                         onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
                         {teamName}
                       </Link>
-                      {pick.tradedFrom && (
-                        <span style={{ color: "#bbb", fontWeight: 700, fontSize: "10px", marginLeft: "8px" }}>(via {pick.tradedFrom})</span>
-                      )}
+                      {pick.tradedFrom && <span style={{ color: "#bbb", fontWeight: 700, fontSize: "10px", marginLeft: "8px" }}>(via {pick.tradedFrom})</span>}
                     </div>
                   </div>
                 </div>
 
-                {/* RIGHT HALF — comm grade + S/W */}
                 {hasPick && (() => {
                   const cd = communityData[player.id];
                   const gd = cd?.grade ? gradeDisplay(cd.grade) : null;
                   return (
                     <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "16px", paddingLeft: "20px", borderLeft: "1px solid #f0f0f0" }}>
-
-                      {/* Grade badge */}
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", flexShrink: 0 }}>
                         <div style={{ fontSize: "8px", fontWeight: 900, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em" }}>Comm</div>
                         {communityLoading && !cd ? (
@@ -500,8 +474,6 @@ export default function CreateMock() {
                           <div style={{ width: "64px", height: "52px", borderRadius: "6px", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "9px", fontWeight: 700, color: "#ccc" }}>—</div>
                         )}
                       </div>
-
-                      {/* Two rows: strengths + weaknesses */}
                       {cd && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -520,7 +492,6 @@ export default function CreateMock() {
                           </div>
                         </div>
                       )}
-
                     </div>
                   );
                 })()}
@@ -529,17 +500,18 @@ export default function CreateMock() {
           })}
         </div>
       </div>
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </>
     );
   }
 
-
-  /* ===================== EDIT MODE (owner) ===================== */
+  /* ===================== EDIT MODE ===================== */
   const filledPicks = visiblePicks.filter((p) => assignedPlayers[p.pickNumber]).length;
   const totalVisiblePicks = visiblePicks.length;
   const availableRoundsEdit = [...new Set(visiblePicks.map((p) => p.round))].sort((a, b) => a - b);
   const roundPicksEdit = visiblePicks.filter((p) => p.round === activeEditRound);
+  const filledEditRoundPicks = roundPicksEdit.filter((p) => assignedPlayers[p.pickNumber]);
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "10px 10px 80px" : 20, fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -777,6 +749,7 @@ export default function CreateMock() {
           </div>
         )}
       </div>
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

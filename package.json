@@ -32,7 +32,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-"build": "node scripts/generate-sitemap.js && react-scripts build",
+    "build": "node scripts/generate-sitemap.js && react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "sync": "node sync.js",
@@ -45,7 +45,6 @@
       "react-app/jest"
     ]
   },
-  
   "browserslist": {
     "production": [
       ">0.2%",
@@ -58,11 +57,11 @@
       "last 1 safari version"
     ]
   },
-"devDependencies": {
+  "devDependencies": {
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17"
-      },
+  },
   "overrides": {
     "react-scripts": {
       "typescript": "$typescript"
