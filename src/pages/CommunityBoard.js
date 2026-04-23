@@ -65,7 +65,13 @@ const gradeDisplay = (g) => {
   return map[g] || null;
 };
 
-// Fixed-size grade badge — every badge identical dimensions
+function sanitizeUrl(url) {
+  if (!url) return "";
+  const u = url.trim();
+  if (!/^https?:\/\//i.test(u)) return `https://${u}`;
+  return u;
+}
+
 const GradeBadge = ({ grade, small = false }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
@@ -95,7 +101,6 @@ const GradeBadge = ({ grade, small = false }) => {
   );
 };
 
-// Plus button — same fixed size as grade badge
 const PlusBadge = ({ onClick, loading, small = false }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
@@ -130,7 +135,6 @@ const parseHeight = (val) => {
   return NaN;
 };
 
-// ── Dropdown checklist ───────────────────────────────────────────────────────
 function DropdownChecklist({ title, options, selected, setSelected, ordered = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -190,7 +194,6 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
   );
 }
 
-// ── Main component ───────────────────────────────────────────────────────────
 export default function CommunityBoard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -199,6 +202,10 @@ export default function CommunityBoard() {
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
   const boardDropdownRef = useRef(null);
+
+  // Draft order map: slug -> { team, round, pick, teamData }
+  const [draftMap, setDraftMap] = useState({});
+  const [nflTeams, setNflTeams] = useState({});
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -215,7 +222,6 @@ export default function CommunityBoard() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // board state: Map of playerId -> grade string
   const [boardMap, setBoardMap] = useState(new Map());
   const [addingId, setAddingId] = useState(null);
 
@@ -227,7 +233,43 @@ export default function CommunityBoard() {
   const [selectedCommGrades, setSelectedCommGrades] = useState([]);
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
   const [showMyBoardOnly, setShowMyBoardOnly] = useState(false);
+  const [showAvailableOnly, setShowAvailableOnly] = useState(false);
   const [eligibleYear, setEligibleYear] = useState("2026");
+
+  // Fetch NFL teams for logos/colors
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "nfl"));
+        const map = {};
+        snap.docs.forEach((d) => { map[d.id] = d.data(); });
+        setNflTeams(map);
+      } catch (e) { console.error(e); }
+    };
+    fetch();
+  }, []);
+
+  // Fetch draft order
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "draftOrder"));
+        const map = {};
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.Selection) {
+            map[data.Selection] = {
+              team: data.Team,
+              round: data.Round,
+              pick: data.Pick,
+            };
+          }
+        });
+        setDraftMap(map);
+      } catch (e) { console.error(e); }
+    };
+    fetch();
+  }, []);
 
   // Fetch players + community grades
   useEffect(() => {
@@ -267,7 +309,7 @@ export default function CommunityBoard() {
     fetchPlayers();
   }, []);
 
-  // Fetch user's board — store as Map(playerId -> grade)
+  // Fetch user's board
   useEffect(() => {
     const fetchBoard = async () => {
       if (!user?.uid) { setBoardMap(new Map()); return; }
@@ -326,11 +368,11 @@ export default function CommunityBoard() {
     setSelectedSchools([]); setSelectedPositions([]);
     setSelectedCommGrades([]); setSelectedMyGrades([]);
     setSearchQuery(""); setShowMyBoardOnly(false);
-    setEligibleYear("2026");
+    setShowAvailableOnly(false); setEligibleYear("2026");
   };
 
   const hasActiveFilters = selectedPositions.length > 0 || selectedSchools.length > 0 ||
-    selectedCommGrades.length > 0 || selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly;
+    selectedCommGrades.length > 0 || selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly || showAvailableOnly;
 
   const filteredPlayers = players
     .filter((p) => p.Eligible ? p.Eligible.toString() === eligibleYear : true)
@@ -343,11 +385,11 @@ export default function CommunityBoard() {
       const myGrade = boardMap.get(p.id);
       return myGrade ? selectedMyGrades.includes(myGrade) : false;
     })
-    .filter((p) => showMyBoardOnly ? boardMap.has(p.id) : true);
+    .filter((p) => showMyBoardOnly ? boardMap.has(p.id) : true)
+    .filter((p) => showAvailableOnly ? !draftMap[p.Slug] : true);
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
     if (sortKey === "CommunityGrade") {
-      // no grade → sort to bottom always
       const aV = gradeScale[a.CommunityGrade];
       const bV = gradeScale[b.CommunityGrade];
       if (aV && bV) return sortOrder === "asc" ? aV - bV : bV - aV;
@@ -356,7 +398,6 @@ export default function CommunityBoard() {
       return (a.Last || "").localeCompare(b.Last || "");
     }
     if (sortKey === "MyGrade") {
-      // Watchlist = 11 (below UDFA=10), not on board = 999
       const myGradeOrder = {
         "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
         "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
@@ -366,6 +407,12 @@ export default function CommunityBoard() {
       const aG = boardMap.get(a.id), bG = boardMap.get(b.id);
       const aV = aG !== undefined ? (myGradeOrder[aG] ?? 99) : 999;
       const bV = bG !== undefined ? (myGradeOrder[bG] ?? 99) : 999;
+      return sortOrder === "asc" ? aV - bV : bV - aV;
+    }
+    if (sortKey === "Pick") {
+      const aD = draftMap[a.Slug], bD = draftMap[b.Slug];
+      const aV = aD ? aD.pick : 9999;
+      const bV = bD ? bD.pick : 9999;
       return sortOrder === "asc" ? aV - bV : bV - aV;
     }
     if (sortKey === "Player") {
@@ -426,7 +473,7 @@ export default function CommunityBoard() {
         <title>Community Board | We-Draft</title>
       </Helmet>
 
-      <div style={{ maxWidth: "1000px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* ===== Page Header ===== */}
         <div style={{ marginBottom: "16px" }}>
@@ -459,16 +506,28 @@ export default function CommunityBoard() {
         {/* ===== Filters row ===== */}
         {isMobile ? (
           <div style={{ marginBottom: "12px" }}>
-            {/* 2-column grid of filter buttons */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
               <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
               <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
               <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
               <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
             </div>
-            {/* My Board + Search on same row */}
             <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
               <BoardDropdown dropdownRef={boardDropdownRef} open={boardDropdownOpen} setOpen={setBoardDropdownOpen} active={showMyBoardOnly} setActive={setShowMyBoardOnly} isMobile={isMobile} onNavigate={() => navigate("/whiteboard")} />
+              {eligibleYear === "2026" && (
+                <button
+                  onClick={() => setShowAvailableOnly((v) => !v)}
+                  style={{
+                    padding: "8px 12px", fontWeight: 900, fontSize: "12px",
+                    textTransform: "uppercase", letterSpacing: "0.05em",
+                    border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+                    background: showAvailableOnly ? GOLD : "#fff",
+                    color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0,
+                  }}
+                >
+                  {showAvailableOnly ? "✓ Available" : "Available"}
+                </button>
+              )}
               <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
                 style={{ flex: 1, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
               {hasActiveFilters && (
@@ -483,6 +542,20 @@ export default function CommunityBoard() {
             <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
             <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
             <BoardDropdown dropdownRef={boardDropdownRef} open={boardDropdownOpen} setOpen={setBoardDropdownOpen} active={showMyBoardOnly} setActive={setShowMyBoardOnly} isMobile={isMobile} onNavigate={() => navigate("/whiteboard")} />
+            {eligibleYear === "2026" && (
+              <button
+                onClick={() => setShowAvailableOnly((v) => !v)}
+                style={{
+                  padding: "8px 16px", fontWeight: 900, fontSize: "13px",
+                  textTransform: "uppercase", letterSpacing: "0.05em",
+                  border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+                  background: showAvailableOnly ? GOLD : "#fff",
+                  color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap",
+                }}
+              >
+                {showAvailableOnly ? "✓ Available" : "Available"}
+              </button>
+            )}
             <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
               style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "190px" }} />
             {hasActiveFilters && (
@@ -493,7 +566,6 @@ export default function CommunityBoard() {
 
         {/* ===== Table Card ===== */}
         <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-          {/* Card top bar */}
           <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
               {eligibleYear} Draft Class
@@ -505,23 +577,39 @@ export default function CommunityBoard() {
           <div style={{ height: "3px", background: GOLD }} />
 
           {isMobile ? (
-            // ── Mobile: card list ──────────────────────────────────────────
             <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
               {sortedPlayers.length === 0 ? (
                 <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
                   No players match your filters.
                 </div>
-              ) : sortedPlayers.map((p, i) => {
+              ) : sortedPlayers.map((p) => {
                 const myGrade = boardMap.get(p.id);
                 const onBoard = myGrade !== undefined;
                 const isAdding = addingId === p.id;
+                const draft = draftMap[p.Slug];
+                const teamData = draft ? nflTeams[draft.team] : null;
+                const c1 = teamData?.Color1 || BLUE;
+                const c2 = teamData?.Color2 || GOLD;
                 return (
                   <div key={p.id} style={{
                     display: "flex", alignItems: "center", gap: "10px",
                     padding: "10px 12px", background: "#fff",
                     borderBottom: `1px solid ${GOLD}`,
                   }}>
-                    {/* Left: player info */}
+                    {/* Draft pick badge — only if drafted and 2026 */}
+                    {eligibleYear === "2026" && draft && (
+                      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "3px" }}>
+                        <div style={{ width: 32, height: 32, borderRadius: "6px", background: c1, border: `2px solid ${c2}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>Rd {draft.round}</span>
+                          <span style={{ fontSize: "13px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
+                        </div>
+                        {teamData?.Logo1 ? (
+                          <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} style={{ width: "24px", height: "24px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                        ) : (
+                          <span style={{ fontSize: "8px", fontWeight: 900, color: c1 }}>{draft.team}</span>
+                        )}
+                      </div>
+                    )}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Link to={`/player/${p.Slug}`} style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2 }}>
                         {`${p.First || ""} ${p.Last || ""}`}
@@ -535,8 +623,6 @@ export default function CommunityBoard() {
                         </div>
                       )}
                     </div>
-
-                    {/* Right: grade badges */}
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
                       <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>My</div>
                       {isAdding ? (
@@ -556,11 +642,16 @@ export default function CommunityBoard() {
               })}
             </div>
           ) : (
-            // ── Desktop: table ─────────────────────────────────────────────
             <div style={{ overflowX: "auto", maxHeight: "680px", overflowY: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "center" }}>
                 <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                   <tr>
+                    {eligibleYear === "2026" && <SortHeader sortK="Pick" label="Pick" minWidth="60px" />}
+                    {eligibleYear === "2026" && (
+                      <th style={{ padding: "12px 10px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", background: BLUE, color: "#fff", border: `1px solid ${GOLD}`, whiteSpace: "nowrap", minWidth: "52px" }}>
+                        Team
+                      </th>
+                    )}
                     <SortHeader sortK="Player" label="Player" align="left" minWidth="200px" />
                     <SortHeader sortK="Position" label="Pos" />
                     <SortHeader sortK="School" label="School" />
@@ -573,7 +664,7 @@ export default function CommunityBoard() {
                 <tbody>
                   {sortedPlayers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ padding: "32px", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
+                      <td colSpan={eligibleYear === "2026" ? 9 : 7} style={{ padding: "32px", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
                         No players match your filters.
                       </td>
                     </tr>
@@ -581,11 +672,43 @@ export default function CommunityBoard() {
                     const myGrade = boardMap.get(p.id);
                     const onBoard = myGrade !== undefined;
                     const isAdding = addingId === p.id;
+                    const draft = draftMap[p.Slug];
+                    const teamData = draft ? nflTeams[draft.team] : null;
+                    const c1 = teamData?.Color1 || BLUE;
+                    const c2 = teamData?.Color2 || GOLD;
                     return (
                       <tr key={p.id}
                         onMouseEnter={(e) => { Array.from(e.currentTarget.cells).forEach((c) => c.style.background = "#e6f0fa"); }}
                         onMouseLeave={(e) => { Array.from(e.currentTarget.cells).forEach((c) => c.style.background = "#fff"); }}
                       >
+                        {eligibleYear === "2026" && (
+                          <td style={{ padding: "8px 10px", border: `1px solid ${GOLD}`, background: "#fff" }}>
+                            {draft ? (
+                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "44px", height: "44px", borderRadius: "6px", background: c1, border: `2px solid ${c2}`, margin: "0 auto" }}>
+                                <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
+                                <span style={{ fontSize: "18px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
+                              </div>
+                            ) : (
+                              <span style={{ color: "#ddd", fontSize: "14px" }}>—</span>
+                            )}
+                          </td>
+                        )}
+                        {eligibleYear === "2026" && (
+                          <td style={{ padding: "8px 10px", border: `1px solid ${GOLD}`, background: "#fff" }}>
+                            {draft ? (
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {teamData?.Logo1 ? (
+                                  <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={teamData?.Name || draft.team} style={{ width: "36px", height: "36px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                                ) : (
+                                  <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ color: "#ddd", fontSize: "14px" }}>—</span>
+                            )}
+                          </td>
+                        )}
+                        {/* Player name */}
                         <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", textAlign: "left" }}>
                           <Link to={`/player/${p.Slug}`} style={{ color: BLUE, fontWeight: 900, textDecoration: "none", fontSize: "17px" }}
                             onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
@@ -637,7 +760,6 @@ export default function CommunityBoard() {
   );
 }
 
-// ── My Board dropdown (top-level component) ──────────────────────────────────
 function BoardDropdown({ dropdownRef, open, setOpen, active, setActive, isMobile, onNavigate }) {
   return (
     <div ref={dropdownRef} style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
