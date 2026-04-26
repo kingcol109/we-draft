@@ -53,17 +53,20 @@ export default function Navbar() {
   }, []);
 
   /* ======================
-     SCROLL HIDE (DESKTOP)
+     SCROLL HIDE (DESKTOP) — logic kept, disabled for now
   ====================== */
   useEffect(() => {
     if (isMobile) return;
     const handleScroll = () => {
-      setShow(window.scrollY < lastScrollY);
+      setShow(window.scrollY < lastScrollY || window.scrollY < 10);
       setLastScrollY(window.scrollY);
     };
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, [lastScrollY, isMobile]);
+  // TODO: re-enable scroll hide when navbar content is ready
+  // const showNavbar = show; // uncomment to re-enable
+  const showNavbar = true;
 
   /* ======================
      LOAD TICKER
@@ -253,11 +256,14 @@ export default function Navbar() {
       <div
         style={{
           position: "fixed",
-          top: show || isMobile ? 0 : "-140px",
+          top: 0,
           left: 0,
           right: 0,
           zIndex: 10000,
-          transition: isMobile ? "none" : "top 0.3s ease-in-out",
+          // Fade in/out on scroll — no layout shift, position stays fixed
+          opacity: showNavbar || isMobile ? 1 : 0,
+          pointerEvents: showNavbar || isMobile ? "auto" : "none",
+          transition: isMobile ? "none" : "opacity 0.3s ease-in-out",
         }}
       >
         {/* ================= NAVBAR ================= */}
@@ -335,11 +341,9 @@ export default function Navbar() {
                   <div style={{ padding: "12px 10px" }}>
                     {NFL_DIVISIONS.map(({ conf, divisions }, ci) => (
                       <div key={conf} style={{ marginBottom: ci === 0 ? "14px" : 0 }}>
-                        {/* Conf label */}
                         <div style={{ fontSize: "11px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #f6a21d", paddingBottom: "3px", marginBottom: "8px" }}>
                           {conf}
                         </div>
-                        {/* 4 divisions side by side — 2 cols on narrow */}
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 6px" }}>
                           {divisions.map((div) => {
                             const divLabel = div.replace(`${conf} `, "");
@@ -509,7 +513,8 @@ export default function Navbar() {
           </div>
         )}
 
-        {/* ================= TICKER ================= */}
+        {/* ================= TICKER — hidden for now ================= */}
+        {false && (
         <div
           style={{
             background: "#ffffff",
@@ -534,6 +539,7 @@ export default function Navbar() {
             {tickerText}
           </div>
         </div>
+        )}
       </div>
 
       <style>{`

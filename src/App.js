@@ -42,6 +42,9 @@ import AdminArticles from "./pages/AdminArticles";
 import EditArticle from "./pages/EditArticle";
 import ArticlePage from "./pages/ArticlePage";
 
+// Games
+import MyDraftClass from "./pages/MyDraftClass";
+
 function App() {
   return (
     <HelmetProvider>
@@ -82,6 +85,7 @@ function MainLayout() {
           <Route path="/mocks/:mockId" element={<CreateMock />} />
           <Route path="/whiteboard" element={<Whiteboard />} />
           <Route path="/draft" element={<DraftPage />} />
+          <Route path="/my-draft-class" element={<MyDraftClass />} />
           <Route path="/admin/articles" element={<AdminArticles />} />
           <Route path="/admin/articles/:id" element={<EditArticle />} />
           <Route path="/article/:slug" element={<ArticlePage />} />

@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getAuth } from "firebase/auth";
 import { collection, getDocs, query, where, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
@@ -7,9 +7,75 @@ import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
 
 const MAX_MOCKS_PER_CLASS = 5;
-const DRAFT_CLASSES = ["2026", "2027"];
+const ACTIVE_YEARS = ["2027"];
+const ARCHIVE_YEARS = ["2026"];
+const ALL_YEARS = [...ACTIVE_YEARS, ...ARCHIVE_YEARS];
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
+
+function ArchiveDropdown({ classFilter, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const isArchive = ARCHIVE_YEARS.includes(classFilter);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          border: `2px solid ${GOLD}`, borderRadius: "8px",
+          padding: "12px 20px",
+          fontWeight: 900, fontSize: "14px",
+          textTransform: "uppercase", letterSpacing: "0.06em",
+          cursor: "pointer",
+          background: isArchive ? BLUE : "#fff",
+          color: isArchive ? "#fff" : BLUE,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {isArchive ? `Archive: ${classFilter}` : "Archive"} ▾
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 8px)", left: 0,
+          zIndex: 50, minWidth: "160px",
+          background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "10px",
+          boxShadow: "0 6px 20px rgba(0,0,0,0.14)", overflow: "hidden",
+        }}>
+          <div style={{ background: BLUE, padding: "8px 14px", fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+            Past Draft Classes
+          </div>
+          <div style={{ height: "3px", background: GOLD }} />
+          {ARCHIVE_YEARS.map((yr) => (
+            <div
+              key={yr}
+              onClick={() => { onSelect(yr); setOpen(false); }}
+              style={{
+                padding: "11px 16px", cursor: "pointer", fontWeight: 900,
+                fontSize: "15px", color: classFilter === yr ? "#fff" : BLUE,
+                background: classFilter === yr ? BLUE : "#fff",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                borderBottom: "1px solid #f0f0f0",
+              }}
+              onMouseEnter={(e) => { if (classFilter !== yr) e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { if (classFilter !== yr) e.currentTarget.style.background = "#fff"; }}
+            >
+              <span>{yr}</span>
+              {classFilter === yr && <span style={{ color: GOLD }}>✓</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function MyMocksPage() {
   const navigate = useNavigate();
@@ -18,8 +84,7 @@ export default function MyMocksPage() {
   const [loading, setLoading] = useState(true);
   const [mocks, setMocks] = useState([]);
   const [error, setError] = useState("");
-  const [classFilter, setClassFilter] = useState("2026");
-  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const [classFilter, setClassFilter] = useState("2027");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
   useEffect(() => {
@@ -43,14 +108,6 @@ export default function MyMocksPage() {
     };
     load();
   }, [user]);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (!e.target.closest("[data-class-dropdown]")) setClassDropdownOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this mock draft? This cannot be undone.")) return;
@@ -131,63 +188,39 @@ export default function MyMocksPage() {
           >
             Mock Hub
           </button>
+        </div>
 
-          {/* Draft class dropdown */}
-          <div data-class-dropdown="true" style={{ position: "relative", marginLeft: "auto" }}>
-            <button
-              onClick={() => setClassDropdownOpen((o) => !o)}
-              style={{
-                background: BLUE, color: GOLD, border: `2px solid ${GOLD}`,
-                borderRadius: "8px", padding: isMobile ? "10px 16px" : "12px 20px",
-                fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
-                textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
-                display: "flex", alignItems: "center", gap: "8px",
-              }}
-            >
-              {classFilter} Class ▾
-            </button>
-            {classDropdownOpen && (
-              <div style={{
-                position: "absolute", top: "calc(100% + 6px)", right: 0,
-                background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
-                overflow: "hidden", zIndex: 50, minWidth: "170px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-              }}>
-                <div style={{ background: BLUE, padding: "7px 12px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                  Draft Class
-                </div>
-                <div style={{ height: "3px", background: GOLD }} />
-                {DRAFT_CLASSES.map((yr, i) => {
-                  const count = mocks.filter((m) => (m.draftClass || "2026") === yr).length;
-                  const full = count >= MAX_MOCKS_PER_CLASS;
-                  return (
-                    <div
-                      key={yr}
-                      onClick={() => { setClassFilter(yr); setClassDropdownOpen(false); setError(""); }}
-                      style={{
-                        padding: "11px 14px", cursor: "pointer", fontWeight: 900,
-                        fontSize: "14px", color: BLUE,
-                        background: classFilter === yr ? "#f0f5ff" : "#fff",
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        borderBottom: i < DRAFT_CLASSES.length - 1 ? "1px solid #eee" : "none",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = classFilter === yr ? "#f0f5ff" : "#fff"; }}
-                    >
-                      <span>{yr} Class</span>
-                      <span style={{
-                        fontSize: "10px", fontWeight: 900, padding: "2px 8px", borderRadius: "10px",
-                        background: full ? "#ffebee" : "#e8f5e9",
-                        color: full ? "#c0392b" : "#2e7d32",
-                      }}>
-                        {count}/{MAX_MOCKS_PER_CLASS}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {/* ===== Class filter tabs ===== */}
+        <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap", alignItems: "center" }}>
+          {ACTIVE_YEARS.map((year) => {
+            const count = mocks.filter((m) => (m.draftClass || "2026") === year).length;
+            const full = count >= MAX_MOCKS_PER_CLASS;
+            return (
+              <button
+                key={year}
+                onClick={() => { setClassFilter(year); setError(""); }}
+                style={{
+                  padding: isMobile ? "7px 18px" : "8px 24px",
+                  fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+                  textTransform: "uppercase", letterSpacing: "0.06em",
+                  border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+                  background: classFilter === year ? BLUE : "#fff",
+                  color: classFilter === year ? "#fff" : BLUE,
+                  display: "flex", alignItems: "center", gap: "8px",
+                }}
+              >
+                {year} Class
+                <span style={{
+                  fontSize: "10px", fontWeight: 900, padding: "1px 7px", borderRadius: "10px",
+                  background: full ? "#ffebee" : (classFilter === year ? "rgba(255,255,255,0.25)" : "#e8f5e9"),
+                  color: full ? "#c0392b" : (classFilter === year ? "#fff" : "#2e7d32"),
+                }}>
+                  {count}/{MAX_MOCKS_PER_CLASS}
+                </span>
+              </button>
+            );
+          })}
+          <ArchiveDropdown classFilter={classFilter} onSelect={(yr) => { setClassFilter(yr); setError(""); }} />
         </div>
 
         {error && (

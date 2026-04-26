@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { Link } from "react-router-dom";
 import {
   doc,
   getDoc,
@@ -154,7 +155,7 @@ export default function UserProfile() {
   const inputStyle = {
     width: "100%", border: `2px solid ${BLUE}`, borderRadius: "6px",
     padding: isMobile ? "12px 12px" : "10px 12px",
-    fontSize: isMobile ? "16px" : "14px", // 16px prevents iOS zoom on focus
+    fontSize: isMobile ? "16px" : "14px",
     fontWeight: 600, boxSizing: "border-box", outline: "none",
     marginBottom: "10px", fontFamily: "inherit",
   };
@@ -188,7 +189,7 @@ export default function UserProfile() {
       {/* ===== Main Card ===== */}
       <div style={{ border: `3px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", backgroundColor: "#fff" }}>
 
-        {/* Card top bar — display name + verified */}
+        {/* Card top bar */}
         <div style={{ backgroundColor: BLUE, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
           <span style={{ fontSize: "20px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.05em" }}>
             {displayedUsername || user.email}
@@ -209,7 +210,7 @@ export default function UserProfile() {
             <div style={{ fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: "#999", marginBottom: "4px" }}>
               Account Email
             </div>
-            <div style={{ fontSize: isMobile ? "14px" : "14px", fontWeight: 700, color: "#555", padding: "10px 12px", border: "2px solid #eee", borderRadius: "6px", backgroundColor: "#fafafa", wordBreak: "break-all" }}>
+            <div style={{ fontSize: "14px", fontWeight: 700, color: "#555", padding: "10px 12px", border: "2px solid #eee", borderRadius: "6px", backgroundColor: "#fafafa", wordBreak: "break-all" }}>
               {user.email}
             </div>
           </div>
@@ -232,6 +233,35 @@ export default function UserProfile() {
 
           {/* Divider */}
           <div style={{ height: "1px", backgroundColor: "#eee", margin: "4px 0 16px" }} />
+
+          {/* ===== My Draft Class CTA ===== */}
+          <div style={{ marginBottom: "10px" }}>
+            <Link
+              to="/my-draft-class"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                width: "100%", boxSizing: "border-box",
+                backgroundColor: "#fff",
+                border: `2px solid ${BLUE}`,
+                borderRadius: "8px",
+                padding: isMobile ? "14px 16px" : "12px 16px",
+                textDecoration: "none",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div>
+                <div style={{ fontSize: isMobile ? "14px" : "13px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1.2 }}>
+                  🏈 My Draft Class
+                </div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "3px" }}>
+                  Build your perfect 2026 draft class
+                </div>
+              </div>
+              <span style={{ color: GOLD, fontWeight: 900, fontSize: "18px" }}>→</span>
+            </Link>
+          </div>
 
           {/* Log Out */}
           <button onClick={logout} style={btnStyle("secondary")}>Log Out</button>
