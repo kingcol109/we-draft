@@ -7,11 +7,13 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
+import html2canvas from "html2canvas";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const LOCK_DATE = new Date("2026-06-01T00:00:00-04:00");
 const TOTAL_ROUNDS = 7;
+const AVAILABLE_YEARS = ["2026"];
 
 function sanitizeUrl(url) {
   if (!url) return "";
@@ -53,19 +55,21 @@ function GradeBadge({ grade }) {
 
 export default function MyDraftClass() {
   const { user, login } = useAuth();
-  const [draftedPlayers, setDraftedPlayers] = useState([]); // enriched picks from draftOrder
+  const [draftedPlayers, setDraftedPlayers] = useState([]);
   const [nflTeams, setNflTeams] = useState({});
-  const [myPicks, setMyPicks] = useState({}); // { round: playerSlug }
-  const [savedPicks, setSavedPicks] = useState(null); // loaded from Firestore
+  const [myPicks, setMyPicks] = useState({});
+  const [savedPicks, setSavedPicks] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeRound, setActiveRound] = useState(null); // which round picker is open
+  const [activeRound, setActiveRound] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedYear, setSelectedYear] = useState("2026");
+  const [exporting, setExporting] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const searchRef = useRef(null);
+  const exportRef = useRef(null);
+
   const isLocked = new Date() >= LOCK_DATE;
-  const [selectedYear, setSelectedYear] = useState("2026");
-  const AVAILABLE_YEARS = ["2026"]; // add future years here as drafts complete
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -86,7 +90,7 @@ export default function MyDraftClass() {
     fetch();
   }, []);
 
-  // Load all drafted players from draftOrder + enrich with player data + comm grade
+  // Load all drafted players
   useEffect(() => {
     const fetchDraft = async () => {
       try {
@@ -151,6 +155,8 @@ export default function MyDraftClass() {
           const data = snap.data();
           setSavedPicks(data.picks || {});
           setMyPicks(data.picks || {});
+        } else {
+          setSavedPicks({});
         }
       } catch (e) { console.error(e); }
     };
@@ -172,6 +178,25 @@ export default function MyDraftClass() {
     finally { setSaving(false); }
   };
 
+  const handleExport = async () => {
+    if (!exportRef.current) return;
+    setExporting(true);
+    try {
+      const canvas = await html2canvas(exportRef.current, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+      });
+      const link = document.createElement("a");
+      link.download = "my-2026-draft-class.png";
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (e) { console.error("Export failed:", e); }
+    finally { setExporting(false); }
+  };
+
   const handleSelectPick = (round, slug) => {
     if (isLocked) return;
     setMyPicks((prev) => ({ ...prev, [round]: slug }));
@@ -188,15 +213,12 @@ export default function MyDraftClass() {
     });
   };
 
-  // Players eligible for a given round = any player drafted in that round
-  const eligibleForRound = (round) => {
-    return draftedPlayers.filter((p) => p.Round === round);
-  };
+  const eligibleForRound = (round) => draftedPlayers.filter((p) => p.Round === round);
 
   const isDirty = JSON.stringify(myPicks) !== JSON.stringify(savedPicks || {});
   const picksComplete = Object.keys(myPicks).length === TOTAL_ROUNDS;
+  const hasAnyPick = Object.keys(myPicks).length > 0;
 
-  // Get enriched pick data for display
   const getPickData = (round) => {
     const slug = myPicks[round];
     if (!slug) return null;
@@ -246,7 +268,7 @@ export default function MyDraftClass() {
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
         </div>
 
-        {/* Explainer */}
+        {/* Explainer banner */}
         <div style={{
           background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
           borderRadius: "12px", padding: isMobile ? "16px" : "20px 24px",
@@ -261,7 +283,7 @@ export default function MyDraftClass() {
               You hold Pick #1 in every round.
             </div>
             <div style={{ fontSize: isMobile ? "12px" : "13px", fontWeight: 700, color: "rgba(255,255,255,0.8)", lineHeight: 1.6 }}>
-              Build your perfect 7-round draft class — but you can only select players who were actually drafted <em>after</em> pick #1 of each round. No taking the guy who went #1. Come back later and see how your class holds up.
+              Build your perfect 7-round draft class — select any player from each round. Come back later and see how your class holds up.
             </div>
             {!isLocked && (
               <div style={{ marginTop: "10px", fontSize: "11px", fontWeight: 800, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -277,7 +299,7 @@ export default function MyDraftClass() {
         </div>
 
         {/* Year selector */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
           <div style={{ fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: "#888" }}>Draft Year</div>
           <div style={{ position: "relative", display: "inline-block" }}>
             <select
@@ -299,7 +321,7 @@ export default function MyDraftClass() {
             <div style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: BLUE, fontWeight: 900, fontSize: "12px" }}>▾</div>
           </div>
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic" }}>
-            Your class is saved per year — one submission per draft
+            One submission per draft — saves automatically per year
           </div>
         </div>
 
@@ -343,7 +365,6 @@ export default function MyDraftClass() {
 
             return (
               <div key={round} style={{ borderBottom: round < TOTAL_ROUNDS ? "1px solid #f0f0f0" : "none" }}>
-
                 {/* Pick row */}
                 <div
                   className="pick-row"
@@ -373,7 +394,7 @@ export default function MyDraftClass() {
                     <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: pickData ? "#fff" : "#ccc", lineHeight: 1 }}>{round}</div>
                   </div>
 
-                  {/* Team logo if picked */}
+                  {/* Team logo */}
                   {pickData && teamData?.Logo1 && (
                     <div style={{ flexShrink: 0, width: isMobile ? "32px" : "40px", height: isMobile ? "32px" : "40px", display: "flex", alignItems: "center", justifyContent: "center", marginRight: isMobile ? "8px" : "12px", background: "#fff", borderRadius: "6px", border: "1px solid #eee", padding: "3px" }}>
                       <img src={sanitizeUrl(teamData.Logo1)} alt={pickData.Team} style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -409,7 +430,7 @@ export default function MyDraftClass() {
                     )}
                   </div>
 
-                  {/* Right side: grade + actions */}
+                  {/* Grade + actions */}
                   <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: "8px", marginLeft: "10px" }}>
                     {pickData?.commGrade && <GradeBadge grade={pickData.commGrade} />}
                     {pickData && !isLocked && (
@@ -425,10 +446,9 @@ export default function MyDraftClass() {
                   </div>
                 </div>
 
-                {/* Dropdown player picker */}
+                {/* Dropdown picker */}
                 {isOpen && (
                   <div style={{ background: "#f8faff", borderTop: `1px solid #e0e8f5`, padding: "12px 16px", animation: "fadeIn 0.15s ease" }}>
-                    {/* Search */}
                     <input
                       ref={searchRef}
                       type="text"
@@ -439,21 +459,15 @@ export default function MyDraftClass() {
                         width: "100%", boxSizing: "border-box",
                         border: `2px solid ${GOLD}`, borderRadius: "8px",
                         padding: "8px 14px", fontWeight: 700, fontSize: "13px",
-                        color: BLUE, outline: "none", marginBottom: "10px",
-                        background: "#fff",
+                        color: BLUE, outline: "none", marginBottom: "10px", background: "#fff",
                       }}
                     />
-
-                    {/* Player list */}
                     <div style={{ maxHeight: "280px", overflowY: "auto", border: `1px solid #e0e8f5`, borderRadius: "8px", background: "#fff" }}>
                       {filteredEligible.length === 0 ? (
-                        <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>
-                          No players found
-                        </div>
+                        <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>No players found</div>
                       ) : filteredEligible.map((pick, i) => {
                         const td = nflTeams[pick.Team];
                         const pc1 = td?.Color1 || BLUE;
-                        const pc2 = td?.Color2 || GOLD;
                         const isSelected = myPicks[round] === pick.Selection;
                         return (
                           <div
@@ -467,7 +481,6 @@ export default function MyDraftClass() {
                               background: isSelected ? "#e8f0fa" : "#fff",
                             }}
                           >
-                            {/* Mini pick badge */}
                             <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
                               <div style={{ fontSize: "9px", fontWeight: 900, color: "#999", lineHeight: 1 }}>#{pick.Pick}</div>
                               <div style={{ width: "32px", height: "32px", background: "#fff", border: `2px solid ${pc1}`, borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", padding: "2px" }}>
@@ -478,8 +491,6 @@ export default function MyDraftClass() {
                                 )}
                               </div>
                             </div>
-
-                            {/* Name + info */}
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE, lineHeight: 1.2 }}>
                                 {pick.player ? `${pick.player.First || ""} ${pick.player.Last || ""}` : pick.Selection}
@@ -490,14 +501,8 @@ export default function MyDraftClass() {
                                 </div>
                               )}
                             </div>
-
-                            {/* Comm grade */}
                             {pick.commGrade && <GradeBadge grade={pick.commGrade} />}
-
-                            {/* Selected checkmark */}
-                            {isSelected && (
-                              <div style={{ flexShrink: 0, color: GOLD, fontWeight: 900, fontSize: "18px" }}>✓</div>
-                            )}
+                            {isSelected && <div style={{ flexShrink: 0, color: GOLD, fontWeight: 900, fontSize: "18px" }}>✓</div>}
                           </div>
                         );
                       })}
@@ -509,23 +514,23 @@ export default function MyDraftClass() {
           })}
         </div>
 
-        {/* Save button */}
+        {/* ===== SAVE BUTTON — always visible when logged in and not locked ===== */}
         {user && !isLocked && (
-          <div style={{ display: "flex", justifyContent: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "32px" }}>
             <button
               onClick={handleSave}
               disabled={saving || !isDirty}
               style={{
-                backgroundColor: isDirty ? (saving ? "#888" : BLUE) : "#ccc",
+                backgroundColor: isDirty ? (saving ? "#888" : BLUE) : "#aac4e8",
                 color: "#fff",
-                border: `2px solid ${isDirty ? GOLD : "#bbb"}`,
+                border: `2px solid ${isDirty ? GOLD : "#aac4e8"}`,
                 borderRadius: "8px",
                 padding: isMobile ? "12px 28px" : "14px 40px",
                 fontWeight: 900,
                 fontSize: isMobile ? "13px" : "15px",
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
-                cursor: isDirty && !saving ? "pointer" : "not-allowed",
+                cursor: isDirty && !saving ? "pointer" : "default",
                 transition: "background 0.15s",
               }}
             >
@@ -534,10 +539,136 @@ export default function MyDraftClass() {
           </div>
         )}
 
-        {/* Locked state message */}
-        {isLocked && savedPicks && Object.keys(savedPicks).length === 0 && (
-          <div style={{ textAlign: "center", padding: "20px", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>
-            The submission window has closed. You didn't submit a draft class this year.
+        {/* Locked message */}
+        {isLocked && (
+          <div style={{ textAlign: "center", padding: "16px", color: "#aaa", fontStyle: "italic", fontSize: "13px", marginBottom: "24px" }}>
+            {savedPicks && Object.keys(savedPicks).length === 0
+              ? "The submission window has closed. You didn't submit a draft class this year."
+              : "Your picks are locked in. Come back to see how your class holds up!"}
+          </div>
+        )}
+
+        {/* ===== SHARE CARD — shows when at least 1 pick made ===== */}
+        {hasAnyPick && (
+          <div>
+            {/* Share section header */}
+            <div style={{ marginBottom: "14px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "5px" }}>
+                <div style={{ fontSize: isMobile ? "16px" : "20px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+                  Share Your Class
+                </div>
+                <button
+                  onClick={handleExport}
+                  disabled={exporting}
+                  style={{
+                    backgroundColor: exporting ? "#888" : GOLD,
+                    color: "#fff", border: "none", borderRadius: "8px",
+                    padding: isMobile ? "8px 18px" : "10px 24px",
+                    fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
+                    textTransform: "uppercase", letterSpacing: "0.06em",
+                    cursor: exporting ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {exporting ? "Generating..." : "↓ Download Image"}
+                </button>
+              </div>
+              <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+              <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+            </div>
+
+            {/* Exportable card — fixed width, square corners, no grades */}
+            <div
+              ref={exportRef}
+              style={{
+                background: "#fff",
+                border: `3px solid ${BLUE}`,
+                borderRadius: "0px",
+                overflow: "hidden",
+                fontFamily: "Arial, sans-serif",
+                width: "420px",
+                margin: "0 auto",
+              }}
+            >
+              {/* Card header */}
+              <div style={{
+                background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
+                padding: "14px 16px",
+              }}>
+                <div style={{ fontSize: "13px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: "5px", fontFamily: "Arial, sans-serif" }}>
+                  My 2026 Draft Class
+                </div>
+                <div style={{ fontSize: "22px", fontWeight: 900, color: "#fff", lineHeight: 1, fontFamily: "Arial, sans-serif" }}>
+                  {(user?.displayName || user?.email?.split("@")[0] || "My")}'s Class
+                </div>
+              </div>
+              <div style={{ height: "3px", background: GOLD }} />
+
+              {/* Column header */}
+              <div style={{ display: "flex", alignItems: "center", padding: "8px 14px 6px", borderBottom: "2px solid #eee", background: "#f8f9fc" }}>
+                <div style={{ width: "54px", marginRight: "12px", textAlign: "center" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "bold", color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "Arial, sans-serif" }}>ROUND</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: "12px", fontWeight: "bold", color: BLUE, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "Arial, sans-serif" }}>PLAYER</span>
+                </div>
+              </div>
+
+              {/* Picks */}
+              {Array.from({ length: TOTAL_ROUNDS }, (_, i) => i + 1).map((round) => {
+                const pickData = getPickData(round);
+                const teamData = pickData ? nflTeams[pickData.Team] : null;
+                const c1 = teamData?.Color1 || BLUE;
+                const c2 = teamData?.Color2 || GOLD;
+                return (
+                  <div key={round} style={{
+                    display: "flex", alignItems: "center",
+                    padding: "9px 14px",
+                    borderBottom: round < TOTAL_ROUNDS ? "1px solid #f0f0f0" : "none",
+                    background: "#fff",
+                  }}>
+                    {/* Round number only — no label */}
+                    <div style={{
+                      flexShrink: 0, width: "54px",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      marginRight: "12px",
+                    }}>
+                      <span style={{ display: "block", fontSize: "28px", fontWeight: "bold", color: BLUE, lineHeight: "1", fontFamily: "Arial, sans-serif", textAlign: "center", width: "100%" }}>{round}</span>
+                    </div>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {pickData ? (
+                        <>
+                          <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE, lineHeight: 1.2 }}>
+                            {pickData.player ? `${pickData.player.First || ""} ${pickData.player.Last || ""}` : pickData.Selection}
+                          </div>
+                          {pickData.player && (
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "#555", marginTop: "1px" }}>
+                              {pickData.player.Position} · {pickData.player.School}
+                            </div>
+                          )}
+                          <div style={{ fontSize: "9px", fontWeight: 800, color: "#999", textTransform: "uppercase", letterSpacing: "0.03em", marginTop: "1px" }}>
+                            Real pick: #{pickData.Pick} · {pickData.Team}
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#ccc", fontStyle: "italic" }}>— No pick —</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Card footer */}
+              <div style={{
+                background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
+                padding: "16px 20px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <div style={{ fontSize: "14px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "Arial, sans-serif", textAlign: "center" }}>
+                  WE-DRAFT.COM/MY-DRAFT-CLASS
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
