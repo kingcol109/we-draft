@@ -53,9 +53,9 @@ export default function NewsArticle() {
     const fetch = async () => {
       try {
         const newsSnap = await getDocs(query(collection(db, "news"), where("slug", "==", id), where("active", "==", true)));
-        if (!newsSnap.empty) { setArticle({ id: newsSnap.docs[0].id, ...newsSnap.docs[0].data() }); return; }
+        if (!newsSnap.empty) { setArticle({ id: newsSnap.docs[0].id, ...newsSnap.docs[0].data(), type: "news" }); return; }
         const articleSnap = await getDocs(query(collection(db, "articles"), where("slug", "==", id), where("status", "==", "published")));
-        if (!articleSnap.empty) setArticle({ id: articleSnap.docs[0].id, ...articleSnap.docs[0].data() });
+        if (!articleSnap.empty) setArticle({ id: articleSnap.docs[0].id, ...articleSnap.docs[0].data(), type: "article" });
       } catch (err) { console.error("Error loading article:", err); }
       finally { setLoading(false); }
     };
@@ -95,7 +95,11 @@ export default function NewsArticle() {
     </div>
   );
 
-  const rawText = article.summary || (article.content || article.long || "").replace(/<[^>]+>/g, "");
+  const rawHtml = article.content || article.long || "";
+  const cleanHtml = rawHtml;
+  const videoLinks = article.videoUrl ? [{ href: article.videoUrl, label: "Watch Video" }] : [];
+
+  const rawText = article.summary || rawHtml.replace(/<[^>]+>/g, "");
   const description = rawText.slice(0, 160);
   const canonicalUrl = `https://we-draft.com/news/${article.slug}`;
   const pubDate = article.publishedAt?.toDate?.();
@@ -161,7 +165,7 @@ export default function NewsArticle() {
 
       <div style={{ maxWidth: "1200px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
-        {/* ===== Page header ===== */}
+        {/* Page header */}
         <div style={{ marginBottom: "24px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
             <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
@@ -176,10 +180,10 @@ export default function NewsArticle() {
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
         </div>
 
-        {/* ===== Main layout: article + sidebar ===== */}
+        {/* Main layout */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: isMobile ? "20px" : "32px", alignItems: "start" }}>
 
-          {/* ── Article ── */}
+          {/* Article */}
           <div style={{ order: isMobile ? 2 : 1 }}>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
 
@@ -203,17 +207,47 @@ export default function NewsArticle() {
               <div style={{ background: "#fff", padding: isMobile ? "20px 16px" : "32px 36px" }}>
 
                 {/* Title */}
-                <h1 style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontSize: isMobile ? "22px" : "32px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: "20px", marginTop: 0 }}>
+                <h1 style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontSize: isMobile ? "22px" : "32px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: "16px", marginTop: 0 }}>
                   {article.title}
                 </h1>
+
+                {/* Video buttons — shown below title if present */}
+                {videoLinks.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "20px" }}>
+                    {videoLinks.map((v, i) => (
+                      <a
+                        key={i}
+                        href={v.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: "8px",
+                          backgroundColor: BLUE, color: "#fff",
+                          border: `2px solid ${GOLD}`, borderRadius: "8px",
+                          padding: isMobile ? "10px 18px" : "12px 24px",
+                          fontFamily: "'Arial Black', Arial, sans-serif",
+                          fontWeight: 900, fontSize: isMobile ? "13px" : "14px",
+                          textDecoration: "none", textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          transition: "background 0.15s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+                      >
+                        <span style={{ fontSize: "16px" }}>▶</span>
+                        {v.label.replace("▶ ", "").replace("▶", "").trim() || "Watch Video"}
+                      </a>
+                    ))}
+                  </div>
+                )}
 
                 {/* Divider */}
                 <div style={{ height: "2px", background: GOLD, borderRadius: "1px", marginBottom: "24px" }} />
 
-                {/* Content */}
+                {/* Content — video links stripped out */}
                 <div
                   className="article-body"
-                  dangerouslySetInnerHTML={{ __html: article.content || article.long }}
+                  dangerouslySetInnerHTML={{ __html: cleanHtml }}
                 />
 
                 {/* Footer */}
@@ -229,7 +263,7 @@ export default function NewsArticle() {
             </div>
           </div>
 
-          {/* ── Sidebar ── */}
+          {/* Sidebar */}
           <div style={{ position: isMobile ? "static" : "sticky", top: "24px", order: isMobile ? 1 : 2 }}>
             <div style={{ marginBottom: "14px" }}>
               <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
@@ -239,16 +273,13 @@ export default function NewsArticle() {
               <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
             </div>
 
-            <div style={{
-              border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden",
-            }}>
+            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
               <div style={{ background: BLUE, padding: "8px 14px" }}>
                 <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
               </div>
               <div style={{ height: "3px", background: GOLD }} />
               {sidebarItems.length > 0 ? (
                 isMobile ? (
-                  // Horizontal scroll on mobile
                   <div style={{ display: "flex", overflowX: "auto", gap: "0", background: "#fff" }}>
                     {sidebarItems.map((item) => {
                       const ts = item.publishedAt || item.updatedAt;
@@ -271,7 +302,7 @@ export default function NewsArticle() {
                     })}
                   </div>
                 ) : (
-                  sidebarItems.map((item, i) => (
+                  sidebarItems.map((item) => (
                     <div key={item.id}>
                       <SidebarItem item={item} />
                     </div>

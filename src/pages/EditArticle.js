@@ -76,6 +76,9 @@ export default function EditArticle() {
   const [imageUrl, setImageUrl] = useState("");
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [showVideoInput, setShowVideoInput] = useState(false);
+  const [savedVideoUrl, setSavedVideoUrl] = useState(""); // stored separately, not in body
 
   const editor = useEditor({
     extensions: [
@@ -109,6 +112,7 @@ export default function EditArticle() {
             : ""
         );
         editor.commands.setContent(data.content || "");
+        setSavedVideoUrl(data.videoUrl || "");
       }
 
       const playerSnap = await getDocs(collection(db, "players"));
@@ -178,6 +182,14 @@ export default function EditArticle() {
     setShowLinkInput(false);
   };
 
+  const insertVideo = () => {
+    if (!videoUrl.trim()) return;
+    const href = /^https?:\/\//i.test(videoUrl.trim()) ? videoUrl.trim() : `https://${videoUrl.trim()}`;
+    setSavedVideoUrl(href);
+    setVideoUrl("");
+    setShowVideoInput(false);
+  };
+
   const handleDelete = async () => {
     const confirmDelete = window.confirm("Are you sure you want to delete this article? This cannot be undone.");
     if (!confirmDelete) return;
@@ -211,6 +223,7 @@ export default function EditArticle() {
       publishedAt: publishedAt ? (() => { const [y,m,d] = publishedAt.split("-"); return new Date(+y, +m-1, +d); })() : null,
       slugs: Array.from(playerSet),
       teamSlugs: Array.from(teamSet),
+      videoUrl: savedVideoUrl || "",
       updatedAt: serverTimestamp(),
     });
 
@@ -255,20 +268,24 @@ export default function EditArticle() {
           editor.chain().focus().setFontSize(Math.min(36, Number(current) + 2)).run();
         }}>A+</button>
 
-        <button style={btn} onClick={() => { setShowPlayerPicker((v) => !v); setShowTeamPicker(false); setShowImageInput(false); setShowLinkInput(false); }}>
+        <button style={btn} onClick={() => { setShowPlayerPicker((v) => !v); setShowTeamPicker(false); setShowImageInput(false); setShowLinkInput(false); setShowVideoInput(false); }}>
           + Player
         </button>
 
-        <button style={btn} onClick={() => { setShowTeamPicker((v) => !v); setShowPlayerPicker(false); setShowImageInput(false); setShowLinkInput(false); }}>
+        <button style={btn} onClick={() => { setShowTeamPicker((v) => !v); setShowPlayerPicker(false); setShowImageInput(false); setShowLinkInput(false); setShowVideoInput(false); }}>
           + Team
         </button>
 
-        <button style={btn} onClick={() => { setShowImageInput((v) => !v); setShowPlayerPicker(false); setShowTeamPicker(false); setShowLinkInput(false); }}>
+        <button style={btn} onClick={() => { setShowImageInput((v) => !v); setShowPlayerPicker(false); setShowTeamPicker(false); setShowLinkInput(false); setShowVideoInput(false); }}>
           + Image
         </button>
 
-        <button style={btn} onClick={() => { setShowLinkInput((v) => !v); setShowPlayerPicker(false); setShowTeamPicker(false); setShowImageInput(false); }}>
+        <button style={btn} onClick={() => { setShowLinkInput((v) => !v); setShowPlayerPicker(false); setShowTeamPicker(false); setShowImageInput(false); setShowVideoInput(false); }}>
           + Link
+        </button>
+
+        <button style={{ ...btn, background: "#b45309" }} onClick={() => { setShowVideoInput((v) => !v); setShowPlayerPicker(false); setShowTeamPicker(false); setShowImageInput(false); setShowLinkInput(false); }}>
+          ▶ Video
         </button>
       </div>
 
@@ -331,6 +348,35 @@ export default function EditArticle() {
             disabled={!linkText.trim() || !linkUrl.trim()}
           >
             Insert Link
+          </button>
+        </div>
+      )}
+
+      {/* VIDEO INPUT */}
+      {showVideoInput && (
+        <div style={modal}>
+          <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "13px", color: "#0055a5" }}>Video Link</p>
+          {savedVideoUrl && (
+            <div style={{ marginBottom: "10px", padding: "8px 10px", background: "#e8f0fa", borderRadius: "6px", fontSize: "12px", fontWeight: 700, color: "#0055a5", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+              <span>Current: {savedVideoUrl}</span>
+              <button onClick={() => setSavedVideoUrl("")} style={{ background: "#b91c1c", color: "#fff", border: "none", borderRadius: "4px", padding: "2px 8px", cursor: "pointer", fontSize: "11px", fontWeight: 900 }}>Remove</button>
+            </div>
+          )}
+          <input
+            placeholder="Video URL (YouTube, Twitter, etc.)"
+            value={videoUrl}
+            onChange={(e) => setVideoUrl(e.target.value)}
+            style={{ ...search, marginBottom: "8px" }}
+          />
+          <p style={{ margin: "0 0 8px", fontSize: "11px", color: "#888" }}>
+            A ▶ Watch Video button will appear below the article title — not in the body.
+          </p>
+          <button
+            style={{ ...btn, background: "#b45309", opacity: !videoUrl.trim() ? 0.5 : 1 }}
+            onClick={insertVideo}
+            disabled={!videoUrl.trim()}
+          >
+            {savedVideoUrl ? "Update Video Link" : "Set Video Link"}
           </button>
         </div>
       )}

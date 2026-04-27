@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { collection, getDocs, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -346,11 +346,26 @@ export default function CommunityBoard() {
   }, []);
 
   // Fetch players + community grades
+  // Active years (2027-2029) load on mount and are cached.
+  // Archive years only load when explicitly selected.
+  const [playerCache, setPlayerCache] = useState({}); // { year: players[] }
+
   useEffect(() => {
+    // Skip fetch if already cached
+    if (playerCache[eligibleYear]) {
+      setPlayers(playerCache[eligibleYear]);
+      return;
+    }
+
+    // For active years, fetch on mount. For archive years, only fetch when selected.
+    const isActiveYear = ACTIVE_YEARS.includes(eligibleYear);
+    const isArchiveYear = ARCHIVE_YEARS.includes(eligibleYear);
+    if (!isActiveYear && !isArchiveYear) return; // unknown year
+
     const fetchPlayers = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(collection(db, "players"));
+        const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", eligibleYear)));
         const data = await Promise.all(
           snap.docs.map(async (docSnap) => {
             const p = { id: docSnap.id, ...docSnap.data() };
@@ -373,6 +388,7 @@ export default function CommunityBoard() {
             return p;
           })
         );
+        setPlayerCache((prev) => ({ ...prev, [eligibleYear]: data }));
         setPlayers(data);
       } catch (err) {
         console.error("Error fetching players:", err);
@@ -381,7 +397,7 @@ export default function CommunityBoard() {
       }
     };
     fetchPlayers();
-  }, []);
+  }, [eligibleYear]);
 
   // Fetch user's board
   useEffect(() => {
@@ -452,7 +468,6 @@ export default function CommunityBoard() {
   const is2029 = eligibleYear === "2029";
 
   const filteredPlayers = players
-    .filter((p) => p.Eligible ? p.Eligible.toString() === eligibleYear : true)
     .filter((p) => !searchQuery.trim() ? true : `${p.First || ""} ${p.Last || ""}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
     .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
     .filter((p) => selectedSchools.length === 0 ? true : selectedSchools.includes(p.School))
