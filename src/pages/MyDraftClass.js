@@ -65,6 +65,7 @@ export default function MyDraftClass() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedYear, setSelectedYear] = useState("2026");
   const [exporting, setExporting] = useState(false);
+  const [wedraftUsername, setWedraftUsername] = useState("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const searchRef = useRef(null);
   const exportRef = useRef(null);
@@ -145,22 +146,29 @@ export default function MyDraftClass() {
     fetchDraft();
   }, []);
 
-  // Load user's saved picks
+  // Load user's saved picks + We-Draft display name
   useEffect(() => {
-    if (!user) return;
-    const fetchSaved = async () => {
+    if (!user?.uid) return;
+    const fetchUserData = async () => {
       try {
-        const snap = await getDoc(doc(db, "myDraftClass", `${user.uid}_2026`));
-        if (snap.exists()) {
-          const data = snap.data();
+        const [picksSnap, userSnap] = await Promise.all([
+          getDoc(doc(db, "myDraftClass", `${user.uid}_2026`)),
+          getDoc(doc(db, "users", user.uid)),
+        ]);
+        if (picksSnap.exists()) {
+          const data = picksSnap.data();
           setSavedPicks(data.picks || {});
           setMyPicks(data.picks || {});
         } else {
           setSavedPicks({});
         }
+        if (userSnap.exists()) {
+          const u = userSnap.data();
+          setWedraftUsername(u.username || u.email || "");
+        }
       } catch (e) { console.error(e); }
     };
-    fetchSaved();
+    fetchUserData();
   }, [user]);
 
   const handleSave = async () => {
@@ -598,7 +606,7 @@ export default function MyDraftClass() {
                   My 2026 Draft Class
                 </div>
                 <div style={{ fontSize: "22px", fontWeight: 900, color: "#fff", lineHeight: 1, fontFamily: "Arial, sans-serif" }}>
-                  {(user?.displayName || user?.email?.split("@")[0] || "My")}'s Class
+                  {(wedraftUsername || user?.displayName || user?.email?.split("@")[0] || "My")}'s Class
                 </div>
               </div>
               <div style={{ height: "3px", background: GOLD }} />
