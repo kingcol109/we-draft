@@ -208,7 +208,7 @@ export default function EditArticle() {
 
     await updateDoc(ref, {
       title, slug, priority, content: html, status, author,
-      publishedAt: publishedAt ? new Date(publishedAt) : null,
+      publishedAt: publishedAt ? (() => { const [y,m,d] = publishedAt.split("-"); return new Date(+y, +m-1, +d); })() : null,
       slugs: Array.from(playerSet),
       teamSlugs: Array.from(teamSet),
       updatedAt: serverTimestamp(),
