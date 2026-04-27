@@ -1,5 +1,5 @@
 // src/App.js
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { HelmetProvider } from "react-helmet-async";
 // Components
@@ -11,7 +11,6 @@ import News from "./pages/News";
 import NewsArticle from "./pages/NewsArticle";
 import CommunityBoard from "./pages/CommunityBoard";
 import PlayerProfile from "./pages/PlayerProfile";
-import PlayerPage2 from "./pages/PlayerPage2";
 import UserBoards from "./pages/UserBoards";
 import UserProfile from "./pages/UserProfile";
 
@@ -74,7 +73,8 @@ function MainLayout() {
           <Route path="/news/:id" element={<NewsArticle />} />
           <Route path="/community" element={<CommunityBoard />} />
           <Route path="/player/:slug" element={<PlayerProfile />} />
-          <Route path="/player2/:slug" element={<PlayerPage2 />} />
+          {/* Redirect old /player2 URLs to canonical /player URLs */}
+          <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
           <Route path="/team/:teamId" element={<TeamPage />} />
           <Route path="/nfl/:teamId" element={<NFLTeamPage />} />
           <Route path="/boards" element={<UserBoards />} />
@@ -95,6 +95,12 @@ function MainLayout() {
       <Analytics />
     </>
   );
+}
+
+// Redirect /player2/:slug → /player/:slug
+function RedirectPlayer2() {
+  const { slug } = useParams();
+  return <Navigate to={`/player/${slug}`} replace />;
 }
 
 export default App;
