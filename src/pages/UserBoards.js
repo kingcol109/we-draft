@@ -1,140 +1,131 @@
 import React, { useEffect, useState, useRef } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
-import { Range } from "react-range";
 
-const defaultRanges = {
-  Height: [60, 84],
-  Weight: [150, 400],
-  Wingspan: [30, 90],
-  "Arm Length": [25, 40],
-  "Hand Size": [7, 12],
-  "40 Yard": [4.0, 7.0],
-  Vertical: [15, 50],
-  Broad: [70, 130],
-  Shuttle: [3.8, 6.0],
-  "3-Cone": [6.0, 20.0],
-  Bench: [0, 60],
-};
+const BLUE = "#0055a5";
+const GOLD = "#f6a21d";
+
+const ARCHIVE_YEARS = ["2026"];
+const ACTIVE_YEARS = ["2027", "2028", "2029"];
 
 const gradeOrder = [
-  "Early First Round",
-  "Middle First Round",
-  "Late First Round",
-  "Second Round",
-  "Third Round",
-  "Fourth Round",
-  "Fifth Round",
-  "Sixth Round",
-  "Seventh Round",
-  "UDFA",
   "Watchlist",
+  "Early First Round", "Middle First Round", "Late First Round",
+  "Second Round", "Third Round", "Fourth Round",
+  "Fifth Round", "Sixth Round", "Seventh Round", "UDFA",
 ];
 
-// --- helpers ---
+const gradeScale = {
+  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
+  "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
+  "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
+};
+
+const gradeDisplay = (g) => {
+  const map = {
+    "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
+    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
+    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
+    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
+    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
+    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
+    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
+    "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
+  };
+  return map[g] || null;
+};
+
+function sanitizeUrl(url) {
+  if (!url) return "";
+  const u = url.trim();
+  if (!/^https?:\/\//i.test(u)) return `https://${u}`;
+  return u;
+}
+
+const GradeBadge = ({ grade, small = false }) => {
+  const w = small ? "48px" : "64px";
+  const h = small ? "40px" : "52px";
+  const numSz = small ? "14px" : "18px";
+  const lblSz = small ? "5.5px" : "7px";
+  const gd = gradeDisplay(grade);
+  if (!gd) return (
+    <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: w, height: h, border: "2px solid #ddd", borderRadius: "5px", color: "#ccc", fontSize: small ? "14px" : "18px", fontWeight: 900 }}>—</div>
+  );
+  const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
+  const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
+  return (
+    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`, borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px" }}>
+      {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
+      <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>{gd.short}</span>
+      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>ROUND</span>
+    </div>
+  );
+};
+
+const PlusBadge = ({ onClick, loading, small = false }) => {
+  const w = small ? "48px" : "64px";
+  const h = small ? "40px" : "52px";
+  return (
+    <div onClick={loading ? undefined : onClick}
+      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: w, height: h, border: `2px solid ${BLUE}`, borderRadius: "5px", cursor: loading ? "default" : "pointer", backgroundColor: "#fff", color: BLUE, fontSize: small ? "18px" : "22px", fontWeight: 900, opacity: loading ? 0.4 : 1, transition: "background 0.15s", flexShrink: 0 }}
+      onMouseEnter={(e) => { if (!loading) e.currentTarget.style.background = "#e6f0fa"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+    >+</div>
+  );
+};
+
 const formatHeight = (inches) => {
-  if (!inches || isNaN(inches)) return "-";
+  if (!inches) return "-";
   const ft = Math.floor(inches / 12);
-  const inch = inches % 12;
+  const inch = Math.round((inches % 12) * 10) / 10;
   return `${ft}'${inch}"`;
 };
 
-const formatValue = (trait, value) => {
-  if (value === undefined || value === null || value === "" || isNaN(value))
-    return "-";
-  if (trait === "Height") return formatHeight(value);
-  if (
-    ["Wingspan", "Arm Length", "Hand Size", "Vertical", "Broad"].includes(trait)
-  )
-    return `${value}"`;
-  if (["40 Yard", "Shuttle", "3-Cone"].includes(trait))
-    return value.toFixed(2);
-  return value.toString();
-};
-
-const parseValue = (trait, val) => {
+const parseHeight = (val) => {
   if (!val) return NaN;
-  if (trait === "Height") {
-    const match = val.match(/(\d+)'(\d+)?/);
-    if (match) {
-      const ft = parseInt(match[1], 10);
-      const inches = parseInt(match[2] || "0", 10);
-      return ft * 12 + inches;
-    }
-    return parseFloat(val);
-  }
-  return parseFloat(val);
+  if (typeof val === "number") return val;
+  const match = String(val).match(/^(\d+)'([\d.]+)"/);
+  if (match) return parseInt(match[1], 10) * 12 + parseFloat(match[2]);
+  return NaN;
 };
 
-// --- Dropdown checklist ---
-function DropdownChecklist({
-  title,
-  options,
-  selected,
-  setSelected,
-  ordered = false,
-}) {
+function DropdownChecklist({ title, options, selected, setSelected, ordered = false }) {
   const [open, setOpen] = useState(false);
-  const dropdownRef = useRef(null);
-
+  const ref = useRef(null);
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
-
-  const toggleOption = (option) => {
-    setSelected((prev) =>
-      prev.includes(option)
-        ? prev.filter((o) => o !== option)
-        : [...prev, option]
-    );
-  };
-
-  const selectAll = () => setSelected(options);
-  const clearAll = () => setSelected([]);
-
-  const sortedOptions = ordered ? options : [...options].sort();
-
+  const toggle = (o) => setSelected((prev) => prev.includes(o) ? prev.filter((x) => x !== o) : [...prev, o]);
+  const sorted = ordered ? options : [...options].sort();
   return (
-    <div ref={dropdownRef} className="relative inline-block text-left">
-      <button
-        onClick={() => setOpen(!open)}
-        className="px-6 py-3 font-extrabold uppercase tracking-wide text-white rounded bg-[#0055a5] border-4 border-[#f6a21d] shadow hover:brightness-110 transition w-64"
-      >
-        {title}
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button onClick={() => setOpen(!open)} style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", whiteSpace: "nowrap" }}>
+        {title}{selected.length > 0 ? ` (${selected.length})` : ""} ▾
       </button>
       {open && (
-        <div className="absolute z-20 mt-2 w-64 max-h-80 overflow-y-auto bg-white border-4 border-[#f6a21d] rounded shadow-lg">
-          <div className="flex items-center justify-between px-4 py-2 bg-[#0055a5] text-white text-sm font-bold">
-            <span>{title}</span>
-            <div className="space-x-3">
-              <button onClick={selectAll} type="button" className="underline">
-                All
-              </button>
-              <button onClick={clearAll} type="button" className="underline">
-                Clear
-              </button>
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: "220px", maxHeight: "300px", overflowY: "auto", background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px", boxShadow: "0 6px 16px rgba(0,0,0,0.12)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: BLUE, color: "#fff", fontSize: "12px", fontWeight: 900 }}>
+            <span style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>{title}</span>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={() => setSelected(options)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontWeight: 800, fontSize: "12px", textDecoration: "underline" }}>All</button>
+              <button onClick={() => setSelected([])} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontWeight: 800, fontSize: "12px", textDecoration: "underline" }}>Clear</button>
             </div>
           </div>
-          <div className="p-4">
-            {sortedOptions.map((option) => (
-              <label key={option} className="block mb-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(option)}
-                  onChange={() => toggleOption(option)}
-                  className="mr-2 accent-[#0055a5]"
-                />
-                {option}
+          <div style={{ height: "3px", background: GOLD }} />
+          <div style={{ padding: "10px 12px" }}>
+            {sorted.map((o) => (
+              <label key={o} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", cursor: "pointer", fontSize: "14px", fontWeight: 700 }}>
+                <input type="checkbox" checked={selected.includes(o)} onChange={() => toggle(o)} style={{ accentColor: BLUE, width: "14px", height: "14px" }} />
+                {o}
               </label>
             ))}
           </div>
@@ -144,513 +135,520 @@ function DropdownChecklist({
   );
 }
 
-// --- Traits filter ---
-function TraitsFilter({ traitFilters, setTraitFilters, resetFilters }) {
+function ArchiveDropdown({ eligibleYear, onSelect }) {
   const [open, setOpen] = useState(false);
-  const dropdownRef = useRef(null);
-
+  const ref = useRef(null);
+  const isArchive = ARCHIVE_YEARS.includes(eligibleYear);
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
-
   return (
-    <div ref={dropdownRef} className="relative inline-block text-left">
-      <button
-        onClick={() => setOpen(!open)}
-        className="px-6 py-3 font-extrabold uppercase tracking-wide text-white rounded bg-[#0055a5] border-4 border-[#f6a21d] shadow hover:brightness-110 transition w-64"
-      >
-        Traits
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ border: `2px solid ${GOLD}`, borderRadius: "20px", padding: "6px 18px", fontWeight: 900, fontSize: "14px", cursor: "pointer", background: isArchive ? BLUE : "#fff", color: isArchive ? "#fff" : BLUE, display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+        {isArchive ? `Archive: ${eligibleYear}` : "Archive"} ▾
       </button>
       {open && (
-        <div className="absolute z-20 mt-2 w-96 max-h-[36rem] overflow-y-auto bg-white border-2 border-[#f6a21d] rounded-lg shadow-lg p-4">
-          <div className="flex justify-between items-center mb-3">
-            <span className="font-bold text-[#0055a5]">Filter Traits</span>
-            <button
-              onClick={resetFilters}
-              className="text-xs text-red-600 underline"
+        <div style={{ position: "absolute", top: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", zIndex: 50, minWidth: "160px", background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "10px", boxShadow: "0 6px 20px rgba(0,0,0,0.14)", overflow: "hidden" }}>
+          <div style={{ background: BLUE, padding: "8px 14px", fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>Past Draft Classes</div>
+          <div style={{ height: "3px", background: GOLD }} />
+          {ARCHIVE_YEARS.map((yr) => (
+            <div key={yr} onClick={() => { onSelect(yr); setOpen(false); }}
+              style={{ padding: "11px 16px", cursor: "pointer", fontWeight: 900, fontSize: "15px", color: eligibleYear === yr ? "#fff" : BLUE, background: eligibleYear === yr ? BLUE : "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #f0f0f0" }}
+              onMouseEnter={(e) => { if (eligibleYear !== yr) e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { if (eligibleYear !== yr) e.currentTarget.style.background = "#fff"; }}
             >
-              Reset
-            </button>
-          </div>
-
-          {Object.keys(traitFilters).map((trait) => {
-            const [minVal, maxVal] = traitFilters[trait];
-            const [minDefault, maxDefault] = defaultRanges[trait];
-            const step =
-              trait === "Hand Size"
-                ? 0.25
-                : ["40 Yard", "Shuttle", "3-Cone"].includes(trait)
-                ? 0.1
-                : 1;
-
-            return (
-              <div key={trait} className="mb-6">
-                <div className="font-semibold text-[#0055a5] mb-2">{trait}</div>
-                <Range
-                  values={[minVal, maxVal]}
-                  step={step}
-                  min={minDefault}
-                  max={maxDefault}
-                  onChange={(vals) =>
-                    setTraitFilters((prev) => ({ ...prev, [trait]: vals }))
-                  }
-                  renderTrack={({ props, children }) => (
-                    <div
-                      {...props}
-                      className="h-2 w-full bg-gray-200 rounded"
-                      style={{ ...props.style }}
-                    >
-                      <div
-                        className="h-2 bg-[#0055a5] rounded"
-                        style={{
-                          marginLeft: `${
-                            ((minVal - minDefault) / (maxDefault - minDefault)) *
-                            100
-                          }%`,
-                          width: `${
-                            ((maxVal - minVal) / (maxDefault - minDefault)) *
-                            100
-                          }%`,
-                        }}
-                      />
-                      {children}
-                    </div>
-                  )}
-                  renderThumb={({ props }) => (
-                    <div
-                      {...props}
-                      className="h-5 w-5 bg-[#0055a5] rounded-full border-2 border-[#f6a21d] shadow"
-                    />
-                  )}
-                />
-                <div className="grid grid-cols-3 text-sm text-center mt-2">
-                  <span>{formatValue(trait, minDefault)}</span>
-                  <span className="font-bold text-[#0055a5]">
-                    {formatValue(trait, minVal)} – {formatValue(trait, maxVal)}
-                  </span>
-                  <span>{formatValue(trait, maxDefault)}</span>
-                </div>
-              </div>
-            );
-          })}
+              <span>{yr}</span>
+              {eligibleYear === yr && <span style={{ color: GOLD }}>✓</span>}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// --- Main ---
 export default function UserBoards() {
   const { user } = useAuth();
-  const [evaluations, setEvaluations] = useState([]);
+  const navigate = useNavigate();
   const [players, setPlayers] = useState([]);
-  const [sortKey, setSortKey] = useState("UserGrade");
-  const [sortOrder, setSortOrder] = useState("asc");
-  const [view, setView] = useState("table");
+  const [playerCache, setPlayerCache] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
-  // Filters
+  const [draftMap, setDraftMap] = useState({});
+  const [nflTeams, setNflTeams] = useState({});
+  const [boardMap, setBoardMap] = useState(new Map());
+  const [addingId, setAddingId] = useState(null);
+
+  const [sortKey, setSortKey] = useState("MyGrade");
+  const [sortOrder, setSortOrder] = useState("asc");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
-  const [selectedGrades, setSelectedGrades] = useState([]);
-  const [traitFilters, setTraitFilters] = useState(
-    JSON.parse(JSON.stringify(defaultRanges))
-  );
-  const [eligibleYear, setEligibleYear] = useState("2026");
+  const [selectedMyGrades, setSelectedMyGrades] = useState([]);
+  const [showMyBoardOnly, setShowMyBoardOnly] = useState(false);
+  const [showAvailableOnly, setShowAvailableOnly] = useState(false);
+  const [eligibleYear, setEligibleYear] = useState("2027");
 
-  // Fetch players
-useEffect(() => {
-  const fetchPlayers = async () => {
-    const querySnapshot = await getDocs(collection(db, "players"));
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
-    const data = querySnapshot.docs.map((doc) => {
-      const raw = { id: doc.id, ...doc.data() };
-
-      // 🔥 normalize 40 Yard key (handles hidden whitespace)
-      const fortyKey = Object.keys(raw).find(
-        (k) => k.replace(/\s/g, "") === "40Yard"
-      );
-
-      if (fortyKey) {
-        raw["40 Yard"] = raw[fortyKey];
-      }
-
-      return raw;
-    });
-
-    setPlayers(data);
+  const handleYearSelect = (yr) => {
+    setEligibleYear(yr);
+    setSearchQuery(""); setSelectedPositions([]); setSelectedSchools([]);
+    setSelectedMyGrades([]); setShowMyBoardOnly(false); setShowAvailableOnly(false);
   };
 
-  fetchPlayers();
-}, []);
-
-  // Fetch user evaluations
+  // Fetch NFL teams
   useEffect(() => {
-    const fetchEvaluations = async () => {
-      if (!user) return;
-      const evalSnapshot = await getDocs(
-        collection(db, "users", user.uid, "evaluations")
-      );
-      const evals = evalSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setEvaluations(evals);
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "nfl"));
+        const map = {};
+        snap.docs.forEach((d) => { map[d.id] = d.data(); });
+        setNflTeams(map);
+      } catch (e) { console.error(e); }
     };
-    fetchEvaluations();
+    fetch();
+  }, []);
+
+  // Fetch draft order
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "draftOrder"));
+        const map = {};
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.Selection) map[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
+        });
+        setDraftMap(map);
+      } catch (e) { console.error(e); }
+    };
+    fetch();
+  }, []);
+
+  // Fetch players by year with cache
+  useEffect(() => {
+    if (playerCache[eligibleYear]) {
+      setPlayers(playerCache[eligibleYear]);
+      setLoading(false);
+      return;
+    }
+    const fetchPlayers = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", eligibleYear)));
+        const data = snap.docs.map((docSnap) => {
+          const p = { id: docSnap.id, ...docSnap.data() };
+          const fortyKey = Object.keys(p).find((k) => k.replace(/\s/g, "") === "40Yard");
+          if (fortyKey) p["40 Yard"] = p[fortyKey];
+          if (p.Height) p.HeightInches = parseHeight(p.Height);
+          return p;
+        });
+        setPlayerCache((prev) => ({ ...prev, [eligibleYear]: data }));
+        setPlayers(data);
+      } catch (err) { console.error(err); }
+      finally { setLoading(false); }
+    };
+    fetchPlayers();
+  }, [eligibleYear]);
+
+  // Fetch user's board
+  useEffect(() => {
+    const fetchBoard = async () => {
+      if (!user?.uid) { setBoardMap(new Map()); return; }
+      try {
+        const snap = await getDocs(collection(db, "users", user.uid, "evaluations"));
+        const m = new Map();
+        snap.docs.forEach((d) => m.set(d.id, d.data().grade || "Watchlist"));
+        setBoardMap(m);
+      } catch (err) { console.error(err); }
+    };
+    fetchBoard();
   }, [user]);
 
-  const handleSort = (key) => {
-    if (sortKey === key) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-    } else {
-      setSortKey(key);
-      setSortOrder("asc");
-    }
+  const handleAddToBoard = async (p) => {
+    if (!user) return alert("Sign in to add players to your board.");
+    if (boardMap.has(p.id)) return;
+    setAddingId(p.id);
+    try {
+      const evalData = {
+        uid: user.uid, email: user.email, playerId: p.id,
+        playerName: `${p.First || ""} ${p.Last || ""}`.trim(),
+        grade: "Watchlist", strengths: [], weaknesses: [],
+        nflFit: "", evaluation: "", visibility: "private",
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(doc(db, "players", p.id, "evaluations", user.uid), evalData);
+      await setDoc(doc(db, "users", user.uid, "evaluations", p.id), evalData);
+      setBoardMap((prev) => new Map([...prev, [p.id, "Watchlist"]]));
+    } catch (err) { console.error(err); alert("Failed to add player. Try again."); }
+    finally { setAddingId(null); }
   };
 
-  // Merge players + evals
-  const gradedPlayers = players
-    .map((p) => {
-      const evalData = evaluations.find((e) => e.playerId === p.id);
-      if (!evalData) return null;
-      return { ...p, UserGrade: evalData.grade || "-" };
-    })
-    .filter(Boolean);
+  const handleSort = (key) => {
+    if (sortKey === key) setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortOrder("asc"); }
+  };
 
-  // Filters
-  const filteredPlayers = gradedPlayers
+  const resetFilters = () => {
+    setSelectedSchools([]); setSelectedPositions([]);
+    setSelectedMyGrades([]); setSearchQuery("");
+    setShowMyBoardOnly(false); setShowAvailableOnly(false);
+  };
+
+  const hasActiveFilters = selectedPositions.length > 0 || selectedSchools.length > 0 ||
+    selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly || showAvailableOnly;
+
+  const is2026 = eligibleYear === "2026";
+  const is2029 = eligibleYear === "2029";
+
+  const filteredPlayers = players
+    .filter((p) => !searchQuery.trim() ? true : `${p.First || ""} ${p.Last || ""}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
+    .filter((p) => selectedSchools.length === 0 ? true : selectedSchools.includes(p.School))
     .filter((p) => {
-      if (!searchQuery.trim()) return true;
-      return `${p.First} ${p.Last}`
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase());
+      if (selectedMyGrades.length === 0) return true;
+      const myGrade = boardMap.get(p.id);
+      return myGrade ? selectedMyGrades.includes(myGrade) : false;
     })
-    .filter((p) =>
-      selectedPositions.length ? selectedPositions.includes(p.Position) : true
-    )
-    .filter((p) =>
-      selectedSchools.length ? selectedSchools.includes(p.School) : true
-    )
-    .filter((p) =>
-      selectedGrades.length ? selectedGrades.includes(p.UserGrade) : true
-    )
-    .filter((p) => {
-      if (!p.Eligible) return true;
-      return p.Eligible.toString() === eligibleYear;
-    })
-    .filter((p) =>
-      Object.entries(traitFilters).every(([trait, [min, max]]) => {
-        const val = parseValue(trait, p[trait]);
-        if (isNaN(val)) return true;
-        return val >= min && val <= max;
-      })
-    );
+    .filter((p) => showMyBoardOnly ? boardMap.has(p.id) : true)
+    .filter((p) => showAvailableOnly ? !draftMap[p.Slug] : true);
 
-const sortedPlayers = [...filteredPlayers].sort((a, b) => {
+  const myGradeOrder = {
+    "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
+    "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
+    "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9,
+    "UDFA": 10, "Watchlist": 11,
+  };
 
-  // ---- USER GRADE SORT ----
-  if (sortKey === "UserGrade") {
-    const rank = (g) =>
-      gradeOrder.includes(g) ? gradeOrder.indexOf(g) : gradeOrder.length;
-
-    const aRank = rank(a.UserGrade);
-    const bRank = rank(b.UserGrade);
-
-    return sortOrder === "asc" ? aRank - bRank : bRank - aRank;
-  }
-
-  // ---- PLAYER NAME ----
-  if (sortKey === "Player") {
-    const aLast = (a.Last || "").toLowerCase();
-    const bLast = (b.Last || "").toLowerCase();
-
-    if (aLast !== bLast) {
-      return sortOrder === "asc"
-        ? aLast.localeCompare(bLast)
-        : bLast.localeCompare(aLast);
+  const sortedPlayers = [...filteredPlayers].sort((a, b) => {
+    if (sortKey === "MyGrade") {
+      const aG = boardMap.get(a.id), bG = boardMap.get(b.id);
+      const aV = aG !== undefined ? (myGradeOrder[aG] ?? 99) : 999;
+      const bV = bG !== undefined ? (myGradeOrder[bG] ?? 99) : 999;
+      return sortOrder === "asc" ? aV - bV : bV - aV;
     }
-
-    const aFirst = (a.First || "").toLowerCase();
-    const bFirst = (b.First || "").toLowerCase();
-
-    return sortOrder === "asc"
-      ? aFirst.localeCompare(bFirst)
-      : bFirst.localeCompare(aFirst);
-  }
-
-  // ---- NUMERIC TRAITS ----
-  const numericTraits = [
-    "Height",
-    "Weight",
-    "Wingspan",
-    "Arm Length",
-    "Hand Size",
-    "40 Yard",
-    "Vertical",
-    "Broad",
-    "3-Cone",
-    "Shuttle",
-    "Bench",
-  ];
-
-  if (numericTraits.includes(sortKey)) {
-
-    const aVal = parseValue(sortKey, a[sortKey]);
-    const bVal = parseValue(sortKey, b[sortKey]);
-
-    const aHas = !isNaN(aVal);
-    const bHas = !isNaN(bVal);
-
-    // Both have numbers
-    if (aHas && bHas) {
-      return sortOrder === "asc" ? aVal - bVal : bVal - aVal;
+    if (sortKey === "Pick") {
+      const aD = draftMap[a.Slug], bD = draftMap[b.Slug];
+      return sortOrder === "asc" ? (aD?.pick || 9999) - (bD?.pick || 9999) : (bD?.pick || 9999) - (aD?.pick || 9999);
     }
-
-    // Only one has number
-    if (aHas && !bHas) return -1;
-    if (!aHas && bHas) return 1;
-
-    // Neither have numbers → alphabetical by last name
-    const aLast = (a.Last || "").toLowerCase();
-    const bLast = (b.Last || "").toLowerCase();
-
-    if (aLast < bLast) return -1;
-    if (aLast > bLast) return 1;
+    if (sortKey === "Player") {
+      const cmp = (a.Last || "").localeCompare(b.Last || "");
+      if (cmp !== 0) return sortOrder === "asc" ? cmp : -cmp;
+      return sortOrder === "asc" ? (a.First || "").localeCompare(b.First || "") : (b.First || "").localeCompare(a.First || "");
+    }
+    if (sortKey === "Height") {
+      const aV = a.HeightInches, bV = b.HeightInches;
+      const aH = !isNaN(aV), bH = !isNaN(bV);
+      if (aH && bH) return sortOrder === "asc" ? aV - bV : bV - aV;
+      if (aH) return -1; if (bH) return 1; return 0;
+    }
+    if (sortKey === "Weight") {
+      const aV = parseFloat(a.Weight), bV = parseFloat(b.Weight);
+      const aH = !isNaN(aV), bH = !isNaN(bV);
+      if (aH && bH) return sortOrder === "asc" ? aV - bV : bV - aV;
+      if (aH) return -1; if (bH) return 1; return 0;
+    }
+    const aV = (a[sortKey] || "").toString().toLowerCase();
+    const bV = (b[sortKey] || "").toString().toLowerCase();
+    if (aV < bV) return sortOrder === "asc" ? -1 : 1;
+    if (aV > bV) return sortOrder === "asc" ? 1 : -1;
     return 0;
-  }
+  });
 
-  // ---- DEFAULT STRING SORT ----
-  const aVal = (a[sortKey] || "").toString().toLowerCase();
-  const bVal = (b[sortKey] || "").toString().toLowerCase();
+  const allPositions = [...new Set(players.map((p) => p.Position).filter(Boolean))].sort();
+  const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
-  if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
-  if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
-  return 0;
+  const SortHeader = ({ sortK, label, align = "center", minWidth }) => (
+    <th onClick={() => handleSort(sortK)}
+      style={{ padding: "12px 14px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", background: BLUE, color: "#fff", border: `1px solid ${GOLD}`, cursor: "pointer", whiteSpace: "nowrap", textAlign: align, userSelect: "none", minWidth: minWidth || "auto" }}>
+      {label}{sortKey === sortK ? (sortOrder === "asc" ? " ▲" : " ▼") : ""}
+    </th>
+  );
 
-});
+  if (!user) return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      Please sign in to view your boards.
+    </div>
+  );
 
-
-  const headers = [
-    { key: "Player", label: "PLAYER" },
-    { key: "Position", label: "POS" },
-    { key: "School", label: "SCHOOL" },
-    { key: "UserGrade", label: "YOUR GRADE" },
-    { key: "Height", label: "HT" },
-    { key: "Weight", label: "WT" },
-    { key: "Wingspan", label: "WING" },
-    { key: "Arm Length", label: "ARM" },
-    { key: "Hand Size", label: "HAND" },
-    { key: "40 Yard", label: "40" },
-    { key: "Vertical", label: "VERT" },
-    { key: "Broad", label: "BROAD" },
-    { key: "3-Cone", label: "3C" },
-    { key: "Shuttle", label: "SHUTT" },
-    { key: "Bench", label: "BENCH" },
-  ];
-
-  if (!user) {
-    return (
-      <div className="flex justify-center items-center h-screen text-xl font-bold text-[#0055a5]">
-        Please sign in to view your boards.
-      </div>
-    );
-  }
+  if (loading) return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      Loading Board...
+    </div>
+  );
 
   return (
-    <div className="flex justify-center p-6">
-      <div className="w-full max-w-7xl">
-        {/* Logo + title */}
-<div className="flex justify-center mb-2">
-  <img src={Logo1} alt="Logo" className="h-20 object-contain" />
-</div>
+    <>
+      <Helmet><title>My Boards | We-Draft</title></Helmet>
 
-{/* Add Players via Community Board button */}
-<div className="flex justify-center mb-4">
-  <Link to="/community" className="inline-block" aria-label="Add players via Community Board">
-    <button
-      type="button"
-      className="px-6 py-3 font-extrabold uppercase tracking-wide text-white rounded-full bg-[#0055a5] border-4 border-[#f6a21d] shadow hover:brightness-110 transition"
-    >
-      Add players via Community Board
-    </button>
-  </Link>
-</div>
+      <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
-<h1 className="text-4xl font-black text-[#0055a5] mb-4 text-center">
-  Your Boards
-</h1>
-
-
-        {/* Eligible buttons */}
-        <div className="flex justify-center gap-4 mb-6">
-          {["2026", "2027", "2028"].map((year) => (
-            <button
-              key={year}
-              onClick={() => setEligibleYear(year)}
-              className={`px-8 py-3 font-extrabold uppercase rounded-full border-4 border-[#f6a21d] shadow transition ${
-                eligibleYear === year
-                  ? "bg-[#0055a5] text-white"
-                  : "bg-white text-[#0055a5]"
-              }`}
-            >
-              {year}
-            </button>
-          ))}
-        </div>
-{/* My Whiteboards Button */}
-<div className="flex justify-center mb-6">
-  <Link to="/whiteboard">
-    <button
-      type="button"
-      className="px-6 py-3 font-extrabold uppercase tracking-wide text-white rounded-full bg-[#0055a5] border-4 border-[#f6a21d] shadow hover:brightness-110 transition"
-    >
-      My Whiteboards
-    </button>
-  </Link>
-</div>
-        {/* Filters */}
-<div className="flex gap-4 mb-4 justify-center flex-wrap">
-  <DropdownChecklist
-    title="Position"
-    options={[
-      ...new Set(gradedPlayers.map((p) => p.Position).filter(Boolean)),
-    ]}
-    selected={selectedPositions}
-    setSelected={setSelectedPositions}
-  />
-  <DropdownChecklist
-    title="School"
-    options={[
-      ...new Set(gradedPlayers.map((p) => p.School).filter(Boolean)),
-    ].sort()}
-    selected={selectedSchools}
-    setSelected={setSelectedSchools}
-  />
-  <DropdownChecklist
-    title="Your Grade"
-    options={gradeOrder}
-    selected={selectedGrades}
-    setSelected={setSelectedGrades}
-    ordered
-  />
-  <TraitsFilter
-    traitFilters={traitFilters}
-    setTraitFilters={setTraitFilters}
-    resetFilters={() => {
-      setSelectedSchools([]);
-      setSelectedPositions([]);
-      setSelectedGrades([]);
-      setTraitFilters(JSON.parse(JSON.stringify(defaultRanges)));
-      setSearchQuery("");
-      setEligibleYear("2026");
-    }}
-  />
-</div>
-
-        {/* Search */}
-        <div className="flex justify-center mb-6">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search player..."
-            className="w-[360px] px-5 py-3 rounded font-semibold bg-white text-[#0055a5] placeholder-[#0055a5]/70 border-4 border-[#f6a21d] shadow focus:outline-none focus:ring-2 focus:ring-[#f6a21d]"
-          />
-        </div>
-
-        {/* Table view */}
-        {view === "table" && (
-          <div className="overflow-x-auto max-h-[700px] overflow-y-scroll">
-            <table className="min-w-full border-collapse text-center">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-[#0055a5] text-white border-4 border-[#f6a21d]">
-                  {headers.map((h) => (
-                    <th
-                      key={h.key}
-                      onClick={() => handleSort(h.key)}
-                      className="p-3 font-extrabold uppercase text-base cursor-pointer select-none"
-                    >
-                      {h.label}
-                      {sortKey === h.key
-                        ? sortOrder === "asc"
-                          ? " ▲"
-                          : " ▼"
-                        : ""}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedPlayers.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="odd:bg-white even:bg-white hover:bg-[#e6f0fa]"
-                  >
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      <Link
-                        to={`/player/${p.Slug}`}
-                        className="text-[#0055a5] font-bold hover:underline"
-                      >
-                        {`${p.First || ""} ${p.Last || ""}`}
-                      </Link>
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {p.Position || "-"}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {p.School || "-"}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {p.UserGrade || "-"}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Height", parseValue("Height", p.Height))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {p.Weight || "-"}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Wingspan", parseFloat(p.Wingspan))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Arm Length", parseFloat(p["Arm Length"]))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Hand Size", parseFloat(p["Hand Size"]))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("40 Yard", parseFloat(p["40 Yard"]))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Vertical", parseFloat(p.Vertical))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Broad", parseFloat(p.Broad))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("3-Cone", parseFloat(p["3-Cone"]))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {formatValue("Shuttle", parseFloat(p.Shuttle))}
-                    </td>
-                    <td className="p-3 border border-[#f6a21d] text-sm">
-                      {p.Bench || "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Page Header */}
+        <div style={{ marginBottom: "16px" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", marginBottom: "6px" }}>
+            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "26px" : "32px", objectFit: "contain" }} />
+            <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>My Boards</div>
           </div>
+          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        </div>
+
+        {/* Year Selector */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", marginBottom: "18px" }}>
+          <div style={{ display: "flex", gap: "8px" }}>
+            {ACTIVE_YEARS.map((yr) => (
+              <button key={yr} onClick={() => handleYearSelect(yr)}
+                style={{ border: `2px solid ${GOLD}`, borderRadius: "20px", padding: isMobile ? "6px 20px" : "8px 28px", fontWeight: 900, fontSize: isMobile ? "14px" : "16px", cursor: "pointer", background: eligibleYear === yr ? BLUE : "#fff", color: eligibleYear === yr ? "#fff" : BLUE, transition: "background 0.15s, color 0.15s" }}>
+                {yr}
+              </button>
+            ))}
+          </div>
+          <ArchiveDropdown eligibleYear={eligibleYear} onSelect={handleYearSelect} />
+        </div>
+
+        {/* 2029 placeholder */}
+        {is2029 ? (
+          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: BLUE, padding: "8px 16px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2029 Draft Class</div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+            <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
+              <div style={{ fontSize: "40px", marginBottom: "16px" }}>🏈</div>
+              <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>2029 Players Coming Soon</div>
+              <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#888", maxWidth: "480px", margin: "0 auto", lineHeight: 1.6 }}>
+                The 2029 draft class will be added once the 2026 college football season kicks off.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Filters */}
+            {isMobile ? (
+              <div style={{ marginBottom: "12px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
+                  <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+                  <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
+                  <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
+                </div>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <button onClick={() => setShowMyBoardOnly((v) => !v)}
+                    style={{ padding: "8px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showMyBoardOnly ? GOLD : "#fff", color: showMyBoardOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0 }}>
+                    {showMyBoardOnly ? "✓ My Board" : "My Board"}
+                  </button>
+                  {is2026 && (
+                    <button onClick={() => setShowAvailableOnly((v) => !v)}
+                      style={{ padding: "8px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showAvailableOnly ? GOLD : "#fff", color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0 }}>
+                      {showAvailableOnly ? "✓ Available" : "Available"}
+                    </button>
+                  )}
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+                    style={{ flex: 1, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
+                  {hasActiveFilters && (
+                    <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
+                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+                <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
+                <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
+                <button onClick={() => setShowMyBoardOnly((v) => !v)}
+                  style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showMyBoardOnly ? GOLD : "#fff", color: showMyBoardOnly ? "#fff" : BLUE, whiteSpace: "nowrap" }}>
+                  {showMyBoardOnly ? "✓ My Board" : "My Board"}
+                </button>
+                {is2026 && (
+                  <button onClick={() => setShowAvailableOnly((v) => !v)}
+                    style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showAvailableOnly ? GOLD : "#fff", color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap" }}>
+                    {showAvailableOnly ? "✓ Available" : "Available"}
+                  </button>
+                )}
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+                  style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "190px" }} />
+                <Link to="/community" style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: GOLD, border: `2px solid ${BLUE}`, borderRadius: "8px", textDecoration: "none", whiteSpace: "nowrap" }}>
+                  + Community Board
+                </Link>
+                <Link to="/whiteboard" style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px", textDecoration: "none", whiteSpace: "nowrap" }}>
+                  Whiteboard ↗
+                </Link>
+                {hasActiveFilters && (
+                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
+                )}
+              </div>
+            )}
+
+            {/* Table Card */}
+            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+              <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{eligibleYear} Draft Class</div>
+                <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
+                  {sortedPlayers.length} player{sortedPlayers.length !== 1 ? "s" : ""}
+                </div>
+              </div>
+              <div style={{ height: "3px", background: GOLD }} />
+
+              {isMobile ? (
+                <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                  {sortedPlayers.length === 0 ? (
+                    <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+                      {boardMap.size === 0 ? "No players on your board yet." : "No players match your filters."}
+                    </div>
+                  ) : sortedPlayers.map((p) => {
+                    const myGrade = boardMap.get(p.id);
+                    const onBoard = myGrade !== undefined;
+                    const isAdding = addingId === p.id;
+                    const draft = draftMap[p.Slug];
+                    const teamData = draft ? nflTeams[draft.team] : null;
+                    const c1 = teamData?.Color1 || BLUE;
+                    const c2 = teamData?.Color2 || GOLD;
+                    return (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderBottom: `1px solid ${GOLD}` }}>
+                        {is2026 && draft && (
+                          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "3px" }}>
+                            <div style={{ width: 32, height: 32, borderRadius: "6px", background: c1, border: `2px solid ${c2}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                              <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>Rd {draft.round}</span>
+                              <span style={{ fontSize: "13px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
+                            </div>
+                            {teamData?.Logo1 ? (
+                              <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} style={{ width: "24px", height: "24px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            ) : (
+                              <span style={{ fontSize: "8px", fontWeight: 900, color: c1 }}>{draft.team}</span>
+                            )}
+                          </div>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Link to={`/player/${p.Slug}`} style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2 }}>
+                            {`${p.First || ""} ${p.Last || ""}`}
+                          </Link>
+                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#555", marginTop: "3px" }}>{p.Position || "—"} · {p.School || "—"}</div>
+                          {(p.HeightInches || p.Weight) && (
+                            <div style={{ fontSize: "11px", color: "#aaa", fontWeight: 700, marginTop: "2px" }}>
+                              {p.HeightInches ? formatHeight(p.HeightInches) : ""}{p.HeightInches && p.Weight ? " · " : ""}{p.Weight ? `${p.Weight} lbs` : ""}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
+                          <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>My</div>
+                          {isAdding ? (
+                            <div style={{ width: "48px", height: "40px", border: `2px solid ${BLUE}`, borderRadius: "5px", opacity: 0.4 }} />
+                          ) : onBoard ? (
+                            <GradeBadge grade={myGrade} small />
+                          ) : (
+                            <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto", maxHeight: "680px", overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "center" }}>
+                    <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
+                      <tr>
+                        {is2026 && <SortHeader sortK="Pick" label="Pick" minWidth="60px" />}
+                        {is2026 && (
+                          <th style={{ padding: "12px 10px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", background: BLUE, color: "#fff", border: `1px solid ${GOLD}`, whiteSpace: "nowrap", minWidth: "52px" }}>Team</th>
+                        )}
+                        <SortHeader sortK="Player" label="Player" align="left" minWidth="200px" />
+                        <SortHeader sortK="Position" label="Pos" />
+                        <SortHeader sortK="School" label="School" />
+                        <SortHeader sortK="MyGrade" label="My Grade" />
+                        <SortHeader sortK="Height" label="HT" />
+                        <SortHeader sortK="Weight" label="WT" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedPlayers.length === 0 ? (
+                        <tr>
+                          <td colSpan={is2026 ? 8 : 6} style={{ padding: "32px", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
+                            {boardMap.size === 0 ? "No players on your board yet. Add players from the Community Board." : "No players match your filters."}
+                          </td>
+                        </tr>
+                      ) : sortedPlayers.map((p) => {
+                        const myGrade = boardMap.get(p.id);
+                        const onBoard = myGrade !== undefined;
+                        const isAdding = addingId === p.id;
+                        const draft = draftMap[p.Slug];
+                        const teamData = draft ? nflTeams[draft.team] : null;
+                        const c1 = teamData?.Color1 || BLUE;
+                        const c2 = teamData?.Color2 || GOLD;
+                        return (
+                          <tr key={p.id}
+                            onMouseEnter={(e) => { Array.from(e.currentTarget.cells).forEach((c) => c.style.background = "#e6f0fa"); }}
+                            onMouseLeave={(e) => { Array.from(e.currentTarget.cells).forEach((c) => c.style.background = "#fff"); }}
+                          >
+                            {is2026 && (
+                              <td style={{ padding: "8px 10px", border: `1px solid ${GOLD}`, background: "#fff" }}>
+                                {draft ? (
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "44px", height: "44px", borderRadius: "6px", background: c1, border: `2px solid ${c2}`, margin: "0 auto" }}>
+                                    <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
+                                    <span style={{ fontSize: "18px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
+                                  </div>
+                                ) : <span style={{ color: "#ddd" }}>—</span>}
+                              </td>
+                            )}
+                            {is2026 && (
+                              <td style={{ padding: "8px 10px", border: `1px solid ${GOLD}`, background: "#fff" }}>
+                                {draft ? (
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    {teamData?.Logo1 ? (
+                                      <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={teamData?.Name || draft.team} style={{ width: "36px", height: "36px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                                    ) : <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span>}
+                                  </div>
+                                ) : <span style={{ color: "#ddd" }}>—</span>}
+                              </td>
+                            )}
+                            <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", textAlign: "left" }}>
+                              <Link to={`/player/${p.Slug}`} style={{ color: BLUE, fontWeight: 900, textDecoration: "none", fontSize: "17px" }}
+                                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
+                                {`${p.First || ""} ${p.Last || ""}`}
+                              </Link>
+                            </td>
+                            <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>{p.Position || "-"}</td>
+                            <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>{p.School || "-"}</td>
+                            <td style={{ padding: "10px 12px", border: `1px solid ${GOLD}`, background: "#fff" }}>
+                              <div style={{ display: "flex", justifyContent: "center" }}>
+                                {isAdding ? (
+                                  <div style={{ width: "64px", height: "52px", border: `2px solid ${BLUE}`, borderRadius: "5px", opacity: 0.4 }} />
+                                ) : onBoard ? (
+                                  <GradeBadge grade={myGrade} />
+                                ) : (
+                                  <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} />
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: "10px 12px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>
+                              {p.HeightInches ? formatHeight(p.HeightInches) : (p.Height || "-")}
+                            </td>
+                            <td style={{ padding: "10px 12px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>
+                              {p.Weight || "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {!user && (
+              <p style={{ textAlign: "center", marginTop: "14px", fontSize: "13px", color: "#999", fontWeight: 700 }}>Sign in to add players to your board</p>
+            )}
+          </>
         )}
       </div>
-    </div>
+    </>
   );
 }

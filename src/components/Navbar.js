@@ -295,7 +295,6 @@ export default function Navbar() {
           >
             {[
               { path: "/community", label: "Community Board" },
-              { path: "/boards", label: "My Boards" },
               { path: "/mocks", label: "Mock Drafts" },
             ].map((l) => (
               <Link key={l.path} to={l.path} style={baseStyle}>{l.label}</Link>
@@ -492,7 +491,6 @@ export default function Navbar() {
           >
             {[
               { path: "/community", label: "Community Board" },
-              { path: "/boards", label: "My Boards" },
               { path: "/mocks", label: "Mock Drafts" },
               { path: "/nfl", label: "NFL Teams" },
               { path: "/cfb", label: "CFB Teams" },
