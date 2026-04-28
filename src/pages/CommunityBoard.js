@@ -78,8 +78,8 @@ function sanitizeUrl(url) {
 const GradeBadge = ({ grade, small = false }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
-  const numSz = small ? "16px" : "20px";
-  const lblSz = small ? "6px" : "7.5px";
+  const numSz = small ? "14px" : "18px";
+  const lblSz = small ? "5.5px" : "7px";
   const gd = gradeDisplay(grade);
   if (!gd) return (
     <div style={{
@@ -88,17 +88,21 @@ const GradeBadge = ({ grade, small = false }) => {
       color: "#ccc", fontSize: small ? "14px" : "18px", fontWeight: 900,
     }}>—</div>
   );
+  const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
+  const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
+  const bottomLabel = "ROUND";
   return (
     <div style={{
       display: "inline-flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
-      borderRadius: "5px", width: w, height: h, flexShrink: 0,
+      borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px",
     }}>
-      <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em" }}>
+      {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
+      <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>
         {gd.short}
       </span>
-      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: "2px", textAlign: "center", lineHeight: 1.1 }}>
-        {grade}
+      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>
+        ROUND
       </span>
     </div>
   );
