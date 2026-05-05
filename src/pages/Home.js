@@ -428,7 +428,7 @@ export default function Home() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("updatedAt", "desc"), limit(6)));
+        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)));
         setArticles(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })));
       } catch (err) { console.error("Error fetching articles:", err); }
     };
@@ -475,7 +475,7 @@ export default function Home() {
   }, []);
 
   const combinedNews = [...news, ...articles]
-    .sort((a, b) => ((b.updatedAt?.seconds || b.publishedAt?.seconds || 0) - (a.updatedAt?.seconds || a.publishedAt?.seconds || 0)))
+    .sort((a, b) => ((b.publishedAt?.seconds || b.updatedAt?.seconds || 0) - (a.publishedAt?.seconds || a.updatedAt?.seconds || 0)))
     .slice(0, 6);
 
   const SectionTitle = ({ children, linkTo, linkLabel }) => (
