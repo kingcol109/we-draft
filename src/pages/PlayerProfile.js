@@ -197,8 +197,13 @@ export default function PlayerProfile() {
       try {
         const newsSnap = await getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
         const newsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", ...d.data() }));
-        const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("slugs","array-contains",slug), orderBy("updatedAt","desc")));
-        const articleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", ...d.data(), publishedAt:d.data().updatedAt }));
+        let articleItems = [];
+        try {
+          const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
+          articleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", ...d.data() }));
+        } catch(articleErr) {
+          console.warn("Articles index missing, skipping:", articleErr);
+        }
         const combined = [...newsItems, ...articleItems].sort((a,b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0));
         setPlayerNews(combined);
       } catch(e) { setPlayerNews([]); }
@@ -289,7 +294,6 @@ export default function PlayerProfile() {
           });
           const userDocs = await Promise.all(Array.from(pubUids).map((uid) => getDoc(doc(db,"users",uid))));
           const uMap = {};
-          // ── FIX: show "Anonymous User" instead of email for users without a display name ──
           userDocs.forEach((snap) => { if (snap.exists()) { const u=snap.data(); uMap[snap.id]={name:u.username||"Anonymous User", verified:u.verified||false}; } });
           const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
           const pubWithNames = pubEvals
@@ -445,10 +449,13 @@ export default function PlayerProfile() {
 
   const GradeBadge = ({ g, large=false }) => {
     const { short, bg, border } = gradeDisplay(g);
+    const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(g);
+    const qualifier = isFirstRound ? g.replace(" First Round", "").toUpperCase() : null;
     return (
-      <div className="rounded text-center" style={{ backgroundColor:bg, border:`${large?4:3}px solid ${border}`, padding:large?"10px 16px":"8px 10px", minWidth:large?"100%":"auto" }}>
-        <div style={{ fontSize:large?"52px":"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
-        <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{g}</div>
+      <div className="rounded text-center" style={{ backgroundColor:bg, border:`${large?4:3}px solid ${border}`, padding:large?"10px 16px":"8px 10px", minWidth:large?"100%":"auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"1px" }}>
+        {qualifier && <div style={{ fontSize:large?"12px":"8px", fontWeight:900, color:"rgba(255,255,255,0.9)", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1, textAlign:"center" }}>{qualifier}</div>}
+        <div style={{ fontSize:large?"52px":"30px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em", textAlign:"center" }}>{short}</div>
+        <div style={{ fontSize:large?"10px":"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", textAlign:"center" }}>ROUND</div>
       </div>
     );
   };
@@ -457,34 +464,73 @@ export default function PlayerProfile() {
     <>
       <Helmet>
         <title>{`${player.First||""} ${player.Last||""} Draft Scouting Report | We-Draft`}</title>
-        <meta name="description" content={`Scouting report for ${player.First||""} ${player.Last||""}, ${player.Position||""} from ${player.School||""}.`} />
-        <meta property="og:title" content={`${player.First||""} ${player.Last||""} Scouting Report`} />
-        <meta property="og:url" content={`https://we-draft.com/player/${slug}`} />
+        <meta name="description" content={`${player.First||""} ${player.Last||""} scouting report. ${player.Position||""} from ${player.School||""}. Community grades, strengths, weaknesses, and NFL fit projections.`} />
         <link rel="canonical" href={`https://we-draft.com/player/${slug}`} />
+        <meta property="og:type" content="article" />
+        <meta property="og:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report | We-Draft`} />
+        <meta property="og:description" content={`${player.First||""} ${player.Last||""} scouting report. ${player.Position||""} from ${player.School||""}.`} />
+        <meta property="og:url" content={`https://we-draft.com/player/${slug}`} />
+        <meta property="og:site_name" content="We-Draft" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report`} />
+        <meta name="twitter:description" content={`${player.First||""} ${player.Last||""} | ${player.Position||""} | ${player.School||""}`} />
       </Helmet>
 
       <div className="max-w-6xl mx-auto pb-40" style={{ padding:isMobile?"10px 10px 160px":"24px 24px 160px" }}>
 
         {/* ===== HERO CARD ===== */}
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border:`3px solid ${color1}` }}>
-          <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"8px 12px":"10px 20px" }}>
-            <button onClick={()=>navigate(-1)} className="text-white font-extrabold rounded-full transition hover:opacity-80"
-              style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
+          <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
+            <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
+              style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"14px", padding:isMobile?"6px 12px":"7px 18px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
-            <div className="flex gap-2">
+
+            {/* ── Prominent CTA buttons ── */}
+            <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
               {player.Link && (
-                <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
-                  className="text-white font-bold rounded-full transition hover:opacity-80"
-                  style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
-                  Film
+                <button
+                  onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
+                  style={{
+                    background:"rgba(255,255,255,0.15)",
+                    border:`2px solid ${color2}`,
+                    color:"#fff",
+                    fontSize:isMobile?"12px":"14px",
+                    fontWeight:900,
+                    padding:isMobile?"8px 16px":"10px 22px",
+                    borderRadius:"8px",
+                    letterSpacing:"0.06em",
+                    textTransform:"uppercase",
+                    cursor:"pointer",
+                    display:"flex", alignItems:"center", gap:"6px",
+                  }}
+                  onMouseEnter={(e)=>{ e.currentTarget.style.background="rgba(255,255,255,0.28)"; }}
+                  onMouseLeave={(e)=>{ e.currentTarget.style.background="rgba(255,255,255,0.15)"; }}
+                >
+                  <span style={{ fontSize:"14px" }}>▶</span> Film
                 </button>
               )}
               {!draftedBy && (
-                <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
-                  className="font-extrabold rounded-full transition hover:opacity-90"
-                  style={{ backgroundColor:color2, border:`2px solid ${color2}`, color:"#fff", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
-                  Evaluate
+                <button
+                  onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
+                  style={{
+                    backgroundColor:color2,
+                    border:"2px solid rgba(255,255,255,0.7)",
+                    color:"#fff",
+                    fontSize:isMobile?"13px":"15px",
+                    fontWeight:900,
+                    padding:isMobile?"9px 20px":"11px 30px",
+                    borderRadius:"8px",
+                    letterSpacing:"0.08em",
+                    textTransform:"uppercase",
+                    cursor:"pointer",
+                    display:"flex", alignItems:"center", gap:"6px",
+                    boxShadow:"0 2px 16px rgba(0,0,0,0.3)",
+                  }}
+                  onMouseEnter={(e)=>{ e.currentTarget.style.opacity="0.88"; }}
+                  onMouseLeave={(e)=>{ e.currentTarget.style.opacity="1"; }}
+                >
+                  <span style={{ fontSize:"14px" }}>✏</span> Evaluate
                 </button>
               )}
             </div>
