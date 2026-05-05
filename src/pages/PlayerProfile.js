@@ -486,51 +486,19 @@ export default function PlayerProfile() {
               ← Back
             </button>
 
-            {/* ── Prominent CTA buttons ── */}
-            <div style={{ display:"flex", gap:"10px", alignItems:"center" }}>
+            <div className="flex gap-2">
               {player.Link && (
-                <button
-                  onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
-                  style={{
-                    background:"rgba(255,255,255,0.15)",
-                    border:`2px solid ${color2}`,
-                    color:"#fff",
-                    fontSize:isMobile?"12px":"14px",
-                    fontWeight:900,
-                    padding:isMobile?"8px 16px":"10px 22px",
-                    borderRadius:"8px",
-                    letterSpacing:"0.06em",
-                    textTransform:"uppercase",
-                    cursor:"pointer",
-                    display:"flex", alignItems:"center", gap:"6px",
-                  }}
-                  onMouseEnter={(e)=>{ e.currentTarget.style.background="rgba(255,255,255,0.28)"; }}
-                  onMouseLeave={(e)=>{ e.currentTarget.style.background="rgba(255,255,255,0.15)"; }}
-                >
-                  <span style={{ fontSize:"14px" }}>▶</span> Film
+                <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
+                  className="text-white font-bold rounded-full transition hover:opacity-80"
+                  style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
+                  Film
                 </button>
               )}
               {!draftedBy && (
-                <button
-                  onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
-                  style={{
-                    backgroundColor:color2,
-                    border:"2px solid rgba(255,255,255,0.7)",
-                    color:"#fff",
-                    fontSize:isMobile?"13px":"15px",
-                    fontWeight:900,
-                    padding:isMobile?"9px 20px":"11px 30px",
-                    borderRadius:"8px",
-                    letterSpacing:"0.08em",
-                    textTransform:"uppercase",
-                    cursor:"pointer",
-                    display:"flex", alignItems:"center", gap:"6px",
-                    boxShadow:"0 2px 16px rgba(0,0,0,0.3)",
-                  }}
-                  onMouseEnter={(e)=>{ e.currentTarget.style.opacity="0.88"; }}
-                  onMouseLeave={(e)=>{ e.currentTarget.style.opacity="1"; }}
-                >
-                  <span style={{ fontSize:"14px" }}>✏</span> Evaluate
+                <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
+                  className="font-extrabold rounded-full transition hover:opacity-90"
+                  style={{ backgroundColor:color2, border:`2px solid ${color2}`, color:"#fff", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
+                  Evaluate
                 </button>
               )}
             </div>
