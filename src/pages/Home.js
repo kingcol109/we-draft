@@ -428,7 +428,7 @@ export default function Home() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)));
+        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("updatedAt", "desc"), limit(6)));
         setArticles(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })));
       } catch (err) { console.error("Error fetching articles:", err); }
     };
@@ -545,9 +545,13 @@ export default function Home() {
                     onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                   >
                     {dateStr && (
-                      <div style={{ flexShrink: 0, width: "32px", height: "32px", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "5px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", lineHeight: 1 }}>
-                        <span style={{ fontSize: "11px", fontWeight: 900 }}>{dateStr.split(" ")[1]}</span>
-                        <span style={{ fontSize: "6px", fontWeight: 800, opacity: 0.8, textTransform: "uppercase" }}>{dateStr.split(" ")[0]}</span>
+                      <div style={{ flexShrink: 0, width: "38px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                        <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+                          <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{dateStr.split(" ")[0]}</span>
+                        </div>
+                        <div style={{ padding: "3px 0 3px", textAlign: "center" }}>
+                          <span style={{ fontSize: "17px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{dateStr.split(" ")[1]}</span>
+                        </div>
                       </div>
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>

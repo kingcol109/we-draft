@@ -710,9 +710,13 @@ export default function PlayerProfile() {
             <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
               {playerNews.map((n,i) => (
                 <div key={n.slug||n.id} className="flex items-center hover:bg-gray-50 transition" style={{ gap:isMobile?"10px":"16px", padding:isMobile?"10px 12px":"14px 20px", borderBottom:i<playerNews.length-1?"1px solid #f0f0f0":"none" }}>
-                  <div className="flex-shrink-0 flex flex-col items-center justify-center rounded text-white font-black" style={{ backgroundColor:color1, border:`2px solid ${color2}`, width:isMobile?38:48, height:isMobile?38:48, lineHeight:1 }}>
-                    <span style={{ fontSize:isMobile?"12px":"16px", fontWeight:900 }}>{n.publishedAt?.toDate?.().toLocaleDateString(undefined,{day:"numeric"})}</span>
-                    <span style={{ fontSize:"8px", fontWeight:800, letterSpacing:"0.06em", textTransform:"uppercase", opacity:0.85 }}>{n.publishedAt?.toDate?.().toLocaleDateString(undefined,{month:"short"})}</span>
+                  <div className="flex-shrink-0 rounded overflow-hidden" style={{ width:isMobile?40:50, border:`2px solid ${color1}`, background:"#fff", display:"flex", flexDirection:"column" }}>
+                    <div style={{ background:color2, lineHeight:1, padding:"1px 0", textAlign:"center" }}>
+                      <span style={{ fontSize:"10px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em" }}>{n.publishedAt?.toDate?.().toLocaleDateString(undefined,{month:"short"})}</span>
+                    </div>
+                    <div style={{ padding:"4px 0 3px", textAlign:"center" }}>
+                      <span style={{ fontSize:isMobile?"17px":"21px", fontWeight:900, color:color1, lineHeight:1, display:"block" }}>{n.publishedAt?.toDate?.().toLocaleDateString(undefined,{day:"numeric"})}</span>
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -910,7 +914,7 @@ export default function PlayerProfile() {
                       <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"11px":"14px" }}>{ev.username}</span>
                       {ev.verified && <img src={verifiedBadge} alt="Verified" className="w-4 h-4 inline-block" />}
                     </div>
-                    {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.6)", fontSize:"10px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
+                    {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
                   </div>
                   {isMobile ? (
                     <div>
@@ -943,7 +947,7 @@ export default function PlayerProfile() {
                       )}
                       {ev.evaluation && <div className="px-3 py-3">
                         <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`1px solid ${color1}`, paddingBottom:"3px", marginBottom:"6px" }}>Scout's Take</div>
-                        <p className="italic text-gray-700" style={{ fontSize:"12px" }}>"{ev.evaluation}"</p>
+                        <p className="italic" style={{ fontSize:"13px", color:"#222" }}>"{ev.evaluation}"</p>
                       </div>}
                     </div>
                   ) : (
@@ -976,7 +980,7 @@ export default function PlayerProfile() {
                         <div style={{ height:"1px", backgroundColor:"#e5e7eb", margin:"0 16px" }} />
                         <div className="px-4 py-3">
                           <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
-                          <p className="italic text-sm text-gray-700">"{ev.evaluation}"</p>
+                          <p className="italic" style={{ fontSize:"15px", color:"#222" }}>"{ev.evaluation}"</p>
                         </div>
                       </>}
                     </div>

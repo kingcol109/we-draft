@@ -28,21 +28,25 @@ export default function NewsArticle() {
     const style = document.createElement("style");
     style.id = "article-content-style";
     style.innerHTML = `
-      .article-body { font-family: Georgia, 'Times New Roman', serif; font-size: 17px; line-height: 1.85; color: #222; }
+      .article-body { font-family: Georgia, 'Times New Roman', serif; font-size: 17px; line-height: 1.85; color: #222; word-wrap: break-word; overflow-wrap: break-word; }
       .article-body p { margin-bottom: 1.2em; }
       .article-body h1, .article-body h2, .article-body h3 { font-family: 'Arial Black', Arial, sans-serif; font-weight: 900; color: ${BLUE}; text-transform: uppercase; letter-spacing: 0.05em; margin: 1.5em 0 0.5em; }
-      .article-body h1 { font-size: 22px; }
-      .article-body h2 { font-size: 18px; }
-      .article-body h3 { font-size: 15px; }
+      .article-body h1 { font-size: 20px; }
+      .article-body h2 { font-size: 17px; }
+      .article-body h3 { font-size: 14px; }
       .article-body strong { font-weight: 700; }
       .article-body em { font-style: italic; }
-      .article-body a { color: ${GOLD}; font-weight: 600; text-decoration: underline; }
+      .article-body a { color: ${GOLD}; font-weight: 600; text-decoration: underline; word-break: break-all; }
       .article-body a:hover { color: #c98a10; }
       .article-body ul, .article-body ol { margin: 0 0 1.2em 1.5em; }
       .article-body li { margin-bottom: 0.4em; }
       .article-body blockquote { border-left: 4px solid ${GOLD}; margin: 1.5em 0; padding: 0.5em 1em; background: #fdfaf3; font-style: italic; color: #444; }
-      .article-body img { max-width: 100%; border-radius: 8px; margin: 1em 0; }
+      .article-body img { max-width: 100%; height: auto; border-radius: 8px; margin: 1em 0; display: block; }
       .article-body hr { border: none; border-top: 2px solid #eee; margin: 2em 0; }
+      .article-body table { max-width: 100%; overflow-x: auto; display: block; }
+      @media (max-width: 600px) {
+        .article-body { font-size: 15px; line-height: 1.7; }
+      }
     `;
     document.head.appendChild(style);
     return () => { const s = document.getElementById("article-content-style"); if (s) s.remove(); };
@@ -68,14 +72,14 @@ export default function NewsArticle() {
       try {
         const [newsSnap, articleSnap] = await Promise.all([
           getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"), limit(8))),
-          getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("updatedAt", "desc"), limit(8))),
+          getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(8))),
         ]);
         const items = [
           ...newsSnap.docs.map((d) => ({ id: d.id, ...d.data(), type: "news" })),
           ...articleSnap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })),
         ]
           .filter((item) => item.slug !== id)
-          .sort((a, b) => ((b.updatedAt?.seconds || b.publishedAt?.seconds || 0) - (a.updatedAt?.seconds || a.publishedAt?.seconds || 0)))
+          .sort((a, b) => ((b.publishedAt?.seconds || b.updatedAt?.seconds || 0) - (a.publishedAt?.seconds || a.updatedAt?.seconds || 0)))
           .slice(0, 8);
         setSidebarItems(items);
       } catch (err) { console.error("Error loading sidebar:", err); }
@@ -116,9 +120,13 @@ export default function NewsArticle() {
         onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
       >
         {d && (
-          <div style={{ flexShrink: 0, width: "36px", height: "36px", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "6px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", lineHeight: 1 }}>
-            <span style={{ fontSize: "12px", fontWeight: 900 }}>{d.split(" ")[1]}</span>
-            <span style={{ fontSize: "7px", fontWeight: 800, opacity: 0.8, textTransform: "uppercase" }}>{d.split(" ")[0]}</span>
+        <div style={{ flexShrink: 0, width: "42px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "6px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+              <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{d.split(" ")[0]}</span>
+            </div>
+            <div style={{ padding: "4px 0 4px", textAlign: "center" }}>
+              <span style={{ fontSize: "20px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{d.split(" ")[1]}</span>
+            </div>
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -280,27 +288,11 @@ export default function NewsArticle() {
               <div style={{ height: "3px", background: GOLD }} />
               {sidebarItems.length > 0 ? (
                 isMobile ? (
-                  <div style={{ display: "flex", overflowX: "auto", gap: "0", background: "#fff" }}>
-                    {sidebarItems.map((item) => {
-                      const ts = item.publishedAt || item.updatedAt;
-                      const d = ts?.toDate?.()?.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                      return (
-                        <Link
-                          key={item.id}
-                          to={`/news/${item.slug}`}
-                          style={{ flexShrink: 0, width: "180px", padding: "12px 12px", textDecoration: "none", background: "#fff", borderRight: "1px solid #f0f0f0", display: "flex", flexDirection: "column", gap: "6px" }}
-                        >
-                          <span style={{ background: item.type === "article" ? GOLD : BLUE, color: "#fff", fontSize: "7px", fontWeight: 900, padding: "1px 5px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.08em", alignSelf: "flex-start" }}>
-                            {item.type === "article" ? "Article" : "News"}
-                          </span>
-                          {d && <span style={{ fontSize: "10px", fontWeight: 700, color: "#aaa" }}>{d}</span>}
-                          <span style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "11px", color: "#222", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.3 }}>
-                            {item.title}
-                          </span>
-                        </Link>
-                      );
-                    })}
-                  </div>
+                  sidebarItems.map((item) => (
+                    <div key={item.id}>
+                      <SidebarItem item={item} />
+                    </div>
+                  ))
                 ) : (
                   sidebarItems.map((item) => (
                     <div key={item.id}>
