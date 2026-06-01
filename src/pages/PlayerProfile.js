@@ -109,6 +109,9 @@ export default function PlayerProfile() {
   const [fitLogos, setFitLogos] = useState([]);
   const [nflFitLogo, setNflFitLogo] = useState("");
   const [feedLogoCache, setFeedLogoCache] = useState({});
+  const [archivedEval, setArchivedEval] = useState(null);
+  const [archiving, setArchiving] = useState(false);
+  const [playerStats, setPlayerStats] = useState(null);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -273,6 +276,32 @@ export default function PlayerProfile() {
     fetch();
   }, [user, player]);
 
+  // Fetch archived evaluation
+  useEffect(() => {
+    const fetch = async () => {
+      if (!user || !player?.id) return;
+      try {
+        const snap = await getDoc(doc(db,"users",user.uid,"archivedEvaluations",player.id));
+        if (snap.exists()) setArchivedEval(snap.data());
+        else setArchivedEval(null);
+      } catch(e) { console.error(e); }
+    };
+    fetch();
+  }, [user, player]);
+
+  // Fetch player stats
+  useEffect(() => {
+    const fetch = async () => {
+      if (!player?.Slug) return;
+      try {
+        const snap = await getDoc(doc(db,"playerStats",player.Slug));
+        if (snap.exists()) setPlayerStats(snap.data());
+        else setPlayerStats(null);
+      } catch(e) { console.error(e); }
+    };
+    fetch();
+  }, [player]);
+
   useEffect(() => {
     const fetch = async () => {
       if (!player?.id) return;
@@ -407,6 +436,49 @@ export default function PlayerProfile() {
     } catch(e) { alert("❌ Failed to remove evaluation. Try again."); }
   }
 
+  async function handleArchiveEvaluation() {
+    if (!user||!player?.id) return alert("You must sign in first.");
+    if (!lastUpdated) return alert("Save your evaluation first before archiving.");
+
+    const overwriteWarning = archivedEval
+      ? "\n\n⚠️ You already have an archived evaluation for this player. This will overwrite it."
+      : "";
+
+    const confirmed = window.confirm(
+      `📦 Archive this evaluation?\n\nArchiving takes a snapshot of your current evaluation and locks it as a read-only record. Your current evaluation will be cleared so you can start fresh.\n\nYou can only have one archive per player — archiving again will overwrite the previous snapshot.${overwriteWarning}`
+    );
+    if (!confirmed) return;
+
+    setArchiving(true);
+    try {
+      const snap = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
+      if (!snap.exists()) return alert("Save your evaluation first before archiving.");
+      const data = snap.data();
+
+      // Save archive with a JS Date so it's readable immediately (before Firestore resolves serverTimestamp)
+      const now = new Date();
+      const archiveData = {
+        ...data,
+        archivedAt: serverTimestamp(),
+        archivedAtISO: now.toISOString(),
+        playerName: `${player.First||""} ${player.Last||""}`.trim(),
+      };
+      await setDoc(doc(db,"users",user.uid,"archivedEvaluations",player.id), archiveData);
+
+      // Clear the current evaluation
+      const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
+      await Promise.all([
+        deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)),
+        deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id)),
+      ]);
+
+      setArchivedEval({ ...archiveData, archivedAt: { toDate: () => now } });
+      setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+      alert("📦 Evaluation archived and current eval cleared. You can now start a fresh evaluation.");
+    } catch(e) { console.error(e); alert("❌ Failed to archive evaluation. Try again."); }
+    finally { setArchiving(false); }
+  }
+
   const renderDate = (ts) => {
     if (!ts) return "";
     try { return ts?.toDate?.() ? ts.toDate().toLocaleString() : typeof ts==="number" ? new Date(ts).toLocaleString() : new Date(ts).toLocaleString(); }
@@ -437,7 +509,7 @@ export default function PlayerProfile() {
   );
 
   const GroupLabel = ({ children }) => (
-    <div style={{ fontSize:"10px", fontWeight:800, letterSpacing:"0.1em", textTransform:"uppercase", color:"#888", marginBottom:"6px", textAlign:"center" }}>{children}</div>
+    <div style={{ fontSize:"12px", fontWeight:900, letterSpacing:"0.12em", textTransform:"uppercase", color:"#666", marginBottom:"8px", textAlign:"center" }}>{children}</div>
   );
 
   const SectionTitle = ({ children }) => (
@@ -565,10 +637,10 @@ export default function PlayerProfile() {
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>
               {isMobile ? (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
-                  <div style={{ width:"100%", fontSize:"9px", fontWeight:800, letterSpacing:"0.1em", textTransform:"uppercase", color:"#aaa", textAlign:"center", marginBottom:"2px" }}>Physical</div>
+                  <div style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginBottom:"4px" }}>Physical</div>
                   {physicalMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                   {hasAthletic && <>
-                    <div style={{ width:"100%", fontSize:"9px", fontWeight:800, letterSpacing:"0.1em", textTransform:"uppercase", color:"#aaa", textAlign:"center", marginTop:"6px", marginBottom:"2px" }}>Athletic Testing</div>
+                    <div style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginTop:"8px", marginBottom:"4px" }}>Athletic Testing</div>
                     {athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                   </>}
                 </div>
@@ -593,6 +665,82 @@ export default function PlayerProfile() {
               )}
             </div>
           )}
+
+        {/* ===== Season Stats ===== */}
+        {playerStats && (() => {
+          const pos = (player.Position || "").toUpperCase();
+          const s = playerStats;
+          const n = (v) => (v !== undefined && v !== null && v !== "") ? String(v) : null;
+
+          const formatNum = (v) => {
+            const n = Number(v);
+            if (isNaN(n)) return v;
+            return n.toLocaleString();
+          };
+
+          let statPills = [];
+
+          if (pos === "QB") {
+            const comp = n(s.PassComp), att = n(s.PassAtt), yds = n(s.PassYds), td = n(s.PassTD), ints = n(s.Int), ryds = n(s.RushYds), rtd = n(s.RushTD);
+            const pct = (comp && att && Number(att) > 0) ? Math.round((Number(comp) / Number(att)) * 100) + "%" : null;
+            if (comp && att) statPills.push({ val: `${formatNum(comp)}/${formatNum(att)}${pct ? ` (${pct})` : ""}`, label: "Comp/Att" });
+            if (yds) statPills.push({ val: formatNum(yds), label: "Pass Yds" });
+            if (td) statPills.push({ val: formatNum(td), label: "Pass TD" });
+            if (ints) statPills.push({ val: formatNum(ints), label: "Int" });
+            if (ryds) statPills.push({ val: formatNum(ryds), label: "Rush Yds" });
+            if (rtd) statPills.push({ val: formatNum(rtd), label: "Rush TD" });
+          } else if (pos === "RB") {
+            const att = n(s.RushAtt), yds = n(s.RushYds), td = n(s.RushTD), rec = n(s.Rec), ryds = n(s.RecYds), rtd = n(s.RecTD);
+            const ypc = (att && yds && Number(att) > 0) ? (Number(yds) / Number(att)).toFixed(1) : null;
+            if (yds) statPills.push({ val: `${formatNum(yds)}${ypc ? ` (${ypc})` : ""}`, label: "Rush Yds" });
+            if (td) statPills.push({ val: formatNum(td), label: "Rush TD" });
+            if (rec) statPills.push({ val: formatNum(rec), label: "Rec" });
+            if (ryds) statPills.push({ val: formatNum(ryds), label: "Rec Yds" });
+            if (rtd) statPills.push({ val: formatNum(rtd), label: "Rec TD" });
+          } else if (pos === "WR" || pos === "TE") {
+            const rec = n(s.Rec), yds = n(s.RecYds), td = n(s.RecTD);
+            if (rec) statPills.push({ val: formatNum(rec), label: "Rec" });
+            if (yds) statPills.push({ val: formatNum(yds), label: "Rec Yds" });
+            if (td) statPills.push({ val: formatNum(td), label: "Rec TD" });
+          } else if (pos === "DL" || pos === "EDGE" || pos === "DE" || pos === "DT") {
+            const tkl = n(s.Tkl), tfl = n(s.TFL), sk = n(s.Sk), ff = n(s.FF);
+            if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
+            if (tfl) statPills.push({ val: formatNum(tfl), label: "TFL" });
+            if (sk) statPills.push({ val: formatNum(sk), label: "Sacks" });
+            if (ff) statPills.push({ val: formatNum(ff), label: "FF" });
+          } else if (pos === "LB") {
+            const tkl = n(s.Tkl), tfl = n(s.TFL), sk = n(s.Sk), ff = n(s.FF), di = n(s.DefInt), pbu = n(s.PBU);
+            if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
+            if (tfl) statPills.push({ val: formatNum(tfl), label: "TFL" });
+            if (sk) statPills.push({ val: formatNum(sk), label: "Sacks" });
+            if (ff) statPills.push({ val: formatNum(ff), label: "FF" });
+            if (di) statPills.push({ val: formatNum(di), label: "INT" });
+            if (pbu) statPills.push({ val: formatNum(pbu), label: "PBU" });
+          } else if (pos === "DB" || pos === "CB" || pos === "S") {
+            const di = n(s.DefInt), pbu = n(s.PBU), tkl = n(s.Tkl);
+            if (di) statPills.push({ val: formatNum(di), label: "INT" });
+            if (pbu) statPills.push({ val: formatNum(pbu), label: "PBU" });
+            if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
+          }
+
+          if (statPills.length === 0) return null;
+
+          return (
+            <div className="bg-white" style={{ padding: isMobile ? "6px 10px 12px" : "8px 24px 14px", borderTop: "1px solid #f0f0f0" }}>
+              <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#666", textAlign: "center", marginBottom: "8px" }}>
+                {s.season ? `${s.season} Season Stats` : "Season Stats"}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", justifyContent: "center" }}>
+                {statPills.map((m) => (
+                  <div key={m.label} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", background: "#fff", border: `2px solid ${color1}`, borderRadius: "8px", padding: isMobile ? "5px 10px" : "7px 16px", minWidth: isMobile ? "52px" : "68px" }}>
+                    <span style={{ fontSize: isMobile ? "12px" : "16px", fontWeight: 900, color: color1, lineHeight: 1.1 }}>{m.val}</span>
+                    <span style={{ fontSize: isMobile ? "9px" : "11px", fontWeight: 800, color: "#888", letterSpacing: "0.08em", marginTop: "3px", textTransform: "uppercase" }}>{m.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
           <div style={{ height:"5px", backgroundColor:color2 }} />
         </div>
@@ -894,13 +1042,124 @@ export default function PlayerProfile() {
                   <button onClick={handleExportImage} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${color1}`, color:color1, letterSpacing:"0.08em" }}>
                     Export as Image
                   </button>
+                  {(lastUpdated || archivedEval) && (
+                    <button onClick={handleArchiveEvaluation} disabled={archiving || !lastUpdated} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90"
+                      style={{ backgroundColor:"#fff", border:`2px solid ${SITE_GOLD}`, color: lastUpdated ? "#7a5c00" : "#bbb", letterSpacing:"0.08em", cursor: lastUpdated ? "pointer" : "default" }}>
+                      {archiving ? "Archiving..." : archivedEval ? "📦 Update Archive" : "📦 Archive This Evaluation"}
+                    </button>
+                  )}
                   {lastUpdated && <button onClick={handleRemoveEvaluation} className="w-full text-xs text-gray-400 hover:text-red-500 font-medium underline transition pt-1">Remove from Board</button>}
-                  {lastUpdated && <p className="text-xs text-gray-400 text-center">{renderDate(lastUpdated)}</p>}
+                  {lastUpdated && <p style={{ textAlign:"center", fontSize:"13px", fontWeight:700, color:"#888", marginTop:"4px" }}>Saved: {renderDate(lastUpdated)}</p>}
                 </div>
               </div>
             )}
           </div>
         </div>
+
+        {/* ===== Archived Evaluation ===== */}
+        {user && archivedEval && (
+          <div className="mb-8">
+            <SectionTitle>My Archived Evaluation</SectionTitle>
+            <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${SITE_GOLD}`, opacity: 0.95 }}>
+              {/* Header */}
+              <div style={{ background:`linear-gradient(135deg, #7a5c00 0%, #b8860b 100%)`, padding:isMobile?"8px 12px":"10px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+                  <span style={{ fontSize:"14px" }}>📦</span>
+                  <span style={{ fontWeight:900, color:"#fff", fontSize:isMobile?"12px":"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Archived Snapshot</span>
+                  <span style={{ background:"rgba(255,255,255,0.2)", color:"#fff", fontSize:"9px", fontWeight:800, padding:"2px 8px", borderRadius:"20px", letterSpacing:"0.08em" }}>READ ONLY</span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+                  {(archivedEval.archivedAt || archivedEval.archivedAtISO) && (
+                    <span style={{ color:"#fff", fontSize:"14px", fontWeight:900 }}>
+                      {archivedEval.archivedAt?.toDate?.()?.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})
+                        || (archivedEval.archivedAtISO ? new Date(archivedEval.archivedAtISO).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}) : "")}
+                    </span>
+                  )}
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm("Delete your archived evaluation? This cannot be undone.")) return;
+                      try {
+                        const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
+                        await deleteDoc(fDoc(db,"users",user.uid,"archivedEvaluations",player.id));
+                        setArchivedEval(null);
+                      } catch(e) { alert("❌ Failed to delete archive. Try again."); }
+                    }}
+                    style={{ background:"rgba(255,255,255,0.15)", border:"1px solid rgba(255,255,255,0.4)", color:"#fff", borderRadius:"6px", padding:"4px 10px", fontSize:"11px", fontWeight:900, cursor:"pointer", letterSpacing:"0.04em" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(200,0,0,0.4)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.15)"; }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <div style={{ height:"3px", background:SITE_GOLD }} />
+
+              <div style={{ padding:isMobile?"12px":"20px", display:"flex", flexDirection:"column", gap:"16px" }}>
+                {/* Grade row */}
+                {archivedEval.grade && (() => {
+                  const gd = gradeDisplay(archivedEval.grade);
+                  if (!gd) return null;
+                  const isFirstRound = ["Early First Round","Middle First Round","Late First Round"].includes(archivedEval.grade);
+                  const qualifier = isFirstRound ? archivedEval.grade.replace(" First Round","").toUpperCase() : null;
+                  return (
+                    <div style={{ display:"flex", alignItems:"center", gap:"12px" }}>
+                      <div style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", justifyContent:"center", backgroundColor:gd.bg, border:`2px solid ${gd.border}`, borderRadius:"5px", width:"56px", height:"46px", flexShrink:0, gap:"1px" }}>
+                        {qualifier && <span style={{ fontSize:"7px", fontWeight:900, color:"rgba(255,255,255,0.9)", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1 }}>{qualifier}</span>}
+                        <span style={{ fontSize:"16px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{gd.short}</span>
+                        <span style={{ fontSize:"6px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", letterSpacing:"0.05em", lineHeight:1.1 }}>
+                          {archivedEval.grade === "Watchlist" ? "WATCHLIST" : "ROUND"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize:isMobile?"13px":"15px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.04em" }}>{archivedEval.grade}</div>
+                    </div>
+                  );
+                })()}
+
+                {/* Strengths + Weaknesses */}
+                {(archivedEval.strengths?.length > 0 || archivedEval.weaknesses?.length > 0) && (
+                  <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:"12px" }}>
+                    {archivedEval.strengths?.length > 0 && (
+                      <div>
+                        <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Strengths</div>
+                        {archivedEval.strengths.map((s,i) => (
+                          <div key={i} style={{ fontSize:isMobile?"12px":"13px", fontWeight:800, color:"#222", textTransform:"uppercase", letterSpacing:"0.04em", padding:"3px 0", borderBottom:i<archivedEval.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>
+                        ))}
+                      </div>
+                    )}
+                    {archivedEval.weaknesses?.length > 0 && (
+                      <div>
+                        <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Weaknesses</div>
+                        {archivedEval.weaknesses.map((w,i) => (
+                          <div key={i} style={{ fontSize:isMobile?"12px":"13px", fontWeight:800, color:"#222", textTransform:"uppercase", letterSpacing:"0.04em", padding:"3px 0", borderBottom:i<archivedEval.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* NFL Fit */}
+                {archivedEval.nflFit && (
+                  <div>
+                    <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>NFL Fit</div>
+                    <div style={{ fontSize:isMobile?"13px":"14px", fontWeight:800, color:"#333" }}>{archivedEval.nflFit}</div>
+                  </div>
+                )}
+
+                {/* Evaluation text */}
+                {archivedEval.evaluation && (
+                  <div>
+                    <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Scout's Take</div>
+                    <p style={{ fontStyle:"italic", fontSize:isMobile?"13px":"15px", color:"#222", lineHeight:1.6, margin:0 }}>"{archivedEval.evaluation}"</p>
+                  </div>
+                )}
+
+                <div style={{ fontSize:"11px", fontWeight:700, color:"#bbb", textAlign:"center", fontStyle:"italic" }}>
+                  This evaluation is locked and cannot be edited. Use "Archive This Evaluation" on your current eval to update it.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ===== Public Feed ===== */}
         <div className="mb-10">
