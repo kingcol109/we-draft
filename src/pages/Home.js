@@ -68,6 +68,256 @@ function GradeBadge({ grade }) {
   );
 }
 
+/* =========================
+   SUPPLEMENTAL DRAFT SPOTLIGHT
+   Fetches players with Eligible === "2026s"
+   Displayed as a breaking news banner above the main grid
+   ========================= */
+function SupplementalDraftSpotlight({ isMobile }) {
+  const [players, setPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPlayers = async () => {
+      try {
+        const snap = await getDocs(collection(db, "players"));
+        const suppPlayers = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((p) => p.Eligible?.toString() === "2026s");
+        setPlayers(suppPlayers);
+      } catch (err) {
+        console.error("Error fetching supplemental players:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPlayers();
+  }, []);
+
+  if (loading || players.length === 0) return null;
+
+  return (
+    <>
+      <style>{`
+        @keyframes suppPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+        @keyframes suppSlideIn {
+          from { opacity: 0; transform: translateY(-12px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .supp-player-row {
+          transition: background 0.15s, transform 0.15s;
+        }
+        .supp-player-row:hover {
+          background: #fff8e8 !important;
+          transform: translateX(4px);
+        }
+        .supp-player-row:hover .supp-player-name {
+          text-decoration: underline;
+        }
+      `}</style>
+
+      <div style={{
+        marginBottom: isMobile ? "24px" : "32px",
+        borderRadius: "12px",
+        overflow: "hidden",
+        boxShadow: `0 6px 32px rgba(180,30,30,0.18), 0 2px 8px rgba(246,162,29,0.15)`,
+        border: `2px solid #c0392b`,
+        animation: "suppSlideIn 0.4s ease both",
+      }}>
+
+        {/* Breaking banner ticker */}
+        <div style={{
+          background: "#c0392b",
+          padding: "5px 16px",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          overflow: "hidden",
+        }}>
+          <span style={{
+            flexShrink: 0,
+            background: "#fff",
+            color: "#c0392b",
+            fontSize: "9px",
+            fontWeight: 900,
+            padding: "2px 8px",
+            borderRadius: "3px",
+            textTransform: "uppercase",
+            letterSpacing: "0.12em",
+            animation: "suppPulse 1.4s ease-in-out infinite",
+          }}>
+            ● Breaking
+          </span>
+          <span style={{
+            color: "rgba(255,255,255,0.9)",
+            fontSize: "11px",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            whiteSpace: "nowrap",
+          }}>
+            2026 NFL Supplemental Draft — New prospect{players.length > 1 ? "s" : ""} eligible
+          </span>
+        </div>
+
+        {/* Main header */}
+        <div style={{
+          background: `linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)`,
+          padding: isMobile ? "16px 16px 14px" : "20px 28px 18px",
+          position: "relative",
+          overflow: "hidden",
+        }}>
+          {/* Diagonal stripe decoration */}
+          <div style={{
+            position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+            background: "repeating-linear-gradient(55deg, transparent, transparent 18px, rgba(192,57,43,0.08) 18px, rgba(192,57,43,0.08) 36px)",
+            pointerEvents: "none",
+          }} />
+          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+            <div>
+              <div style={{ fontSize: isMobile ? "9px" : "10px", fontWeight: 900, color: "#e74c3c", textTransform: "uppercase", letterSpacing: "0.22em", marginBottom: "5px" }}>
+                ⚡ 2026 NFL Draft — Supplemental Class
+              </div>
+              <div style={{ fontSize: isMobile ? "24px" : "34px", fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em" }}>
+                Supplemental Draft
+              </div>
+              <div style={{ fontSize: isMobile ? "13px" : "17px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "3px" }}>
+                Brendan Sorsby Plans to Enter the Supplemental Draft
+              </div>
+            </div>
+            <div style={{
+              background: "linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)",
+              border: "2px solid rgba(255,255,255,0.2)",
+              borderRadius: "10px",
+              padding: isMobile ? "10px 16px" : "12px 20px",
+              textAlign: "center",
+              flexShrink: 0,
+            }}>
+              <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "2px" }}>Eligible</div>
+              <div style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{players.length}</div>
+              <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "2px" }}>
+                Prospect{players.length > 1 ? "s" : ""}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Gold divider */}
+        <div style={{ height: "4px", background: `linear-gradient(90deg, #c0392b, ${GOLD}, #c0392b)` }} />
+
+        {/* Player rows */}
+        <div style={{ background: "#fff" }}>
+          {players.map((p, i) => {
+            const gradeVal = p.Grade || null;
+            const gd = gradeVal ? gradeDisplay(gradeVal) : null;
+            return (
+              <Link
+                key={p.id}
+                to={`/player/${p.Slug}`}
+                className="supp-player-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  padding: isMobile ? "14px 16px" : "18px 28px",
+                  borderBottom: i < players.length - 1 ? "1px solid #fce8e6" : "none",
+                  background: "#fff",
+                  textDecoration: "none",
+                  gap: "16px",
+                }}
+              >
+                {/* Supp badge */}
+                <div style={{
+                  flexShrink: 0,
+                  width: isMobile ? "46px" : "56px",
+                  height: isMobile ? "46px" : "56px",
+                  borderRadius: "10px",
+                  background: `linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)`,
+                  border: `2px solid #922b21`,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 3px 10px rgba(192,57,43,0.35)",
+                }}>
+                  <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: "0.1em", lineHeight: 1 }}>SUPP</span>
+                  <span style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>'26</span>
+                </div>
+
+                {/* Player info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    className="supp-player-name"
+                    style={{ fontWeight: 900, fontSize: isMobile ? "20px" : "26px", color: BLUE, lineHeight: 1.1, letterSpacing: "-0.01em" }}
+                  >
+                    {`${p.First || ""} ${p.Last || ""}`}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px", flexWrap: "wrap" }}>
+                    {p.Position && (
+                      <span style={{ background: BLUE, color: "#fff", fontSize: "10px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        {p.Position}
+                      </span>
+                    )}
+                    {p.School && (
+                      <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#444" }}>{p.School}</span>
+                    )}
+                    <span style={{
+                      background: "#fef9e7",
+                      border: "1px solid #f6a21d",
+                      color: "#7a4a00",
+                      fontSize: "9px",
+                      fontWeight: 900,
+                      padding: "2px 8px",
+                      borderRadius: "20px",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                    }}>
+                      Supplemental Eligible
+                    </span>
+                  </div>
+                </div>
+
+                {/* Grade + arrow */}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                  {gradeVal && gd && <GradeBadge grade={gradeVal} />}
+                  <span style={{ color: "#c0392b", fontSize: "22px", fontWeight: 900 }}>›</span>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          background: `linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)`,
+          padding: isMobile ? "10px 16px" : "12px 28px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "8px",
+        }}>
+          <div style={{ color: "rgba(255,255,255,0.6)", fontSize: "11px", fontWeight: 700 }}>
+            Supplemental draft prospects are outside the regular 2026 class
+          </div>
+          <Link to="/draft" style={{
+            color: GOLD,
+            fontWeight: 900,
+            fontSize: "11px",
+            textDecoration: "underline",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+          }}>
+            2026 Draft Board →
+          </Link>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function Top2027Board({ isMobile }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -166,7 +416,6 @@ function Top2027Board({ isMobile }) {
           padding: isMobile ? "16px 16px 14px" : "20px 24px 18px",
           position: "relative", overflow: "hidden",
         }}>
-          {/* decorative diagonal stripes */}
           <div style={{ position: "absolute", top: 0, right: 0, width: "200px", height: "100%", background: "repeating-linear-gradient(60deg, transparent, transparent 12px, rgba(246,162,29,0.07) 12px, rgba(246,162,29,0.07) 24px)", pointerEvents: "none" }} />
           <div style={{ position: "relative" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -215,7 +464,6 @@ function Top2027Board({ isMobile }) {
                   animationDelay: `${i * 0.05}s`,
                 }}
               >
-                {/* Rank badge */}
                 <div style={{
                   flexShrink: 0,
                   width: isMobile ? (isTop3 ? "36px" : "28px") : (isTop3 ? "46px" : "36px"),
@@ -237,7 +485,6 @@ function Top2027Board({ isMobile }) {
                   </span>
                 </div>
 
-                {/* Player info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     className="prospect-name"
@@ -267,7 +514,6 @@ function Top2027Board({ isMobile }) {
                   </div>
                 </div>
 
-                {/* Grade badge + arrow */}
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0, marginLeft: "10px" }}>
                   {p.commGrade && <GradeBadge grade={p.commGrade} />}
                   <span style={{ color: "#ccc", fontSize: "16px", fontWeight: 900 }}>›</span>
@@ -305,101 +551,7 @@ function Top2027Board({ isMobile }) {
   );
 }
 
-function Top2026Results({ isMobile }) {
-  const [picks, setPicks] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchPicks = async () => {
-      try {
-        const snap = await getDocs(collection(db, "draftOrder"));
-        const all = snap.docs
-          .map((d) => ({ docId: d.id, ...d.data() }))
-          .filter((p) => p.Selection && p.Selection.trim() !== "")
-          .sort((a, b) => a.Round !== b.Round ? a.Round - b.Round : a.Pick - b.Pick)
-          .slice(0, 10);
-
-        const enriched = await Promise.all(
-          all.map(async (pick) => {
-            let player = null;
-            let teamData = null;
-            try {
-              const q = query(collection(db, "players"), where("Slug", "==", pick.Selection), limit(1));
-              const playerSnap = await getDocs(q);
-              if (!playerSnap.empty) player = { id: playerSnap.docs[0].id, ...playerSnap.docs[0].data() };
-            } catch {}
-            try {
-              const teamSnap = await getDoc(doc(db, "nfl", pick.Team));
-              if (teamSnap.exists()) teamData = teamSnap.data();
-            } catch {}
-            return { ...pick, player, teamData };
-          })
-        );
-        setPicks(enriched);
-      } catch (err) {
-        console.error("Error fetching picks:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchPicks();
-  }, []);
-
-  if (loading) return (
-    <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>Loading...</div>
-  );
-  if (picks.length === 0) return null;
-
-  return (
-    <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-      <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Top 10 Picks</div>
-        <Link to="/draft" style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline" }}>
-          Full Board →
-        </Link>
-      </div>
-      <div style={{ height: "3px", background: GOLD }} />
-
-      {picks.map((pick, i) => {
-        const c1 = pick.teamData?.Color1 || BLUE;
-        const c2 = pick.teamData?.Color2 || GOLD;
-        const teamLogo = pick.teamData?.Logo1 || null;
-        const teamName = pick.teamData?.Name || pick.Team;
-        return (
-          <div key={pick.docId} style={{ display: "flex", alignItems: "center", padding: "8px 12px", borderBottom: i < picks.length - 1 ? "1px solid #f0f0f0" : "none", background: "#fff" }}>
-            <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: "6px", background: c1, border: `2px solid ${c2}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", marginRight: "8px" }}>
-              <div style={{ fontSize: "7px", fontWeight: 800, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>#{pick.Pick}</div>
-              {teamLogo ? (
-                <img src={sanitizeUrl(teamLogo)} alt={teamName} style={{ width: "18px", height: "18px", objectFit: "contain", marginTop: "1px" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-              ) : (
-                <div style={{ fontSize: "7px", fontWeight: 900, color: "#fff" }}>{pick.Team}</div>
-              )}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Link to={`/player/${pick.Selection}`} style={{ color: BLUE, fontWeight: 900, fontSize: "13px", textDecoration: "none", lineHeight: 1.2, display: "block" }}
-                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
-                {pick.player ? `${pick.player.First || ""} ${pick.player.Last || ""}` : pick.Selection}
-              </Link>
-              {pick.player && (
-                <div style={{ fontSize: "10px", fontWeight: 700, color: "#555" }}>
-                  {pick.player.Position} · {pick.player.School}
-                </div>
-              )}
-              <div style={{ fontSize: "10px", fontWeight: 800, color: c1, textTransform: "uppercase", letterSpacing: "0.03em" }}>{teamName}</div>
-            </div>
-          </div>
-        );
-      })}
-
-      <div style={{ textAlign: "center", padding: "10px" }}>
-        <Link to="/draft" style={{ display: "inline-block", backgroundColor: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "6px", padding: "7px 18px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.08em", textDecoration: "none" }}>
-          Full 2026 Results →
-        </Link>
-      </div>
-    </div>
-  );
-}
 
 export default function Home() {
   const [recentEvals, setRecentEvals] = useState([]);
@@ -518,6 +670,9 @@ export default function Home() {
           )}
         </div>
 
+        {/* ===== SUPPLEMENTAL DRAFT SPOTLIGHT ===== */}
+        <SupplementalDraftSpotlight isMobile={isMobile} />
+
         {/* ===== MAIN 3-COL: NEWS | 2027 BOARD | EVALS ===== */}
         <div style={{
           display: "grid",
@@ -589,7 +744,6 @@ export default function Home() {
                 <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>Loading...</div>
               ) : recentEvals.length > 0 ? recentEvals.map((ev, i) => (
                 <div key={i} style={{ padding: "12px 14px", background: "#fff", borderBottom: i < recentEvals.length - 1 ? "1px solid #f0f0f0" : "none" }}>
-                  {/* Header: username on player */}
                   <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "6px", flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ev.username}</span>
                     {ev.verified && <img src={verifiedBadge} alt="Verified" style={{ width: "11px", height: "11px" }} />}
@@ -598,7 +752,6 @@ export default function Home() {
                       {ev.playerName}
                     </Link>
                   </div>
-                  {/* Grade + evaluation text */}
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
                     {ev.grade && gradeDisplay(ev.grade) && <GradeBadge grade={ev.grade} />}
                     {ev.evaluation && (
@@ -607,7 +760,6 @@ export default function Home() {
                       </p>
                     )}
                   </div>
-                  {/* Strengths + Weaknesses */}
                   {(ev.strengths?.length > 0 || ev.weaknesses?.length > 0) && (
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px" }}>
                       {ev.strengths?.length > 0 && (
@@ -635,12 +787,6 @@ export default function Home() {
             </div>
           </div>
 
-        </div>
-
-        {/* ===== 2026 DRAFT RESULTS — SLIM BELOW ===== */}
-        <div style={{ marginBottom: isMobile ? "28px" : "40px" }}>
-          <SectionTitle linkTo="/draft" linkLabel="Full Results →">2026 Draft Results</SectionTitle>
-          <Top2026Results isMobile={isMobile} />
         </div>
 
         {/* ===== SOCIAL LINKS ===== */}

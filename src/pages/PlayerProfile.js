@@ -54,6 +54,13 @@ const toTeamSlug = (school) => {
   return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
 };
 
+const formatEligible = (eligible) => {
+  if (!eligible) return "";
+  const match = String(eligible).match(/^(\d{4})s$/i);
+  if (match) return `${match[1]} (Supplemental)`;
+  return String(eligible);
+};
+
 function teamNameFromAbbr(abbr) {
   const map = {
     ARI:"Arizona Cardinals",ATL:"Atlanta Falcons",BAL:"Baltimore Ravens",BUF:"Buffalo Bills",
@@ -276,7 +283,6 @@ export default function PlayerProfile() {
     fetch();
   }, [user, player]);
 
-  // Fetch archived evaluation
   useEffect(() => {
     const fetch = async () => {
       if (!user || !player?.id) return;
@@ -289,7 +295,6 @@ export default function PlayerProfile() {
     fetch();
   }, [user, player]);
 
-  // Fetch player stats
   useEffect(() => {
     const fetch = async () => {
       if (!player?.Slug) return;
@@ -455,7 +460,6 @@ export default function PlayerProfile() {
       if (!snap.exists()) return alert("Save your evaluation first before archiving.");
       const data = snap.data();
 
-      // Save archive with a JS Date so it's readable immediately (before Firestore resolves serverTimestamp)
       const now = new Date();
       const archiveData = {
         ...data,
@@ -465,7 +469,6 @@ export default function PlayerProfile() {
       };
       await setDoc(doc(db,"users",user.uid,"archivedEvaluations",player.id), archiveData);
 
-      // Clear the current evaluation
       const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
       await Promise.all([
         deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)),
@@ -600,7 +603,7 @@ export default function PlayerProfile() {
                   {player.School}
                 </span>
                 <span style={{ color:"#ccc" }}>·</span>
-                <span className="font-bold" style={{ color:"#666", fontSize:isMobile?"12px":"19px" }}>{player.Eligible}</span>
+                <span className="font-bold" style={{ color:"#666", fontSize:isMobile?"12px":"19px" }}>{formatEligible(player.Eligible)}</span>
               </div>
               {draftedBy && draftInfo && (
                 <div className="flex items-center justify-center gap-3 mt-2">
@@ -898,7 +901,7 @@ export default function PlayerProfile() {
                 <span style={{ color:"#ccc", fontSize:"20px" }}>·</span>
                 <span style={{ color:color1, fontWeight:900, fontSize:"20px" }}>{player.School}</span>
                 <span style={{ color:"#ccc", fontSize:"20px" }}>·</span>
-                <span style={{ color:"#666", fontWeight:800, fontSize:"20px" }}>{player.Eligible}</span>
+                <span style={{ color:"#666", fontWeight:800, fontSize:"20px" }}>{formatEligible(player.Eligible)}</span>
               </div>
             </div>
             <div style={{ height:"2px", backgroundColor:color2, margin:"0 28px" }} />
@@ -1061,7 +1064,6 @@ export default function PlayerProfile() {
           <div className="mb-8">
             <SectionTitle>My Archived Evaluation</SectionTitle>
             <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${SITE_GOLD}`, opacity: 0.95 }}>
-              {/* Header */}
               <div style={{ background:`linear-gradient(135deg, #7a5c00 0%, #b8860b 100%)`, padding:isMobile?"8px 12px":"10px 20px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
                   <span style={{ fontSize:"14px" }}>📦</span>
@@ -1095,7 +1097,6 @@ export default function PlayerProfile() {
               <div style={{ height:"3px", background:SITE_GOLD }} />
 
               <div style={{ padding:isMobile?"12px":"20px", display:"flex", flexDirection:"column", gap:"16px" }}>
-                {/* Grade row */}
                 {archivedEval.grade && (() => {
                   const gd = gradeDisplay(archivedEval.grade);
                   if (!gd) return null;
@@ -1115,7 +1116,6 @@ export default function PlayerProfile() {
                   );
                 })()}
 
-                {/* Strengths + Weaknesses */}
                 {(archivedEval.strengths?.length > 0 || archivedEval.weaknesses?.length > 0) && (
                   <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:"12px" }}>
                     {archivedEval.strengths?.length > 0 && (
@@ -1137,7 +1137,6 @@ export default function PlayerProfile() {
                   </div>
                 )}
 
-                {/* NFL Fit */}
                 {archivedEval.nflFit && (
                   <div>
                     <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>NFL Fit</div>
@@ -1145,7 +1144,6 @@ export default function PlayerProfile() {
                   </div>
                 )}
 
-                {/* Evaluation text */}
                 {archivedEval.evaluation && (
                   <div>
                     <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Scout's Take</div>
