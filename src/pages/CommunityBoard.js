@@ -90,7 +90,6 @@ const GradeBadge = ({ grade, small = false }) => {
   );
   const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
   const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
-  const bottomLabel = "ROUND";
   return (
     <div style={{
       display: "inline-flex", flexDirection: "column", alignItems: "center",
@@ -371,26 +370,29 @@ export default function CommunityBoard() {
       try {
         const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", eligibleYear)));
         const data = await Promise.all(
-          snap.docs.map(async (docSnap) => {
-            const p = { id: docSnap.id, ...docSnap.data() };
-            const fortyKey = Object.keys(p).find((k) => k.replace(/\s/g, "") === "40Yard");
-            if (fortyKey) p["40 Yard"] = p[fortyKey];
-            if (p.Height) p.HeightInches = parseHeight(p.Height);
-            try {
-              const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-              const grades = [];
-              evalsSnap.forEach((d) => {
-                const g = d.data().grade;
-                if (g && gradeScale[g]) grades.push(gradeScale[g]);
-              });
-              p.CommunityGrade = grades.length > 0
-                ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                : "-";
-            } catch {
-              p.CommunityGrade = "-";
-            }
-            return p;
-          })
+          snap.docs
+            // ── Exclude players explicitly marked Live: false ──
+            .filter((docSnap) => docSnap.data().Live !== false)
+            .map(async (docSnap) => {
+              const p = { id: docSnap.id, ...docSnap.data() };
+              const fortyKey = Object.keys(p).find((k) => k.replace(/\s/g, "") === "40Yard");
+              if (fortyKey) p["40 Yard"] = p[fortyKey];
+              if (p.Height) p.HeightInches = parseHeight(p.Height);
+              try {
+                const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
+                const grades = [];
+                evalsSnap.forEach((d) => {
+                  const g = d.data().grade;
+                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                });
+                p.CommunityGrade = grades.length > 0
+                  ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+                  : "-";
+              } catch {
+                p.CommunityGrade = "-";
+              }
+              return p;
+            })
         );
         setPlayerCache((prev) => ({ ...prev, [eligibleYear]: data }));
         setPlayers(data);
@@ -469,7 +471,11 @@ export default function CommunityBoard() {
     selectedCommGrades.length > 0 || selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly || showAvailableOnly;
 
   const is2026 = eligibleYear === "2026";
-  const is2029 = eligibleYear === "2029";
+
+  // ── 2029 placeholder shows only while there are genuinely no live 2029 players yet ──
+  // Once players with Eligible: "2029" (and Live !== false) exist in Firestore,
+  // this automatically flips to the real board — no code change needed later.
+  const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
 
   const filteredPlayers = players
     .filter((p) => !searchQuery.trim() ? true : `${p.First || ""} ${p.Last || ""}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
@@ -611,8 +617,8 @@ export default function CommunityBoard() {
           <ArchiveDropdown eligibleYear={eligibleYear} onSelect={handleYearSelect} />
         </div>
 
-        {/* ===== 2029 placeholder ===== */}
-        {is2029 ? (
+        {/* ===== 2029 placeholder — only while no live 2029 players exist yet ===== */}
+        {is2029Empty ? (
           <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>

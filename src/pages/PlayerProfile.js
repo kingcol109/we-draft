@@ -23,6 +23,10 @@ import confetti from "canvas-confetti";
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
 
+// ── Sidebar list caps ──────────────────────────────────────────────────────
+const DRAFT_CLASS_LIMIT = 20;
+const SIDEBAR_NEWS_LIMIT = 8;
+
 function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
@@ -86,6 +90,21 @@ const teamNameToAbbr = {
   "Seattle Seahawks":"SEA","Tampa Bay Buccaneers":"TB","Tennessee Titans":"TEN","Washington Commanders":"WAS",
 };
 
+// ── Shared sidebar shell — used by both the Draft Class column and the News column ──
+function SidebarCard({ title, color1, color2, children }) {
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${color1}` }}>
+      <div style={{ backgroundColor: color1, padding: "10px 14px" }}>
+        <div className="font-black uppercase" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.08em" }}>
+          {title}
+        </div>
+      </div>
+      <div style={{ height: "4px", backgroundColor: color2 }} />
+      <div style={{ background: "#fff" }}>{children}</div>
+    </div>
+  );
+}
+
 export default function PlayerProfile() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -119,6 +138,10 @@ export default function PlayerProfile() {
   const [archivedEval, setArchivedEval] = useState(null);
   const [archiving, setArchiving] = useState(false);
   const [playerStats, setPlayerStats] = useState(null);
+
+  // ── Draft class sidebar (left column) ──
+  const [draftClassPlayers, setDraftClassPlayers] = useState([]);
+  const [draftClassLoading, setDraftClassLoading] = useState(false);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -349,6 +372,66 @@ export default function PlayerProfile() {
     fetch();
   }, [player]);
 
+  // ── Fetch draft class: same Position + same Eligible year, Live !== false (except self, who always shows), sorted best-to-worst ──
+  // The current player is included and flagged isSelf so the sidebar can highlight their position in the class.
+  useEffect(() => {
+    const fetchDraftClass = async () => {
+      if (!player?.Position || !player?.Eligible) { setDraftClassPlayers([]); return; }
+      setDraftClassLoading(true);
+      try {
+        const q = query(
+          collection(db, "players"),
+          where("Position", "==", player.Position),
+          where("Eligible", "==", player.Eligible)
+        );
+        const snap = await getDocs(q);
+
+        const list = await Promise.all(
+          snap.docs
+            .filter((d) => d.id === player.id || d.data().Live !== false)
+            .map(async (d) => {
+              const data = d.data();
+              let avgGrade = null;
+              try {
+                const evalsSnap = await getDocs(collection(db, "players", d.id, "evaluations"));
+                const grades = [];
+                evalsSnap.forEach((ev) => {
+                  const g = ev.data().grade;
+                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                });
+                if (grades.length > 0) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
+              } catch { /* no evaluations subcollection yet — leave avgGrade null */ }
+              return {
+                id: d.id,
+                First: data.First || "",
+                Last: data.Last || "",
+                School: data.School || "",
+                Slug: data.Slug || "",
+                avgGrade,
+                isSelf: d.id === player.id,
+              };
+            })
+        );
+
+        list.sort((a, b) => {
+          const aV = a.avgGrade ?? 999; // ungraded players sink to the bottom
+          const bV = b.avgGrade ?? 999;
+          if (aV !== bV) return aV - bV; // lower scale value = better grade = shown first
+          return (a.Last || "").localeCompare(b.Last || "");
+        });
+
+        setDraftClassPlayers(list);
+      } catch (e) {
+        console.error(e);
+        setDraftClassPlayers([]);
+      } finally {
+        setDraftClassLoading(false);
+      }
+    };
+    fetchDraftClass();
+  }, [player]);
+
+
   useEffect(() => {
     if (!publicFeed.length) return;
     const missing = [...new Set(publicFeed.map((ev)=>ev.nflFit).filter(Boolean))].filter((t)=>!feedLogoCache[t]);
@@ -535,6 +618,123 @@ export default function PlayerProfile() {
     );
   };
 
+  // ── Draft Class sidebar content (left column) ──
+  // Sidebars use the site's own brand colors (not team colors) so they stay
+  // visually distinct from the team-branded main column.
+  const draftClassLabel = `${formatEligible(player.Eligible)} ${player.Position}`.trim();
+  const DraftClassList = (
+    <SidebarCard title={draftClassLabel} color1={SITE_BLUE} color2={SITE_GOLD}>
+      {draftClassLoading ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontWeight: 700 }}>
+          Loading…
+        </div>
+      ) : draftClassPlayers.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+          No other prospects yet.
+        </div>
+      ) : (
+        draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT).map((p, i) => {
+          const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : null;
+          const gd = gradeLabel ? gradeDisplay(gradeLabel) : null;
+          const rowStyle = {
+            display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px",
+            textDecoration: "none",
+            borderBottom: i < Math.min(draftClassPlayers.length, DRAFT_CLASS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none",
+            background: p.isSelf ? "#fff8e6" : "#fff",
+            borderLeft: p.isSelf ? `4px solid ${SITE_GOLD}` : "4px solid transparent",
+          };
+          const rowContent = (
+            <>
+              <div
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  width: "28px", height: "28px", borderRadius: "5px",
+                  backgroundColor: gd ? gd.bg : "#eee",
+                  border: `2px solid ${gd ? gd.border : "#ddd"}`,
+                  color: gd ? "#fff" : "#bbb",
+                  fontSize: "10px", fontWeight: 900,
+                }}
+                title={gradeLabel || "No grade yet"}
+              >
+                {gd ? gd.short : "—"}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "14px", lineHeight: 1.2 }}>
+                  {`${p.First} ${p.Last}`}
+                </span>
+                <span style={{ color: "#777", fontWeight: 700, fontSize: "12px", marginTop: "2px" }}>
+                  {p.School || "—"}
+                </span>
+              </div>
+            </>
+          );
+
+          return p.isSelf ? (
+            <div key={p.id} style={rowStyle}>
+              {rowContent}
+            </div>
+          ) : (
+            <Link
+              key={p.id}
+              to={`/player/${p.Slug}`}
+              style={rowStyle}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              {rowContent}
+            </Link>
+          );
+        })
+      )}
+    </SidebarCard>
+  );
+
+  // ── In The News sidebar content (right column) — same shell/sizing as Draft Class ──
+  const NewsSidebar = (
+    <SidebarCard title="In The News" color1={SITE_BLUE} color2={SITE_GOLD}>
+      {playerNews.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+          No recent news.
+        </div>
+      ) : (
+        playerNews.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
+          <Link
+            key={n.slug || n.id}
+            to={`/news/${n.slug}`}
+            style={{
+              display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px",
+              textDecoration: "none",
+              borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >
+            <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: `2px solid ${SITE_BLUE}`, background: "#fff", display: "flex", flexDirection: "column" }}>
+              <div style={{ background: SITE_GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+                <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
+                </span>
+              </div>
+              <div style={{ padding: "3px 0 2px", textAlign: "center" }}>
+                <span style={{ fontSize: "15px", fontWeight: 900, color: SITE_BLUE, lineHeight: 1, display: "block" }}>
+                  {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
+                </span>
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "article" ? SITE_GOLD : SITE_BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
+                {n.type === "article" ? "Article" : "News"}
+              </span>
+              <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>
+                {n.title}
+              </div>
+            </div>
+          </Link>
+        ))
+      )}
+    </SidebarCard>
+  );
+
   return (
     <>
       <Helmet>
@@ -551,7 +751,26 @@ export default function PlayerProfile() {
         <meta name="twitter:description" content={`${player.First||""} ${player.Last||""} | ${player.Position||""} | ${player.School||""}`} />
       </Helmet>
 
-      <div className="max-w-6xl mx-auto pb-40" style={{ padding:isMobile?"10px 10px 160px":"24px 24px 160px" }}>
+      <div
+        className="mx-auto pb-40"
+        style={
+          isMobile
+            ? { padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px" }
+            : { maxWidth: "1600px", padding: "24px 16px 160px", display: "grid", gridTemplateColumns: "260px 1fr 260px", gap: "18px", alignItems: "start" }
+        }
+      >
+
+        {/* ===== LEFT COLUMN: Draft Class ===== */}
+        {isMobile ? (
+          DraftClassList
+        ) : (
+          <div style={{ position: "sticky", top: "20px" }}>
+            {DraftClassList}
+          </div>
+        )}
+
+        {/* ===== MAIN COLUMN ===== */}
+        <div>
 
         {/* ===== HERO CARD ===== */}
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border:`3px solid ${color1}` }}>
@@ -853,38 +1072,6 @@ export default function PlayerProfile() {
             </div>
           )}
         </div>
-
-        {/* ===== In the News ===== */}
-        {playerNews.length > 0 && (
-          <div className="mb-8">
-            <SectionTitle>In the News</SectionTitle>
-            <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
-              {playerNews.map((n,i) => (
-                <div key={n.slug||n.id} className="flex items-center hover:bg-gray-50 transition" style={{ gap:isMobile?"10px":"16px", padding:isMobile?"10px 12px":"14px 20px", borderBottom:i<playerNews.length-1?"1px solid #f0f0f0":"none" }}>
-                  <div className="flex-shrink-0 rounded overflow-hidden" style={{ width:isMobile?40:50, border:`2px solid ${color1}`, background:"#fff", display:"flex", flexDirection:"column" }}>
-                    <div style={{ background:color2, lineHeight:1, padding:"1px 0", textAlign:"center" }}>
-                      <span style={{ fontSize:"10px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em" }}>{n.publishedAt?.toDate?.().toLocaleDateString(undefined,{month:"short"})}</span>
-                    </div>
-                    <div style={{ padding:"4px 0 3px", textAlign:"center" }}>
-                      <span style={{ fontSize:isMobile?"17px":"21px", fontWeight:900, color:color1, lineHeight:1, display:"block" }}>{n.publishedAt?.toDate?.().toLocaleDateString(undefined,{day:"numeric"})}</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor:n.type==="article"?color2:color1, color:"#fff", letterSpacing:"0.08em", fontSize:"8px", padding:"2px 6px" }}>
-                        {n.type==="article"?"Article":"News"}
-                      </span>
-                    </div>
-                    <Link to={`/news/${n.slug}`} className="font-black uppercase hover:underline leading-tight block" style={{ color:"#222", letterSpacing:"0.04em", fontSize:isMobile?"11px":"13px" }}>
-                      {n.title}
-                    </Link>
-                  </div>
-                  <div className="flex-shrink-0 font-black" style={{ color:color1, fontSize:isMobile?"14px":"18px" }}>→</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* ===== Hidden Export Card ===== */}
         <div style={{ position:"absolute", left:"-9999px", top:0 }}>
@@ -1254,6 +1441,18 @@ export default function PlayerProfile() {
             <p className="italic text-gray-400 text-sm">No public evaluations yet.</p>
           )}
         </div>
+
+        </div>
+        {/* ===== END MAIN COLUMN ===== */}
+
+        {/* ===== RIGHT COLUMN: In The News ===== */}
+        {isMobile ? (
+          NewsSidebar
+        ) : (
+          <div style={{ position: "sticky", top: "20px" }}>
+            {NewsSidebar}
+          </div>
+        )}
 
       </div>
     </>
