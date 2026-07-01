@@ -90,7 +90,7 @@ const teamNameToAbbr = {
   "Seattle Seahawks":"SEA","Tampa Bay Buccaneers":"TB","Tennessee Titans":"TEN","Washington Commanders":"WAS",
 };
 
-// ── Shared sidebar shell — used by both the Draft Class column and the News column ──
+// ── Shared sidebar shell ──
 function SidebarCard({ title, color1, color2, children }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${color1}` }}>
@@ -139,7 +139,7 @@ export default function PlayerProfile() {
   const [archiving, setArchiving] = useState(false);
   const [playerStats, setPlayerStats] = useState(null);
 
-  // ── Draft class sidebar (left column) ──
+  // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
   const [draftClassLoading, setDraftClassLoading] = useState(false);
 
@@ -372,8 +372,7 @@ export default function PlayerProfile() {
     fetch();
   }, [player]);
 
-  // ── Fetch draft class: same Position + same Eligible year, Live !== false (except self, who always shows), sorted best-to-worst ──
-  // The current player is included and flagged isSelf so the sidebar can highlight their position in the class.
+  // ── Fetch draft class ──
   useEffect(() => {
     const fetchDraftClass = async () => {
       if (!player?.Position || !player?.Eligible) { setDraftClassPlayers([]); return; }
@@ -385,7 +384,6 @@ export default function PlayerProfile() {
           where("Eligible", "==", player.Eligible)
         );
         const snap = await getDocs(q);
-
         const list = await Promise.all(
           snap.docs
             .filter((d) => d.id === player.id || d.data().Live !== false)
@@ -400,7 +398,7 @@ export default function PlayerProfile() {
                   if (g && gradeScale[g]) grades.push(gradeScale[g]);
                 });
                 if (grades.length > 0) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
-              } catch { /* no evaluations subcollection yet — leave avgGrade null */ }
+              } catch { }
               return {
                 id: d.id,
                 First: data.First || "",
@@ -412,14 +410,12 @@ export default function PlayerProfile() {
               };
             })
         );
-
         list.sort((a, b) => {
-          const aV = a.avgGrade ?? 999; // ungraded players sink to the bottom
+          const aV = a.avgGrade ?? 999;
           const bV = b.avgGrade ?? 999;
-          if (aV !== bV) return aV - bV; // lower scale value = better grade = shown first
+          if (aV !== bV) return aV - bV;
           return (a.Last || "").localeCompare(b.Last || "");
         });
-
         setDraftClassPlayers(list);
       } catch (e) {
         console.error(e);
@@ -430,7 +426,6 @@ export default function PlayerProfile() {
     };
     fetchDraftClass();
   }, [player]);
-
 
   useEffect(() => {
     if (!publicFeed.length) return;
@@ -488,9 +483,7 @@ export default function PlayerProfile() {
   const handleSaveEvaluation = async () => {
     if (!user||!player?.id) return alert("You must sign in first.");
     if (visibility==="public"&&containsProfanity(evaluation)) return alert("❌ Your evaluation contains inappropriate language.");
-
     const gradeLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
-
     setSaving(true);
     try {
       let savedGrade = grade;
@@ -498,7 +491,6 @@ export default function PlayerProfile() {
         const existing = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
         savedGrade = existing.exists() ? (existing.data().grade || grade) : grade;
       }
-
       const evalData = {
         uid:user.uid, email:user.email, playerId:player.id,
         playerName:`${player.First||""} ${player.Last||""}`.trim(),
@@ -527,37 +519,19 @@ export default function PlayerProfile() {
   async function handleArchiveEvaluation() {
     if (!user||!player?.id) return alert("You must sign in first.");
     if (!lastUpdated) return alert("Save your evaluation first before archiving.");
-
-    const overwriteWarning = archivedEval
-      ? "\n\n⚠️ You already have an archived evaluation for this player. This will overwrite it."
-      : "";
-
-    const confirmed = window.confirm(
-      `📦 Archive this evaluation?\n\nArchiving takes a snapshot of your current evaluation and locks it as a read-only record. Your current evaluation will be cleared so you can start fresh.\n\nYou can only have one archive per player — archiving again will overwrite the previous snapshot.${overwriteWarning}`
-    );
+    const overwriteWarning = archivedEval ? "\n\n⚠️ You already have an archived evaluation for this player. This will overwrite it." : "";
+    const confirmed = window.confirm(`📦 Archive this evaluation?\n\nArchiving takes a snapshot of your current evaluation and locks it as a read-only record. Your current evaluation will be cleared so you can start fresh.\n\nYou can only have one archive per player — archiving again will overwrite the previous snapshot.${overwriteWarning}`);
     if (!confirmed) return;
-
     setArchiving(true);
     try {
       const snap = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
       if (!snap.exists()) return alert("Save your evaluation first before archiving.");
       const data = snap.data();
-
       const now = new Date();
-      const archiveData = {
-        ...data,
-        archivedAt: serverTimestamp(),
-        archivedAtISO: now.toISOString(),
-        playerName: `${player.First||""} ${player.Last||""}`.trim(),
-      };
+      const archiveData = { ...data, archivedAt: serverTimestamp(), archivedAtISO: now.toISOString(), playerName: `${player.First||""} ${player.Last||""}`.trim() };
       await setDoc(doc(db,"users",user.uid,"archivedEvaluations",player.id), archiveData);
-
       const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
-      await Promise.all([
-        deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)),
-        deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id)),
-      ]);
-
+      await Promise.all([deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)), deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id))]);
       setArchivedEval({ ...archiveData, archivedAt: { toDate: () => now } });
       setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
       alert("📦 Evaluation archived and current eval cleared. You can now start a fresh evaluation.");
@@ -574,6 +548,20 @@ export default function PlayerProfile() {
   if (!player) return <div className="flex justify-center items-center h-screen text-xl font-bold" style={{color:SITE_BLUE}}>Loading Player...</div>;
 
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
+
+  const buildMetaDescription = () => {
+    const name = `${player.First || ""} ${player.Last || ""}`.trim();
+    const parts = [];
+    const schoolPiece = [player.Position, player.School].filter(Boolean).join(" from ");
+    if (schoolPiece) parts.push(schoolPiece);
+    if (player.Height) parts.push(player.Height);
+    if (community.topStrengths?.length > 0) parts.push(`Strengths: ${community.topStrengths.slice(0, 3).join(", ")}`);
+    const gradeLabel = community.avgGrade ? gradeLabels[Math.round(community.avgGrade)] : null;
+    if (gradeLabel) parts.push(`Community grade: ${gradeLabel}`);
+    if (parts.length === 0) return `${name} scouting report, community grades, and NFL fit projections on We-Draft.com.`;
+    return `${name} — ${parts.join(". ")}.`;
+  };
+  const metaDescription = buildMetaDescription();
 
   const physicalMeasurements = [
     {val:player.Height,label:"Height"},{val:player.Weight,label:"Weight"},
@@ -618,20 +606,14 @@ export default function PlayerProfile() {
     );
   };
 
-  // ── Draft Class sidebar content (left column) ──
-  // Sidebars use the site's own brand colors (not team colors) so they stay
-  // visually distinct from the team-branded main column.
+  // ── Draft Class list (shared between desktop sidebar and mobile dropdown) ──
   const draftClassLabel = `${formatEligible(player.Eligible)} ${player.Position}`.trim();
-  const DraftClassList = (
-    <SidebarCard title={draftClassLabel} color1={SITE_BLUE} color2={SITE_GOLD}>
+  const DraftClassListContent = (
+    <>
       {draftClassLoading ? (
-        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontWeight: 700 }}>
-          Loading…
-        </div>
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontWeight: 700 }}>Loading…</div>
       ) : draftClassPlayers.length === 0 ? (
-        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
-          No other prospects yet.
-        </div>
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No other prospects yet.</div>
       ) : (
         draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT).map((p, i) => {
           const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : null;
@@ -668,44 +650,65 @@ export default function PlayerProfile() {
               </div>
             </>
           );
-
           return p.isSelf ? (
-            <div key={p.id} style={rowStyle}>
-              {rowContent}
-            </div>
+            <div key={p.id} style={rowStyle}>{rowContent}</div>
           ) : (
-            <Link
-              key={p.id}
-              to={`/player/${p.Slug}`}
-              style={rowStyle}
+            <Link key={p.id} to={`/player/${p.Slug}`} style={rowStyle}
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-            >
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}>
               {rowContent}
             </Link>
           );
         })
       )}
+    </>
+  );
+
+  // ── Desktop: full sidebar card ──
+  const DraftClassList = (
+    <SidebarCard title={draftClassLabel} color1={SITE_BLUE} color2={SITE_GOLD}>
+      {DraftClassListContent}
     </SidebarCard>
   );
 
-  // ── In The News sidebar content (right column) — same shell/sizing as Draft Class ──
+  // ── Mobile: collapsible dropdown ──
+  const playerFullName = `${player.First || ""} ${player.Last || ""}`.trim();
+  const DraftClassDropdown = (
+    <details style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+      <summary style={{
+        backgroundColor: SITE_BLUE,
+        padding: "10px 14px",
+        cursor: "pointer",
+        listStyle: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        userSelect: "none",
+      }}>
+        <div>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            {playerFullName}
+          </div>
+          <div style={{ color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: "11px", marginTop: "2px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            {draftClassLabel} Class ▾
+          </div>
+        </div>
+        <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "18px" }}>⬇</span>
+      </summary>
+      <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
+      {DraftClassListContent}
+    </details>
+  );
+
+  // ── In The News sidebar ──
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={SITE_BLUE} color2={SITE_GOLD}>
       {playerNews.length === 0 ? (
-        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
-          No recent news.
-        </div>
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No recent news.</div>
       ) : (
         playerNews.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
-          <Link
-            key={n.slug || n.id}
-            to={`/news/${n.slug}`}
-            style={{
-              display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px",
-              textDecoration: "none",
-              borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none",
-            }}
+          <Link key={n.slug || n.id} to={`/news/${n.slug}`}
+            style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
@@ -725,9 +728,7 @@ export default function PlayerProfile() {
               <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "article" ? SITE_GOLD : SITE_BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
                 {n.type === "article" ? "Article" : "News"}
               </span>
-              <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>
-                {n.title}
-              </div>
+              <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
             </div>
           </Link>
         ))
@@ -738,17 +739,17 @@ export default function PlayerProfile() {
   return (
     <>
       <Helmet>
-        <title>{`${player.First||""} ${player.Last||""} Draft Scouting Report | We-Draft`}</title>
-        <meta name="description" content={`${player.First||""} ${player.Last||""} scouting report. ${player.Position||""} from ${player.School||""}. Community grades, strengths, weaknesses, and NFL fit projections.`} />
+        <title>{`${player.First||""} ${player.Last||""} Draft Scouting Report`}</title>
+        <meta name="description" content={metaDescription} />
         <link rel="canonical" href={`https://we-draft.com/player/${slug}`} />
         <meta property="og:type" content="article" />
-        <meta property="og:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report | We-Draft`} />
-        <meta property="og:description" content={`${player.First||""} ${player.Last||""} scouting report. ${player.Position||""} from ${player.School||""}.`} />
+        <meta property="og:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report`} />
+        <meta property="og:description" content={metaDescription} />
         <meta property="og:url" content={`https://we-draft.com/player/${slug}`} />
-        <meta property="og:site_name" content="We-Draft" />
+        <meta property="og:site_name" content="We-Draft.com" />
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report`} />
-        <meta name="twitter:description" content={`${player.First||""} ${player.Last||""} | ${player.Position||""} | ${player.School||""}`} />
+        <meta name="twitter:description" content={metaDescription} />
       </Helmet>
 
       <div
@@ -756,13 +757,13 @@ export default function PlayerProfile() {
         style={
           isMobile
             ? { padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px" }
-            : { maxWidth: "1600px", padding: "24px 16px 160px", display: "grid", gridTemplateColumns: "260px 1fr 260px", gap: "18px", alignItems: "start" }
+            : { maxWidth: "1600px", margin: "0 auto", padding: "24px 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center" }
         }
       >
 
         {/* ===== LEFT COLUMN: Draft Class ===== */}
         {isMobile ? (
-          DraftClassList
+          DraftClassDropdown
         ) : (
           <div style={{ position: "sticky", top: "20px" }}>
             {DraftClassList}
@@ -779,7 +780,6 @@ export default function PlayerProfile() {
               style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"14px", padding:isMobile?"6px 12px":"7px 18px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
-
             <div className="flex gap-2">
               {player.Link && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
@@ -893,15 +893,8 @@ export default function PlayerProfile() {
           const pos = (player.Position || "").toUpperCase();
           const s = playerStats;
           const n = (v) => (v !== undefined && v !== null && v !== "") ? String(v) : null;
-
-          const formatNum = (v) => {
-            const n = Number(v);
-            if (isNaN(n)) return v;
-            return n.toLocaleString();
-          };
-
+          const formatNum = (v) => { const n = Number(v); if (isNaN(n)) return v; return n.toLocaleString(); };
           let statPills = [];
-
           if (pos === "QB") {
             const comp = n(s.PassComp), att = n(s.PassAtt), yds = n(s.PassYds), td = n(s.PassTD), ints = n(s.Int), ryds = n(s.RushYds), rtd = n(s.RushTD);
             const pct = (comp && att && Number(att) > 0) ? Math.round((Number(comp) / Number(att)) * 100) + "%" : null;
@@ -944,9 +937,7 @@ export default function PlayerProfile() {
             if (pbu) statPills.push({ val: formatNum(pbu), label: "PBU" });
             if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
           }
-
           if (statPills.length === 0) return null;
-
           return (
             <div className="bg-white" style={{ padding: isMobile ? "6px 10px 12px" : "8px 24px 14px", borderTop: "1px solid #f0f0f0" }}>
               <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#666", textAlign: "center", marginBottom: "8px" }}>
@@ -1134,7 +1125,7 @@ export default function PlayerProfile() {
               <div className="font-black uppercase text-white tracking-wide" style={{ fontSize:isMobile?"13px":"18px" }}>
                 {`${player.First||""} ${player.Last||""}`.toUpperCase()}
               </div>
-              <img src={Logo1} alt="We-Draft Logo" className="w-auto object-contain opacity-90" style={{ height:isMobile?"20px":"28px", filter:"brightness(0) invert(1)" }} />
+              <img src={Logo1} alt="We-Draft.com Logo" className="w-auto object-contain opacity-90" style={{ height:isMobile?"20px":"28px", filter:"brightness(0) invert(1)" }} />
             </div>
 
             {!user ? (
@@ -1143,7 +1134,6 @@ export default function PlayerProfile() {
               </div>
             ) : (
               <div style={{ padding:isMobile?"12px":"24px" }}>
-
                 {gradeIsLocked && (
                   <div style={{ display:"flex", alignItems:"center", gap:"10px", background:"#fff8e1", border:`2px solid ${SITE_GOLD}`, borderRadius:"8px", padding:"10px 14px", marginBottom:"16px" }}>
                     <span style={{ fontSize:"18px" }}>🔒</span>
@@ -1163,8 +1153,7 @@ export default function PlayerProfile() {
                     </div>
                     {gradeIsLocked ? (
                       <div style={{ width:"100%", borderRadius:"6px", padding:"10px 12px", border:`2px solid #ddd`, background:"#f9f9f9", fontWeight:700, fontSize:"14px", color:"#888", display:"flex", alignItems:"center", gap:"8px" }}>
-                        <span>🔒</span>
-                        <span>{grade || "No grade set"}</span>
+                        <span>🔒</span><span>{grade || "No grade set"}</span>
                       </div>
                     ) : (
                       <select value={grade} onChange={(e)=>setGrade(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:color1, color:grade?"#111":"#999" }}>
@@ -1193,7 +1182,7 @@ export default function PlayerProfile() {
                         <summary className="cursor-pointer px-3 py-2 bg-white font-bold text-sm" style={{ color:state.length>0?"#111":"#999" }}>
                           {state.length>0 ? state.join(", ") : `Select ${label.split(" ")[0].toLowerCase()}`}
                         </summary>
-                        <div className="max-h-40 overflow-y-auto px-3 py-2 bg-white">
+                        <div className="px-3 py-2 bg-white">
                           {Object.entries(traits).map(([lbl, options]) => (
                             <div key={lbl} className="mb-2">
                               <p className="font-black text-xs uppercase tracking-wider mb-1" style={{ color:color1 }}>{lbl}</p>
@@ -1282,7 +1271,6 @@ export default function PlayerProfile() {
                 </div>
               </div>
               <div style={{ height:"3px", background:SITE_GOLD }} />
-
               <div style={{ padding:isMobile?"12px":"20px", display:"flex", flexDirection:"column", gap:"16px" }}>
                 {archivedEval.grade && (() => {
                   const gd = gradeDisplay(archivedEval.grade);
@@ -1302,7 +1290,6 @@ export default function PlayerProfile() {
                     </div>
                   );
                 })()}
-
                 {(archivedEval.strengths?.length > 0 || archivedEval.weaknesses?.length > 0) && (
                   <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:"12px" }}>
                     {archivedEval.strengths?.length > 0 && (
@@ -1323,21 +1310,18 @@ export default function PlayerProfile() {
                     )}
                   </div>
                 )}
-
                 {archivedEval.nflFit && (
                   <div>
                     <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>NFL Fit</div>
                     <div style={{ fontSize:isMobile?"13px":"14px", fontWeight:800, color:"#333" }}>{archivedEval.nflFit}</div>
                   </div>
                 )}
-
                 {archivedEval.evaluation && (
                   <div>
                     <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Scout's Take</div>
                     <p style={{ fontStyle:"italic", fontSize:isMobile?"13px":"15px", color:"#222", lineHeight:1.6, margin:0 }}>"{archivedEval.evaluation}"</p>
                   </div>
                 )}
-
                 <div style={{ fontSize:"11px", fontWeight:700, color:"#bbb", textAlign:"center", fontStyle:"italic" }}>
                   This evaluation is locked and cannot be edited. Use "Archive This Evaluation" on your current eval to update it.
                 </div>
@@ -1355,7 +1339,7 @@ export default function PlayerProfile() {
                 <div key={ev.uid} className="bg-white rounded-lg overflow-hidden mb-4" style={{ border:`2px solid ${color1}` }}>
                   <div className="flex items-center justify-between px-3 py-2" style={{ backgroundColor:color1 }}>
                     <div className="flex items-center gap-2">
-                      <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"11px":"14px" }}>{ev.username}</span>
+                      <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"13px":"17px" }}>{ev.username}</span>
                       {ev.verified && <img src={verifiedBadge} alt="Verified" className="w-4 h-4 inline-block" />}
                     </div>
                     {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
@@ -1389,9 +1373,10 @@ export default function PlayerProfile() {
                           </div>}
                         </div>
                       )}
-                      {ev.evaluation && <div className="px-3 py-3">
-                        <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`1px solid ${color1}`, paddingBottom:"3px", marginBottom:"6px" }}>Scout's Take</div>
-                        <p className="italic" style={{ fontSize:"13px", color:"#222" }}>"{ev.evaluation}"</p>
+                      {/* ── Scout's Take: mobile — legible, non-italic ── */}
+                      {ev.evaluation && <div className="px-3 py-3" style={{ borderLeft: `3px solid ${color1}`, margin: "0 8px 8px", borderRadius: "0 4px 4px 0", background: "#fafafa" }}>
+                        <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"6px" }}>Scout's Take</div>
+                        <p style={{ fontSize:"13px", fontWeight:600, color:"#111", lineHeight:1.65, margin:0 }}>{ev.evaluation}</p>
                       </div>}
                     </div>
                   ) : (
@@ -1399,7 +1384,7 @@ export default function PlayerProfile() {
                       <div className="flex gap-0">
                         {ev.grade && (() => { const { short, bg, border } = gradeDisplay(ev.grade); return (
                           <div className="flex flex-col items-center justify-center text-center px-4 py-4" style={{ flex:"0 0 130px", borderRight:"1px solid #e5e7eb" }}>
-                            <div className="text-xs font-black uppercase pb-1 mb-3 w-full text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Grade</div>
+                            <div className="font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Grade</div>
                             <div className="rounded w-full text-center" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"8px 10px" }}>
                               <div style={{ fontSize:"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
                               <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{ev.grade}</div>
@@ -1407,24 +1392,27 @@ export default function PlayerProfile() {
                           </div>
                         ); })()}
                         {ev.strengths?.length > 0 && <div className="flex-1 px-4 py-4" style={{ borderRight:"1px solid #e5e7eb" }}>
-                          <div className="text-xs font-black uppercase pb-1 mb-3" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Strengths</div>
-                          {ev.strengths.map((s,i) => <div key={i} className="text-xs font-black uppercase py-1" style={{ color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>)}
+                          <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Strengths</div>
+                          {ev.strengths.map((s,i) => <div key={i} className="font-black uppercase py-1" style={{ fontSize:"14px", color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>)}
                         </div>}
                         {ev.weaknesses?.length > 0 && <div className="flex-1 px-4 py-4" style={{ borderRight:ev.nflFit||ev.evaluation?"1px solid #e5e7eb":"none" }}>
-                          <div className="text-xs font-black uppercase pb-1 mb-3" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Weaknesses</div>
-                          {ev.weaknesses.map((w,i) => <div key={i} className="text-xs font-black uppercase py-1" style={{ color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>)}
+                          <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Weaknesses</div>
+                          {ev.weaknesses.map((w,i) => <div key={i} className="font-black uppercase py-1" style={{ fontSize:"14px", color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>)}
                         </div>}
                         {ev.nflFit && <div className="flex flex-col items-center justify-center px-4 py-4" style={{ flex:"0 0 120px", borderRight:ev.evaluation?"1px solid #e5e7eb":"none" }}>
-                          <div className="text-xs font-black uppercase pb-1 mb-3 w-full text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
+                          <div className="font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
                           {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} className="object-contain" style={{ width:"52px", height:"52px" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
-                            : <div className="text-xs font-black uppercase text-center" style={{ color:color1, letterSpacing:"0.04em", lineHeight:1.4 }}>{ev.nflFit}</div>}
+                            : <div className="font-black uppercase text-center" style={{ fontSize:"13px", color:color1, letterSpacing:"0.04em", lineHeight:1.4 }}>{ev.nflFit}</div>}
                         </div>}
                       </div>
+                      {/* ── Scout's Take: desktop — legible, non-italic, with left accent border ── */}
                       {ev.evaluation && <>
                         <div style={{ height:"1px", backgroundColor:"#e5e7eb", margin:"0 16px" }} />
-                        <div className="px-4 py-3">
-                          <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
-                          <p className="italic" style={{ fontSize:"15px", color:"#222" }}>"{ev.evaluation}"</p>
+                        <div className="px-4 py-4">
+                          <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
+                          <div style={{ borderLeft:`3px solid ${color1}`, paddingLeft:"14px", background:"#fafafa", borderRadius:"0 4px 4px 0", padding:"10px 14px" }}>
+                            <p style={{ fontSize:"16px", fontWeight:600, color:"#111", lineHeight:1.7, margin:0 }}>{ev.evaluation}</p>
+                          </div>
                         </div>
                       </>}
                     </div>

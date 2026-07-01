@@ -83,7 +83,7 @@ function SupplementalDraftSpotlight({ isMobile }) {
         const snap = await getDocs(collection(db, "players"));
         const suppPlayers = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => p.Eligible?.toString() === "2026s");
+          .filter((p) => p.Eligible?.toString() === "2026s" && p.Live !== false && p.Live !== null && p.Live !== 0 && p.Live !== "false" && p.Live !== "no");
         setPlayers(suppPlayers);
       } catch (err) {
         console.error("Error fetching supplemental players:", err);
@@ -330,6 +330,7 @@ function Top2027Board({ isMobile }) {
           snap.docs.map(async (docSnap) => {
             const p = { id: docSnap.id, ...docSnap.data() };
             if (p.Eligible?.toString() !== "2027") return null;
+            if (p.Live === false || p.Live === null || p.Live === 0 || p.Live === "false" || p.Live === "no") return null; // skip non-live players
             try {
               const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
               const grades = [];
@@ -587,17 +588,21 @@ export default function Home() {
     fetch();
   }, []);
 
+  // ── Recent Evaluations: only pulls from players that are live (Live !== false) ──
+  // Non-live players (added but not yet ready for the boards) are skipped entirely here,
+  // so their evaluations — if any — never surface in this public homepage feed.
   useEffect(() => {
     const fetch = async () => {
       try {
         const playersSnap = await getDocs(collection(db, "players"));
         const evalPromises = [];
         playersSnap.forEach((playerDoc) => {
+          const pd = playerDoc.data();
+          if (pd.Live === false || pd.Live === null || pd.Live === 0 || pd.Live === "false" || pd.Live === "no") return; // skip non-live players
           const q = query(collection(db, "players", playerDoc.id, "evaluations"), orderBy("updatedAt", "desc"), limit(2));
           evalPromises.push(
             getDocs(q).then((snap) =>
               snap.docs.map((d) => {
-                const pd = playerDoc.data();
                 return { ...d.data(), playerId: playerDoc.id, playerName: `${pd.First || ""} ${pd.Last || ""}`.trim(), playerSlug: pd.Slug || playerDoc.id };
               })
             )

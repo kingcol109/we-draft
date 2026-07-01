@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
@@ -268,6 +268,11 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
 export default function CommunityBoard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { year } = useParams();
+
+  // ── Year is driven by the URL param; defaults to 2027 on /community ──
+  const eligibleYear = year || "2027";
+
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
@@ -304,18 +309,26 @@ export default function CommunityBoard() {
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
   const [showMyBoardOnly, setShowMyBoardOnly] = useState(false);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
-  const [eligibleYear, setEligibleYear] = useState("2027"); // DEFAULT 2027
 
-  const handleYearSelect = (yr) => {
-    setEligibleYear(yr);
-    setSearchQuery("");
-    setSelectedPositions([]);
-    setSelectedSchools([]);
-    setSelectedCommGrades([]);
-    setSelectedMyGrades([]);
-    setShowMyBoardOnly(false);
-    setShowAvailableOnly(false);
-  };
+  // ── Reset filters whenever the year URL param changes ──
+  const prevYearRef = useRef(eligibleYear);
+  useEffect(() => {
+    if (prevYearRef.current !== eligibleYear) {
+      prevYearRef.current = eligibleYear;
+      setSearchQuery("");
+      setSelectedPositions([]);
+      setSelectedSchools([]);
+      setSelectedCommGrades([]);
+      setSelectedMyGrades([]);
+      setShowMyBoardOnly(false);
+      setShowAvailableOnly(false);
+      setSortKey("CommunityGrade");
+      setSortOrder("asc");
+    }
+  }, [eligibleYear]);
+
+  // ── Year nav helper — 2027 lives at /community, others at /community/:year ──
+  const yearPath = (yr) => yr === "2027" ? "/community" : `/community/${yr}`;
 
   // Fetch NFL teams
   useEffect(() => {
@@ -349,21 +362,18 @@ export default function CommunityBoard() {
   }, []);
 
   // Fetch players + community grades
-  // Active years (2027-2029) load on mount and are cached.
-  // Archive years only load when explicitly selected.
-  const [playerCache, setPlayerCache] = useState({}); // { year: players[] }
+  const [playerCache, setPlayerCache] = useState({});
 
   useEffect(() => {
-    // Skip fetch if already cached
     if (playerCache[eligibleYear]) {
       setPlayers(playerCache[eligibleYear]);
+      setLoading(false);
       return;
     }
 
-    // For active years, fetch on mount. For archive years, only fetch when selected.
     const isActiveYear = ACTIVE_YEARS.includes(eligibleYear);
     const isArchiveYear = ARCHIVE_YEARS.includes(eligibleYear);
-    if (!isActiveYear && !isArchiveYear) return; // unknown year
+    if (!isActiveYear && !isArchiveYear) return;
 
     const fetchPlayers = async () => {
       setLoading(true);
@@ -371,7 +381,6 @@ export default function CommunityBoard() {
         const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", eligibleYear)));
         const data = await Promise.all(
           snap.docs
-            // ── Exclude players explicitly marked Live: false ──
             .filter((docSnap) => docSnap.data().Live !== false)
             .map(async (docSnap) => {
               const p = { id: docSnap.id, ...docSnap.data() };
@@ -471,10 +480,6 @@ export default function CommunityBoard() {
     selectedCommGrades.length > 0 || selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly || showAvailableOnly;
 
   const is2026 = eligibleYear === "2026";
-
-  // ── 2029 placeholder shows only while there are genuinely no live 2029 players yet ──
-  // Once players with Eligible: "2029" (and Live !== false) exist in Firestore,
-  // this automatically flips to the real board — no code change needed later.
   const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
 
   const filteredPlayers = players
@@ -572,7 +577,9 @@ export default function CommunityBoard() {
   return (
     <>
       <Helmet>
-        <title>Community Board | We-Draft</title>
+        <title>{eligibleYear} NFL Draft Community Board | We-Draft.com</title>
+        <meta name="description" content={`We-Draft.com ${eligibleYear} NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections — voted on by the community.`} />
+        <link rel="canonical" href={`https://we-draft.com${yearPath(eligibleYear)}`} />
       </Helmet>
 
       <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -580,7 +587,7 @@ export default function CommunityBoard() {
         {/* ===== Page Header ===== */}
         <div style={{ marginBottom: "16px" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", marginBottom: "6px" }}>
-            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "26px" : "32px", objectFit: "contain" }} />
+            <img src={Logo1} alt="We-Draft.com" style={{ height: isMobile ? "26px" : "32px", objectFit: "contain" }} />
             <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>
               Community Board
             </div>
@@ -592,32 +599,35 @@ export default function CommunityBoard() {
         {/* ===== Year Selector ===== */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", marginBottom: "18px" }}>
 
-          {/* Active years: 2027 / 2028 / 2029 */}
+          {/* Active years: 2027 / 2028 / 2029 — each is a Link to its own URL */}
           <div style={{ display: "flex", gap: "8px" }}>
             {ACTIVE_YEARS.map((yr) => (
-              <button
+              <Link
                 key={yr}
-                onClick={() => handleYearSelect(yr)}
+                to={yearPath(yr)}
                 style={{
                   border: `2px solid ${GOLD}`, borderRadius: "20px",
                   padding: isMobile ? "6px 20px" : "8px 28px",
                   fontWeight: 900, fontSize: isMobile ? "14px" : "16px",
-                  cursor: "pointer",
                   background: eligibleYear === yr ? BLUE : "#fff",
                   color: eligibleYear === yr ? "#fff" : BLUE,
                   transition: "background 0.15s, color 0.15s",
+                  textDecoration: "none", display: "inline-block",
                 }}
               >
                 {yr}
-              </button>
+              </Link>
             ))}
           </div>
 
-          {/* Archive dropdown */}
-          <ArchiveDropdown eligibleYear={eligibleYear} onSelect={handleYearSelect} />
+          {/* Archive dropdown — navigates to /community/2026 etc */}
+          <ArchiveDropdown
+            eligibleYear={eligibleYear}
+            onSelect={(yr) => navigate(yearPath(yr))}
+          />
         </div>
 
-        {/* ===== 2029 placeholder — only while no live 2029 players exist yet ===== */}
+        {/* ===== 2029 placeholder ===== */}
         {is2029Empty ? (
           <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -626,10 +636,7 @@ export default function CommunityBoard() {
               </div>
             </div>
             <div style={{ height: "3px", background: GOLD }} />
-            <div style={{
-              padding: isMobile ? "40px 20px" : "60px 40px",
-              textAlign: "center", background: "#fff",
-            }}>
+            <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
               <div style={{ fontSize: "40px", marginBottom: "16px" }}>🏈</div>
               <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>
                 2029 Players Coming Soon

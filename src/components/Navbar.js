@@ -27,6 +27,13 @@ const NFL_DIVISIONS = [
   { conf: "NFC", divisions: ["NFC East", "NFC North", "NFC South", "NFC West"] },
 ];
 
+const COMMUNITY_YEARS = [
+  { label: "2027 Draft Class", path: "/community" },
+  { label: "2028 Draft Class", path: "/community/2028" },
+  { label: "2029 Draft Class", path: "/community/2029" },
+  { label: "2026 Archive",     path: "/community/2026" },
+];
+
 export default function Navbar() {
   const { user, login } = useAuth();
 
@@ -41,6 +48,8 @@ export default function Navbar() {
   const [cfbTimeout, setCfbTimeout] = useState(null);
   const [nflOpen, setNflOpen] = useState(false);
   const [nflTimeout, setNflTimeout] = useState(null);
+  const [communityOpen, setCommunityOpen] = useState(false);
+  const [communityTimeout, setCommunityTimeout] = useState(null);
 
   /* ======================
      MOBILE DETECTION
@@ -53,7 +62,7 @@ export default function Navbar() {
   }, []);
 
   /* ======================
-     SCROLL HIDE (DESKTOP) — logic kept, disabled for now
+     SCROLL HIDE (DESKTOP)
   ====================== */
   useEffect(() => {
     if (isMobile) return;
@@ -64,8 +73,6 @@ export default function Navbar() {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, [lastScrollY, isMobile]);
-  // TODO: re-enable scroll hide when navbar content is ready
-  // const showNavbar = show; // uncomment to re-enable
   const showNavbar = true;
 
   /* ======================
@@ -166,7 +173,6 @@ export default function Navbar() {
     return acc;
   }, {});
 
-  // Group NFL teams by division
   const nflGrouped = {};
   NFL_DIVISIONS.forEach(({ divisions }) => {
     divisions.forEach((div) => {
@@ -234,6 +240,18 @@ export default function Navbar() {
           white-space: nowrap;
         }
         .nfl-team-link:hover { background: #f0f5ff; color: #0055a5; }
+        .community-year-link {
+          display: block;
+          padding: 10px 16px;
+          text-decoration: none;
+          color: #222;
+          font-weight: 700;
+          font-size: 14px;
+          transition: background 0.12s ease;
+          border-bottom: 1px solid #f0f0f0;
+        }
+        .community-year-link:last-child { border-bottom: none; }
+        .community-year-link:hover { background: #f0f5ff; color: #0055a5; }
         .mobile-nav-link {
           display: flex;
           align-items: center;
@@ -260,7 +278,6 @@ export default function Navbar() {
           left: 0,
           right: 0,
           zIndex: 10000,
-          // Fade in/out on scroll — no layout shift, position stays fixed
           opacity: showNavbar || isMobile ? 1 : 0,
           pointerEvents: showNavbar || isMobile ? "auto" : "none",
           transition: isMobile ? "none" : "opacity 0.3s ease-in-out",
@@ -280,7 +297,7 @@ export default function Navbar() {
         >
           {/* LOGO */}
           <Link to="/">
-            <img src={Logo2} alt="We-Draft" style={{ height: 42 }} />
+            <img src={Logo2} alt="We-Draft.com" style={{ height: 42 }} />
           </Link>
 
           {/* DESKTOP NAV */}
@@ -293,12 +310,57 @@ export default function Navbar() {
               alignItems: "center",
             }}
           >
-            {[
-              { path: "/community", label: "Community Board" },
-              { path: "/mocks", label: "Mock Drafts" },
-            ].map((l) => (
-              <Link key={l.path} to={l.path} style={baseStyle}>{l.label}</Link>
-            ))}
+
+            {/* ── COMMUNITY BOARD DROPDOWN ── */}
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={() => { if (communityTimeout) clearTimeout(communityTimeout); setCommunityOpen(true); }}
+              onMouseLeave={() => { const t = setTimeout(() => setCommunityOpen(false), 150); setCommunityTimeout(t); }}
+            >
+              <Link to="/community" style={baseStyle}>Community Board</Link>
+
+              {communityOpen && (
+                <div
+                  onMouseEnter={() => { if (communityTimeout) clearTimeout(communityTimeout); setCommunityOpen(true); }}
+                  onMouseLeave={() => setCommunityOpen(false)}
+                  style={{
+                    position: "fixed",
+                    top: "60px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: "220px",
+                    background: "#ffffff",
+                    border: "2px solid #0055a5",
+                    borderRadius: "10px",
+                    boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                    zIndex: 10002,
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px" }}>
+                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                      Draft Classes
+                    </div>
+                  </div>
+                  <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
+
+                  {/* Year links */}
+                  {COMMUNITY_YEARS.map((yr) => (
+                    <Link
+                      key={yr.path}
+                      to={yr.path}
+                      className="community-year-link"
+                      onClick={() => setCommunityOpen(false)}
+                    >
+                      {yr.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
 
             {/* ── NFL DROPDOWN ── */}
             <div
@@ -326,7 +388,6 @@ export default function Navbar() {
                     overflow: "hidden",
                   }}
                 >
-                  {/* Header */}
                   <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>NFL Teams</div>
                     <Link to="/nfl" onClick={() => setNflOpen(false)}
@@ -336,7 +397,6 @@ export default function Navbar() {
                   </div>
                   <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
 
-                  {/* AFC + NFC stacked, 4 divisions across each */}
                   <div style={{ padding: "12px 10px" }}>
                     {NFL_DIVISIONS.map(({ conf, divisions }, ci) => (
                       <div key={conf} style={{ marginBottom: ci === 0 ? "14px" : 0 }}>
@@ -410,7 +470,6 @@ export default function Navbar() {
                     flexDirection: "column",
                   }}
                 >
-                  {/* Header */}
                   <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
                     <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>College Football</div>
                     <Link to="/cfb" onClick={() => setCfbOpen(false)}
@@ -420,7 +479,6 @@ export default function Navbar() {
                   </div>
                   <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
 
-                  {/* Team list grouped by conference */}
                   <div style={{ overflowY: "auto", padding: "10px 12px", flex: 1 }}>
                     {conferenceOrder.map((conf) => {
                       const teams = grouped[conf];
@@ -491,6 +549,8 @@ export default function Navbar() {
           >
             {[
               { path: "/community", label: "Community Board" },
+              { path: "/community/2028", label: "2028 Board" },
+              { path: "/community/2029", label: "2029 Board" },
               { path: "/mocks", label: "Mock Drafts" },
               { path: "/nfl", label: "NFL Teams" },
               { path: "/cfb", label: "CFB Teams" },
@@ -513,30 +573,30 @@ export default function Navbar() {
 
         {/* ================= TICKER — hidden for now ================= */}
         {false && (
-        <div
-          style={{
-            background: "#ffffff",
-            borderTop: "2px solid #f6a21d",
-            borderBottom: "2px solid #f6a21d",
-            overflow: "hidden",
-            whiteSpace: "nowrap",
-            position: "relative",
-            zIndex: 1,
-          }}
-        >
           <div
             style={{
-              display: "inline-block",
-              padding: "0.55rem 0",
-              fontWeight: 800,
-              color: "#0055a5",
-              animation: "tickerMove 300s linear infinite",
-              willChange: "transform",
+              background: "#ffffff",
+              borderTop: "2px solid #f6a21d",
+              borderBottom: "2px solid #f6a21d",
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+              position: "relative",
+              zIndex: 1,
             }}
           >
-            {tickerText}
+            <div
+              style={{
+                display: "inline-block",
+                padding: "0.55rem 0",
+                fontWeight: 800,
+                color: "#0055a5",
+                animation: "tickerMove 300s linear infinite",
+                willChange: "transform",
+              }}
+            >
+              {tickerText}
+            </div>
           </div>
-        </div>
         )}
       </div>
 

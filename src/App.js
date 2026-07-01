@@ -72,6 +72,7 @@ function MainLayout() {
           <Route path="/news" element={<News />} />
           <Route path="/news/:id" element={<NewsArticle />} />
           <Route path="/community" element={<CommunityBoard />} />
+          <Route path="/community/:year" element={<CommunityBoard />} />
           <Route path="/player/:slug" element={<PlayerProfile />} />
           {/* Redirect old /player2 URLs to canonical /player URLs */}
           <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
