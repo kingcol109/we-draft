@@ -11,6 +11,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -94,8 +95,8 @@ const teamNameToAbbr = {
 function SidebarCard({ title, color1, color2, children }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${color1}` }}>
-      <div style={{ backgroundColor: color1, padding: "10px 14px" }}>
-        <div className="font-black uppercase" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.08em" }}>
+      <div style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
+        <div className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
           {title}
         </div>
       </div>
@@ -109,7 +110,7 @@ export default function PlayerProfile() {
   const { slug } = useParams();
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const evaluationFormRef = useRef(null);
   const exportCardRef = useRef(null);
   const [draftedBy, setDraftedBy] = useState(null);
@@ -119,6 +120,7 @@ export default function PlayerProfile() {
   const [branding, setBranding] = useState(null);
   const cfbLogoRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const [evalCount, setEvalCount] = useState(0);
 
   const [grade, setGrade] = useState("");
   const [strengths, setStrengths] = useState([]);
@@ -228,21 +230,46 @@ export default function PlayerProfile() {
     if (!slug) return;
     const fetch = async () => {
       try {
+        // 1. Player-specific news and articles
         const newsSnap = await getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
-        const newsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", ...d.data() }));
-        let articleItems = [];
+        const playerNewsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:1, ...d.data() }));
+
+        let playerArticleItems = [];
         try {
           const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
-          articleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", ...d.data() }));
+          playerArticleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", _priority:1, ...d.data() }));
         } catch(articleErr) {
           console.warn("Articles index missing, skipping:", articleErr);
         }
-        const combined = [...newsItems, ...articleItems].sort((a,b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0));
+
+        // 2. School articles — fill remaining slots when player content is sparse
+        const existingIds = new Set([...playerNewsItems, ...playerArticleItems].map((n) => n.id));
+        let schoolItems = [];
+        if (player?.School) {
+          const schoolSlug = toTeamSlug(player.School);
+          try {
+            const [schoolArticleSnap, schoolNewsSnap] = await Promise.all([
+              getDocs(query(collection(db,"articles"), where("status","==","published"), where("slugs","array-contains",schoolSlug), limit(8))),
+              getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",schoolSlug), limit(8))),
+            ]);
+            schoolItems = [
+              ...schoolArticleSnap.docs.map((d) => ({ id:d.id, type:"article", _priority:2, ...d.data() })),
+              ...schoolNewsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:2, ...d.data() })),
+            ].filter((n) => !existingIds.has(n.id));
+          } catch(e) { /* school articles unavailable */ }
+        }
+
+        // Sort: player content first, school content second, each sorted by date within group
+        const combined = [...playerArticleItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
+          if (a._priority !== b._priority) return a._priority - b._priority;
+          return (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0);
+        });
+
         setPlayerNews(combined);
       } catch(e) { setPlayerNews([]); }
     };
     fetch();
-  }, [slug]);
+  }, [slug, player?.School]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -336,6 +363,7 @@ export default function PlayerProfile() {
       try {
         const evalsSnap = await getDocs(collection(db,"players",player.id,"evaluations"));
         if (!evalsSnap.empty) {
+          setEvalCount(evalsSnap.size);
           let grades=[], sC={}, wC={}, fC={}, pubEvals=[];
           const pubUids = new Set();
           evalsSnap.forEach((d) => {
@@ -551,15 +579,32 @@ export default function PlayerProfile() {
 
   const buildMetaDescription = () => {
     const name = `${player.First || ""} ${player.Last || ""}`.trim();
-    const parts = [];
-    const schoolPiece = [player.Position, player.School].filter(Boolean).join(" from ");
-    if (schoolPiece) parts.push(schoolPiece);
-    if (player.Height) parts.push(player.Height);
-    if (community.topStrengths?.length > 0) parts.push(`Strengths: ${community.topStrengths.slice(0, 3).join(", ")}`);
+    const year = player.Eligible ? String(player.Eligible).replace(/s$/i, "") : "";
+    const pos = player.Position || "";
+    const school = player.School || "";
+    const height = player.Height || "";
+    const weight = player.Weight ? `${player.Weight} lbs` : "";
+
+    // Identity line: "2028 QB from Colorado | 6'1", 190 lbs"
+    const identityParts = [
+      [year, pos].filter(Boolean).join(" "),
+      school ? `from ${school}` : "",
+    ].filter(Boolean).join(" ");
+    const measureParts = [height, weight].filter(Boolean).join(", ");
+
+    // Community data if available
     const gradeLabel = community.avgGrade ? gradeLabels[Math.round(community.avgGrade)] : null;
-    if (gradeLabel) parts.push(`Community grade: ${gradeLabel}`);
-    if (parts.length === 0) return `${name} scouting report, community grades, and NFL fit projections on We-Draft.com.`;
-    return `${name} — ${parts.join(". ")}.`;
+    const topStrengths = community.topStrengths?.slice(0, 2).join(", ");
+
+    if (gradeLabel && topStrengths) {
+      // Full data: lead with grade and strengths
+      return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Community grade: ${gradeLabel}. Top strengths: ${topStrengths}. Scouting report and NFL fit on We-Draft.com.`;
+    } else if (gradeLabel) {
+      return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Community grade: ${gradeLabel}. View full scouting report, strengths, weaknesses, and NFL fit on We-Draft.com.`;
+    } else {
+      // No community data yet — make it a call to action
+      return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Submit your scouting grade, strengths, weaknesses, and NFL fit on We-Draft.com — community-powered NFL Draft analysis.`;
+    }
   };
   const metaDescription = buildMetaDescription();
 
@@ -608,6 +653,14 @@ export default function PlayerProfile() {
 
   // ── Draft Class list (shared between desktop sidebar and mobile dropdown) ──
   const draftClassLabel = `${formatEligible(player.Eligible)} ${player.Position}`.trim();
+  const communityYearPath = String(player.Eligible) === "2027" ? "/community" : `/community/${player.Eligible}`;
+
+  // ── Ensure the current player is always visible even if ranked beyond the cap ──
+  const selfIndex = draftClassPlayers.findIndex((p) => p.isSelf);
+  const displayList = selfIndex >= DRAFT_CLASS_LIMIT
+    ? [...draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT), draftClassPlayers[selfIndex]]
+    : draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT);
+
   const DraftClassListContent = (
     <>
       {draftClassLoading ? (
@@ -615,13 +668,14 @@ export default function PlayerProfile() {
       ) : draftClassPlayers.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No other prospects yet.</div>
       ) : (
-        draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT).map((p, i) => {
+        <>
+          {displayList.map((p, i) => {
           const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : null;
           const gd = gradeLabel ? gradeDisplay(gradeLabel) : null;
           const rowStyle = {
             display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px",
             textDecoration: "none",
-            borderBottom: i < Math.min(draftClassPlayers.length, DRAFT_CLASS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none",
+            borderBottom: i < Math.min(displayList.length, DRAFT_CLASS_LIMIT + 1) - 1 ? "1px solid #f0f0f0" : "none",
             background: p.isSelf ? "#fff8e6" : "#fff",
             borderLeft: p.isSelf ? `4px solid ${SITE_GOLD}` : "4px solid transparent",
           };
@@ -659,7 +713,23 @@ export default function PlayerProfile() {
               {rowContent}
             </Link>
           );
-        })
+        })}
+          <Link
+            to={communityYearPath}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "10px 14px", textDecoration: "none",
+              background: SITE_BLUE, color: SITE_GOLD,
+              fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.1em",
+              gap: "6px",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
+          >
+            Full {formatEligible(player.Eligible)} Board →
+          </Link>
+        </>
       )}
     </>
   );
@@ -777,21 +847,21 @@ export default function PlayerProfile() {
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border:`3px solid ${color1}` }}>
           <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
-              style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"14px", padding:isMobile?"6px 12px":"7px 18px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
+              style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
             <div className="flex gap-2">
               {player.Link && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
-                  className="text-white font-bold rounded-full transition hover:opacity-80"
-                  style={{ border:"2px solid rgba(255,255,255,0.45)", background:"transparent", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
+                  className="text-white font-extrabold rounded-full transition hover:opacity-80"
+                  style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px" }}>
                   Film
                 </button>
               )}
               {!draftedBy && (
                 <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
                   className="font-extrabold rounded-full transition hover:opacity-90"
-                  style={{ backgroundColor:color2, border:`2px solid ${color2}`, color:"#fff", fontSize:isMobile?"12px":"15px", padding:isMobile?"4px 12px":"6px 20px" }}>
+                  style={{ backgroundColor:color2, border:"2px solid #fff", color:"#fff", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", fontWeight:900 }}>
                   Evaluate
                 </button>
               )}
@@ -849,7 +919,7 @@ export default function PlayerProfile() {
                 ) : null
               ) : branding?.logo2 ? (
                 <Link to={`/team/${toTeamSlug(player.School)}`} className="flex items-center justify-center w-full h-full">
-                  <img src={sanitizeUrl(branding.logo2)} alt={`${player.School} Logo 2`} style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
+                  <img src={sanitizeUrl(branding.logo2)} alt="" style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
                 </Link>
               ) : null}
             </div>
@@ -1129,8 +1199,31 @@ export default function PlayerProfile() {
             </div>
 
             {!user ? (
-              <div className="p-6 text-center">
-                <p className="font-black uppercase" style={{ color:color1, fontSize:isMobile?"13px":"18px" }}>Sign in to submit an evaluation</p>
+              <div style={{ padding: isMobile ? "24px 16px" : "36px 32px", textAlign: "center", background: "#fafafa" }}>
+                <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "12px" }}>
+                  Add Your Scouting Report
+                </div>
+                <div style={{ fontSize: isMobile ? "14px" : "15px", fontWeight: 700, color: "#666", lineHeight: 1.65, maxWidth: "360px", margin: "0 auto 24px" }}>
+                  Grade {player.First || "this player"}, pick their top strengths and weaknesses, choose an NFL fit, and see how your take compares to the community.
+                </div>
+                <button
+                  onClick={login}
+                  style={{
+                    backgroundColor: color1, color: "#fff",
+                    border: `3px solid ${color2}`,
+                    borderRadius: "10px",
+                    padding: isMobile ? "14px 28px" : "16px 40px",
+                    fontWeight: 900, fontSize: isMobile ? "15px" : "17px",
+                    textTransform: "uppercase", letterSpacing: "0.08em",
+                    cursor: "pointer", width: "100%", maxWidth: "360px",
+                    boxShadow: `0 4px 20px ${color1}33`,
+                  }}
+                >
+                  Sign In to Evaluate →
+                </button>
+                <div style={{ fontSize: "12px", color: "#aaa", marginTop: "12px", fontWeight: 700 }}>
+                  Free · Sign in with Google
+                </div>
               </div>
             ) : (
               <div style={{ padding:isMobile?"12px":"24px" }}>

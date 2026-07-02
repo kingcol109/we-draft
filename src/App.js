@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from "rea
 import { Analytics } from "@vercel/analytics/react";
 import { HelmetProvider } from "react-helmet-async";
 // Components
+import AuthModal from "./components/AuthModal";
+
 import Navbar from "./components/Navbar";
 
 // Pages
@@ -64,6 +66,7 @@ function MainLayout() {
   return (
     <>
       <Navbar />
+      <AuthModal />
       <div style={{ paddingTop: "25px" }}>
         <Routes>
           <Route path="/" element={<Home />} />

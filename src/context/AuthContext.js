@@ -1,6 +1,13 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import { auth, provider, db } from "../firebase"; 
-import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { auth, provider, db } from "../firebase";
+import {
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+} from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const AuthContext = createContext();
@@ -12,13 +19,42 @@ export function useAuth() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  const login = async () => {
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (err) {
-      console.error("Login error:", err);
-    }
+  // ── Modal controls ──
+  const openAuthModal = () => setAuthModalOpen(true);
+  const closeAuthModal = () => setAuthModalOpen(false);
+
+  // ── `login` now opens the modal — all existing login() calls work unchanged ──
+  const login = openAuthModal;
+
+  // ── Google sign-in (called from inside the modal) ──
+  const loginWithGoogle = async () => {
+    await signInWithPopup(auth, provider);
+  };
+
+  // ── Email/password sign-up — creates Firestore user doc with empty username ──
+  // New users land on Profile page to set their display name
+  const signUpWithEmail = async (email, password) => {
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    await setDoc(doc(db, "users", result.user.uid), {
+      uid: result.user.uid,
+      email: result.user.email,
+      username: "",
+      usernameLower: "",
+      createdAt: new Date().toISOString(),
+    }, { merge: true });
+    return result;
+  };
+
+  // ── Email/password sign-in ──
+  const signInWithEmail = async (email, password) => {
+    return signInWithEmailAndPassword(auth, email, password);
+  };
+
+  // ── Password reset ──
+  const resetPassword = async (email) => {
+    return sendPasswordResetEmail(auth, email);
   };
 
   const logout = async () => {
@@ -33,15 +69,11 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
         setUser(u);
-
-        // 🔹 load user profile
         const ref = doc(db, "users", u.uid);
         const snap = await getDoc(ref);
-
         if (snap.exists()) {
           setProfile(snap.data());
         } else {
-          // no profile yet
           setProfile(null);
         }
       } else {
@@ -52,7 +84,7 @@ export function AuthProvider({ children }) {
     return unsubscribe;
   }, []);
 
-  // 🔹 save profile (for when user picks username)
+  // ── Save/update display name (unchanged) ──
   const saveProfile = async (username) => {
     if (!user) return;
     const ref = doc(db, "users", user.uid);
@@ -66,7 +98,11 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, login, logout, saveProfile }}>
+    <AuthContext.Provider value={{
+      user, profile, login, logout, saveProfile,
+      authModalOpen, openAuthModal, closeAuthModal,
+      loginWithGoogle, signInWithEmail, signUpWithEmail, resetPassword,
+    }}>
       {children}
     </AuthContext.Provider>
   );
