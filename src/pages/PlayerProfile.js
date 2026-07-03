@@ -585,24 +585,20 @@ export default function PlayerProfile() {
     const height = player.Height || "";
     const weight = player.Weight ? `${player.Weight} lbs` : "";
 
-    // Identity line: "2028 QB from Colorado | 6'1", 190 lbs"
     const identityParts = [
       [year, pos].filter(Boolean).join(" "),
       school ? `from ${school}` : "",
     ].filter(Boolean).join(" ");
     const measureParts = [height, weight].filter(Boolean).join(", ");
 
-    // Community data if available
     const gradeLabel = community.avgGrade ? gradeLabels[Math.round(community.avgGrade)] : null;
     const topStrengths = community.topStrengths?.slice(0, 2).join(", ");
 
     if (gradeLabel && topStrengths) {
-      // Full data: lead with grade and strengths
       return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Community grade: ${gradeLabel}. Top strengths: ${topStrengths}. Scouting report and NFL fit on We-Draft.com.`;
     } else if (gradeLabel) {
       return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Community grade: ${gradeLabel}. View full scouting report, strengths, weaknesses, and NFL fit on We-Draft.com.`;
     } else {
-      // No community data yet — make it a call to action
       return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Submit your scouting grade, strengths, weaknesses, and NFL fit on We-Draft.com — community-powered NFL Draft analysis.`;
     }
   };
@@ -1201,10 +1197,10 @@ export default function PlayerProfile() {
             {!user ? (
               <div style={{ padding: isMobile ? "24px 16px" : "36px 32px", textAlign: "center", background: "#fafafa" }}>
                 <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "12px" }}>
-                  Add Your Scouting Report
+                  Create Your Scouting Report
                 </div>
                 <div style={{ fontSize: isMobile ? "14px" : "15px", fontWeight: 700, color: "#666", lineHeight: 1.65, maxWidth: "360px", margin: "0 auto 24px" }}>
-                  Grade {player.First || "this player"}, pick their top strengths and weaknesses, choose an NFL fit, and see how your take compares to the community.
+                  Grade players, evaluate strengths and weaknesses, and find an NFL fit.
                 </div>
                 <button
                   onClick={login}
@@ -1466,7 +1462,6 @@ export default function PlayerProfile() {
                           </div>}
                         </div>
                       )}
-                      {/* ── Scout's Take: mobile — legible, non-italic ── */}
                       {ev.evaluation && <div className="px-3 py-3" style={{ borderLeft: `3px solid ${color1}`, margin: "0 8px 8px", borderRadius: "0 4px 4px 0", background: "#fafafa" }}>
                         <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"6px" }}>Scout's Take</div>
                         <p style={{ fontSize:"13px", fontWeight:600, color:"#111", lineHeight:1.65, margin:0 }}>{ev.evaluation}</p>
@@ -1498,7 +1493,6 @@ export default function PlayerProfile() {
                             : <div className="font-black uppercase text-center" style={{ fontSize:"13px", color:color1, letterSpacing:"0.04em", lineHeight:1.4 }}>{ev.nflFit}</div>}
                         </div>}
                       </div>
-                      {/* ── Scout's Take: desktop — legible, non-italic, with left accent border ── */}
                       {ev.evaluation && <>
                         <div style={{ height:"1px", backgroundColor:"#e5e7eb", margin:"0 16px" }} />
                         <div className="px-4 py-4">

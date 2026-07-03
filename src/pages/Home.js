@@ -42,13 +42,6 @@ const gradeDisplay = (g) => {
   return map[g] || null;
 };
 
-function sanitizeUrl(url) {
-  if (!url) return "";
-  const u = url.trim();
-  if (!/^https?:\/\//i.test(u)) return `https://${u}`;
-  return u;
-}
-
 function GradeBadge({ grade }) {
   const gd = gradeDisplay(grade);
   if (!gd) return null;
@@ -68,259 +61,12 @@ function GradeBadge({ grade }) {
   );
 }
 
-/* =========================
-   SUPPLEMENTAL DRAFT SPOTLIGHT
-   Fetches players with Eligible === "2026s"
-   Displayed as a breaking news banner above the main grid
-   ========================= */
-function SupplementalDraftSpotlight({ isMobile }) {
+function TopDraftBoard({ isMobile, year }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchPlayers = async () => {
-      try {
-        const snap = await getDocs(collection(db, "players"));
-        const suppPlayers = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => p.Eligible?.toString() === "2026s" && p.Live !== false && p.Live !== null && p.Live !== 0 && p.Live !== "false" && p.Live !== "no");
-        setPlayers(suppPlayers);
-      } catch (err) {
-        console.error("Error fetching supplemental players:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchPlayers();
-  }, []);
-
-  if (loading || players.length === 0) return null;
-
-  return (
-    <>
-      <style>{`
-        @keyframes suppPulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-        @keyframes suppSlideIn {
-          from { opacity: 0; transform: translateY(-12px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .supp-player-row {
-          transition: background 0.15s, transform 0.15s;
-        }
-        .supp-player-row:hover {
-          background: #fff8e8 !important;
-          transform: translateX(4px);
-        }
-        .supp-player-row:hover .supp-player-name {
-          text-decoration: underline;
-        }
-      `}</style>
-
-      <div style={{
-        marginBottom: isMobile ? "24px" : "32px",
-        borderRadius: "12px",
-        overflow: "hidden",
-        boxShadow: `0 6px 32px rgba(180,30,30,0.18), 0 2px 8px rgba(246,162,29,0.15)`,
-        border: `2px solid #c0392b`,
-        animation: "suppSlideIn 0.4s ease both",
-      }}>
-
-        {/* Breaking banner ticker */}
-        <div style={{
-          background: "#c0392b",
-          padding: "5px 16px",
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          overflow: "hidden",
-        }}>
-          <span style={{
-            flexShrink: 0,
-            background: "#fff",
-            color: "#c0392b",
-            fontSize: "9px",
-            fontWeight: 900,
-            padding: "2px 8px",
-            borderRadius: "3px",
-            textTransform: "uppercase",
-            letterSpacing: "0.12em",
-            animation: "suppPulse 1.4s ease-in-out infinite",
-          }}>
-            ● Breaking
-          </span>
-          <span style={{
-            color: "rgba(255,255,255,0.9)",
-            fontSize: "11px",
-            fontWeight: 800,
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            whiteSpace: "nowrap",
-          }}>
-            2026 NFL Supplemental Draft — New prospect{players.length > 1 ? "s" : ""} eligible
-          </span>
-        </div>
-
-        {/* Main header */}
-        <div style={{
-          background: `linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)`,
-          padding: isMobile ? "16px 16px 14px" : "20px 28px 18px",
-          position: "relative",
-          overflow: "hidden",
-        }}>
-          {/* Diagonal stripe decoration */}
-          <div style={{
-            position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-            background: "repeating-linear-gradient(55deg, transparent, transparent 18px, rgba(192,57,43,0.08) 18px, rgba(192,57,43,0.08) 36px)",
-            pointerEvents: "none",
-          }} />
-          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-            <div>
-              <div style={{ fontSize: isMobile ? "9px" : "10px", fontWeight: 900, color: "#e74c3c", textTransform: "uppercase", letterSpacing: "0.22em", marginBottom: "5px" }}>
-                ⚡ 2026 NFL Draft — Supplemental Class
-              </div>
-              <div style={{ fontSize: isMobile ? "24px" : "34px", fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em" }}>
-                Supplemental Draft
-              </div>
-              <div style={{ fontSize: isMobile ? "13px" : "17px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "3px" }}>
-                Brendan Sorsby Plans to Enter the Supplemental Draft
-              </div>
-            </div>
-            <div style={{
-              background: "linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)",
-              border: "2px solid rgba(255,255,255,0.2)",
-              borderRadius: "10px",
-              padding: isMobile ? "10px 16px" : "12px 20px",
-              textAlign: "center",
-              flexShrink: 0,
-            }}>
-              <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "2px" }}>Eligible</div>
-              <div style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{players.length}</div>
-              <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "2px" }}>
-                Prospect{players.length > 1 ? "s" : ""}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Gold divider */}
-        <div style={{ height: "4px", background: `linear-gradient(90deg, #c0392b, ${GOLD}, #c0392b)` }} />
-
-        {/* Player rows */}
-        <div style={{ background: "#fff" }}>
-          {players.map((p, i) => {
-            const gradeVal = p.Grade || null;
-            const gd = gradeVal ? gradeDisplay(gradeVal) : null;
-            return (
-              <Link
-                key={p.id}
-                to={`/player/${p.Slug}`}
-                className="supp-player-row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: isMobile ? "14px 16px" : "18px 28px",
-                  borderBottom: i < players.length - 1 ? "1px solid #fce8e6" : "none",
-                  background: "#fff",
-                  textDecoration: "none",
-                  gap: "16px",
-                }}
-              >
-                {/* Supp badge */}
-                <div style={{
-                  flexShrink: 0,
-                  width: isMobile ? "46px" : "56px",
-                  height: isMobile ? "46px" : "56px",
-                  borderRadius: "10px",
-                  background: `linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)`,
-                  border: `2px solid #922b21`,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 3px 10px rgba(192,57,43,0.35)",
-                }}>
-                  <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: "0.1em", lineHeight: 1 }}>SUPP</span>
-                  <span style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>'26</span>
-                </div>
-
-                {/* Player info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    className="supp-player-name"
-                    style={{ fontWeight: 900, fontSize: isMobile ? "20px" : "26px", color: BLUE, lineHeight: 1.1, letterSpacing: "-0.01em" }}
-                  >
-                    {`${p.First || ""} ${p.Last || ""}`}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px", flexWrap: "wrap" }}>
-                    {p.Position && (
-                      <span style={{ background: BLUE, color: "#fff", fontSize: "10px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                        {p.Position}
-                      </span>
-                    )}
-                    {p.School && (
-                      <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#444" }}>{p.School}</span>
-                    )}
-                    <span style={{
-                      background: "#fef9e7",
-                      border: "1px solid #f6a21d",
-                      color: "#7a4a00",
-                      fontSize: "9px",
-                      fontWeight: 900,
-                      padding: "2px 8px",
-                      borderRadius: "20px",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.1em",
-                    }}>
-                      Supplemental Eligible
-                    </span>
-                  </div>
-                </div>
-
-                {/* Grade + arrow */}
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
-                  {gradeVal && gd && <GradeBadge grade={gradeVal} />}
-                  <span style={{ color: "#c0392b", fontSize: "22px", fontWeight: 900 }}>›</span>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* Footer */}
-        <div style={{
-          background: `linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)`,
-          padding: isMobile ? "10px 16px" : "12px 28px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "8px",
-        }}>
-          <div style={{ color: "rgba(255,255,255,0.6)", fontSize: "11px", fontWeight: 700 }}>
-            Supplemental draft prospects are outside the regular 2026 class
-          </div>
-          <Link to="/draft" style={{
-            color: GOLD,
-            fontWeight: 900,
-            fontSize: "11px",
-            textDecoration: "underline",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-          }}>
-            2026 Draft Board →
-          </Link>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function Top2027Board({ isMobile }) {
-  const [players, setPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Link targets: 2027 → /community, 2028 → /community/2028
+  const boardLink = year === "2027" ? "/community" : `/community/${year}`;
 
   useEffect(() => {
     const fetchPlayers = async () => {
@@ -329,8 +75,8 @@ function Top2027Board({ isMobile }) {
         const all = await Promise.all(
           snap.docs.map(async (docSnap) => {
             const p = { id: docSnap.id, ...docSnap.data() };
-            if (p.Eligible?.toString() !== "2027") return null;
-            if (p.Live === false || p.Live === null || p.Live === 0 || p.Live === "false" || p.Live === "no") return null; // skip non-live players
+            if (p.Eligible?.toString() !== year) return null;
+            if (p.Live === false || p.Live === null || p.Live === 0 || p.Live === "false" || p.Live === "no") return null;
             try {
               const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
               const grades = [];
@@ -357,13 +103,13 @@ function Top2027Board({ isMobile }) {
 
         setPlayers(ranked);
       } catch (err) {
-        console.error("Error fetching 2027 players:", err);
+        console.error(`Error fetching ${year} players:`, err);
       } finally {
         setLoading(false);
       }
     };
     fetchPlayers();
-  }, []);
+  }, [year]);
 
   if (loading) return (
     <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>Loading...</div>
@@ -376,11 +122,11 @@ function Top2027Board({ isMobile }) {
   ];
 
   if (players.length === 0) return (
-    <div style={{ borderRadius: "14px", overflow: "hidden", background: `linear-gradient(160deg, ${BLUE} 0%, #003a7a 100%)`, padding: "40px 24px", textAlign: "center" }}>
-      <div style={{ fontSize: "32px", marginBottom: "10px" }}>🏈</div>
-      <div style={{ color: GOLD, fontWeight: 900, fontSize: "18px", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>The 2027 Class Awaits</div>
-      <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "13px", fontWeight: 700, marginBottom: "20px" }}>Be the first to evaluate the next generation of NFL talent</div>
-      <Link to="/community" style={{ display: "inline-block", backgroundColor: GOLD, color: BLUE, borderRadius: "8px", padding: "10px 28px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em", textDecoration: "none" }}>
+    <div style={{ borderRadius: "14px", overflow: "hidden", background: `linear-gradient(160deg, ${BLUE} 0%, #003a7a 100%)`, padding: "40px 16px", textAlign: "center" }}>
+      <div style={{ fontSize: "28px", marginBottom: "8px" }}>🏈</div>
+      <div style={{ color: GOLD, fontWeight: 900, fontSize: "15px", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>The {year} Class Awaits</div>
+      <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "12px", fontWeight: 700, marginBottom: "18px" }}>Be the first to evaluate the next generation of NFL talent</div>
+      <Link to={boardLink} style={{ display: "inline-block", backgroundColor: GOLD, color: BLUE, borderRadius: "8px", padding: "9px 22px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em", textDecoration: "none" }}>
         Start Evaluating →
       </Link>
     </div>
@@ -390,169 +136,169 @@ function Top2027Board({ isMobile }) {
     <>
       <style>{`
         @keyframes slideIn {
-          from { opacity: 0; transform: translateX(-18px); }
+          from { opacity: 0; transform: translateX(-12px); }
           to   { opacity: 1; transform: translateX(0); }
         }
         .prospect-row {
-          transition: background 0.15s, transform 0.15s;
-          cursor: pointer;
+          transition: background 0.15s, box-shadow 0.15s, transform 0.12s;
         }
         .prospect-row:hover {
-          background: linear-gradient(90deg, #e8f0fa 0%, #f5f8ff 100%) !important;
+          background: linear-gradient(90deg, #e8f2ff 0%, #f0f6ff 100%) !important;
+          box-shadow: inset 4px 0 0 #0055a5;
           transform: translateX(3px);
         }
         .prospect-row:hover .prospect-name {
           text-decoration: underline;
         }
       `}</style>
-
       <div style={{
         borderRadius: "14px", overflow: "hidden",
         boxShadow: "0 8px 40px rgba(0,85,165,0.18)",
         border: `2px solid ${BLUE}`,
       }}>
-        {/* Header */}
-        <div style={{
-          background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
-          padding: isMobile ? "16px 16px 14px" : "20px 24px 18px",
-          position: "relative", overflow: "hidden",
-        }}>
-          <div style={{ position: "absolute", top: 0, right: 0, width: "200px", height: "100%", background: "repeating-linear-gradient(60deg, transparent, transparent 12px, rgba(246,162,29,0.07) 12px, rgba(246,162,29,0.07) 24px)", pointerEvents: "none" }} />
-          <div style={{ position: "relative" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-              <div>
-                <div style={{ fontSize: isMobile ? "9px" : "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: "4px" }}>
-                  🏈 Community Rankings
-                </div>
-                <div style={{ fontSize: isMobile ? "22px" : "30px", fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.01em" }}>
-                  2027 NFL Draft
-                </div>
-                <div style={{ fontSize: isMobile ? "13px" : "16px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "2px" }}>
-                  Top Prospects
-                </div>
-              </div>
-              <Link to="/community" style={{
-                background: GOLD, color: BLUE, fontWeight: 900,
-                fontSize: isMobile ? "11px" : "12px", padding: "8px 16px",
-                borderRadius: "20px", textDecoration: "none", textTransform: "uppercase",
-                letterSpacing: "0.06em", flexShrink: 0, marginTop: "4px",
-                boxShadow: "0 2px 10px rgba(246,162,29,0.4)",
-              }}>
-                Full Board →
-              </Link>
+      {/* Header */}
+      <div style={{
+        background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
+        padding: isMobile ? "14px 14px 12px" : "16px 18px 14px",
+        position: "relative", overflow: "hidden",
+      }}>
+        <div style={{ position: "absolute", top: 0, right: 0, width: "150px", height: "100%", background: "repeating-linear-gradient(60deg, transparent, transparent 12px, rgba(246,162,29,0.07) 12px, rgba(246,162,29,0.07) 24px)", pointerEvents: "none" }} />
+        <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: "9px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: "3px" }}>
+              🏈 Community Rankings
+            </div>
+            <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.01em" }}>
+              {year} NFL Draft
+            </div>
+            <div style={{ fontSize: isMobile ? "11px" : "13px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "2px" }}>
+              Top Prospects
             </div>
           </div>
-        </div>
-        <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-
-        {/* Rows */}
-        <div style={{ background: "#fff" }}>
-          {players.map((p, i) => {
-            const rank = rankColors[i] || null;
-            const isTop3 = i < 3;
-            return (
-              <Link
-                key={p.id}
-                to={`/player/${p.Slug}`}
-                className="prospect-row"
-                style={{
-                  display: "flex", alignItems: "center",
-                  padding: isMobile ? "11px 14px" : isTop3 ? "16px 20px" : "13px 20px",
-                  borderBottom: i < players.length - 1 ? "1px solid #eef2f7" : "none",
-                  background: isTop3 ? "linear-gradient(90deg, #f7faff 0%, #fff 100%)" : "#fff",
-                  textDecoration: "none",
-                  animation: `slideIn 0.3s ease both`,
-                  animationDelay: `${i * 0.05}s`,
-                }}
-              >
-                <div style={{
-                  flexShrink: 0,
-                  width: isMobile ? (isTop3 ? "36px" : "28px") : (isTop3 ? "46px" : "36px"),
-                  height: isMobile ? (isTop3 ? "36px" : "28px") : (isTop3 ? "46px" : "36px"),
-                  borderRadius: isTop3 ? "10px" : "8px",
-                  background: rank ? rank.bg : "#f0f0f0",
-                  border: rank ? rank.border : "2px solid #ddd",
-                  boxShadow: rank ? rank.shadow : "none",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  marginRight: isMobile ? "12px" : "16px",
-                  flexDirection: "column",
-                }}>
-                  <span style={{
-                    fontSize: isTop3 ? (isMobile ? "15px" : "20px") : (isMobile ? "12px" : "15px"),
-                    fontWeight: 900, color: rank ? rank.num : "#bbb",
-                    lineHeight: 1, textShadow: isTop3 ? "0 1px 3px rgba(0,0,0,0.3)" : "none",
-                  }}>
-                    {i + 1}
-                  </span>
-                </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    className="prospect-name"
-                    style={{
-                      color: BLUE, fontWeight: 900,
-                      fontSize: isTop3 ? (isMobile ? "16px" : "20px") : (isMobile ? "14px" : "16px"),
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    {`${p.First || ""} ${p.Last || ""}`}
-                  </div>
-                  <div style={{
-                    fontSize: isMobile ? "11px" : "12px", fontWeight: 700,
-                    color: isTop3 ? "#444" : "#888", marginTop: "2px",
-                    display: "flex", alignItems: "center", gap: "6px",
-                  }}>
-                    {p.Position && (
-                      <span style={{
-                        background: BLUE, color: "#fff", fontSize: "9px",
-                        fontWeight: 900, padding: "1px 6px", borderRadius: "3px",
-                        textTransform: "uppercase", letterSpacing: "0.06em",
-                      }}>
-                        {p.Position}
-                      </span>
-                    )}
-                    <span>{p.School || "—"}</span>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0, marginLeft: "10px" }}>
-                  {p.commGrade && <GradeBadge grade={p.commGrade} />}
-                  <span style={{ color: "#ccc", fontSize: "16px", fontWeight: 900 }}>›</span>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* Footer CTA */}
-        <div style={{
-          background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
-          padding: isMobile ? "14px" : "18px 24px",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          flexWrap: "wrap", gap: "10px",
-        }}>
-          <div style={{ color: "rgba(255,255,255,0.75)", fontSize: isMobile ? "11px" : "12px", fontWeight: 700 }}>
-            Rankings based on community evaluations
-          </div>
-          <Link
-            to="/community"
-            style={{
-              background: GOLD, color: BLUE, fontWeight: 900,
-              fontSize: isMobile ? "12px" : "13px", padding: isMobile ? "9px 20px" : "11px 28px",
-              borderRadius: "8px", textDecoration: "none",
-              textTransform: "uppercase", letterSpacing: "0.08em",
-              boxShadow: "0 3px 14px rgba(246,162,29,0.45)",
-            }}
-          >
-            View Full 2027 Board →
+          <Link to={boardLink} style={{
+            background: GOLD, color: BLUE, fontWeight: 900,
+            fontSize: "10px", padding: "6px 14px",
+            borderRadius: "20px", textDecoration: "none", textTransform: "uppercase",
+            letterSpacing: "0.06em", flexShrink: 0,
+            boxShadow: "0 2px 10px rgba(246,162,29,0.4)",
+            whiteSpace: "nowrap",
+          }}>
+            Full Board →
           </Link>
         </div>
+      </div>
+      <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
+
+      {/* Rows */}
+      <div style={{ background: "#fff" }}>
+        {players.map((p, i) => {
+          const rank = rankColors[i] || null;
+          const isTop3 = i < 3;
+          return (
+            <Link
+              key={p.id}
+              to={`/player/${p.Slug}`}
+              className="prospect-row"
+              style={{
+                display: "flex", alignItems: "center",
+                padding: isMobile ? "10px 12px" : isTop3 ? "13px 16px" : "10px 16px",
+                borderBottom: i < players.length - 1 ? "1px solid #eef2f7" : "none",
+                background: isTop3 ? "linear-gradient(90deg, #f7faff 0%, #fff 100%)" : "#fff",
+                textDecoration: "none",
+                animation: `slideIn 0.3s ease both`,
+                animationDelay: `${i * 0.05}s`,
+              }}
+            >
+              {/* Rank badge */}
+              <div style={{
+                flexShrink: 0,
+                width: isTop3 ? "38px" : "30px",
+                height: isTop3 ? "38px" : "30px",
+                borderRadius: isTop3 ? "8px" : "6px",
+                background: rank ? rank.bg : "#f0f0f0",
+                border: rank ? rank.border : "2px solid #ddd",
+                boxShadow: rank ? rank.shadow : "none",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                marginRight: "12px",
+                flexShrink: 0,
+              }}>
+                <span style={{
+                  fontSize: isTop3 ? "17px" : "13px",
+                  fontWeight: 900, color: rank ? rank.num : "#bbb",
+                  lineHeight: 1, textShadow: isTop3 ? "0 1px 3px rgba(0,0,0,0.3)" : "none",
+                }}>
+                  {i + 1}
+                </span>
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  className="prospect-name"
+                  style={{
+                    color: BLUE, fontWeight: 900,
+                    fontSize: isTop3 ? "19px" : "16px",
+                    lineHeight: 1.2,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}
+                >
+                  {`${p.First || ""} ${p.Last || ""}`}
+                </div>
+                <div style={{
+                  fontSize: "13px", fontWeight: 700,
+                  color: isTop3 ? "#444" : "#888", marginTop: "3px",
+                  display: "flex", alignItems: "center", gap: "5px",
+                }}>
+                  {p.Position && (
+                    <span style={{
+                      background: BLUE, color: "#fff", fontSize: "10px",
+                      fontWeight: 900, padding: "2px 6px", borderRadius: "3px",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                      flexShrink: 0,
+                    }}>
+                      {p.Position}
+                    </span>
+                  )}
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "13px" }}>{p.School || "—"}</span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0, marginLeft: "6px" }}>
+                {p.commGrade && <GradeBadge grade={p.commGrade} />}
+                <span style={{ color: "#ccc", fontSize: "14px", fontWeight: 900 }}>›</span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* Footer CTA */}
+      <div style={{
+        background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
+        padding: isMobile ? "12px 14px" : "14px 18px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        flexWrap: "wrap", gap: "8px",
+      }}>
+        <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "10px", fontWeight: 700 }}>
+          Community evaluations
+        </div>
+        <Link
+          to={boardLink}
+          style={{
+            background: GOLD, color: BLUE, fontWeight: 900,
+            fontSize: "11px", padding: "8px 16px",
+            borderRadius: "8px", textDecoration: "none",
+            textTransform: "uppercase", letterSpacing: "0.08em",
+            boxShadow: "0 3px 14px rgba(246,162,29,0.45)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Full {year} Board →
+        </Link>
+      </div>
       </div>
     </>
   );
 }
-
-
 
 export default function Home() {
   const [recentEvals, setRecentEvals] = useState([]);
@@ -588,9 +334,6 @@ export default function Home() {
     fetch();
   }, []);
 
-  // ── Recent Evaluations: only pulls from players that are live (Live !== false) ──
-  // Non-live players (added but not yet ready for the boards) are skipped entirely here,
-  // so their evaluations — if any — never surface in this public homepage feed.
   useEffect(() => {
     const fetch = async () => {
       try {
@@ -598,13 +341,16 @@ export default function Home() {
         const evalPromises = [];
         playersSnap.forEach((playerDoc) => {
           const pd = playerDoc.data();
-          if (pd.Live === false || pd.Live === null || pd.Live === 0 || pd.Live === "false" || pd.Live === "no") return; // skip non-live players
+          if (pd.Live === false || pd.Live === null || pd.Live === 0 || pd.Live === "false" || pd.Live === "no") return;
           const q = query(collection(db, "players", playerDoc.id, "evaluations"), orderBy("updatedAt", "desc"), limit(2));
           evalPromises.push(
             getDocs(q).then((snap) =>
-              snap.docs.map((d) => {
-                return { ...d.data(), playerId: playerDoc.id, playerName: `${pd.First || ""} ${pd.Last || ""}`.trim(), playerSlug: pd.Slug || playerDoc.id };
-              })
+              snap.docs.map((d) => ({
+                ...d.data(),
+                playerId: playerDoc.id,
+                playerName: `${pd.First || ""} ${pd.Last || ""}`.trim(),
+                playerSlug: pd.Slug || playerDoc.id,
+              }))
             )
           );
         });
@@ -624,7 +370,11 @@ export default function Home() {
             userMap[snap.id] = { username: u.username || u.email || "User", verified: u.verified || false };
           }
         });
-        setRecentEvals(publicEvals.map((ev) => ({ ...ev, username: userMap[ev.uid]?.username || "User", verified: userMap[ev.uid]?.verified || false })));
+        setRecentEvals(publicEvals.map((ev) => ({
+          ...ev,
+          username: userMap[ev.uid]?.username || "User",
+          verified: userMap[ev.uid]?.verified || false,
+        })));
       } catch (err) { console.error("Error fetching evals:", err); }
       finally { setLoading(false); }
     };
@@ -638,11 +388,11 @@ export default function Home() {
   const SectionTitle = ({ children, linkTo, linkLabel }) => (
     <div style={{ marginBottom: "14px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "5px" }}>
-        <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+        <div style={{ fontSize: isMobile ? "16px" : "22px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
           {children}
         </div>
         {linkTo && (
-          <Link to={linkTo} style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline" }}>
+          <Link to={linkTo} style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline", flexShrink: 0, marginLeft: "10px" }}>
             {linkLabel || "See all →"}
           </Link>
         )}
@@ -652,25 +402,62 @@ export default function Home() {
     </div>
   );
 
+  // Mobile quick-link chips (horizontal scroll row)
+  const mobileChips = [
+    { label: "Evaluate", to: "/community", icon: "📋" },
+    { label: "Mock Drafts", to: "/mocks", icon: "🏈" },
+    { label: "NFL Teams", to: "/nfl", icon: "🏟️" },
+    { label: "Colleges", to: "/cfb", icon: "🎓" },
+    { label: "News", to: "/news", icon: "📰" },
+    { label: "Past Drafts", to: "/community/2026", icon: "📜" },
+  ];
+
   return (
     <>
       <Helmet><title>We-Draft.com</title></Helmet>
 
-      <div style={{ width: "100%", padding: isMobile ? "12px 10px 60px" : "20px 4% 60px", fontFamily: "'Arial Black', Arial, sans-serif", boxSizing: "border-box" }}>
+      <style>{`
+        .mobile-chip-scroll {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          padding-bottom: 2px;
+        }
+        .mobile-chip-scroll::-webkit-scrollbar { display: none; }
+        .mobile-chip {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          background: rgba(255,255,255,0.12);
+          border: 1px solid rgba(255,255,255,0.22);
+          border-radius: 10px;
+          padding: 10px 14px;
+          text-decoration: none;
+          flex-shrink: 0;
+          min-width: 72px;
+          transition: background 0.15s;
+        }
+        .mobile-chip:active { background: rgba(255,255,255,0.22); }
+      `}</style>
+
+      <div style={{ width: "100%", padding: isMobile ? "10px 10px 60px" : "20px 4% 60px", fontFamily: "'Arial Black', Arial, sans-serif", boxSizing: "border-box" }}>
 
         {/* ===== HERO ===== */}
         <div style={{
-          display: "flex", alignItems: "center",
-          marginBottom: isMobile ? "20px" : "28px",
+          display: "flex", alignItems: "stretch",
+          marginBottom: isMobile ? "16px" : "28px",
           background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
-          borderRadius: "12px", padding: isMobile ? "20px 16px" : "24px 28px",
-          border: `2px solid ${GOLD}`, gap: "20px",
+          borderRadius: "12px", padding: isMobile ? "14px 14px 12px" : "18px 32px",
+          border: `2px solid ${GOLD}`, gap: "28px",
           flexDirection: isMobile ? "column" : "row",
         }}>
 
-          {/* ── Left chips: 2x2 grid ── */}
+          {/* ── Left chips: 2x2 grid (desktop only) ── */}
           {!isMobile && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "10px", flexShrink: 0, width: "300px", alignSelf: "stretch" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "280px", maxWidth: "420px", alignSelf: "stretch" }}>
               {[
                 { label: "Evaluate Players", sub: "Grade every prospect", to: "/community", icon: "📋" },
                 { label: "Find Hidden Gems", sub: "Under-the-radar talent", to: "/community/2028", icon: "💎" },
@@ -678,33 +465,37 @@ export default function Home() {
                 { label: "Draft News", sub: "Latest prospect analysis", to: "/news", icon: "📰" },
               ].map(({ label, sub, to, icon }) => (
                 <Link key={label} to={to} style={{
-                  display: "flex", flexDirection: "column", gap: "6px",
+                  display: "flex", flexDirection: "column", gap: "8px",
                   background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                  borderRadius: "10px", padding: "14px 14px", textDecoration: "none",
+                  borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
                   transition: "background 0.15s", height: "100%", boxSizing: "border-box",
                 }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
                 >
-                  <span style={{ fontSize: "22px", lineHeight: 1 }}>{icon}</span>
-                  <span style={{ fontWeight: 900, fontSize: "12px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>{label}</span>
-                  <span style={{ fontWeight: 700, fontSize: "10px", color: "rgba(255,255,255,0.6)", lineHeight: 1.3 }}>{sub}</span>
+                  <span style={{ fontSize: "26px", lineHeight: 1 }}>{icon}</span>
+                  <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>{label}</span>
+                  <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>{sub}</span>
                 </Link>
               ))}
             </div>
           )}
 
           {/* ── Center ── */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
-            <img src={logo} alt="We-Draft.com" style={{ width: isMobile ? "240px" : "440px", maxWidth: "80vw", height: "auto", marginBottom: isMobile ? "10px" : "12px" }} />
+          <div style={{ flex: "1.3 1 0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+            <img
+              src={logo}
+              alt="We-Draft.com"
+              style={{ width: isMobile ? "220px" : "660px", maxWidth: "90vw", height: "auto", marginBottom: isMobile ? "10px" : "16px" }}
+            />
 
-            <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, letterSpacing: "0.04em", lineHeight: 1.1, marginBottom: "8px" }}>
+            <div style={{ fontSize: isMobile ? "18px" : "32px", fontWeight: 900, letterSpacing: "0.04em", lineHeight: 1.1, marginBottom: "8px" }}>
               <span style={{ color: "#fff" }}>FOOTBALL. </span>
               <span style={{ color: GOLD }}>YOUR WAY.</span>
             </div>
 
-            <div style={{ fontSize: isMobile ? "12px" : "14px", fontWeight: 700, color: "rgba(255,255,255,0.65)", lineHeight: 1.7, marginBottom: "16px", maxWidth: "460px" }}>
-              Grade prospects and build your personal draft board.<br />See how your takes stack up against the community.
+            <div style={{ fontSize: isMobile ? "12px" : "15px", fontWeight: 700, color: "#fff", lineHeight: 1.65, marginBottom: "18px", maxWidth: "520px" }}>
+              Create your own NFL Draft board, publish player evaluations, and compare your rankings with the We-Draft community.
             </div>
 
             {!user ? (
@@ -712,10 +503,11 @@ export default function Home() {
                 <button onClick={login} style={{
                   backgroundColor: GOLD, color: "#fff",
                   border: "2px solid #fff", borderRadius: "8px",
-                  padding: isMobile ? "12px 26px" : "14px 32px",
-                  fontWeight: 900, fontSize: isMobile ? "14px" : "17px",
+                  padding: isMobile ? "12px 24px" : "16px 36px",
+                  fontWeight: 900, fontSize: isMobile ? "14px" : "18px",
                   textTransform: "uppercase", letterSpacing: "0.08em",
                   cursor: "pointer", fontFamily: "inherit",
+                  WebkitTapHighlightColor: "transparent",
                 }}>
                   Join Free — Start Scouting →
                 </button>
@@ -724,65 +516,74 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <p style={{ fontSize: "14px", fontWeight: 700, color: "rgba(255,255,255,0.8)", margin: 0 }}>
+              <p style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "rgba(255,255,255,0.8)", margin: 0 }}>
                 Welcome back!{" "}
                 <Link to="/boards" style={{ color: GOLD, fontWeight: 900 }}>My Boards</Link>
                 {" "}·{" "}
                 <Link to="/community" style={{ color: GOLD, fontWeight: 900 }}>Community Board</Link>
               </p>
             )}
+
+            {/* Mobile horizontal chip row */}
+            {isMobile && (
+              <div className="mobile-chip-scroll" style={{ marginTop: "18px", width: "100%" }}>
+                {mobileChips.map(({ label, to, icon }) => (
+                  <Link key={label} to={to} className="mobile-chip">
+                    <span style={{ fontSize: "20px", lineHeight: 1 }}>{icon}</span>
+                    <span style={{ fontWeight: 900, fontSize: "10px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.2 }}>{label}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* ── Right chips: 2x2 grid ── */}
+          {/* ── Right chips: 2x2 grid (desktop only) ── */}
           {!isMobile && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "10px", flexShrink: 0, width: "300px", alignSelf: "stretch" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "280px", maxWidth: "420px", alignSelf: "stretch" }}>
 
-              {/* NFL Rosters */}
               <Link to="/nfl" style={{
-                display: "flex", flexDirection: "column", gap: "6px",
+                display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                borderRadius: "10px", padding: "14px 14px", textDecoration: "none",
+                borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
                 transition: "background 0.15s", height: "100%", boxSizing: "border-box",
               }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
               >
-                <span style={{ fontSize: "22px", lineHeight: 1 }}>🏟️</span>
-                <span style={{ fontWeight: 900, fontSize: "12px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>NFL Rosters</span>
-                <span style={{ fontWeight: 700, fontSize: "10px", color: "rgba(255,255,255,0.6)", lineHeight: 1.3 }}>All 32 NFL teams</span>
+                <span style={{ fontSize: "26px", lineHeight: 1 }}>🏟️</span>
+                <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>NFL Rosters</span>
+                <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>All 32 NFL teams</span>
               </Link>
 
-              {/* College Rosters */}
               <Link to="/cfb" style={{
-                display: "flex", flexDirection: "column", gap: "6px",
+                display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                borderRadius: "10px", padding: "14px 14px", textDecoration: "none",
+                borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
                 transition: "background 0.15s", height: "100%", boxSizing: "border-box",
               }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
               >
-                <span style={{ fontSize: "22px", lineHeight: 1 }}>🎓</span>
-                <span style={{ fontWeight: 900, fontSize: "12px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>College Rosters</span>
-                <span style={{ fontWeight: 700, fontSize: "10px", color: "rgba(255,255,255,0.6)", lineHeight: 1.3 }}>Prospects by school</span>
+                <span style={{ fontSize: "26px", lineHeight: 1 }}>🎓</span>
+                <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>College Rosters</span>
+                <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>Prospects by school</span>
               </Link>
 
-              {/* Stay Up to Date — non-clickable, social links inside */}
               <div style={{
-                display: "flex", flexDirection: "column", gap: "6px",
+                display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                borderRadius: "10px", padding: "14px 14px", height: "100%", boxSizing: "border-box",
+                borderRadius: "12px", padding: "18px 18px", height: "100%", boxSizing: "border-box",
               }}>
-                <span style={{ fontSize: "22px", lineHeight: 1 }}>📣</span>
-                <span style={{ fontWeight: 900, fontSize: "12px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>Stay Up to Date</span>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "2px" }}>
+                <span style={{ fontSize: "26px", lineHeight: 1 }}>📣</span>
+                <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>Stay Up to Date</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginTop: "2px" }}>
                   {[
                     { label: "X / Twitter", href: "https://twitter.com/wedraftsite" },
                     { label: "Instagram", href: "https://www.instagram.com/wedraftsite" },
                     { label: "YouTube", href: "https://www.youtube.com/@kingcoldsports" },
                   ].map(({ label, href }) => (
                     <a key={label} href={href} target="_blank" rel="noopener noreferrer" style={{
-                      color: GOLD, fontWeight: 900, fontSize: "10px",
+                      color: GOLD, fontWeight: 900, fontSize: "11px",
                       textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.05em",
                     }}
                       onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
@@ -794,19 +595,18 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Past Drafts */}
               <Link to="/community/2026" style={{
-                display: "flex", flexDirection: "column", gap: "6px",
+                display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
-                borderRadius: "10px", padding: "14px 14px", textDecoration: "none",
+                borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
                 transition: "background 0.15s", height: "100%", boxSizing: "border-box",
               }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
               >
-                <span style={{ fontSize: "22px", lineHeight: 1 }}>📜</span>
-                <span style={{ fontWeight: 900, fontSize: "12px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>View Past Drafts</span>
-                <span style={{ fontWeight: 700, fontSize: "10px", color: "rgba(255,255,255,0.6)", lineHeight: 1.3 }}>2026 class results</span>
+                <span style={{ fontSize: "26px", lineHeight: 1 }}>📜</span>
+                <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>View Past Drafts</span>
+                <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>2026 class results</span>
               </Link>
 
             </div>
@@ -814,20 +614,19 @@ export default function Home() {
 
         </div>
 
-        {/* ===== SUPPLEMENTAL DRAFT SPOTLIGHT ===== */}
-        <SupplementalDraftSpotlight isMobile={isMobile} />
-
-        {/* ===== MAIN 3-COL: NEWS | 2027 BOARD | EVALS ===== */}
+        {/* ===== MAIN GRID: 3-col desktop, stacked mobile (board first) ===== */}
         <div style={{
           display: "grid",
           gridTemplateColumns: isMobile ? "1fr" : "1fr 2fr 1fr",
-          gap: isMobile ? "28px" : "20px",
+          gap: isMobile ? "24px" : "20px",
           marginBottom: isMobile ? "28px" : "40px",
           alignItems: "start",
         }}>
 
-          {/* -- Recent Evaluations (LEFT) -- */}
-          <div>
+          {/* On mobile: 2027 Board renders first via CSS order */}
+
+          {/* -- Recent Evaluations (LEFT on desktop, 2nd on mobile) -- */}
+          <div style={{ order: isMobile ? 2 : 0 }}>
             <SectionTitle linkTo="/community" linkLabel="Community →">Recent Evals</SectionTitle>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
               <div style={{ background: BLUE, padding: "8px 14px" }}>
@@ -881,14 +680,27 @@ export default function Home() {
             </div>
           </div>
 
-          {/* -- 2027 Board (center, wider) -- */}
-          <div>
-            <SectionTitle linkTo="/community" linkLabel="Full Board →">2027 NFL Draft Board</SectionTitle>
-            <Top2027Board isMobile={isMobile} />
+          {/* -- 2027 + 2028 Boards (CENTER on desktop, 1st on mobile) -- */}
+          <div style={{ order: isMobile ? 1 : 0 }}>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+              gap: isMobile ? "24px" : "16px",
+              alignItems: "start",
+            }}>
+              <div>
+                <SectionTitle linkTo="/community" linkLabel="Full Board →">2027 Draft Board</SectionTitle>
+                <TopDraftBoard isMobile={isMobile} year="2027" />
+              </div>
+              <div>
+                <SectionTitle linkTo="/community/2028" linkLabel="Full Board →">2028 Draft Board</SectionTitle>
+                <TopDraftBoard isMobile={isMobile} year="2028" />
+              </div>
+            </div>
           </div>
 
-          {/* -- News (RIGHT) -- */}
-          <div>
+          {/* -- News (RIGHT on desktop, 3rd on mobile) -- */}
+          <div style={{ order: isMobile ? 3 : 0 }}>
             <SectionTitle linkTo="/news" linkLabel="All News →">News</SectionTitle>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
               <div style={{ background: BLUE, padding: "8px 14px" }}>
@@ -898,19 +710,20 @@ export default function Home() {
               {combinedNews.length > 0 ? combinedNews.map((n, i) => {
                 const ts = n.publishedAt || n.updatedAt;
                 const dateStr = ts?.toDate?.().toLocaleDateString(undefined, { month: "short", day: "numeric" });
+                const [mon, day] = dateStr ? dateStr.split(" ") : [null, null];
                 return (
                   <Link key={n.id} to={`/news/${n.slug}`}
                     style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", background: "#fff", borderBottom: i < combinedNews.length - 1 ? "1px solid #f0f0f0" : "none" }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                   >
-                    {dateStr && (
-                      <div style={{ flexShrink: 0, width: "38px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                        <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
-                          <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{dateStr.split(" ")[0]}</span>
+                    {mon && day && (
+                      <div style={{ flexShrink: 0, width: "36px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                        <div style={{ background: GOLD, lineHeight: 1, padding: "2px 0", textAlign: "center" }}>
+                          <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{mon}</span>
                         </div>
-                        <div style={{ padding: "3px 0 3px", textAlign: "center" }}>
-                          <span style={{ fontSize: "17px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{dateStr.split(" ")[1]}</span>
+                        <div style={{ padding: "3px 0", textAlign: "center" }}>
+                          <span style={{ fontSize: "16px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{day}</span>
                         </div>
                       </div>
                     )}
@@ -920,7 +733,7 @@ export default function Home() {
                           {n.type === "article" ? "Article" : "News"}
                         </span>
                       </div>
-                      <div style={{ fontWeight: 900, fontSize: "11px", color: "#222", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.3 }}>{n.title}</div>
+                      <div style={{ fontWeight: 900, fontSize: "11px", color: "#222", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{n.title}</div>
                     </div>
                     <div style={{ flexShrink: 0, fontWeight: 900, fontSize: "12px", color: BLUE }}>→</div>
                   </Link>
@@ -936,14 +749,14 @@ export default function Home() {
         {/* ===== SOCIAL LINKS ===== */}
         <div style={{ borderTop: `2px solid #eee`, paddingTop: "24px", textAlign: "center" }}>
           <div style={{ fontSize: "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: "#aaa", marginBottom: "12px" }}>Follow Us</div>
-          <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? "16px" : "32px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? "20px" : "32px", flexWrap: "wrap" }}>
             {[
               { label: "Instagram", href: "https://www.instagram.com/wedraftsite" },
               { label: "X (Twitter)", href: "https://twitter.com/wedraftsite" },
               { label: "YouTube", href: "https://www.youtube.com/@kingcoldsports" },
             ].map(({ label, href }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                style={{ color: GOLD, fontWeight: 900, fontSize: isMobile ? "14px" : "16px", textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.06em" }}
+                style={{ color: GOLD, fontWeight: 900, fontSize: isMobile ? "13px" : "16px", textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.06em" }}
                 onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
                 {label}
