@@ -170,7 +170,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
 }
 
 export default function UserBoards() {
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const navigate = useNavigate();
   const [players, setPlayers] = useState([]);
   const [playerCache, setPlayerCache] = useState({});
@@ -188,7 +188,6 @@ export default function UserBoards() {
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
-  const [showMyBoardOnly, setShowMyBoardOnly] = useState(false);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
   const [eligibleYear, setEligibleYear] = useState("2027");
 
@@ -201,7 +200,7 @@ export default function UserBoards() {
   const handleYearSelect = (yr) => {
     setEligibleYear(yr);
     setSearchQuery(""); setSelectedPositions([]); setSelectedSchools([]);
-    setSelectedMyGrades([]); setShowMyBoardOnly(false); setShowAvailableOnly(false);
+    setSelectedMyGrades([]); setShowAvailableOnly(false);
   };
 
   // Fetch NFL teams
@@ -300,11 +299,11 @@ export default function UserBoards() {
   const resetFilters = () => {
     setSelectedSchools([]); setSelectedPositions([]);
     setSelectedMyGrades([]); setSearchQuery("");
-    setShowMyBoardOnly(false); setShowAvailableOnly(false);
+    setShowAvailableOnly(false);
   };
 
   const hasActiveFilters = selectedPositions.length > 0 || selectedSchools.length > 0 ||
-    selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly || showAvailableOnly;
+    selectedMyGrades.length > 0 || searchQuery || showAvailableOnly;
 
   const is2026 = eligibleYear === "2026";
   const is2029 = eligibleYear === "2029";
@@ -318,7 +317,6 @@ export default function UserBoards() {
       const myGrade = boardMap.get(p.id);
       return myGrade ? selectedMyGrades.includes(myGrade) : false;
     })
-    .filter((p) => showMyBoardOnly ? boardMap.has(p.id) : true)
     .filter((p) => showAvailableOnly ? !draftMap[p.Slug] : true);
 
   const myGradeOrder = {
@@ -374,8 +372,58 @@ export default function UserBoards() {
   );
 
   if (!user) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Please sign in to view your boards.
+    <div style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ width: "100%", maxWidth: "520px", border: `2px solid ${GOLD}`, borderRadius: "14px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.14)" }}>
+        {/* Header */}
+        <div style={{ background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`, padding: "28px 32px 24px", textAlign: "center", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "repeating-linear-gradient(55deg, transparent, transparent 18px, rgba(246,162,29,0.06) 18px, rgba(246,162,29,0.06) 36px)", pointerEvents: "none" }} />
+          <div style={{ position: "relative" }}>
+            <div style={{ fontSize: "42px", marginBottom: "10px" }}>📋</div>
+            <div style={{ fontSize: "26px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1, marginBottom: "8px" }}>
+              My Boards
+            </div>
+            <div style={{ fontSize: "14px", fontWeight: 700, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Your Personal Draft Command Center
+            </div>
+          </div>
+        </div>
+        <div style={{ height: "4px", background: `linear-gradient(90deg, ${BLUE}, ${GOLD}, ${BLUE})` }} />
+
+        {/* Features list */}
+        <div style={{ background: "#fff", padding: "24px 28px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "28px" }}>
+            {[
+              { icon: "🏈", text: "Build your own personal draft board across every class" },
+              { icon: "📊", text: "Grade every prospect and track your evaluations in one place" },
+              { icon: "🔍", text: "Filter by position, school, and your own grades" },
+              { icon: "📣", text: "See how your takes compare to the We-Draft community" },
+            ].map(({ icon, text }) => (
+              <div key={text} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span style={{ fontSize: "20px", flexShrink: 0 }}>{icon}</span>
+                <span style={{ fontSize: "14px", fontWeight: 700, color: "#333", lineHeight: 1.4 }}>{text}</span>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={login}
+            style={{
+              width: "100%", backgroundColor: BLUE, color: "#fff",
+              border: `3px solid ${GOLD}`, borderRadius: "10px",
+              padding: "16px 32px", fontWeight: 900, fontSize: "17px",
+              textTransform: "uppercase", letterSpacing: "0.08em",
+              cursor: "pointer", fontFamily: "inherit",
+              boxShadow: `0 4px 20px rgba(0,85,165,0.25)`,
+              marginBottom: "10px",
+            }}
+          >
+            Sign In to Access My Boards →
+          </button>
+          <div style={{ textAlign: "center", fontSize: "12px", fontWeight: 700, color: "#aaa" }}>
+            Free · Sign in with Google or Email · No spam
+          </div>
+        </div>
+      </div>
     </div>
   );
 
@@ -440,10 +488,6 @@ export default function UserBoards() {
                   <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 </div>
                 <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <button onClick={() => setShowMyBoardOnly((v) => !v)}
-                    style={{ padding: "8px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showMyBoardOnly ? GOLD : "#fff", color: showMyBoardOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0 }}>
-                    {showMyBoardOnly ? "✓ My Board" : "My Board"}
-                  </button>
                   {is2026 && (
                     <button onClick={() => setShowAvailableOnly((v) => !v)}
                       style={{ padding: "8px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showAvailableOnly ? GOLD : "#fff", color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -462,10 +506,6 @@ export default function UserBoards() {
                 <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
-                <button onClick={() => setShowMyBoardOnly((v) => !v)}
-                  style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showMyBoardOnly ? GOLD : "#fff", color: showMyBoardOnly ? "#fff" : BLUE, whiteSpace: "nowrap" }}>
-                  {showMyBoardOnly ? "✓ My Board" : "My Board"}
-                </button>
                 {is2026 && (
                   <button onClick={() => setShowAvailableOnly((v) => !v)}
                     style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer", background: showAvailableOnly ? GOLD : "#fff", color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap" }}>

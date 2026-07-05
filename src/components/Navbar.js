@@ -252,6 +252,20 @@ export default function Navbar() {
         }
         .community-year-link:last-child { border-bottom: none; }
         .community-year-link:hover { background: #f0f5ff; color: #0055a5; }
+        .community-myboards-link {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 16px;
+          text-decoration: none;
+          font-weight: 900;
+          font-size: 14px;
+          transition: background 0.12s ease;
+          background: #fff8e6;
+          border-bottom: 2px solid #f6a21d;
+          color: #0055a5;
+        }
+        .community-myboards-link:hover { background: #fff0c0; }
         .mobile-nav-link {
           display: flex;
           align-items: center;
@@ -344,6 +358,16 @@ export default function Navbar() {
                     </div>
                   </div>
                   <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
+
+                  {/* My Boards */}
+                  <Link
+                    to="/boards"
+                    className="community-myboards-link"
+                    onClick={() => setCommunityOpen(false)}
+                  >
+                    <span style={{ fontSize: "16px", lineHeight: 1 }}>📋</span>
+                    My Boards
+                  </Link>
 
                   {/* Year links */}
                   {COMMUNITY_YEARS.map((yr) => (
@@ -547,6 +571,11 @@ export default function Navbar() {
               position: "relative",
             }}
           >
+            <Link to="/boards" className="mobile-nav-link"
+              style={{ background: "#fff8e6", borderColor: "#f6a21d" }}
+              onClick={() => setMenuOpen(false)}>
+              📋 My Boards
+            </Link>
             {[
               { path: "/community", label: "Community Board" },
               { path: "/community/2028", label: "2028 Board" },

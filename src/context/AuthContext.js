@@ -19,6 +19,7 @@ export function useAuth() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // ── Modal controls ──
@@ -34,7 +35,6 @@ export function AuthProvider({ children }) {
   };
 
   // ── Email/password sign-up — creates Firestore user doc with empty username ──
-  // New users land on Profile page to set their display name
   const signUpWithEmail = async (email, password) => {
     const result = await createUserWithEmailAndPassword(auth, email, password);
     await setDoc(doc(db, "users", result.user.uid), {
@@ -80,11 +80,12 @@ export function AuthProvider({ children }) {
         setUser(null);
         setProfile(null);
       }
+      setAuthReady(true); // fires after first resolution, signed in or not
     });
     return unsubscribe;
   }, []);
 
-  // ── Save/update display name (unchanged) ──
+  // ── Save/update display name ──
   const saveProfile = async (username) => {
     if (!user) return;
     const ref = doc(db, "users", user.uid);
@@ -99,7 +100,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, login, logout, saveProfile,
+      user, profile, authReady, login, logout, saveProfile,
       authModalOpen, openAuthModal, closeAuthModal,
       loginWithGoogle, signInWithEmail, signUpWithEmail, resetPassword,
     }}>

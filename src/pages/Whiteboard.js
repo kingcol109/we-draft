@@ -12,11 +12,11 @@ const SITE_GOLD = "#f6a21d";
 
 const POSITIONS = ["QB","RB","WR","TE","OL","DL","EDGE","LB","DB"];
 const ROUNDS = ["ROUND 1","ROUND 2","ROUND 3","ROUND 4","ROUND 5","ROUND 6","ROUND 7","UDFA"];
-const DRAFT_CLASSES = ["2027","2028","2026"]; // 2027 default; 2026 kept as archive
+const DRAFT_CLASSES = ["2027","2028","2026"];
 
 export default function Whiteboard() {
-  const { user } = useAuth();
-  const [selectedClass, setSelectedClass] = useState("2027"); // default 2027
+  const { user, authReady } = useAuth();
+  const [selectedClass, setSelectedClass] = useState("2027");
   const [allPlayers, setAllPlayers] = useState([]);
   const [board, setBoard] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -29,6 +29,7 @@ export default function Whiteboard() {
   };
 
   useEffect(() => {
+    if (!authReady || !user) return;
     const loadPlayers = async () => {
       const snap = await getDocs(collection(db, "players"));
       const players = snap.docs
@@ -37,10 +38,10 @@ export default function Whiteboard() {
       setAllPlayers(players);
     };
     loadPlayers();
-  }, [selectedClass]);
+  }, [selectedClass, user, authReady]);
 
   useEffect(() => {
-    if (!allPlayers.length || !user) return;
+    if (!authReady || !allPlayers.length || !user) return;
     const loadBoard = async () => {
       const boardRef = doc(db, "whiteboards", `${user.uid}_${selectedClass}`);
       const snap = await getDoc(boardRef);
@@ -56,7 +57,7 @@ export default function Whiteboard() {
       }
     };
     loadBoard();
-  }, [allPlayers, selectedClass, user]);
+  }, [allPlayers, selectedClass, user, authReady]);
 
   useEffect(() => {
     const handleBeforeUnload = (e) => {
@@ -163,7 +164,7 @@ export default function Whiteboard() {
   const handleSave = async () => {
     if (!user) { alert("You must be logged in to save your board."); return; }
     await setDoc(doc(db, "whiteboards", `${user.uid}_${selectedClass}`), {
-      userId: user.uid,
+      uid: user.uid,
       draftClass: selectedClass,
       board,
       updatedAt: serverTimestamp()
@@ -179,6 +180,9 @@ export default function Whiteboard() {
   const bankPlayers = useMemo(() => {
     return allPlayers.filter(p => !assignedIds.includes(p.id));
   }, [allPlayers, assignedIds]);
+
+  // Still resolving auth — show nothing yet
+  if (!authReady) return null;
 
   if (!user) {
     return (
