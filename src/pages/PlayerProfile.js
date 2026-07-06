@@ -317,21 +317,24 @@ export default function PlayerProfile() {
     fetch();
   }, [player]);
 
-  useEffect(() => {
-    const fetch = async () => {
-      if (!user || !player?.id) return;
-      try {
-        const snap = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
-        if (snap.exists()) {
-          const d = snap.data();
-          setGrade(d.grade||""); setStrengths(d.strengths||[]); setWeaknesses(d.weaknesses||[]);
-          setNflFit(d.nflFit||""); setEvaluation(d.evaluation||"");
-          setVisibility(d.visibility||"public"); setLastUpdated(d.updatedAt||null);
-        }
-      } catch(e) { console.error(e); }
-    };
-    fetch();
-  }, [user, player]);
+useEffect(() => {
+  const fetch = async () => {
+    if (!user || !player?.id) return;
+    // Always reset first so switching to an unevaluated player clears the form
+    setGrade(""); setStrengths([]); setWeaknesses([]);
+    setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+    try {
+      const snap = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
+      if (snap.exists()) {
+        const d = snap.data();
+        setGrade(d.grade||""); setStrengths(d.strengths||[]); setWeaknesses(d.weaknesses||[]);
+        setNflFit(d.nflFit||""); setEvaluation(d.evaluation||"");
+        setVisibility(d.visibility||"public"); setLastUpdated(d.updatedAt||null);
+      }
+    } catch(e) { console.error(e); }
+  };
+  fetch();
+}, [user, player]);
 
   useEffect(() => {
     const fetch = async () => {

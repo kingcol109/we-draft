@@ -14,29 +14,15 @@ const ACTIVE_YEARS = ["2027", "2028", "2029"];
 
 const gradeOrder = [
   "Watchlist",
-  "Early First Round",
-  "Middle First Round",
-  "Late First Round",
-  "Second Round",
-  "Third Round",
-  "Fourth Round",
-  "Fifth Round",
-  "Sixth Round",
-  "Seventh Round",
-  "UDFA",
+  "Early First Round", "Middle First Round", "Late First Round",
+  "Second Round", "Third Round", "Fourth Round",
+  "Fifth Round", "Sixth Round", "Seventh Round", "UDFA",
 ];
 
 const commGradeOrder = [
-  "Early First Round",
-  "Middle First Round",
-  "Late First Round",
-  "Second Round",
-  "Third Round",
-  "Fourth Round",
-  "Fifth Round",
-  "Sixth Round",
-  "Seventh Round",
-  "UDFA",
+  "Early First Round", "Middle First Round", "Late First Round",
+  "Second Round", "Third Round", "Fourth Round",
+  "Fifth Round", "Sixth Round", "Seventh Round", "UDFA",
 ];
 
 const gradeScale = {
@@ -97,12 +83,8 @@ const GradeBadge = ({ grade, small = false }) => {
       borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px",
     }}>
       {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
-      <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>
-        {gd.short}
-      </span>
-      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>
-        ROUND
-      </span>
+      <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>{gd.short}</span>
+      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>ROUND</span>
     </div>
   );
 };
@@ -217,8 +199,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
         onClick={() => setOpen((v) => !v)}
         style={{
           border: `2px solid ${GOLD}`, borderRadius: "20px",
-          padding: "6px 18px",
-          fontWeight: 900, fontSize: "14px",
+          padding: "6px 18px", fontWeight: 900, fontSize: "14px",
           cursor: "pointer",
           background: isArchive ? BLUE : "#fff",
           color: isArchive ? "#fff" : BLUE,
@@ -265,12 +246,69 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
   );
 }
 
+function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyBoards }) {
+  return (
+    <div ref={dropdownRef} style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        style={{
+          padding: isMobile ? "8px 14px" : "8px 16px",
+          fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
+          textTransform: "uppercase", letterSpacing: "0.05em",
+          border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+          background: "#fff", color: BLUE, whiteSpace: "nowrap",
+        }}
+      >
+        My Board ▾
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: 0,
+          zIndex: 50, minWidth: "180px",
+          background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
+          boxShadow: "0 6px 16px rgba(0,0,0,0.12)", overflow: "hidden",
+        }}>
+          <div style={{ background: BLUE, padding: "8px 12px", fontSize: "12px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            My Board
+          </div>
+          <div style={{ height: "3px", background: GOLD }} />
+          <div
+            onClick={() => { setOpen(false); onMyBoards(); }}
+            style={{
+              padding: "11px 14px", cursor: "pointer", fontWeight: 800,
+              fontSize: "14px", color: BLUE, background: "#fff",
+              display: "flex", alignItems: "center", gap: "8px",
+              borderBottom: "1px solid #eee",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >
+            📋 My Boards
+          </div>
+          <div
+            onClick={() => { setOpen(false); onNavigate(); }}
+            style={{
+              padding: "11px 14px", cursor: "pointer", fontWeight: 800,
+              fontSize: "14px", color: BLUE, background: "#fff",
+              display: "flex", alignItems: "center", gap: "8px",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >
+            Open Whiteboard ↗
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CommunityBoard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { year } = useParams();
 
-  // ── Year is driven by the URL param; defaults to 2027 on /community ──
   const eligibleYear = year || "2027";
 
   const [players, setPlayers] = useState([]);
@@ -307,10 +345,8 @@ export default function CommunityBoard() {
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedCommGrades, setSelectedCommGrades] = useState([]);
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
-  const [showMyBoardOnly, setShowMyBoardOnly] = useState(false);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
 
-  // ── Reset filters whenever the year URL param changes ──
   const prevYearRef = useRef(eligibleYear);
   useEffect(() => {
     if (prevYearRef.current !== eligibleYear) {
@@ -320,17 +356,14 @@ export default function CommunityBoard() {
       setSelectedSchools([]);
       setSelectedCommGrades([]);
       setSelectedMyGrades([]);
-      setShowMyBoardOnly(false);
       setShowAvailableOnly(false);
       setSortKey("CommunityGrade");
       setSortOrder("asc");
     }
   }, [eligibleYear]);
 
-  // ── Year nav helper — 2027 lives at /community, others at /community/:year ──
   const yearPath = (yr) => yr === "2027" ? "/community" : `/community/${yr}`;
 
-  // Fetch NFL teams
   useEffect(() => {
     const fetch = async () => {
       try {
@@ -343,7 +376,6 @@ export default function CommunityBoard() {
     fetch();
   }, []);
 
-  // Fetch draft order
   useEffect(() => {
     const fetch = async () => {
       try {
@@ -351,9 +383,7 @@ export default function CommunityBoard() {
         const map = {};
         snap.docs.forEach((d) => {
           const data = d.data();
-          if (data.Selection) {
-            map[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
-          }
+          if (data.Selection) map[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
         });
         setDraftMap(map);
       } catch (e) { console.error(e); }
@@ -361,7 +391,6 @@ export default function CommunityBoard() {
     fetch();
   }, []);
 
-  // Fetch players + community grades
   const [playerCache, setPlayerCache] = useState({});
 
   useEffect(() => {
@@ -414,7 +443,6 @@ export default function CommunityBoard() {
     fetchPlayers();
   }, [eligibleYear]);
 
-  // Fetch user's board
   useEffect(() => {
     const fetchBoard = async () => {
       if (!user?.uid) { setBoardMap(new Map()); return; }
@@ -423,9 +451,7 @@ export default function CommunityBoard() {
         const m = new Map();
         snap.docs.forEach((d) => m.set(d.id, d.data().grade || "Watchlist"));
         setBoardMap(m);
-      } catch (err) {
-        console.error("Error fetching board:", err);
-      }
+      } catch (err) { console.error("Error fetching board:", err); }
     };
     fetchBoard();
   }, [user]);
@@ -459,25 +485,14 @@ export default function CommunityBoard() {
     else { setSortKey(key); setSortOrder("asc"); }
   };
 
-  useEffect(() => {
-    if (showMyBoardOnly) {
-      setSortKey("MyGrade");
-      setSortOrder("asc");
-    } else {
-      setSortKey("CommunityGrade");
-      setSortOrder("asc");
-    }
-  }, [showMyBoardOnly]);
-
   const resetFilters = () => {
     setSelectedSchools([]); setSelectedPositions([]);
     setSelectedCommGrades([]); setSelectedMyGrades([]);
-    setSearchQuery(""); setShowMyBoardOnly(false);
-    setShowAvailableOnly(false);
+    setSearchQuery(""); setShowAvailableOnly(false);
   };
 
   const hasActiveFilters = selectedPositions.length > 0 || selectedSchools.length > 0 ||
-    selectedCommGrades.length > 0 || selectedMyGrades.length > 0 || searchQuery || showMyBoardOnly || showAvailableOnly;
+    selectedCommGrades.length > 0 || selectedMyGrades.length > 0 || searchQuery || showAvailableOnly;
 
   const is2026 = eligibleYear === "2026";
   const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
@@ -492,7 +507,6 @@ export default function CommunityBoard() {
       const myGrade = boardMap.get(p.id);
       return myGrade ? selectedMyGrades.includes(myGrade) : false;
     })
-    .filter((p) => showMyBoardOnly ? boardMap.has(p.id) : true)
     .filter((p) => showAvailableOnly ? !draftMap[p.Slug] : true);
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
@@ -518,16 +532,12 @@ export default function CommunityBoard() {
     }
     if (sortKey === "Pick") {
       const aD = draftMap[a.Slug], bD = draftMap[b.Slug];
-      const aV = aD ? aD.pick : 9999;
-      const bV = bD ? bD.pick : 9999;
-      return sortOrder === "asc" ? aV - bV : bV - aV;
+      return sortOrder === "asc" ? (aD?.pick || 9999) - (bD?.pick || 9999) : (bD?.pick || 9999) - (aD?.pick || 9999);
     }
     if (sortKey === "Player") {
       const cmp = (a.Last || "").localeCompare(b.Last || "");
       if (cmp !== 0) return sortOrder === "asc" ? cmp : -cmp;
-      return sortOrder === "asc"
-        ? (a.First || "").localeCompare(b.First || "")
-        : (b.First || "").localeCompare(a.First || "");
+      return sortOrder === "asc" ? (a.First || "").localeCompare(b.First || "") : (b.First || "").localeCompare(a.First || "");
     }
     if (sortKey === "Height") {
       const aV = a.HeightInches, bV = b.HeightInches;
@@ -566,13 +576,11 @@ export default function CommunityBoard() {
     </th>
   );
 
-  if (loading) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-        Loading Board...
-      </div>
-    );
-  }
+  if (loading) return (
+    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      Loading Board...
+    </div>
+  );
 
   return (
     <>
@@ -598,8 +606,6 @@ export default function CommunityBoard() {
 
         {/* ===== Year Selector ===== */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", marginBottom: "18px" }}>
-
-          {/* Active years: 2027 / 2028 / 2029 — each is a Link to its own URL */}
           <div style={{ display: "flex", gap: "8px" }}>
             {ACTIVE_YEARS.map((yr) => (
               <Link
@@ -619,21 +625,14 @@ export default function CommunityBoard() {
               </Link>
             ))}
           </div>
-
-          {/* Archive dropdown — navigates to /community/2026 etc */}
-          <ArchiveDropdown
-            eligibleYear={eligibleYear}
-            onSelect={(yr) => navigate(yearPath(yr))}
-          />
+          <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
         </div>
 
         {/* ===== 2029 placeholder ===== */}
         {is2029Empty ? (
           <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-            <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                2029 Draft Class
-              </div>
+            <div style={{ background: BLUE, padding: "8px 16px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2029 Draft Class</div>
             </div>
             <div style={{ height: "3px", background: GOLD }} />
             <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
@@ -658,7 +657,14 @@ export default function CommunityBoard() {
                   <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
                 </div>
                 <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <BoardDropdown dropdownRef={boardDropdownRef} open={boardDropdownOpen} setOpen={setBoardDropdownOpen} active={showMyBoardOnly} setActive={setShowMyBoardOnly} isMobile={isMobile} onNavigate={() => navigate("/whiteboard")} />
+                  <BoardDropdown
+                    dropdownRef={boardDropdownRef}
+                    open={boardDropdownOpen}
+                    setOpen={setBoardDropdownOpen}
+                    isMobile={isMobile}
+                    onNavigate={() => navigate("/whiteboard")}
+                    onMyBoards={() => navigate("/boards")}
+                  />
                   {is2026 && (
                     <button
                       onClick={() => setShowAvailableOnly((v) => !v)}
@@ -686,7 +692,14 @@ export default function CommunityBoard() {
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
-                <BoardDropdown dropdownRef={boardDropdownRef} open={boardDropdownOpen} setOpen={setBoardDropdownOpen} active={showMyBoardOnly} setActive={setShowMyBoardOnly} isMobile={isMobile} onNavigate={() => navigate("/whiteboard")} />
+                <BoardDropdown
+                  dropdownRef={boardDropdownRef}
+                  open={boardDropdownOpen}
+                  setOpen={setBoardDropdownOpen}
+                  isMobile={isMobile}
+                  onNavigate={() => navigate("/whiteboard")}
+                  onMyBoards={() => navigate("/boards")}
+                />
                 {is2026 && (
                   <button
                     onClick={() => setShowAvailableOnly((v) => !v)}
@@ -828,9 +841,7 @@ export default function CommunityBoard() {
                                     <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
                                     <span style={{ fontSize: "18px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
                                   </div>
-                                ) : (
-                                  <span style={{ color: "#ddd", fontSize: "14px" }}>—</span>
-                                )}
+                                ) : <span style={{ color: "#ddd" }}>—</span>}
                               </td>
                             )}
                             {is2026 && (
@@ -839,13 +850,9 @@ export default function CommunityBoard() {
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                                     {teamData?.Logo1 ? (
                                       <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={teamData?.Name || draft.team} style={{ width: "36px", height: "36px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                                    ) : (
-                                      <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span>
-                                    )}
+                                    ) : <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span>}
                                   </div>
-                                ) : (
-                                  <span style={{ color: "#ddd", fontSize: "14px" }}>—</span>
-                                )}
+                                ) : <span style={{ color: "#ddd" }}>—</span>}
                               </td>
                             )}
                             <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", textAlign: "left" }}>
@@ -895,69 +902,7 @@ export default function CommunityBoard() {
             )}
           </>
         )}
-
       </div>
     </>
-  );
-}
-
-function BoardDropdown({ dropdownRef, open, setOpen, active, setActive, isMobile, onNavigate }) {
-  return (
-    <div ref={dropdownRef} style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
-      <button
-        onClick={() => setOpen((prev) => !prev)}
-        style={{
-          padding: isMobile ? "8px 14px" : "8px 16px",
-          fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
-          textTransform: "uppercase", letterSpacing: "0.05em",
-          border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
-          background: active ? GOLD : "#fff",
-          color: active ? "#fff" : BLUE, whiteSpace: "nowrap",
-        }}
-      >
-        {active ? "✓ My Board" : "My Board"} ▾
-      </button>
-
-      {open && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 6px)", left: 0,
-          zIndex: 50, minWidth: "180px",
-          background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
-          boxShadow: "0 6px 16px rgba(0,0,0,0.12)", overflow: "hidden",
-        }}>
-          <div style={{ background: BLUE, padding: "8px 12px", fontSize: "12px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            My Board
-          </div>
-          <div style={{ height: "3px", background: GOLD }} />
-          <div
-            onClick={() => { setActive((prev) => !prev); setOpen(false); }}
-            style={{
-              padding: "11px 14px", cursor: "pointer", fontWeight: 800,
-              fontSize: "14px", color: BLUE,
-              background: active ? "#f0f5ff" : "#fff",
-              display: "flex", alignItems: "center", gap: "8px",
-              borderBottom: "1px solid #eee",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = active ? "#f0f5ff" : "#fff"; }}
-          >
-            {active && <span style={{ color: GOLD, fontWeight: 900 }}>✓</span>}
-            Filter My Board
-          </div>
-          <div
-            onClick={() => { setOpen(false); onNavigate(); }}
-            style={{
-              padding: "11px 14px", cursor: "pointer", fontWeight: 800,
-              fontSize: "14px", color: BLUE, background: "#fff",
-              display: "flex", alignItems: "center", gap: "8px",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-          >
-            Open Whiteboard ↗
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

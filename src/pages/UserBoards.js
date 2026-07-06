@@ -170,8 +170,10 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
 }
 
 export default function UserBoards() {
-  const { user, login } = useAuth();
+  const { user, login, profile } = useAuth();
   const navigate = useNavigate();
+  const displayName = profile?.username?.trim() || null;
+  const boardsTitle = displayName ? `${displayName}'s Boards` : "My Boards";
   const [players, setPlayers] = useState([]);
   const [playerCache, setPlayerCache] = useState({});
   const [loading, setLoading] = useState(true);
@@ -380,7 +382,7 @@ export default function UserBoards() {
           <div style={{ position: "relative" }}>
             <div style={{ fontSize: "42px", marginBottom: "10px" }}>📋</div>
             <div style={{ fontSize: "26px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1, marginBottom: "8px" }}>
-              My Boards
+              {boardsTitle}
             </div>
             <div style={{ fontSize: "14px", fontWeight: 700, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
               Your Personal Draft Command Center
@@ -435,7 +437,7 @@ export default function UserBoards() {
 
   return (
     <>
-      <Helmet><title>My Boards | We-Draft</title></Helmet>
+      <Helmet><title>{boardsTitle} | We-Draft</title></Helmet>
 
       <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
@@ -443,7 +445,7 @@ export default function UserBoards() {
         <div style={{ marginBottom: "16px" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", marginBottom: "6px" }}>
             <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "26px" : "32px", objectFit: "contain" }} />
-            <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>My Boards</div>
+            <div style={{ fontSize: displayName ? (isMobile ? "22px" : "32px") : (isMobile ? "20px" : "26px"), fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>{boardsTitle}</div>
           </div>
           <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />

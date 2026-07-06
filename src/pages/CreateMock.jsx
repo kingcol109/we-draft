@@ -6,6 +6,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { getAuth } from "firebase/auth";
+import { useAuth } from "../context/AuthContext";
 import { useParams } from "react-router-dom";
 import { useRef } from "react";
 import Logo1 from "../assets/Logo1.png";
@@ -55,6 +56,7 @@ export default function CreateMock() {
   const isEditMode = Boolean(mockId);
   const navigate = useNavigate();
   const auth = getAuth();
+  const { login } = useAuth();
   const [userId, setUserId] = useState(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
@@ -116,6 +118,7 @@ export default function CreateMock() {
   const [communityData, setCommunityData] = useState({});
   const [communityLoading, setCommunityLoading] = useState(false);
   const [draftClass, setDraftClass] = useState(null);
+  const [pendingClass, setPendingClass] = useState(null);
 
   const assignedPlayerIds = useMemo(() => new Set(Object.values(assignedPlayers).map((p) => p.id)), [assignedPlayers]);
   const isOwner = userId && mockOwnerId === userId;
@@ -152,7 +155,13 @@ export default function CreateMock() {
       setTeams(teamMap);
 
       if (!mockId && draftClass) {
-        const orderCollection = draftClass === "2027" ? "draftOrder2027" : "draftOrder";
+        // Map each draft class to its order collection
+        const orderCollectionMap = {
+          "2027": "draftOrder2027",
+          "2028": "draftOrder2028",
+          "2026": "draftOrder",
+        };
+        const orderCollection = orderCollectionMap[draftClass] || "draftOrder";
         const draftSnap = await getDocs(collection(db, orderCollection));
         const loaded = draftSnap.docs.map((d) => d.data())
           .sort((a, b) => a.Pick - b.Pick)
@@ -164,7 +173,8 @@ export default function CreateMock() {
             tradedFrom: d.Traded ? d.Team : null,
           }));
         setPicks(loaded);
-        if (draftClass === "2027") setRounds(1);
+        // 2027 and 2028 default to 1 round; 2026 defaults to 7
+        if (draftClass === "2027" || draftClass === "2028") setRounds(1);
       }
 
       setLoading(false);
@@ -198,7 +208,11 @@ export default function CreateMock() {
       if (!userId || !draftClass) return;
       setBankLoading(true);
       const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", draftClass)));
-      const data = await Promise.all(snap.docs.map(async (docSnap) => {
+      const liveDocs = snap.docs.filter((d) => {
+        const live = d.data().Live;
+        return live !== false && live !== 0 && live !== "false" && live !== "no" && live !== null;
+      });
+      const data = await Promise.all(liveDocs.map(async (docSnap) => {
         const p = { id: docSnap.id, ...docSnap.data() };
         let community = [];
         const evalSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
@@ -286,17 +300,30 @@ export default function CreateMock() {
     setTimeout(() => setSaveStatus("idle"), 2000);
   };
 
+  // ── Draft class picker ──
   if (!mockId && !draftClass) {
     const isLocked = new Date() >= MOCK_LOCK_DATE;
     const availableClasses = isLocked
-      ? [{ year: "2027", label: "2027 NFL Draft", sub: "1 round · Projected order" }]
+      ? [
+          { year: "2027", label: "2027 NFL Draft", sub: "1 round · Projected order" },
+          { year: "2028", label: "2028 NFL Draft", sub: "1 round · Projected order" },
+        ]
       : [
           { year: "2026", label: "2026 NFL Draft", sub: "7 rounds · Live draft order" },
           { year: "2027", label: "2027 NFL Draft", sub: "1 round · Projected order" },
+          { year: "2028", label: "2028 NFL Draft", sub: "1 round · Projected order" },
         ];
 
+    const handleClassSelect = (year) => {
+      if (!userId) {
+        setPendingClass(year);
+      } else {
+        setDraftClass(year);
+      }
+    };
+
     return (
-      <div style={{ maxWidth: 600, margin: "80px auto", padding: "0 20px", fontFamily: "'Arial Black', Arial, sans-serif", textAlign: "center" }}>
+      <div style={{ maxWidth: 700, margin: "80px auto", padding: "0 20px", fontFamily: "'Arial Black', Arial, sans-serif", textAlign: "center" }}>
         <div style={{ marginBottom: "20px" }}>
           <div style={{ fontSize: 22, fontWeight: 900, color: SITE_BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>Create Mock Draft</div>
           <div style={{ height: "3px", background: SITE_BLUE, borderRadius: "2px", marginBottom: "3px" }} />
@@ -304,25 +331,77 @@ export default function CreateMock() {
         </div>
         {isLocked && (
           <div style={{ background: "#fff8e1", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: "10px 16px", marginBottom: "20px", fontSize: 13, fontWeight: 700, color: "#7a5c00" }}>
-            🔒 2026 mock drafts are locked. Only 2027 mocks can be created now.
+            🔒 2026 mock drafts are locked. Only 2027 and 2028 mocks can be created now.
           </div>
         )}
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#555", marginBottom: "24px" }}>Which draft class?</div>
-        <div style={{ display: "flex", gap: "16px", justifyContent: "center", flexWrap: "wrap" }}>
-          {availableClasses.map(({ year, label, sub }) => (
-            <div key={year} onClick={() => setDraftClass(year)}
-              style={{ border: `3px solid ${SITE_GOLD}`, borderRadius: 12, padding: "24px 32px", cursor: "pointer", background: "#fff", minWidth: 180, transition: "all 0.15s" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; e.currentTarget.style.borderColor = SITE_BLUE; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = SITE_GOLD; }}>
-              <div style={{ fontSize: 32, fontWeight: 900, color: SITE_BLUE, marginBottom: 6 }}>{year}</div>
-              <div style={{ fontSize: 13, fontWeight: 900, color: SITE_BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#999" }}>{sub}</div>
+
+        {/* ── Sign-in prompt after class selected ── */}
+        {pendingClass && !userId ? (
+          <div style={{
+            border: `2px solid ${SITE_GOLD}`, borderRadius: 14, overflow: "hidden",
+            boxShadow: "0 8px 40px rgba(0,85,165,0.14)", maxWidth: 420, margin: "0 auto",
+          }}>
+            <div style={{
+              background: `linear-gradient(135deg, ${SITE_BLUE} 0%, #003a7a 100%)`,
+              padding: "24px 28px 20px", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 36, marginBottom: 8 }}>🏈</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1, marginBottom: 6 }}>
+                {pendingClass} Mock Draft
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 900, color: SITE_GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                Sign in to continue
+              </div>
             </div>
-          ))}
-        </div>
-        <button onClick={() => navigate("/mocks")} style={{ marginTop: 24, background: "none", border: "none", color: "#bbb", fontWeight: 700, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
-          Cancel
-        </button>
+            <div style={{ height: "4px", background: `linear-gradient(90deg, ${SITE_BLUE}, ${SITE_GOLD}, ${SITE_BLUE})` }} />
+            <div style={{ background: "#fff", padding: "24px 28px" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#555", lineHeight: 1.6, marginBottom: 20 }}>
+                Create and save your {pendingClass} mock draft, trade picks, and share with the We-Draft community.
+              </div>
+              <button
+                onClick={login}
+                style={{
+                  width: "100%", backgroundColor: SITE_BLUE, color: "#fff",
+                  border: `3px solid ${SITE_GOLD}`, borderRadius: 10,
+                  padding: "14px 28px", fontWeight: 900, fontSize: 16,
+                  textTransform: "uppercase", letterSpacing: "0.08em",
+                  cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
+                  boxShadow: `0 4px 20px rgba(0,85,165,0.25)`,
+                }}
+              >
+                Sign In to Create →
+              </button>
+              <div style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginBottom: 16 }}>
+                Free · Google or Email · No spam
+              </div>
+              <button
+                onClick={() => setPendingClass(null)}
+                style={{ background: "none", border: "none", color: "#bbb", fontWeight: 700, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}
+              >
+                ← Back
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#555", marginBottom: "24px" }}>Which draft class?</div>
+            <div style={{ display: "flex", gap: "16px", justifyContent: "center", flexWrap: "wrap" }}>
+              {availableClasses.map(({ year, label, sub }) => (
+                <div key={year} onClick={() => handleClassSelect(year)}
+                  style={{ border: `3px solid ${SITE_GOLD}`, borderRadius: 12, padding: "24px 32px", cursor: "pointer", background: "#fff", minWidth: 180, transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; e.currentTarget.style.borderColor = SITE_BLUE; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = SITE_GOLD; }}>
+                  <div style={{ fontSize: 32, fontWeight: 900, color: SITE_BLUE, marginBottom: 6 }}>{year}</div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: SITE_BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#999" }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => navigate("/mocks")} style={{ marginTop: 24, background: "none", border: "none", color: "#bbb", fontWeight: 700, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -382,7 +461,7 @@ export default function CreateMock() {
           )}
         </div>
 
-        {/* Round tabs + Export button */}
+        {/* Round tabs */}
         <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginBottom: "20px" }}>
           {availableRounds.map((r) => (
             <button key={r} onClick={() => setActiveRound(r)} style={{

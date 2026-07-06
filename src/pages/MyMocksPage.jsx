@@ -7,7 +7,7 @@ import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
 
 const MAX_MOCKS_PER_CLASS = 5;
-const ACTIVE_YEARS = ["2027"];
+const ACTIVE_YEARS = ["2027", "2028"];
 const ARCHIVE_YEARS = ["2026"];
 const ALL_YEARS = [...ACTIVE_YEARS, ...ARCHIVE_YEARS];
 const BLUE = "#0055a5";
@@ -314,7 +314,7 @@ export default function MyMocksPage() {
                         letterSpacing: "0.06em", cursor: "pointer",
                       }}
                     >
-                      Edit →
+{ARCHIVE_YEARS.includes(mock.draftClass || "2026") ? "View →" : "Edit →"}
                     </button>
                     <button
                       onClick={() => handleDelete(mock.id)}
