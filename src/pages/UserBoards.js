@@ -311,6 +311,11 @@ export default function UserBoards() {
   const is2029 = eligibleYear === "2029";
 
   const filteredPlayers = players
+    .filter((p) => {
+      // Only show players the user has graded with a round grade (not Watchlist, not ungraded)
+      const myGrade = boardMap.get(p.id);
+      return myGrade && myGrade !== "Watchlist";
+    })
     .filter((p) => !searchQuery.trim() ? true : `${p.First || ""} ${p.Last || ""}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
     .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
     .filter((p) => selectedSchools.length === 0 ? true : selectedSchools.includes(p.School))
@@ -542,7 +547,7 @@ export default function UserBoards() {
                 <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
                   {sortedPlayers.length === 0 ? (
                     <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
-                      {boardMap.size === 0 ? "No players on your board yet." : "No players match your filters."}
+                      {filteredPlayers.length === 0 && !hasActiveFilters ? `No graded ${eligibleYear} players yet. Go to the Community Board and grade some players to see them here.` : "No players match your filters."}
                     </div>
                   ) : sortedPlayers.map((p) => {
                     const myGrade = boardMap.get(p.id);
@@ -613,7 +618,7 @@ export default function UserBoards() {
                       {sortedPlayers.length === 0 ? (
                         <tr>
                           <td colSpan={is2026 ? 8 : 6} style={{ padding: "32px", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
-                            {boardMap.size === 0 ? "No players on your board yet. Add players from the Community Board." : "No players match your filters."}
+                            {filteredPlayers.length === 0 && !hasActiveFilters ? `No graded ${eligibleYear} players yet. Go to the Community Board and grade some players to see them here.` : "No players match your filters."}
                           </td>
                         </tr>
                       ) : sortedPlayers.map((p) => {
