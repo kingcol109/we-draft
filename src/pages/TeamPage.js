@@ -1,38 +1,753 @@
-import { useParams } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
-import { Helmet } from "react-helmet-async";
+import { useEffect, useState, useRef, useMemo } from "react";
+import ReactDOM from "react-dom";
+import { useParams, Link } from "react-router-dom";
+import { collection, getDocs, getDoc, doc, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
-import { getAuth } from "firebase/auth";
-import {
-  doc,
-  getDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  setDoc,
-  updateDoc,
-  increment,
-} from "firebase/firestore";
+import { Helmet } from "react-helmet-async";
+
+const BLUE = "#0055a5";
+const GOLD = "#f6a21d";
+
+const PROSPECT_YEARS = ["2027", "2028", "2029"];
+const ARCHIVE_YEAR = "2026";
+const NEWS_LIMIT = 8;
+
+const gradeScale = {
+  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
+  "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
+  "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
+};
+const gradeLabels = {
+  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
+  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
+  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
+};
+
+const gradeDisplay = (g) => {
+  const map = {
+    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
+    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
+    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
+    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
+    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
+    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
+    "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
+  };
+  return map[g] || null;
+};
+
+function sanitizeUrl(url) {
+  if (!url) return "";
+  const u = url.trim();
+  if (!/^https?:\/\//i.test(u)) return `https://${u}`;
+  return u;
+}
+
+// ── Shared sidebar card shell ──
+function SidebarCard({ title, color1, color2, children, headerRight }) {
+  return (
+    <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ backgroundColor: color1, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          {title}
+        </div>
+        {headerRight && headerRight}
+      </div>
+      <div style={{ height: "4px", backgroundColor: color2 }} />
+      <div style={{ background: "#fff" }}>{children}</div>
+    </div>
+  );
+}
+
+function GradeBadge({ grade }) {
+  const gd = gradeDisplay(grade);
+  if (!gd) return null;
+  const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
+  const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
+  return (
+    <div style={{
+      display: "inline-flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
+      borderRadius: "5px", width: "52px", height: "42px", flexShrink: 0, gap: "1px",
+    }}>
+      {qualifier && (
+        <span style={{ fontSize: "6.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 }}>
+          {qualifier}
+        </span>
+      )}
+      <span style={{ fontSize: "15px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{gd.short}</span>
+      <span style={{ fontSize: "6px", fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.1 }}>
+        {grade === "UDFA" ? "UDFA" : "ROUND"}
+      </span>
+    </div>
+  );
+}
+
+function SectionTitle({ children, color1, color2 }) {
+  return (
+    <div style={{ marginBottom: "14px" }}>
+      <div style={{ fontSize: "18px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: color1, marginBottom: "5px" }}>
+        {children}
+      </div>
+      <div style={{ height: "3px", background: color1, borderRadius: "2px", marginBottom: "3px" }} />
+      <div style={{ height: "3px", background: color2, borderRadius: "2px" }} />
+    </div>
+  );
+}
+
+// ── NFL full name → abbreviation map (for historical collection lookup) ──
+const NFL_NAME_TO_ABBR = {
+  "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL",
+  "Buffalo Bills": "BUF", "Carolina Panthers": "CAR", "Chicago Bears": "CHI",
+  "Cincinnati Bengals": "CIN", "Cleveland Browns": "CLE", "Dallas Cowboys": "DAL",
+  "Denver Broncos": "DEN", "Detroit Lions": "DET", "Green Bay Packers": "GB",
+  "Houston Texans": "HOU", "Indianapolis Colts": "IND", "Jacksonville Jaguars": "JAX",
+  "Kansas City Chiefs": "KC", "Las Vegas Raiders": "LV", "Los Angeles Chargers": "LAC",
+  "Los Angeles Rams": "LAR", "Miami Dolphins": "MIA", "Minnesota Vikings": "MIN",
+  "New England Patriots": "NE", "New Orleans Saints": "NO", "New York Giants": "NYG",
+  "New York Jets": "NYJ", "Philadelphia Eagles": "PHI", "Pittsburgh Steelers": "PIT",
+  "San Francisco 49ers": "SF", "Seattle Seahawks": "SEA", "Tampa Bay Buccaneers": "TB",
+  "Tennessee Titans": "TEN", "Washington Commanders": "WAS",
+};
+
+// ── Shared column widths — single source of truth ──
+const COL = {
+  year:  { width: "52px" },
+  round: { width: "44px" },
+  pick:  { width: "44px" },
+  pos:   { width: "52px" },
+  nfl:   { width: "36px" },
+  grade: { width: "58px" },
+  arrow: { width: "20px" },
+};
+
+// ── Sticky column header row ──
+function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showNfl = true }) {
+  const cell = (label, width) => (
+    <div style={{
+      flexShrink: 0, width,
+      fontSize: "11px", fontWeight: 900, color: "#fff",
+      textTransform: "uppercase", letterSpacing: "0.1em", textAlign: "center",
+    }}>
+      {label}
+    </div>
+  );
+  const gradeWidth = isMobile ? "52px" : "80px";
+  return (
+    <div style={{
+      position: "sticky", top: 0, zIndex: 10,
+      display: "flex", alignItems: "center", gap: isMobile ? "6px" : "10px",
+      padding: isMobile ? "7px 10px" : "9px 18px",
+      background: `${color1}f5`, borderBottom: `3px solid ${color2}`,
+      backdropFilter: "blur(4px)",
+    }}>
+      {cell("Year", COL.year.width)}
+      {showDraftPick && cell("Rd", COL.round.width)}
+      {showDraftPick && !isMobile && cell("Pick", COL.pick.width)}
+      {cell("Pos", COL.pos.width)}
+      {showNfl && !isMobile && cell("NFL", COL.nfl.width)}
+      <div style={{ flex: 1, minWidth: 0, fontSize: "11px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+        Player
+      </div>
+      {showGrade && (
+        <div style={{ flexShrink: 0, width: gradeWidth, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px" }}>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>We-Draft</div>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>Grade</div>
+        </div>
+      )}
+      <div style={{ width: COL.arrow.width, flexShrink: 0 }} />
+    </div>
+  );
+}
+
+function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, color2, showDraftPick = false, showNfl = true }) {
+  const draft = draftInfo;
+  const teamData = draft ? nflTeams[draft.team] : null;
+
+  return (
+    <Link
+      to={`/player/${player.Slug}`}
+      style={{
+        display: "flex", alignItems: "center", gap: isMobile ? "6px" : "10px",
+        padding: isMobile ? "10px 12px" : "12px 18px", textDecoration: "none",
+        background: "#fff", borderBottom: "1px solid #f0f0f0", transition: "background 0.12s",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+    >
+      <div style={{ flexShrink: 0, width: COL.year.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#444", lineHeight: 1 }}>
+          {player.Eligible ? String(player.Eligible).replace(/s$/i, "") : "—"}
+        </span>
+      </div>
+
+      {showDraftPick && (
+        <div style={{ flexShrink: 0, width: COL.round.width, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {draft ? (
+            <div style={{
+              width: "38px", height: "38px", borderRadius: "6px",
+              background: BLUE, border: `2px solid ${GOLD}`,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            }}>
+              <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>Rd</span>
+              <span style={{ fontSize: "16px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.round}</span>
+            </div>
+          ) : <span style={{ color: "#ddd", fontSize: "12px" }}>—</span>}
+        </div>
+      )}
+
+      {/* Hide Pick on mobile — saves ~44px of precious row width */}
+      {showDraftPick && !isMobile && (
+        <div style={{ flexShrink: 0, width: COL.pick.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          {draft ? (
+            <>
+              <span style={{ fontSize: "15px", fontWeight: 900, color: "#222", lineHeight: 1 }}>{draft.pick}</span>
+              <span style={{ fontSize: "8px", fontWeight: 700, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>Pick</span>
+            </>
+          ) : <span style={{ color: "#ddd", fontSize: "12px" }}>—</span>}
+        </div>
+      )}
+
+      <div style={{ flexShrink: 0, width: COL.pos.width, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {player.Position ? (
+          <span style={{
+            background: color1, color: "#fff",
+            fontSize: isMobile ? "10px" : "11px", fontWeight: 900,
+            padding: isMobile ? "3px 5px" : "4px 6px", borderRadius: "4px",
+            textTransform: "uppercase", letterSpacing: "0.03em",
+            display: "block", textAlign: "center", width: "100%",
+          }}>
+            {player.Position}
+          </span>
+        ) : <span style={{ color: "#ddd", fontSize: "12px" }}>—</span>}
+      </div>
+
+      {showNfl && !isMobile && (
+        <div style={{ flexShrink: 0, width: COL.nfl.width, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {teamData?.Logo1 ? (
+            <div style={{ width: "32px", height: "32px", background: "#f5f5f5", borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center", padding: "2px" }}>
+              <img src={sanitizeUrl(teamData.Logo1)} alt={draft?.team}
+                style={{ width: "28px", height: "28px", objectFit: "contain" }}
+                onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
+            </div>
+          ) : <div style={{ width: "32px" }} />}
+        </div>
+      )}
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontWeight: 900, fontSize: isMobile ? "15px" : "20px", color: color1,
+          lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>
+          {`${player.First || ""} ${player.Last || ""}`}
+        </div>
+      </div>
+
+      <div style={{ flexShrink: 0, width: isMobile ? "52px" : "80px", height: "42px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {commGrade ? <GradeBadge grade={commGrade} /> : null}
+      </div>
+
+      <span style={{ color: "#ccc", fontSize: "16px", fontWeight: 900, flexShrink: 0, width: COL.arrow.width, textAlign: "center" }}>›</span>
+    </Link>
+  );
+}
+
+function HistoricalRow({ player, nflTeams, isMobile, color1, color2 }) {
+  const nflTeamName = player["NFL Team"] || "";
+  const abbr = NFL_NAME_TO_ABBR[nflTeamName];
+  const nflEntry = abbr ? nflTeams[abbr] : null;
+  const teamLogo = nflEntry?.Logo1 || null;
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: isMobile ? "6px" : "10px",
+      padding: isMobile ? "10px 12px" : "12px 18px",
+      background: "#fff", borderBottom: "1px solid #f0f0f0",
+    }}>
+      <div style={{ flexShrink: 0, width: COL.year.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#444", lineHeight: 1 }}>{player.Year || "—"}</span>
+      </div>
+
+      <div style={{ flexShrink: 0, width: COL.round.width, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{
+          width: "38px", height: "38px", borderRadius: "6px",
+          background: BLUE, border: `2px solid ${GOLD}`,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        }}>
+          <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>Rd</span>
+          <span style={{ fontSize: "16px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{player.Round}</span>
+        </div>
+      </div>
+
+      {/* Hide Pick on mobile — saves ~44px */}
+      {!isMobile && (
+        <div style={{ flexShrink: 0, width: COL.pick.width, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: "15px", fontWeight: 900, color: "#222", lineHeight: 1 }}>{player.Pick}</span>
+          <span style={{ fontSize: "8px", fontWeight: 700, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>Pick</span>
+        </div>
+      )}
+
+      <div style={{ flexShrink: 0, width: COL.pos.width, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {player.Position ? (
+          <span style={{
+            background: color1, color: "#fff",
+            fontSize: isMobile ? "10px" : "11px", fontWeight: 900,
+            padding: isMobile ? "3px 5px" : "4px 6px", borderRadius: "4px",
+            textTransform: "uppercase", letterSpacing: "0.03em",
+            display: "block", textAlign: "center", width: "100%",
+          }}>
+            {player.Position}
+          </span>
+        ) : <span style={{ color: "#ddd", fontSize: "12px" }}>—</span>}
+      </div>
+
+      {!isMobile && (
+        <div style={{ flexShrink: 0, width: COL.nfl.width, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {teamLogo ? (
+            <div style={{ width: "32px", height: "32px", background: "#f5f5f5", borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center", padding: "2px" }}>
+              <img src={sanitizeUrl(teamLogo)} alt={nflTeamName}
+                style={{ width: "28px", height: "28px", objectFit: "contain" }}
+                onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
+            </div>
+          ) : <div style={{ width: "32px" }} />}
+        </div>
+      )}
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontWeight: 900, fontSize: isMobile ? "15px" : "20px", color: "#333",
+          lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>
+          {player.Player || "—"}
+        </div>
+      </div>
+
+      {/* Grade slot — sized to match PlayerRow */}
+      <div style={{ flexShrink: 0, width: isMobile ? "52px" : "80px", height: "42px" }} />
+      <div style={{ flexShrink: 0, width: COL.arrow.width }} />
+    </div>
+  );
+}
+
+// ── FilterButton — renders dropdown via portal to escape overflow:hidden ancestors ──
+function FilterButton({ label, options, panelKey, activeSet, onToggle, onClearGroup, color1, color2, openPanel, setOpenPanel }) {
+  const isOpen = openPanel === panelKey;
+  const hasActive = activeSet.size > 0;
+  const btnRef = useRef(null);
+  const [dropdownStyle, setDropdownStyle] = useState({});
+
+  // Recompute dropdown position whenever it opens
+  useEffect(() => {
+    if (isOpen && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setDropdownStyle({
+        position: "fixed",
+        top: rect.bottom + 6,
+        left: rect.left,
+        zIndex: 99999,
+        background: "#fff",
+        border: `2px solid ${color1}`,
+        borderRadius: "8px",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.18)",
+        minWidth: "160px",
+        overflow: "hidden",
+      });
+    }
+  }, [isOpen, color1]);
+
+  const handleOpen = () => {
+    setOpenPanel(isOpen ? null : panelKey);
+  };
+
+  const dropdown = isOpen ? ReactDOM.createPortal(
+    <div style={dropdownStyle}>
+      <div style={{ background: color1, padding: "6px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
+        {activeSet.size > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onClearGroup(panelKey); }}
+            style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", fontSize: "10px", cursor: "pointer", fontWeight: 700 }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div style={{ height: "2px", background: color2 }} />
+      <div style={{ maxHeight: "220px", overflowY: "auto" }}>
+        {options.map((val) => {
+          const checked = activeSet.has(val);
+          return (
+            <label
+              key={val}
+              onClick={() => onToggle(panelKey, val)}
+              style={{
+                display: "flex", alignItems: "center", gap: "8px",
+                padding: "8px 12px", cursor: "pointer",
+                borderBottom: "1px solid #f0f0f0",
+                background: checked ? `${color1}0d` : "#fff",
+                transition: "background 0.1s",
+              }}
+            >
+              <div style={{
+                width: "16px", height: "16px", borderRadius: "3px", flexShrink: 0,
+                border: `2px solid ${checked ? color1 : "#ccc"}`,
+                background: checked ? color1 : "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {checked && <span style={{ color: "#fff", fontSize: "10px", fontWeight: 900, lineHeight: 1 }}>✓</span>}
+              </div>
+              <span style={{ fontSize: "12px", fontWeight: 800, color: "#333", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {panelKey === "round" ? `Round ${val}` : val}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        ref={btnRef}
+        onClick={handleOpen}
+        style={{
+          display: "flex", alignItems: "center", gap: "5px",
+          border: `2px solid ${hasActive ? color1 : "#d0d0d0"}`,
+          borderRadius: "6px", padding: "5px 10px",
+          fontWeight: 900, fontSize: "11px",
+          color: hasActive ? color1 : "#666",
+          background: hasActive ? `${color1}10` : "#fff",
+          cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.06em",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+        {hasActive && (
+          <span style={{
+            background: color1, color: "#fff", borderRadius: "10px",
+            padding: "1px 6px", fontSize: "10px", fontWeight: 900,
+          }}>
+            {activeSet.size}
+          </span>
+        )}
+        <span style={{ fontSize: "8px", color: "#aaa", marginLeft: "2px" }}>{isOpen ? "▲" : "▼"}</span>
+      </button>
+      {dropdown}
+    </div>
+  );
+}
+
+// ── Archive filter bar + filtered list ──
+function ArchiveFilters({ allYears, allRounds, allPositions, allArchive, color1, color2, isMobile, nflTeams }) {
+  const [selectedYears, setSelectedYears] = useState(new Set());
+  const [selectedRounds, setSelectedRounds] = useState(new Set());
+  const [selectedPositions, setSelectedPositions] = useState(new Set());
+  const [openPanel, setOpenPanel] = useState(null);
+
+  const handleToggle = (panelKey, val) => {
+    if (panelKey === "year") {
+      setSelectedYears((prev) => { const n = new Set(prev); n.has(val) ? n.delete(val) : n.add(val); return n; });
+    } else if (panelKey === "round") {
+      setSelectedRounds((prev) => { const n = new Set(prev); n.has(val) ? n.delete(val) : n.add(val); return n; });
+    } else {
+      setSelectedPositions((prev) => { const n = new Set(prev); n.has(val) ? n.delete(val) : n.add(val); return n; });
+    }
+  };
+
+  const handleClearGroup = (panelKey) => {
+    if (panelKey === "year") setSelectedYears(new Set());
+    else if (panelKey === "round") setSelectedRounds(new Set());
+    else setSelectedPositions(new Set());
+  };
+
+  const clearAll = () => {
+    setSelectedYears(new Set());
+    setSelectedRounds(new Set());
+    setSelectedPositions(new Set());
+    setOpenPanel(null);
+  };
+
+  const hasFilters = selectedYears.size > 0 || selectedRounds.size > 0 || selectedPositions.size > 0;
+
+  const filtered = allArchive.filter((e) => {
+    const year = e._year;
+    const round = e._type === "player" ? parseInt(e.draftInfo?.round) : parseInt(e.player.Round);
+    const pos = e._type === "player" ? e.player.Position : e.player.Position;
+    if (selectedYears.size > 0 && !selectedYears.has(year)) return false;
+    if (selectedRounds.size > 0 && !selectedRounds.has(round)) return false;
+    if (selectedPositions.size > 0 && !selectedPositions.has(pos)) return false;
+    return true;
+  });
+
+  const sharedFilterProps = { color1, color2, openPanel, setOpenPanel };
+
+  return (
+    <>
+      {/* Click/touch-outside overlay to close panels (touchStart covers iOS) */}
+      {openPanel && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 99 }}
+          onClick={() => setOpenPanel(null)}
+          onTouchStart={() => setOpenPanel(null)}
+        />
+      )}
+
+      {/* Filter bar — z-index above overlay so buttons are clickable */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap",
+        padding: isMobile ? "10px 12px" : "10px 18px",
+        background: "#f7f8fa", borderBottom: "1px solid #e8e8e8",
+        position: "relative", zIndex: 100,
+      }}>
+        <span style={{ fontSize: "11px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>
+          Filter:
+        </span>
+
+        <FilterButton
+          label="Year" options={allYears} panelKey="year" activeSet={selectedYears}
+          onToggle={handleToggle} onClearGroup={handleClearGroup}
+          {...sharedFilterProps}
+        />
+        <FilterButton
+          label="Round" options={allRounds} panelKey="round" activeSet={selectedRounds}
+          onToggle={handleToggle} onClearGroup={handleClearGroup}
+          {...sharedFilterProps}
+        />
+        <FilterButton
+          label="Position" options={allPositions} panelKey="pos" activeSet={selectedPositions}
+          onToggle={handleToggle} onClearGroup={handleClearGroup}
+          {...sharedFilterProps}
+        />
+
+        {hasFilters && (
+          <button onClick={clearAll} style={{
+            border: "2px solid #ccc", borderRadius: "6px", padding: "5px 12px",
+            fontWeight: 900, fontSize: "11px", color: "#888", background: "#fff",
+            cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.05em",
+          }}>
+            Clear All
+          </button>
+        )}
+
+        <span style={{ marginLeft: isMobile ? "0" : "auto", width: isMobile ? "100%" : "auto", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+          {filtered.length} player{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* Rows */}
+      {filtered.length === 0 ? (
+        <div style={{ padding: "40px 24px", textAlign: "center", background: "#fff" }}>
+          <div style={{ fontSize: "32px", marginBottom: "10px" }}>🔍</div>
+          <div style={{ fontSize: "15px", fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em" }}>No results</div>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "6px" }}>Try adjusting your filters.</div>
+        </div>
+      ) : (
+        <>
+          <TableHeader color1={color1} color2={color2} isMobile={isMobile} showDraftPick={true} showGrade={true} showNfl={true} />
+          {filtered.map((entry) => {
+            if (entry._type === "historical") {
+              return (
+                <HistoricalRow key={entry._key} player={entry.player}
+                  nflTeams={nflTeams} isMobile={isMobile} color1={color1} color2={color2} />
+              );
+            }
+            return (
+              <PlayerRow key={entry._key} player={entry.player}
+                commGrade={entry.player.commGrade}
+                draftInfo={entry.draftInfo?.team ? entry.draftInfo : null}
+                nflTeams={nflTeams} isMobile={isMobile}
+                color1={color1} color2={color2} showDraftPick={true} showNfl={true} />
+            );
+          })}
+        </>
+      )}
+    </>
+  );
+}
+
+// ── Main tabs + player lists ──
+function MainContent({
+  school, canonicalSchool, color1, color2, isMobile,
+  activeTab, setActiveTab, prospects, archivePlayers, historicalPlayers,
+  draftMap, nflTeams, totalProspects,
+}) {
+  const totalArchive = archivePlayers.length + historicalPlayers.length;
+
+  // Memoize so this only rebuilds when source data changes, not on every filter re-render
+  const allArchive = useMemo(() => {
+    const raw = [
+      ...archivePlayers.map((p) => {
+        const draftInfo = draftMap[p.Slug] || {};
+        return { _type: "player", _year: 2026, _pick: parseInt(draftInfo.pick) || 9999, _key: `player-${p.Slug}`, player: p, draftInfo };
+      }),
+      ...historicalPlayers.map((h) => ({
+        _type: "historical", _year: parseInt(h.Year) || 0, _pick: parseInt(h.Pick) || 9999, _key: `hist-${h.Year}-${h.Pick}-${h.Player}`, player: h,
+      })),
+    ].sort((a, b) => {
+      if (a._year === b._year && a._pick === b._pick) {
+        if (a._type === "player" && b._type !== "player") return -1;
+        if (b._type === "player" && a._type !== "player") return 1;
+      }
+      return b._year - a._year || a._pick - b._pick;
+    });
+
+    // Dedup: player entries by Slug, historical by year+pick and year+name
+    const seenSlugs = new Set();
+    const seenPickKeys = new Set();
+    const seenNameKeys = new Set();
+
+    return raw.filter((e) => {
+      if (e._type === "player") {
+        const slug = e.player.Slug;
+        if (!slug || seenSlugs.has(slug)) return false;
+        seenSlugs.add(slug);
+        return true;
+      } else {
+        const pick = parseInt(e._pick);
+        const year = parseInt(e._year);
+        if (pick && pick !== 9999) {
+          const pickKey = `${year}-${pick}`;
+          if (seenPickKeys.has(pickKey)) return false;
+          seenPickKeys.add(pickKey);
+        }
+        const name = (e.player.Player || "").trim().toLowerCase();
+        if (name) {
+          const nameKey = `${year}-${name}`;
+          if (seenNameKeys.has(nameKey)) return false;
+          seenNameKeys.add(nameKey);
+        }
+        return true;
+      }
+    });
+  }, [archivePlayers, historicalPlayers, draftMap]);
+
+  return (
+    <div>
+      {/* Tab nav */}
+      <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <button onClick={() => setActiveTab("prospects")} style={{
+          padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
+          fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+          border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+          background: activeTab === "prospects" ? color1 : "#fff",
+          color: activeTab === "prospects" ? "#fff" : color1,
+        }}>
+          Prospects ({totalProspects})
+        </button>
+        <button onClick={() => setActiveTab("archive")} style={{
+          padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
+          fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+          border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+          background: activeTab === "archive" ? color1 : "#fff",
+          color: activeTab === "archive" ? "#fff" : color1,
+        }}>
+          Archive ({totalArchive})
+        </button>
+      </div>
+
+      {/* ── PROSPECTS TAB ── */}
+      {activeTab === "prospects" && (() => {
+        const allProspects = PROSPECT_YEARS.flatMap((yr) => prospects[yr] || [])
+          .sort((a, b) => {
+            const aScore = a.commGradeScore ?? 999;
+            const bScore = b.commGradeScore ?? 999;
+            if (aScore !== bScore) return aScore - bScore;
+            return (a.Eligible || "").localeCompare(b.Eligible || "");
+          });
+        return (
+          <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              {/* FIX: was color2 (gold), now #fff (white) */}
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                We-Draft Prospects ({allProspects.length})
+              </div>
+              <Link to="/community" style={{ color: "rgba(255,255,255,0.75)", fontSize: "11px", fontWeight: 800, textDecoration: "underline" }}>
+                Full Board →
+              </Link>
+            </div>
+            <div style={{ height: "3px", background: color2 }} />
+            {allProspects.length === 0 ? (
+              <div style={{ padding: "40px 24px", textAlign: "center", background: "#fff" }}>
+                <div style={{ fontSize: "32px", marginBottom: "10px" }}>🏈</div>
+                <div style={{ fontSize: "16px", fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em" }}>No We-Draft prospects yet</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "6px" }}>No 2027–2029 players from {canonicalSchool} in the We-Draft database yet.</div>
+              </div>
+            ) : (
+              <>
+                <TableHeader color1={color1} color2={color2} isMobile={isMobile} showDraftPick={false} showGrade={true} showNfl={false} />
+                {allProspects.map((p) => (
+                  <PlayerRow key={p.id} player={p} commGrade={p.commGrade}
+                    draftInfo={null} nflTeams={nflTeams} isMobile={isMobile}
+                    color1={color1} color2={color2} showDraftPick={false} showNfl={false} />
+                ))}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── ARCHIVE TAB ── */}
+      {activeTab === "archive" && (() => {
+        const allYears = [...new Set(allArchive.map((e) => e._year))].sort((a, b) => b - a);
+        const allRounds = [...new Set(allArchive.map((e) => {
+          const r = e._type === "player" ? e.draftInfo?.round : e.player.Round;
+          return r ? parseInt(r) : null;
+        }).filter(Boolean))].sort((a, b) => a - b);
+        const allPositions = [...new Set(allArchive.map((e) => {
+          return e._type === "player" ? e.player.Position : e.player.Position;
+        }).filter(Boolean))].sort((a, b) => {
+          const POS_ORDER = ["QB","RB","WR","TE","OL","EDGE","DL","LB","DB","K","P","LS"];
+          const ai = POS_ORDER.indexOf(a), bi = POS_ORDER.indexOf(b);
+          if (ai !== -1 && bi !== -1) return ai - bi;
+          if (ai !== -1) return -1; if (bi !== -1) return 1;
+          return a.localeCompare(b);
+        });
+
+        return (
+          <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              {/* FIX: was color2 (gold), now #fff (white) */}
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                NFL Draft History ({totalArchive})
+              </div>
+              <Link to="/community/2026" style={{ color: "rgba(255,255,255,0.75)", fontSize: "11px", fontWeight: 800, textDecoration: "underline" }}>
+                2026 Board →
+              </Link>
+            </div>
+            <div style={{ height: "3px", background: color2 }} />
+            <ArchiveFilters
+              allYears={allYears} allRounds={allRounds} allPositions={allPositions}
+              allArchive={allArchive} color1={color1} color2={color2} isMobile={isMobile}
+              nflTeams={nflTeams}
+            />
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
 
 export default function TeamPage() {
-  const { teamId } = useParams();
-
-  const [team, setTeam] = useState(null);
-  const [players, setPlayers] = useState([]);
-  const [historical, setHistorical] = useState([]);
+  const { teamId: slug } = useParams();
+  const [school, setSchool] = useState(null);
+  const [branding, setBranding] = useState(null);
+  const [prospects, setProspects] = useState({});
+  const [archivePlayers, setArchivePlayers] = useState([]);
+  const [historicalPlayers, setHistoricalPlayers] = useState([]);
+  const [draftMap, setDraftMap] = useState({});
+  const [nflTeams, setNflTeams] = useState({});
   const [loading, setLoading] = useState(true);
-  const [positionRanks, setPositionRanks] = useState(null);
-  const [teamArticles, setTeamArticles] = useState([]);
-  const [viewMode, setViewMode] = useState("current");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [rosterYearMode, setRosterYearMode] = useState(2026);
-  const [declaredIds, setDeclaredIds] = useState(() => new Set());
-  const [redshirtOverrideIds, setRedshirtOverrideIds] = useState(() => new Set());
-  const [hoveredPlayer, setHoveredPlayer] = useState(null);
-  const [hoveredIcon, setHoveredIcon] = useState(null);
-  const [userVotes, setUserVotes] = useState({});
+  const [canonicalSchool, setCanonicalSchool] = useState("");
+  const [activeTab, setActiveTab] = useState("prospects");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+
+  const [conferenceTeams, setConferenceTeams] = useState([]);
+  const [teamNews, setTeamNews] = useState([]);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -40,789 +755,530 @@ export default function TeamPage() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  useEffect(() => {
-    const auth = getAuth();
-    const user = auth.currentUser;
-    if (!user) return;
-
-    const loadVotes = async () => {
-      const rosterRef = doc(db, "rosters", teamId.toLowerCase());
-      const rosterSnap = await getDoc(rosterRef);
-      const rosterPlayers = rosterSnap.exists() ? rosterSnap.data().players || [] : [];
-
-      const votesMap = {};
-      await Promise.all(
-        rosterPlayers.map(async (p, idx) => {
-          const voteId = getVoteId({ ...p, _id: idx });
-          try {
-            const userVoteRef = doc(db, "votes", voteId, "users", user.uid);
-            const snap = await getDoc(userVoteRef);
-            if (snap.exists()) votesMap[voteId] = snap.data().value;
-          } catch {}
-        })
-      );
-      setUserVotes(votesMap);
-    };
-
-    loadVotes();
-  }, [teamId]);
-
-  const getVoteId = (p) => {
-    const normalize = (str) =>
-      (str || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
-    return `${normalize(p.First)}-${normalize(p.Last)}-${normalize(p.School)}`;
-  };
-
-  const handleVote = async (p, value) => {
-    const auth = getAuth();
-    const user = auth.currentUser;
-    if (!user) {
-      const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
-      const auth2 = getAuth();
-      const provider = new GoogleAuthProvider();
-      try { await signInWithPopup(auth2, provider); } catch { return; }
-    }
-    const voteId = getVoteId(p);
-    const oldValue = userVotes[voteId] || 0;
-    const newValue = oldValue === value ? 0 : value;
-    const delta = newValue - oldValue;
-    const voteRef = doc(db, "votes", voteId);
-    const userVoteRef = doc(db, "votes", voteId, "users", user.uid);
-    await setDoc(voteRef, { voteScore: increment(delta) }, { merge: true });
-    await setDoc(userVoteRef, { value: newValue });
-    setUserVotes((prev) => ({ ...prev, [voteId]: newValue }));
-  };
-
-  const formatTeamId = (str) => {
-    const lower = str.toLowerCase();
-    const map = {
-      "army": "Army West Point", "nc-state": "NC State", "uconn": "UConn",
-      "troy": "Troy", "lsu": "LSU", "smu": "SMU", "tcu": "TCU",
-      "ucla": "UCLA", "ucf": "UCF",
-    };
-    if (map[lower]) return map[lower];
-    if (/^[a-z]{2,5}$/i.test(str)) return str.toUpperCase();
-    return str.toLowerCase().split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-  };
-
-  const sanitizeImgur = (url) =>
-    url?.includes("imgur.com") ? url.replace("imgur.com", "i.imgur.com") + ".png" : url;
-
-  const primary = team?.Color1 || "#0055a5";
-  const secondary = team?.Color2 || "#f6a21d";
-
-  const YEARS = ["Senior", "Junior", "Sophomore", "Freshman"];
-  const OFFENSE_POS = ["QB", "RB", "WR", "TE", "OL"];
-  const DEFENSE_POS = ["EDGE", "DL", "LB", "DB"];
-  const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "DE", "DT", "LB", "CB", "S"];
+  const slugFallback = slug
+    ? slug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ").replace(/\bAnd\b/g, "&")
+    : "";
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      const formattedId = formatTeamId(teamId);
-      let teamData = null;
+    const load = async () => {
+      try {
+        let schoolData = null;
+        const slugQuery = await getDocs(query(collection(db, "schools"), where("Slug", "==", slug)));
+        if (!slugQuery.empty) {
+          schoolData = slugQuery.docs[0].data();
+        } else {
+          const directSnap = await getDoc(doc(db, "schools", slugFallback));
+          if (directSnap.exists()) schoolData = directSnap.data();
+        }
 
-      const teamRef = doc(db, "schools", formattedId);
-      const teamSnap = await getDoc(teamRef);
-      if (teamSnap.exists()) {
-        teamData = teamSnap.data();
-      } else {
-        const schoolsRef = collection(db, "schools");
-        const snapshot = await getDocs(schoolsRef);
-        const normalize = (str) => (str || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const target = normalize(teamId);
-        let bestMatch = null;
-        snapshot.forEach((doc) => {
-          const school = doc.data().School;
-          const s = normalize(school);
-          if (s === target) { bestMatch = doc.data(); return; }
-          if (!bestMatch && s.startsWith(target)) { bestMatch = doc.data(); return; }
-          if (!bestMatch && s.includes(target)) { bestMatch = doc.data(); }
+        if (schoolData) {
+          setSchool(schoolData);
+          setBranding({
+            color1: schoolData.Color1 || BLUE,
+            color2: schoolData.Color2 || GOLD,
+            logo1: schoolData.Logo1 || "",
+            logo2: schoolData.Logo2 || "",
+            depthChart: schoolData.DepthChart || "",
+          });
+        } else {
+          setBranding({ color1: BLUE, color2: GOLD, logo1: "", logo2: "", depthChart: "" });
+        }
+
+        const resolvedSchool = schoolData?.School || slugFallback;
+        setCanonicalSchool(resolvedSchool);
+
+        if (schoolData?.Conference) {
+          const confSnap = await getDocs(query(
+            collection(db, "schools"),
+            where("Conference", "==", schoolData.Conference)
+          ));
+          const confTeams = confSnap.docs
+            .map((d) => d.data())
+            .filter((t) => t.School !== resolvedSchool)
+            .sort((a, b) => a.School.localeCompare(b.School));
+          setConferenceTeams(confTeams);
+        }
+
+        try {
+          const [newsSnap, articleSnap] = await Promise.all([
+            getDocs(query(collection(db, "news"), where("active", "==", true), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+            getDocs(query(collection(db, "articles"), where("status", "==", "published"), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+          ]);
+          const combined = [
+            ...newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() })),
+            ...articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() })),
+          ].sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
+            .slice(0, NEWS_LIMIT);
+          setTeamNews(combined);
+        } catch { setTeamNews([]); }
+
+        const nflSnap = await getDocs(collection(db, "nfl"));
+        const nflMap = {};
+        nflSnap.docs.forEach((d) => { nflMap[d.id] = d.data(); });
+        setNflTeams(nflMap);
+
+        const draftSnap = await getDocs(collection(db, "draftOrder"));
+        const dMap = {};
+        draftSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.Selection) dMap[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
         });
-        teamData = bestMatch;
-      }
+        setDraftMap(dMap);
 
-      if (!teamData) { setLoading(false); return; }
-      setTeam(teamData);
-
-      const rosterRef = doc(db, "rosters", teamId.toLowerCase());
-      const rosterSnap = await getDoc(rosterRef);
-      const rosterPlayers = rosterSnap.exists() ? rosterSnap.data().players || [] : [];
-      setPlayers(rosterPlayers.map((p, idx) => ({ ...p, _id: idx })));
-
-      const colRef = collection(db, "historical");
-      const q = query(colRef, where("School", "==", teamData.School));
-      const snapshot = await getDocs(q);
-      setHistorical(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-
-      const rankRef = doc(db, "teamPositionRanks", teamId.toLowerCase());
-      const rankSnap = await getDoc(rankRef);
-      if (rankSnap.exists()) {
-        setPositionRanks(rankSnap.data());
-        const articleQuery = query(
-          collection(db, "articles"),
-          where("status", "==", "published"),
-          where("teamSlugs", "array-contains", teamId.toLowerCase())
+        const prospectResults = {};
+        await Promise.all(
+          PROSPECT_YEARS.map(async (yr) => {
+            const snap = await getDocs(query(
+              collection(db, "players"),
+              where("School", "==", resolvedSchool),
+              where("Eligible", "==", yr)
+            ));
+            // Dedup by Slug — multiple sheet rows can produce duplicate Firestore docs
+            const seenProspectSlugs = new Set();
+            const dedupedDocs = snap.docs.filter((docSnap) => {
+              const slug = docSnap.data().Slug;
+              if (!slug || seenProspectSlugs.has(slug)) return false;
+              seenProspectSlugs.add(slug);
+              return true;
+            });
+            const players = await Promise.all(
+              dedupedDocs.map(async (docSnap) => {
+                const p = { id: docSnap.id, ...docSnap.data() };
+                try {
+                  const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
+                  const grades = [];
+                  evalsSnap.forEach((e) => {
+                    const g = e.data().grade;
+                    if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                  });
+                  p.commGrade = grades.length > 0
+                    ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+                    : null;
+                  p.commGradeScore = grades.length > 0
+                    ? grades.reduce((a, b) => a + b, 0) / grades.length
+                    : 999;
+                } catch {
+                  p.commGrade = null;
+                  p.commGradeScore = 999;
+                }
+                return p;
+              })
+            );
+            players.sort((a, b) => a.commGradeScore - b.commGradeScore);
+            prospectResults[yr] = players;
+          })
         );
-        const articleSnap = await getDocs(articleQuery);
-        setTeamArticles(articleSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setProspects(prospectResults);
+
+        const archiveSnap = await getDocs(query(
+          collection(db, "players"),
+          where("School", "==", resolvedSchool),
+          where("Eligible", "==", ARCHIVE_YEAR)
+        ));
+
+        // Dedup by Slug first — multiple sheet rows can produce multiple Firestore docs
+        // with the same Slug. Keep only the first doc per Slug.
+        const seenSlugs = new Set();
+        const dedupedArchiveDocs = archiveSnap.docs.filter((docSnap) => {
+          const slug = docSnap.data().Slug;
+          if (!slug || seenSlugs.has(slug)) return false;
+          seenSlugs.add(slug);
+          return true;
+        });
+
+        const archivePlrs = await Promise.all(
+          dedupedArchiveDocs
+            .filter((docSnap) => !!dMap[docSnap.data().Slug])
+            .map(async (docSnap) => {
+              const p = { id: docSnap.id, ...docSnap.data() };
+              try {
+                const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
+                const grades = [];
+                evalsSnap.forEach((e) => {
+                  const g = e.data().grade;
+                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                });
+                p.commGrade = grades.length > 0
+                  ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+                  : null;
+              } catch {
+                p.commGrade = null;
+              }
+              return p;
+            })
+        );
+        archivePlrs.sort((a, b) => {
+          const aDraft = dMap[a.Slug];
+          const bDraft = dMap[b.Slug];
+          return (aDraft?.pick || 9999) - (bDraft?.pick || 9999);
+        });
+        setArchivePlayers(archivePlrs);
+
+        try {
+          const histSnap = await getDocs(query(
+            collection(db, "historical"),
+            where("School", "==", resolvedSchool)
+          ));
+          const histRaw = histSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((h) => h.Year && parseInt(h.Year) <= 2025)
+            .sort((a, b) => {
+              if (b.Year !== a.Year) return parseInt(b.Year) - parseInt(a.Year);
+              return parseInt(a.Pick || 999) - parseInt(b.Pick || 999);
+            });
+
+          // Dedup by year+pick, then year+name — duplicate rows in Firestore
+          // come from multiple sheet rows for the same player
+          const hSeenPick = new Set();
+          const hSeenName = new Set();
+          const histPlayers = histRaw.filter((h) => {
+            const year = parseInt(h.Year);
+            const pick = parseInt(h.Pick);
+            if (pick && pick !== 999) {
+              const pickKey = `${year}-${pick}`;
+              if (hSeenPick.has(pickKey)) return false;
+              hSeenPick.add(pickKey);
+            }
+            const name = (h.Player || "").trim().toLowerCase();
+            if (name) {
+              const nameKey = `${year}-${name}`;
+              if (hSeenName.has(nameKey)) return false;
+              hSeenName.add(nameKey);
+            }
+            return true;
+          });
+
+          setHistoricalPlayers(histPlayers);
+        } catch (e) {
+          console.error("Historical load error:", e);
+          setHistoricalPlayers([]);
+        }
+
+      } catch (err) {
+        console.error("TeamPage load error:", err);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     };
-    fetchData();
-  }, [teamId]);
+    load();
+  }, [slug]);
 
-  const hasSlug = (p) => Boolean((p.Slug ?? "").toString().trim());
-  const rsStringIsYes = (v) => (v ?? "").toString().trim().toLowerCase() === "yes";
-
-  const isRedshirtDisplay = (p) => {
-    if (rosterYearMode === 2026) return rsStringIsYes(p.RS);
-    return rsStringIsYes(p.RS) || redshirtOverrideIds.has(p._id);
-  };
-
-  const sortRosterPlayers = (arr) => {
-    const gradeRank = (g) => {
-      if (!g) return 100;
-      const grade = g.toString().toUpperCase().trim();
-      if (/^[1-5]$/.test(grade)) return 6 - Number(grade);
-      if (grade === "A+") return 9; if (grade === "A") return 10;
-      if (grade === "B") return 11; if (grade === "C") return 12;
-      if (grade === "D") return 13; if (grade === "W") return 20;
-      return 90;
-    };
-    return [...arr].sort((a, b) => {
-      const ga = gradeRank(a.Grade), gb = gradeRank(b.Grade);
-      if (ga !== gb) return ga - gb;
-      const la = (a.Last || "").toLowerCase(), lb = (b.Last || "").toLowerCase();
-      if (la < lb) return -1; if (la > lb) return 1;
-      return 0;
-    });
-  };
-
-  const ageForward = (year) => {
-    if (year === "Senior") return "LEAVES";
-    if (year === "Junior") return "Senior";
-    if (year === "Sophomore") return "Junior";
-    if (year === "Freshman") return "Sophomore";
-    return year;
-  };
-
-  const moveDownOne = (year) => {
-    if (year === "Senior") return "Junior";
-    if (year === "Junior") return "Sophomore";
-    if (year === "Sophomore") return "Freshman";
-    return year;
-  };
-
-  const isDraftEligibleIn2027 = (p) => {
-    const baseYear = p.Year;
-    const baseRS = rsStringIsYes(p.RS) || redshirtOverrideIds.has(p._id);
-    if (baseYear === "Senior") return true;
-    if (baseYear === "Junior") return true;
-    if (baseYear === "Sophomore" && baseRS) return true;
-    return false;
-  };
-
-  const displayPlayers = useMemo(() => {
-    if (rosterYearMode === 2026) return players;
-    return players.map((p) => {
-      let y = ageForward(p.Year);
-      if (redshirtOverrideIds.has(p._id)) {
-        if (y !== "LEAVES") y = moveDownOne(y);
-      }
-      return { ...p, _displayYear: y };
-    });
-  }, [players, rosterYearMode, redshirtOverrideIds]);
-
-  const getGradeColor = (grade) => {
-    const g = grade?.toString().toUpperCase().trim();
-    if (g === "5") return "#0026ff"; if (g === "4") return "#00a83e";
-    if (g === "3") return "#eab308"; if (g === "2") return "#f97316";
-    if (g === "1") return "#ef4444"; if (g === "A+") return "#00ff40";
-    if (g === "A") return "#00d9ff"; if (g === "B") return "#dc00f0";
-    if (g === "C") return "#a74300"; if (g === "D") return "#850000";
-    if (g === "W") return "#000000";
-    return "#111";
-  };
-
-  const leavesIn2027 = useMemo(() => {
-    if (rosterYearMode !== 2027) return [];
-    const agedLeaves = displayPlayers.filter((p) => p._displayYear === "LEAVES");
-    const declaredLeaves = displayPlayers.filter((p) => declaredIds.has(p._id));
-    const map = new Map();
-    [...agedLeaves, ...declaredLeaves].forEach((p) => map.set(p._id, p));
-    return Array.from(map.values());
-  }, [displayPlayers, rosterYearMode, declaredIds]);
-
-  const rosterGridPlayers = useMemo(() => {
-    if (rosterYearMode === 2026) return players;
-    return displayPlayers.filter(
-      (p) => p._displayYear !== "LEAVES" && !declaredIds.has(p._id)
-    );
-  }, [players, displayPlayers, rosterYearMode, declaredIds]);
-
-  const positionCounts = useMemo(() => {
-    if (!historical.length) return {};
-    const counts = {};
-    historical.forEach((p) => { if (p.Position) counts[p.Position] = (counts[p.Position] || 0) + 1; });
-    return counts;
-  }, [historical]);
-
-  const toggleDeclare = (id) => {
-    setDeclaredIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleRedshirt = (p) => {
-    if (rosterYearMode !== 2027) return;
-    if (rsStringIsYes(p.RS)) return;
-    setRedshirtOverrideIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(p._id)) next.delete(p._id); else next.add(p._id);
-      return next;
-    });
-  };
-
-  const SectionHeader = ({ children }) => (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: 22, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: primary, marginBottom: 6 }}>
-        {children}
-      </div>
-      <div style={{ height: 3, backgroundColor: primary, borderRadius: 2 }} />
-    </div>
-  );
-
-  // ── A+ Tooltip — redesigned ──────────────────────────────────────────────
-  const BluechipTooltip = ({ p }) => (
-    <div style={{
-      position: "absolute", bottom: "calc(100% + 10px)", left: "50%",
-      transform: "translateX(-50%)",
-      width: 210, zIndex: 50,
-      background: "linear-gradient(160deg, #001a3a 0%, #003070 100%)",
-      border: `2px solid ${secondary}`,
-      borderRadius: 10,
-      boxShadow: "0 8px 28px rgba(0,0,0,0.5)",
-      overflow: "hidden",
-      fontFamily: "'Arial Black', Arial, sans-serif",
-    }}>
-      {/* Gold header bar */}
-      <div style={{ background: secondary, padding: "6px 12px", textAlign: "center" }}>
-        <div style={{ fontSize: 8, fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.18em" }}>
-          We-Draft.com
-        </div>
-        <div style={{ fontSize: 11, fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", lineHeight: 1.1, marginTop: 1 }}>
-          Bluechip Prospect
-        </div>
-      </div>
-      {/* Player name */}
-      <div style={{ padding: "8px 12px 4px", textAlign: "center" }}>
-        <div style={{ fontSize: 14, fontWeight: 900, color: "#fff", letterSpacing: "0.04em", lineHeight: 1.2 }}>
-          {p.First} {p.Last}
-        </div>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>
-          {p.Year} · {p.Position}
-        </div>
-      </div>
-      {/* Divider */}
-      <div style={{ height: 1, background: `linear-gradient(90deg, transparent, ${secondary}, transparent)`, margin: "2px 12px" }} />
-      {/* Notes */}
-      <div style={{ padding: "6px 12px 10px" }}>
-        {p.Notes && <div style={{ fontSize: 11, fontWeight: 800, color: secondary, lineHeight: 1.4, marginBottom: p.Notes2 ? 4 : 0 }}>{p.Notes}</div>}
-        {p.From && <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.55)", marginBottom: 4 }}>{p.From}</div>}
-        {p.Notes2 && <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.8)", lineHeight: 1.5, whiteSpace: "pre-line" }}>{p.Notes2}</div>}
-      </div>
-      {/* Arrow */}
-      <div style={{ position: "absolute", bottom: -7, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "7px solid transparent", borderRight: "7px solid transparent", borderTop: `7px solid ${secondary}` }} />
-    </div>
-  );
-
-  const RegularTooltip = ({ p }) => (
-    <div style={{
-      position: "absolute", bottom: "calc(100% + 10px)", left: "50%",
-      transform: "translateX(-50%)",
-      width: 200, zIndex: 50,
-      background: "#1a1a1a",
-      border: "1px solid rgba(255,255,255,0.12)",
-      borderRadius: 8,
-      boxShadow: "0 6px 20px rgba(0,0,0,0.45)",
-      overflow: "hidden",
-      fontFamily: "'Arial Black', Arial, sans-serif",
-    }}>
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-        <div style={{ fontSize: 13, fontWeight: 900, color: "#fff" }}>{p.First} {p.Last}</div>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", fontWeight: 700, marginTop: 1 }}>{p.Year} · {p.Position}</div>
-        {p.Grade === "5" && <div style={{ marginTop: 4, fontSize: 10, fontWeight: 900, color: "#ffd700", letterSpacing: "0.08em" }}>★ IMPACT PLAYER ★</div>}
-      </div>
-      <div style={{ padding: "8px 12px" }}>
-        {p.Notes && <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.85)", lineHeight: 1.4, marginBottom: p.Notes2 ? 4 : 0 }}>{p.Notes}</div>}
-        {p.From && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginBottom: 4 }}>{p.From}</div>}
-        {p.Notes2 && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.5, whiteSpace: "pre-line" }}>{p.Notes2}</div>}
-      </div>
-      <div style={{ position: "absolute", bottom: -6, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "6px solid #1a1a1a" }} />
-    </div>
-  );
-
-  const renderSectionMobile = (positions, label) => {
-    const allPlayers = rosterGridPlayers;
-    return (
-      <div style={{ marginBottom: 40 }}>
-        <SectionHeader>{label}</SectionHeader>
-        {positions.map((pos) => {
-          const posPlayers = sortRosterPlayers(allPlayers.filter((p) => p.Position === pos));
-          if (!posPlayers.length) return null;
-          return (
-            <div key={pos} style={{ marginBottom: 16 }}>
-              <div style={{ backgroundColor: primary, color: "#fff", fontWeight: 900, fontSize: 18, padding: "8px 14px", borderBottom: `3px solid ${secondary}`, letterSpacing: "0.06em" }}>
-                {pos}
-              </div>
-              {YEARS.map((year) => {
-                const yearPos = posPlayers.filter((p) =>
-                  rosterYearMode === 2026 ? p.Year === year : p._displayYear === year
-                );
-                if (!yearPos.length) return null;
-                return (
-                  <div key={year} style={{ display: "flex", alignItems: "flex-start", borderBottom: `1px solid ${secondary}` }}>
-                    <div style={{ width: 72, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 11, color: primary, background: "#f9f9f9", borderRight: `2px solid ${secondary}`, padding: "10px 4px", textAlign: "center", letterSpacing: "0.04em" }}>
-                      {year.toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1, padding: "8px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {yearPos.map((p) => {
-                        const italic = isRedshirtDisplay(p);
-                        const slugged = hasSlug(p);
-                        const showIcons = rosterYearMode === 2027;
-                        const showNFL = showIcons && isDraftEligibleIn2027(p);
-                        const showShirt = showIcons && !rsStringIsYes(p.RS);
-                        return (
-                          <div key={p._id} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                            <div style={{ background: primary, border: `2px solid ${secondary}`, borderRadius: 8, color: "#fff", display: "flex", alignItems: "stretch", minWidth: 80 }}>
-                              {p.Grade && (
-                                <div style={{ background: p.Grade === "A+" ? secondary : "#fff", color: p.Grade === "A+" ? "#fff" : getGradeColor(p.Grade), fontWeight: 900, fontSize: 14, width: 22, minWidth: 22, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "6px 0 0 6px", borderRight: `2px solid ${secondary}` }}>
-                                  {p.Grade === "A+" ? "A+" : p.Grade}
-                                </div>
-                              )}
-                              <div style={{ padding: "5px 7px", textAlign: "center", fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
-                                {slugged ? (
-                                  <a href={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", textDecoration: "underline", fontStyle: italic ? "italic" : "normal" }}>
-                                    <div>{p.First}</div><div>{p.Last}</div>
-                                  </a>
-                                ) : (
-                                  <div style={{ fontStyle: italic ? "italic" : "normal" }}>
-                                    <div>{p.First}</div><div>{p.Last}</div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            {showIcons && (showNFL || showShirt) && (
-                              <div style={{ display: "flex", gap: 4, marginTop: 3 }}>
-                                {showNFL && <span onClick={() => toggleDeclare(p._id)} style={{ cursor: "pointer", fontSize: 14 }}>🏈</span>}
-                                {showShirt && <span onClick={() => toggleRedshirt(p)} style={{ cursor: "pointer", fontSize: 14, opacity: redshirtOverrideIds.has(p._id) ? 1 : 0.7 }}>👕</span>}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const renderSection = (positions, label) => {
-    if (isMobile) return renderSectionMobile(positions, label);
-    return (
-      <div style={{ marginBottom: 70 }}>
-        <SectionHeader>{label}</SectionHeader>
-
-        <div style={{ display: "grid", gridTemplateColumns: `160px repeat(${positions.length}, 1fr)`, position: "sticky", top: 0, background: "#fff", zIndex: 30, borderTop: `4px solid ${secondary}`, borderBottom: `4px solid ${secondary}` }}>
-          <div />
-          {positions.map((pos) => (
-            <div key={pos} style={{ textAlign: "center", fontWeight: 900, fontSize: 26, padding: "14px 8px", borderLeft: `2px solid ${secondary}`, color: primary, letterSpacing: 0.5 }}>
-              {pos}
-            </div>
-          ))}
-        </div>
-
-        {YEARS.map((year) => {
-          const yearPlayers = rosterYearMode === 2026
-            ? rosterGridPlayers.filter((p) => p.Year === year)
-            : rosterGridPlayers.filter((p) => p._displayYear === year);
-          if (!yearPlayers.length) return null;
-
-          return (
-            <div key={year} style={{ display: "grid", gridTemplateColumns: `160px repeat(${positions.length}, 1fr)`, borderBottom: `2px solid ${secondary}` }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 18, borderRight: `2px solid ${secondary}`, background: "#f9f9f9", padding: "14px 10px" }}>
-                {year.toUpperCase()}
-              </div>
-
-              {positions.map((pos) => {
-                const posPlayers = sortRosterPlayers(yearPlayers.filter((p) => p.Position === pos));
-                return (
-                  <div key={pos} style={{ padding: 14, borderLeft: `2px solid ${secondary}`, minHeight: 90 }}>
-                    {posPlayers.map((p) => {
-                      const italic = isRedshirtDisplay(p);
-                      const slugged = hasSlug(p);
-                      const showIcons = rosterYearMode === 2027;
-                      const showNFL = showIcons && isDraftEligibleIn2027(p);
-                      const showShirt = showIcons && !rsStringIsYes(p.RS);
-                      const isAPlus = p.Grade === "A+";
-
-                      return (
-                        <div key={p._id} style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 10 }}>
-                          <div style={{
-                            width: "92%", background: primary, border: `3px solid ${secondary}`,
-                            borderRadius: 10, padding: "10px 10px 8px",
-                            boxShadow: isAPlus ? `0 0 16px rgba(246,162,29,0.35)` : "0 1px 0 rgba(0,0,0,0.08)",
-                            color: "#fff", display: "flex", alignItems: "stretch", justifyContent: "center", gap: 8, position: "relative",
-                          }}>
-                            <div style={{ display: "flex", alignItems: "stretch", justifyContent: "center", gap: 10, width: "100%" }}>
-                              {p.Grade && (
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", margin: "-10px 0 -8px -10px", alignSelf: "stretch" }}>
-                                  <div style={{
-                                    display: "flex", alignItems: "stretch", justifyContent: "flex-start",
-                                    fontWeight: 900, fontSize: 18,
-                                    color: isAPlus ? "#0055a5" : getGradeColor(p.Grade),
-                                    background: isAPlus ? secondary : "#ffffff",
-                                    padding: 0, width: 28, minWidth: 28, height: "100%",
-                                    borderRadius: "7px 0 0 7px", borderRight: `3px solid ${secondary}`,
-                                  }}>
-                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", width: "100%", minHeight: 52, padding: "4px 0", lineHeight: 1 }}>
-                                      <span onClick={() => handleVote(p, 1)} style={{ cursor: "pointer", fontSize: 10, color: userVotes[getVoteId(p)] === 1 ? "#00c94f" : (isAPlus ? "rgba(0,40,100,0.5)" : "#aaa"), fontWeight: userVotes[getVoteId(p)] === 1 ? 900 : 400, marginBottom: -2 }}>▲</span>
-                                      <div style={{ display: "flex", alignItems: "center" }}>
-                                        {isAPlus ? (
-                                          <><span>A</span><span style={{ fontSize: 10, marginLeft: 1, position: "relative", top: -2 }}>+</span></>
-                                        ) : p.Grade}
-                                      </div>
-                                      <span onClick={() => handleVote(p, -1)} style={{ cursor: "pointer", fontSize: 9, color: userVotes[getVoteId(p)] === -1 ? "#ff4444" : (isAPlus ? "rgba(0,40,100,0.5)" : "#aaa"), fontWeight: userVotes[getVoteId(p)] === -1 ? 900 : 400, lineHeight: 1 }}>▼</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-
-                              <div style={{ position: "relative", textAlign: "center", flex: 1 }}
-                                onMouseEnter={() => setHoveredPlayer(p._id)}
-                                onMouseLeave={() => setHoveredPlayer(null)}
-                              >
-                                {slugged ? (
-                                  <a href={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer"
-                                    style={{ color: "#fff", fontWeight: 700, fontSize: "1.05rem", textDecoration: "underline", fontStyle: italic ? "italic" : "normal", lineHeight: 1.1, display: "block" }}>
-                                    <div>{p.First}</div><div>{p.Last}</div>
-                                  </a>
-                                ) : (
-                                  <div style={{ fontWeight: 700, fontSize: "1.05rem", fontStyle: italic ? "italic" : "normal", lineHeight: 1.1 }}>
-                                    <div>{p.First}</div><div>{p.Last}</div>
-                                  </div>
-                                )}
-
-                                {hoveredPlayer === p._id && (p.Notes || p.Notes2) && (
-                                  isAPlus
-                                    ? <BluechipTooltip p={p} />
-                                    : <RegularTooltip p={p} />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {showIcons && (showNFL || showShirt) && (
-                            <div style={{ marginTop: 4, display: "flex", justifyContent: "center", gap: 10 }}>
-                              {showNFL && (
-                                <div style={{ position: "relative" }}
-                                  onMouseEnter={() => setHoveredIcon(`nfl-${p._id}`)}
-                                  onMouseLeave={() => setHoveredIcon(null)}>
-                                  <span onClick={() => toggleDeclare(p._id)} style={{ cursor: "pointer", fontSize: 16 }}>🏈</span>
-                                  {hoveredIcon === `nfl-${p._id}` && (
-                                    <div style={{ position: "absolute", bottom: "130%", left: "50%", transform: "translateX(-50%)", background: "#111", color: "#fff", padding: "8px 10px", borderRadius: 6, fontSize: 12, whiteSpace: "nowrap", zIndex: 50, boxShadow: "0 4px 10px rgba(0,0,0,0.4)" }}>
-                                      Declare for Draft (moves to LEAVES)
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {showShirt && (
-                                <div style={{ position: "relative" }}
-                                  onMouseEnter={() => setHoveredIcon(`shirt-${p._id}`)}
-                                  onMouseLeave={() => setHoveredIcon(null)}>
-                                  <span onClick={() => toggleRedshirt(p)} style={{ cursor: "pointer", fontSize: 16, opacity: redshirtOverrideIds.has(p._id) ? 1 : 0.9 }}>👕</span>
-                                  {hoveredIcon === `shirt-${p._id}` && (
-                                    <div style={{ position: "absolute", bottom: "130%", left: "50%", transform: "translateX(-50%)", background: "#111", color: "#fff", padding: "8px 10px", borderRadius: 6, fontSize: 12, whiteSpace: "nowrap", zIndex: 50, boxShadow: "0 4px 10px rgba(0,0,0,0.4)" }}>
-                                      Project Redshirt (moves player down a class)
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
+  const color1 = branding?.color1 || BLUE;
+  const color2 = branding?.color2 || GOLD;
+  const totalProspects = PROSPECT_YEARS.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
 
   if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: "#0055a5" }}>
-      Loading Team...
+    <div style={{
+      display: "flex", justifyContent: "center", alignItems: "center",
+      height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE,
+      fontFamily: "'Arial Black', Arial, sans-serif",
+    }}>
+      Loading...
     </div>
+  );
+
+  const ConferenceSidebar = (
+    <SidebarCard
+      title={school?.Conference || "Conference"}
+      color1={BLUE} color2={GOLD}
+      headerRight={
+        <Link to="/cfb" style={{ color: GOLD, fontSize: "11px", fontWeight: 900, textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+          More →
+        </Link>
+      }
+    >
+      {conferenceTeams.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No other teams.</div>
+      ) : (
+        conferenceTeams.map((team, i) => (
+          <Link
+            key={team.Slug || team.School}
+            to={`/team/${team.Slug}`}
+            style={{
+              display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+              textDecoration: "none", background: "#fff",
+              borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >
+            {team.Logo1 ? (
+              <div style={{
+                width: "28px", height: "28px", flexShrink: 0, display: "flex",
+                alignItems: "center", justifyContent: "center",
+                background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+              }}>
+                <img
+                  src={sanitizeUrl(team.Logo1)}
+                  alt={team.School}
+                  style={{ width: "24px", height: "24px", objectFit: "contain" }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              </div>
+            ) : (
+              <div style={{
+                width: "28px", height: "28px", flexShrink: 0, borderRadius: "4px",
+                background: team.Color1 || BLUE, display: "flex", alignItems: "center",
+                justifyContent: "center", color: "#fff", fontSize: "10px", fontWeight: 900,
+              }}>
+                {team.School.charAt(0)}
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontWeight: 900, fontSize: "13px", color: BLUE, lineHeight: 1.2,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>
+                {team.School}
+              </div>
+              {team.Mascot && (
+                <div style={{ fontSize: "10px", fontWeight: 700, color: "#888", lineHeight: 1.2 }}>
+                  {team.Mascot}
+                </div>
+              )}
+            </div>
+            <span style={{ color: "#ccc", fontSize: "14px", fontWeight: 900, flexShrink: 0 }}>›</span>
+          </Link>
+        ))
+      )}
+    </SidebarCard>
+  );
+
+  const NewsSidebar = (
+    <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
+      {teamNews.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No recent news.</div>
+      ) : (
+        teamNews.map((n, i) => (
+          <Link
+            key={n.id}
+            to={`/news/${n.slug}`}
+            style={{
+              display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
+              textDecoration: "none", background: "#fff",
+              borderBottom: i < teamNews.length - 1 ? "1px solid #f0f0f0" : "none",
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >
+            <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
+              <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
+                <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
+                </span>
+              </div>
+              <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
+                <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+                  {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
+                </span>
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{
+                backgroundColor: n.type === "article" ? GOLD : BLUE,
+                color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
+                padding: "2px 5px", display: "inline-block", marginBottom: "3px", borderRadius: "2px",
+                fontWeight: 900, textTransform: "uppercase",
+              }}>
+                {n.type === "article" ? "Article" : "News"}
+              </span>
+              <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
+                {n.title}
+              </div>
+            </div>
+          </Link>
+        ))
+      )}
+    </SidebarCard>
   );
 
   return (
     <>
       <Helmet>
-        <title>{team?.School} {team?.Mascot} 2026 Roster & Draft Prospects | We-Draft</title>
-        <meta name="description" content={`Full 2026 roster, player grades, and NFL draft prospects for the ${team?.School} ${team?.Mascot}.`} />
-        <link rel="canonical" href={`https://we-draft.com/team/${teamId}`} />
-        <meta property="og:title" content={`${team?.School} ${team?.Mascot} 2026 Roster | We-Draft`} />
-        <meta property="og:description" content={`NFL draft prospects and full roster breakdown for ${team?.School}.`} />
-        <meta property="og:url" content={`https://we-draft.com/team/${teamId}`} />
-        <script type="application/ld+json">
-          {JSON.stringify({
-            "@context": "https://schema.org", "@type": "SportsTeam",
-            "name": `${team?.School} ${team?.Mascot}`, "sport": "American Football",
-            "url": `https://we-draft.com/team/${teamId}`,
-            "memberOf": { "@type": "SportsOrganization", "name": team?.Conference || "NCAA" }
-          })}
-        </script>
+        <title>{school?.Mascot ? `${canonicalSchool} ${school.Mascot}` : canonicalSchool} | We-Draft.com</title>
+        <meta name="description" content={`${canonicalSchool} NFL Draft prospects for 2027, 2028, and 2029. Community scouting grades, strengths, weaknesses, and NFL fit projections on We-Draft.com.`} />
+        <link rel="canonical" href={`https://we-draft.com/team/${slug}`} />
       </Helmet>
 
-      <div className="max-w-7xl mx-auto p-6 pb-40">
-
-        {/* ===== HERO CARD ===== */}
-        <div className="mb-8 rounded-lg overflow-hidden" style={{ border: `3px solid ${primary}` }}>
-          <div style={{ backgroundColor: "#fff", display: "flex", alignItems: "center", gap: isMobile ? 12 : 24, padding: isMobile ? "16px" : "24px 32px" }}>
-            <div style={{ flexShrink: 0, width: isMobile ? 72 : 140, height: isMobile ? 72 : 140, display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f8f8", border: "1px solid #eee", borderRadius: 8 }}>
-              {team?.Logo1 ? <img src={sanitizeImgur(team.Logo1)} alt={`${team.School} logo`} style={{ height: isMobile ? 60 : 120, objectFit: "contain" }} loading="lazy" /> : <div style={{ width: isMobile ? 72 : 140, height: isMobile ? 72 : 140 }} />}
-            </div>
-            <div style={{ flex: 1, textAlign: "center" }}>
-              <div style={{ fontSize: isMobile ? "clamp(20px, 6vw, 32px)" : "clamp(32px, 5vw, 60px)", fontWeight: 900, color: primary, lineHeight: 1, letterSpacing: "0.02em", textTransform: "uppercase" }}>{team?.School}</div>
-              <div style={{ fontSize: isMobile ? "clamp(16px, 4.5vw, 24px)" : "clamp(24px, 3.5vw, 44px)", fontWeight: 900, color: primary, lineHeight: 1, letterSpacing: "0.02em", textTransform: "uppercase", marginTop: 4 }}>{team?.Mascot}</div>
-              {team?.Conference && (
-                <div style={{ marginTop: 8, display: "inline-block", backgroundColor: primary, color: "#fff", fontWeight: 900, fontSize: isMobile ? 11 : 13, padding: "3px 14px", borderRadius: 20, letterSpacing: "0.05em" }}>{team.Conference}</div>
-              )}
-            </div>
-            <div style={{ flexShrink: 0, width: isMobile ? 72 : 140, height: isMobile ? 72 : 140, display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f8f8", border: "1px solid #eee", borderRadius: 8 }}>
-              {team?.Logo2 ? <img src={sanitizeImgur(team.Logo2)} alt={`${team.School} alt logo`} style={{ height: isMobile ? 60 : 120, objectFit: "contain" }} loading="lazy" /> : <div style={{ width: isMobile ? 72 : 140, height: isMobile ? 72 : 140 }} />}
-            </div>
-          </div>
-          <div style={{ height: 5, backgroundColor: secondary }} />
-        </div>
-
-        {/* ===== IN THE NEWS ===== */}
-        {teamArticles.length > 0 && (
-          <div style={{ marginBottom: 40 }}>
-            <SectionHeader>In the News</SectionHeader>
-            <div style={{ backgroundColor: "#fff", border: `2px solid ${primary}`, borderRadius: 8, overflow: "hidden" }}>
-              {teamArticles
-                .slice()
-                .sort((a, b) => (b.publishedAt?.seconds || b.updatedAt?.seconds || 0) - (a.publishedAt?.seconds || a.updatedAt?.seconds || 0))
-                .map((a, i, arr) => (
-                  <a key={a.id} href={`/news/${a.slug}`}
-                    style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 20px", textDecoration: "none", borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none", backgroundColor: "#fff", transition: "background 0.15s" }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = "#f9fbff"}
-                    onMouseLeave={(e) => e.currentTarget.style.background = "#fff"}
-                  >
-                    {/* Calendar date badge */}
-                    <div style={{ flexShrink: 0, width: 48, background: "#fff", border: `2px solid ${primary}`, borderRadius: 6, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                      <div style={{ background: secondary, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
-                        <span style={{ fontSize: 10, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                          {(a.publishedAt || a.updatedAt)?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
-                        </span>
-                      </div>
-                      <div style={{ padding: "4px 0 3px", textAlign: "center" }}>
-                        <span style={{ fontSize: 20, fontWeight: 900, color: primary, lineHeight: 1, display: "block" }}>
-                          {(a.publishedAt || a.updatedAt)?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ marginBottom: 3 }}>
-                        <span style={{ backgroundColor: primary, color: "#fff", fontWeight: 900, fontSize: 9, padding: "2px 8px", borderRadius: 4, letterSpacing: "0.08em", textTransform: "uppercase" }}>Article</span>
-                      </div>
-                      <div style={{ fontWeight: 900, fontSize: 14, color: "#222", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.3 }}>{a.title}</div>
-                    </div>
-                    <div style={{ flexShrink: 0, fontWeight: 900, fontSize: 18, color: primary }}>→</div>
-                  </a>
-                ))}
-            </div>
-          </div>
-        )}
-
-        {/* ===== CONTROLS ROW ===== */}
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "stretch", gap: 12, marginBottom: 40, flexWrap: "wrap" }}>
-          <div style={{ position: "relative" }}>
-            <button onClick={() => setDropdownOpen((prev) => !prev)}
-              style={{ padding: "10px 28px", fontWeight: 900, borderRadius: 8, border: `2px solid ${secondary}`, cursor: "pointer", backgroundColor: primary, color: "#fff", minWidth: 160, textAlign: "center" }}>
-              <div style={{ fontSize: 20 }}>{viewMode === "archive" ? "Draft Archive" : rosterYearMode === 2027 ? "2027 Projection" : "2026 Roster"}</div>
-              <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>▾ change view</div>
-            </button>
-            {dropdownOpen && (
-              <div style={{ position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", backgroundColor: "#fff", border: `2px solid ${secondary}`, borderRadius: 8, overflow: "hidden", zIndex: 50, minWidth: 200, boxShadow: "0 6px 16px rgba(0,0,0,0.12)" }}>
-                {[
-                  { label: "2026 Roster", action: () => { setViewMode("current"); setRosterYearMode(2026); setDropdownOpen(false); } },
-                  { label: "2027 Projection", action: () => { setViewMode("current"); setRosterYearMode(2027); setDropdownOpen(false); } },
-                  { label: "Draft Archive", action: () => { setViewMode("archive"); setDropdownOpen(false); } },
-                ].map(({ label, action }, i, arr) => {
-                  const isActive = (label === "2026 Roster" && viewMode === "current" && rosterYearMode === 2026) || (label === "2027 Projection" && viewMode === "current" && rosterYearMode === 2027) || (label === "Draft Archive" && viewMode === "archive");
-                  return (
-                    <div key={label} onClick={action}
-                      style={{ padding: "12px 20px", cursor: "pointer", fontWeight: 800, fontSize: 15, color: primary, backgroundColor: isActive ? "#f0f5ff" : "#fff", borderBottom: i < arr.length - 1 ? "1px solid #eee" : "none", display: "flex", alignItems: "center", gap: 8 }}>
-                      {isActive && <span style={{ color: secondary, fontWeight: 900 }}>✓</span>}
-                      {label}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div style={{ position: "relative" }}>
-            <button style={{ backgroundColor: "#fff", color: primary, border: `2px solid ${secondary}`, padding: "10px 28px", borderRadius: 8, fontWeight: 900, cursor: "pointer", minWidth: 160, textAlign: "center" }}
-              onMouseEnter={(e) => e.currentTarget.nextSibling.style.display = "block"}
-              onMouseLeave={(e) => e.currentTarget.nextSibling.style.display = "none"}>
-              <div style={{ fontSize: 20 }}>Player Grades</div>
-              <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>▾</div>
-            </button>
-            <div style={{ display: "none", position: "absolute", top: "110%", left: "50%", transform: "translateX(-50%)", backgroundColor: "#fff", border: `2px solid ${secondary}`, borderRadius: 8, padding: "20px 24px", width: 420, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.15)", textAlign: "left", fontSize: 14, lineHeight: 1.6 }}
-              onMouseEnter={(e) => e.currentTarget.style.display = "block"}
-              onMouseLeave={(e) => e.currentTarget.style.display = "none"}>
-              <div style={{ fontWeight: 900, fontSize: 16, color: primary, marginBottom: 4 }}>Production Grades <span style={{ fontWeight: 400, fontSize: 13 }}>(number system)</span></div>
-              <div style={{ marginBottom: 8, color: "#444", fontSize: 13 }}>Given by <strong>We-Draft.com</strong> editors based on a player's experience, production, and skillset.</div>
-              {[
-                { grade: "5", color: "#0026ff", desc: 'Best in the country, impact every play. "Early 1st round talent"' },
-                { grade: "4", color: "#00a83e", desc: 'High-end starter. "Day 2 talent"' },
-                { grade: "3", color: "#eab308", desc: 'Trusted contributor. "Day 3 talent"' },
-                { grade: "2", color: "#f97316", desc: "Played some and/or is depth." },
-                { grade: "1", color: "#ef4444", desc: "Has not played much." },
-                { grade: "W", color: "#000", desc: "Walk-on. Not on scholarship." },
-              ].map(({ grade, color, desc }) => (
-                <div key={grade} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 900, color, minWidth: 20, fontSize: 15 }}>{grade}</span>
-                  <span style={{ color: "#333", fontSize: 13 }}>{desc}</span>
+      <div style={{
+        maxWidth: "1600px", margin: "0 auto",
+        padding: isMobile ? "10px 10px 60px" : "24px 40px 60px",
+        fontFamily: "'Arial Black', Arial, sans-serif",
+      }}>
+        {isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <HeroCard
+              school={school} branding={branding} canonicalSchool={canonicalSchool}
+              color1={color1} color2={color2} isMobile={isMobile}
+            />
+            <MainContent
+              school={school} canonicalSchool={canonicalSchool}
+              color1={color1} color2={color2} isMobile={isMobile}
+              activeTab={activeTab} setActiveTab={setActiveTab}
+              prospects={prospects} archivePlayers={archivePlayers}
+              historicalPlayers={historicalPlayers}
+              draftMap={draftMap} nflTeams={nflTeams}
+              totalProspects={totalProspects}
+            />
+            <details style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+              <summary style={{ backgroundColor: BLUE, padding: "10px 14px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  {school?.Conference || "Conference"} Teams ▾
                 </div>
-              ))}
-              <div style={{ borderTop: `2px solid ${secondary}`, margin: "14px 0" }} />
-              <div style={{ fontWeight: 900, fontSize: 16, color: primary, marginBottom: 4 }}>Development Grades <span style={{ fontWeight: 400, fontSize: 13 }}>(letter system)</span></div>
-              <div style={{ marginBottom: 8, color: "#444", fontSize: 13 }}>Given to players with 3+ years of eligibility remaining, based on recruiting rankings and film.</div>
-              {[
-                { grade: "A+", color: "#f6a21d", desc: "Rare talent, bluechip prospect per We-Draft.com" },
-                { grade: "A", color: "#00d9ff", desc: 'Impact potential soon. "5-Star"' },
-                { grade: "B", color: "#dc00f0", desc: 'Multiple traits for early contribution. "4-Star"' },
-                { grade: "C", color: "#a74300", desc: 'Potential but needs time. "3-Star"' },
-                { grade: "D", color: "#850000", desc: "Needs significant development." },
-              ].map(({ grade, color, desc }) => (
-                <div key={grade} style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 900, color, minWidth: 20, fontSize: 15 }}>{grade}</span>
-                  <span style={{ color: "#333", fontSize: 13 }}>{desc}</span>
-                </div>
-              ))}
-              <div style={{ borderTop: `2px solid ${secondary}`, margin: "14px 0" }} />
-              <div style={{ fontWeight: 900, fontSize: 16, color: primary, marginBottom: 6 }}>Community Votes</div>
-              <div style={{ color: "#444", fontSize: 13, lineHeight: 1.6 }}>Vote on any player you think <strong>We-Draft.com</strong> is over or underrating. Sign in to your account!</div>
-            </div>
-          </div>
-        </div>
-
-        {/* ===== CURRENT VIEW ===== */}
-        {viewMode === "current" && (
-          <>
-            {renderSection(OFFENSE_POS, "Offense")}
-            {renderSection(DEFENSE_POS, "Defense")}
-
-            {rosterYearMode === 2027 && (
-              <div style={{ marginTop: 60 }}>
-                <SectionHeader>Leaves in 2027</SectionHeader>
-                <div style={{ border: `2px solid ${primary}`, borderRadius: 8, overflow: "hidden", backgroundColor: "#fff", maxWidth: 720, margin: "0 auto" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 140px 60px", backgroundColor: primary, color: "#fff", fontWeight: 900, padding: "14px 18px", fontSize: 16, alignItems: "center" }}>
-                    <div>Player</div><div style={{ textAlign: "center" }}>Pos</div><div style={{ textAlign: "center" }}>Reason</div><div />
-                  </div>
-                  {leavesIn2027.length === 0 ? (
-                    <div style={{ padding: 18, fontSize: 16, color: "#666", fontStyle: "italic" }}>No players currently marked as leaving.</div>
-                  ) : leavesIn2027.slice().sort((a, b) => (a.Last || "").localeCompare(b.Last || "")).map((p) => {
-                    const isDeclared = declaredIds.has(p._id);
-                    return (
-                      <div key={p._id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 140px 60px", padding: "12px 18px", borderTop: "1px solid #eee", alignItems: "center", fontSize: 16 }}>
-                        <div style={{ fontWeight: 900, color: primary }}>{p.First} {p.Last}</div>
-                        <div style={{ textAlign: "center", fontWeight: 800 }}>{p.Position || "-"}</div>
-                        <div style={{ textAlign: "center", fontWeight: 800, color: isDeclared ? "#b45309" : "#444" }}>{isDeclared ? "Draft" : "Graduates"}</div>
-                        <div style={{ textAlign: "center" }}>
-                          {isDeclared ? (
-                            <button onClick={() => toggleDeclare(p._id)} style={{ background: "#fff", border: `2px solid ${secondary}`, color: "#b91c1c", fontWeight: 900, borderRadius: 6, width: 30, height: 30, cursor: "pointer", fontSize: 16 }}>✕</button>
-                          ) : <span style={{ color: "#999" }}>—</span>}
-                        </div>
+              </summary>
+              <div style={{ height: "4px", backgroundColor: GOLD }} />
+              <div style={{ background: "#fff" }}>
+                {conferenceTeams.map((team, i) => (
+                  <Link key={team.Slug || team.School} to={`/team/${team.Slug}`}
+                    style={{ display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px", textDecoration: "none", borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none" }}>
+                    {team.Logo1 ? (
+                      <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <img src={sanitizeUrl(team.Logo1)} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ===== ARCHIVE VIEW ===== */}
-        {viewMode === "archive" && (
-          <div>
-            <SectionHeader>Players Drafted Since 2000</SectionHeader>
-            {positionRanks && (
-              <div style={{ marginBottom: 30 }}>
-                <div style={{ overflowX: "auto" }}>
-                  <div style={{ border: `2px solid ${primary}`, borderRadius: 8, overflow: "hidden", backgroundColor: "#fff", marginBottom: 20, minWidth: isMobile ? 500 : "auto" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: `160px repeat(${POSITION_ORDER.length}, 1fr)`, backgroundColor: primary, color: "#fff", fontWeight: 900, padding: "12px 10px", fontSize: 14, textAlign: "center" }}>
-                      <div />
-                      {POSITION_ORDER.map((pos) => <div key={pos}>{pos}</div>)}
-                    </div>
-                    {[
-                      { label: "Amount", getValue: (pos) => positionCounts[pos] || 0 },
-                      { label: "National Rank", getValue: (pos) => positionRanks?.[pos]?.natRank || "-" },
-                      { label: `${team?.Conference} Rank`, getValue: (pos) => positionRanks?.[pos]?.confRank || "-" },
-                    ].map(({ label, getValue }) => (
-                      <div key={label} style={{ display: "grid", gridTemplateColumns: `160px repeat(${POSITION_ORDER.length}, 1fr)`, borderTop: "1px solid #eee", textAlign: "center", fontWeight: 800 }}>
-                        <div style={{ padding: 12, textAlign: "left", fontWeight: 900, color: primary, fontSize: 13 }}>{label}</div>
-                        {POSITION_ORDER.map((pos) => <div key={pos} style={{ padding: 12 }}>{getValue(pos)}</div>)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-            <div style={{ overflowX: "auto" }}>
-              <div style={{ border: `2px solid ${primary}`, borderRadius: 8, overflow: "hidden", backgroundColor: "#fff", maxWidth: 1000, margin: "0 auto", minWidth: isMobile ? 600 : "auto" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "80px 100px 1fr 100px 200px", backgroundColor: primary, color: "#fff", fontWeight: 900, padding: "14px 18px", fontSize: 16, alignItems: "center" }}>
-                  <div>Year</div><div>Round</div><div>Player</div><div>Pos</div><div>NFL Team</div>
-                </div>
-                {historical.length === 0 ? (
-                  <div style={{ padding: 20, fontSize: 16, color: "#666", fontStyle: "italic" }}>No draft history available.</div>
-                ) : historical.slice().sort((a, b) => {
-                  if (a.Year !== b.Year) return b.Year - a.Year;
-                  if (a.Round !== b.Round) return a.Round - b.Round;
-                  return a.Pick - b.Pick;
-                }).map((p) => (
-                  <div key={p.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 1fr 100px 200px", padding: "12px 18px", borderTop: "1px solid #eee", alignItems: "center", fontSize: 16 }}>
-                    <div style={{ fontWeight: 800 }}>{p.Year}</div>
-                    <div style={{ fontWeight: 800 }}>R{p.Round}</div>
-                    <div style={{ fontWeight: 900, color: primary }}>{p.Player}</div>
-                    <div style={{ textAlign: "center", fontWeight: 800 }}>{p.Position}</div>
-                    <div style={{ fontWeight: 700 }}>{p["NFL Team"]}</div>
-                  </div>
+                    ) : null}
+                    <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>
+                    <span style={{ color: "#ccc", fontSize: "14px", marginLeft: "auto" }}>›</span>
+                  </Link>
                 ))}
               </div>
+            </details>
+            {NewsSidebar}
+          </div>
+        ) : (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "240px minmax(0, 1fr) 240px",
+            gap: "20px",
+            alignItems: "start",
+          }}>
+            <div style={{ position: "sticky", top: "20px" }}>
+              {ConferenceSidebar}
+            </div>
+            <div>
+              <HeroCard
+                school={school} branding={branding} canonicalSchool={canonicalSchool}
+                color1={color1} color2={color2} isMobile={isMobile}
+              />
+              <MainContent
+                school={school} canonicalSchool={canonicalSchool}
+                color1={color1} color2={color2} isMobile={isMobile}
+                activeTab={activeTab} setActiveTab={setActiveTab}
+                prospects={prospects} archivePlayers={archivePlayers}
+                historicalPlayers={historicalPlayers}
+                draftMap={draftMap} nflTeams={nflTeams}
+                totalProspects={totalProspects}
+              />
+            </div>
+            <div style={{ position: "sticky", top: "20px" }}>
+              {NewsSidebar}
             </div>
           </div>
         )}
-
       </div>
     </>
+  );
+}
+
+function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile }) {
+  return (
+    <div style={{
+      background: `linear-gradient(135deg, ${color1} 0%, ${color1}cc 100%)`,
+      borderRadius: "12px", border: `2px solid ${color2}`,
+      padding: isMobile ? "18px 16px" : "24px 28px",
+      marginBottom: "20px",
+      display: "flex", alignItems: "center", gap: isMobile ? "14px" : "22px",
+    }}>
+      <div style={{ display: "flex", gap: "10px", flexShrink: 0 }}>
+        {branding?.logo1 && (
+          <div style={{
+            background: "#fff", borderRadius: "10px", padding: isMobile ? "6px" : "8px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+          }}>
+            <img
+              src={sanitizeUrl(branding.logo1)}
+              alt={canonicalSchool}
+              style={{ height: isMobile ? "48px" : "72px", objectFit: "contain" }}
+              onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
+            />
+          </div>
+        )}
+        {branding?.logo2 && !isMobile && (
+          <div style={{
+            background: "#fff", borderRadius: "10px", padding: "8px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+          }}>
+            <img
+              src={sanitizeUrl(branding.logo2)}
+              alt={canonicalSchool}
+              style={{ height: "72px", objectFit: "contain" }}
+              onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
+            />
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: isMobile ? "9px" : "10px", fontWeight: 900, color: color2,
+          textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: "4px",
+        }}>
+          {school?.Conference || "College Football"}
+        </div>
+        <div style={{
+          fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(36px, 4vw, 52px)", fontWeight: 900, color: "#fff",
+          lineHeight: 1.05, letterSpacing: "0.02em", marginBottom: "6px",
+          textTransform: "uppercase", wordBreak: "break-word",
+        }}>
+          {canonicalSchool}
+        </div>
+        {school?.Mascot && (
+          <div style={{
+            fontSize: isMobile ? "14px" : "18px", fontWeight: 700,
+            color: "rgba(255,255,255,0.75)", textTransform: "uppercase", letterSpacing: "0.1em",
+          }}>
+            {school.Mascot}
+          </div>
+        )}
+      </div>
+      {branding?.depthChart && !isMobile && (
+        <a
+          href={sanitizeUrl(branding.depthChart)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            flexShrink: 0, background: color2, color: "#fff",
+            border: "2px solid #fff", borderRadius: "8px",
+            padding: "10px 20px",
+            fontWeight: 900, fontSize: "13px",
+            textTransform: "uppercase", letterSpacing: "0.06em",
+            textDecoration: "none", whiteSpace: "nowrap",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+          }}
+        >
+          Depth Chart ↗
+        </a>
+      )}
+      {branding?.depthChart && isMobile && (
+        <a
+          href={sanitizeUrl(branding.depthChart)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            flexShrink: 0, background: color2, color: "#fff",
+            border: "2px solid #fff", borderRadius: "6px",
+            padding: "6px 10px",
+            fontWeight: 900, fontSize: "10px",
+            textTransform: "uppercase", letterSpacing: "0.04em",
+            textDecoration: "none", whiteSpace: "nowrap",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+          }}
+        >
+          Depth ↗
+        </a>
+      )}
+    </div>
   );
 }

@@ -181,11 +181,7 @@ export default function CFBPage() {
               }}
             >
               {teams.map((team) => {
-                const slug = team.School.toLowerCase()
-                  .replace(/&/g, "and")
-                  .replace(/[^a-z0-9\s]/g, "")
-                  .trim()
-                  .replace(/\s+/g, "-");
+                const slug = team.Slug;
 
                 const primary = team.Color1 || SITE_BLUE;
                 const secondary = team.Color2 || SITE_GOLD;

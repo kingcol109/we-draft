@@ -64,7 +64,9 @@ const GradeBadge = ({ grade, small = false }) => {
     <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`, borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px" }}>
       {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
       <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>{gd.short}</span>
-      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>ROUND</span>
+      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>
+        {grade === "Watchlist" ? "LIST" : "ROUND"}
+      </span>
     </div>
   );
 };
@@ -312,9 +314,8 @@ export default function UserBoards() {
 
   const filteredPlayers = players
     .filter((p) => {
-      // Only show players the user has graded with a round grade (not Watchlist, not ungraded)
-      const myGrade = boardMap.get(p.id);
-      return myGrade && myGrade !== "Watchlist";
+      // Show any player the user has on their board (Watchlist or graded)
+      return boardMap.has(p.id);
     })
     .filter((p) => !searchQuery.trim() ? true : `${p.First || ""} ${p.Last || ""}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
     .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
@@ -547,7 +548,7 @@ export default function UserBoards() {
                 <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
                   {sortedPlayers.length === 0 ? (
                     <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
-                      {filteredPlayers.length === 0 && !hasActiveFilters ? `No graded ${eligibleYear} players yet. Go to the Community Board and grade some players to see them here.` : "No players match your filters."}
+                      {!hasActiveFilters ? `No ${eligibleYear} players on your board yet. Go to the Community Board and add some players to see them here.` : "No players match your filters."}
                     </div>
                   ) : sortedPlayers.map((p) => {
                     const myGrade = boardMap.get(p.id);
@@ -618,7 +619,7 @@ export default function UserBoards() {
                       {sortedPlayers.length === 0 ? (
                         <tr>
                           <td colSpan={is2026 ? 8 : 6} style={{ padding: "32px", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
-                            {filteredPlayers.length === 0 && !hasActiveFilters ? `No graded ${eligibleYear} players yet. Go to the Community Board and grade some players to see them here.` : "No players match your filters."}
+                            {!hasActiveFilters ? `No ${eligibleYear} players on your board yet. Go to the Community Board and add some players to see them here.` : "No players match your filters."}
                           </td>
                         </tr>
                       ) : sortedPlayers.map((p) => {
