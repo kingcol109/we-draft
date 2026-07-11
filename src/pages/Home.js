@@ -13,6 +13,10 @@ import { Helmet } from "react-helmet-async";
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
+const SITE_TITLE = "We-Draft.com - NFL Draft Scouting Reports, Rankings & Mock Drafts";
+const SITE_DESCRIPTION = "Build your NFL Draft board, read scouting reports, compare community evaluations, create mock drafts, and follow thousands of college football prospects with rankings, film links, measurable data, and the latest draft news.";
+const SITE_URL = "https://we-draft.com/";
+
 const gradeScale = {
   "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
   "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
@@ -414,7 +418,19 @@ export default function Home() {
 
   return (
     <>
-      <Helmet><title>We-Draft.com</title></Helmet>
+      <Helmet>
+        <title>{SITE_TITLE}</title>
+        <meta name="description" content={SITE_DESCRIPTION} />
+        <link rel="canonical" href={SITE_URL} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={SITE_TITLE} />
+        <meta property="og:description" content={SITE_DESCRIPTION} />
+        <meta property="og:url" content={SITE_URL} />
+        <meta property="og:site_name" content="We-Draft.com" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={SITE_TITLE} />
+        <meta name="twitter:description" content={SITE_DESCRIPTION} />
+      </Helmet>
 
       <style>{`
         .mobile-chip-scroll {
