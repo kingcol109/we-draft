@@ -582,28 +582,18 @@ useEffect(() => {
 
   const buildMetaDescription = () => {
     const name = `${player.First || ""} ${player.Last || ""}`.trim();
-    const year = player.Eligible ? String(player.Eligible).replace(/s$/i, "") : "";
-    const pos = player.Position || "";
-    const school = player.School || "";
-    const height = player.Height || "";
-    const weight = player.Weight ? `${player.Weight} lbs` : "";
 
-    const identityParts = [
-      [year, pos].filter(Boolean).join(" "),
-      school ? `from ${school}` : "",
-    ].filter(Boolean).join(" ");
-    const measureParts = [height, weight].filter(Boolean).join(", ");
-
-    const gradeLabel = community.avgGrade ? gradeLabels[Math.round(community.avgGrade)] : null;
-    const topStrengths = community.topStrengths?.slice(0, 2).join(", ");
-
-    if (gradeLabel && topStrengths) {
-      return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Community grade: ${gradeLabel}. Top strengths: ${topStrengths}. Scouting report and NFL fit on We-Draft.com.`;
-    } else if (gradeLabel) {
-      return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Community grade: ${gradeLabel}. View full scouting report, strengths, weaknesses, and NFL fit on We-Draft.com.`;
-    } else {
-      return `${name} | ${identityParts}${measureParts ? ` | ${measureParts}` : ""}. Submit your scouting grade, strengths, weaknesses, and NFL fit on We-Draft.com — community-powered NFL Draft analysis.`;
+    // Try to pull first 12 words from the top public evaluation
+    const latestEval = publicFeed[0]?.evaluation?.trim();
+    if (latestEval) {
+      const words = latestEval.split(/\s+/);
+      const first12 = words.slice(0, 12).join(" ");
+      const snippet = first12 + (words.length > 12 ? "..." : "");
+      return `${snippet} View the full evaluation, grades, measurables, and film.`;
     }
+
+    // Fallback: no evaluations yet
+    return `Read ${name}'s scouting report, including strengths, weaknesses, NFL projection, current draft grade, measurables, and the latest evaluations from We Draft.`;
   };
   const metaDescription = buildMetaDescription();
 
@@ -808,16 +798,16 @@ useEffect(() => {
   return (
     <>
       <Helmet>
-        <title>{`${player.First||""} ${player.Last||""} Draft Scouting Report`}</title>
+        <title>{`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`}</title>
         <meta name="description" content={metaDescription} />
         <link rel="canonical" href={`https://we-draft.com/player/${slug}`} />
         <meta property="og:type" content="article" />
-        <meta property="og:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report`} />
+        <meta property="og:title" content={`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`} />
         <meta property="og:description" content={metaDescription} />
         <meta property="og:url" content={`https://we-draft.com/player/${slug}`} />
         <meta property="og:site_name" content="We-Draft.com" />
         <meta name="twitter:card" content="summary" />
-        <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} Draft Scouting Report`} />
+        <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`} />
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
 

@@ -84,27 +84,69 @@ const GradeBadge = ({ grade, small = false }) => {
     }}>
       {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
       <span style={{ fontSize: numSz, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em", textAlign: "center" }}>{gd.short}</span>
-      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>ROUND</span>
+      <span style={{ fontSize: lblSz, fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>{grade === "Watchlist" ? "LIST" : "ROUND"}</span>
     </div>
   );
 };
 
-const PlusBadge = ({ onClick, loading, small = false }) => {
+// ── PlusBadge with hover tooltip and unauthenticated modal trigger ──
+const PlusBadge = ({ onClick, loading, small = false, user, login }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
+  const [hovered, setHovered] = useState(false);
+
+  const handleClick = () => {
+    if (loading) return;
+    if (!user) { login(); return; }
+    onClick();
+  };
+
   return (
-    <div
-      onClick={loading ? undefined : onClick}
-      style={{
-        display: "inline-flex", alignItems: "center", justifyContent: "center",
-        width: w, height: h, border: `2px solid ${BLUE}`, borderRadius: "5px",
-        cursor: loading ? "default" : "pointer", backgroundColor: "#fff",
-        color: BLUE, fontSize: small ? "18px" : "22px", fontWeight: 900,
-        opacity: loading ? 0.4 : 1, transition: "background 0.15s", flexShrink: 0,
-      }}
-      onMouseEnter={(e) => { if (!loading) e.currentTarget.style.background = "#e6f0fa"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-    >+</div>
+    <div style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+      <div
+        onClick={handleClick}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: w, height: h, border: `2px solid ${BLUE}`, borderRadius: "5px",
+          cursor: loading ? "default" : "pointer",
+          backgroundColor: hovered ? "#e6f0fa" : "#fff",
+          color: BLUE, fontSize: small ? "18px" : "22px", fontWeight: 900,
+          opacity: loading ? 0.4 : 1, transition: "background 0.15s",
+        }}
+      >
+        +
+      </div>
+      {hovered && !loading && (
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 6px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#222",
+          color: "#fff",
+          fontSize: "11px",
+          fontWeight: 800,
+          padding: "4px 8px",
+          borderRadius: "4px",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: 999,
+        }}>
+          Add to Board
+          <div style={{
+            position: "absolute",
+            top: "100%", left: "50%",
+            transform: "translateX(-50%)",
+            width: 0, height: 0,
+            borderLeft: "5px solid transparent",
+            borderRight: "5px solid transparent",
+            borderTop: "5px solid #222",
+          }} />
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -305,7 +347,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
 }
 
 export default function CommunityBoard() {
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   const navigate = useNavigate();
   const { year } = useParams();
 
@@ -457,7 +499,7 @@ export default function CommunityBoard() {
   }, [user]);
 
   const handleAddToBoard = async (p) => {
-    if (!user) return alert("Sign in to add players to your board.");
+    if (!user) { login(); return; }
     if (boardMap.has(p.id)) return;
     setAddingId(p.id);
     try {
@@ -592,7 +634,7 @@ export default function CommunityBoard() {
 
       <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
-        {/* ===== Page Header ===== */}
+        {/* Page Header */}
         <div style={{ marginBottom: "16px" }}>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", marginBottom: "6px" }}>
             <img src={Logo1} alt="We-Draft.com" style={{ height: isMobile ? "26px" : "32px", objectFit: "contain" }} />
@@ -604,7 +646,7 @@ export default function CommunityBoard() {
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
         </div>
 
-        {/* ===== Year Selector ===== */}
+        {/* Year Selector */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", marginBottom: "18px" }}>
           <div style={{ display: "flex", gap: "8px" }}>
             {ACTIVE_YEARS.map((yr) => (
@@ -628,7 +670,7 @@ export default function CommunityBoard() {
           <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
         </div>
 
-        {/* ===== 2029 placeholder ===== */}
+        {/* 2029 placeholder */}
         {is2029Empty ? (
           <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: BLUE, padding: "8px 16px" }}>
@@ -647,7 +689,7 @@ export default function CommunityBoard() {
           </div>
         ) : (
           <>
-            {/* ===== Filters row ===== */}
+            {/* Filters */}
             {isMobile ? (
               <div style={{ marginBottom: "12px" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
@@ -722,7 +764,7 @@ export default function CommunityBoard() {
               </div>
             )}
 
-            {/* ===== Table Card ===== */}
+            {/* Table Card */}
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
               <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
@@ -783,7 +825,7 @@ export default function CommunityBoard() {
                           ) : onBoard ? (
                             <GradeBadge grade={myGrade} small />
                           ) : (
-                            <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small />
+                            <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small user={user} login={login} />
                           )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
@@ -871,7 +913,7 @@ export default function CommunityBoard() {
                                 ) : onBoard ? (
                                   <GradeBadge grade={myGrade} />
                                 ) : (
-                                  <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} />
+                                  <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} user={user} login={login} />
                                 )}
                               </div>
                             </td>
@@ -897,7 +939,7 @@ export default function CommunityBoard() {
 
             {!user && (
               <p style={{ textAlign: "center", marginTop: "14px", fontSize: "13px", color: "#999", fontWeight: 700 }}>
-                Sign in to add players to your board
+                <span onClick={login} style={{ color: BLUE, fontWeight: 900, cursor: "pointer", textDecoration: "underline" }}>Sign in</span> to add players to your board
               </p>
             )}
           </>
