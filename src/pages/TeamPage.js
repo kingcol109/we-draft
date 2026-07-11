@@ -662,7 +662,6 @@ function MainContent({
         return (
           <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              {/* FIX: was color2 (gold), now #fff (white) */}
               <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 We-Draft Prospects ({allProspects.length})
               </div>
@@ -711,7 +710,6 @@ function MainContent({
         return (
           <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              {/* FIX: was color2 (gold), now #fff (white) */}
               <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 NFL Draft History ({totalArchive})
               </div>
@@ -977,6 +975,12 @@ export default function TeamPage() {
     </div>
   );
 
+  const pageTitle = school?.Mascot
+    ? `${canonicalSchool} ${school.Mascot} Draft Prospects | We-Draft.com`
+    : `${canonicalSchool} Draft Prospects | We-Draft.com`;
+
+  const pageDescription = `View ${canonicalSchool}'s NFL Draft prospects. View draft history, write player evaluations, and create your own draft board on We-Draft.com.`;
+
   const ConferenceSidebar = (
     <SidebarCard
       title={school?.Conference || "Conference"}
@@ -1097,9 +1101,16 @@ export default function TeamPage() {
   return (
     <>
       <Helmet>
-        <title>{school?.Mascot ? `${canonicalSchool} ${school.Mascot}` : canonicalSchool} | We-Draft.com</title>
-        <meta name="description" content={`${canonicalSchool} NFL Draft prospects for 2027, 2028, and 2029. Community scouting grades, strengths, weaknesses, and NFL fit projections on We-Draft.com.`} />
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
         <link rel="canonical" href={`https://we-draft.com/team/${slug}`} />
+        <meta property="og:title" content={pageTitle} />
+        <meta property="og:description" content={pageDescription} />
+        <meta property="og:url" content={`https://we-draft.com/team/${slug}`} />
+        <meta property="og:site_name" content="We-Draft.com" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={pageDescription} />
       </Helmet>
 
       <div style={{

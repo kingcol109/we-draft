@@ -119,6 +119,7 @@ export default function PlayerProfile() {
   const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
   const cfbLogoRef = useRef("");
+  const schoolSlugRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [evalCount, setEvalCount] = useState(0);
 
@@ -279,7 +280,8 @@ export default function PlayerProfile() {
         if (sSnap.exists()) {
           const b = sSnap.data();
           cfbLogoRef.current = b.Logo1 || b.Logo2 || "";
-          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"" });
+          schoolSlugRef.current = b.Slug || "";
+          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", slug:b.Slug||"" });
         } else { setBranding(null); }
       } catch(e) { setBranding(null); }
     };
@@ -293,7 +295,7 @@ export default function PlayerProfile() {
         const snap = await getDoc(doc(db,"nfl",draftedBy));
         if (snap.exists()) {
           const n = snap.data();
-          setBranding({ color1:n.Color1, color2:n.Color2, nflLogo:n.Logo1, cfbLogo:cfbLogoRef.current });
+          setBranding({ color1:n.Color1, color2:n.Color2, nflLogo:n.Logo1, cfbLogo:cfbLogoRef.current, slug:schoolSlugRef.current });
         }
       } catch(e) { console.error(e); }
     };
@@ -302,6 +304,7 @@ export default function PlayerProfile() {
 
   const color1 = draftedBy ? branding?.color1 : (branding?.color1 || SITE_BLUE);
   const color2 = draftedBy ? branding?.color2 : (branding?.color2 || SITE_GOLD);
+  const teamSlug = branding?.slug || toTeamSlug(player?.School);
 
   useEffect(() => {
     const fetch = async () => {
@@ -582,6 +585,7 @@ useEffect(() => {
 
   const buildMetaDescription = () => {
     const name = `${player.First || ""} ${player.Last || ""}`.trim();
+    const prefix = [player.School, player.Position].filter(Boolean).join(" ");
 
     // Try to pull first 12 words from the top public evaluation
     const latestEval = publicFeed[0]?.evaluation?.trim();
@@ -589,11 +593,11 @@ useEffect(() => {
       const words = latestEval.split(/\s+/);
       const first12 = words.slice(0, 12).join(" ");
       const snippet = first12 + (words.length > 12 ? "..." : "");
-      return `${snippet} View the full evaluation, grades, measurables, and film.`;
+      return `${prefix ? prefix + ": " : ""}${snippet} View the full evaluation, grades, measurables, and film.`;
     }
 
     // Fallback: no evaluations yet
-    return `Read ${name}'s scouting report, including strengths, weaknesses, NFL projection, current draft grade, measurables, and the latest evaluations from We Draft.`;
+    return `${prefix ? prefix + " — " : ""}Read ${name}'s scouting report, including strengths, weaknesses, NFL projection, current draft grade, measurables, and the latest evaluations from We Draft.`;
   };
   const metaDescription = buildMetaDescription();
 
@@ -862,7 +866,7 @@ useEffect(() => {
               {draftedBy ? (
                 branding?.nflLogo ? <img src={sanitizeUrl(branding.nflLogo)} alt="NFL" style={{ height:isMobile?50:96, objectFit:"contain" }} /> : null
               ) : branding?.logo1 ? (
-                <Link to={`/team/${toTeamSlug(player.School)}`} className="flex items-center justify-center w-full h-full">
+                <Link to={`/team/${teamSlug}`} className="flex items-center justify-center w-full h-full">
                   <img src={sanitizeUrl(branding.logo1)} alt={player.School} style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
                 </Link>
               ) : null}
@@ -877,7 +881,7 @@ useEffect(() => {
                   {player.Position}
                 </span>
                 <span style={{ color:"#ccc" }}>·</span>
-                <span onClick={()=>navigate(`/team/${toTeamSlug(player.School)}`)} className="font-extrabold hover:underline cursor-pointer" style={{ color:color1, fontSize:isMobile?"12px":"19px" }}>
+                <span onClick={()=>navigate(`/team/${teamSlug}`)} className="font-extrabold hover:underline cursor-pointer" style={{ color:color1, fontSize:isMobile?"12px":"19px" }}>
                   {player.School}
                 </span>
                 <span style={{ color:"#ccc" }}>·</span>
@@ -902,12 +906,12 @@ useEffect(() => {
             <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:"1px solid #eee", borderRadius:"8px" }}>
               {draftedBy ? (
                 branding?.cfbLogo ? (
-                  <Link to={`/team/${toTeamSlug(player.School)}`} className="flex items-center justify-center w-full h-full">
+                  <Link to={`/team/${teamSlug}`} className="flex items-center justify-center w-full h-full">
                     <img src={sanitizeUrl(branding.cfbLogo)} alt="College" style={{ height:isMobile?42:88, objectFit:"contain" }} />
                   </Link>
                 ) : null
               ) : branding?.logo2 ? (
-                <Link to={`/team/${toTeamSlug(player.School)}`} className="flex items-center justify-center w-full h-full">
+                <Link to={`/team/${teamSlug}`} className="flex items-center justify-center w-full h-full">
                   <img src={sanitizeUrl(branding.logo2)} alt="" style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
                 </Link>
               ) : null}
