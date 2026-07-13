@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /players/{playerId} {
+      allow read: if true;
+      allow write: if true;
+      match /evaluations/{uid} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+    match /schools/{school} { allow read, write: if true; }
+    match /nfl/{team} { allow read, write: if true; }
+    match /draftOrder/{pick} { allow read, write: if true; }
+    match /draftOrder2027/{pick} { allow read, write: if true; }
+    match /draftOrder2028/{pick} { allow read, write: if true; }
+    match /historical/{doc} { allow read, write: if true; }
+    match /news/{doc} { allow read, write: if true; }
+    match /traits/{doc} { allow read, write: if true; }
+    match /config/{doc} { allow read, write: if true; }
+    match /playerStats/{doc} { allow read, write: if true; }
+    match /teamPositionRanks/{doc} { allow read, write: if true; }
+    match /rosters/{doc} { allow read, write: if true; }
+    match /articles/{doc} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /users/{uid} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid;
+      match /evaluations/{playerId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      match /archivedEvaluations/{playerId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+    match /mockDrafts/{draftId} {
+      allow read: if resource.data.visibility == 'public'
+                  || (request.auth != null && request.auth.uid == resource.data.ownerId);
+      allow create: if request.auth != null
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null
+                             && resource.data.ownerId == request.auth.uid;
+    }
+    match /myDraftClass/{docId} {
+      allow get: if request.auth != null
+                 && (resource == null || resource.data.uid == request.auth.uid);
+      allow list: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow update: if request.auth != null
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid;
+      allow delete: if request.auth != null
+                    && resource.data.uid == request.auth.uid;
+    }
+    match /votes/{voteId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+    match /whiteboards/{docId} {
+      allow get: if request.auth != null
+                 && (resource == null || resource.data.uid == request.auth.uid);
+      allow list: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid
+                    && docId == request.auth.uid + "_" + request.resource.data.draftClass;
+
+      allow update: if request.auth != null
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid;
+
+      allow delete: if request.auth != null
+                    && resource.data.uid == request.auth.uid;
+    }
+  }
+}
