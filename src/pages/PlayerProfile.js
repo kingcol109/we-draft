@@ -656,6 +656,21 @@ useEffect(() => {
 
   const DraftClassListContent = (
     <>
+      <Link
+        to={communityYearPath}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "10px 14px", textDecoration: "none",
+          background: SITE_BLUE, color: SITE_GOLD,
+          fontWeight: 900, fontSize: "12px",
+          textTransform: "uppercase", letterSpacing: "0.1em",
+          gap: "6px", borderBottom: "1px solid #f0f0f0",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
+      >
+        Full {formatEligible(player.Eligible)} Board →
+      </Link>
       {draftClassLoading ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontWeight: 700 }}>Loading…</div>
       ) : draftClassPlayers.length === 0 ? (
@@ -707,21 +722,6 @@ useEffect(() => {
             </Link>
           );
         })}
-          <Link
-            to={communityYearPath}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: "10px 14px", textDecoration: "none",
-              background: SITE_BLUE, color: SITE_GOLD,
-              fontWeight: 900, fontSize: "12px",
-              textTransform: "uppercase", letterSpacing: "0.1em",
-              gap: "6px",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
-          >
-            Full {formatEligible(player.Eligible)} Board →
-          </Link>
         </>
       )}
     </>

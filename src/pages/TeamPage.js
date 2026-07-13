@@ -792,7 +792,6 @@ export default function TeamPage() {
           ));
           const confTeams = confSnap.docs
             .map((d) => d.data())
-            .filter((t) => t.School !== resolvedSchool)
             .sort((a, b) => a.School.localeCompare(b.School));
           setConferenceTeams(confTeams);
         }
@@ -994,57 +993,70 @@ export default function TeamPage() {
       {conferenceTeams.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No other teams.</div>
       ) : (
-        conferenceTeams.map((team, i) => (
-          <Link
-            key={team.Slug || team.School}
-            to={`/team/${team.Slug}`}
-            style={{
-              display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
-              textDecoration: "none", background: "#fff",
-              borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-          >
-            {team.Logo1 ? (
-              <div style={{
-                width: "28px", height: "28px", flexShrink: 0, display: "flex",
-                alignItems: "center", justifyContent: "center",
-                background: "#f5f5f5", borderRadius: "4px", padding: "2px",
-              }}>
-                <img
-                  src={sanitizeUrl(team.Logo1)}
-                  alt={team.School}
-                  style={{ width: "24px", height: "24px", objectFit: "contain" }}
-                  onError={(e) => { e.currentTarget.style.display = "none"; }}
-                />
-              </div>
-            ) : (
-              <div style={{
-                width: "28px", height: "28px", flexShrink: 0, borderRadius: "4px",
-                background: team.Color1 || BLUE, display: "flex", alignItems: "center",
-                justifyContent: "center", color: "#fff", fontSize: "10px", fontWeight: 900,
-              }}>
-                {team.School.charAt(0)}
-              </div>
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontWeight: 900, fontSize: "13px", color: BLUE, lineHeight: 1.2,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}>
-                {team.School}
-              </div>
-              {team.Mascot && (
-                <div style={{ fontSize: "10px", fontWeight: 700, color: "#888", lineHeight: 1.2 }}>
-                  {team.Mascot}
+        conferenceTeams.map((team, i) => {
+          const isSelf = team.School === canonicalSchool;
+          const rowStyle = {
+            display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+            textDecoration: "none",
+            background: isSelf ? "#fff8e6" : "#fff",
+            borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
+            borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+            transition: "background 0.12s",
+          };
+          const rowContent = (
+            <>
+              {team.Logo1 ? (
+                <div style={{
+                  width: "28px", height: "28px", flexShrink: 0, display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                  background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+                }}>
+                  <img
+                    src={sanitizeUrl(team.Logo1)}
+                    alt={team.School}
+                    style={{ width: "24px", height: "24px", objectFit: "contain" }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                </div>
+              ) : (
+                <div style={{
+                  width: "28px", height: "28px", flexShrink: 0, borderRadius: "4px",
+                  background: team.Color1 || BLUE, display: "flex", alignItems: "center",
+                  justifyContent: "center", color: "#fff", fontSize: "10px", fontWeight: 900,
+                }}>
+                  {team.School.charAt(0)}
                 </div>
               )}
-            </div>
-            <span style={{ color: "#ccc", fontSize: "14px", fontWeight: 900, flexShrink: 0 }}>›</span>
-          </Link>
-        ))
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontWeight: 900, fontSize: "13px", color: BLUE, lineHeight: 1.2,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>
+                  {team.School}
+                </div>
+                {team.Mascot && (
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#888", lineHeight: 1.2 }}>
+                    {team.Mascot}
+                  </div>
+                )}
+              </div>
+              {!isSelf && <span style={{ color: "#ccc", fontSize: "14px", fontWeight: 900, flexShrink: 0 }}>›</span>}
+            </>
+          );
+          return isSelf ? (
+            <div key={team.Slug || team.School} style={rowStyle}>{rowContent}</div>
+          ) : (
+            <Link
+              key={team.Slug || team.School}
+              to={`/team/${team.Slug}`}
+              style={rowStyle}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              {rowContent}
+            </Link>
+          );
+        })
       )}
     </SidebarCard>
   );
@@ -1141,18 +1153,34 @@ export default function TeamPage() {
               </summary>
               <div style={{ height: "4px", backgroundColor: GOLD }} />
               <div style={{ background: "#fff" }}>
-                {conferenceTeams.map((team, i) => (
-                  <Link key={team.Slug || team.School} to={`/team/${team.Slug}`}
-                    style={{ display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px", textDecoration: "none", borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none" }}>
-                    {team.Logo1 ? (
-                      <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <img src={sanitizeUrl(team.Logo1)} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                      </div>
-                    ) : null}
-                    <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>
-                    <span style={{ color: "#ccc", fontSize: "14px", marginLeft: "auto" }}>›</span>
-                  </Link>
-                ))}
+                {conferenceTeams.map((team, i) => {
+                  const isSelf = team.School === canonicalSchool;
+                  const rowStyle = {
+                    display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+                    textDecoration: "none",
+                    background: isSelf ? "#fff8e6" : "#fff",
+                    borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
+                    borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+                  };
+                  const rowContent = (
+                    <>
+                      {team.Logo1 ? (
+                        <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <img src={sanitizeUrl(team.Logo1)} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                        </div>
+                      ) : null}
+                      <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>
+                      {!isSelf && <span style={{ color: "#ccc", fontSize: "14px", marginLeft: "auto" }}>›</span>}
+                    </>
+                  );
+                  return isSelf ? (
+                    <div key={team.Slug || team.School} style={rowStyle}>{rowContent}</div>
+                  ) : (
+                    <Link key={team.Slug || team.School} to={`/team/${team.Slug}`} style={rowStyle}>
+                      {rowContent}
+                    </Link>
+                  );
+                })}
               </div>
             </details>
             {NewsSidebar}

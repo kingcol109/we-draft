@@ -14,6 +14,23 @@ const POSITIONS = ["QB","RB","WR","TE","OL","DL","EDGE","LB","DB"];
 const ROUNDS = ["ROUND 1","ROUND 2","ROUND 3","ROUND 4","ROUND 5","ROUND 6","ROUND 7","UDFA"];
 const DRAFT_CLASSES = ["2027","2028","2026"];
 
+// Retries a Firestore call a few times if it fails with permission-denied.
+// This covers a known race where onAuthStateChanged resolves slightly ahead
+// of Firestore's internal credential provider on a fresh page load / new
+// tab — the very first protected read can fail even though the user is
+// genuinely signed in and legitimately authorized.
+async function withAuthRetry(fn, retries = 3, delayMs = 400) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isPermissionRace = err?.code === "permission-denied";
+      if (!isPermissionRace || i === retries - 1) throw err;
+      await new Promise(res => setTimeout(res, delayMs * (i + 1)));
+    }
+  }
+}
+
 export default function Whiteboard() {
   const { user, authReady } = useAuth();
   const [selectedClass, setSelectedClass] = useState("2027");
@@ -21,6 +38,7 @@ export default function Whiteboard() {
   const [board, setBoard] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
   const [activeId, setActiveId] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const playerBankRef = useRef(null);
   const sensors = useSensors(useSensor(PointerSensor));
 
@@ -31,11 +49,16 @@ export default function Whiteboard() {
   useEffect(() => {
     if (!authReady || !user) return;
     const loadPlayers = async () => {
-      const snap = await getDocs(collection(db, "players"));
-      const players = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(p => p.Eligible === selectedClass);
-      setAllPlayers(players);
+      try {
+        const snap = await withAuthRetry(() => getDocs(collection(db, "players")));
+        const players = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(p => p.Eligible === selectedClass);
+        setAllPlayers(players);
+      } catch (err) {
+        console.error("Failed to load players:", err);
+        setLoadError("We couldn't load player data. Please refresh the page.");
+      }
     };
     loadPlayers();
   }, [selectedClass, user, authReady]);
@@ -43,17 +66,22 @@ export default function Whiteboard() {
   useEffect(() => {
     if (!authReady || !allPlayers.length || !user) return;
     const loadBoard = async () => {
-      const boardRef = doc(db, "whiteboards", `${user.uid}_${selectedClass}`);
-      const snap = await getDoc(boardRef);
-      if (snap.exists()) {
-        setBoard(snap.data().board);
-      } else {
-        const empty = {};
-        ROUNDS.forEach(r => {
-          empty[r] = {};
-          POSITIONS.forEach(p => { empty[r][p] = []; });
-        });
-        setBoard(empty);
+      try {
+        const boardRef = doc(db, "whiteboards", `${user.uid}_${selectedClass}`);
+        const snap = await withAuthRetry(() => getDoc(boardRef));
+        if (snap.exists()) {
+          setBoard(snap.data().board);
+        } else {
+          const empty = {};
+          ROUNDS.forEach(r => {
+            empty[r] = {};
+            POSITIONS.forEach(p => { empty[r][p] = []; });
+          });
+          setBoard(empty);
+        }
+      } catch (err) {
+        console.error("Failed to load whiteboard:", err);
+        setLoadError("We couldn't load your whiteboard. Please refresh the page.");
       }
     };
     loadBoard();
@@ -163,13 +191,18 @@ export default function Whiteboard() {
 
   const handleSave = async () => {
     if (!user) { alert("You must be logged in to save your board."); return; }
-    await setDoc(doc(db, "whiteboards", `${user.uid}_${selectedClass}`), {
-      uid: user.uid,
-      draftClass: selectedClass,
-      board,
-      updatedAt: serverTimestamp()
-    });
-    setIsDirty(false);
+    try {
+      await withAuthRetry(() => setDoc(doc(db, "whiteboards", `${user.uid}_${selectedClass}`), {
+        uid: user.uid,
+        draftClass: selectedClass,
+        board,
+        updatedAt: serverTimestamp()
+      }));
+      setIsDirty(false);
+    } catch (err) {
+      console.error("Failed to save whiteboard:", err);
+      alert("We couldn't save your board. Please try again in a moment.");
+    }
   };
 
   const assignedIds = useMemo(() => {
@@ -192,7 +225,21 @@ export default function Whiteboard() {
     );
   }
 
-  if (!board) return null;
+  if (loadError) {
+    return (
+      <div style={{ padding: 100, textAlign: "center" }}>
+        <h2>{loadError}</h2>
+      </div>
+    );
+  }
+
+  if (!board) {
+    return (
+      <div style={{ padding: 100, textAlign: "center", color: "#888" }}>
+        Loading your whiteboard...
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "60px 140px", background: "#fafafa" }}>

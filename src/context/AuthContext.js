@@ -68,12 +68,29 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
+        // Force-refresh the ID token before touching Firestore. On a fresh
+        // page load / new tab, onAuthStateChanged can fire slightly ahead of
+        // Firestore's internal credential provider picking up the restored
+        // session, which produces spurious "Missing or insufficient
+        // permissions" errors on the very first protected read. Awaiting a
+        // fresh token here closes most of that race before authReady flips.
+        try {
+          await u.getIdToken(true);
+        } catch (err) {
+          console.error("Token refresh error:", err);
+        }
+
         setUser(u);
-        const ref = doc(db, "users", u.uid);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          setProfile(snap.data());
-        } else {
+        try {
+          const ref = doc(db, "users", u.uid);
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            setProfile(snap.data());
+          } else {
+            setProfile(null);
+          }
+        } catch (err) {
+          console.error("Failed to load user profile:", err);
           setProfile(null);
         }
       } else {
