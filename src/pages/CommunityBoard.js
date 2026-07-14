@@ -600,7 +600,17 @@ export default function CommunityBoard() {
     return 0;
   });
 
-  const allPositions = [...new Set(players.map((p) => p.Position).filter(Boolean))].sort();
+  const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
+  const allPositions = [...new Set(players.map((p) => p.Position).filter(Boolean))].sort(
+    (a, b) => {
+      const ai = POSITION_ORDER.indexOf(a);
+      const bi = POSITION_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    }
+  );
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
   const SortHeader = ({ sortK, label, align = "center", minWidth }) => (
@@ -693,7 +703,7 @@ export default function CommunityBoard() {
             {isMobile ? (
               <div style={{ marginBottom: "12px" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
-                  <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+                  <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} ordered />
                   <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                   <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                   <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
@@ -730,7 +740,7 @@ export default function CommunityBoard() {
               </div>
             ) : (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
-                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} ordered />
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />

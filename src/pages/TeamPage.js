@@ -710,10 +710,15 @@ function MainContent({
         return (
           <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                NFL Draft History ({totalArchive})
+              <div>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  NFL Draft History ({totalArchive})
+                </div>
+                <div style={{ color: "rgba(255,255,255,0.65)", fontWeight: 700, fontSize: "10px", marginTop: "2px" }}>
+                  Data available back to 2000
+                </div>
               </div>
-              <Link to="/community/2026" style={{ color: "rgba(255,255,255,0.75)", fontSize: "11px", fontWeight: 800, textDecoration: "underline" }}>
+              <Link to="/community/2026" style={{ color: "rgba(255,255,255,0.75)", fontSize: "11px", fontWeight: 800, textDecoration: "underline", flexShrink: 0, marginLeft: "12px" }}>
                 2026 Board →
               </Link>
             </div>
@@ -746,6 +751,8 @@ export default function TeamPage() {
 
   const [conferenceTeams, setConferenceTeams] = useState([]);
   const [teamNews, setTeamNews] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+  const [schoolsMap, setSchoolsMap] = useState({});
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -814,6 +821,20 @@ export default function TeamPage() {
         nflSnap.docs.forEach((d) => { nflMap[d.id] = d.data(); });
         setNflTeams(nflMap);
 
+        // Full schools map — used to resolve schedule opponents (needed regardless
+        // of which conference they're in, unlike the conference-scoped query above)
+        try {
+          const allSchoolsSnap = await getDocs(collection(db, "schools"));
+          const allSchoolsMap = {};
+          allSchoolsSnap.docs.forEach((d) => {
+            const data = d.data();
+            if (data.School) allSchoolsMap[data.School] = data;
+          });
+          setSchoolsMap(allSchoolsMap);
+        } catch {
+          setSchoolsMap({});
+        }
+
         const draftSnap = await getDocs(collection(db, "draftOrder"));
         const dMap = {};
         draftSnap.docs.forEach((d) => {
@@ -821,6 +842,30 @@ export default function TeamPage() {
           if (data.Selection) dMap[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
         });
         setDraftMap(dMap);
+
+        // Schedule — a team can appear as either Away or Home, so run both queries and merge
+        try {
+          const [awaySnap, homeSnap] = await Promise.all([
+            getDocs(query(collection(db, "schedule26"), where("Away", "==", resolvedSchool))),
+            getDocs(query(collection(db, "schedule26"), where("Home", "==", resolvedSchool))),
+          ]);
+          const seenIds = new Set();
+          const games = [...awaySnap.docs, ...homeSnap.docs]
+            .filter((d) => { if (seenIds.has(d.id)) return false; seenIds.add(d.id); return true; })
+            .map((d) => ({ id: d.id, ...d.data() }));
+
+          const getGameTime = (g) => {
+            if (g.Date?.toDate) return g.Date.toDate().getTime();
+            if (g.Date) { const t = new Date(g.Date).getTime(); if (!isNaN(t)) return t; }
+            return 0;
+          };
+          games.sort((a, b) => getGameTime(a) - getGameTime(b));
+
+          setSchedule(games);
+        } catch (e) {
+          console.error("Schedule load error:", e);
+          setSchedule([]);
+        }
 
         const prospectResults = {};
         await Promise.all(
@@ -1061,6 +1106,138 @@ export default function TeamPage() {
     </SidebarCard>
   );
 
+  // ── Schedule sidebar — opponents are clickable only if they belong to a
+  // tracked conference (Independent counts as a conference; unlisted/FCS
+  // opponents with no Conference field are shown as plain text). Only the
+  // opponent's name is a link for now — full game pages come later.
+  let scheduleWins = 0, scheduleLosses = 0, scheduleTies = 0;
+  schedule.forEach((g) => {
+    const hasScoreG = g.AwayScore !== undefined && g.AwayScore !== null
+      && g.HomeScore !== undefined && g.HomeScore !== null;
+    if (!hasScoreG) return;
+    const isHome = g.Home === canonicalSchool;
+    const ownScore = isHome ? g.HomeScore : g.AwayScore;
+    const oppScore = isHome ? g.AwayScore : g.HomeScore;
+    if (ownScore > oppScore) scheduleWins++;
+    else if (ownScore < oppScore) scheduleLosses++;
+    else scheduleTies++;
+  });
+  const hasAnyScores = scheduleWins + scheduleLosses + scheduleTies > 0;
+  const recordLabel = scheduleTies > 0
+    ? `${scheduleWins}-${scheduleLosses}-${scheduleTies}`
+    : `${scheduleWins}-${scheduleLosses}`;
+
+  const ScheduleSidebar = (
+    <SidebarCard title={`${ARCHIVE_YEAR} Schedule`} color1={BLUE} color2={GOLD}>
+      {hasAnyScores && (
+        <div style={{
+          padding: "10px 14px", textAlign: "center",
+          background: "#f7f8fa", borderBottom: "1px solid #f0f0f0",
+        }}>
+          <span style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: "8px" }}>
+            Record
+          </span>
+          <span style={{ fontSize: "18px", fontWeight: 900, color: BLUE, letterSpacing: "0.02em" }}>
+            {recordLabel}
+          </span>
+        </div>
+      )}
+      {schedule.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No schedule available.</div>
+      ) : (
+        schedule.map((g, i) => {
+          const isHome = g.Home === canonicalSchool;
+          const opponentName = isHome ? g.Away : g.Home;
+          const opponentData = schoolsMap[opponentName];
+          const isClickable = !!(opponentData && opponentData.Conference);
+
+          const hasScore = g.AwayScore !== undefined && g.AwayScore !== null
+            && g.HomeScore !== undefined && g.HomeScore !== null;
+          let resultLabel = null;
+          let resultColor = "#888";
+          if (hasScore) {
+            const ownScore = isHome ? g.HomeScore : g.AwayScore;
+            const oppScore = isHome ? g.AwayScore : g.HomeScore;
+            if (ownScore > oppScore) { resultLabel = `W ${ownScore}-${oppScore}`; resultColor = "#2e7d32"; }
+            else if (ownScore < oppScore) { resultLabel = `L ${ownScore}-${oppScore}`; resultColor = "#c0392b"; }
+            else { resultLabel = `T ${ownScore}-${oppScore}`; resultColor = "#888"; }
+          }
+
+          let dateLabel = "";
+          if (g.Date?.toDate) {
+            dateLabel = g.Date.toDate().toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          } else if (g.Date) {
+            const d = new Date(g.Date);
+            dateLabel = isNaN(d.getTime()) ? String(g.Date) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          }
+
+          return (
+            <div
+              key={g.id || i}
+              style={{
+                display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+                background: "#fff",
+                borderBottom: i < schedule.length - 1 ? "1px solid #f0f0f0" : "none",
+              }}
+            >
+              <div style={{ flexShrink: 0, width: "34px", textAlign: "center" }}>
+                <div style={{ fontSize: "9px", fontWeight: 900, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {g.Week ? g.Week.replace("Week ", "Wk ") : ""}
+                </div>
+              </div>
+              {opponentData?.Logo1 ? (
+                <div style={{
+                  width: "26px", height: "26px", flexShrink: 0, display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                  background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+                }}>
+                  <img
+                    src={sanitizeUrl(opponentData.Logo1)}
+                    alt={opponentName}
+                    style={{ width: "22px", height: "22px", objectFit: "contain" }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                </div>
+              ) : (
+                <div style={{
+                  width: "26px", height: "26px", flexShrink: 0, borderRadius: "4px",
+                  background: "#ddd", display: "flex", alignItems: "center",
+                  justifyContent: "center", color: "#888", fontSize: "9px", fontWeight: 900,
+                }}>
+                  {(opponentName || "?").charAt(0)}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontWeight: 900, fontSize: "12.5px", lineHeight: 1.2,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>
+                  <span style={{ color: "#888", fontWeight: 700 }}>{(isHome || g.Neutral) ? "vs " : "@ "}</span>
+                  {isClickable ? (
+                    <Link
+                      to={`/team/${opponentData.Slug}`}
+                      style={{ color: BLUE, textDecoration: "none" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+                    >
+                      {(opponentData?.Short || opponentName).toUpperCase()}
+                    </Link>
+                  ) : (
+                    <span style={{ color: "#444" }}>{(opponentData?.Short || opponentName).toUpperCase()}</span>
+                  )}
+                  {g.Neutral ? <span style={{ color: "#bbb", fontWeight: 700 }}> (N)</span> : null}
+                </div>
+                <div style={{ fontSize: "10px", fontWeight: 700, color: resultLabel ? resultColor : "#aaa", lineHeight: 1.3 }}>
+                  {resultLabel || dateLabel}
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
+    </SidebarCard>
+  );
+
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
       {teamNews.length === 0 ? (
@@ -1183,6 +1360,7 @@ export default function TeamPage() {
                 })}
               </div>
             </details>
+            {ScheduleSidebar}
             {NewsSidebar}
           </div>
         ) : (
@@ -1210,7 +1388,8 @@ export default function TeamPage() {
                 totalProspects={totalProspects}
               />
             </div>
-            <div style={{ position: "sticky", top: "20px" }}>
+            <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
+              {ScheduleSidebar}
               {NewsSidebar}
             </div>
           </div>

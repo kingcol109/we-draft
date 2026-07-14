@@ -184,6 +184,9 @@ export default function Navbar() {
     });
   });
 
+  // Fallback only — the real link source is each school's uploaded `Slug` field
+  // (TeamSlug column in the Schools sheet). This just covers schools synced
+  // before that field existed.
   const toSlug = (school) =>
     school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
 
@@ -516,7 +519,7 @@ export default function Navbar() {
                             {teams.map((team) => (
                               <Link
                                 key={team.School}
-                                to={`/team/${toSlug(team.School)}`}
+                                to={`/team/${team.Slug || toSlug(team.School)}`}
                                 className="cfb-team-link"
                                 onClick={() => setCfbOpen(false)}
                               >
