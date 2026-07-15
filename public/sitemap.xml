@@ -3,6 +3,10 @@
 
   <sitemap>
     <loc>https://we-draft.com/sitemap-1.xml</loc>
-    <lastmod>2026-06-30</lastmod>
+    <lastmod>2026-07-15</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://we-draft.com/sitemap-2.xml</loc>
+    <lastmod>2026-07-15</lastmod>
   </sitemap>
 </sitemapindex>
