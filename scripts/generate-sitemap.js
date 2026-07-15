@@ -176,10 +176,13 @@ for (const doc of allTeams) {
   const data = doc.data();
   const school = data?.School;
 
-  const slug = toTeamSlug(school);
+  // Prefer the manually-set Slug field from Firestore (e.g. "lt").
+  // Fall back to the auto-generated long-form slug only if it's missing.
+  const manualSlug = data?.Slug;
+  const slug = isValidSlug(manualSlug) ? manualSlug : toTeamSlug(school);
 
   if (!isValidSlug(slug)) {
-    console.warn("⚠️ Skipping invalid team slug:", slug);
+    console.warn("⚠️ Skipping invalid team slug:", school);
     continue;
   }
 
