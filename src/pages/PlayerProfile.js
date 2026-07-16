@@ -106,6 +106,53 @@ function SidebarCard({ title, color1, color2, children }) {
   );
 }
 
+// ── Renders evaluation text with lines starting in •, -, or * grouped into
+// real bullet lists; everything else renders as normal paragraphs. Used
+// anywhere a saved evaluation is displayed (Scout's Take, public feed,
+// archived snapshot, export card) so plain text still works unchanged.
+function renderEvaluationText(text, keyPrefix = "ev") {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const blocks = [];
+  let currentList = [];
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      blocks.push(
+        <ul
+          key={`${keyPrefix}-ul-${blocks.length}`}
+          style={{
+            margin: "0 0 8px 0",
+            paddingLeft: "20px",
+            listStyleType: "disc",
+            listStylePosition: "outside",
+          }}
+        >
+          {currentList.map((item, i) => (
+            <li key={i} style={{ display: "list-item", marginBottom: "4px" }}>{item}</li>
+          ))}
+        </ul>
+      );
+      currentList = [];
+    }
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    const bulletMatch = trimmed.match(/^[•\-*]\s+(.*)/);
+    if (bulletMatch) {
+      currentList.push(bulletMatch[1]);
+    } else {
+      flushList();
+      if (trimmed) {
+        blocks.push(<p key={`${keyPrefix}-p-${blocks.length}`} style={{ margin: "0 0 8px 0" }}>{trimmed}</p>);
+      }
+    }
+  });
+  flushList();
+  return blocks;
+}
+
 export default function PlayerProfile() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -113,6 +160,7 @@ export default function PlayerProfile() {
   const { user, login } = useAuth();
   const evaluationFormRef = useRef(null);
   const exportCardRef = useRef(null);
+  const evaluationTextareaRef = useRef(null);
   const [draftedBy, setDraftedBy] = useState(null);
   const [draftInfo, setDraftInfo] = useState(null);
   const [playerNews, setPlayerNews] = useState([]);
@@ -512,6 +560,29 @@ useEffect(() => {
       link.download = `${player.First}_${player.Last}_Evaluation.png`;
       link.href = dataUrl; link.click();
     } catch(e) { alert("Failed to export image. Please try again."); }
+  };
+
+  // ── Insert a bullet line into the evaluation textarea at the cursor,
+  // starting a new line if the cursor isn't already at the start of one.
+  const handleInsertBullet = () => {
+    const el = evaluationTextareaRef.current;
+    if (!el) {
+      setEvaluation((prev) => (prev && !prev.endsWith("\n") ? prev + "\n• " : prev + "• "));
+      return;
+    }
+    const start = el.selectionStart ?? evaluation.length;
+    const end = el.selectionEnd ?? evaluation.length;
+    const before = evaluation.slice(0, start);
+    const after = evaluation.slice(end);
+    const needsNewline = before.length > 0 && !before.endsWith("\n");
+    const insert = `${needsNewline ? "\n" : ""}• `;
+    const next = before + insert + after;
+    setEvaluation(next);
+    const cursorPos = before.length + insert.length;
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(cursorPos, cursorPos);
+    });
   };
 
   const handleSaveEvaluation = async () => {
@@ -1169,7 +1240,9 @@ useEffect(() => {
                 <div style={{ height:"2px", backgroundColor:color2, margin:"0 28px" }} />
                 <div style={{ padding:"16px 28px" }}>
                   <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", borderBottom:`3px solid ${color1}`, paddingBottom:"5px", marginBottom:"10px" }}>Scout's Take</div>
-                  <p style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.6, margin:0 }}>"{evaluation}"</p>
+                  <div style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.6 }}>
+                    {renderEvaluationText(evaluation, "export")}
+                  </div>
                 </div>
               </>
             )}
@@ -1296,8 +1369,32 @@ useEffect(() => {
                 </div>
 
                 <div className="mb-4">
-                  <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Evaluation</div>
-                  <textarea value={evaluation} onChange={(e)=>setEvaluation(e.target.value)} placeholder="Write your evaluation..." className="w-full rounded px-3 py-2 h-32 border-2 font-medium" style={{ borderColor:color1 }} />
+                  <div className="flex items-center justify-between pb-2 mb-3" style={{ borderBottom:`3px solid ${color1}` }}>
+                    <div className="text-sm font-black uppercase" style={{ color:color1, letterSpacing:"0.14em" }}>Evaluation</div>
+                    <button
+                      type="button"
+                      onClick={handleInsertBullet}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "5px",
+                        background: "#fff", border: `1.5px solid ${color1}`, color: color1,
+                        borderRadius: "6px", padding: "4px 10px", fontSize: "11px", fontWeight: 800,
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                      }}
+                    >
+                      • Add Bullet
+                    </button>
+                  </div>
+                  <textarea
+                    ref={evaluationTextareaRef}
+                    value={evaluation}
+                    onChange={(e)=>setEvaluation(e.target.value)}
+                    placeholder="Write your evaluation... start a line with • or - for bullet points"
+                    className="w-full rounded px-3 py-2 h-32 border-2 font-medium"
+                    style={{ borderColor:color1 }}
+                  />
+                  <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                    Tip: start any line with • or - to make it a bullet point.
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -1405,7 +1502,9 @@ useEffect(() => {
                 {archivedEval.evaluation && (
                   <div>
                     <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Scout's Take</div>
-                    <p style={{ fontStyle:"italic", fontSize:isMobile?"13px":"15px", color:"#222", lineHeight:1.6, margin:0 }}>"{archivedEval.evaluation}"</p>
+                    <div style={{ fontStyle:"italic", fontSize:isMobile?"13px":"15px", color:"#222", lineHeight:1.6 }}>
+                      {renderEvaluationText(archivedEval.evaluation, "archived")}
+                    </div>
                   </div>
                 )}
                 <div style={{ fontSize:"11px", fontWeight:700, color:"#bbb", textAlign:"center", fontStyle:"italic" }}>
@@ -1461,7 +1560,9 @@ useEffect(() => {
                       )}
                       {ev.evaluation && <div className="px-3 py-3" style={{ borderLeft: `3px solid ${color1}`, margin: "0 8px 8px", borderRadius: "0 4px 4px 0", background: "#fafafa" }}>
                         <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"6px" }}>Scout's Take</div>
-                        <p style={{ fontSize:"13px", fontWeight:600, color:"#111", lineHeight:1.65, margin:0 }}>{ev.evaluation}</p>
+                        <div style={{ fontSize:"13px", fontWeight:600, color:"#111", lineHeight:1.65 }}>
+                          {renderEvaluationText(ev.evaluation, `feed-m-${ev.uid}`)}
+                        </div>
                       </div>}
                     </div>
                   ) : (
@@ -1495,7 +1596,9 @@ useEffect(() => {
                         <div className="px-4 py-4">
                           <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
                           <div style={{ borderLeft:`3px solid ${color1}`, paddingLeft:"14px", background:"#fafafa", borderRadius:"0 4px 4px 0", padding:"10px 14px" }}>
-                            <p style={{ fontSize:"16px", fontWeight:600, color:"#111", lineHeight:1.7, margin:0 }}>{ev.evaluation}</p>
+                            <div style={{ fontSize:"16px", fontWeight:600, color:"#111", lineHeight:1.7 }}>
+                              {renderEvaluationText(ev.evaluation, `feed-d-${ev.uid}`)}
+                            </div>
                           </div>
                         </div>
                       </>}
