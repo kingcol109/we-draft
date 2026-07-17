@@ -502,11 +502,18 @@ useEffect(() => {
               };
             })
         );
+        // Mirror the Community Board's ranking: sort by rounded grade label (not raw
+        // average), and leave ties in Firestore's natural order — same as CommunityBoard.js —
+        // so this rank matches what the board actually shows.
         list.sort((a, b) => {
-          const aV = a.avgGrade ?? 999;
-          const bV = b.avgGrade ?? 999;
-          if (aV !== bV) return aV - bV;
-          return (a.Last || "").localeCompare(b.Last || "");
+          const aLabel = a.avgGrade != null ? gradeLabels[Math.round(a.avgGrade)] : null;
+          const bLabel = b.avgGrade != null ? gradeLabels[Math.round(b.avgGrade)] : null;
+          const aV = aLabel ? gradeScale[aLabel] : null;
+          const bV = bLabel ? gradeScale[bLabel] : null;
+          if (aV && bV) return aV - bV;
+          if (aV && !bV) return -1;
+          if (!aV && bV) return 1;
+          return 0;
         });
         setDraftClassPlayers(list.filter((p) => p.Position === player.Position));
         const classSelfIndex = list.findIndex((p) => p.isSelf);
