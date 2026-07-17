@@ -193,6 +193,8 @@ export default function PlayerProfile() {
   // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
   const [draftClassLoading, setDraftClassLoading] = useState(false);
+  const [classRank, setClassRank] = useState(null);
+  const [classSize, setClassSize] = useState(0);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -224,6 +226,8 @@ export default function PlayerProfile() {
     };
     return map[g] || { short:g, bg:"#5F5E5A", border:"#444441" };
   };
+
+  const barPct = (pct) => Math.sqrt(pct/100) * 100;
 
   const bannedWords = ["faggot","nigger","monkey","nigga","fuck"];
   const containsProfanity = (text) => {
@@ -438,10 +442,13 @@ useEffect(() => {
           const pubWithNames = pubEvals
             .map((ev) => ({ ...ev, username:uMap[ev.uid]?.name||"Anonymous User", verified:uMap[ev.uid]?.verified||false }))
             .sort((a,b) => { if (a.verified&&!b.verified) return -1; if (!a.verified&&b.verified) return 1; return toMs(b.updatedAt)-toMs(a.updatedAt); });
+          const totalReports = evalsSnap.size;
+          const dedupedS = Object.entries(sC).filter(([term,count]) => count >= (wC[term] ?? -Infinity));
+          const dedupedW = Object.entries(wC).filter(([term,count]) => count > (sC[term] ?? -Infinity));
           setCommunity({
             avgGrade: grades.length>0 ? (grades.reduce((a,b)=>a+b,0)/grades.length).toFixed(1) : null,
-            topStrengths: Object.entries(sC).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([s])=>s),
-            topWeaknesses: Object.entries(wC).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([w])=>w),
+            topStrengths: dedupedS.sort((a,b)=>b[1]-a[1]).slice(0,5).map(([s,count])=>({ term:s, pct:(count/totalReports)*100 })),
+            topWeaknesses: dedupedW.sort((a,b)=>b[1]-a[1]).slice(0,5).map(([w,count])=>({ term:w, pct:(count/totalReports)*100 })),
             topFits: Object.entries(fC).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([t])=>t),
           });
           setPublicFeed(pubWithNames);
@@ -454,15 +461,17 @@ useEffect(() => {
     fetch();
   }, [player]);
 
-  // ── Fetch draft class ──
+  // ── Fetch draft class (whole class once; position group + class rank both derive from it) ──
   useEffect(() => {
     const fetchDraftClass = async () => {
-      if (!player?.Position || !player?.Eligible) { setDraftClassPlayers([]); return; }
+      if (!player?.Position || !player?.Eligible) {
+        setDraftClassPlayers([]); setClassRank(null); setClassSize(0);
+        return;
+      }
       setDraftClassLoading(true);
       try {
         const q = query(
           collection(db, "players"),
-          where("Position", "==", player.Position),
           where("Eligible", "==", player.Eligible)
         );
         const snap = await getDocs(q);
@@ -487,6 +496,7 @@ useEffect(() => {
                 Last: data.Last || "",
                 School: data.School || "",
                 Slug: data.Slug || "",
+                Position: data.Position || "",
                 avgGrade,
                 isSelf: d.id === player.id,
               };
@@ -498,10 +508,15 @@ useEffect(() => {
           if (aV !== bV) return aV - bV;
           return (a.Last || "").localeCompare(b.Last || "");
         });
-        setDraftClassPlayers(list);
+        setDraftClassPlayers(list.filter((p) => p.Position === player.Position));
+        const classSelfIndex = list.findIndex((p) => p.isSelf);
+        setClassRank(classSelfIndex >= 0 ? classSelfIndex + 1 : null);
+        setClassSize(list.length);
       } catch (e) {
         console.error(e);
         setDraftClassPlayers([]);
+        setClassRank(null);
+        setClassSize(0);
       } finally {
         setDraftClassLoading(false);
       }
@@ -1115,6 +1130,15 @@ useEffect(() => {
                           </div>
                           <div className="flex justify-between mt-1" style={{ fontSize:"8px", color:"#bbb", fontWeight:700 }}><span>1st</span><span>UDFA</span></div>
                         </div>
+                        {(selfIndex >= 0 || classRank) && (
+                          <div className="mt-3">
+                            <div className="text-xs font-black uppercase pb-1 mb-1 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em", fontSize:"9px" }}>Class Rank</div>
+                            <div className="text-center" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
+                              {selfIndex >= 0 && <div>{selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                              {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })() : <p className="italic text-gray-400 text-xs text-center">No grade</p>}
@@ -1136,20 +1160,30 @@ useEffect(() => {
                 <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
                   <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Strengths</div>
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
-                    <div key={i} className="font-black uppercase py-1" style={{ fontSize:"10px", borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none", color:"#222", letterSpacing:"0.04em" }}>{s}</div>
+                    <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
+                      <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
+                      <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
+                        <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
+                      </div>
+                    </div>
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
                 <div className="flex-1 px-3 py-3">
                   <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Weaknesses</div>
                   {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
-                    <div key={i} className="font-black uppercase py-1" style={{ fontSize:"10px", borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none", color:"#222", letterSpacing:"0.04em" }}>{w}</div>
+                    <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
+                      <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
+                      <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
+                        <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
+                      </div>
+                    </div>
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
               </div>
             </div>
           ) : (
             <div className="flex bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
-              <div className="flex flex-col items-center justify-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
+              <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
                 <div className="text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Grade</div>
                 {community.avgGrade ? (() => {
                   const label = gradeLabels[Math.round(community.avgGrade)];
@@ -1168,6 +1202,15 @@ useEffect(() => {
                           <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"4px" }} />
                         </div>
                       </div>
+                      {(selfIndex >= 0 || classRank) && (
+                        <div className="mt-4 w-full">
+                          <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.1em" }}>Class Rank</div>
+                          <div className="text-center" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
+                            {selfIndex >= 0 && <div>{selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                            {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
+                          </div>
+                        </div>
+                      )}
                     </>
                   );
                 })() : <p className="italic text-gray-400 text-sm">No grade yet</p>}
@@ -1175,20 +1218,30 @@ useEffect(() => {
               <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
                 <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Strengths</div>
                 {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
-                  <div key={i} className="py-2 font-black uppercase text-sm" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none", color:"#222", letterSpacing:"0.06em" }}>{s}</div>
+                  <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
+                    <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
+                    <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
+                      <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
+                    </div>
+                  </div>
                 )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
               </div>
               <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
                 <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Weaknesses</div>
                 {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
-                  <div key={i} className="py-2 font-black uppercase text-sm" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none", color:"#222", letterSpacing:"0.06em" }}>{w}</div>
+                  <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
+                    <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
+                    <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
+                      <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
+                    </div>
+                  </div>
                 )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
               </div>
               <div className="flex flex-col px-5 py-5" style={{ flex:"0 0 150px" }}>
                 <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>NFL Fit</div>
                 {fitLogos.length > 0 ? (
-                  <div className="flex flex-col items-center justify-around flex-1 gap-2">
-                    {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"52px", height:"52px" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                  <div className="flex flex-col items-center justify-start flex-1 gap-3">
+                    {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
                   </div>
                 ) : community.topFits.length > 0 ? (
                   <div className="flex flex-col gap-1">{community.topFits.map((t,i) => <p key={i} className="text-sm font-bold text-gray-600">{t}</p>)}</div>
