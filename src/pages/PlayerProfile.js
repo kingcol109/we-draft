@@ -189,6 +189,7 @@ export default function PlayerProfile() {
   const [archivedEval, setArchivedEval] = useState(null);
   const [archiving, setArchiving] = useState(false);
   const [playerStats, setPlayerStats] = useState(null);
+  const [trend, setTrend] = useState(null);
 
   // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
@@ -411,6 +412,20 @@ useEffect(() => {
         if (snap.exists()) setPlayerStats(snap.data());
         else setPlayerStats(null);
       } catch(e) { console.error(e); }
+    };
+    fetch();
+  }, [player]);
+
+  // ── Trend (Google Sheet "Trends" tab synced to the `trends` collection,
+  // keyed by player Slug). Purely cosmetic — never blocks page render. ──
+  useEffect(() => {
+    const fetch = async () => {
+      if (!player?.Slug) { setTrend(null); return; }
+      try {
+        const snap = await getDoc(doc(db,"trends",player.Slug));
+        if (snap.exists()) setTrend(snap.data());
+        else setTrend(null);
+      } catch(e) { setTrend(null); }
     };
     fetch();
   }, [player]);
@@ -675,6 +690,7 @@ useEffect(() => {
   if (!player) return <div className="flex justify-center items-center h-screen text-xl font-bold" style={{color:SITE_BLUE}}>Loading Player...</div>;
 
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
+  const isTrendingUp = (trend?.Trend || "").toString().trim().toLowerCase() === "up";
 
   const buildMetaDescription = () => {
     const name = `${player.First || ""} ${player.Last || ""}`.trim();
@@ -908,6 +924,38 @@ useEffect(() => {
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
 
+      {isTrendingUp && (
+        <style>{`
+          @keyframes wdTrendPulse {
+            0%   { box-shadow: 0 0 0 0 rgba(22,163,74,0.55); }
+            70%  { box-shadow: 0 0 0 12px rgba(22,163,74,0); }
+            100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
+          }
+          @keyframes wdTrendBounce {
+            0%, 100% { transform: scale(1) rotate(0deg); }
+            50%      { transform: scale(1.08) rotate(-2deg); }
+          }
+          @keyframes wdTrendArrow {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50%      { transform: translateY(-4px) scale(1.25); }
+          }
+          @keyframes wdTrendShine {
+            0%   { background-position: -150% 0; }
+            100% { background-position: 250% 0; }
+          }
+          .wd-trend-badge {
+            animation: wdTrendPulse 2s ease-out infinite, wdTrendBounce 1.2s ease-in-out infinite;
+            background: linear-gradient(90deg, #16a34a, #22c55e, #4ade80, #22c55e, #16a34a);
+            background-size: 300% 100%;
+            animation-name: wdTrendPulse, wdTrendBounce, wdTrendShine;
+            animation-duration: 2s, 1.2s, 2.5s;
+            animation-timing-function: ease-out, ease-in-out, linear;
+            animation-iteration-count: infinite, infinite, infinite;
+          }
+          .wd-trend-arrow { display:inline-block; animation: wdTrendArrow 0.9s ease-in-out infinite; }
+        `}</style>
+      )}
+
       <div
         className="mx-auto pb-40"
         style={
@@ -966,6 +1014,25 @@ useEffect(() => {
             </div>
 
             <div className="flex-1 text-center">
+              {isTrendingUp && (
+                <div
+                  className="wd-trend-badge"
+                  title={trend?.Notes || "Trending up"}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "5px",
+                    color: "#fff",
+                    borderRadius: "999px", padding: isMobile ? "4px 12px" : "5px 14px",
+                    fontSize: isMobile ? "10px" : "11px", fontWeight: 900,
+                    textTransform: "uppercase", letterSpacing: "0.08em",
+                    marginBottom: "8px",
+                    border: "1px solid rgba(255,255,255,0.6)",
+                  }}
+                >
+                  <span className="wd-trend-arrow">🔥</span>
+                  Trending Up
+                  <span className="wd-trend-arrow" style={{ animationDelay: "0.2s" }}>▲</span>
+                </div>
+              )}
               <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:color1, letterSpacing:"0.02em" }}>
                 {`${player.First||""} ${player.Last||""}`}
               </h1>
@@ -1169,9 +1236,11 @@ useEffect(() => {
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
-                      <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
-                        <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
-                      </div>
+                      {evalCount >= 3 && (
+                        <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
+                          <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
+                        </div>
+                      )}
                     </div>
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
@@ -1180,9 +1249,11 @@ useEffect(() => {
                   {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
-                      <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
-                        <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
-                      </div>
+                      {evalCount >= 3 && (
+                        <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
+                          <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
+                        </div>
+                      )}
                     </div>
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
@@ -1227,9 +1298,11 @@ useEffect(() => {
                 {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                     <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
-                    <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
-                      <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
-                    </div>
+                    {evalCount >= 3 && (
+                      <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
+                        <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
+                      </div>
+                    )}
                   </div>
                 )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
               </div>
@@ -1238,9 +1311,11 @@ useEffect(() => {
                 {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                     <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
-                    <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
-                      <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
-                    </div>
+                    {evalCount >= 3 && (
+                      <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
+                        <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
+                      </div>
+                    )}
                   </div>
                 )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
               </div>
