@@ -1236,7 +1236,7 @@ useEffect(() => {
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
-                      {evalCount >= 3 && (
+                      {evalCount >= 5 && (
                         <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
                           <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
                         </div>
@@ -1249,7 +1249,7 @@ useEffect(() => {
                   {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
-                      {evalCount >= 3 && (
+                      {evalCount >= 5 && (
                         <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
                           <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
                         </div>
@@ -1298,7 +1298,7 @@ useEffect(() => {
                 {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                     <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
-                    {evalCount >= 3 && (
+                    {evalCount >= 5 && (
                       <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
                         <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
                       </div>
@@ -1311,7 +1311,7 @@ useEffect(() => {
                 {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                     <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
-                    {evalCount >= 3 && (
+                    {evalCount >= 5 && (
                       <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
                         <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
                       </div>
