@@ -153,6 +153,31 @@ function renderEvaluationText(text, keyPrefix = "ev") {
   return blocks;
 }
 
+const PUBLIC_EVAL_CHAR_LIMIT = 700;
+
+// ── Truncates a public evaluation to PUBLIC_EVAL_CHAR_LIMIT characters with a
+// Show More/Less toggle. Only used in the Public Evaluations feed. ──
+function TruncatedEvaluationText({ text, keyPrefix, color }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!text) return null;
+  const isLong = text.length > PUBLIC_EVAL_CHAR_LIMIT;
+  const displayText = !isLong || expanded ? text : text.slice(0, PUBLIC_EVAL_CHAR_LIMIT).trimEnd() + "…";
+  return (
+    <>
+      {renderEvaluationText(displayText, keyPrefix)}
+      {isLong && (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="font-black uppercase hover:underline"
+          style={{ fontSize: "11px", letterSpacing: "0.08em", color: color, background: "none", border: "none", padding: 0, cursor: "pointer" }}
+        >
+          {expanded ? "Show Less" : "Show More"}
+        </button>
+      )}
+    </>
+  );
+}
+
 export default function PlayerProfile() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -1696,7 +1721,7 @@ useEffect(() => {
                       {ev.evaluation && <div className="px-3 py-3" style={{ borderLeft: `3px solid ${color1}`, margin: "0 8px 8px", borderRadius: "0 4px 4px 0", background: "#fafafa" }}>
                         <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"6px" }}>Scout's Take</div>
                         <div style={{ fontSize:"13px", fontWeight:600, color:"#111", lineHeight:1.65 }}>
-                          {renderEvaluationText(ev.evaluation, `feed-m-${ev.uid}`)}
+                          <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-m-${ev.uid}`} color={color1} />
                         </div>
                       </div>}
                     </div>
@@ -1732,7 +1757,7 @@ useEffect(() => {
                           <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
                           <div style={{ borderLeft:`3px solid ${color1}`, paddingLeft:"14px", background:"#fafafa", borderRadius:"0 4px 4px 0", padding:"10px 14px" }}>
                             <div style={{ fontSize:"16px", fontWeight:600, color:"#111", lineHeight:1.7 }}>
-                              {renderEvaluationText(ev.evaluation, `feed-d-${ev.uid}`)}
+                              <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-d-${ev.uid}`} color={color1} />
                             </div>
                           </div>
                         </div>
