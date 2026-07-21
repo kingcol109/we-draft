@@ -951,33 +951,11 @@ useEffect(() => {
 
       {isTrendingUp && (
         <style>{`
-          @keyframes wdTrendPulse {
-            0%   { box-shadow: 0 0 0 0 rgba(22,163,74,0.55); }
-            70%  { box-shadow: 0 0 0 12px rgba(22,163,74,0); }
-            100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
+          @keyframes wdTrendBannerPulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.9; }
           }
-          @keyframes wdTrendBounce {
-            0%, 100% { transform: scale(1) rotate(0deg); }
-            50%      { transform: scale(1.08) rotate(-2deg); }
-          }
-          @keyframes wdTrendArrow {
-            0%, 100% { transform: translateY(0) scale(1); }
-            50%      { transform: translateY(-4px) scale(1.25); }
-          }
-          @keyframes wdTrendShine {
-            0%   { background-position: -150% 0; }
-            100% { background-position: 250% 0; }
-          }
-          .wd-trend-badge {
-            animation: wdTrendPulse 2s ease-out infinite, wdTrendBounce 1.2s ease-in-out infinite;
-            background: linear-gradient(90deg, #16a34a, #22c55e, #4ade80, #22c55e, #16a34a);
-            background-size: 300% 100%;
-            animation-name: wdTrendPulse, wdTrendBounce, wdTrendShine;
-            animation-duration: 2s, 1.2s, 2.5s;
-            animation-timing-function: ease-out, ease-in-out, linear;
-            animation-iteration-count: infinite, infinite, infinite;
-          }
-          .wd-trend-arrow { display:inline-block; animation: wdTrendArrow 0.9s ease-in-out infinite; }
+          .wd-trend-banner { animation: wdTrendBannerPulse 2.8s ease-in-out infinite; }
         `}</style>
       )}
 
@@ -1003,7 +981,7 @@ useEffect(() => {
         <div>
 
         {/* ===== HERO CARD ===== */}
-        <div className="mb-6 rounded-lg overflow-hidden" style={{ border:`3px solid ${color1}` }}>
+        <div className="mb-6 rounded-lg overflow-hidden" style={{ border: isTrendingUp ? "3px solid #16a34a" : `3px solid ${color1}` }}>
           <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
               style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
@@ -1039,25 +1017,6 @@ useEffect(() => {
             </div>
 
             <div className="flex-1 text-center">
-              {isTrendingUp && (
-                <div
-                  className="wd-trend-badge"
-                  title={trend?.Notes || "Trending up"}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: "5px",
-                    color: "#fff",
-                    borderRadius: "999px", padding: isMobile ? "4px 12px" : "5px 14px",
-                    fontSize: isMobile ? "10px" : "11px", fontWeight: 900,
-                    textTransform: "uppercase", letterSpacing: "0.08em",
-                    marginBottom: "8px",
-                    border: "1px solid rgba(255,255,255,0.6)",
-                  }}
-                >
-                  <span className="wd-trend-arrow">🔥</span>
-                  Trending Up
-                  <span className="wd-trend-arrow" style={{ animationDelay: "0.2s" }}>▲</span>
-                </div>
-              )}
               <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:color1, letterSpacing:"0.02em" }}>
                 {`${player.First||""} ${player.Last||""}`}
               </h1>
@@ -1102,6 +1061,23 @@ useEffect(() => {
               ) : null}
             </div>
           </div>
+
+          {isTrendingUp && (
+            <div
+              className="wd-trend-banner"
+              title={trend?.Notes || "Trending up"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+                background: "#16a34a", color: "#fff",
+                padding: isMobile ? "6px 10px" : "8px 12px",
+                fontSize: isMobile ? "12px" : "13px", fontWeight: 900,
+                textTransform: "uppercase", letterSpacing: "0.1em",
+              }}
+            >
+              <span style={{ fontSize: isMobile ? "13px" : "15px" }}>▲</span>
+              Trending Up
+            </div>
+          )}
 
           {physicalMeasurements.length > 0 && (
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>

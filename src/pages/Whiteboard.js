@@ -49,11 +49,39 @@ export default function Whiteboard() {
   const [activeId, setActiveId] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const playerBankRef = useRef(null);
+  const headerScrollRef = useRef(null);
+  const boardScrollRef = useRef(null);
+  const lastScrollYRef = useRef(0);
+  const [posHeaderHidden, setPosHeaderHidden] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor));
 
   const scrollToPlayers = () => {
     playerBankRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  const syncHeaderScroll = (e) => {
+    if (boardScrollRef.current) boardScrollRef.current.scrollLeft = e.target.scrollLeft;
+  };
+  const syncBodyScroll = (e) => {
+    if (headerScrollRef.current) headerScrollRef.current.scrollLeft = e.target.scrollLeft;
+  };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      const lastY = lastScrollYRef.current;
+      if (currentY < 120) {
+        setPosHeaderHidden(false);
+      } else if (currentY > lastY + 4) {
+        setPosHeaderHidden(true);
+      } else if (currentY < lastY - 4) {
+        setPosHeaderHidden(false);
+      }
+      lastScrollYRef.current = currentY;
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     if (!authReady || !user) return;
@@ -347,8 +375,18 @@ export default function Whiteboard() {
     .wb-view-players:hover { background: #eef4fb; }
     .wb-view-players-wrap { display: flex; justify-content: center; }
 
+    .wb-pos-header-wrap {
+      position: sticky; top: 60px; z-index: 50; background: ${SITE_BG};
+      transition: transform 0.2s ease;
+    }
+    .wb-pos-header-wrap.wb-pos-header-hidden {
+      transform: translateY(-100%);
+    }
+    .wb-pos-header-scroll {
+      overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    }
+    .wb-pos-header-scroll::-webkit-scrollbar { display: none; }
     .wb-pos-header {
-      position: sticky; top: 0; z-index: 50; background: ${SITE_BG};
       display: grid; grid-template-columns: 84px repeat(9, minmax(150px, 1fr));
       gap: 10px; padding: 14px 0; margin-bottom: 18px; min-width: 1500px;
       border-bottom: 3px solid ${SITE_GOLD};
@@ -562,15 +600,19 @@ export default function Whiteboard() {
           ) : null}
         </DragOverlay>
 
-        <div className="wb-board-scroll">
-          {/* STICKY POSITION HEADER */}
-          <div className="wb-pos-header">
-            <div></div>
-            {POSITIONS.map(pos => (
-              <div key={pos} className="wb-pos-label" style={{ background: POS_COLORS[pos] }}>{pos}</div>
-            ))}
+        {/* STICKY POSITION HEADER */}
+        <div className={`wb-pos-header-wrap${posHeaderHidden ? " wb-pos-header-hidden" : ""}`}>
+          <div className="wb-pos-header-scroll" ref={headerScrollRef} onScroll={syncHeaderScroll}>
+            <div className="wb-pos-header">
+              <div></div>
+              {POSITIONS.map(pos => (
+                <div key={pos} className="wb-pos-label" style={{ background: POS_COLORS[pos] }}>{pos}</div>
+              ))}
+            </div>
           </div>
+        </div>
 
+        <div className="wb-board-scroll" ref={boardScrollRef} onScroll={syncBodyScroll}>
           {/* ROUNDS */}
           {ROUNDS.map((round) => (
             <div key={round} className="wb-round-row">

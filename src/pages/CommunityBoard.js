@@ -4,7 +4,7 @@ import { db } from "../firebase";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
-import Logo1 from "../assets/Logo1.png";
+import Logo2 from "../assets/Logo2.png";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -220,6 +220,35 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PositionFilterBar({ options, selected, setSelected, isMobile }) {
+  const toggle = (pos) => setSelected((prev) => prev.includes(pos) ? prev.filter((x) => x !== pos) : [...prev, pos]);
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", justifyContent: "center", marginBottom: isMobile ? "6px" : "16px" }}>
+      {options.map((pos) => {
+        const active = selected.includes(pos);
+        return (
+          <button
+            key={pos}
+            onClick={() => toggle(pos)}
+            style={{
+              padding: isMobile ? "8px 16px" : "10px 24px",
+              fontWeight: 900, fontSize: isMobile ? "14px" : "16px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+              background: active ? BLUE : "#fff",
+              color: active ? "#fff" : BLUE,
+              whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+            }}
+          >
+            {pos}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -645,15 +674,24 @@ export default function CommunityBoard() {
       <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* Page Header */}
-        <div style={{ marginBottom: "16px" }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", marginBottom: "6px" }}>
-            <img src={Logo1} alt="We-Draft.com" style={{ height: isMobile ? "26px" : "32px", objectFit: "contain" }} />
-            <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>
+        <div style={{ marginBottom: "20px", border: `3px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
+          <div style={{
+            background: BLUE, padding: isMobile ? "24px 14px" : "34px 20px",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
+          }}>
+            <img src={Logo2} alt="We-Draft.com" style={{ height: isMobile ? "36px" : "48px", objectFit: "contain" }} />
+            <div style={{
+              fontSize: isMobile ? "34px" : "56px", fontWeight: 900, textTransform: "uppercase",
+              letterSpacing: "0.04em", color: "#fff", lineHeight: 1, textAlign: "center", width: "100%",
+              textShadow: `-1px -1px 0 ${GOLD}, 1px -1px 0 ${GOLD}, -1px 1px 0 ${GOLD}, 1px 1px 0 ${GOLD}, 0 -1px 0 ${GOLD}, 0 1px 0 ${GOLD}, -1px 0 0 ${GOLD}, 1px 0 0 ${GOLD}`,
+            }}>
               Community Board
             </div>
+            <div style={{ fontSize: isMobile ? "12px" : "14px", fontWeight: 700, color: "rgba(255,255,255,0.75)", letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center" }}>
+              Crowd-sourced grades &amp; scouting reports
+            </div>
           </div>
-          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+          <div style={{ height: "4px", background: GOLD }} />
         </div>
 
         {/* Year Selector */}
@@ -664,9 +702,9 @@ export default function CommunityBoard() {
                 key={yr}
                 to={yearPath(yr)}
                 style={{
-                  border: `2px solid ${GOLD}`, borderRadius: "20px",
-                  padding: isMobile ? "6px 20px" : "8px 28px",
-                  fontWeight: 900, fontSize: isMobile ? "14px" : "16px",
+                  border: `3px solid ${GOLD}`, borderRadius: "24px",
+                  padding: isMobile ? "10px 26px" : "14px 40px",
+                  fontWeight: 900, fontSize: isMobile ? "18px" : "22px",
                   background: eligibleYear === yr ? BLUE : "#fff",
                   color: eligibleYear === yr ? "#fff" : BLUE,
                   transition: "background 0.15s, color 0.15s",
@@ -703,12 +741,12 @@ export default function CommunityBoard() {
             {isMobile ? (
               <div style={{ marginBottom: "12px" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
-                  <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} ordered />
                   <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                   <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                   <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
                 </div>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile />
+                <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center", marginBottom: "6px" }}>
                   <BoardDropdown
                     dropdownRef={boardDropdownRef}
                     open={boardDropdownOpen}
@@ -732,46 +770,48 @@ export default function CommunityBoard() {
                     </button>
                   )}
                   <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
-                    style={{ flex: 1, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
+                    style={{ flex: 1, minWidth: "140px", border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
                   {hasActiveFilters && (
                     <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
                   )}
                 </div>
               </div>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
-                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} ordered />
-                <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
-                <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
-                <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
-                <BoardDropdown
-                  dropdownRef={boardDropdownRef}
-                  open={boardDropdownOpen}
-                  setOpen={setBoardDropdownOpen}
-                  isMobile={isMobile}
-                  onNavigate={() => navigate("/whiteboard")}
-                  onMyBoards={() => navigate("/boards")}
-                />
-                {is2026 && (
-                  <button
-                    onClick={() => setShowAvailableOnly((v) => !v)}
-                    style={{
-                      padding: "8px 16px", fontWeight: 900, fontSize: "13px",
-                      textTransform: "uppercase", letterSpacing: "0.05em",
-                      border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
-                      background: showAvailableOnly ? GOLD : "#fff",
-                      color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap",
-                    }}
-                  >
-                    {showAvailableOnly ? "✓ Available" : "Available"}
-                  </button>
-                )}
-                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
-                  style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "190px" }} />
-                {hasActiveFilters && (
-                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
-                )}
-              </div>
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
+                  <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
+                  <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
+                  <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
+                  <BoardDropdown
+                    dropdownRef={boardDropdownRef}
+                    open={boardDropdownOpen}
+                    setOpen={setBoardDropdownOpen}
+                    isMobile={isMobile}
+                    onNavigate={() => navigate("/whiteboard")}
+                    onMyBoards={() => navigate("/boards")}
+                  />
+                  {is2026 && (
+                    <button
+                      onClick={() => setShowAvailableOnly((v) => !v)}
+                      style={{
+                        padding: "8px 16px", fontWeight: 900, fontSize: "13px",
+                        textTransform: "uppercase", letterSpacing: "0.05em",
+                        border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+                        background: showAvailableOnly ? GOLD : "#fff",
+                        color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap",
+                      }}
+                    >
+                      {showAvailableOnly ? "✓ Available" : "Available"}
+                    </button>
+                  )}
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+                    style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "280px" }} />
+                  {hasActiveFilters && (
+                    <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
+                  )}
+                </div>
+                <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+              </>
             )}
 
             {/* Table Card */}
