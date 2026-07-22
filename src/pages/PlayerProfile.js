@@ -21,6 +21,16 @@ import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
 
+// ── Flair badge images (dropped into assets — filenames as uploaded) ───────
+import EliteFlair from "../assets/elite.png";
+import StarFlair from "../assets/star.png";
+import GemFlair from "../assets/gem.png";
+import RadarFlair from "../assets/radar.png";
+import SecondFlair from "../assets/second.png";
+import AlienFlair from "../assets/alien.png";
+import FutureStarFlair from "../assets/futurestar.png";
+import CurveFlair from "../assets/curve.png";
+
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
 
@@ -53,6 +63,23 @@ function sanitizeUrl(url) {
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
+
+// ── Flair → { image, stroke color } config. The image renders in the
+// right-side hero logo square (replacing the second school/CFB logo) and
+// the square gets a border in the matching stroke color. Key must match
+// the exact string stored in Firestore player.Flair. ──
+const FLAIR_CONFIG = {
+  "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
+  "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
+  "Hidden Gem":          { img: GemFlair,         stroke: "#3fc305", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
+  "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
+  "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
+  "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
+  "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
+  "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
+  // "Raw Talent": image not uploaded yet — add here once you have it, e.g.
+  // "Raw Talent": { img: RawTalentFlair, stroke: "#hexcode", desc: "..." },
+};
 
 const toTeamSlug = (school) => {
   if (!school) return "";
@@ -195,6 +222,7 @@ export default function PlayerProfile() {
   const schoolSlugRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [evalCount, setEvalCount] = useState(0);
+  const [pageVisible, setPageVisible] = useState(false);
 
   const [grade, setGrade] = useState("");
   const [strengths, setStrengths] = useState([]);
@@ -215,6 +243,10 @@ export default function PlayerProfile() {
   const [archiving, setArchiving] = useState(false);
   const [playerStats, setPlayerStats] = useState(null);
   const [trend, setTrend] = useState(null);
+  const [showFlairTip, setShowFlairTip] = useState(false);
+  const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
+  const [showBreakoutTip, setShowBreakoutTip] = useState(false);
+  const [showTrendUpTip, setShowTrendUpTip] = useState(false);
 
   // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
@@ -253,13 +285,26 @@ export default function PlayerProfile() {
     return map[g] || { short:g, bg:"#5F5E5A", border:"#444441" };
   };
 
-  const barPct = (pct) => Math.sqrt(pct/100) * 100;
+  // Skews raw percentages so bars read as "more filled" at a glance — a low
+  // exponent (< 0.5) pushes small percentages up more aggressively than a
+  // straight square root did. Tune BAR_SKEW_EXPONENT to taste: lower = fuller.
+  const BAR_SKEW_EXPONENT = 0.3;
+  const barPct = (pct) => Math.pow(pct/100, BAR_SKEW_EXPONENT) * 100;
 
   const bannedWords = ["faggot","nigger","monkey","nigga","fuck"];
   const containsProfanity = (text) => {
     if (!text) return false;
     return bannedWords.some((w) => text.toLowerCase().includes(w));
   };
+
+  // ── Reset immediately when navigating to a new player, so stale content
+  // (old team colors, old name, etc.) doesn't linger while the next player's
+  // data streams in piecemeal — and jump the viewport back to the top. ──
+  useEffect(() => {
+    setPlayer(null);
+    setPageVisible(false);
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [slug]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -277,6 +322,14 @@ export default function PlayerProfile() {
     };
     fetch();
   }, [slug]);
+
+  // ── Fade the page in once the core player doc has loaded, instead of
+  // popping straight to fully-rendered content. ──
+  useEffect(() => {
+    if (!player) return;
+    const t = setTimeout(() => setPageVisible(true), 20);
+    return () => clearTimeout(t);
+  }, [player]);
 
   useEffect(() => {
     if (!slug) return;
@@ -441,6 +494,13 @@ useEffect(() => {
     fetch();
   }, [player]);
 
+  // ── Fires the full-screen breakout animation once when a player whose
+  // Trend is "Breakout" is loaded. Purely cosmetic, never blocks anything. ──
+  const triggerBreakoutAnimation = () => {
+    setShowBreakoutAnim(true);
+    setTimeout(() => setShowBreakoutAnim(false), 2400);
+  };
+
   // ── Trend (Google Sheet "Trends" tab synced to the `trends` collection,
   // keyed by player Slug). Purely cosmetic — never blocks page render. ──
   useEffect(() => {
@@ -448,8 +508,14 @@ useEffect(() => {
       if (!player?.Slug) { setTrend(null); return; }
       try {
         const snap = await getDoc(doc(db,"trends",player.Slug));
-        if (snap.exists()) setTrend(snap.data());
-        else setTrend(null);
+        if (snap.exists()) {
+          const data = snap.data();
+          setTrend(data);
+          const trendVal = (data.Trend || "").toString().trim().toLowerCase();
+          if (trendVal === "breakout") triggerBreakoutAnimation();
+        } else {
+          setTrend(null);
+        }
       } catch(e) { setTrend(null); }
     };
     fetch();
@@ -712,10 +778,33 @@ useEffect(() => {
     catch { return ""; }
   };
 
-  if (!player) return <div className="flex justify-center items-center h-screen text-xl font-bold" style={{color:SITE_BLUE}}>Loading Player...</div>;
+  if (!player) return (
+    <div
+      className="flex justify-center items-center h-screen text-xl font-bold"
+      style={{
+        color:SITE_BLUE,
+        opacity:1,
+        animation:"wdLoadingFadeIn 0.2s ease",
+      }}
+    >
+      <style>{`
+        @keyframes wdLoadingFadeIn {
+          0%   { opacity: 0; }
+          100% { opacity: 1; }
+        }
+      `}</style>
+      Loading Player...
+    </div>
+  );
 
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
   const isTrendingUp = (trend?.Trend || "").toString().trim().toLowerCase() === "up";
+  const isBreakoutTrend = (trend?.Trend || "").toString().trim().toLowerCase() === "breakout";
+  const breakoutStats = (trend?.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const trendNotesList = breakoutStats;
+
+  // ── Flair lookup — drives the right-side hero logo square + its stroke ──
+  const flairInfo = player.Flair ? FLAIR_CONFIG[String(player.Flair).trim()] : null;
 
   const buildMetaDescription = () => {
     const name = `${player.First || ""} ${player.Last || ""}`.trim();
@@ -949,22 +1038,129 @@ useEffect(() => {
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
 
+      {flairInfo && (
+        <style>{`
+          @keyframes wdFlairShine {
+            0%   { left: -60%; }
+            12%  { left: 130%; }
+            100% { left: 130%; }
+          }
+          .wd-flair-shine { animation: wdFlairShine 4.5s ease-in-out infinite; }
+        `}</style>
+      )}
+
+      {isBreakoutTrend && (
+        <style>{`
+          @keyframes wdBreakoutTagGlow {
+            0%, 100% { box-shadow: 0 0 6px 1px rgba(143,216,255,0.45); }
+            50%      { box-shadow: 0 0 12px 3px rgba(143,216,255,0.85); }
+          }
+          .wd-breakout-tag { animation: wdBreakoutTagGlow 2.4s ease-in-out infinite; }
+        `}</style>
+      )}
+
       {isTrendingUp && (
         <style>{`
-          @keyframes wdTrendBannerPulse {
-            0%, 100% { opacity: 1; }
-            50%      { opacity: 0.9; }
+          @keyframes wdTrendUpTagGlow {
+            0%, 100% { box-shadow: 0 0 6px 1px rgba(74,222,128,0.45); }
+            50%      { box-shadow: 0 0 12px 3px rgba(74,222,128,0.85); }
           }
-          .wd-trend-banner { animation: wdTrendBannerPulse 2.8s ease-in-out infinite; }
+          .wd-trendup-tag { animation: wdTrendUpTagGlow 2.4s ease-in-out infinite; }
         `}</style>
+      )}
+
+      {showBreakoutAnim && (
+        <>
+          <style>{`
+            @keyframes wdVoltOverlayFade {
+              0%   { opacity: 0; }
+              8%   { opacity: 1; }
+              82%  { opacity: 1; }
+              100% { opacity: 0; }
+            }
+            @keyframes wdVoltTextFlicker {
+              0%   { opacity: 0; filter: brightness(3) blur(3px); transform: scale(0.92); }
+              4%   { opacity: 1; }
+              7%   { opacity: 0.15; }
+              10%  { opacity: 1; }
+              13%  { opacity: 0.25; }
+              16%  { opacity: 1; filter: brightness(1.7) blur(0px); transform: scale(1.02); }
+              20%  { transform: scale(1); filter: brightness(1); }
+              82%  { opacity: 1; }
+              100% { opacity: 0; }
+            }
+            @keyframes wdBoltFlashA {
+              0%, 100% { opacity: 0; }
+              5% { opacity: 1; }
+              9% { opacity: 0; }
+              13% { opacity: 0.8; }
+              17% { opacity: 0; }
+            }
+            @keyframes wdBoltFlashB {
+              0%, 100% { opacity: 0; }
+              7% { opacity: 0.9; }
+              11% { opacity: 0; }
+              15% { opacity: 1; }
+              19% { opacity: 0; }
+            }
+          `}</style>
+          <div
+            style={{
+              position:"fixed", inset:0, zIndex:200,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              pointerEvents:"none", overflow:"hidden",
+              background:"radial-gradient(circle at center, rgba(35,42,50,0.78), rgba(4,6,8,0.9))",
+              animation:"wdVoltOverlayFade 2.4s ease forwards",
+            }}
+          >
+            {/* electric bolt streaks */}
+            <div
+              style={{
+                position:"absolute", top:"20%", left:"-10%", width:"120%", height:"3px",
+                background:"linear-gradient(90deg, transparent, #bfe8ff, #ffffff, #7fd0ff, transparent)",
+                boxShadow:"0 0 14px 2px rgba(140,220,255,0.9)",
+                transform:"rotate(-8deg)",
+                animation:"wdBoltFlashA 2.4s ease forwards",
+              }}
+            />
+            <div
+              style={{
+                position:"absolute", bottom:"24%", left:"-10%", width:"120%", height:"2px",
+                background:"linear-gradient(90deg, transparent, #9fdcff, #ffffff, #6fc4ff, transparent)",
+                boxShadow:"0 0 12px 2px rgba(120,200,255,0.85)",
+                transform:"rotate(6deg)",
+                animation:"wdBoltFlashB 2.4s ease forwards",
+              }}
+            />
+            <div
+              style={{
+                position:"relative",
+                fontSize:"clamp(38px,10vw,110px)",
+                fontWeight:900,
+                textTransform:"uppercase",
+                letterSpacing:"0.1em",
+                textAlign:"center",
+                backgroundImage:"linear-gradient(180deg, #ffffff 0%, #d6dee6 30%, #8b97a3 52%, #c7d1da 70%, #ffffff 100%)",
+                WebkitBackgroundClip:"text",
+                backgroundClip:"text",
+                color:"transparent",
+                WebkitTextFillColor:"transparent",
+                textShadow:"0 0 18px rgba(130,205,255,0.85), 0 0 46px rgba(90,170,255,0.55)",
+                animation:"wdVoltTextFlicker 2.4s ease forwards",
+              }}
+            >
+              Breakout
+            </div>
+          </div>
+        </>
       )}
 
       <div
         className="mx-auto pb-40"
         style={
           isMobile
-            ? { padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px" }
-            : { maxWidth: "1600px", margin: "0 auto", padding: "24px 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center" }
+            ? { padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
+            : { maxWidth: "1600px", margin: "0 auto", padding: "24px 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
         }
       >
 
@@ -981,7 +1177,7 @@ useEffect(() => {
         <div>
 
         {/* ===== HERO CARD ===== */}
-        <div className="mb-6 rounded-lg overflow-hidden" style={{ border: isTrendingUp ? "3px solid #16a34a" : `3px solid ${color1}` }}>
+        <div className="mb-6 rounded-lg overflow-hidden" style={{ border: `3px solid ${color1}` }}>
           <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
               style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
@@ -1006,19 +1202,56 @@ useEffect(() => {
           </div>
 
           <div className="bg-white flex items-center" style={{ gap:isMobile?"8px":"16px", padding:isMobile?"12px 10px 8px":"20px 24px 10px" }}>
-            <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:"1px solid #eee", borderRadius:"8px" }}>
+            <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:`2px solid ${color2}`, borderRadius:"8px" }}>
               {draftedBy ? (
                 branding?.nflLogo ? <img src={sanitizeUrl(branding.nflLogo)} alt="NFL" style={{ height:isMobile?50:96, objectFit:"contain" }} /> : null
               ) : branding?.logo1 ? (
-                <Link to={`/team/${teamSlug}`} className="flex items-center justify-center w-full h-full">
+                <Link to={`/team/${teamSlug}`} className="group relative flex items-center justify-center w-full h-full">
                   <img src={sanitizeUrl(branding.logo1)} alt={player.School} style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
+                  <div
+                    className="hidden group-hover:flex"
+                    style={{
+                      position:"absolute",
+                      top:"calc(100% + 10px)",
+                      left:"50%",
+                      transform:"translateX(-50%)",
+                      background:"#fff",
+                      border:`2px solid ${color1}`,
+                      borderRadius:"8px",
+                      padding:"6px 12px",
+                      boxShadow:"0 8px 20px rgba(0,0,0,0.18)",
+                      zIndex:50,
+                      whiteSpace:"nowrap",
+                      alignItems:"center",
+                      justifyContent:"center",
+                      pointerEvents:"none",
+                    }}
+                  >
+                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.08em", color:color1 }}>
+                      Click for Team Page
+                    </span>
+                    <div
+                      style={{
+                        position:"absolute",
+                        bottom:"100%",
+                        left:"50%",
+                        transform:"translateX(-50%)",
+                        width:0,
+                        height:0,
+                        borderLeft:"6px solid transparent",
+                        borderRight:"6px solid transparent",
+                        borderBottom:`6px solid ${color1}`,
+                      }}
+                    />
+                  </div>
                 </Link>
               ) : null}
             </div>
 
             <div className="flex-1 text-center">
               <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:color1, letterSpacing:"0.02em" }}>
-                {`${player.First||""} ${player.Last||""}`}
+                <div>{player.First}</div>
+                <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
               </h1>
               <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:isMobile?"6px":"10px" }}>
                 <span className="font-extrabold rounded-full" style={{ backgroundColor:color1, color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
@@ -1030,6 +1263,178 @@ useEffect(() => {
                 </span>
                 <span style={{ color:"#ccc" }}>·</span>
                 <span className="font-bold" style={{ color:"#666", fontSize:isMobile?"12px":"19px" }}>{formatEligible(player.Eligible)}</span>
+                {isTrendingUp && (
+                  <>
+                    <span style={{ color:"#ccc" }}>·</span>
+                    <div
+                      style={{ position:"relative", display:"inline-block" }}
+                      onMouseEnter={() => setShowTrendUpTip(true)}
+                      onMouseLeave={() => setShowTrendUpTip(false)}
+                      onClick={() => setShowTrendUpTip((v) => !v)}
+                    >
+                      <span
+                        className="font-extrabold rounded-full wd-trendup-tag"
+                        style={{
+                          display:"inline-flex", alignItems:"center", gap:"5px",
+                          backgroundImage:"linear-gradient(135deg, #14532d, #16a34a)",
+                          border:"1px solid #4ade80",
+                          color:"#eafff0",
+                          letterSpacing:"0.06em",
+                          fontSize:isMobile?"11px":"16px",
+                          padding:isMobile?"2px 10px":"3px 15px",
+                          textTransform:"uppercase",
+                          cursor:"pointer",
+                        }}
+                      >
+                        ▲ Trending Up
+                      </span>
+                      {showTrendUpTip && (
+                        <div
+                          style={{
+                            position:"absolute",
+                            top:"calc(100% + 12px)",
+                            left:"50%",
+                            transform:"translateX(-50%)",
+                            width:isMobile?"220px":"270px",
+                            backgroundImage:"linear-gradient(135deg, #0f2b1a, #1e4028)",
+                            border:"1px solid #4ade80",
+                            borderRadius:"10px",
+                            padding:"12px 14px",
+                            boxShadow:"0 10px 30px rgba(0,0,0,0.45), 0 0 18px rgba(74,222,128,0.35)",
+                            zIndex:60,
+                            textAlign:"left",
+                            pointerEvents:"none",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%)",
+                              width:0, height:0,
+                              borderLeft:"8px solid transparent", borderRight:"8px solid transparent",
+                              borderBottom:"8px solid #4ade80",
+                            }}
+                          />
+                          <div
+                            style={{
+                              position:"absolute", bottom:"calc(100% - 2px)", left:"50%", transform:"translateX(-50%)",
+                              width:0, height:0,
+                              borderLeft:"6px solid transparent", borderRight:"6px solid transparent",
+                              borderBottom:"6px solid #1e4028",
+                            }}
+                          />
+                          <div
+                            style={{
+                              fontSize:isMobile?"11px":"12px",
+                              fontWeight:900,
+                              textTransform:"uppercase",
+                              letterSpacing:"0.07em",
+                              color:"#eafff0",
+                              marginBottom:"6px",
+                            }}
+                          >
+                            {`${player.First||""} ${player.Last||""}`.trim()} Trending Up
+                          </div>
+                          <div style={{ height:"2px", background:"#4ade80", opacity:0.4, marginBottom:"8px", width:"36px", borderRadius:"2px" }} />
+                          {trendNotesList.length > 0 && (
+                            <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                              {trendNotesList.map((s, i) => (
+                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:700, color:"#d4f5df" }}>
+                                  ▲ {s}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+                {isBreakoutTrend && (
+                  <>
+                    <span style={{ color:"#ccc" }}>·</span>
+                    <div
+                      style={{ position:"relative", display:"inline-block" }}
+                      onMouseEnter={() => setShowBreakoutTip(true)}
+                      onMouseLeave={() => setShowBreakoutTip(false)}
+                      onClick={() => setShowBreakoutTip((v) => !v)}
+                    >
+                      <span
+                        className="font-extrabold rounded-full wd-breakout-tag"
+                        style={{
+                          display:"inline-flex", alignItems:"center", gap:"5px",
+                          backgroundImage:"linear-gradient(135deg, #2c333b, #4a535e)",
+                          border:"1px solid #8fd8ff",
+                          color:"#eaf6ff",
+                          letterSpacing:"0.06em",
+                          fontSize:isMobile?"11px":"16px",
+                          padding:isMobile?"2px 10px":"3px 15px",
+                          textTransform:"uppercase",
+                          cursor:"pointer",
+                        }}
+                      >
+                        ⚡ Breakout
+                      </span>
+                      {showBreakoutTip && (
+                        <div
+                          style={{
+                            position:"absolute",
+                            top:"calc(100% + 12px)",
+                            left:"50%",
+                            transform:"translateX(-50%)",
+                            width:isMobile?"220px":"270px",
+                            backgroundImage:"linear-gradient(135deg, #1c2128, #2f3742)",
+                            border:"1px solid #8fd8ff",
+                            borderRadius:"10px",
+                            padding:"12px 14px",
+                            boxShadow:"0 10px 30px rgba(0,0,0,0.45), 0 0 18px rgba(143,216,255,0.35)",
+                            zIndex:60,
+                            textAlign:"left",
+                            pointerEvents:"none",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%)",
+                              width:0, height:0,
+                              borderLeft:"8px solid transparent", borderRight:"8px solid transparent",
+                              borderBottom:"8px solid #8fd8ff",
+                            }}
+                          />
+                          <div
+                            style={{
+                              position:"absolute", bottom:"calc(100% - 2px)", left:"50%", transform:"translateX(-50%)",
+                              width:0, height:0,
+                              borderLeft:"6px solid transparent", borderRight:"6px solid transparent",
+                              borderBottom:"6px solid #2f3742",
+                            }}
+                          />
+                          <div
+                            style={{
+                              fontSize:isMobile?"11px":"12px",
+                              fontWeight:900,
+                              textTransform:"uppercase",
+                              letterSpacing:"0.07em",
+                              color:"#eaf6ff",
+                              marginBottom:"6px",
+                            }}
+                          >
+                            {`${player.First||""} ${player.Last||""}`.trim()} Breakout Performance
+                          </div>
+                          <div style={{ height:"2px", background:"#8fd8ff", opacity:0.4, marginBottom:"8px", width:"36px", borderRadius:"2px" }} />
+                          {breakoutStats.length > 0 && (
+                            <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                              {breakoutStats.map((s, i) => (
+                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:700, color:"#cfe9ff" }}>
+                                  ⚡ {s}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
               {draftedBy && draftInfo && (
                 <div className="flex items-center justify-center gap-3 mt-2">
@@ -1047,37 +1452,194 @@ useEffect(() => {
               )}
             </div>
 
-            <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:"1px solid #eee", borderRadius:"8px" }}>
-              {draftedBy ? (
+            <div
+              className="flex-shrink-0 flex items-center justify-center"
+              style={{
+                width:isMobile?60:112, height:isMobile?60:112,
+                background: flairInfo
+                  ? `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), #f2f4f6 55%, #e9edf0 100%)`
+                  : "#f8f8f8",
+                border:`2px solid ${flairInfo ? flairInfo.stroke : "#eee"}`,
+                borderRadius:"8px",
+                position:"relative",
+              }}
+              onMouseEnter={() => flairInfo && setShowFlairTip(true)}
+              onMouseLeave={() => setShowFlairTip(false)}
+              onClick={() => flairInfo && setShowFlairTip((v) => !v)}
+            >
+              {flairInfo ? (
+                <>
+                  {/* clipped layer for the image + shine sweep only — kept separate
+                      from the outer container so the tooltip below isn't clipped too */}
+                  <div
+                    style={{
+                      position:"absolute", inset:0, borderRadius:"6px",
+                      overflow:"hidden",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                    }}
+                  >
+                    <img
+                      src={flairInfo.img}
+                      alt={player.Flair}
+                      style={{
+                        height:isMobile?50:96, objectFit:"contain", cursor:"pointer",
+                        filter:"drop-shadow(0 3px 5px rgba(0,0,0,0.18))",
+                        position:"relative", zIndex:1,
+                      }}
+                    />
+                    {/* glossy sheen sweep — gives the badge a bit of life instead of sitting flat */}
+                    <div
+                      className="wd-flair-shine"
+                      style={{
+                        position:"absolute", top:0, left:"-60%", width:"40%", height:"100%",
+                        background:"linear-gradient(115deg, transparent, rgba(255,255,255,0.65), transparent)",
+                        transform:"skewX(-20deg)",
+                        pointerEvents:"none",
+                        zIndex:2,
+                      }}
+                    />
+                  </div>
+                  {showFlairTip && (
+                    <div
+                      style={{
+                        position:"absolute",
+                        top:"calc(100% + 14px)",
+                        right:0,
+                        width:isMobile?"180px":"230px",
+                        background:"#fff",
+                        border:`2px solid ${flairInfo.stroke}`,
+                        borderRadius:"10px",
+                        padding:"12px 14px",
+                        boxShadow:"0 10px 28px rgba(0,0,0,0.22)",
+                        zIndex:50,
+                        textAlign:"center",
+                        pointerEvents:"none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          position:"absolute",
+                          bottom:"100%",
+                          right:isMobile?"22px":"48px",
+                          width:0,
+                          height:0,
+                          borderLeft:"8px solid transparent",
+                          borderRight:"8px solid transparent",
+                          borderBottom:`8px solid ${flairInfo.stroke}`,
+                        }}
+                      />
+                      <div
+                        style={{
+                          position:"absolute",
+                          bottom:"calc(100% - 2px)",
+                          right:isMobile?"24px":"50px",
+                          width:0,
+                          height:0,
+                          borderLeft:"6px solid transparent",
+                          borderRight:"6px solid transparent",
+                          borderBottom:"6px solid #fff",
+                        }}
+                      />
+                      <div
+                        style={{
+                          fontSize:isMobile?"11px":"12px",
+                          fontWeight:900,
+                          textTransform:"uppercase",
+                          letterSpacing:"0.1em",
+                          color:flairInfo.stroke,
+                          marginBottom:"5px",
+                        }}
+                      >
+                        {player.Flair}
+                      </div>
+                      <div style={{ height:"2px", background:flairInfo.stroke, opacity:0.35, margin:"0 auto 8px", width:"36px", borderRadius:"2px" }} />
+                      <div style={{ fontSize:isMobile?"11px":"12px", fontWeight:700, color:"#444", lineHeight:1.5 }}>
+                        {flairInfo.desc || "Description coming soon."}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : draftedBy ? (
                 branding?.cfbLogo ? (
-                  <Link to={`/team/${teamSlug}`} className="flex items-center justify-center w-full h-full">
+                  <Link to={`/team/${teamSlug}`} className="group relative flex items-center justify-center w-full h-full">
                     <img src={sanitizeUrl(branding.cfbLogo)} alt="College" style={{ height:isMobile?42:88, objectFit:"contain" }} />
+                    <div
+                      className="hidden group-hover:flex"
+                      style={{
+                        position:"absolute",
+                        top:"calc(100% + 10px)",
+                        right:0,
+                        background:"#fff",
+                        border:`2px solid ${color1}`,
+                        borderRadius:"8px",
+                        padding:"6px 12px",
+                        boxShadow:"0 8px 20px rgba(0,0,0,0.18)",
+                        zIndex:50,
+                        whiteSpace:"nowrap",
+                        alignItems:"center",
+                        justifyContent:"center",
+                        pointerEvents:"none",
+                      }}
+                    >
+                      <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.08em", color:color1 }}>
+                        Click for Team Page
+                      </span>
+                      <div
+                        style={{
+                          position:"absolute",
+                          bottom:"100%",
+                          right:"20px",
+                          width:0,
+                          height:0,
+                          borderLeft:"6px solid transparent",
+                          borderRight:"6px solid transparent",
+                          borderBottom:`6px solid ${color1}`,
+                        }}
+                      />
+                    </div>
                   </Link>
                 ) : null
               ) : branding?.logo2 ? (
-                <Link to={`/team/${teamSlug}`} className="flex items-center justify-center w-full h-full">
+                <Link to={`/team/${teamSlug}`} className="group relative flex items-center justify-center w-full h-full">
                   <img src={sanitizeUrl(branding.logo2)} alt="" style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
+                  <div
+                    className="hidden group-hover:flex"
+                    style={{
+                      position:"absolute",
+                      top:"calc(100% + 10px)",
+                      right:0,
+                      background:"#fff",
+                      border:`2px solid ${color1}`,
+                      borderRadius:"8px",
+                      padding:"6px 12px",
+                      boxShadow:"0 8px 20px rgba(0,0,0,0.18)",
+                      zIndex:50,
+                      whiteSpace:"nowrap",
+                      alignItems:"center",
+                      justifyContent:"center",
+                      pointerEvents:"none",
+                    }}
+                  >
+                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.08em", color:color1 }}>
+                      Click for Team Page
+                    </span>
+                    <div
+                      style={{
+                        position:"absolute",
+                        bottom:"100%",
+                        right:"20px",
+                        width:0,
+                        height:0,
+                        borderLeft:"6px solid transparent",
+                        borderRight:"6px solid transparent",
+                        borderBottom:`6px solid ${color1}`,
+                      }}
+                    />
+                  </div>
                 </Link>
               ) : null}
             </div>
           </div>
-
-          {isTrendingUp && (
-            <div
-              className="wd-trend-banner"
-              title={trend?.Notes || "Trending up"}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
-                background: "#16a34a", color: "#fff",
-                padding: isMobile ? "6px 10px" : "8px 12px",
-                fontSize: isMobile ? "12px" : "13px", fontWeight: 900,
-                textTransform: "uppercase", letterSpacing: "0.1em",
-              }}
-            >
-              <span style={{ fontSize: isMobile ? "13px" : "15px" }}>▲</span>
-              Trending Up
-            </div>
-          )}
 
           {physicalMeasurements.length > 0 && (
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>
