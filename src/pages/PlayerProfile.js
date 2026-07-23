@@ -216,6 +216,8 @@ export default function PlayerProfile() {
   const [draftedBy, setDraftedBy] = useState(null);
   const [draftInfo, setDraftInfo] = useState(null);
   const [playerNews, setPlayerNews] = useState([]);
+  const [playerVideos, setPlayerVideos] = useState([]);
+  const [visibleVideoCount, setVisibleVideoCount] = useState(3);
   const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
   const cfbLogoRef = useRef("");
@@ -402,6 +404,39 @@ export default function PlayerProfile() {
     };
     fetch();
   }, [slug, player?.School]);
+
+  // ── Videos attached to this player's slug (Google Sheet "Videos" tab synced
+  // to the `videos` collection). Each video can reference up to 3 slugs, each
+  // with its own title/thumb override — fall back to items[0] (Slug1's
+  // title/thumb) if this player's own slug has no override set. ──
+  useEffect(() => {
+    if (!slug) return;
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(query(collection(db,"videos"), where("slugs","array-contains",slug)));
+        const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
+        const vids = snap.docs
+          .map((d) => {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const matched = items.find((it) => it.slug === slug) || null;
+            const first = items[0] || null;
+            return {
+              id: d.id,
+              video: data.Video || "",
+              date: data.Date || null,
+              title: matched?.title || first?.title || "",
+              thumb: matched?.thumb || first?.thumb || "",
+            };
+          })
+          .filter((v) => v.video)
+          .sort((a, b) => toMs(b.date) - toMs(a.date));
+        setPlayerVideos(vids);
+        setVisibleVideoCount(3);
+      } catch(e) { setPlayerVideos([]); }
+    };
+    fetch();
+  }, [slug]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -986,6 +1021,91 @@ useEffect(() => {
     </details>
   );
 
+  // ── Videos sidebar — only rendered at all when the player has at least one
+  // attached video; each row shows that video's per-slug title/thumb as a
+  // full-width card (thumbnail on top, title overlaid in a gradient scrim). ──
+  const VideosSidebar = (
+    <SidebarCard title="Videos" color1={SITE_BLUE} color2={SITE_GOLD}>
+      {playerVideos.slice(0, visibleVideoCount).map((v, i, arr) => (
+        <a
+          key={v.id}
+          href={sanitizeUrl(v.video)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="wd-video-card"
+          style={{
+            display: "block",
+            position: "relative",
+            textDecoration: "none",
+            borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+          }}
+        >
+          <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+            {v.thumb ? (
+              <img
+                className="wd-video-thumb"
+                src={sanitizeUrl(v.thumb)}
+                alt={v.title || "Video thumbnail"}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                referrerPolicy="no-referrer"
+                onError={(e)=>{e.currentTarget.style.display="none";}}
+                loading="lazy"
+              />
+            ) : (
+              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
+              </div>
+            )}
+
+            {/* gradient scrim so the title reads over any thumbnail */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+
+            {/* play button — scales/fades in on hover */}
+            <div
+              className="wd-video-play"
+              style={{
+                position: "absolute", top: "50%", left: "50%",
+                transform: "translate(-50%, -50%) scale(0.8)",
+                width: "48px", height: "48px", borderRadius: "50%",
+                background: "rgba(255,255,255,0.95)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+              }}
+            >
+              <span style={{ color: color1, fontSize: "18px", marginLeft: "3px" }}>▶</span>
+            </div>
+
+            {v.title && (
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
+                <div className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
+                  {v.title}
+                </div>
+              </div>
+            )}
+          </div>
+        </a>
+      ))}
+      {visibleVideoCount < playerVideos.length && (
+        <button
+          onClick={() => setVisibleVideoCount((c) => c + 3)}
+          style={{
+            display: "block", width: "100%",
+            padding: "10px 14px",
+            background: SITE_BLUE, color: SITE_GOLD,
+            border: "none", cursor: "pointer",
+            fontWeight: 900, fontSize: "12px",
+            textTransform: "uppercase", letterSpacing: "0.1em",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
+        >
+          Show More Videos ▾
+        </button>
+      )}
+    </SidebarCard>
+  );
+
   // ── In The News sidebar ──
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={SITE_BLUE} color2={SITE_GOLD}>
@@ -1037,6 +1157,13 @@ useEffect(() => {
         <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`} />
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
+
+      {playerVideos.length > 0 && (
+        <style>{`
+          .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
+          .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        `}</style>
+      )}
 
       {flairInfo && (
         <style>{`
@@ -1184,7 +1311,7 @@ useEffect(() => {
               ← Back
             </button>
             <div className="flex gap-2">
-              {player.Link && (
+              {player.Link && String(player.Eligible) === "2026" && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
                   className="text-white font-extrabold rounded-full transition hover:opacity-80"
                   style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px" }}>
@@ -2318,11 +2445,15 @@ useEffect(() => {
         </div>
         {/* ===== END MAIN COLUMN ===== */}
 
-        {/* ===== RIGHT COLUMN: In The News ===== */}
+        {/* ===== RIGHT COLUMN: Videos + In The News ===== */}
         {isMobile ? (
-          NewsSidebar
+          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            {playerVideos.length > 0 && VideosSidebar}
+            {NewsSidebar}
+          </div>
         ) : (
-          <div style={{ position: "sticky", top: "20px" }}>
+          <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            {playerVideos.length > 0 && VideosSidebar}
             {NewsSidebar}
           </div>
         )}

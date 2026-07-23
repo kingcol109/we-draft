@@ -11,6 +11,8 @@ const GOLD = "#f6a21d";
 const PROSPECT_YEARS = ["2027", "2028", "2029"];
 const ARCHIVE_YEAR = "2026";
 const NEWS_LIMIT = 8;
+const VIDEO_INITIAL_COUNT = 3;
+const VIDEO_MAX_TOTAL = 9;
 
 const gradeScale = {
   "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
@@ -753,6 +755,8 @@ export default function TeamPage() {
   const [teamNews, setTeamNews] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [schoolsMap, setSchoolsMap] = useState({});
+  const [teamVideos, setTeamVideos] = useState([]);
+  const [visibleVideoCount, setVisibleVideoCount] = useState(VIDEO_INITIAL_COUNT);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -994,6 +998,55 @@ export default function TeamPage() {
         } catch (e) {
           console.error("Historical load error:", e);
           setHistoricalPlayers([]);
+        }
+
+        // Videos — roster slugs are every player from Prospects (2027-2029) plus
+        // the drafted 2026 archive class. Firestore caps array-contains-any at 10
+        // values per query, so chunk the roster into groups of 10 and merge results.
+        try {
+          const rosterSlugs = new Set();
+          Object.values(prospectResults).forEach((arr) => arr.forEach((p) => { if (p.Slug) rosterSlugs.add(p.Slug); }));
+          archivePlrs.forEach((p) => { if (p.Slug) rosterSlugs.add(p.Slug); });
+
+          const slugArray = Array.from(rosterSlugs);
+          if (slugArray.length > 0) {
+            const chunks = [];
+            for (let i = 0; i < slugArray.length; i += 10) chunks.push(slugArray.slice(i, i + 10));
+
+            const chunkSnaps = await Promise.all(
+              chunks.map((chunk) => getDocs(query(collection(db, "videos"), where("slugs", "array-contains-any", chunk))))
+            );
+
+            const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
+            const seenVideoIds = new Set();
+            const vids = [];
+            chunkSnaps.forEach((snap) => {
+              snap.docs.forEach((d) => {
+                if (seenVideoIds.has(d.id)) return;
+                seenVideoIds.add(d.id);
+                const data = d.data();
+                const items = Array.isArray(data.items) ? data.items : [];
+                // Prefer whichever item belongs to a player on this roster; fall
+                // back to items[0] (Slug1) per-field, same pattern as the player page.
+                const matched = items.find((it) => rosterSlugs.has(it.slug)) || null;
+                const first = items[0] || null;
+                vids.push({
+                  id: d.id,
+                  video: data.Video || "",
+                  date: data.Date || null,
+                  title: matched?.title || first?.title || "",
+                  thumb: matched?.thumb || first?.thumb || "",
+                });
+              });
+            });
+            vids.sort((a, b) => toMs(b.date) - toMs(a.date));
+            setTeamVideos(vids.filter((v) => v.video));
+          } else {
+            setTeamVideos([]);
+          }
+        } catch (e) {
+          console.error("Videos load error:", e);
+          setTeamVideos([]);
         }
 
       } catch (err) {
@@ -1238,6 +1291,90 @@ export default function TeamPage() {
     </SidebarCard>
   );
 
+  // ── Videos sidebar — only meaningfully non-empty when a Video row's
+  // Slug1/2/3 references a player on this team's roster. Starts at 3, can be
+  // expanded 3-at-a-time up to VIDEO_MAX_TOTAL. ──
+  const VideosSidebar = (
+    <SidebarCard title="Videos" color1={BLUE} color2={GOLD}>
+      {teamVideos.slice(0, visibleVideoCount).map((v, i, arr) => (
+        <a
+          key={v.id}
+          href={sanitizeUrl(v.video)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="wd-video-card"
+          style={{
+            display: "block",
+            position: "relative",
+            textDecoration: "none",
+            borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+          }}
+        >
+          <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+            {v.thumb ? (
+              <img
+                className="wd-video-thumb"
+                src={sanitizeUrl(v.thumb)}
+                alt={v.title || "Video thumbnail"}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                loading="lazy"
+              />
+            ) : (
+              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
+              </div>
+            )}
+
+            {/* gradient scrim so the title reads over any thumbnail */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+
+            {/* play button — scales/fades in on hover */}
+            <div
+              className="wd-video-play"
+              style={{
+                position: "absolute", top: "50%", left: "50%",
+                transform: "translate(-50%, -50%) scale(0.8)",
+                width: "48px", height: "48px", borderRadius: "50%",
+                background: "rgba(255,255,255,0.95)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+              }}
+            >
+              <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
+            </div>
+
+            {v.title && (
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
+                <div style={{ fontWeight: 900, textTransform: "uppercase", color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.25 }}>
+                  {v.title}
+                </div>
+              </div>
+            )}
+          </div>
+        </a>
+      ))}
+      {visibleVideoCount < Math.min(teamVideos.length, VIDEO_MAX_TOTAL) && (
+        <button
+          onClick={() => setVisibleVideoCount((c) => Math.min(c + 3, VIDEO_MAX_TOTAL))}
+          style={{
+            display: "block", width: "100%",
+            padding: "10px 14px",
+            background: BLUE, color: GOLD,
+            border: "none", cursor: "pointer",
+            fontWeight: 900, fontSize: "12px",
+            textTransform: "uppercase", letterSpacing: "0.1em",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+        >
+          Show More Videos ▾
+        </button>
+      )}
+    </SidebarCard>
+  );
+
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
       {teamNews.length === 0 ? (
@@ -1302,6 +1439,13 @@ export default function TeamPage() {
         <meta name="twitter:description" content={pageDescription} />
       </Helmet>
 
+      {teamVideos.length > 0 && (
+        <style>{`
+          .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
+          .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        `}</style>
+      )}
+
       <div style={{
         maxWidth: "1600px", margin: "0 auto",
         padding: isMobile ? "10px 10px 60px" : "24px 40px 60px",
@@ -1361,6 +1505,7 @@ export default function TeamPage() {
               </div>
             </details>
             {ScheduleSidebar}
+            {teamVideos.length > 0 && VideosSidebar}
             {NewsSidebar}
           </div>
         ) : (
@@ -1390,6 +1535,7 @@ export default function TeamPage() {
             </div>
             <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
               {ScheduleSidebar}
+              {teamVideos.length > 0 && VideosSidebar}
               {NewsSidebar}
             </div>
           </div>
