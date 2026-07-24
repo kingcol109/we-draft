@@ -663,12 +663,28 @@ export default function CommunityBoard() {
     </div>
   );
 
+  // ── SEO: page-specific title/description/canonical + Open Graph/Twitter
+  // Card tags, mirroring the pattern used on PlayerProfile.js. Built from
+  // eligibleYear so each draft class (2026 archive, 2027, 2028, 2029) gets
+  // its own distinct metadata and social preview instead of a generic one. ──
+  const pageTitle = `${eligibleYear} NFL Draft Community Board | We-Draft.com`;
+  const pageDescription = `We-Draft.com ${eligibleYear} NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections — voted on by the community.`;
+  const pageUrl = `https://we-draft.com${yearPath(eligibleYear)}`;
+
   return (
     <>
       <Helmet>
-        <title>{eligibleYear} NFL Draft Community Board | We-Draft.com</title>
-        <meta name="description" content={`We-Draft.com ${eligibleYear} NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections — voted on by the community.`} />
-        <link rel="canonical" href={`https://we-draft.com${yearPath(eligibleYear)}`} />
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+        <link rel="canonical" href={pageUrl} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={pageTitle} />
+        <meta property="og:description" content={pageDescription} />
+        <meta property="og:url" content={pageUrl} />
+        <meta property="og:site_name" content="We-Draft.com" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={pageDescription} />
       </Helmet>
 
       <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
