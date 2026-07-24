@@ -180,15 +180,18 @@ function renderEvaluationText(text, keyPrefix = "ev") {
   return blocks;
 }
 
-const PUBLIC_EVAL_CHAR_LIMIT = 700;
+const PUBLIC_EVAL_LINE_LIMIT = 8;
 
-// ── Truncates a public evaluation to PUBLIC_EVAL_CHAR_LIMIT characters with a
-// Show More/Less toggle. Only used in the Public Evaluations feed. ──
+// ── Truncates a public evaluation to PUBLIC_EVAL_LINE_LIMIT lines (not
+// characters) with a Show More/Less toggle. Line-based so a bulleted
+// evaluation never gets cut mid-bullet — each hidden/shown unit is always a
+// whole line. Only used in the Public Evaluations feed. ──
 function TruncatedEvaluationText({ text, keyPrefix, color }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
-  const isLong = text.length > PUBLIC_EVAL_CHAR_LIMIT;
-  const displayText = !isLong || expanded ? text : text.slice(0, PUBLIC_EVAL_CHAR_LIMIT).trimEnd() + "…";
+  const lines = text.split("\n");
+  const isLong = lines.length > PUBLIC_EVAL_LINE_LIMIT;
+  const displayText = !isLong || expanded ? text : lines.slice(0, PUBLIC_EVAL_LINE_LIMIT).join("\n");
   return (
     <>
       {renderEvaluationText(displayText, keyPrefix)}
