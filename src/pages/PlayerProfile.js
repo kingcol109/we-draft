@@ -248,6 +248,7 @@ export default function PlayerProfile() {
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [evalCount, setEvalCount] = useState(0);
   const [seoDataReady, setSeoDataReady] = useState(false);
+  const [brandingReady, setBrandingReady] = useState(false);
   const [pageVisible, setPageVisible] = useState(false);
 
   const [grade, setGrade] = useState("");
@@ -382,19 +383,24 @@ export default function PlayerProfile() {
     setPlayer(null);
     setPageVisible(false);
     setSeoDataReady(false);
+    setBrandingReady(false);
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [slug]);
 
   // ── Tells Prerender.io's headless browser when this page's SEO-critical
-  // data (grades/evaluations, aggregated in the effect below) has actually
-  // finished loading, instead of letting it guess via a fixed timeout or the
-  // browser's `load` event — which fires once the JS bundle executes, long
-  // before the Firestore reads this page depends on have resolved. Without
-  // this, Prerender.io can snapshot the page mid-fetch: sidebar stuck on
-  // "Loading...", grade sections empty, even when the real data exists by
-  // the time Googlebot's crawl actually happens. A capped safety timeout
-  // forces readiness anyway after 8s so a slow or failed fetch can't hang
-  // Prerender.io indefinitely. ──
+  // data — grades/evaluations (below) AND school branding/logo (separate
+  // fetch, see the branding effect above) — has actually finished loading,
+  // instead of letting it guess via a fixed timeout or the browser's `load`
+  // event, which fires once the JS bundle executes, long before the
+  // Firestore reads this page depends on have resolved. Without this,
+  // Prerender.io can snapshot the page mid-fetch — sidebar stuck on
+  // "Loading...", grade sections empty, or (as seen after the first fix
+  // attempt) the school logo box rendering empty even though the flair icon
+  // loaded fine, since that one comes from a separate fetch this didn't
+  // originally account for. Requires ALL tracked fetches to report ready,
+  // not just one, so a single slow dependency can't slip through again. A
+  // capped safety timeout forces readiness anyway after 8s so a slow or
+  // failed fetch can't hang Prerender.io indefinitely. ──
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.prerenderReady = false;
@@ -404,8 +410,8 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (seoDataReady) window.prerenderReady = true;
-  }, [seoDataReady]);
+    if (seoDataReady && brandingReady) window.prerenderReady = true;
+  }, [seoDataReady, brandingReady]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -591,7 +597,7 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     const fetch = async () => {
-      if (!player?.School) { setBranding(null); return; }
+      if (!player?.School) { setBranding(null); setBrandingReady(true); return; }
       try {
         const sSnap = await getDoc(doc(db,"schools",player.School));
         if (sSnap.exists()) {
@@ -601,6 +607,14 @@ export default function PlayerProfile() {
           setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
         } else { setBranding(null); }
       } catch(e) { setBranding(null); }
+      finally {
+        // Marks the school logo/branding fetch as done, same reasoning as
+        // seoDataReady below — the flair icon renders instantly from
+        // player.Flair (no fetch needed), but the school logo box depends on
+        // this separate async call, and was slipping through the original
+        // prerenderReady gate because it only watched the evaluations fetch.
+        setBrandingReady(true);
+      }
     };
     fetch();
   }, [player]);
