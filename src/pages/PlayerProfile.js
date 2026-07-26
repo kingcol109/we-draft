@@ -2,6 +2,7 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import Logo1 from "../assets/Logo1.png";
+import HomageLogo from "../assets/homagelogo.png";
 import {
   doc,
   getDoc,
@@ -30,6 +31,11 @@ import SecondFlair from "../assets/second.png";
 import AlienFlair from "../assets/alien.png";
 import FutureStarFlair from "../assets/futurestar.png";
 import CurveFlair from "../assets/curve.png";
+import EarlyImpactFlair from "../assets/early impact.png";
+import EarlyContributorFlair from "../assets/early contributor.png";
+import Year2ContributorFlair from "../assets/y2contributor.png";
+import DevelopmentalFlair from "../assets/developmental.png";
+import ProvenFlair from "../assets/proven.png";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -77,8 +83,13 @@ const FLAIR_CONFIG = {
   "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
   "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
   "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
+  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. \"High 5-Star\".", tag: "Recruit Grade" },
+  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. \"Low 5-Star/High 4-Star\".", tag: "Recruit Grade" },
+  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. \"4-Star\".", tag: "Recruit Grade" },
+  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. \"3-Star\".", tag: "Recruit Grade" },
   // "Raw Talent": image not uploaded yet — add here once you have it, e.g.
   // "Raw Talent": { img: RawTalentFlair, stroke: "#hexcode", desc: "..." },
+  "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
 };
 
 const toTeamSlug = (school) => {
@@ -117,6 +128,15 @@ const teamNameToAbbr = {
   "New York Jets":"NYJ","Philadelphia Eagles":"PHI","Pittsburgh Steelers":"PIT","San Francisco 49ers":"SF",
   "Seattle Seahawks":"SEA","Tampa Bay Buccaneers":"TB","Tennessee Titans":"TEN","Washington Commanders":"WAS",
 };
+
+// ── All 32 NFL team abbreviations, ordered to fill an 8x4 grid exactly —
+// used by the margin ad's team picker. ──
+const NFL_TEAM_ABBRS = [
+  "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE",
+  "DAL","DEN","DET","GB","HOU","IND","JAX","KC",
+  "LV","LAC","LAR","MIA","MIN","NE","NO","NYG",
+  "NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS",
+];
 
 // ── Shared sidebar shell ──
 function SidebarCard({ title, color1, color2, children }) {
@@ -227,6 +247,7 @@ export default function PlayerProfile() {
   const schoolSlugRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [evalCount, setEvalCount] = useState(0);
+  const [seoDataReady, setSeoDataReady] = useState(false);
   const [pageVisible, setPageVisible] = useState(false);
 
   const [grade, setGrade] = useState("");
@@ -253,17 +274,69 @@ export default function PlayerProfile() {
   const [showBreakoutTip, setShowBreakoutTip] = useState(false);
   const [showTrendUpTip, setShowTrendUpTip] = useState(false);
 
+  // ── Sponsored margin ads (Homage) — desktop-only, wide-viewport-only.
+  // Layout (width + per-side offset) is measured from the actual rendered
+  // content grid via mainGridRef, not estimated from window.innerWidth minus
+  // an assumed 1600px — that guess doesn't account for padding, box-sizing,
+  // or the scrollbar, which is why it kept hugging the edge incorrectly. ──
+  const mainGridRef = useRef(null);
+  const [showMarginAds, setShowMarginAds] = useState(false);
+  const [adData, setAdData] = useState(null);
+  const [allAds, setAllAds] = useState([]);
+  const [adVisible, setAdVisible] = useState(false);
+  const [adTeamBranding, setAdTeamBranding] = useState(null);
+  const [adLayout, setAdLayout] = useState({ width: 140, leftGutter: 0, rightGutter: 0 });
+
   // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
   const [draftClassLoading, setDraftClassLoading] = useState(false);
   const [classRank, setClassRank] = useState(null);
   const [classSize, setClassSize] = useState(0);
 
+  // ── Measures the real left/right gutter around the content grid (the
+  // space actually left over, not an estimate) and derives the ad card's
+  // width + per-side offset so it centers itself in whatever room truly
+  // exists, symmetrically, on both sides. The grid has its own 60px
+  // horizontal padding (see the style below) — the visible sidebar starts
+  // 60px inside the measured box edge, not flush with it, so that padding
+  // has to be subtracted or the ad ends up centered against invisible
+  // padding instead of the actual visible content, making it look like it's
+  // hugging the outer browser edge. ──
+  const CONTENT_H_PADDING = 60;
+  const recomputeAdLayout = () => {
+    if (isMobile || !mainGridRef.current) { setShowMarginAds(false); return; }
+    const rect = mainGridRef.current.getBoundingClientRect();
+    const visibleLeftEdge = rect.left + CONTENT_H_PADDING;
+    const visibleRightEdge = rect.right - CONTENT_H_PADDING;
+    const leftGutter = Math.max(0, visibleLeftEdge);
+    const rightGutter = Math.max(0, window.innerWidth - visibleRightEdge);
+    const minGutter = Math.min(leftGutter, rightGutter);
+    const MIN_USABLE_GUTTER = 160; // below this, there's no sensible room for a card + breathing room
+    if (minGutter < MIN_USABLE_GUTTER) { setShowMarginAds(false); return; }
+    const width = Math.max(140, Math.min(240, minGutter - 16));
+    setAdLayout({ width, leftGutter, rightGutter });
+    setShowMarginAds(true);
+  };
+
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
+    const handler = () => {
+      setIsMobile(window.innerWidth < 768);
+      recomputeAdLayout();
+    };
     window.addEventListener("resize", handler);
+
     return () => window.removeEventListener("resize", handler);
   }, []);
+
+  // ── The grid ref has no real size until content actually renders — recompute
+  // once pageVisible flips true (and again shortly after, in case fonts/images
+  // still nudge the layout). ──
+  useEffect(() => {
+    if (!pageVisible) return;
+    recomputeAdLayout();
+    const t = setTimeout(recomputeAdLayout, 300);
+    return () => clearTimeout(t);
+  }, [pageVisible]);
 
   const gradeScale = {
     "Early First Round":1,"Middle First Round":2,"Late First Round":3,"Second Round":4,
@@ -308,8 +381,31 @@ export default function PlayerProfile() {
   useEffect(() => {
     setPlayer(null);
     setPageVisible(false);
+    setSeoDataReady(false);
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [slug]);
+
+  // ── Tells Prerender.io's headless browser when this page's SEO-critical
+  // data (grades/evaluations, aggregated in the effect below) has actually
+  // finished loading, instead of letting it guess via a fixed timeout or the
+  // browser's `load` event — which fires once the JS bundle executes, long
+  // before the Firestore reads this page depends on have resolved. Without
+  // this, Prerender.io can snapshot the page mid-fetch: sidebar stuck on
+  // "Loading...", grade sections empty, even when the real data exists by
+  // the time Googlebot's crawl actually happens. A capped safety timeout
+  // forces readiness anyway after 8s so a slow or failed fetch can't hang
+  // Prerender.io indefinitely. ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.prerenderReady = false;
+    const safetyTimer = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(safetyTimer);
+  }, [slug]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (seoDataReady) window.prerenderReady = true;
+  }, [seoDataReady]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -335,6 +431,58 @@ export default function PlayerProfile() {
     const t = setTimeout(() => setPageVisible(true), 20);
     return () => clearTimeout(t);
   }, [player]);
+
+  // ── Sponsored margin ads (Homage). Deliberately deferred to be the very
+  // last network call the page makes: waits for pageVisible (so it never
+  // competes with real content), then adds its own delay on top. Selection
+  // priority: (1) the team that actually drafted this player, if drafted —
+  // feels intentional rather than random; (2) the player's college's NFL
+  // affiliate (Schools sheet's NFL column — a scouting/feeder relationship,
+  // not a draft outcome) for undrafted prospects; (3) random, as a last
+  // resort. Fails silently — an ad that doesn't load should never be
+  // visible as a broken/blank state. ──
+  useEffect(() => {
+    if (isMobile || !showMarginAds || !pageVisible) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const snap = await getDocs(collection(db, "ads"));
+        const ads = snap.docs.map((d) => d.data()).filter((a) => a.Link && a.Image1);
+        if (!cancelled && ads.length > 0) {
+          setAllAds(ads);
+          const draftedAd = draftedBy ? ads.find((a) => a.Team === draftedBy) : null;
+          const affiliateAd = !draftedAd && branding?.nflAffiliate
+            ? ads.find((a) => a.Team === branding.nflAffiliate)
+            : null;
+          setAdData(draftedAd || affiliateAd || ads[Math.floor(Math.random() * ads.length)]);
+        }
+      } catch (e) { /* ads are non-critical — fail silently */ }
+    }, 1500);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [isMobile, showMarginAds, pageVisible, draftedBy, branding?.nflAffiliate]);
+
+  useEffect(() => {
+    if (!adData) return;
+    const t = setTimeout(() => setAdVisible(true), 20);
+    return () => clearTimeout(t);
+  }, [adData]);
+
+  // ── The right-side ad card is stylized to whichever team is currently
+  // selected (shared `adData` state, driven by the left card's picker) —
+  // pull that team's real Color1/Color2/Logo from the nfl collection. ──
+  useEffect(() => {
+    if (!adData?.Team) { setAdTeamBranding(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "nfl", adData.Team));
+        if (!cancelled) setAdTeamBranding(snap.exists() ? snap.data() : null);
+      } catch (e) {
+        if (!cancelled) setAdTeamBranding(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [adData?.Team]);
 
   useEffect(() => {
     if (!slug) return;
@@ -450,7 +598,7 @@ export default function PlayerProfile() {
           const b = sSnap.data();
           cfbLogoRef.current = b.Logo1 || b.Logo2 || "";
           schoolSlugRef.current = b.Slug || "";
-          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", slug:b.Slug||"" });
+          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
         } else { setBranding(null); }
       } catch(e) { setBranding(null); }
     };
@@ -601,6 +749,11 @@ useEffect(() => {
           setPublicFeed([]);
         }
       } catch(e) { console.error(e); }
+      finally {
+        // Marks the SEO-critical data fetch as done regardless of success,
+        // empty result, or error — see the prerenderReady effect below.
+        setSeoDataReady(true);
+      }
     };
     fetch();
   }, [player]);
@@ -885,6 +1038,281 @@ useEffect(() => {
     <div style={{ fontSize:"12px", fontWeight:900, letterSpacing:"0.12em", textTransform:"uppercase", color:"#666", marginBottom:"8px", textAlign:"center" }}>{children}</div>
   );
 
+  // ── Shared fixed-position placement for both margin ad cards, derived from
+  // the measured gutter (see recomputeAdLayout above). Kept as one function
+  // so the left and right cards always use identical positioning math. ──
+  const marginAdPositionStyle = (side) => {
+    const gutter = side === "left" ? adLayout.leftGutter : adLayout.rightGutter;
+    const offset = Math.max(8, (gutter - adLayout.width) / 2);
+    return {
+      position: "fixed",
+      top: "50%",
+      [side]: `${offset}px`,
+      transform: "translateY(-50%)",
+      width: `${adLayout.width}px`,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      zIndex: 5,
+      opacity: adVisible ? 1 : 0,
+      transition: "opacity 0.7s ease",
+    };
+  };
+
+  // ── Sponsored margin ad card — lives entirely outside the content grid via
+  // position:fixed, so it never competes with the page layout for space.
+  // Outer wrapper is a div rather than an anchor because it now contains a
+  // real <select> team picker — nesting an interactive control inside an <a>
+  // is invalid HTML and breaks click handling, so only the image/copy/CTA
+  // portion is wrapped in its own link. Defaults to a random team on load;
+  // the picker lets the visitor override that with any team in `allAds`.
+  // This is the LEFT card — it drives the shared `adData` selection; the
+  // right card (MarginAdTeamCard, below) just follows whatever this picks. ──
+  const MarginAd = ({ side }) => {
+    if (!adData) return null;
+    const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
+    return (
+      <div
+        className="wd-margin-ad"
+        style={marginAdPositionStyle(side)}
+      >
+        <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
+          Sponsored
+        </div>
+        <div
+          className="wd-margin-ad-card"
+          style={{
+            width:"100%", borderRadius:"14px", overflow:"hidden",
+            border:"1px solid #eee", background:"#fff",
+            boxShadow:"0 4px 18px rgba(0,0,0,0.08)",
+            transition:"box-shadow 0.2s ease, transform 0.2s ease",
+          }}
+        >
+          <div style={{ padding:"9px 10px", borderBottom:"1px solid #f3f3f3" }}>
+            <div style={{ fontSize:"9px", fontWeight:900, color:"#c8102e", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
+              {teamLabel}
+            </div>
+          </div>
+
+          <a
+            href={sanitizeUrl(adData.Link)}
+            target="_blank"
+            rel="sponsored noopener noreferrer"
+            style={{ display:"block" }}
+          >
+            <img
+              src={sanitizeUrl(adData.Image1)}
+              alt={`${teamLabel} throwback gear`}
+              style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+              loading="lazy"
+              fetchpriority="low"
+              referrerPolicy="no-referrer"
+              onError={(e)=>{e.currentTarget.style.display="none";}}
+            />
+          </a>
+
+          {/* Always-visible 8x4 grid of all 32 NFL teams, directly under the product shot */}
+          <div style={{ padding:"10px 10px 6px", borderTop:"1px solid #f3f3f3" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:"5px" }}>
+              {NFL_TEAM_ABBRS.map((abbr) => {
+                const teamAd = allAds.find((a) => a.Team === abbr);
+                const isActive = adData.Team === abbr;
+                return (
+                  <button
+                    key={abbr}
+                    type="button"
+                    disabled={!teamAd}
+                    title={teamNameFromAbbr(abbr)}
+                    className={teamAd ? "wd-team-btn" : ""}
+                    onClick={() => { if (teamAd) setAdData(teamAd); }}
+                    style={{
+                      fontSize:"8.5px", fontWeight:900,
+                      padding:"5px 0", borderRadius:"4px",
+                      border:`1px solid ${isActive ? "#c8102e" : "#eee"}`,
+                      background: isActive ? "#c8102e" : teamAd ? "#fff" : "#f6f6f6",
+                      color: isActive ? "#fff" : teamAd ? "#333" : "#ccc",
+                      cursor: teamAd ? "pointer" : "not-allowed",
+                      transition: "transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
+                    }}
+                  >
+                    {abbr}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <a
+            href={sanitizeUrl(adData.Link)}
+            target="_blank"
+            rel="sponsored noopener noreferrer"
+            style={{ display:"block", textDecoration:"none" }}
+          >
+            <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:"1px solid #f3f3f3" }}>
+              <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
+                Throwback &amp; Licensed
+              </div>
+              <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
+                All 32 NFL Teams + MLB, NBA, NHL &amp; More
+              </div>
+              <div
+                className="wd-margin-ad-cta"
+                style={{
+                  display:"inline-flex", alignItems:"center", gap:"4px",
+                  background:"#c8102e", color:"#fff",
+                  fontSize:"10px", fontWeight:900,
+                  padding:"7px 16px", borderRadius:"20px",
+                  textTransform:"uppercase", letterSpacing:"0.05em",
+                  transition:"background 0.15s ease",
+                }}
+              >
+                Shop Now →
+              </div>
+            </div>
+          </a>
+
+          <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:"1px solid #f3f3f3" }}>
+            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Right-side companion ad card. Doesn't have its own team picker — it
+  // just follows whatever team is currently selected in `adData` (shared
+  // state, driven by the left card). Stylized to that team using its real
+  // Color1/Color2/Logo1 from adTeamBranding instead of generic Homage red,
+  // and shows Image2 + Image3 (a 2-up gallery) instead of Image1, so the two
+  // cards read as complementary rather than duplicates of each other. ──
+  const MarginAdTeamCard = ({ side }) => {
+    if (!adData) return null;
+    const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
+    const tColor1 = adTeamBranding?.Color1 || SITE_BLUE;
+    const tColor2 = adTeamBranding?.Color2 || SITE_GOLD;
+    const tLogo = adTeamBranding?.Logo1 || adTeamBranding?.Logo2 || "";
+    const gallery = [adData.Image2, adData.Image3].filter(Boolean);
+    const displayImages = gallery.length > 0 ? gallery : (adData.Image1 ? [adData.Image1] : []);
+
+    return (
+      <div
+        className="wd-margin-ad"
+        style={marginAdPositionStyle(side)}
+      >
+        <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
+          Sponsored
+        </div>
+        <div
+          className="wd-margin-ad-card"
+          style={{
+            width:"100%", borderRadius:"14px", overflow:"hidden",
+            border:`2px solid ${tColor1}`, background:"#fff",
+            boxShadow:`0 4px 18px ${tColor1}40`,
+            transition:"box-shadow 0.2s ease, transform 0.2s ease",
+          }}
+        >
+          <div style={{ background:`linear-gradient(135deg, ${tColor1}, ${tColor1}cc)`, padding:"12px 10px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {(() => {
+              const parts = teamLabel.split(" ");
+              const nickname = parts.pop();
+              const cityLine = parts.join(" ");
+              return (
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", lineHeight:1.15 }}>
+                  <div style={{ fontSize:"12px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
+                    {cityLine}
+                  </div>
+                  <div style={{ fontSize:"16px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
+                    {nickname}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          <a
+            href={sanitizeUrl(adData.Link)}
+            target="_blank"
+            rel="sponsored noopener noreferrer"
+            style={{ display:"block" }}
+          >
+            {displayImages.length === 2 ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:"2px", background:tColor2 }}>
+                {displayImages.map((img, i) => (
+                  <img
+                    key={i}
+                    src={sanitizeUrl(img)}
+                    alt={`${teamLabel} gear ${i + 1}`}
+                    style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+                    loading="lazy"
+                    fetchpriority="low"
+                    referrerPolicy="no-referrer"
+                    onError={(e)=>{e.currentTarget.style.display="none";}}
+                  />
+                ))}
+              </div>
+            ) : displayImages[0] ? (
+              <img
+                src={sanitizeUrl(displayImages[0])}
+                alt={`${teamLabel} gear`}
+                style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+                loading="lazy"
+                fetchpriority="low"
+                referrerPolicy="no-referrer"
+                onError={(e)=>{e.currentTarget.style.display="none";}}
+              />
+            ) : null}
+          </a>
+
+          <a
+            href={sanitizeUrl(adData.Link)}
+            target="_blank"
+            rel="sponsored noopener noreferrer"
+            style={{ display:"block", textDecoration:"none" }}
+          >
+            <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:`1px solid ${tColor1}22` }}>
+              <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
+                Throwback &amp; Licensed
+              </div>
+              <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
+                All 32 NFL Teams + MLB, NBA, NHL &amp; More
+              </div>
+              <div
+                className="wd-margin-ad-cta-team"
+                style={{
+                  display:"inline-flex", alignItems:"center", gap:"4px",
+                  background:tColor1, color:"#fff",
+                  fontSize:"10px", fontWeight:900,
+                  padding:"7px 16px", borderRadius:"20px",
+                  textTransform:"uppercase", letterSpacing:"0.05em",
+                  border:`1px solid ${tColor2}`,
+                  transition:"filter 0.15s ease",
+                }}
+              >
+                Shop Now →
+              </div>
+            </div>
+          </a>
+
+          {tLogo && (
+            <div style={{ padding:"16px 10px", display:"flex", alignItems:"center", justifyContent:"center", background:"#fff", borderTop:`1px solid ${tColor1}22` }}>
+              <img
+                src={sanitizeUrl(tLogo)}
+                alt={teamLabel}
+                style={{ height:"64px", objectFit:"contain" }}
+                referrerPolicy="no-referrer"
+                onError={(e)=>{e.currentTarget.style.display="none";}}
+              />
+            </div>
+          )}
+
+          <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:`1px solid ${tColor1}22` }}>
+            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const SectionTitle = ({ children }) => (
     <>
       <div className="font-black uppercase mb-2" style={{ color:color1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</div>
@@ -1161,6 +1589,29 @@ useEffect(() => {
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
 
+      {adData && (
+        <style>{`
+          .wd-margin-ad:hover .wd-margin-ad-card {
+            box-shadow: 0 8px 26px rgba(0,0,0,0.14);
+            transform: translateY(-2px);
+          }
+          .wd-margin-ad:hover .wd-margin-ad-cta {
+            background: #a10d24;
+          }
+          .wd-margin-ad:hover .wd-margin-ad-cta-team {
+            filter: brightness(0.85);
+          }
+          .wd-team-btn:hover {
+            border-color: #c8102e !important;
+            box-shadow: 0 2px 8px rgba(200,16,46,0.25);
+            transform: translateY(-1px);
+          }
+          .wd-team-btn:active {
+            transform: translateY(0) scale(0.94);
+          }
+        `}</style>
+      )}
+
       {playerVideos.length > 0 && (
         <style>{`
           .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
@@ -1286,6 +1737,7 @@ useEffect(() => {
       )}
 
       <div
+        ref={mainGridRef}
         className="mx-auto pb-40"
         style={
           isMobile
@@ -1342,37 +1794,28 @@ useEffect(() => {
                     className="hidden group-hover:flex"
                     style={{
                       position:"absolute",
-                      top:"calc(100% + 10px)",
+                      top:"calc(100% + 12px)",
                       left:"50%",
                       transform:"translateX(-50%)",
                       background:"#fff",
-                      border:`2px solid ${color1}`,
-                      borderRadius:"8px",
-                      padding:"6px 12px",
-                      boxShadow:"0 8px 20px rgba(0,0,0,0.18)",
+                      border:`1.5px solid ${color1}`,
+                      borderRadius:"10px",
+                      padding:"7px 14px",
+                      boxShadow:"0 10px 24px rgba(0,0,0,0.14)",
                       zIndex:50,
                       whiteSpace:"nowrap",
                       alignItems:"center",
                       justifyContent:"center",
+                      gap:"6px",
                       pointerEvents:"none",
                     }}
                   >
-                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.08em", color:color1 }}>
-                      Click for Team Page
+                    <span style={{ fontSize:"12px" }}>🔗</span>
+                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1 }}>
+                      Team Page
                     </span>
-                    <div
-                      style={{
-                        position:"absolute",
-                        bottom:"100%",
-                        left:"50%",
-                        transform:"translateX(-50%)",
-                        width:0,
-                        height:0,
-                        borderLeft:"6px solid transparent",
-                        borderRight:"6px solid transparent",
-                        borderBottom:`6px solid ${color1}`,
-                      }}
-                    />
+                    <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"11px", height:"11px", background:color1, borderRadius:"2px" }} />
+                    <div style={{ position:"absolute", bottom:"calc(100% - 6px)", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"8px", height:"8px", background:"#fff", borderRadius:"1px" }} />
                   </div>
                 </Link>
               ) : null}
@@ -1422,54 +1865,39 @@ useEffect(() => {
                         <div
                           style={{
                             position:"absolute",
-                            top:"calc(100% + 12px)",
+                            top:"calc(100% + 14px)",
                             left:"50%",
                             transform:"translateX(-50%)",
-                            width:isMobile?"220px":"270px",
+                            width:isMobile?"220px":"264px",
                             backgroundImage:"linear-gradient(135deg, #0f2b1a, #1e4028)",
-                            border:"1px solid #4ade80",
-                            borderRadius:"10px",
-                            padding:"12px 14px",
-                            boxShadow:"0 10px 30px rgba(0,0,0,0.45), 0 0 18px rgba(74,222,128,0.35)",
+                            border:"1px solid rgba(74,222,128,0.55)",
+                            borderRadius:"14px",
+                            padding:"14px 16px",
+                            boxShadow:"0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(74,222,128,0.08)",
                             zIndex:60,
                             textAlign:"left",
                             pointerEvents:"none",
                           }}
                         >
-                          <div
-                            style={{
-                              position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%)",
-                              width:0, height:0,
-                              borderLeft:"8px solid transparent", borderRight:"8px solid transparent",
-                              borderBottom:"8px solid #4ade80",
-                            }}
-                          />
-                          <div
-                            style={{
-                              position:"absolute", bottom:"calc(100% - 2px)", left:"50%", transform:"translateX(-50%)",
-                              width:0, height:0,
-                              borderLeft:"6px solid transparent", borderRight:"6px solid transparent",
-                              borderBottom:"6px solid #1e4028",
-                            }}
-                          />
-                          <div
-                            style={{
+                          <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"13px", height:"13px", background:"#1e4028", border:"1px solid rgba(74,222,128,0.55)", borderRadius:"2px" }} />
+                          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"7px" }}>
+                            <span style={{ fontSize:"12px" }}>▲</span>
+                            <div style={{
                               fontSize:isMobile?"11px":"12px",
                               fontWeight:900,
                               textTransform:"uppercase",
-                              letterSpacing:"0.07em",
+                              letterSpacing:"0.06em",
                               color:"#eafff0",
-                              marginBottom:"6px",
-                            }}
-                          >
-                            {`${player.First||""} ${player.Last||""}`.trim()} Trending Up
+                            }}>
+                              {`${player.First||""} ${player.Last||""}`.trim()} Trending Up
+                            </div>
                           </div>
-                          <div style={{ height:"2px", background:"#4ade80", opacity:0.4, marginBottom:"8px", width:"36px", borderRadius:"2px" }} />
+                          <div style={{ height:"1px", background:"linear-gradient(90deg, rgba(74,222,128,0.6), transparent)", marginBottom:"8px" }} />
                           {trendNotesList.length > 0 && (
-                            <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                            <div style={{ display:"flex", flexDirection:"column", gap:"5px" }}>
                               {trendNotesList.map((s, i) => (
-                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:700, color:"#d4f5df" }}>
-                                  ▲ {s}
+                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#d4f5df", lineHeight:1.4 }}>
+                                  {s}
                                 </div>
                               ))}
                             </div>
@@ -1508,54 +1936,39 @@ useEffect(() => {
                         <div
                           style={{
                             position:"absolute",
-                            top:"calc(100% + 12px)",
+                            top:"calc(100% + 14px)",
                             left:"50%",
                             transform:"translateX(-50%)",
-                            width:isMobile?"220px":"270px",
+                            width:isMobile?"220px":"264px",
                             backgroundImage:"linear-gradient(135deg, #1c2128, #2f3742)",
-                            border:"1px solid #8fd8ff",
-                            borderRadius:"10px",
-                            padding:"12px 14px",
-                            boxShadow:"0 10px 30px rgba(0,0,0,0.45), 0 0 18px rgba(143,216,255,0.35)",
+                            border:"1px solid rgba(143,216,255,0.55)",
+                            borderRadius:"14px",
+                            padding:"14px 16px",
+                            boxShadow:"0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(143,216,255,0.08)",
                             zIndex:60,
                             textAlign:"left",
                             pointerEvents:"none",
                           }}
                         >
-                          <div
-                            style={{
-                              position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%)",
-                              width:0, height:0,
-                              borderLeft:"8px solid transparent", borderRight:"8px solid transparent",
-                              borderBottom:"8px solid #8fd8ff",
-                            }}
-                          />
-                          <div
-                            style={{
-                              position:"absolute", bottom:"calc(100% - 2px)", left:"50%", transform:"translateX(-50%)",
-                              width:0, height:0,
-                              borderLeft:"6px solid transparent", borderRight:"6px solid transparent",
-                              borderBottom:"6px solid #2f3742",
-                            }}
-                          />
-                          <div
-                            style={{
+                          <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"13px", height:"13px", background:"#2f3742", border:"1px solid rgba(143,216,255,0.55)", borderRadius:"2px" }} />
+                          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"7px" }}>
+                            <span style={{ fontSize:"12px" }}>⚡</span>
+                            <div style={{
                               fontSize:isMobile?"11px":"12px",
                               fontWeight:900,
                               textTransform:"uppercase",
-                              letterSpacing:"0.07em",
+                              letterSpacing:"0.06em",
                               color:"#eaf6ff",
-                              marginBottom:"6px",
-                            }}
-                          >
-                            {`${player.First||""} ${player.Last||""}`.trim()} Breakout Performance
+                            }}>
+                              {`${player.First||""} ${player.Last||""}`.trim()} Breakout Performance
+                            </div>
                           </div>
-                          <div style={{ height:"2px", background:"#8fd8ff", opacity:0.4, marginBottom:"8px", width:"36px", borderRadius:"2px" }} />
+                          <div style={{ height:"1px", background:"linear-gradient(90deg, rgba(143,216,255,0.6), transparent)", marginBottom:"8px" }} />
                           {breakoutStats.length > 0 && (
-                            <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
+                            <div style={{ display:"flex", flexDirection:"column", gap:"5px" }}>
                               {breakoutStats.map((s, i) => (
-                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:700, color:"#cfe9ff" }}>
-                                  ⚡ {s}
+                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#cfe9ff", lineHeight:1.4 }}>
+                                  {s}
                                 </div>
                               ))}
                             </div>
@@ -1635,55 +2048,43 @@ useEffect(() => {
                         position:"absolute",
                         top:"calc(100% + 14px)",
                         right:0,
-                        width:isMobile?"180px":"230px",
+                        width:isMobile?"190px":"240px",
                         background:"#fff",
-                        border:`2px solid ${flairInfo.stroke}`,
-                        borderRadius:"10px",
-                        padding:"12px 14px",
-                        boxShadow:"0 10px 28px rgba(0,0,0,0.22)",
+                        border:`1.5px solid ${flairInfo.stroke}`,
+                        borderRadius:"14px",
+                        padding:"14px 16px",
+                        boxShadow:"0 16px 36px rgba(0,0,0,0.16)",
                         zIndex:50,
-                        textAlign:"center",
+                        textAlign:"left",
                         pointerEvents:"none",
                       }}
                     >
-                      <div
-                        style={{
-                          position:"absolute",
-                          bottom:"100%",
-                          right:isMobile?"22px":"48px",
-                          width:0,
-                          height:0,
-                          borderLeft:"8px solid transparent",
-                          borderRight:"8px solid transparent",
-                          borderBottom:`8px solid ${flairInfo.stroke}`,
-                        }}
-                      />
-                      <div
-                        style={{
-                          position:"absolute",
-                          bottom:"calc(100% - 2px)",
-                          right:isMobile?"24px":"50px",
-                          width:0,
-                          height:0,
-                          borderLeft:"6px solid transparent",
-                          borderRight:"6px solid transparent",
-                          borderBottom:"6px solid #fff",
-                        }}
-                      />
-                      <div
-                        style={{
-                          fontSize:isMobile?"11px":"12px",
-                          fontWeight:900,
-                          textTransform:"uppercase",
-                          letterSpacing:"0.1em",
-                          color:flairInfo.stroke,
-                          marginBottom:"5px",
-                        }}
-                      >
-                        {player.Flair}
+                      <div style={{ position:"absolute", bottom:"100%", right:isMobile?"22px":"48px", width:"13px", height:"13px", transform:"rotate(45deg)", background:"#fff", border:`1.5px solid ${flairInfo.stroke}`, borderRadius:"2px" }} />
+                      <div style={{ display:"flex", alignItems:"center", gap:"7px", marginBottom:"7px" }}>
+                        <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:flairInfo.stroke, flexShrink:0 }} />
+                        <div
+                          style={{
+                            fontSize:isMobile?"11px":"12px",
+                            fontWeight:900,
+                            textTransform:"uppercase",
+                            letterSpacing:"0.06em",
+                            color:flairInfo.stroke,
+                          }}
+                        >
+                          {player.Flair}
+                        </div>
+                        {flairInfo.tag && (
+                          <span style={{
+                            fontSize:"8px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.05em",
+                            color:"#fff", background:flairInfo.stroke, padding:"2px 6px", borderRadius:"20px",
+                            marginLeft:"2px",
+                          }}>
+                            {flairInfo.tag}
+                          </span>
+                        )}
                       </div>
-                      <div style={{ height:"2px", background:flairInfo.stroke, opacity:0.35, margin:"0 auto 8px", width:"36px", borderRadius:"2px" }} />
-                      <div style={{ fontSize:isMobile?"11px":"12px", fontWeight:700, color:"#444", lineHeight:1.5 }}>
+                      <div style={{ height:"1px", background:`linear-gradient(90deg, ${flairInfo.stroke}66, transparent)`, marginBottom:"8px" }} />
+                      <div style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#555", lineHeight:1.5 }}>
                         {flairInfo.desc || "Description coming soon."}
                       </div>
                     </div>
@@ -1697,35 +2098,27 @@ useEffect(() => {
                       className="hidden group-hover:flex"
                       style={{
                         position:"absolute",
-                        top:"calc(100% + 10px)",
+                        top:"calc(100% + 12px)",
                         right:0,
                         background:"#fff",
-                        border:`2px solid ${color1}`,
-                        borderRadius:"8px",
-                        padding:"6px 12px",
-                        boxShadow:"0 8px 20px rgba(0,0,0,0.18)",
+                        border:`1.5px solid ${color1}`,
+                        borderRadius:"10px",
+                        padding:"7px 14px",
+                        boxShadow:"0 10px 24px rgba(0,0,0,0.14)",
                         zIndex:50,
                         whiteSpace:"nowrap",
                         alignItems:"center",
                         justifyContent:"center",
+                        gap:"6px",
                         pointerEvents:"none",
                       }}
                     >
-                      <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.08em", color:color1 }}>
-                        Click for Team Page
+                      <span style={{ fontSize:"12px" }}>🔗</span>
+                      <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1 }}>
+                        Team Page
                       </span>
-                      <div
-                        style={{
-                          position:"absolute",
-                          bottom:"100%",
-                          right:"20px",
-                          width:0,
-                          height:0,
-                          borderLeft:"6px solid transparent",
-                          borderRight:"6px solid transparent",
-                          borderBottom:`6px solid ${color1}`,
-                        }}
-                      />
+                      <div style={{ position:"absolute", bottom:"100%", right:"20px", width:"11px", height:"11px", transform:"rotate(45deg)", background:color1, borderRadius:"2px" }} />
+                      <div style={{ position:"absolute", bottom:"calc(100% - 6px)", right:"20px", width:"8px", height:"8px", transform:"rotate(45deg)", background:"#fff", borderRadius:"1px" }} />
                     </div>
                   </Link>
                 ) : null
@@ -1736,35 +2129,27 @@ useEffect(() => {
                     className="hidden group-hover:flex"
                     style={{
                       position:"absolute",
-                      top:"calc(100% + 10px)",
+                      top:"calc(100% + 12px)",
                       right:0,
                       background:"#fff",
-                      border:`2px solid ${color1}`,
-                      borderRadius:"8px",
-                      padding:"6px 12px",
-                      boxShadow:"0 8px 20px rgba(0,0,0,0.18)",
+                      border:`1.5px solid ${color1}`,
+                      borderRadius:"10px",
+                      padding:"7px 14px",
+                      boxShadow:"0 10px 24px rgba(0,0,0,0.14)",
                       zIndex:50,
                       whiteSpace:"nowrap",
                       alignItems:"center",
                       justifyContent:"center",
+                      gap:"6px",
                       pointerEvents:"none",
                     }}
                   >
-                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.08em", color:color1 }}>
-                      Click for Team Page
+                    <span style={{ fontSize:"12px" }}>🔗</span>
+                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1 }}>
+                      Team Page
                     </span>
-                    <div
-                      style={{
-                        position:"absolute",
-                        bottom:"100%",
-                        right:"20px",
-                        width:0,
-                        height:0,
-                        borderLeft:"6px solid transparent",
-                        borderRight:"6px solid transparent",
-                        borderBottom:`6px solid ${color1}`,
-                      }}
-                    />
+                    <div style={{ position:"absolute", bottom:"100%", right:"20px", width:"11px", height:"11px", transform:"rotate(45deg)", background:color1, borderRadius:"2px" }} />
+                    <div style={{ position:"absolute", bottom:"calc(100% - 6px)", right:"20px", width:"8px", height:"8px", transform:"rotate(45deg)", background:"#fff", borderRadius:"1px" }} />
                   </div>
                 </Link>
               ) : null}
@@ -2462,6 +2847,13 @@ useEffect(() => {
         )}
 
       </div>
+
+      {showMarginAds && !isMobile && adData && (
+        <>
+          <MarginAd side="left" />
+          <MarginAdTeamCard side="right" />
+        </>
+      )}
     </>
   );
 }

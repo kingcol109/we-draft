@@ -4,9 +4,40 @@ import { useParams, Link } from "react-router-dom";
 import { collection, getDocs, getDoc, doc, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
+import EliteFlair from "../assets/elite.png";
+import StarFlair from "../assets/star.png";
+import GemFlair from "../assets/gem.png";
+import RadarFlair from "../assets/radar.png";
+import SecondFlair from "../assets/second.png";
+import AlienFlair from "../assets/alien.png";
+import FutureStarFlair from "../assets/futurestar.png";
+import CurveFlair from "../assets/curve.png";
+import EarlyImpactFlair from "../assets/early impact.png";
+import EarlyContributorFlair from "../assets/early contributor.png";
+import Year2ContributorFlair from "../assets/y2contributor.png";
+import DevelopmentalFlair from "../assets/developmental.png";
+import ProvenFlair from "../assets/proven.png";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
+
+// ── Flair -> { image, stroke color, description } — mirrors the map on
+// PlayerProfile.js so a flair means the same thing everywhere it shows up. ──
+const FLAIR_CONFIG = {
+  "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
+  "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
+  "Hidden Gem":          { img: GemFlair,         stroke: "#3fc305", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
+  "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
+  "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
+  "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
+  "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
+  "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
+  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. \"High 5-Star\".", tag: "Recruit Grade" },
+  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. \"Low 5-Star/High 4-Star\".", tag: "Recruit Grade" },
+  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. \"4-Star\".", tag: "Recruit Grade" },
+  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. \"3-Star\".", tag: "Recruit Grade" },
+  "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
+};
 
 const PROSPECT_YEARS = ["2027", "2028", "2029"];
 const ARCHIVE_YEAR = "2026";
@@ -127,16 +158,30 @@ const COL = {
 };
 
 // ── Sticky column header row ──
-function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showNfl = true }) {
-  const cell = (label, width) => (
-    <div style={{
-      flexShrink: 0, width,
-      fontSize: "11px", fontWeight: 900, color: "#fff",
-      textTransform: "uppercase", letterSpacing: "0.1em", textAlign: "center",
-    }}>
-      {label}
-    </div>
-  );
+function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showNfl = true, sortKey, sortOrder, onSort }) {
+  const cell = (label, width, key) => {
+    const clickable = !!onSort && !!key;
+    const active = clickable && sortKey === key;
+    return (
+      <div
+        onClick={clickable ? () => onSort(key) : undefined}
+        style={{
+          flexShrink: 0, width,
+          fontSize: "11px", fontWeight: 900, color: active ? color2 : "#fff",
+          textTransform: "uppercase", letterSpacing: "0.1em", textAlign: "center",
+          cursor: clickable ? "pointer" : "default", userSelect: "none",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "3px",
+        }}
+      >
+        <span>{label}</span>
+        {clickable && (
+          <span style={{ fontSize: "9px", opacity: active ? 1 : 0.5 }}>
+            {active ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
+          </span>
+        )}
+      </div>
+    );
+  };
   const gradeWidth = isMobile ? "52px" : "80px";
   return (
     <div style={{
@@ -146,18 +191,46 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
       background: `${color1}f5`, borderBottom: `3px solid ${color2}`,
       backdropFilter: "blur(4px)",
     }}>
-      {cell("Year", COL.year.width)}
+      {cell("Year", COL.year.width, "Eligible")}
       {showDraftPick && cell("Rd", COL.round.width)}
       {showDraftPick && !isMobile && cell("Pick", COL.pick.width)}
-      {cell("Pos", COL.pos.width)}
+      {cell("Pos", COL.pos.width, "Position")}
       {showNfl && !isMobile && cell("NFL", COL.nfl.width)}
-      <div style={{ flex: 1, minWidth: 0, fontSize: "11px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-        Player
+      <div
+        onClick={onSort ? () => onSort("Player") : undefined}
+        style={{
+          flex: 1, minWidth: 0, fontSize: "11px", fontWeight: 900,
+          color: sortKey === "Player" ? color2 : "#fff",
+          textTransform: "uppercase", letterSpacing: "0.1em",
+          cursor: onSort ? "pointer" : "default", userSelect: "none",
+          display: "flex", alignItems: "center", gap: "3px",
+        }}
+      >
+        <span>Player</span>
+        {onSort && (
+          <span style={{ fontSize: "9px", opacity: sortKey === "Player" ? 1 : 0.5 }}>
+            {sortKey === "Player" ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
+          </span>
+        )}
       </div>
       {showGrade && (
-        <div style={{ flexShrink: 0, width: gradeWidth, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px" }}>
-          <div style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>We-Draft</div>
-          <div style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>Grade</div>
+        <div
+          onClick={onSort ? () => onSort("CommGrade") : undefined}
+          style={{
+            flexShrink: 0, width: gradeWidth, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", gap: "2px",
+            cursor: onSort ? "pointer" : "default", userSelect: "none",
+          }}
+        >
+          <div style={{ fontSize: "10px", fontWeight: 900, color: sortKey === "CommGrade" ? color2 : "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>We-Draft</div>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: sortKey === "CommGrade" ? color2 : "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "3px", justifyContent: "center" }}>
+            <span>Grade</span>
+            {onSort && (
+              <span style={{ fontSize: "9px", opacity: sortKey === "CommGrade" ? 1 : 0.5 }}>
+                {sortKey === "CommGrade" ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
+              </span>
+            )}
+          </div>
         </div>
       )}
       <div style={{ width: COL.arrow.width, flexShrink: 0 }} />
@@ -168,6 +241,8 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
 function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, color2, showDraftPick = false, showNfl = true }) {
   const draft = draftInfo;
   const teamData = draft ? nflTeams[draft.team] : null;
+  const [showFlairTip, setShowFlairTip] = useState(false);
+  const flairInfo = player.Flair ? FLAIR_CONFIG[player.Flair] : null;
 
   return (
     <Link
@@ -239,13 +314,61 @@ function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, c
         </div>
       )}
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "10px" }}>
         <div style={{
-          fontWeight: 900, fontSize: isMobile ? "15px" : "20px", color: color1,
+          flex: "0 1 auto", minWidth: 0,
+          fontWeight: 900, fontSize: isMobile ? "17px" : "24px", color: color1,
           lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
         }}>
           {`${player.First || ""} ${player.Last || ""}`}
         </div>
+        {flairInfo && (
+          <span
+            style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}
+            onMouseEnter={() => setShowFlairTip(true)}
+            onMouseLeave={() => setShowFlairTip(false)}
+          >
+            <img
+              src={flairInfo.img}
+              alt={player.Flair}
+              style={{
+                width: isMobile ? "26px" : "32px", height: isMobile ? "26px" : "32px",
+                objectFit: "contain", borderRadius: "6px", padding: "2px",
+                border: `1.5px solid ${flairInfo.stroke}`,
+              }}
+            />
+            {showFlairTip && (
+              <div
+                style={{
+                  position: "absolute", top: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)",
+                  width: isMobile ? "200px" : "230px", background: "#fff", border: `1.5px solid ${flairInfo.stroke}`,
+                  borderRadius: "12px", padding: "12px 14px", boxShadow: "0 14px 32px rgba(0,0,0,0.16)",
+                  zIndex: 60, textAlign: "left", pointerEvents: "none",
+                }}
+              >
+                <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%) rotate(45deg)", width: "11px", height: "11px", background: "#fff", border: `1.5px solid ${flairInfo.stroke}`, borderRadius: "2px" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "7px" }}>
+                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: flairInfo.stroke, flexShrink: 0 }} />
+                  <div style={{ fontSize: "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: flairInfo.stroke }}>
+                    {player.Flair}
+                  </div>
+                  {flairInfo.tag && (
+                    <span style={{
+                      fontSize: "8px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em",
+                      color: "#fff", background: flairInfo.stroke, padding: "2px 6px", borderRadius: "20px",
+                    }}>
+                      {flairInfo.tag}
+                    </span>
+                  )}
+                </div>
+                <div style={{ height: "1px", background: `linear-gradient(90deg, ${flairInfo.stroke}66, transparent)`, marginBottom: "8px" }} />
+                <div style={{ fontSize: "12px", fontWeight: 600, color: "#555", lineHeight: 1.5 }}>
+                  {flairInfo.desc}
+                </div>
+              </div>
+            )}
+          </span>
+        )}
       </div>
 
       <div style={{ flexShrink: 0, width: isMobile ? "52px" : "80px", height: "42px", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -580,6 +703,15 @@ function MainContent({
 }) {
   const totalArchive = archivePlayers.length + historicalPlayers.length;
 
+  // ── Prospect table sorting — default is We-Draft (community) grade,
+  // ascending (best grade first), same as before this became clickable. ──
+  const [prospectSortKey, setProspectSortKey] = useState("CommGrade");
+  const [prospectSortOrder, setProspectSortOrder] = useState("asc");
+  const handleProspectSort = (key) => {
+    if (prospectSortKey === key) setProspectSortOrder((o) => (o === "asc" ? "desc" : "asc"));
+    else { setProspectSortKey(key); setProspectSortOrder("asc"); }
+  };
+
   // Memoize so this only rebuilds when source data changes, not on every filter re-render
   const allArchive = useMemo(() => {
     const raw = [
@@ -654,13 +786,23 @@ function MainContent({
 
       {/* ── PROSPECTS TAB ── */}
       {activeTab === "prospects" && (() => {
-        const allProspects = PROSPECT_YEARS.flatMap((yr) => prospects[yr] || [])
-          .sort((a, b) => {
+        const allProspects = PROSPECT_YEARS.flatMap((yr) => prospects[yr] || []);
+        const sortedProspects = [...allProspects].sort((a, b) => {
+          let cmp = 0;
+          if (prospectSortKey === "CommGrade") {
             const aScore = a.commGradeScore ?? 999;
             const bScore = b.commGradeScore ?? 999;
-            if (aScore !== bScore) return aScore - bScore;
-            return (a.Eligible || "").localeCompare(b.Eligible || "");
-          });
+            cmp = aScore - bScore;
+            if (cmp === 0) cmp = (a.Eligible || "").localeCompare(b.Eligible || "");
+          } else if (prospectSortKey === "Player") {
+            cmp = (a.Last || "").localeCompare(b.Last || "") || (a.First || "").localeCompare(b.First || "");
+          } else if (prospectSortKey === "Position") {
+            cmp = (a.Position || "").localeCompare(b.Position || "");
+          } else if (prospectSortKey === "Eligible") {
+            cmp = (parseInt(a.Eligible) || 0) - (parseInt(b.Eligible) || 0);
+          }
+          return prospectSortOrder === "asc" ? cmp : -cmp;
+        });
         return (
           <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -680,8 +822,12 @@ function MainContent({
               </div>
             ) : (
               <>
-                <TableHeader color1={color1} color2={color2} isMobile={isMobile} showDraftPick={false} showGrade={true} showNfl={false} />
-                {allProspects.map((p) => (
+                <TableHeader
+                  color1={color1} color2={color2} isMobile={isMobile}
+                  showDraftPick={false} showGrade={true} showNfl={false}
+                  sortKey={prospectSortKey} sortOrder={prospectSortOrder} onSort={handleProspectSort}
+                />
+                {sortedProspects.map((p) => (
                   <PlayerRow key={p.id} player={p} commGrade={p.commGrade}
                     draftInfo={null} nflTeams={nflTeams} isMobile={isMobile}
                     color1={color1} color2={color2} showDraftPick={false} showNfl={false} />

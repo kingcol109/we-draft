@@ -137,6 +137,35 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
   );
 }
 
+function PositionFilterBar({ options, selected, setSelected, isMobile }) {
+  const toggle = (pos) => setSelected((prev) => prev.includes(pos) ? prev.filter((x) => x !== pos) : [...prev, pos]);
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center", marginBottom: isMobile ? "8px" : "18px" }}>
+      {options.map((pos) => {
+        const active = selected.includes(pos);
+        return (
+          <button
+            key={pos}
+            onClick={() => toggle(pos)}
+            style={{
+              padding: isMobile ? "10px 20px" : "14px 32px",
+              fontWeight: 900, fontSize: isMobile ? "16px" : "19px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: `3px solid ${GOLD}`, borderRadius: "10px", cursor: "pointer",
+              background: active ? BLUE : "#fff",
+              color: active ? "#fff" : BLUE,
+              whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+            }}
+          >
+            {pos}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ArchiveDropdown({ eligibleYear, onSelect }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -194,6 +223,7 @@ export default function UserBoards() {
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
   const [eligibleYear, setEligibleYear] = useState("2027");
+  const [showWhiteboardTip, setShowWhiteboardTip] = useState(false);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -205,6 +235,7 @@ export default function UserBoards() {
     setEligibleYear(yr);
     setSearchQuery(""); setSelectedPositions([]); setSelectedSchools([]);
     setSelectedMyGrades([]); setShowAvailableOnly(false);
+    setSortKey("MyGrade"); setSortOrder("asc");
   };
 
   // Fetch NFL teams
@@ -304,6 +335,7 @@ export default function UserBoards() {
     setSelectedSchools([]); setSelectedPositions([]);
     setSelectedMyGrades([]); setSearchQuery("");
     setShowAvailableOnly(false);
+    setSortKey("MyGrade"); setSortOrder("asc");
   };
 
   const hasActiveFilters = selectedPositions.length > 0 || selectedSchools.length > 0 ||
@@ -369,15 +401,49 @@ export default function UserBoards() {
     return 0;
   });
 
-  const allPositions = [...new Set(players.map((p) => p.Position).filter(Boolean))].sort();
+  const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
+  const allPositions = [...new Set(players.map((p) => p.Position).filter(Boolean))].sort(
+    (a, b) => {
+      const ai = POSITION_ORDER.indexOf(a);
+      const bi = POSITION_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    }
+  );
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
-  const SortHeader = ({ sortK, label, align = "center", minWidth }) => (
-    <th onClick={() => handleSort(sortK)}
-      style={{ padding: "12px 14px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", background: BLUE, color: "#fff", border: `1px solid ${GOLD}`, cursor: "pointer", whiteSpace: "nowrap", textAlign: align, userSelect: "none", minWidth: minWidth || "auto" }}>
-      {label}{sortKey === sortK ? (sortOrder === "asc" ? " ▲" : " ▼") : ""}
-    </th>
-  );
+  // ── Sort label used in the desktop ranked-list header — plain clickable
+  // text instead of a table <th>, active column highlighted gold with an
+  // always-visible (dimmed when inactive) arrow so sortability reads at a
+  // glance. Mirrors the same component built for CommunityBoard.js. ──
+  const SortLabel = ({ sortK, label, align = "center", width }) => {
+    const active = sortKey === sortK;
+    return (
+      <div
+        onClick={() => handleSort(sortK)}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = active ? "1" : "0.72"; }}
+        style={{
+          ...(width ? { width, flexShrink: 0 } : { flex: 1, minWidth: 0 }),
+          display: "flex", alignItems: "center", gap: "5px",
+          justifyContent: align === "left" ? "flex-start" : "center",
+          color: active ? GOLD : "#fff",
+          fontWeight: 900, fontSize: "13px",
+          textTransform: "uppercase", letterSpacing: "0.08em",
+          cursor: "pointer", userSelect: "none",
+          opacity: active ? 1 : 0.72,
+          transition: "opacity 0.15s ease, color 0.15s ease",
+        }}
+      >
+        <span style={{ whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ fontSize: "10px", opacity: active ? 1 : 0.5 }}>
+          {active ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
+        </span>
+      </div>
+    );
+  };
 
   if (!user) return (
     <div style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -445,7 +511,7 @@ export default function UserBoards() {
     <>
       <Helmet><title>{boardsTitle} | We-Draft</title></Helmet>
 
-      <div style={{ maxWidth: "1100px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "24px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ maxWidth: "1300px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "18px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* Page Header */}
         <div style={{ marginBottom: "16px" }}>
@@ -459,7 +525,8 @@ export default function UserBoards() {
 
         {/* Year Selector */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", marginBottom: "18px" }}>
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+            <ArchiveDropdown eligibleYear={eligibleYear} onSelect={handleYearSelect} />
             {ACTIVE_YEARS.map((yr) => (
               <button key={yr} onClick={() => handleYearSelect(yr)}
                 style={{ border: `2px solid ${GOLD}`, borderRadius: "20px", padding: isMobile ? "6px 20px" : "8px 28px", fontWeight: 900, fontSize: isMobile ? "14px" : "16px", cursor: "pointer", background: eligibleYear === yr ? BLUE : "#fff", color: eligibleYear === yr ? "#fff" : BLUE, transition: "background 0.15s, color 0.15s" }}>
@@ -467,8 +534,15 @@ export default function UserBoards() {
               </button>
             ))}
           </div>
-          <ArchiveDropdown eligibleYear={eligibleYear} onSelect={handleYearSelect} />
         </div>
+
+        {!is2029 && (
+          isMobile ? (
+            <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile />
+          ) : (
+            <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+          )
+        )}
 
         {/* 2029 placeholder */}
         {is2029 ? (
@@ -491,7 +565,6 @@ export default function UserBoards() {
             {isMobile ? (
               <div style={{ marginBottom: "12px" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
-                  <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
                   <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                   <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 </div>
@@ -504,14 +577,11 @@ export default function UserBoards() {
                   )}
                   <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
                     style={{ flex: 1, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
-                  {hasActiveFilters && (
-                    <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
-                  )}
+                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
                 </div>
               </div>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "16px" }}>
-                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "16px" }}>
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 {is2026 && (
@@ -525,12 +595,28 @@ export default function UserBoards() {
                 <Link to="/community" style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: GOLD, border: `2px solid ${BLUE}`, borderRadius: "8px", textDecoration: "none", whiteSpace: "nowrap" }}>
                   + Community Board
                 </Link>
-                <Link to="/whiteboard" style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px", textDecoration: "none", whiteSpace: "nowrap" }}>
-                  Whiteboard ↗
-                </Link>
-                {hasActiveFilters && (
-                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
-                )}
+                <div style={{ position: "relative", display: "inline-block" }}
+                  onMouseEnter={() => setShowWhiteboardTip(true)}
+                  onMouseLeave={() => setShowWhiteboardTip(false)}
+                >
+                  <Link to="/whiteboard" style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px", textDecoration: "none", whiteSpace: "nowrap", display: "inline-block" }}>
+                    Whiteboard ↗
+                  </Link>
+                  {showWhiteboardTip && (
+                    <div style={{
+                      position: "absolute", top: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)",
+                      width: "220px", background: "#fff", border: `1.5px solid ${BLUE}`,
+                      borderRadius: "10px", padding: "10px 14px", boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 60, textAlign: "center", pointerEvents: "none",
+                    }}>
+                      <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%) rotate(45deg)", width: "11px", height: "11px", background: "#fff", border: `1.5px solid ${BLUE}`, borderRadius: "2px" }} />
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#444", lineHeight: 1.45 }}>
+                        Whiteboard is an easy way to rank players and customize your board.
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
               </div>
             )}
 
@@ -599,94 +685,108 @@ export default function UserBoards() {
                   })}
                 </div>
               ) : (
-                <div style={{ overflowX: "auto", maxHeight: "680px", overflowY: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "center" }}>
-                    <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
-                      <tr>
-                        {is2026 && <SortHeader sortK="Pick" label="Pick" minWidth="60px" />}
+                <div style={{ maxHeight: "760px", overflowY: "auto" }}>
+                  {/* Header row — plain clickable labels instead of table <th> cells,
+                      matching the ranked-list style built for CommunityBoard.js. No
+                      Comm Grade column here since this page only tracks the user's
+                      own grade. */}
+                  <div style={{
+                    position: "sticky", top: 0, zIndex: 10,
+                    display: "flex", alignItems: "center", gap: "16px",
+                    background: `linear-gradient(135deg, ${BLUE}, #003d7a)`,
+                    padding: "12px 20px",
+                  }}>
+                    {is2026 && <SortLabel sortK="Pick" label="Pick" width="64px" />}
+                    {is2026 && <div style={{ width: "56px", flexShrink: 0 }} />}
+                    <SortLabel sortK="Player" label="Player" align="left" />
+                    <SortLabel sortK="Position" label="Pos" width="84px" />
+                    <SortLabel sortK="MyGrade" label="My Grade" width="140px" />
+                    <SortLabel sortK="Height" label="HT" width="70px" />
+                    <SortLabel sortK="Weight" label="WT" width="70px" />
+                  </div>
+                  <div style={{ height: "3px", background: GOLD }} />
+
+                  {sortedPlayers.length === 0 ? (
+                    <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
+                      {!hasActiveFilters ? `No ${eligibleYear} players on your board yet. Go to the Community Board and add some players to see them here.` : "No players match your filters."}
+                    </div>
+                  ) : sortedPlayers.map((p) => {
+                    const myGrade = boardMap.get(p.id);
+                    const onBoard = myGrade !== undefined;
+                    const isAdding = addingId === p.id;
+                    const draft = draftMap[p.Slug];
+                    const teamData = draft ? nflTeams[draft.team] : null;
+                    const c1 = teamData?.Color1 || BLUE;
+                    const c2 = teamData?.Color2 || GOLD;
+                    return (
+                      <div
+                        key={p.id}
+                        style={{ display: "flex", alignItems: "center", gap: "16px", padding: "11px 20px", background: "#fff", borderBottom: "1px solid #eee", transition: "background 0.12s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#f3f8ff"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                      >
                         {is2026 && (
-                          <th style={{ padding: "12px 10px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", background: BLUE, color: "#fff", border: `1px solid ${GOLD}`, whiteSpace: "nowrap", minWidth: "52px" }}>Team</th>
-                        )}
-                        <SortHeader sortK="Player" label="Player" align="left" minWidth="200px" />
-                        <SortHeader sortK="Position" label="Pos" />
-                        <SortHeader sortK="School" label="School" />
-                        <SortHeader sortK="MyGrade" label="My Grade" />
-                        <SortHeader sortK="Height" label="HT" />
-                        <SortHeader sortK="Weight" label="WT" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedPlayers.length === 0 ? (
-                        <tr>
-                          <td colSpan={is2026 ? 8 : 6} style={{ padding: "32px", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
-                            {!hasActiveFilters ? `No ${eligibleYear} players on your board yet. Go to the Community Board and add some players to see them here.` : "No players match your filters."}
-                          </td>
-                        </tr>
-                      ) : sortedPlayers.map((p) => {
-                        const myGrade = boardMap.get(p.id);
-                        const onBoard = myGrade !== undefined;
-                        const isAdding = addingId === p.id;
-                        const draft = draftMap[p.Slug];
-                        const teamData = draft ? nflTeams[draft.team] : null;
-                        const c1 = teamData?.Color1 || BLUE;
-                        const c2 = teamData?.Color2 || GOLD;
-                        return (
-                          <tr key={p.id}
-                            onMouseEnter={(e) => { Array.from(e.currentTarget.cells).forEach((c) => c.style.background = "#e6f0fa"); }}
-                            onMouseLeave={(e) => { Array.from(e.currentTarget.cells).forEach((c) => c.style.background = "#fff"); }}
-                          >
-                            {is2026 && (
-                              <td style={{ padding: "8px 10px", border: `1px solid ${GOLD}`, background: "#fff" }}>
-                                {draft ? (
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "44px", height: "44px", borderRadius: "6px", background: c1, border: `2px solid ${c2}`, margin: "0 auto" }}>
-                                    <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
-                                    <span style={{ fontSize: "18px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
-                                  </div>
-                                ) : <span style={{ color: "#ddd" }}>—</span>}
-                              </td>
-                            )}
-                            {is2026 && (
-                              <td style={{ padding: "8px 10px", border: `1px solid ${GOLD}`, background: "#fff" }}>
-                                {draft ? (
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    {teamData?.Logo1 ? (
-                                      <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={teamData?.Name || draft.team} style={{ width: "36px", height: "36px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                                    ) : <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span>}
-                                  </div>
-                                ) : <span style={{ color: "#ddd" }}>—</span>}
-                              </td>
-                            )}
-                            <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", textAlign: "left" }}>
-                              <Link to={`/player/${p.Slug}`} style={{ color: BLUE, fontWeight: 900, textDecoration: "none", fontSize: "17px" }}
-                                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
-                                {`${p.First || ""} ${p.Last || ""}`}
-                              </Link>
-                            </td>
-                            <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>{p.Position || "-"}</td>
-                            <td style={{ padding: "12px 14px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>{p.School || "-"}</td>
-                            <td style={{ padding: "10px 12px", border: `1px solid ${GOLD}`, background: "#fff" }}>
-                              <div style={{ display: "flex", justifyContent: "center" }}>
-                                {isAdding ? (
-                                  <div style={{ width: "64px", height: "52px", border: `2px solid ${BLUE}`, borderRadius: "5px", opacity: 0.4 }} />
-                                ) : onBoard ? (
-                                  <GradeBadge grade={myGrade} />
-                                ) : (
-                                  <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} />
-                                )}
+                          <div style={{ width: "64px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                            {draft ? (
+                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "48px", height: "48px", borderRadius: "7px", background: c1, border: `2px solid ${c2}` }}>
+                                <span style={{ fontSize: "8px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
+                                <span style={{ fontSize: "19px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
                               </div>
-                            </td>
-                            <td style={{ padding: "10px 12px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>
-                              {p.HeightInches ? formatHeight(p.HeightInches) : (p.Height || "-")}
-                            </td>
-                            <td style={{ padding: "10px 12px", border: `1px solid ${GOLD}`, background: "#fff", fontSize: "16px", fontWeight: 700 }}>
-                              {p.Weight || "-"}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            ) : <span style={{ color: "#ddd" }}>—</span>}
+                          </div>
+                        )}
+                        {is2026 && (
+                          <div style={{ width: "56px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                            {teamData?.Logo1 ? (
+                              <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={teamData?.Name || draft.team} style={{ width: "40px", height: "40px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            ) : draft ? <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span> : <span style={{ color: "#ddd" }}>—</span>}
+                          </div>
+                        )}
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Link
+                            to={`/player/${p.Slug}`}
+                            style={{ color: BLUE, fontWeight: 900, fontSize: "27px", textDecoration: "none", display: "block", lineHeight: 1.15 }}
+                            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+                          >
+                            {`${p.First || ""} ${p.Last || ""}`}
+                          </Link>
+                          {p.School && (
+                            <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "3px" }}>
+                              {p.School}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ width: "84px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                          {p.Position ? (
+                            <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "6px 12px", borderRadius: "6px", textTransform: "uppercase" }}>
+                              {p.Position}
+                            </span>
+                          ) : <span style={{ color: "#ddd" }}>—</span>}
+                        </div>
+
+                        <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                          {isAdding ? (
+                            <div style={{ width: "64px", height: "52px", border: `2px solid ${BLUE}`, borderRadius: "5px", opacity: 0.4 }} />
+                          ) : onBoard ? (
+                            <GradeBadge grade={myGrade} />
+                          ) : (
+                            <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} />
+                          )}
+                        </div>
+
+                        <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
+                          {p.HeightInches ? formatHeight(p.HeightInches) : (p.Height || "-")}
+                        </div>
+
+                        <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
+                          {p.Weight || "-"}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

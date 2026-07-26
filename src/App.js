@@ -76,6 +76,12 @@ function MainLayout() {
           <Route path="/news/:id" element={<NewsArticle />} />
           <Route path="/community" element={<CommunityBoard />} />
           <Route path="/community/:year" element={<CommunityBoard />} />
+          {/* Position-specific rankings pages, e.g. /community/2027/qb —
+              distinct from the year-only route above since it's a separate
+              two-segment path shape; React Router matches by segment count/
+              literal-vs-dynamic parts, not route order, so this coexists
+              cleanly with /community/:year. */}
+          <Route path="/community/:year/:position" element={<CommunityBoard />} />
           <Route path="/player/:slug" element={<PlayerProfile />} />
           {/* Redirect old /player2 URLs to canonical /player URLs */}
           <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
