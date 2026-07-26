@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <!-- Must be the very first thing in <head> — Prerender.io's headless
+         browser can check this before your CSS/JS bundle even downloads.
+         If the variable is undefined at that point (rather than the literal
+         boolean false), Prerender.io falls back to default timing and may
+         snapshot the page before your data has loaded, regardless of
+         whatever React later sets it to. This has to exist synchronously,
+         before React mounts — a useEffect inside the app runs too late. -->
+    <script>window.prerenderReady = false;</script>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/sec logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
