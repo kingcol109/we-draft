@@ -16,6 +16,7 @@ export default async function middleware(req) {
     const targetUrl = `https://service.prerender.io/${req.url}`;
     const prerenderRes = await fetch(targetUrl, {
       headers: { 'X-Prerender-Token': process.env.PRERENDER_TOKEN },
+      cache: 'no-store', // never let Vercel's edge cache this response — always ask Prerender.io fresh, so Prerender.io's own cache/recache logic is actually in control
     });
     return new Response(await prerenderRes.text(), {
       status: prerenderRes.status,
