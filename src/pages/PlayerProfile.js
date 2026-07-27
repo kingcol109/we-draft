@@ -582,8 +582,8 @@ export default function PlayerProfile() {
               id: d.id,
               video: data.Video || "",
               date: data.Date || null,
-              title: matched?.title || first?.title || "",
-              thumb: matched?.thumb || first?.thumb || "",
+              title: matched?.title || first?.title || data.GenTitle || "",
+              thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
             };
           })
           .filter((v) => v.video)
@@ -1466,6 +1466,26 @@ useEffect(() => {
     </details>
   );
 
+  // ── Relative upload age for a video card ("Today", "3 Weeks Ago", ...)
+  // instead of a raw date — matches how the rest of the video UI favors
+  // quick scanning over precision. Buckets by calendar day/week/month so a
+  // video uploaded yesterday at 11pm still reads as "Yesterday" today. ──
+  const formatVideoAge = (ts) => {
+    const ms = ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
+    if (!ms) return "";
+    const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const daysAgo = Math.round((startOfDay(new Date()) - startOfDay(new Date(ms))) / 86400000);
+    if (daysAgo <= 0) return "Today";
+    if (daysAgo === 1) return "Yesterday";
+    if (daysAgo < 7) return "This Week";
+    const weeksAgo = Math.floor(daysAgo / 7);
+    if (weeksAgo < 4) return weeksAgo === 1 ? "Last Week" : `${weeksAgo} Weeks Ago`;
+    const monthsAgo = Math.floor(daysAgo / 30);
+    if (monthsAgo <= 1) return "Last Month";
+    if (monthsAgo < 12) return `${monthsAgo} Months Ago`;
+    return "Last Year";
+  };
+
   // ── Videos sidebar — only rendered at all when the player has at least one
   // attached video; each row shows that video's per-slug title/thumb as a
   // full-width card (thumbnail on top, title overlaid in a gradient scrim). ──
@@ -1504,6 +1524,18 @@ useEffect(() => {
 
             {/* gradient scrim so the title reads over any thumbnail */}
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+
+            {v.date && (
+              <div style={{
+                position: "absolute", top: "8px", right: "8px",
+                background: "rgba(0,0,0,0.72)", color: "#fff",
+                fontSize: "10px", fontWeight: 900, padding: "3px 7px",
+                borderRadius: "4px", textTransform: "uppercase",
+                letterSpacing: "0.05em", pointerEvents: "none",
+              }}>
+                {formatVideoAge(v.date)}
+              </div>
+            )}
 
             {/* play button — scales/fades in on hover */}
             <div

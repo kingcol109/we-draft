@@ -14,6 +14,42 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Extension } from "@tiptap/core";
+
+const FontSize = Extension.create({
+  name: "fontSize",
+
+  addOptions() {
+    return { types: ["textStyle"] };
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          fontSize: {
+            default: null,
+            parseHTML: (element) => element.style.fontSize?.replace("px", ""),
+            renderHTML: (attributes) => {
+              if (!attributes.fontSize) return {};
+              return { style: `font-size: ${attributes.fontSize}px` };
+            },
+          },
+        },
+      },
+    ];
+  },
+
+  addCommands() {
+    return {
+      setFontSize: (size) => ({ chain }) =>
+        chain().setMark("textStyle", { fontSize: size }).run(),
+    };
+  },
+});
+
 export default function AdminArticles() {
   const { user } = useAuth();
 
@@ -27,26 +63,36 @@ export default function AdminArticles() {
   const [content, setContent] = useState("");
   const [message, setMessage] = useState("");
 
+  const [status, setStatus] = useState("draft");
+  const [priority, setPriority] = useState(2);
+  const [slug, setSlug] = useState("");
+  const [author, setAuthor] = useState("");
+  const [publishedAt, setPublishedAt] = useState("");
+
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);
 
   const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
+  const [showImageInput, setShowImageInput] = useState(false);
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [showVideoInput, setShowVideoInput] = useState(false);
 
   const [playerSearch, setPlayerSearch] = useState("");
   const [teamSearch, setTeamSearch] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [linkText, setLinkText] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [savedVideoUrl, setSavedVideoUrl] = useState("");
 const editor = useEditor({
   extensions: [
     StarterKit,
     Underline,
-Link.configure({
-  openOnClick: false,
-  autolink: false,
-  linkOnPaste: false,
-  HTMLAttributes: {
-    class: "player-link",
-  },
-}),
+    Link.configure({ openOnClick: false }),
+    Image,
+    TextStyle,
+    FontSize,
   ],
   content: "<p>Start writing your article...</p>",
 });
@@ -66,6 +112,18 @@ useEffect(() => {
 
     .ProseMirror p {
       margin: 0;
+    }
+
+    .ProseMirror img {
+      max-width: 100%;
+      border-radius: 10px;
+      margin: 10px 0;
+    }
+
+    .ProseMirror a {
+      color: #f6a21d;
+      font-weight: bold;
+      text-decoration: underline;
     }
   `;
   document.head.appendChild(style);
@@ -138,49 +196,86 @@ setTeams(formattedTeams);
   }, [user]);
 
   // 🔥 INSERT PLAYER
-const insertPlayer = (player) => {
-  editor.chain().focus().extendMarkRange("link").unsetLink().run();
+  const insertPlayer = (player) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent(`<a href="/player/${player.slug}">${player.name}</a> `).run();
+    setShowPlayerPicker(false);
+  };
 
-  editor
-    .chain()
-    .focus()
-    .setLink({ href: `/player/${player.slug}` })
-    .insertContent(player.name + " ")
-    .unsetLink()
-    .run();
-
-  setShowPlayerPicker(false);
-};
   // 🔥 INSERT TEAM
-const insertTeam = (team) => {
-  editor.chain().focus().extendMarkRange("link").unsetLink().run();
+  const insertTeam = (team) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent(`<a href="/team/${team.slug}">${team.name}</a> `).run();
+    setShowTeamPicker(false);
+  };
 
-  editor
-    .chain()
-    .focus()
-    .setLink({ href: `/team/${team.slug}` })
-    .insertContent(team.name + " ")
-    .unsetLink()
-    .run();
+  const insertImage = () => {
+    if (!editor || !imageUrl) return;
+    editor.chain().focus().setImage({ src: imageUrl }).run();
+    setImageUrl("");
+    setShowImageInput(false);
+  };
 
-  setShowTeamPicker(false);
-};
+  const insertLink = () => {
+    if (!editor || !linkText.trim() || !linkUrl.trim()) return;
+    const href = /^https?:\/\//i.test(linkUrl.trim()) ? linkUrl.trim() : `https://${linkUrl.trim()}`;
+    editor.chain().focus().insertContent(`<a href="${href}">${linkText.trim()}</a> `).run();
+    setLinkText("");
+    setLinkUrl("");
+    setShowLinkInput(false);
+  };
+
+  const insertVideo = () => {
+    if (!videoUrl.trim()) return;
+    const href = /^https?:\/\//i.test(videoUrl.trim()) ? videoUrl.trim() : `https://${videoUrl.trim()}`;
+    setSavedVideoUrl(href);
+    setVideoUrl("");
+    setShowVideoInput(false);
+  };
 
   // 🔥 CREATE ARTICLE
   const handleCreateArticle = async () => {
-const html = editor.getHTML();
+    const html = editor.getHTML();
 
-if (!title.trim() || !html.trim()) {
+    if (!title.trim() || !html.trim()) {
       setMessage("❌ Title and content required");
       return;
     }
 
+    const div = document.createElement("div");
+    div.innerHTML = html;
+
+    const playerLinks = div.querySelectorAll("a[href^='/player/']");
+    const playerSet = new Set();
+    playerLinks.forEach((link) => {
+      const linkSlug = link.getAttribute("href").split("/player/")[1];
+      if (linkSlug) playerSet.add(linkSlug);
+    });
+
+    const teamLinks = div.querySelectorAll("a[href^='/team/']");
+    const teamSet = new Set();
+    teamLinks.forEach((link) => {
+      const linkSlug = link.getAttribute("href").split("/team/")[1];
+      if (linkSlug) teamSet.add(linkSlug);
+    });
+
     try {
       await addDoc(collection(db, "articles"), {
         title,
-        slug: createSlug(title),
-content: html,
-        status: "draft",
+        slug: slug.trim() ? slug.trim() : createSlug(title),
+        content: html,
+        status,
+        priority,
+        author,
+        publishedAt: publishedAt
+          ? (() => {
+              const [y, m, d] = publishedAt.split("-");
+              return new Date(+y, +m - 1, +d);
+            })()
+          : null,
+        slugs: Array.from(playerSet),
+        teamSlugs: Array.from(teamSet),
+        videoUrl: savedVideoUrl || "",
         authorId: user.uid,
         createdAt: serverTimestamp(),
       });
@@ -207,13 +302,31 @@ content: html,
     t.name.toLowerCase().includes(teamSearch.toLowerCase())
   );
 
+  // 🔥 sort newest first
+  const sortedArticles = [...articles].sort((a, b) => {
+    const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+    const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+    return bTime - aTime;
+  });
+
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: "20px" }}>
-      <h1 style={{ color: "#0055a5" }}>Article Dashboard</h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "12px",
+          marginBottom: "24px",
+        }}
+      >
+        <h1 style={{ color: "#0055a5", margin: 0 }}>Article Dashboard</h1>
 
-      <button style={btn} onClick={() => setShowCreate(true)}>
-        + Create Article
-      </button>
+        <button style={btn} onClick={() => setShowCreate(true)}>
+          + Create Article
+        </button>
+      </div>
 
       {showCreate && (
         <div style={card}>
@@ -224,29 +337,139 @@ content: html,
             style={input}
           />
 
-          {/* ACTION BUTTONS */}
-          <div style={{ marginBottom: "10px" }}>
-  <button onClick={() => editor.chain().focus().toggleBold().run()}>B</button>
-  <button onClick={() => editor.chain().focus().toggleItalic().run()}>I</button>
-  <button onClick={() => editor.chain().focus().toggleUnderline().run()}>U</button>
-</div>
-          <div style={{ marginBottom: "10px" }}>
-            <button style={btn} onClick={() => setShowPlayerPicker(true)}>
+          <input
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="article-url-slug (optional, auto-generated from title)"
+            style={input}
+          />
+
+          <input
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+            placeholder="Author"
+            style={input}
+          />
+
+          <input
+            type="date"
+            value={publishedAt}
+            onChange={(e) => setPublishedAt(e.target.value)}
+            style={input}
+          />
+
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="draft">Draft</option>
+            <option value="pending">Pending</option>
+            <option value="published">Published</option>
+          </select>
+
+          <select
+            value={priority}
+            onChange={(e) => setPriority(Number(e.target.value))}
+            style={{ marginLeft: "10px" }}
+          >
+            <option value={1}>Priority 1</option>
+            <option value={2}>Priority 2</option>
+            <option value={3}>Priority 3</option>
+          </select>
+
+          {/* TOOLBAR */}
+          <div style={{ marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <button style={btn} onClick={() => editor.chain().focus().toggleBold().run()}>B</button>
+            <button style={btn} onClick={() => editor.chain().focus().toggleItalic().run()}>I</button>
+            <button style={btn} onClick={() => editor.chain().focus().toggleUnderline().run()}>U</button>
+
+            <button
+              style={btn}
+              onClick={() => {
+                const current = editor.getAttributes("textStyle").fontSize || 18;
+                editor.chain().focus().setFontSize(Math.max(12, Number(current) - 2)).run();
+              }}
+            >
+              A-
+            </button>
+
+            <button
+              style={btn}
+              onClick={() => {
+                const current = editor.getAttributes("textStyle").fontSize || 18;
+                editor.chain().focus().setFontSize(Math.min(36, Number(current) + 2)).run();
+              }}
+            >
+              A+
+            </button>
+
+            <button
+              style={btn}
+              onClick={() => {
+                setShowPlayerPicker((v) => !v);
+                setShowTeamPicker(false);
+                setShowImageInput(false);
+                setShowLinkInput(false);
+                setShowVideoInput(false);
+              }}
+            >
               + Player
             </button>
 
             <button
-              style={{ ...btn, marginLeft: "10px" }}
-              onClick={() => setShowTeamPicker(true)}
+              style={btn}
+              onClick={() => {
+                setShowTeamPicker((v) => !v);
+                setShowPlayerPicker(false);
+                setShowImageInput(false);
+                setShowLinkInput(false);
+                setShowVideoInput(false);
+              }}
             >
               + Team
+            </button>
+
+            <button
+              style={btn}
+              onClick={() => {
+                setShowImageInput((v) => !v);
+                setShowPlayerPicker(false);
+                setShowTeamPicker(false);
+                setShowLinkInput(false);
+                setShowVideoInput(false);
+              }}
+            >
+              + Image
+            </button>
+
+            <button
+              style={btn}
+              onClick={() => {
+                setShowLinkInput((v) => !v);
+                setShowPlayerPicker(false);
+                setShowTeamPicker(false);
+                setShowImageInput(false);
+                setShowVideoInput(false);
+              }}
+            >
+              + Link
+            </button>
+
+            <button
+              style={{ ...btn, background: "#b45309" }}
+              onClick={() => {
+                setShowVideoInput((v) => !v);
+                setShowPlayerPicker(false);
+                setShowTeamPicker(false);
+                setShowImageInput(false);
+                setShowLinkInput(false);
+              }}
+            >
+              ▶ Video
             </button>
           </div>
 
           {/* TEXT EDITOR */}
-<div style={editorBox}>
-  <EditorContent editor={editor} />
-</div>
+          <div style={editorBox} onClick={() => editor?.chain().focus().run()}>
+            <EditorContent editor={editor} />
+          </div>
 
           {/* PLAYER PICKER */}
           {showPlayerPicker && (
@@ -284,42 +507,159 @@ content: html,
             </div>
           )}
 
+          {/* IMAGE INPUT */}
+          {showImageInput && (
+            <div style={modal}>
+              <input
+                placeholder="Paste image URL..."
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                style={search}
+              />
+              <button style={btn} onClick={insertImage}>Insert Image</button>
+            </div>
+          )}
+
+          {/* CUSTOM LINK INPUT */}
+          {showLinkInput && (
+            <div style={modal}>
+              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "13px", color: "#0055a5" }}>Custom Link</p>
+              <input
+                placeholder="Display text (e.g. Click here)"
+                value={linkText}
+                onChange={(e) => setLinkText(e.target.value)}
+                style={{ ...search, marginBottom: "8px" }}
+              />
+              <input
+                placeholder="URL (e.g. https://example.com or /community)"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                style={{ ...search, marginBottom: "8px" }}
+              />
+              <button
+                style={{ ...btn, opacity: !linkText.trim() || !linkUrl.trim() ? 0.5 : 1 }}
+                onClick={insertLink}
+                disabled={!linkText.trim() || !linkUrl.trim()}
+              >
+                Insert Link
+              </button>
+            </div>
+          )}
+
+          {/* VIDEO INPUT */}
+          {showVideoInput && (
+            <div style={modal}>
+              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "13px", color: "#0055a5" }}>Video Link</p>
+              {savedVideoUrl && (
+                <div
+                  style={{
+                    marginBottom: "10px",
+                    padding: "8px 10px",
+                    background: "#e8f0fa",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    color: "#0055a5",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                  }}
+                >
+                  <span>Current: {savedVideoUrl}</span>
+                  <button
+                    onClick={() => setSavedVideoUrl("")}
+                    style={{
+                      background: "#b91c1c",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "2px 8px",
+                      cursor: "pointer",
+                      fontSize: "11px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+              <input
+                placeholder="Video URL (YouTube, Twitter, etc.)"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                style={{ ...search, marginBottom: "8px" }}
+              />
+              <p style={{ margin: "0 0 8px", fontSize: "11px", color: "#888" }}>
+                A ▶ Watch Video button will appear below the article title — not in the body.
+              </p>
+              <button
+                style={{ ...btn, background: "#b45309", opacity: !videoUrl.trim() ? 0.5 : 1 }}
+                onClick={insertVideo}
+                disabled={!videoUrl.trim()}
+              >
+                {savedVideoUrl ? "Update Video Link" : "Set Video Link"}
+              </button>
+            </div>
+          )}
+
           {message && <p>{message}</p>}
 
-          <button style={btn} onClick={handleCreateArticle}>
+          <button style={{ ...btn, marginTop: "10px" }} onClick={handleCreateArticle}>
             Save Draft
           </button>
         </div>
       )}
 
-{articles.map((a) => (
-  <div
-    key={a.id}
-    onClick={() => window.location.href = `/admin/articles/${a.id}`}
-    style={{
-      border: "1px solid #ddd",
-      padding: "10px",
-      marginBottom: "10px",
-      borderRadius: "8px",
-      cursor: "pointer",
-    }}
-  >
-    <h3 style={{ color: "#0055a5" }}>{a.title}</h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        {sortedArticles.length === 0 && !loading && (
+          <p style={{ color: "#777" }}>No articles yet.</p>
+        )}
 
-    <p
-      style={{
-        color:
-          a.status === "published"
-            ? "green"
-            : a.status === "pending"
-            ? "orange"
-            : "gray",
-      }}
-    >
-      {a.status}
-    </p>
-  </div>
-))}
+        {sortedArticles.map((a) => {
+          const status = statusStyles[a.status] || statusStyles.draft;
+          const date = a.createdAt?.toDate ? a.createdAt.toDate() : null;
+
+          return (
+            <div
+              key={a.id}
+              onClick={() => (window.location.href = `/admin/articles/${a.id}`)}
+              style={articleCard}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.1)";
+                e.currentTarget.style.borderColor = "#0055a5";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = "none";
+                e.currentTarget.style.borderColor = "#e0e0e0";
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <h3 style={{ color: "#0055a5", margin: 0 }}>{a.title}</h3>
+                <span style={{ color: "#888", fontSize: "13px" }}>
+                  {date
+                    ? date.toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "Unknown date"}
+                </span>
+              </div>
+
+              <span
+                style={{
+                  ...statusBadge,
+                  background: status.background,
+                  color: status.color,
+                }}
+              >
+                {a.status}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -395,4 +735,32 @@ const editorBox = {
   minHeight: "300px",
   cursor: "text",
   background: "white",
+};
+
+const articleCard = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  border: "1px solid #e0e0e0",
+  padding: "16px",
+  borderRadius: "10px",
+  cursor: "pointer",
+  background: "#fff",
+  transition: "box-shadow 0.15s ease, border-color 0.15s ease",
+};
+
+const statusBadge = {
+  padding: "4px 12px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "bold",
+  textTransform: "capitalize",
+  whiteSpace: "nowrap",
+};
+
+const statusStyles = {
+  published: { background: "#e6f4ea", color: "#1a7f37" },
+  pending: { background: "#fff4e5", color: "#b35c00" },
+  draft: { background: "#f0f0f0", color: "#666" },
 };
