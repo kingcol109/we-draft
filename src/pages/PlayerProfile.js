@@ -984,21 +984,39 @@ useEffect(() => {
   };
 
   if (!player) return (
-    <div
-      className="flex justify-center items-center h-screen text-xl font-bold"
-      style={{
-        color:SITE_BLUE,
-        opacity:1,
-        animation:"wdLoadingFadeIn 0.2s ease",
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ position: "relative", width: "64px", height: "64px" }}>
+        <div style={{
+          position: "absolute", inset: 0, borderRadius: "50%",
+          border: `5px solid ${SITE_BLUE}`, opacity: 0.15,
+        }} />
+        <div style={{
+          position: "absolute", inset: 0, borderRadius: "50%",
+          border: "5px solid transparent", borderTopColor: SITE_BLUE, borderRightColor: SITE_GOLD,
+          animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
+        }} />
+      </div>
+      <div style={{ fontSize: 19, fontWeight: 900, color: SITE_BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
+        Loading Player
+        <span style={{ display: "inline-flex", marginLeft: "3px" }}>
+          {[0, 1, 2].map((i) => (
+            <span key={i} style={{
+              animation: "wdDotPulse 1.2s ease-in-out infinite",
+              animationDelay: `${i * 0.15}s`,
+            }}>.</span>
+          ))}
+        </span>
+      </div>
       <style>{`
-        @keyframes wdLoadingFadeIn {
-          0%   { opacity: 0; }
-          100% { opacity: 1; }
+        @keyframes wdSpinnerRotate {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        @keyframes wdDotPulse {
+          0%, 80%, 100% { opacity: 0.15; }
+          40% { opacity: 1; }
         }
       `}</style>
-      Loading Player...
     </div>
   );
 
