@@ -25,7 +25,7 @@ import confetti from "canvas-confetti";
 // ── Flair badge images (dropped into assets — filenames as uploaded) ───────
 import EliteFlair from "../assets/elite.png";
 import StarFlair from "../assets/star.png";
-import GemFlair from "../assets/gem.png";
+import DiamondFlair from "../assets/dir.png";
 import RadarFlair from "../assets/radar.png";
 import SecondFlair from "../assets/second.png";
 import AlienFlair from "../assets/alien.png";
@@ -77,7 +77,7 @@ const SITE_GOLD = "#f6a21d";
 const FLAIR_CONFIG = {
   "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
   "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
-  "Hidden Gem":          { img: GemFlair,         stroke: "#3fc305", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
+  "Diamond in the Rough": { img: DiamondFlair,   stroke: "#00d2ff", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
   "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
   "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
   "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
@@ -582,8 +582,8 @@ export default function PlayerProfile() {
               id: d.id,
               video: data.Video || "",
               date: data.Date || null,
-              title: matched?.title || first?.title || data.GenTitle || "",
-              thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
+              title: matched?.title || first?.title || "",
+              thumb: matched?.thumb || first?.thumb || "",
             };
           })
           .filter((v) => v.video)
@@ -1466,26 +1466,6 @@ useEffect(() => {
     </details>
   );
 
-  // ── Relative upload age for a video card ("Today", "3 Weeks Ago", ...)
-  // instead of a raw date — matches how the rest of the video UI favors
-  // quick scanning over precision. Buckets by calendar day/week/month so a
-  // video uploaded yesterday at 11pm still reads as "Yesterday" today. ──
-  const formatVideoAge = (ts) => {
-    const ms = ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
-    if (!ms) return "";
-    const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const daysAgo = Math.round((startOfDay(new Date()) - startOfDay(new Date(ms))) / 86400000);
-    if (daysAgo <= 0) return "Today";
-    if (daysAgo === 1) return "Yesterday";
-    if (daysAgo < 7) return "This Week";
-    const weeksAgo = Math.floor(daysAgo / 7);
-    if (weeksAgo < 4) return weeksAgo === 1 ? "Last Week" : `${weeksAgo} Weeks Ago`;
-    const monthsAgo = Math.floor(daysAgo / 30);
-    if (monthsAgo <= 1) return "Last Month";
-    if (monthsAgo < 12) return `${monthsAgo} Months Ago`;
-    return "Last Year";
-  };
-
   // ── Videos sidebar — only rendered at all when the player has at least one
   // attached video; each row shows that video's per-slug title/thumb as a
   // full-width card (thumbnail on top, title overlaid in a gradient scrim). ──
@@ -1524,18 +1504,6 @@ useEffect(() => {
 
             {/* gradient scrim so the title reads over any thumbnail */}
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
-
-            {v.date && (
-              <div style={{
-                position: "absolute", top: "8px", right: "8px",
-                background: "rgba(0,0,0,0.72)", color: "#fff",
-                fontSize: "10px", fontWeight: 900, padding: "3px 7px",
-                borderRadius: "4px", textTransform: "uppercase",
-                letterSpacing: "0.05em", pointerEvents: "none",
-              }}>
-                {formatVideoAge(v.date)}
-              </div>
-            )}
 
             {/* play button — scales/fades in on hover */}
             <div

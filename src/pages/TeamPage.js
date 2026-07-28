@@ -6,7 +6,7 @@ import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import EliteFlair from "../assets/elite.png";
 import StarFlair from "../assets/star.png";
-import GemFlair from "../assets/gem.png";
+import DiamondFlair from "../assets/dir.png";
 import RadarFlair from "../assets/radar.png";
 import SecondFlair from "../assets/second.png";
 import AlienFlair from "../assets/alien.png";
@@ -26,7 +26,7 @@ const GOLD = "#f6a21d";
 const FLAIR_CONFIG = {
   "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
   "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
-  "Hidden Gem":          { img: GemFlair,         stroke: "#3fc305", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
+  "Diamond in the Rough": { img: DiamondFlair,   stroke: "#00d2ff", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
   "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
   "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
   "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
