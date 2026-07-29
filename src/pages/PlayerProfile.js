@@ -270,6 +270,8 @@ export default function PlayerProfile() {
   const [archiving, setArchiving] = useState(false);
   const [playerStats, setPlayerStats] = useState(null);
   const [trend, setTrend] = useState(null);
+  const [reactionCounts, setReactionCounts] = useState({ likes: 0, up: 0, down: 0 });
+  const [myReaction, setMyReaction] = useState({ liked: false, vote: null });
   const [showFlairTip, setShowFlairTip] = useState(false);
   const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
   const [showBreakoutTip, setShowBreakoutTip] = useState(false);
@@ -384,6 +386,8 @@ export default function PlayerProfile() {
     setPageVisible(false);
     setSeoDataReady(false);
     setBrandingReady(false);
+    setReactionCounts({ likes: 0, up: 0, down: 0 });
+    setMyReaction({ liked: false, vote: null });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [slug]);
 
@@ -772,6 +776,62 @@ useEffect(() => {
     fetch();
   }, [player]);
 
+  // ── Reactions (like/upvote/downvote) — same aggregation pattern as
+  // community evaluations above: read the whole subcollection, compute
+  // totals client-side. No Cloud Functions/counters needed at this scale. ──
+  useEffect(() => {
+    const fetch = async () => {
+      if (!player?.id) return;
+      try {
+        const snap = await getDocs(collection(db,"players",player.id,"reactions"));
+        let likes = 0, up = 0, down = 0;
+        let mine = { liked: false, vote: null };
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.liked) likes++;
+          if (data.vote === "up") up++;
+          else if (data.vote === "down") down++;
+          if (user && d.id === user.uid) mine = { liked: !!data.liked, vote: data.vote || null };
+        });
+        setReactionCounts({ likes, up, down });
+        setMyReaction(mine);
+      } catch(e) { console.error(e); }
+    };
+    fetch();
+  }, [player, user]);
+
+  // ── Toggle like: independent of up/down vote. ──
+  const handleToggleLike = () => {
+    if (!user) { login(); return; }
+    if (!player?.id) return;
+    const nextLiked = !myReaction.liked;
+    setReactionCounts((c) => ({ ...c, likes: c.likes + (nextLiked ? 1 : -1) }));
+    setMyReaction((r) => ({ ...r, liked: nextLiked }));
+    setDoc(doc(db,"players",player.id,"reactions",user.uid), {
+      uid: user.uid, liked: nextLiked, vote: myReaction.vote, updatedAt: serverTimestamp(),
+    }, { merge: true }).catch((e) => console.error(e));
+  };
+
+  // ── Toggle vote: picking the currently-selected direction again clears it;
+  // picking the opposite direction switches (removing the old one). ──
+  const handleVote = (direction) => {
+    if (!user) { login(); return; }
+    if (!player?.id) return;
+    const nextVote = myReaction.vote === direction ? null : direction;
+    setReactionCounts((c) => {
+      const n = { ...c };
+      if (myReaction.vote === "up") n.up -= 1;
+      if (myReaction.vote === "down") n.down -= 1;
+      if (nextVote === "up") n.up += 1;
+      if (nextVote === "down") n.down += 1;
+      return n;
+    });
+    setMyReaction((r) => ({ ...r, vote: nextVote }));
+    setDoc(doc(db,"players",player.id,"reactions",user.uid), {
+      uid: user.uid, liked: myReaction.liked, vote: nextVote, updatedAt: serverTimestamp(),
+    }, { merge: true }).catch((e) => console.error(e));
+  };
+
   // ── Fetch draft class (whole class once; position group + class rank both derive from it) ──
   useEffect(() => {
     const fetchDraftClass = async () => {
@@ -984,39 +1044,21 @@ useEffect(() => {
   };
 
   if (!player) return (
-    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      <div style={{ position: "relative", width: "64px", height: "64px" }}>
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          border: `5px solid ${SITE_BLUE}`, opacity: 0.15,
-        }} />
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          border: "5px solid transparent", borderTopColor: SITE_BLUE, borderRightColor: SITE_GOLD,
-          animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
-        }} />
-      </div>
-      <div style={{ fontSize: 19, fontWeight: 900, color: SITE_BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
-        Loading Player
-        <span style={{ display: "inline-flex", marginLeft: "3px" }}>
-          {[0, 1, 2].map((i) => (
-            <span key={i} style={{
-              animation: "wdDotPulse 1.2s ease-in-out infinite",
-              animationDelay: `${i * 0.15}s`,
-            }}>.</span>
-          ))}
-        </span>
-      </div>
+    <div
+      className="flex justify-center items-center h-screen text-xl font-bold"
+      style={{
+        color:SITE_BLUE,
+        opacity:1,
+        animation:"wdLoadingFadeIn 0.2s ease",
+      }}
+    >
       <style>{`
-        @keyframes wdSpinnerRotate {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        @keyframes wdDotPulse {
-          0%, 80%, 100% { opacity: 0.15; }
-          40% { opacity: 1; }
+        @keyframes wdLoadingFadeIn {
+          0%   { opacity: 0; }
+          100% { opacity: 1; }
         }
       `}</style>
+      Loading Player...
     </div>
   );
 
@@ -1792,11 +1834,63 @@ useEffect(() => {
 
         {/* ===== HERO CARD ===== */}
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border: `3px solid ${color1}` }}>
-          <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
+          <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px", flexWrap:"wrap", rowGap:"8px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
               style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
+
+            <div className="flex items-center" style={{ gap:isMobile?"16px":"24px" }}>
+              <button
+                onClick={handleToggleLike}
+                title="Like"
+                className="transition"
+                style={{
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:"3px",
+                  background:"none", border:"none", cursor:"pointer",
+                }}
+              >
+                <span style={{
+                  fontSize:isMobile?"32px":"42px", lineHeight:1,
+                  color: myReaction.liked ? "#ff4d6d" : "#fff",
+                  WebkitTextStroke: myReaction.liked ? "1.5px #fff" : "0px transparent",
+                }}>♥</span>
+                <span style={{ fontSize:isMobile?"12px":"14px", fontWeight:900, color:"#fff" }}>{reactionCounts.likes}</span>
+              </button>
+              <button
+                onClick={()=>handleVote("up")}
+                title="Upvote"
+                className="transition"
+                style={{
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:"3px",
+                  background:"none", border:"none", cursor:"pointer",
+                }}
+              >
+                <span style={{
+                  fontSize:isMobile?"30px":"40px", lineHeight:1,
+                  color: myReaction.vote==="up" ? "#4ade80" : "#fff",
+                  WebkitTextStroke: myReaction.vote==="up" ? "1.5px #fff" : "0px transparent",
+                }}>▲</span>
+                <span style={{ fontSize:isMobile?"12px":"14px", fontWeight:900, color:"#fff" }}>{reactionCounts.up}</span>
+              </button>
+              <button
+                onClick={()=>handleVote("down")}
+                title="Downvote"
+                className="transition"
+                style={{
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:"3px",
+                  background:"none", border:"none", cursor:"pointer",
+                }}
+              >
+                <span style={{
+                  fontSize:isMobile?"30px":"40px", lineHeight:1,
+                  color: myReaction.vote==="down" ? "#f87171" : "#fff",
+                  WebkitTextStroke: myReaction.vote==="down" ? "1.5px #fff" : "0px transparent",
+                }}>▼</span>
+                <span style={{ fontSize:isMobile?"12px":"14px", fontWeight:900, color:"#fff" }}>{reactionCounts.down}</span>
+              </button>
+            </div>
+
             <div className="flex gap-2">
               {player.Link && String(player.Eligible) === "2026" && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
