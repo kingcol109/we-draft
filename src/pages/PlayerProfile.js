@@ -1224,7 +1224,7 @@ useEffect(() => {
           >
             <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:"1px solid #f3f3f3" }}>
               <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
-                Throwback &amp; Licensed
+                Officially Licensed Throwback Apparel
               </div>
               <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
                 All 32 NFL Teams + MLB, NBA, NHL &amp; More
@@ -1345,7 +1345,7 @@ useEffect(() => {
           >
             <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:`1px solid ${tColor1}22` }}>
               <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
-                Throwback &amp; Licensed
+                Officially Licensed Throwback Apparel
               </div>
               <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
                 All 32 NFL Teams + MLB, NBA, NHL &amp; More
