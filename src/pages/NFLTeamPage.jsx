@@ -119,6 +119,7 @@ export default function NFLTeamPage() {
   const [statsCache, setStatsCache] = useState({});
   const [statsLoading, setStatsLoading] = useState({});
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const [seoDataReady, setSeoDataReady] = useState(false);
   const hoverTimeout = useRef(null);
   const picksRef = useRef(null);
 
@@ -128,28 +129,49 @@ export default function NFLTeamPage() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
+  // ── Tells Prerender.io's headless browser when this page's data has
+  // actually finished loading, instead of letting it guess via a fixed
+  // timeout or the browser's `load` event. Same pattern as PlayerProfile.js,
+  // TeamPage.js, and CommunityBoard.js. ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.prerenderReady = false;
+    const safetyTimer = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(safetyTimer);
+  }, [teamId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (seoDataReady) window.prerenderReady = true;
+  }, [seoDataReady]);
+
   // Load Firestore team + picks
   useEffect(() => {
     if (!teamKey) return;
+    setSeoDataReady(false);
     const loadData = async () => {
-      const teamSnap = await getDoc(doc(db, "nfl", teamKey));
-      if (!teamSnap.exists()) { setLoading(false); return; }
-      setTeam(teamSnap.data());
+      try {
+        const teamSnap = await getDoc(doc(db, "nfl", teamKey));
+        if (!teamSnap.exists()) { setLoading(false); return; }
+        setTeam(teamSnap.data());
 
-      const picksQ = query(collection(db, "draftOrder"), where("Team", "==", teamKey), orderBy("Round"), orderBy("Pick"));
-      const picksSnap = await getDocs(picksQ);
-      const picksData = picksSnap.docs.map((d) => d.data());
-      setPicks(picksData);
+        const picksQ = query(collection(db, "draftOrder"), where("Team", "==", teamKey), orderBy("Round"), orderBy("Pick"));
+        const picksSnap = await getDocs(picksQ);
+        const picksData = picksSnap.docs.map((d) => d.data());
+        setPicks(picksData);
 
-      const slugs = [...new Set(picksData.map((p) => p.Selection).filter((s) => typeof s === "string" && s.trim()))];
-      const playerMap = {};
-      for (const slug of slugs) {
-        const q = query(collection(db, "players"), where("Slug", "==", slug));
-        const snap = await getDocs(q);
-        if (!snap.empty) playerMap[slug] = snap.docs[0].data();
+        const slugs = [...new Set(picksData.map((p) => p.Selection).filter((s) => typeof s === "string" && s.trim()))];
+        const playerMap = {};
+        for (const slug of slugs) {
+          const q = query(collection(db, "players"), where("Slug", "==", slug));
+          const snap = await getDocs(q);
+          if (!snap.empty) playerMap[slug] = snap.docs[0].data();
+        }
+        setPlayersBySlug(playerMap);
+        setLoading(false);
+      } finally {
+        setSeoDataReady(true);
       }
-      setPlayersBySlug(playerMap);
-      setLoading(false);
     };
     loadData();
   }, [teamKey]);
@@ -267,10 +289,25 @@ export default function NFLTeamPage() {
 
   const c1 = team.Color1 || BLUE;
   const c2 = team.Color2 || GOLD;
+  const teamName = `${team.City} ${team.Team}`.trim();
+  const metaDescription = `${teamName} NFL Draft Hub — mock drafts, player grades, and draft archives for the ${teamName}.`;
+  const pageUrl = `https://we-draft.com/nfl/${teamId}`;
 
   return (
     <>
-      <Helmet><title>{team.City} {team.Team} | We-Draft</title></Helmet>
+      <Helmet>
+        <title>{teamName} Draft Hub</title>
+        <meta name="description" content={metaDescription} />
+        <link rel="canonical" href={pageUrl} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={`${teamName} Draft Hub`} />
+        <meta property="og:description" content={metaDescription} />
+        <meta property="og:url" content={pageUrl} />
+        <meta property="og:site_name" content="We-Draft.com" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={`${teamName} Draft Hub`} />
+        <meta name="twitter:description" content={metaDescription} />
+      </Helmet>
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 

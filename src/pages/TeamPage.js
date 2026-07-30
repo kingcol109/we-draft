@@ -893,6 +893,7 @@ export default function TeamPage() {
   const [draftMap, setDraftMap] = useState({});
   const [nflTeams, setNflTeams] = useState({});
   const [loading, setLoading] = useState(true);
+  const [seoDataReady, setSeoDataReady] = useState(false);
   const [canonicalSchool, setCanonicalSchool] = useState("");
   const [activeTab, setActiveTab] = useState("prospects");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
@@ -914,7 +915,27 @@ export default function TeamPage() {
     ? slug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ").replace(/\bAnd\b/g, "&")
     : "";
 
+  // ── Tells Prerender.io's headless browser when this page's data has
+  // actually finished loading, instead of letting it guess via a fixed
+  // timeout or the browser's `load` event. Same pattern as PlayerProfile.js
+  // and CommunityBoard.js — this page is actually the most exposed of the
+  // three: 17 separate Firestore calls in load(), including the same N+1
+  // per-player grade fetch (once per prospect year, again for the archive
+  // class) plus the video roster fan-out query on top of that. ──
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.prerenderReady = false;
+    const safetyTimer = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(safetyTimer);
+  }, [slug]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (seoDataReady) window.prerenderReady = true;
+  }, [seoDataReady]);
+
+  useEffect(() => {
+    setSeoDataReady(false);
     const load = async () => {
       try {
         let schoolData = null;
@@ -1199,6 +1220,7 @@ export default function TeamPage() {
         console.error("TeamPage load error:", err);
       } finally {
         setLoading(false);
+        setSeoDataReady(true);
       }
     };
     load();
@@ -1209,39 +1231,12 @@ export default function TeamPage() {
   const totalProspects = PROSPECT_YEARS.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
 
   if (loading) return (
-    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      <div style={{ position: "relative", width: "64px", height: "64px" }}>
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          border: `5px solid ${BLUE}`, opacity: 0.15,
-        }} />
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          border: "5px solid transparent", borderTopColor: BLUE, borderRightColor: GOLD,
-          animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
-        }} />
-      </div>
-      <div style={{ fontSize: 19, fontWeight: 900, color: BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
-        Loading Team
-        <span style={{ display: "inline-flex", marginLeft: "3px" }}>
-          {[0, 1, 2].map((i) => (
-            <span key={i} style={{
-              animation: "wdDotPulse 1.2s ease-in-out infinite",
-              animationDelay: `${i * 0.15}s`,
-            }}>.</span>
-          ))}
-        </span>
-      </div>
-      <style>{`
-        @keyframes wdSpinnerRotate {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        @keyframes wdDotPulse {
-          0%, 80%, 100% { opacity: 0.15; }
-          40% { opacity: 1; }
-        }
-      `}</style>
+    <div style={{
+      display: "flex", justifyContent: "center", alignItems: "center",
+      height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE,
+      fontFamily: "'Arial Black', Arial, sans-serif",
+    }}>
+      Loading...
     </div>
   );
 
