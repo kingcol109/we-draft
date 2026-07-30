@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import ReactDOM from "react-dom";
-import { collection, getDocs, doc, setDoc, serverTimestamp, query, where, orderBy, limit } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -20,9 +20,6 @@ import Year2ContributorFlair from "../assets/y2contributor.png";
 import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
 
-// ── Flair -> { image, stroke color, description } — mirrors the map on
-// PlayerProfile.js so a flair means the same thing (same icon, color, and
-// hover copy) everywhere it shows up on the site. ──
 const FLAIR_CONFIG = {
   "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
   "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
@@ -32,10 +29,10 @@ const FLAIR_CONFIG = {
   "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
   "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
   "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
-  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. \"High 5-Star\".", tag: "Recruit Grade" },
-  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. \"Low 5-Star/High 4-Star\".", tag: "Recruit Grade" },
-  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. \"4-Star\".", tag: "Recruit Grade" },
-  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. \"3-Star\".", tag: "Recruit Grade" },
+  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. High 5-Star.", tag: "Recruit Grade" },
+  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. Low 5-Star/High 4-Star.", tag: "Recruit Grade" },
+  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. 4-Star.", tag: "Recruit Grade" },
+  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. 3-Star.", tag: "Recruit Grade" },
   "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
 };
 
@@ -45,9 +42,9 @@ const GOLD = "#f6a21d";
 const ARCHIVE_YEARS = ["2026"];
 const ACTIVE_YEARS = ["2027", "2028", "2029"];
 
-// ── Full labels for position-specific SEO titles/descriptions, e.g.
-// "2027 NFL Draft Quarterback Rankings". Falls back to the raw code for any
-// position that shows up in the data but isn't listed here. ──
+const SIDEBAR_NEWS_LIMIT = 8;
+const SIDEBAR_VIDEO_LIMIT = 10;
+
 const POSITION_LABELS = {
   QB: "Quarterback", RB: "Running Back", WR: "Wide Receiver", TE: "Tight End",
   OL: "Offensive Line", OT: "Offensive Tackle", OG: "Offensive Guard", C: "Center",
@@ -105,25 +102,53 @@ function sanitizeUrl(url) {
   return u;
 }
 
+const toMs = (ts) => (ts && ts.toDate ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0);
+
+function formatRelativeTime(input) {
+  if (!input) return "";
+  const d = input && input.toDate ? input.toDate() : typeof input === "number" ? new Date(input) : new Date(input);
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((startOfToday - startOfDate) / 86400000);
+
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays <= 7) return "This Week";
+  if (diffDays <= 30) {
+    const weeks = Math.max(1, Math.floor(diffDays / 7));
+    return weeks === 1 ? "Last Week" : weeks + " Weeks Ago";
+  }
+  if (diffDays <= 60) return "Last Month";
+  if (diffDays <= 365) {
+    const months = Math.max(1, Math.floor(diffDays / 30));
+    return months + " Month" + (months > 1 ? "s" : "") + " Ago";
+  }
+  return "Last Year";
+}
+
 const GradeBadge = ({ grade, small = false }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
   const numSz = small ? "14px" : "18px";
   const lblSz = small ? "5.5px" : "7px";
   const gd = gradeDisplay(grade);
-  if (!gd) return (
-    <div style={{
-      display: "inline-flex", alignItems: "center", justifyContent: "center",
-      width: w, height: h, border: "2px solid #ddd", borderRadius: "5px",
-      color: "#ccc", fontSize: small ? "14px" : "18px", fontWeight: 900,
-    }}>—</div>
-  );
+  if (!gd) {
+    return (
+      <div style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: w, height: h, border: "2px solid #ddd", borderRadius: "5px",
+        color: "#ccc", fontSize: small ? "14px" : "18px", fontWeight: 900,
+      }}>—</div>
+    );
+  }
   const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
   const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
   return (
     <div style={{
       display: "inline-flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
+      justifyContent: "center", backgroundColor: gd.bg, border: "2px solid " + gd.border,
       borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px",
     }}>
       {qualifier && <span style={{ fontSize: small ? "6px" : "7.5px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
@@ -133,7 +158,6 @@ const GradeBadge = ({ grade, small = false }) => {
   );
 };
 
-// ── PlusBadge with hover tooltip and unauthenticated modal trigger ──
 const PlusBadge = ({ onClick, loading, small = false, user, login }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
@@ -153,7 +177,7 @@ const PlusBadge = ({ onClick, loading, small = false, user, login }) => {
         onMouseLeave={() => setHovered(false)}
         style={{
           display: "inline-flex", alignItems: "center", justifyContent: "center",
-          width: w, height: h, border: `2px solid ${BLUE}`, borderRadius: "5px",
+          width: w, height: h, border: "2px solid " + BLUE, borderRadius: "5px",
           cursor: loading ? "default" : "pointer",
           backgroundColor: hovered ? "#e6f0fa" : "#fff",
           color: BLUE, fontSize: small ? "18px" : "22px", fontWeight: 900,
@@ -198,7 +222,7 @@ const formatHeight = (inches) => {
   if (!inches) return "-";
   const ft = Math.floor(inches / 12);
   const inch = Math.round((inches % 12) * 10) / 10;
-  return `${ft}'${inch}"`;
+  return ft + "'" + inch + "\"";
 };
 
 const parseHeight = (val) => {
@@ -229,17 +253,17 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
         style={{
           padding: "8px 16px", fontWeight: 900, fontSize: "13px",
           textTransform: "uppercase", letterSpacing: "0.05em",
-          color: "#fff", background: BLUE, border: `2px solid ${GOLD}`,
+          color: "#fff", background: BLUE, border: "2px solid " + GOLD,
           borderRadius: "8px", cursor: "pointer", whiteSpace: "nowrap",
         }}
       >
-        {title}{selected.length > 0 ? ` (${selected.length})` : ""} ▾
+        {title}{selected.length > 0 ? " (" + selected.length + ")" : ""} ▾
       </button>
       {open && (
         <div style={{
           position: "absolute", top: "calc(100% + 6px)", left: 0,
           zIndex: 50, width: "220px", maxHeight: "300px", overflowY: "auto",
-          background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
+          background: "#fff", border: "2px solid " + GOLD, borderRadius: "8px",
           boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
         }}>
           <div style={{
@@ -283,7 +307,7 @@ function PositionFilterBar({ options, selected, setSelected, isMobile }) {
               padding: isMobile ? "10px 20px" : "14px 32px",
               fontWeight: 900, fontSize: isMobile ? "16px" : "19px",
               textTransform: "uppercase", letterSpacing: "0.05em",
-              border: `3px solid ${GOLD}`, borderRadius: "10px", cursor: "pointer",
+              border: "3px solid " + GOLD, borderRadius: "10px", cursor: "pointer",
               background: active ? BLUE : "#fff",
               color: active ? "#fff" : BLUE,
               whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
@@ -313,7 +337,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
-          border: `2px solid ${GOLD}`, borderRadius: "20px",
+          border: "2px solid " + GOLD, borderRadius: "20px",
           padding: "6px 18px", fontWeight: 900, fontSize: "14px",
           cursor: "pointer",
           background: isArchive ? BLUE : "#fff",
@@ -322,7 +346,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
           whiteSpace: "nowrap",
         }}
       >
-        {isArchive ? `Archive: ${eligibleYear}` : "Archive"} ▾
+        {isArchive ? ("Archive: " + eligibleYear) : "Archive"} ▾
       </button>
 
       {open && (
@@ -330,7 +354,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
           position: "absolute", top: "calc(100% + 8px)", left: "50%",
           transform: "translateX(-50%)",
           zIndex: 50, minWidth: "160px",
-          background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "10px",
+          background: "#fff", border: "2px solid " + GOLD, borderRadius: "10px",
           boxShadow: "0 6px 20px rgba(0,0,0,0.14)", overflow: "hidden",
         }}>
           <div style={{ background: BLUE, padding: "8px 14px", fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
@@ -370,7 +394,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
           padding: isMobile ? "8px 14px" : "8px 16px",
           fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
           textTransform: "uppercase", letterSpacing: "0.05em",
-          border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
+          border: "2px solid " + GOLD, borderRadius: "8px", cursor: "pointer",
           background: "#fff", color: BLUE, whiteSpace: "nowrap",
         }}
       >
@@ -381,7 +405,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
         <div style={{
           position: "absolute", top: "calc(100% + 6px)", left: 0,
           zIndex: 50, minWidth: "180px",
-          background: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
+          background: "#fff", border: "2px solid " + GOLD, borderRadius: "8px",
           boxShadow: "0 6px 16px rgba(0,0,0,0.12)", overflow: "hidden",
         }}>
           <div style={{ background: BLUE, padding: "8px 12px", fontSize: "12px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -399,7 +423,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
-            📋 My Boards
+            My Boards
           </div>
           <div
             onClick={() => { setOpen(false); onNavigate(); }}
@@ -411,10 +435,24 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
-            Open Whiteboard ↗
+            Open Whiteboard
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SidebarCard({ title, color1, color2, children }) {
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ border: "2px solid " + color1 }}>
+      <div style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
+        <div className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
+          {title}
+        </div>
+      </div>
+      <div style={{ height: "4px", backgroundColor: color2 }} />
+      <div style={{ background: "#fff" }}>{children}</div>
     </div>
   );
 }
@@ -428,6 +466,7 @@ export default function CommunityBoard() {
 
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [seoDataReady, setSeoDataReady] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
   const boardDropdownRef = useRef(null);
@@ -435,36 +474,44 @@ export default function CommunityBoard() {
   const [draftMap, setDraftMap] = useState({});
   const [nflTeams, setNflTeams] = useState({});
 
+  const [sidebarNews, setSidebarNews] = useState([]);
+  const [sidebarVideos, setSidebarVideos] = useState([]);
+
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
 
+  // ── Tells Prerender.io's headless browser when this page's data has
+  // actually finished loading, instead of letting it guess via a fixed
+  // timeout or the browser's `load` event. Same pattern as PlayerProfile.js
+  // and TeamPage.js. ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.prerenderReady = false;
+    const safetyTimer = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(safetyTimer);
+  }, [eligibleYear, position]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (seoDataReady) window.prerenderReady = true;
+  }, [seoDataReady]);
+
   useEffect(() => {
     const handler = (e) => {
-      if (boardDropdownRef.current && !boardDropdownRef.current.contains(e.target))
+      if (boardDropdownRef.current && !boardDropdownRef.current.contains(e.target)) {
         setBoardDropdownOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   const [boardMap, setBoardMap] = useState(new Map());
-  const [boardVideos, setBoardVideos] = useState([]);
-  const [boardNews, setBoardNews] = useState([]);
   const [addingId, setAddingId] = useState(null);
 
-  // ── Mini player preview card: hovering a player's name shows a compact
-  // summary card (grades, position/school, flair if they have one). Themed
-  // by the player's flair color when present, plain site blue otherwise.
-  // Delayed like the old flair popup — a short pause before it appears so
-  // scanning quickly down a long list doesn't spam a card on every row.
-  // Rendered via portal into document.body with position:fixed (computed
-  // from the trigger's real getBoundingClientRect, same escape-hatch pattern
-  // TeamPage.js's filter dropdowns use) — otherwise rows near the bottom of
-  // the scrollable table get their card clipped by that container's own
-  // overflow boundary. Flips to open upward when there isn't room below. ──
   const [hoveredPlayerId, setHoveredPlayerId] = useState(null);
   const [hoverCardPos, setHoverCardPos] = useState({ top: 0, left: 0, flip: false });
   const playerHoverTimerRef = useRef(null);
@@ -490,13 +537,13 @@ export default function CommunityBoard() {
 
   const PlayerPreviewCard = ({ player, pos }) => {
     const flairConfig = player.Flair ? FLAIR_CONFIG[player.Flair] : null;
-    const accent = flairConfig?.stroke || BLUE;
+    const accent = flairConfig ? flairConfig.stroke : BLUE;
     const myGrade = boardMap.get(player.id);
     return ReactDOM.createPortal(
       <div
         style={{
-          position: "fixed", top: `${pos.top}px`, left: `${pos.left}px`,
-          width: "250px", background: "#fff", border: `2px solid ${accent}`,
+          position: "fixed", top: pos.top + "px", left: pos.left + "px",
+          width: "250px", background: "#fff", border: "2px solid " + accent,
           borderRadius: "14px", padding: "14px 16px", boxShadow: "0 18px 40px rgba(0,0,0,0.22)",
           zIndex: 9999, textAlign: "left", pointerEvents: "none",
         }}
@@ -505,14 +552,14 @@ export default function CommunityBoard() {
           <div style={{
             position: "absolute", top: "100%", left: "24px",
             width: "12px", height: "12px", background: "#fff",
-            border: `2px solid ${accent}`, borderLeft: "none", borderTop: "none",
+            border: "2px solid " + accent, borderLeft: "none", borderTop: "none",
             transform: "rotate(45deg)",
           }} />
         ) : (
           <div style={{
             position: "absolute", bottom: "100%", left: "24px",
             width: "12px", height: "12px", background: "#fff",
-            border: `2px solid ${accent}`, borderRight: "none", borderBottom: "none",
+            border: "2px solid " + accent, borderRight: "none", borderBottom: "none",
             transform: "rotate(45deg)",
           }} />
         )}
@@ -541,6 +588,7 @@ export default function CommunityBoard() {
                 <span style={{
                   fontSize: "8px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em",
                   color: "#fff", background: accent, padding: "2px 6px", borderRadius: "20px",
+                  marginLeft: "2px",
                 }}>
                   {flairConfig.tag}
                 </span>
@@ -591,24 +639,8 @@ export default function CommunityBoard() {
     }
   }, [eligibleYear]);
 
-  // ── Guards against the two sync effects below fighting each other. When
-  // the filter-state effect (further down) drops the :position segment
-  // because 2+ positions got selected, that URL change would otherwise
-  // re-trigger the effect right below it, which — seeing no position in the
-  // URL — would wipe the multi-select back to []. This flag marks "this URL
-  // change came from our own state, not a real navigation", so the sync-from-
-  // URL effect knows to skip re-deriving state that one time. ──
   const programmaticNavRef = useRef(false);
 
-  // ── URL -> filter state: when the :position route param changes (i.e. the
-  // user navigated — clicked a link, typed a URL, hit back/forward), sync
-  // the position filter to match. Runs after the year-reset effect above, so
-  // on a combined year+position navigation (e.g. /community/2028 ->
-  // /community/2027/qb) this correctly re-applies the position that the
-  // reset effect would otherwise have just cleared. Skips entirely if this
-  // URL change was self-inflicted by the state->URL effect below (see
-  // programmaticNavRef above) — otherwise a 2+ position multi-select gets
-  // wiped the instant it causes the :position segment to drop. ──
   useEffect(() => {
     if (programmaticNavRef.current) {
       programmaticNavRef.current = false;
@@ -622,25 +654,18 @@ export default function CommunityBoard() {
     });
   }, [position]);
 
-  // ── Filter state -> URL: when exactly one position is selected (whether
-  // from the URL sync above or the visitor clicking a position filter
-  // button), make sure the address bar reflects it as a real, shareable,
-  // crawlable URL — /community/{year}/{position}. Falls back to the plain
-  // year URL when zero or multiple positions are selected, since a
-  // multi-position combination isn't a meaningful canonical page. Sets
-  // programmaticNavRef before navigating so the effect above knows this
-  // particular URL change originated here, not from an actual navigation. ──
   useEffect(() => {
     const currentPos = position ? position.toUpperCase() : null;
     const desiredPos = selectedPositions.length === 1 ? selectedPositions[0] : null;
     if (desiredPos === currentPos) return;
     programmaticNavRef.current = true;
     navigate(yearPath(eligibleYear, desiredPos), { replace: true });
-  }, [selectedPositions, eligibleYear]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPositions, eligibleYear]);
 
   const yearPath = (yr, pos) => {
-    if (pos) return `/community/${yr}/${pos.toLowerCase()}`;
-    return yr === "2027" ? "/community" : `/community/${yr}`;
+    if (pos) return "/community/" + yr + "/" + pos.toLowerCase();
+    return yr === "2027" ? "/community" : "/community/" + yr;
   };
 
   useEffect(() => {
@@ -651,51 +676,6 @@ export default function CommunityBoard() {
         snap.docs.forEach((d) => { map[d.id] = d.data(); });
         setNflTeams(map);
       } catch (e) { console.error(e); }
-    };
-    fetch();
-  }, []);
-
-  // ── Videos + News sidebars — unlike PlayerProfile.js/TeamPage.js (where
-  // these are scoped to one player or one team's roster), this page covers
-  // an entire class/position, so there's no single slug to filter by. Shows
-  // the most recently added videos/news site-wide instead. ──
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(query(collection(db, "videos"), orderBy("Date", "desc"), limit(6)));
-        const vids = snap.docs
-          .map((d) => {
-            const data = d.data();
-            const items = Array.isArray(data.items) ? data.items : [];
-            const first = items[0] || null;
-            return {
-              id: d.id,
-              video: data.Video || "",
-              title: first?.title || "",
-              thumb: first?.thumb || "",
-            };
-          })
-          .filter((v) => v.video);
-        setBoardVideos(vids);
-      } catch (e) { setBoardVideos([]); }
-    };
-    fetch();
-  }, []);
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const [newsSnap, articleSnap] = await Promise.all([
-          getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"), limit(8))),
-          getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(8))),
-        ]);
-        const combined = [
-          ...newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() })),
-          ...articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() })),
-        ].sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
-          .slice(0, 8);
-        setBoardNews(combined);
-      } catch (e) { setBoardNews([]); }
     };
     fetch();
   }, []);
@@ -715,29 +695,60 @@ export default function CommunityBoard() {
     fetch();
   }, []);
 
+  useEffect(() => {
+    const fetchNews = async () => {
+      try {
+        const newsSnap = await getDocs(query(collection(db, "news"), where("active", "==", true)));
+        const newsItems = newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() }));
+
+        let articleItems = [];
+        try {
+          const articleSnap = await getDocs(query(collection(db, "articles"), where("status", "==", "published")));
+          articleItems = articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() }));
+        } catch (articleErr) {
+          console.warn("Articles index missing, skipping:", articleErr);
+        }
+
+        const combined = [...articleItems, ...newsItems].sort(function (a, b) {
+          return toMs(b.publishedAt) - toMs(a.publishedAt);
+        });
+        setSidebarNews(combined.slice(0, SIDEBAR_NEWS_LIMIT));
+      } catch (e) {
+        setSidebarNews([]);
+      }
+    };
+    fetchNews();
+  }, []);
+
+  useEffect(() => {
+    const fetchVideos = async () => {
+      try {
+        const snap = await getDocs(collection(db, "videos"));
+        const vids = snap.docs
+          .map(function (d) {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const first = items.length > 0 ? items[0] : null;
+            return {
+              id: d.id,
+              video: data.Video || "",
+              date: data.Date || null,
+              title: data.GenTitle || (first && first.title) || "",
+              thumb: data.GenThumb || (first && first.thumb) || "",
+            };
+          })
+          .filter(function (v) { return !!v.video; })
+          .sort(function (a, b) { return toMs(b.date) - toMs(a.date); })
+          .slice(0, SIDEBAR_VIDEO_LIMIT);
+        setSidebarVideos(vids);
+      } catch (e) {
+        setSidebarVideos([]);
+      }
+    };
+    fetchVideos();
+  }, []);
+
   const [playerCache, setPlayerCache] = useState({});
-  const [seoDataReady, setSeoDataReady] = useState(false);
-
-  // ── Tells Prerender.io's headless browser when this page's data (the full
-  // class list, plus the N+1 per-player grade fetch) has actually finished
-  // loading — same reasoning and pattern as PlayerProfile.js. This page is
-  // more exposed to the timing race than a single player page, since it can
-  // fire 100+ sequential evaluation-subcollection reads before it's done.
-  // Only keyed on eligibleYear (not position) because position filtering is
-  // client-side once the year's data is loaded — no extra fetch happens on
-  // a position-only navigation, so this naturally covers every position
-  // sub-route (2026/qb, 2027/rb, etc.) without needing separate tracking. ──
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.prerenderReady = false;
-    const safetyTimer = setTimeout(() => { window.prerenderReady = true; }, 8000);
-    return () => clearTimeout(safetyTimer);
-  }, [eligibleYear, position]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (seoDataReady) window.prerenderReady = true;
-  }, [seoDataReady]);
 
   useEffect(() => {
     setSeoDataReady(false);
@@ -751,7 +762,10 @@ export default function CommunityBoard() {
 
     const isActiveYear = ACTIVE_YEARS.includes(eligibleYear);
     const isArchiveYear = ARCHIVE_YEARS.includes(eligibleYear);
-    if (!isActiveYear && !isArchiveYear) { setSeoDataReady(true); return; }
+    if (!isActiveYear && !isArchiveYear) {
+      setSeoDataReady(true);
+      return;
+    }
 
     const fetchPlayers = async () => {
       setLoading(true);
@@ -795,7 +809,7 @@ export default function CommunityBoard() {
 
   useEffect(() => {
     const fetchBoard = async () => {
-      if (!user?.uid) { setBoardMap(new Map()); return; }
+      if (!user || !user.uid) { setBoardMap(new Map()); return; }
       try {
         const snap = await getDocs(collection(db, "users", user.uid, "evaluations"));
         const m = new Map();
@@ -814,7 +828,7 @@ export default function CommunityBoard() {
       const evalData = {
         uid: user.uid, email: user.email,
         playerId: p.id,
-        playerName: `${p.First || ""} ${p.Last || ""}`.trim(),
+        playerName: (p.First || "") + " " + (p.Last || ""),
         grade: "Watchlist", strengths: [], weaknesses: [],
         nflFit: "", evaluation: "", visibility: "private",
         updatedAt: serverTimestamp(),
@@ -846,7 +860,7 @@ export default function CommunityBoard() {
   const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
 
   const filteredPlayers = players
-    .filter((p) => !searchQuery.trim() ? true : `${p.First || ""} ${p.Last || ""}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    .filter((p) => !searchQuery.trim() ? true : ((p.First || "") + " " + (p.Last || "")).toLowerCase().includes(searchQuery.trim().toLowerCase()))
     .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
     .filter((p) => selectedSchools.length === 0 ? true : selectedSchools.includes(p.School))
     .filter((p) => selectedCommGrades.length === 0 ? true : selectedCommGrades.includes(p.CommunityGrade))
@@ -874,13 +888,13 @@ export default function CommunityBoard() {
         "UDFA": 10, "Watchlist": 11,
       };
       const aG = boardMap.get(a.id), bG = boardMap.get(b.id);
-      const aV = aG !== undefined ? (myGradeOrder[aG] ?? 99) : 999;
-      const bV = bG !== undefined ? (myGradeOrder[bG] ?? 99) : 999;
+      const aV = aG !== undefined ? (myGradeOrder[aG] || 99) : 999;
+      const bV = bG !== undefined ? (myGradeOrder[bG] || 99) : 999;
       return sortOrder === "asc" ? aV - bV : bV - aV;
     }
     if (sortKey === "Pick") {
       const aD = draftMap[a.Slug], bD = draftMap[b.Slug];
-      return sortOrder === "asc" ? (aD?.pick || 9999) - (bD?.pick || 9999) : (bD?.pick || 9999) - (aD?.pick || 9999);
+      return sortOrder === "asc" ? ((aD && aD.pick) || 9999) - ((bD && bD.pick) || 9999) : ((bD && bD.pick) || 9999) - ((aD && aD.pick) || 9999);
     }
     if (sortKey === "Player") {
       const cmp = (a.Last || "").localeCompare(b.Last || "");
@@ -919,137 +933,536 @@ export default function CommunityBoard() {
   );
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading Board...
-    </div>
-  );
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+        <div style={{ position: "relative", width: "64px", height: "64px" }}>
+          <div style={{
+            position: "absolute", inset: 0, borderRadius: "50%",
+            border: `5px solid ${BLUE}`, opacity: 0.15,
+          }} />
+          <div style={{
+            position: "absolute", inset: 0, borderRadius: "50%",
+            border: "5px solid transparent", borderTopColor: BLUE, borderRightColor: GOLD,
+            animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
+          }} />
+        </div>
+        <div style={{ fontSize: 19, fontWeight: 900, color: BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
+          Loading Board
+          <span style={{ display: "inline-flex", marginLeft: "3px" }}>
+            {[0, 1, 2].map((i) => (
+              <span key={i} style={{
+                animation: "wdDotPulse 1.2s ease-in-out infinite",
+                animationDelay: `${i * 0.15}s`,
+              }}>.</span>
+            ))}
+          </span>
+        </div>
+        <style>{`
+          @keyframes wdSpinnerRotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes wdDotPulse {
+            0%, 80%, 100% { opacity: 0.15; }
+            40% { opacity: 1; }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
-  // ── SEO: page-specific title/description/canonical + Open Graph/Twitter
-  // Card tags, mirroring the pattern used on PlayerProfile.js. Built from
-  // eligibleYear (and now position) so every combination — 2026 archive,
-  // 2027/2028/2029, and each position within each year — gets its own
-  // distinct, crawlable metadata instead of one generic page for everything.
-  // "2027 NFL Draft Quarterback Rankings" etc. is the whole point: each
-  // position gets a real URL + real title, not just a client-side filter. ──
   const positionParam = position ? position.toUpperCase() : null;
   const positionLabel = positionParam ? (POSITION_LABELS[positionParam] || positionParam) : null;
 
   const pageTitle = positionLabel
-    ? `${eligibleYear} NFL Draft ${positionLabel} Rankings | We-Draft.com`
-    : `${eligibleYear} NFL Draft Community Board | We-Draft.com`;
+    ? eligibleYear + " NFL Draft " + positionLabel + " Rankings | We-Draft.com"
+    : eligibleYear + " NFL Draft Community Board | We-Draft.com";
   const pageDescription = positionLabel
-    ? `We-Draft.com ${eligibleYear} NFL Draft ${positionLabel} rankings. Community grades, strengths, weaknesses, and NFL fit projections for top ${positionLabel.toLowerCase()} prospects — voted on by the community.`
-    : `We-Draft.com ${eligibleYear} NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections — voted on by the community.`;
-  const pageUrl = `https://we-draft.com${yearPath(eligibleYear, positionParam)}`;
-
-  // ── Videos sidebar — full-width 16:9 cards with gradient title scrim and a
-  // hover play-button, same visual language as PlayerProfile.js/TeamPage.js. ──
-  const VideosSidebar = boardVideos.length === 0 ? null : (
-    <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-      <div style={{ background: BLUE, padding: "12px 14px", textAlign: "center" }}>
-        <div style={{ color: "#fff", fontWeight: 900, fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>Videos</div>
-      </div>
-      <div style={{ height: "4px", background: GOLD }} />
-      <div style={{ background: "#fff" }}>
-        {boardVideos.map((v, i) => (
-          <a
-            key={v.id}
-            href={sanitizeUrl(v.video)}
-            target="_blank"
-            rel="sponsored noopener noreferrer"
-            className="wd-video-card"
-            style={{ display: "block", position: "relative", textDecoration: "none", borderBottom: i < boardVideos.length - 1 ? "1px solid #f0f0f0" : "none" }}
-          >
-            <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
-              {v.thumb ? (
-                <img
-                  className="wd-video-thumb"
-                  src={sanitizeUrl(v.thumb)}
-                  alt={v.title || "Video thumbnail"}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => { e.currentTarget.style.display = "none"; }}
-                />
-              ) : (
-                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
-                </div>
-              )}
-              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
-              <div
-                className="wd-video-play"
-                style={{
-                  position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%) scale(0.8)",
-                  width: "48px", height: "48px", borderRadius: "50%", background: "rgba(255,255,255,0.95)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease", boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
-                }}
-              >
-                <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
-              </div>
-              {v.title && (
-                <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                  <div style={{ fontWeight: 900, textTransform: "uppercase", color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.25 }}>
-                    {v.title}
-                  </div>
-                </div>
-              )}
-            </div>
-          </a>
-        ))}
-      </div>
-    </div>
-  );
+    ? "We-Draft.com " + eligibleYear + " NFL Draft " + positionLabel + " rankings. Community grades, strengths, weaknesses, and NFL fit projections for top " + positionLabel.toLowerCase() + " prospects, voted on by the community."
+    : "We-Draft.com " + eligibleYear + " NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections, voted on by the community.";
+  const pageUrl = "https://we-draft.com" + yearPath(eligibleYear, positionParam);
 
   const NewsSidebar = (
-    <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-      <div style={{ background: BLUE, padding: "12px 14px", textAlign: "center" }}>
-        <div style={{ color: "#fff", fontWeight: 900, fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>In The News</div>
-      </div>
-      <div style={{ height: "4px", background: GOLD }} />
-      <div style={{ background: "#fff" }}>
-        {boardNews.length === 0 ? (
-          <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No recent news.</div>
-        ) : (
-          boardNews.map((n, i) => (
-            <Link
-              key={n.id}
-              to={n.type === "article" ? `/article/${n.slug}` : `/news/${n.slug}`}
-              style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < boardNews.length - 1 ? "1px solid #f0f0f0" : "none" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-            >
-              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
-                  <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                    {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
-                  </span>
-                </div>
-                <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
-                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
-                    {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
-                  </span>
-                </div>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{
-                  backgroundColor: n.type === "article" ? GOLD : BLUE,
-                  color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
-                  padding: "2px 5px", display: "inline-block", marginBottom: "3px", borderRadius: "2px",
-                  fontWeight: 900, textTransform: "uppercase",
-                }}>
-                  {n.type === "article" ? "Article" : "News"}
+    <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
+      {sidebarNews.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No recent news.</div>
+      ) : (
+        sidebarNews.map((n, i) => (
+          <Link key={n.slug || n.id} to={"/news/" + n.slug}
+            style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < sidebarNews.length - 1 ? "1px solid #f0f0f0" : "none" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >
+            <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: "2px solid " + BLUE, background: "#fff", display: "flex", flexDirection: "column" }}>
+              <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+                <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  {n.publishedAt && n.publishedAt.toDate ? n.publishedAt.toDate().toLocaleDateString(undefined, { month: "short" }) : ""}
                 </span>
-                <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
-                  {n.title}
-                </div>
               </div>
-            </Link>
-          ))
-        )}
+              <div style={{ padding: "3px 0 2px", textAlign: "center" }}>
+                <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+                  {n.publishedAt && n.publishedAt.toDate ? n.publishedAt.toDate().toLocaleDateString(undefined, { day: "numeric" }) : ""}
+                </span>
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "article" ? GOLD : BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
+                {n.type === "article" ? "Article" : "News"}
+              </span>
+              <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
+            </div>
+          </Link>
+        ))
+      )}
+    </SidebarCard>
+  );
+
+  const VideosSidebar = (
+    <SidebarCard title="Videos" color1={BLUE} color2={GOLD}>
+      {sidebarVideos.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No videos yet.</div>
+      ) : (
+        sidebarVideos.map((v, i) => {
+          const relTime = formatRelativeTime(v.date);
+          return (
+            <a
+              key={v.id}
+              href={sanitizeUrl(v.video)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="wd-video-card"
+              style={{
+                display: "block",
+                position: "relative",
+                textDecoration: "none",
+                borderBottom: i < sidebarVideos.length - 1 ? "1px solid #f0f0f0" : "none",
+              }}
+            >
+              <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+                {v.thumb ? (
+                  <img
+                    className="wd-video-thumb"
+                    src={sanitizeUrl(v.thumb)}
+                    alt={v.title || "Video thumbnail"}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
+                  </div>
+                )}
+
+                <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+
+                <div
+                  className="wd-video-play"
+                  style={{
+                    position: "absolute", top: "50%", left: "50%",
+                    transform: "translate(-50%, -50%) scale(0.8)",
+                    width: "48px", height: "48px", borderRadius: "50%",
+                    background: "rgba(255,255,255,0.95)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
+                    boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
+                </div>
+
+                {relTime && (
+                  <div style={{ position: "absolute", top: "8px", right: "8px" }}>
+                    <span style={{ background: "rgba(0,0,0,0.65)", color: "#fff", fontSize: "9px", fontWeight: 900, padding: "3px 8px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {relTime}
+                    </span>
+                  </div>
+                )}
+
+                {v.title && (
+                  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
+                    <div className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
+                      {v.title}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </a>
+          );
+        })
+      )}
+    </SidebarCard>
+  );
+
+  const MainContent = (
+    <div style={{ fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ marginBottom: "20px", border: "3px solid " + BLUE, borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{
+          background: BLUE, padding: isMobile ? "18px 14px" : "24px 20px",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+        }}>
+          <img src={Logo2} alt="We-Draft.com" style={{ height: isMobile ? "36px" : "48px", objectFit: "contain" }} />
+          <h1 style={{
+            fontSize: isMobile ? "34px" : "56px", fontWeight: 900, textTransform: "uppercase",
+            letterSpacing: "0.04em", color: "#fff", lineHeight: 1, textAlign: "center", width: "100%",
+            margin: 0,
+            minHeight: isMobile ? "72px" : "120px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            textShadow: "-1px -1px 0 " + GOLD + ", 1px -1px 0 " + GOLD + ", -1px 1px 0 " + GOLD + ", 1px 1px 0 " + GOLD + ", 0 -1px 0 " + GOLD + ", 0 1px 0 " + GOLD + ", -1px 0 0 " + GOLD + ", 1px 0 0 " + GOLD,
+          }}>
+            {positionLabel ? (eligibleYear + " " + positionLabel + " Rankings") : (eligibleYear + " Community Board")}
+          </h1>
+          <div style={{ fontSize: isMobile ? "12px" : "14px", fontWeight: 700, color: "rgba(255,255,255,0.75)", letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center", lineHeight: 1.4, minHeight: isMobile ? "34px" : "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {positionLabel ? (eligibleYear + " NFL Draft " + positionLabel + " Board — We-Draft.com User Grades") : (eligibleYear + " NFL Draft Community Board — We-Draft.com User Grades")}
+          </div>
+        </div>
+        <div style={{ height: "4px", background: GOLD }} />
       </div>
+
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+          <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
+          {ACTIVE_YEARS.map((yr) => (
+            <Link
+              key={yr}
+              to={yearPath(yr)}
+              style={{
+                border: "3px solid " + GOLD, borderRadius: "24px",
+                padding: isMobile ? "10px 26px" : "14px 40px",
+                fontWeight: 900, fontSize: isMobile ? "18px" : "22px",
+                background: eligibleYear === yr ? BLUE : "#fff",
+                color: eligibleYear === yr ? "#fff" : BLUE,
+                transition: "background 0.15s, color 0.15s",
+                textDecoration: "none", display: "inline-block",
+              }}
+            >
+              {yr}
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {!is2029Empty && (
+        isMobile ? (
+          <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile />
+        ) : (
+          <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+        )
+      )}
+
+      {is2029Empty ? (
+        <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+          <div style={{ background: BLUE, padding: "8px 16px" }}>
+            <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2029 Draft Class</div>
+          </div>
+          <div style={{ height: "3px", background: GOLD }} />
+          <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
+            <div style={{ fontSize: "40px", marginBottom: "16px" }}>🏈</div>
+            <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>
+              2029 Players Coming Soon
+            </div>
+            <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#888", maxWidth: "480px", margin: "0 auto", lineHeight: 1.6 }}>
+              The 2029 draft class will be added once the 2026 college football season kicks off. Check back then to start evaluating the next wave of prospects.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {isMobile ? (
+            <div style={{ marginBottom: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
+                <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
+                <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
+                <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
+              </div>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center", marginBottom: "6px" }}>
+                <BoardDropdown
+                  dropdownRef={boardDropdownRef}
+                  open={boardDropdownOpen}
+                  setOpen={setBoardDropdownOpen}
+                  isMobile={isMobile}
+                  onNavigate={() => navigate("/whiteboard")}
+                  onMyBoards={() => navigate("/boards")}
+                />
+                {is2026 && (
+                  <button
+                    onClick={() => setShowAvailableOnly((v) => !v)}
+                    style={{
+                      padding: "8px 12px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.05em",
+                      border: "2px solid " + GOLD, borderRadius: "8px", cursor: "pointer",
+                      background: showAvailableOnly ? GOLD : "#fff",
+                      color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0,
+                    }}
+                  >
+                    {showAvailableOnly ? "✓ Available" : "Available"}
+                  </button>
+                )}
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+                  style={{ flex: 1, minWidth: "140px", border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
+                <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
+              <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
+              <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
+              <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
+              <BoardDropdown
+                dropdownRef={boardDropdownRef}
+                open={boardDropdownOpen}
+                setOpen={setBoardDropdownOpen}
+                isMobile={isMobile}
+                onNavigate={() => navigate("/whiteboard")}
+                onMyBoards={() => navigate("/boards")}
+              />
+              {is2026 && (
+                <button
+                  onClick={() => setShowAvailableOnly((v) => !v)}
+                  style={{
+                    padding: "8px 16px", fontWeight: 900, fontSize: "13px",
+                    textTransform: "uppercase", letterSpacing: "0.05em",
+                    border: "2px solid " + GOLD, borderRadius: "8px", cursor: "pointer",
+                    background: showAvailableOnly ? GOLD : "#fff",
+                    color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap",
+                  }}
+                >
+                  {showAvailableOnly ? "✓ Available" : "Available"}
+                </button>
+              )}
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+                style={{ border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "280px" }} />
+              <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
+            </div>
+          )}
+
+          <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                {selectedPositions.length === 1
+                  ? (eligibleYear + " " + (POSITION_LABELS[selectedPositions[0]] || selectedPositions[0]) + " Rankings")
+                  : (eligibleYear + " Draft Class")}
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
+                {sortedPlayers.length} player{sortedPlayers.length !== 1 ? "s" : ""}
+              </div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+
+            {isMobile ? (
+              <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                {sortedPlayers.length === 0 ? (
+                  <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+                    No players match your filters.
+                  </div>
+                ) : sortedPlayers.map((p) => {
+                  const myGrade = boardMap.get(p.id);
+                  const onBoard = myGrade !== undefined;
+                  const isAdding = addingId === p.id;
+                  const draft = draftMap[p.Slug];
+                  const teamData = draft ? nflTeams[draft.team] : null;
+                  const c1 = (teamData && teamData.Color1) || BLUE;
+                  const c2 = (teamData && teamData.Color2) || GOLD;
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderBottom: "1px solid " + GOLD }}>
+                      {is2026 && draft && (
+                        <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "3px" }}>
+                          <div style={{ width: 32, height: 32, borderRadius: "6px", background: c1, border: "2px solid " + c2, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                            <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>Rd {draft.round}</span>
+                            <span style={{ fontSize: "13px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
+                          </div>
+                          {teamData && teamData.Logo1 ? (
+                            <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} style={{ width: "24px", height: "24px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                          ) : (
+                            <span style={{ fontSize: "8px", fontWeight: 900, color: c1 }}>{draft.team}</span>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Link
+                          to={"/player/" + p.Slug}
+                          style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2 }}
+                          onMouseEnter={(e) => handlePlayerHoverEnter(p.id, e)}
+                          onMouseLeave={handlePlayerHoverLeave}
+                        >
+                          {(p.First || "") + " " + (p.Last || "")}
+                        </Link>
+                        {hoveredPlayerId === p.id && <PlayerPreviewCard player={p} pos={hoverCardPos} />}
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#555", marginTop: "3px" }}>
+                          {p.Position || "—"} · {p.School || "—"}
+                        </div>
+                        {(p.HeightInches || p.Weight) && (
+                          <div style={{ fontSize: "11px", color: "#aaa", fontWeight: 700, marginTop: "2px" }}>
+                            {p.HeightInches ? formatHeight(p.HeightInches) : ""}{p.HeightInches && p.Weight ? " · " : ""}{p.Weight ? (p.Weight + " lbs") : ""}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
+                        <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>My</div>
+                        {isAdding ? (
+                          <div style={{ width: "48px", height: "40px", border: "2px solid " + BLUE, borderRadius: "5px", opacity: 0.4 }} />
+                        ) : onBoard ? (
+                          <GradeBadge grade={myGrade} small />
+                        ) : (
+                          <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small user={user} login={login} />
+                        )}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
+                        <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>Comm</div>
+                        <GradeBadge grade={p.CommunityGrade} small />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ maxHeight: "760px", overflowY: "auto" }}>
+                {(() => {
+                  const SortLabel = ({ sortK, label, align = "center", width }) => {
+                    const active = sortKey === sortK;
+                    return (
+                      <div
+                        onClick={() => handleSort(sortK)}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = active ? "1" : "0.72"; }}
+                        style={{
+                          ...(width ? { width, flexShrink: 0 } : { flex: 1, minWidth: 0 }),
+                          display: "flex", alignItems: "center", gap: "5px",
+                          justifyContent: align === "left" ? "flex-start" : "center",
+                          color: active ? GOLD : "#fff",
+                          fontWeight: 900, fontSize: "13px",
+                          textTransform: "uppercase", letterSpacing: "0.08em",
+                          cursor: "pointer", userSelect: "none",
+                          opacity: active ? 1 : 0.72,
+                          transition: "opacity 0.15s ease, color 0.15s ease",
+                        }}
+                      >
+                        <span style={{ whiteSpace: "nowrap" }}>{label}</span>
+                        <span style={{ fontSize: "10px", opacity: active ? 1 : 0.5 }}>
+                          {active ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
+                        </span>
+                      </div>
+                    );
+                  };
+                  return (
+                    <div style={{
+                      position: "sticky", top: 0, zIndex: 10,
+                      display: "flex", alignItems: "center", gap: "16px",
+                      background: "linear-gradient(135deg, " + BLUE + ", #003d7a)",
+                      padding: "12px 20px",
+                    }}>
+                      {is2026 && <SortLabel sortK="Pick" label="Pick" width="64px" />}
+                      {is2026 && <div style={{ width: "56px", flexShrink: 0 }} />}
+                      <SortLabel sortK="Player" label="Player" align="left" />
+                      <SortLabel sortK="Position" label="Pos" width="84px" />
+                      <SortLabel sortK="MyGrade" label="My Grade" width="140px" />
+                      <SortLabel sortK="CommunityGrade" label="Comm Grade" width="140px" />
+                      <SortLabel sortK="Height" label="HT" width="70px" />
+                      <SortLabel sortK="Weight" label="WT" width="70px" />
+                    </div>
+                  );
+                })()}
+                <div style={{ height: "3px", background: GOLD }} />
+
+                {sortedPlayers.length === 0 ? (
+                  <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
+                    No players match your filters.
+                  </div>
+                ) : sortedPlayers.map((p) => {
+                  const myGrade = boardMap.get(p.id);
+                  const onBoard = myGrade !== undefined;
+                  const isAdding = addingId === p.id;
+                  const draft = draftMap[p.Slug];
+                  const teamData = draft ? nflTeams[draft.team] : null;
+                  const c1 = (teamData && teamData.Color1) || BLUE;
+                  const c2 = (teamData && teamData.Color2) || GOLD;
+                  return (
+                    <div
+                      key={p.id}
+                      style={{ display: "flex", alignItems: "center", gap: "16px", padding: "11px 20px", background: "#fff", borderBottom: "1px solid #eee", transition: "background 0.12s" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "#f3f8ff"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                    >
+                      {is2026 && (
+                        <div style={{ width: "64px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                          {draft ? (
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "48px", height: "48px", borderRadius: "7px", background: c1, border: "2px solid " + c2 }}>
+                              <span style={{ fontSize: "8px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
+                              <span style={{ fontSize: "19px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
+                            </div>
+                          ) : <span style={{ color: "#ddd" }}>—</span>}
+                        </div>
+                      )}
+                      {is2026 && (
+                        <div style={{ width: "56px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                          {teamData && teamData.Logo1 ? (
+                            <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={(teamData && teamData.Name) || draft.team} style={{ width: "40px", height: "40px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                          ) : draft ? <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span> : <span style={{ color: "#ddd" }}>—</span>}
+                        </div>
+                      )}
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Link
+                          to={"/player/" + p.Slug}
+                          style={{ color: BLUE, fontWeight: 900, fontSize: "27px", textDecoration: "none", display: "block", lineHeight: 1.15 }}
+                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; handlePlayerHoverEnter(p.id, e); }}
+                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; handlePlayerHoverLeave(); }}
+                        >
+                          {(p.First || "") + " " + (p.Last || "")}
+                        </Link>
+                        {hoveredPlayerId === p.id && <PlayerPreviewCard player={p} pos={hoverCardPos} />}
+                        {p.School && (
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "3px" }}>
+                            {p.School}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ width: "84px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                        {p.Position ? (
+                          <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "6px 12px", borderRadius: "6px", textTransform: "uppercase" }}>
+                            {p.Position}
+                          </span>
+                        ) : <span style={{ color: "#ddd" }}>—</span>}
+                      </div>
+
+                      <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                        {isAdding ? (
+                          <div style={{ width: "64px", height: "52px", border: "2px solid " + BLUE, borderRadius: "5px", opacity: 0.4 }} />
+                        ) : onBoard ? (
+                          <GradeBadge grade={myGrade} />
+                        ) : (
+                          <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} user={user} login={login} />
+                        )}
+                      </div>
+
+                      <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                        <GradeBadge grade={p.CommunityGrade} />
+                      </div>
+
+                      <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
+                        {p.HeightInches ? formatHeight(p.HeightInches) : (p.Height || "-")}
+                      </div>
+
+                      <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
+                        {p.Weight || "-"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {!user && (
+            <p style={{ textAlign: "center", marginTop: "14px", fontSize: "13px", color: "#999", fontWeight: 700 }}>
+              <span onClick={login} style={{ color: BLUE, fontWeight: 900, cursor: "pointer", textDecoration: "underline" }}>Sign in</span> to add players to your board
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 
@@ -1069,411 +1482,23 @@ export default function CommunityBoard() {
         <meta name="twitter:description" content={pageDescription} />
       </Helmet>
 
-
-      {boardVideos.length > 0 && (
-        <style>{`
-          .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
-          .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        `}</style>
+      {sidebarVideos.length > 0 && (
+        <style>{".wd-video-card:hover .wd-video-thumb { transform: scale(1.08); } .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }"}</style>
       )}
 
-      <div style={{
-        maxWidth: "1600px", margin: "0 auto",
-        padding: isMobile ? "4px 10px 60px" : "6px 24px 60px",
-        fontFamily: "'Arial Black', Arial, sans-serif",
-        display: isMobile ? "flex" : "grid",
-        flexDirection: isMobile ? "column" : undefined,
-        gridTemplateColumns: isMobile ? undefined : "minmax(0, 1300px) 280px",
-        gap: isMobile ? "20px" : "24px",
-        alignItems: "start",
-        justifyContent: "center",
-      }}>
-
-        <div>
-        {/* Page Header */}
-        <div style={{ marginBottom: "20px", border: `3px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
-          <div style={{
-            background: BLUE, padding: isMobile ? "18px 14px" : "24px 20px",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
-          }}>
-            <img src={Logo2} alt="We-Draft.com" style={{ height: isMobile ? "36px" : "48px", objectFit: "contain" }} />
-            <h1 style={{
-              fontSize: isMobile ? "34px" : "56px", fontWeight: 900, textTransform: "uppercase",
-              letterSpacing: "0.04em", color: "#fff", lineHeight: 1, textAlign: "center", width: "100%",
-              margin: 0,
-              minHeight: isMobile ? "72px" : "120px",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              textShadow: `-1px -1px 0 ${GOLD}, 1px -1px 0 ${GOLD}, -1px 1px 0 ${GOLD}, 1px 1px 0 ${GOLD}, 0 -1px 0 ${GOLD}, 0 1px 0 ${GOLD}, -1px 0 0 ${GOLD}, 1px 0 0 ${GOLD}`,
-            }}>
-              {positionLabel ? `${eligibleYear} ${positionLabel} Rankings` : `${eligibleYear} Community Board`}
-            </h1>
-            <div style={{ fontSize: isMobile ? "12px" : "14px", fontWeight: 700, color: "rgba(255,255,255,0.75)", letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center", lineHeight: 1.4, minHeight: isMobile ? "34px" : "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {positionLabel ? `${eligibleYear} NFL Draft ${positionLabel} Board — We-Draft.com User Grades` : `${eligibleYear} NFL Draft Community Board — We-Draft.com User Grades`}
-            </div>
-          </div>
-          <div style={{ height: "4px", background: GOLD }} />
+      {isMobile ? (
+        <div style={{ padding: "4px 10px 60px", display: "flex", flexDirection: "column", gap: "24px" }}>
+          <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{MainContent}</div>
+          {sidebarNews.length > 0 && <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{NewsSidebar}</div>}
+          {sidebarVideos.length > 0 && <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{VideosSidebar}</div>}
         </div>
-
-        {/* Year Selector */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-            <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
-            {ACTIVE_YEARS.map((yr) => (
-              <Link
-                key={yr}
-                to={yearPath(yr)}
-                style={{
-                  border: `3px solid ${GOLD}`, borderRadius: "24px",
-                  padding: isMobile ? "10px 26px" : "14px 40px",
-                  fontWeight: 900, fontSize: isMobile ? "18px" : "22px",
-                  background: eligibleYear === yr ? BLUE : "#fff",
-                  color: eligibleYear === yr ? "#fff" : BLUE,
-                  transition: "background 0.15s, color 0.15s",
-                  textDecoration: "none", display: "inline-block",
-                }}
-              >
-                {yr}
-              </Link>
-            ))}
-          </div>
+      ) : (
+        <div style={{ maxWidth: "1900px", margin: "0 auto", padding: "6px 24px 60px", display: "grid", gridTemplateColumns: "280px minmax(0, 1300px) 280px", gap: "20px", alignItems: "start" }}>
+          <div style={{ position: "sticky", top: "20px" }}>{NewsSidebar}</div>
+          <div>{MainContent}</div>
+          <div style={{ position: "sticky", top: "20px" }}>{VideosSidebar}</div>
         </div>
-
-        {!is2029Empty && (
-          isMobile ? (
-            <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile />
-          ) : (
-            <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
-          )
-        )}
-
-        {/* 2029 placeholder */}
-        {is2029Empty ? (
-          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-            <div style={{ background: BLUE, padding: "8px 16px" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2029 Draft Class</div>
-            </div>
-            <div style={{ height: "3px", background: GOLD }} />
-            <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
-              <div style={{ fontSize: "40px", marginBottom: "16px" }}>🏈</div>
-              <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>
-                2029 Players Coming Soon
-              </div>
-              <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#888", maxWidth: "480px", margin: "0 auto", lineHeight: 1.6 }}>
-                The 2029 draft class will be added once the 2026 college football season kicks off. Check back then to start evaluating the next wave of prospects.
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Filters */}
-            {isMobile ? (
-              <div style={{ marginBottom: "12px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
-                  <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
-                  <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
-                  <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
-                </div>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center", marginBottom: "6px" }}>
-                  <BoardDropdown
-                    dropdownRef={boardDropdownRef}
-                    open={boardDropdownOpen}
-                    setOpen={setBoardDropdownOpen}
-                    isMobile={isMobile}
-                    onNavigate={() => navigate("/whiteboard")}
-                    onMyBoards={() => navigate("/boards")}
-                  />
-                  {is2026 && (
-                    <button
-                      onClick={() => setShowAvailableOnly((v) => !v)}
-                      style={{
-                        padding: "8px 12px", fontWeight: 900, fontSize: "12px",
-                        textTransform: "uppercase", letterSpacing: "0.05em",
-                        border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
-                        background: showAvailableOnly ? GOLD : "#fff",
-                        color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0,
-                      }}
-                    >
-                      {showAvailableOnly ? "✓ Available" : "Available"}
-                    </button>
-                  )}
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
-                    style={{ flex: 1, minWidth: "140px", border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
-                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
-                  <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
-                  <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
-                  <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
-                  <BoardDropdown
-                    dropdownRef={boardDropdownRef}
-                    open={boardDropdownOpen}
-                    setOpen={setBoardDropdownOpen}
-                    isMobile={isMobile}
-                    onNavigate={() => navigate("/whiteboard")}
-                    onMyBoards={() => navigate("/boards")}
-                  />
-                  {is2026 && (
-                    <button
-                      onClick={() => setShowAvailableOnly((v) => !v)}
-                      style={{
-                        padding: "8px 16px", fontWeight: 900, fontSize: "13px",
-                        textTransform: "uppercase", letterSpacing: "0.05em",
-                        border: `2px solid ${GOLD}`, borderRadius: "8px", cursor: "pointer",
-                        background: showAvailableOnly ? GOLD : "#fff",
-                        color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap",
-                      }}
-                    >
-                      {showAvailableOnly ? "✓ Available" : "Available"}
-                    </button>
-                  )}
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
-                    style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "280px" }} />
-                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
-                </div>
-              </>
-            )}
-
-            {/* Table Card */}
-            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                  {selectedPositions.length === 1
-                    ? `${eligibleYear} ${POSITION_LABELS[selectedPositions[0]] || selectedPositions[0]} Rankings`
-                    : `${eligibleYear} Draft Class`}
-                </div>
-                <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
-                  {sortedPlayers.length} player{sortedPlayers.length !== 1 ? "s" : ""}
-                </div>
-              </div>
-              <div style={{ height: "3px", background: GOLD }} />
-
-              {isMobile ? (
-                <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
-                  {sortedPlayers.length === 0 ? (
-                    <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
-                      No players match your filters.
-                    </div>
-                  ) : sortedPlayers.map((p) => {
-                    const myGrade = boardMap.get(p.id);
-                    const onBoard = myGrade !== undefined;
-                    const isAdding = addingId === p.id;
-                    const draft = draftMap[p.Slug];
-                    const teamData = draft ? nflTeams[draft.team] : null;
-                    const c1 = teamData?.Color1 || BLUE;
-                    const c2 = teamData?.Color2 || GOLD;
-                    return (
-                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderBottom: `1px solid ${GOLD}` }}>
-                        {is2026 && draft && (
-                          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "3px" }}>
-                            <div style={{ width: 32, height: 32, borderRadius: "6px", background: c1, border: `2px solid ${c2}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                              <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1 }}>Rd {draft.round}</span>
-                              <span style={{ fontSize: "13px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
-                            </div>
-                            {teamData?.Logo1 ? (
-                              <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} style={{ width: "24px", height: "24px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                            ) : (
-                              <span style={{ fontSize: "8px", fontWeight: 900, color: c1 }}>{draft.team}</span>
-                            )}
-                          </div>
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <Link
-                            to={`/player/${p.Slug}`}
-                            style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2 }}
-                            onMouseEnter={(e) => handlePlayerHoverEnter(p.id, e)}
-                            onMouseLeave={handlePlayerHoverLeave}
-                          >
-                            {`${p.First || ""} ${p.Last || ""}`}
-                          </Link>
-                          {hoveredPlayerId === p.id && <PlayerPreviewCard player={p} pos={hoverCardPos} />}
-                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#555", marginTop: "3px" }}>
-                            {p.Position || "—"} · {p.School || "—"}
-                          </div>
-                          {(p.HeightInches || p.Weight) && (
-                            <div style={{ fontSize: "11px", color: "#aaa", fontWeight: 700, marginTop: "2px" }}>
-                              {p.HeightInches ? formatHeight(p.HeightInches) : ""}{p.HeightInches && p.Weight ? " · " : ""}{p.Weight ? `${p.Weight} lbs` : ""}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
-                          <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>My</div>
-                          {isAdding ? (
-                            <div style={{ width: "48px", height: "40px", border: `2px solid ${BLUE}`, borderRadius: "5px", opacity: 0.4 }} />
-                          ) : onBoard ? (
-                            <GradeBadge grade={myGrade} small />
-                          ) : (
-                            <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small user={user} login={login} />
-                          )}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
-                          <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>Comm</div>
-                          <GradeBadge grade={p.CommunityGrade} small />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div style={{ maxHeight: "760px", overflowY: "auto" }}>
-                  {/* Header row — plain clickable labels instead of table <th> cells, since this
-                      is a ranked list now, not a spreadsheet grid. SortLabel gives the active
-                      column a gold highlight and keeps a faint arrow visible on every column so
-                      sortability reads at a glance instead of being invisible until hovered. */}
-                  {(() => {
-                    const SortLabel = ({ sortK, label, align = "center", width }) => {
-                      const active = sortKey === sortK;
-                      return (
-                        <div
-                          onClick={() => handleSort(sortK)}
-                          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.opacity = active ? "1" : "0.72"; }}
-                          style={{
-                            ...(width ? { width, flexShrink: 0 } : { flex: 1, minWidth: 0 }),
-                            display: "flex", alignItems: "center", gap: "5px",
-                            justifyContent: align === "left" ? "flex-start" : "center",
-                            color: active ? GOLD : "#fff",
-                            fontWeight: 900, fontSize: "13px",
-                            textTransform: "uppercase", letterSpacing: "0.08em",
-                            cursor: "pointer", userSelect: "none",
-                            opacity: active ? 1 : 0.72,
-                            transition: "opacity 0.15s ease, color 0.15s ease",
-                          }}
-                        >
-                          <span style={{ whiteSpace: "nowrap" }}>{label}</span>
-                          <span style={{ fontSize: "10px", opacity: active ? 1 : 0.5 }}>
-                            {active ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
-                          </span>
-                        </div>
-                      );
-                    };
-                    return (
-                      <div style={{
-                        position: "sticky", top: 0, zIndex: 10,
-                        display: "flex", alignItems: "center", gap: "16px",
-                        background: `linear-gradient(135deg, ${BLUE}, #003d7a)`,
-                        padding: "12px 20px",
-                      }}>
-                        {is2026 && <SortLabel sortK="Pick" label="Pick" width="64px" />}
-                        {is2026 && <div style={{ width: "56px", flexShrink: 0 }} />}
-                        <SortLabel sortK="Player" label="Player" align="left" />
-                        <SortLabel sortK="Position" label="Pos" width="84px" />
-                        <SortLabel sortK="MyGrade" label="My Grade" width="140px" />
-                        <SortLabel sortK="CommunityGrade" label="Comm Grade" width="140px" />
-                        <SortLabel sortK="Height" label="HT" width="70px" />
-                        <SortLabel sortK="Weight" label="WT" width="70px" />
-                      </div>
-                    );
-                  })()}
-                  <div style={{ height: "3px", background: GOLD }} />
-
-                  {sortedPlayers.length === 0 ? (
-                    <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
-                      No players match your filters.
-                    </div>
-                  ) : sortedPlayers.map((p) => {
-                    const myGrade = boardMap.get(p.id);
-                    const onBoard = myGrade !== undefined;
-                    const isAdding = addingId === p.id;
-                    const draft = draftMap[p.Slug];
-                    const teamData = draft ? nflTeams[draft.team] : null;
-                    const c1 = teamData?.Color1 || BLUE;
-                    const c2 = teamData?.Color2 || GOLD;
-                    return (
-                      <div
-                        key={p.id}
-                        style={{ display: "flex", alignItems: "center", gap: "16px", padding: "11px 20px", background: "#fff", borderBottom: "1px solid #eee", transition: "background 0.12s" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "#f3f8ff"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-                      >
-                        {is2026 && (
-                          <div style={{ width: "64px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                            {draft ? (
-                              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "48px", height: "48px", borderRadius: "7px", background: c1, border: `2px solid ${c2}` }}>
-                                <span style={{ fontSize: "8px", fontWeight: 900, color: "rgba(255,255,255,0.7)", lineHeight: 1, textTransform: "uppercase" }}>Rd {draft.round}</span>
-                                <span style={{ fontSize: "19px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
-                              </div>
-                            ) : <span style={{ color: "#ddd" }}>—</span>}
-                          </div>
-                        )}
-                        {is2026 && (
-                          <div style={{ width: "56px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                            {teamData?.Logo1 ? (
-                              <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={teamData?.Name || draft.team} style={{ width: "40px", height: "40px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                            ) : draft ? <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span> : <span style={{ color: "#ddd" }}>—</span>}
-                          </div>
-                        )}
-
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <Link
-                            to={`/player/${p.Slug}`}
-                            style={{ color: BLUE, fontWeight: 900, fontSize: "27px", textDecoration: "none", display: "block", lineHeight: 1.15 }}
-                            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; handlePlayerHoverEnter(p.id, e); }}
-                            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; handlePlayerHoverLeave(); }}
-                          >
-                            {`${p.First || ""} ${p.Last || ""}`}
-                          </Link>
-                          {hoveredPlayerId === p.id && <PlayerPreviewCard player={p} pos={hoverCardPos} />}
-                          {p.School && (
-                            <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "3px" }}>
-                              {p.School}
-                            </div>
-                          )}
-                        </div>
-
-                        <div style={{ width: "84px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                          {p.Position ? (
-                            <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "6px 12px", borderRadius: "6px", textTransform: "uppercase" }}>
-                              {p.Position}
-                            </span>
-                          ) : <span style={{ color: "#ddd" }}>—</span>}
-                        </div>
-
-                        <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                          {isAdding ? (
-                            <div style={{ width: "64px", height: "52px", border: `2px solid ${BLUE}`, borderRadius: "5px", opacity: 0.4 }} />
-                          ) : onBoard ? (
-                            <GradeBadge grade={myGrade} />
-                          ) : (
-                            <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} user={user} login={login} />
-                          )}
-                        </div>
-
-                        <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                          <GradeBadge grade={p.CommunityGrade} />
-                        </div>
-
-                        <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
-                          {p.HeightInches ? formatHeight(p.HeightInches) : (p.Height || "-")}
-                        </div>
-
-                        <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
-                          {p.Weight || "-"}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {!user && (
-              <p style={{ textAlign: "center", marginTop: "14px", fontSize: "13px", color: "#999", fontWeight: 700 }}>
-                <span onClick={login} style={{ color: BLUE, fontWeight: 900, cursor: "pointer", textDecoration: "underline" }}>Sign in</span> to add players to your board
-              </p>
-            )}
-          </>
-        )}
-        </div>
-
-        <div style={isMobile ? { display: "flex", flexDirection: "column", gap: "20px" } : { position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
-          {VideosSidebar}
-          {NewsSidebar}
-        </div>
-
-      </div>
+      )}
     </>
   );
 }
