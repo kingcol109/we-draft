@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { HelmetProvider } from "react-helmet-async";
 // Components
 import AuthModal from "./components/AuthModal";
+import AdminRoute from "./components/AdminRoute";
 
 import Navbar from "./components/Navbar";
 
@@ -42,6 +43,9 @@ import NFLPage from "./pages/NFLPage";
 import AdminArticles from "./pages/AdminArticles";
 import EditArticle from "./pages/EditArticle";
 import ArticlePage from "./pages/ArticlePage";
+
+// Admin
+import AdminPanel from "./pages/AdminPanel";
 
 // Games
 import MyDraftClass from "./pages/MyDraftClass";
@@ -96,6 +100,7 @@ function MainLayout() {
           <Route path="/whiteboard" element={<Whiteboard />} />
           <Route path="/draft" element={<DraftPage />} />
           <Route path="/my-draft-class" element={<MyDraftClass />} />
+          <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
           <Route path="/admin/articles" element={<AdminArticles />} />
           <Route path="/admin/articles/:id" element={<EditArticle />} />
           <Route path="/article/:slug" element={<ArticlePage />} />

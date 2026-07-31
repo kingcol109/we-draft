@@ -238,6 +238,12 @@ export default function UserProfile() {
             </button>
           )}
 
+          {role === "admin" && (
+            <button onClick={() => window.location.href = "/admin"} style={btnStyle("gold")}>
+              Admin Panel
+            </button>
+          )}
+
           <div style={{ height: "1px", backgroundColor: "#eee", margin: "6px 0 18px" }} />
 
           {/* Request a Player */}
