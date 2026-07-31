@@ -464,6 +464,44 @@ export default function CommunityBoard() {
 
   const eligibleYear = year || "2027";
 
+  // ── yearPath is needed for the URL/canonical below, so it's defined up
+  // here rather than further down with the rest of the nav helpers. ──
+  const yearPath = (yr, pos) => {
+    if (pos) return "/community/" + yr + "/" + pos.toLowerCase();
+    return yr === "2027" ? "/community" : "/community/" + yr;
+  };
+
+  // ── SEO tags — computed from URL params alone (no fetched data), so they
+  // can render on every pass, including the loading spinner. This is what
+  // lets Prerender.io capture a valid <title>/description/canonical even if
+  // it snapshots before the player list has loaded. ──
+  const positionParam = position ? position.toUpperCase() : null;
+  const positionLabel = positionParam ? (POSITION_LABELS[positionParam] || positionParam) : null;
+
+  const pageTitle = positionLabel
+    ? eligibleYear + " NFL Draft " + positionLabel + " Rankings | We-Draft.com"
+    : eligibleYear + " NFL Draft Community Board | We-Draft.com";
+  const pageDescription = positionLabel
+    ? "We-Draft.com " + eligibleYear + " NFL Draft " + positionLabel + " rankings. Community grades, strengths, weaknesses, and NFL fit projections for top " + positionLabel.toLowerCase() + " prospects, voted on by the community."
+    : "We-Draft.com " + eligibleYear + " NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections, voted on by the community.";
+  const pageUrl = "https://we-draft.com" + yearPath(eligibleYear, positionParam);
+
+  const SeoTags = (
+    <Helmet>
+      <title>{pageTitle}</title>
+      <meta name="description" content={pageDescription} />
+      <link rel="canonical" href={pageUrl} />
+      <meta property="og:type" content="website" />
+      <meta property="og:title" content={pageTitle} />
+      <meta property="og:description" content={pageDescription} />
+      <meta property="og:url" content={pageUrl} />
+      <meta property="og:site_name" content="We-Draft.com" />
+      <meta name="twitter:card" content="summary" />
+      <meta name="twitter:title" content={pageTitle} />
+      <meta name="twitter:description" content={pageDescription} />
+    </Helmet>
+  );
+
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [seoDataReady, setSeoDataReady] = useState(false);
@@ -663,11 +701,6 @@ export default function CommunityBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPositions, eligibleYear]);
 
-  const yearPath = (yr, pos) => {
-    if (pos) return "/community/" + yr + "/" + pos.toLowerCase();
-    return yr === "2027" ? "/community" : "/community/" + yr;
-  };
-
   useEffect(() => {
     const fetch = async () => {
       try {
@@ -750,6 +783,13 @@ export default function CommunityBoard() {
 
   const [playerCache, setPlayerCache] = useState({});
 
+  // ── Two-phase fetch: (1) grab the base player list — names, schools,
+  // positions, physicals — in a single query and render it immediately, so
+  // `loading` clears and prerenderReady can fire on real, crawlable content
+  // without waiting on anything else. (2) hydrate CommunityGrade in the
+  // background via the per-player evaluations subcollection reads, which
+  // are the slow part (N extra round-trips) but aren't needed for SEO or
+  // for the page to be usable — they just fill in badges a beat later. ──
   useEffect(() => {
     setSeoDataReady(false);
 
@@ -763,48 +803,73 @@ export default function CommunityBoard() {
     const isActiveYear = ACTIVE_YEARS.includes(eligibleYear);
     const isArchiveYear = ARCHIVE_YEARS.includes(eligibleYear);
     if (!isActiveYear && !isArchiveYear) {
+      // No matching year — nothing to fetch, but loading must still clear
+      // or this route hangs on the spinner forever.
+      setLoading(false);
       setSeoDataReady(true);
       return;
     }
+
+    let cancelled = false;
 
     const fetchPlayers = async () => {
       setLoading(true);
       try {
         const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", eligibleYear)));
-        const data = await Promise.all(
-          snap.docs
-            .filter((docSnap) => docSnap.data().Live !== false)
-            .map(async (docSnap) => {
-              const p = { id: docSnap.id, ...docSnap.data() };
-              const fortyKey = Object.keys(p).find((k) => k.replace(/\s/g, "") === "40Yard");
-              if (fortyKey) p["40 Yard"] = p[fortyKey];
-              if (p.Height) p.HeightInches = parseHeight(p.Height);
-              try {
-                const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-                const grades = [];
-                evalsSnap.forEach((d) => {
-                  const g = d.data().grade;
-                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                });
-                p.CommunityGrade = grades.length > 0
-                  ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                  : "-";
-              } catch {
-                p.CommunityGrade = "-";
-              }
-              return p;
-            })
-        );
-        setPlayerCache((prev) => ({ ...prev, [eligibleYear]: data }));
-        setPlayers(data);
-      } catch (err) {
-        console.error("Error fetching players:", err);
-      } finally {
+        const basePlayers = snap.docs
+          .filter((docSnap) => docSnap.data().Live !== false)
+          .map((docSnap) => {
+            const p = { id: docSnap.id, ...docSnap.data() };
+            const fortyKey = Object.keys(p).find((k) => k.replace(/\s/g, "") === "40Yard");
+            if (fortyKey) p["40 Yard"] = p[fortyKey];
+            if (p.Height) p.HeightInches = parseHeight(p.Height);
+            p.CommunityGrade = "-"; // placeholder — hydrated below
+            return p;
+          });
+
+        if (cancelled) return;
+
+        // Phase 1 done — render immediately, clear the spinner, let
+        // prerenderReady fire. Grades aren't in yet, but every player's
+        // name/school/position is, which is what actually needs indexing.
+        setPlayers(basePlayers);
         setLoading(false);
         setSeoDataReady(true);
+
+        // Phase 2 — fill in community grades in the background.
+        const withGrades = await Promise.all(
+          basePlayers.map(async (p) => {
+            try {
+              const evalsSnap = await getDocs(collection(db, "players", p.id, "evaluations"));
+              const grades = [];
+              evalsSnap.forEach((d) => {
+                const g = d.data().grade;
+                if (g && gradeScale[g]) grades.push(gradeScale[g]);
+              });
+              p.CommunityGrade = grades.length > 0
+                ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+                : "-";
+            } catch {
+              p.CommunityGrade = "-";
+            }
+            return p;
+          })
+        );
+
+        if (cancelled) return;
+        setPlayers(withGrades);
+        setPlayerCache((prev) => ({ ...prev, [eligibleYear]: withGrades }));
+      } catch (err) {
+        console.error("Error fetching players:", err);
+        if (!cancelled) {
+          setLoading(false);
+          setSeoDataReady(true);
+        }
       }
     };
     fetchPlayers();
+
+    return () => { cancelled = true; };
   }, [eligibleYear]);
 
   useEffect(() => {
@@ -935,53 +1000,45 @@ export default function CommunityBoard() {
 
   if (loading) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-        <div style={{ position: "relative", width: "64px", height: "64px" }}>
-          <div style={{
-            position: "absolute", inset: 0, borderRadius: "50%",
-            border: `5px solid ${BLUE}`, opacity: 0.15,
-          }} />
-          <div style={{
-            position: "absolute", inset: 0, borderRadius: "50%",
-            border: "5px solid transparent", borderTopColor: BLUE, borderRightColor: GOLD,
-            animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
-          }} />
+      <>
+        {SeoTags}
+        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+          <div style={{ position: "relative", width: "64px", height: "64px" }}>
+            <div style={{
+              position: "absolute", inset: 0, borderRadius: "50%",
+              border: `5px solid ${BLUE}`, opacity: 0.15,
+            }} />
+            <div style={{
+              position: "absolute", inset: 0, borderRadius: "50%",
+              border: "5px solid transparent", borderTopColor: BLUE, borderRightColor: GOLD,
+              animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
+            }} />
+          </div>
+          <div style={{ fontSize: 19, fontWeight: 900, color: BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
+            Loading Board
+            <span style={{ display: "inline-flex", marginLeft: "3px" }}>
+              {[0, 1, 2].map((i) => (
+                <span key={i} style={{
+                  animation: "wdDotPulse 1.2s ease-in-out infinite",
+                  animationDelay: `${i * 0.15}s`,
+                }}>.</span>
+              ))}
+            </span>
+          </div>
+          <style>{`
+            @keyframes wdSpinnerRotate {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            @keyframes wdDotPulse {
+              0%, 80%, 100% { opacity: 0.15; }
+              40% { opacity: 1; }
+            }
+          `}</style>
         </div>
-        <div style={{ fontSize: 19, fontWeight: 900, color: BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
-          Loading Board
-          <span style={{ display: "inline-flex", marginLeft: "3px" }}>
-            {[0, 1, 2].map((i) => (
-              <span key={i} style={{
-                animation: "wdDotPulse 1.2s ease-in-out infinite",
-                animationDelay: `${i * 0.15}s`,
-              }}>.</span>
-            ))}
-          </span>
-        </div>
-        <style>{`
-          @keyframes wdSpinnerRotate {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-          @keyframes wdDotPulse {
-            0%, 80%, 100% { opacity: 0.15; }
-            40% { opacity: 1; }
-          }
-        `}</style>
-      </div>
+      </>
     );
   }
-
-  const positionParam = position ? position.toUpperCase() : null;
-  const positionLabel = positionParam ? (POSITION_LABELS[positionParam] || positionParam) : null;
-
-  const pageTitle = positionLabel
-    ? eligibleYear + " NFL Draft " + positionLabel + " Rankings | We-Draft.com"
-    : eligibleYear + " NFL Draft Community Board | We-Draft.com";
-  const pageDescription = positionLabel
-    ? "We-Draft.com " + eligibleYear + " NFL Draft " + positionLabel + " rankings. Community grades, strengths, weaknesses, and NFL fit projections for top " + positionLabel.toLowerCase() + " prospects, voted on by the community."
-    : "We-Draft.com " + eligibleYear + " NFL Draft community scouting board. Player grades, strengths, weaknesses, and NFL fit projections, voted on by the community.";
-  const pageUrl = "https://we-draft.com" + yearPath(eligibleYear, positionParam);
 
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
@@ -1468,19 +1525,7 @@ export default function CommunityBoard() {
 
   return (
     <>
-      <Helmet>
-        <title>{pageTitle}</title>
-        <meta name="description" content={pageDescription} />
-        <link rel="canonical" href={pageUrl} />
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content={pageTitle} />
-        <meta property="og:description" content={pageDescription} />
-        <meta property="og:url" content={pageUrl} />
-        <meta property="og:site_name" content="We-Draft.com" />
-        <meta name="twitter:card" content="summary" />
-        <meta name="twitter:title" content={pageTitle} />
-        <meta name="twitter:description" content={pageDescription} />
-      </Helmet>
+      {SeoTags}
 
       {sidebarVideos.length > 0 && (
         <style>{".wd-video-card:hover .wd-video-thumb { transform: scale(1.08); } .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }"}</style>
