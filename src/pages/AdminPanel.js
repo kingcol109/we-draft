@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, query, where } from "firebase/firestore";
+import { collection, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, query, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -42,12 +42,12 @@ const BLANK_PLAYER_FORM = {
 // ── Slug generator — ports the Google Sheets formula exactly so IDs
 // created here match what the sheet has been producing:
 //   =REGEXREPLACE(LOWER(REGEXREPLACE(REGEXREPLACE(REGEXREPLACE(
-//     A2&"-"&B2&"-"&P2&"-"&C2, "[’'`.]", ""), "[^a-zA-Z0-9- ]", ""),
+//     A2&"-"&B2&"-"&C2&"-"&P2, "[’'`.]", ""), "[^a-zA-Z0-9- ]", ""),
 //     "\s+", "-")), "-+", "-")
-// Column order in the sheet is First(A) - Last(B) - Position(P) - Eligible
-// year(C) — NOT School. School isn't part of the slug at all. ──
+// Column order in the sheet is First(A) - Last(B) - Eligible year(C) -
+// Position(P) — NOT School. School isn't part of the slug at all. ──
 function generateSlug(first, last, position, eligible) {
-  const raw = `${first || ""}-${last || ""}-${position || ""}-${eligible || ""}`;
+  const raw = `${first || ""}-${last || ""}-${eligible || ""}-${position || ""}`;
   let s = raw.replace(/[’'`.]/g, "");        // strip curly/straight apostrophes, backtick, period
   s = s.replace(/[^a-zA-Z0-9\- ]/g, "");      // keep only letters, numbers, dash, space
   s = s.replace(/\s+/g, "-");                 // collapse whitespace runs to a single dash
@@ -62,6 +62,7 @@ function generateSlug(first, last, position, eligible) {
 const SECTIONS = [
   { key: "players", label: "Player Data", icon: "🏈", ready: true },
   { key: "trends", label: "Trends", icon: "📈", ready: true },
+  { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "content", label: "Content", icon: "📰", ready: false },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
@@ -291,7 +292,6 @@ function PlayerDataSection() {
   const [allPlayers, setAllPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [viewArchive, setViewArchive] = useState(false);
   const [selectedYears, setSelectedYears] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedSchools, setSelectedSchools] = useState([]);
@@ -334,24 +334,15 @@ function PlayerDataSection() {
     fetchAllPlayers();
   }, []);
 
-  // Switching Archive mode clears the year/position/school filters and any
-  // open selection, since "2026 only" replaces rather than blends with the
-  // active-year browsing state.
-  const toggleArchive = () => {
-    setViewArchive((v) => !v);
-    setSelectedYears([]);
-    setSelectedPositions([]);
-    setSelectedSchools([]);
-    setSelectedPlayer(null);
-    setFormState(null);
-    setSaveMessage("");
-  };
-
-  // Positions actually present in the currently-relevant pool (archive or
-  // active), ordered the same way CommunityBoard.js orders its position
-  // filter bar: POSITION_ORDER first, anything else appended alphabetically.
+  // Positions actually present in whichever years are currently relevant
+  // (respecting the same year-inclusion rule `filtered` below uses), ordered
+  // the same way CommunityBoard.js orders its position filter bar:
+  // POSITION_ORDER first, anything else appended alphabetically.
   const allPositions = useMemo(() => {
-    const pool = allPlayers.filter((p) => viewArchive ? p.Eligible === "2026" : p.Eligible !== "2026");
+    const pool = allPlayers.filter((p) => {
+      if (selectedYears.length === 0) return p.Eligible !== "2026";
+      return selectedYears.includes(p.Eligible);
+    });
     const set = [...new Set(pool.map((p) => p.Position).filter(Boolean))];
     return set.sort((a, b) => {
       const ai = POSITION_ORDER.indexOf(a);
@@ -361,14 +352,18 @@ function PlayerDataSection() {
       if (bi === -1) return -1;
       return ai - bi;
     });
-  }, [allPlayers, viewArchive]);
+  }, [allPlayers, selectedYears]);
 
+  // 2026 is the one exception to "blank selection = show everything": since
+  // it's the already-completed draft class, it stays out of the default
+  // view. It's still a perfectly normal button in the year filter row below
+  // though — click it (alone or alongside active years) to include it, same
+  // as any other filter option.
   const filtered = allPlayers.filter((p) => {
-    if (viewArchive) {
-      if (p.Eligible !== "2026") return false;
+    if (selectedYears.length === 0) {
+      if (p.Eligible === "2026") return false;
     } else {
-      if (p.Eligible === "2026") return false; // 2026 never appears outside Archive mode
-      if (selectedYears.length > 0 && !selectedYears.includes(p.Eligible)) return false;
+      if (!selectedYears.includes(p.Eligible)) return false;
     }
     if (selectedPositions.length > 0 && !selectedPositions.includes(p.Position)) return false;
     if (selectedSchools.length > 0 && !selectedSchools.includes(p.School)) return false;
@@ -401,7 +396,7 @@ function PlayerDataSection() {
 
   const startNewPlayer = () => {
     setSelectedPlayer({ id: null, isNew: true });
-    setFormState({ ...BLANK_PLAYER_FORM, Eligible: viewArchive ? "2026" : "" });
+    setFormState({ ...BLANK_PLAYER_FORM });
     setSaveMessage("");
   };
 
@@ -484,27 +479,15 @@ function PlayerDataSection() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       {/* ── List / search column ── */}
-      <div style={{ border: "2px solid " + (viewArchive ? GOLD : BLUE), borderRadius: "10px", overflow: "hidden" }}>
-        <div style={{ background: viewArchive ? GOLD : BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ color: viewArchive ? "#fff" : GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            {viewArchive ? "Archive — 2026 Draft Class" : "Player Data"}
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Player Data
           </div>
-          <button
-            onClick={toggleArchive}
-            style={{
-              background: viewArchive ? "#fff" : "transparent",
-              color: viewArchive ? GOLD : "#fff",
-              border: "2px solid #fff", borderRadius: "20px",
-              padding: "5px 12px", fontWeight: 900, fontSize: "11px",
-              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
-            }}
-          >
-            {viewArchive ? "← Back to Active" : "Archive: 2026 ▾"}
-          </button>
           <button
             onClick={startNewPlayer}
             style={{
-              marginLeft: "auto", background: viewArchive ? BLUE : GOLD, color: "#fff", border: "none",
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
               borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
               textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
             }}
@@ -523,9 +506,34 @@ function PlayerDataSection() {
           />
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start" }}>
             <DropdownChecklist title="School" options={schoolOptions} selected={selectedSchools} setSelected={setSelectedSchools} />
-            {!viewArchive && (
-              <FilterBar options={ACTIVE_YEARS} selected={selectedYears} setSelected={setSelectedYears} />
-            )}
+          </div>
+          <div>
+            <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "5px" }}>
+              Eligible Year
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {[...ACTIVE_YEARS, "2026"].map((yr) => {
+                const isArchive = yr === "2026";
+                const active = selectedYears.includes(yr);
+                return (
+                  <button
+                    key={yr}
+                    onClick={() => setSelectedYears((prev) => prev.includes(yr) ? prev.filter((y) => y !== yr) : [...prev, yr])}
+                    title={isArchive ? "2026 — completed draft class, not shown by default" : undefined}
+                    style={{
+                      padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em",
+                      border: "2px solid " + (isArchive ? "#7a5c00" : GOLD), borderRadius: "20px", cursor: "pointer",
+                      background: active ? (isArchive ? "#7a5c00" : BLUE) : "#fff",
+                      color: active ? "#fff" : (isArchive ? "#7a5c00" : BLUE),
+                      whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+                    }}
+                  >
+                    {isArchive ? "📦 2026" : yr}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <FilterBar label="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
         </div>
@@ -995,6 +1003,452 @@ function TrendsSection() {
   );
 }
 
+const toMs = (ts) => {
+  if (!ts) return 0;
+  if (ts?.toDate) return ts.toDate().getTime();
+  if (ts instanceof Date) return ts.getTime();
+  if (typeof ts === "number") return ts;
+  const parsed = Date.parse(ts);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+// Firestore Timestamp / JS Date / string → "yyyy-mm-dd" for a <input type="date">.
+function toDateInputValue(d) {
+  if (!d) return "";
+  const dateObj = d?.toDate ? d.toDate() : d instanceof Date ? d : new Date(d);
+  if (isNaN(dateObj.getTime())) return "";
+  return dateObj.toISOString().slice(0, 10);
+}
+
+// ── Typeable player picker for a video's item slots. The input's value IS
+// the stored slug (same "value is the source of truth" pattern as
+// SchoolCombobox) — typing filters suggestions by name or slug, and
+// selecting a suggestion replaces the field's text with that player's slug.
+// Free text is still allowed, so a slug can be pasted directly for a player
+// not in the fetched list. ──
+function PlayerSlugCombobox({ value, onChange, players }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const q = (value || "").trim().toLowerCase();
+  const filtered = (q
+    ? players.filter((p) => (`${p.First} ${p.Last}`).toLowerCase().includes(q) || (p.Slug || "").toLowerCase().includes(q))
+    : players
+  ).slice(0, 8);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <input
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Type a name or paste a slug..."
+        autoComplete="off"
+        style={inputStyle}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+          background: "#fff", border: "2px solid #ddd", borderRadius: "6px",
+          maxHeight: "220px", overflowY: "auto", boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+        }}>
+          {filtered.map((p) => (
+            <div
+              key={p.Slug}
+              onClick={() => { onChange(p.Slug); setOpen(false); }}
+              style={{ padding: "8px 10px", cursor: "pointer" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{p.First} {p.Last}</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
+                {p.Position || "—"} · {p.School || "—"} · {p.Slug}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const BLANK_VIDEO_ITEM = { slug: "", title: "", thumb: "" };
+
+// ── Videos section — manages the `videos` collection that PlayerProfile.js,
+// TeamPage.js, and CommunityBoard.js all read from. Two things matter for
+// correctness here, both direct consequences of how those pages query:
+//
+// 1. The top-level `slugs` array — not `items[].slug` — is what the
+//    array-contains / array-contains-any queries actually filter on
+//    (PlayerProfile.js: where("slugs","array-contains",slug); TeamPage.js:
+//    where("slugs","array-contains-any",chunk)). So `slugs` has to be
+//    rebuilt from `items` on every save, or a video becomes invisible on
+//    the pages that reference it even though `items` looks correct.
+// 2. `GenTitle`/`GenThumb` are the fallback title/thumb CommunityBoard.js's
+//    sidebar uses (data.GenTitle || items[0]?.title); PlayerProfile.js
+//    instead prefers the matching item for the current player, falling
+//    back to items[0]. Leaving Gen* blank is fine — items[0] covers it —
+//    but filling them in gives a sensible default when no per-player
+//    slug matches on a given page.
+//
+// `sheetKey` (visible on existing sheet-synced docs) is a sync bookkeeping
+// field nothing in the app reads — admin-created videos don't need it. ──
+function VideosSection() {
+  const [videos, setVideos] = useState([]);
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [videosSnap, playersSnap] = await Promise.all([
+          getDocs(collection(db, "videos")),
+          getDocs(collection(db, "players")),
+        ]);
+        const vids = videosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        vids.sort((a, b) => toMs(b.Date) - toMs(a.Date));
+        setVideos(vids);
+
+        const players = playersSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((p) => p.Slug);
+        players.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
+        setAllPlayers(players);
+      } catch (e) {
+        console.error("Admin videos fetch error:", e);
+        setVideos([]);
+        setAllPlayers([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const playersBySlug = useMemo(() => {
+    const map = new Map();
+    allPlayers.forEach((p) => map.set(p.Slug, p));
+    return map;
+  }, [allPlayers]);
+
+  const filtered = videos.filter((v) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    const items = Array.isArray(v.items) ? v.items : [];
+    return (
+      (v.GenTitle || "").toLowerCase().includes(q) ||
+      (v.Video || "").toLowerCase().includes(q) ||
+      items.some((it) => (it.slug || "").toLowerCase().includes(q) || (it.title || "").toLowerCase().includes(q))
+    );
+  });
+
+  const selectVideo = (v) => {
+    setSelectedVideo(v);
+    const items = Array.isArray(v.items) ? v.items : [];
+    setFormState({
+      Video: v.Video || "",
+      Date: toDateInputValue(v.Date) || toDateInputValue(new Date()),
+      GenTitle: v.GenTitle || "",
+      GenThumb: v.GenThumb || "",
+      items: [0, 1, 2].map((i) => ({
+        slug: items[i]?.slug || "",
+        title: items[i]?.title || "",
+        thumb: items[i]?.thumb || "",
+      })),
+    });
+    setSaveMessage("");
+  };
+
+  const startNewVideo = () => {
+    setSelectedVideo({ id: null, isNew: true });
+    setFormState({
+      Video: "",
+      Date: toDateInputValue(new Date()),
+      GenTitle: "",
+      GenThumb: "",
+      items: [{ ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
+    });
+    setSaveMessage("");
+  };
+
+  const handleFieldChange = (field, value) => {
+    setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleItemChange = (index, field, value) => {
+    setFormState((prev) => {
+      const items = [...prev.items];
+      items[index] = { ...items[index], [field]: value };
+      return { ...prev, items };
+    });
+  };
+
+  const isNew = selectedVideo?.isNew === true;
+
+  const handleSave = async () => {
+    if (!selectedVideo || !formState) return;
+    if (!formState.Video.trim()) {
+      setSaveMessage("A video URL is required.");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const cleanedItems = formState.items
+        .filter((it) => it.slug.trim())
+        .map((it) => ({ slug: it.slug.trim(), title: it.title.trim(), thumb: it.thumb.trim() }));
+
+      const payload = {
+        Video: formState.Video.trim(),
+        Date: formState.Date ? new Date(formState.Date) : new Date(),
+        GenTitle: formState.GenTitle.trim(),
+        GenThumb: formState.GenThumb.trim(),
+        items: cleanedItems,
+        // Kept in sync with `items` — this is the field TeamPage.js and
+        // PlayerProfile.js actually query against.
+        slugs: cleanedItems.map((it) => it.slug),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (isNew) {
+        const newRef = await addDoc(collection(db, "videos"), payload);
+        const newVideo = { id: newRef.id, ...payload };
+        setVideos((prev) => [newVideo, ...prev].sort((a, b) => toMs(b.Date) - toMs(a.Date)));
+        setSelectedVideo(newVideo);
+        setSaveMessage("Video created.");
+      } else {
+        await updateDoc(doc(db, "videos", selectedVideo.id), payload);
+        setVideos((prev) =>
+          prev.map((v) => (v.id === selectedVideo.id ? { ...v, ...payload } : v))
+            .sort((a, b) => toMs(b.Date) - toMs(a.Date))
+        );
+        setSaveMessage("Saved.");
+      }
+    } catch (e) {
+      console.error("Admin video save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!selectedVideo || isNew) return;
+    if (!window.confirm("Delete this video entry? This cannot be undone.")) return;
+    setRemoving(true);
+    setSaveMessage("");
+    try {
+      await deleteDoc(doc(db, "videos", selectedVideo.id));
+      setVideos((prev) => prev.filter((v) => v.id !== selectedVideo.id));
+      setSelectedVideo(null);
+      setFormState(null);
+      setSaveMessage("");
+    } catch (e) {
+      console.error("Admin video remove error:", e);
+      setSaveMessage("Failed to remove — check console.");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
+      {/* ── List / search column ── */}
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Videos
+          </div>
+          <button
+            onClick={startNewVideo}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + Add Video
+          </button>
+        </div>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search title, URL, player name, or slug..."
+            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+          />
+        </div>
+
+        {loading ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No videos match.</div>
+        ) : (
+          <div style={{ maxHeight: "640px", overflowY: "auto" }}>
+            <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+              {filtered.length} video{filtered.length !== 1 ? "s" : ""}
+            </div>
+            {filtered.map((v) => {
+              const isSelected = selectedVideo?.id === v.id;
+              const items = Array.isArray(v.items) ? v.items : [];
+              const displayTitle = v.GenTitle || items[0]?.title || "Untitled Video";
+              const displayThumb = v.GenThumb || items[0]?.thumb || "";
+              return (
+                <div
+                  key={v.id}
+                  onClick={() => selectVideo(v)}
+                  style={{
+                    display: "flex", gap: "10px",
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? `4px solid ${BLUE}` : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{ flexShrink: 0, width: "64px", height: "36px", borderRadius: "4px", background: "#111", overflow: "hidden" }}>
+                    {displayThumb && (
+                      <img src={displayThumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {displayTitle}
+                    </div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
+                      {v.Date ? new Date(toMs(v.Date)).toLocaleDateString() : "No date"}
+                    </div>
+                    {items.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
+                        {items.map((it, i) => {
+                          const p = playersBySlug.get(it.slug);
+                          return (
+                            <span key={i} style={{ fontSize: "10px", fontWeight: 700, color: "#666", background: "#f0f0f0", borderRadius: "8px", padding: "1px 7px" }}>
+                              {p ? `${p.First} ${p.Last}` : it.slug}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Edit / create column ── */}
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {isNew ? "New Video" : selectedVideo ? "Edit Video" : "Select a Video"}
+          </div>
+        </div>
+
+        {!selectedVideo || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a video from the list to edit it, or "+ Add Video" to create one.
+          </div>
+        ) : (
+          <div style={{ padding: "16px", maxHeight: "720px", overflowY: "auto" }}>
+            <FieldGroup>
+              <FieldRow label="Video URL">
+                <input value={formState.Video} onChange={(e) => handleFieldChange("Video", e.target.value)} placeholder="https://youtu.be/..." style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Date">
+                <input type="date" value={formState.Date} onChange={(e) => handleFieldChange("Date", e.target.value)} style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Generic Title (fallback if no player match)">
+                <input value={formState.GenTitle} onChange={(e) => handleFieldChange("GenTitle", e.target.value)} placeholder="e.g. 2026 Impact Freshman RBs" style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Generic Thumbnail URL (fallback)">
+                <input value={formState.GenThumb} onChange={(e) => handleFieldChange("GenThumb", e.target.value)} placeholder="https://..." style={inputStyle} />
+              </FieldRow>
+            </FieldGroup>
+
+            <div style={{ height: "1px", background: "#eee", margin: "16px 0" }} />
+
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ marginBottom: i < 2 ? "18px" : 0 }}>
+                <div style={{ fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+                  Player {i + 1}
+                </div>
+                <FieldGroup>
+                  <FieldRow label="Slug (search by name or paste directly)">
+                    <PlayerSlugCombobox
+                      value={formState.items[i].slug}
+                      onChange={(v) => handleItemChange(i, "slug", v)}
+                      players={allPlayers}
+                    />
+                  </FieldRow>
+                  <FieldRow label="Title override">
+                    <input value={formState.items[i].title} onChange={(e) => handleItemChange(i, "title", e.target.value)} placeholder="Shown on this player's page" style={inputStyle} />
+                  </FieldRow>
+                  <FieldRow label="Thumbnail URL">
+                    <input value={formState.items[i].thumb} onChange={(e) => handleItemChange(i, "thumb", e.target.value)} placeholder="https://..." style={inputStyle} />
+                  </FieldRow>
+                </FieldGroup>
+              </div>
+            ))}
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%", marginTop: "18px",
+                background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : isNew ? "Create Video" : "Save Changes"}
+            </button>
+
+            {!isNew && (
+              <button
+                onClick={handleRemove}
+                disabled={removing}
+                style={{
+                  width: "100%", marginTop: "8px",
+                  background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                  borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: removing ? "default" : "pointer",
+                  opacity: removing ? 0.6 : 1,
+                }}
+              >
+                {removing ? "Removing..." : "Delete Video"}
+              </button>
+            )}
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") || saveMessage.includes("required") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const inputStyle = {
   width: "100%", border: "2px solid #ddd", borderRadius: "6px",
   padding: "8px 10px", fontWeight: 700, fontSize: "13px",
@@ -1046,6 +1500,7 @@ export default function AdminPanel() {
           <div>
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "trends" && <TrendsSection />}
+            {activeSection === "videos" && <VideosSection />}
             {activeSection === "content" && <ComingSoonPane label="Content Management" />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
