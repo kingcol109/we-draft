@@ -42,13 +42,13 @@ const BLANK_PLAYER_FORM = {
 // ── Slug generator — ports the Google Sheets formula exactly so IDs
 // created here match what the sheet has been producing:
 //   =REGEXREPLACE(LOWER(REGEXREPLACE(REGEXREPLACE(REGEXREPLACE(
-//     A2&"-"&B2&"-"&C2&"-"&P2, "[’'`.]", ""), "[^a-zA-Z0-9- ]", ""),
+//     A2&"-"&B2&"-"&C2&"-"&P2, "['\u2019\u0060.]", ""), "[^a-zA-Z0-9- ]", ""),
 //     "\s+", "-")), "-+", "-")
 // Column order in the sheet is First(A) - Last(B) - Eligible year(C) -
 // Position(P) — NOT School. School isn't part of the slug at all. ──
 function generateSlug(first, last, position, eligible) {
-  const raw = `${first || ""}-${last || ""}-${eligible || ""}-${position || ""}`;
-  let s = raw.replace(/[’'`.]/g, "");        // strip curly/straight apostrophes, backtick, period
+  const raw = (first || "") + "-" + (last || "") + "-" + (eligible || "") + "-" + (position || "");
+  let s = raw.replace(/['\u2019`.]/g, "");    // strip curly/straight apostrophes, backtick, period
   s = s.replace(/[^a-zA-Z0-9\- ]/g, "");      // keep only letters, numbers, dash, space
   s = s.replace(/\s+/g, "-");                 // collapse whitespace runs to a single dash
   s = s.toLowerCase();
@@ -56,13 +56,15 @@ function generateSlug(first, last, position, eligible) {
   return s;
 }
 
-// ── Sections for the sidebar. Only `key: "players"` is wired to real data
-// right now — the rest render a placeholder pane so the layout/nav is in
-// place to build into next. Add new entries here as sections come online. ──
+// ── Sections for the sidebar. Only `key: "players"`, `"trends"`, `"videos"`,
+// and `"analytics"` are wired to real (or laid-out) panes right now — the
+// rest render a placeholder pane so the layout/nav is in place to build
+// into next. Add new entries here as sections come online. ──
 const SECTIONS = [
   { key: "players", label: "Player Data", icon: "🏈", ready: true },
   { key: "trends", label: "Trends", icon: "📈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
+  { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "content", label: "Content", icon: "📰", ready: false },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
@@ -204,7 +206,7 @@ function DropdownChecklist({ title, options, selected, setSelected }) {
           cursor: "pointer", whiteSpace: "nowrap",
         }}
       >
-        {title}{selected.length > 0 ? ` (${selected.length})` : ""} ▾
+        {title}{selected.length > 0 ? " (" + selected.length + ")" : ""} ▾
       </button>
       {open && (
         <div style={{
@@ -435,7 +437,7 @@ function PlayerDataSection() {
         // Guard against slug collisions across the whole players collection.
         const dupSnap = await getDocs(query(collection(db, "players"), where("Slug", "==", slug)));
         if (!dupSnap.empty) {
-          setSaveMessage(`Slug "${slug}" is already in use — adjust name/position/year to make it unique.`);
+          setSaveMessage("Slug \"" + slug + "\" is already in use — adjust name/position/year to make it unique.");
           setSaving(false);
           return;
         }
@@ -449,7 +451,7 @@ function PlayerDataSection() {
         // Flip into edit mode against the real doc so further saves update
         // rather than create again.
         setSelectedPlayer(newPlayer);
-        setSaveMessage(`Player created — slug "${slug}".`);
+        setSaveMessage("Player created — slug \"" + slug + "\".");
       } catch (e) {
         console.error("Admin player create error:", e);
         setSaveMessage("Failed to create — check console.");
@@ -557,7 +559,7 @@ function PlayerDataSection() {
                     display: "flex", alignItems: "center", gap: "10px",
                     padding: "10px 14px", cursor: "pointer",
                     background: isSelected ? "#eaf1ff" : "#fff",
-                    borderLeft: isSelected ? `4px solid ${BLUE}` : "4px solid transparent",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
                     borderBottom: "1px solid #f0f0f0",
                   }}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
@@ -578,7 +580,7 @@ function PlayerDataSection() {
                   </div>
                   {p.Slug && (
                     <a
-                      href={`/player/${p.Slug}`}
+                      href={"/player/" + p.Slug}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}
@@ -608,7 +610,7 @@ function PlayerDataSection() {
           </div>
           {!isNew && selectedPlayer?.Slug && (
             <a
-              href={`/player/${selectedPlayer.Slug}`}
+              href={"/player/" + selectedPlayer.Slug}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -657,7 +659,7 @@ function PlayerDataSection() {
                 </select>
               </FieldRow>
               <FieldRow label="Height">
-                <input value={formState.Height} onChange={(e) => handleFieldChange("Height", e.target.value)} placeholder={'e.g. 6\'2"'} style={inputStyle} />
+                <input value={formState.Height} onChange={(e) => handleFieldChange("Height", e.target.value)} placeholder="e.g. 6'2&quot;" style={inputStyle} />
               </FieldRow>
               <FieldRow label="Weight">
                 <input value={formState.Weight} onChange={(e) => handleFieldChange("Weight", e.target.value)} placeholder="e.g. 215" style={inputStyle} />
@@ -700,7 +702,7 @@ function PlayerDataSection() {
               disabled={saving}
               style={{
                 width: "100%", marginTop: "16px",
-                background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
                 borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
                 textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
                 opacity: saving ? 0.6 : 1,
@@ -811,7 +813,7 @@ function TrendsSection() {
   const handleRemove = async () => {
     if (!selectedPlayer) return;
     if (!trendsMap.has(selectedPlayer.Slug)) return;
-    if (!window.confirm(`Remove the trend for ${selectedPlayer.First} ${selectedPlayer.Last}?`)) return;
+    if (!window.confirm("Remove the trend for " + selectedPlayer.First + " " + selectedPlayer.Last + "?")) return;
     setRemoving(true);
     setSaveMessage("");
     try {
@@ -894,7 +896,7 @@ function TrendsSection() {
                     display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
                     padding: "10px 14px", cursor: "pointer",
                     background: isSelected ? "#eaf1ff" : "#fff",
-                    borderLeft: isSelected ? `4px solid ${BLUE}` : "4px solid transparent",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
                     borderBottom: "1px solid #f0f0f0",
                   }}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
@@ -966,7 +968,7 @@ function TrendsSection() {
               disabled={saving}
               style={{
                 width: "100%", marginTop: "16px",
-                background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
                 borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
                 textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
                 opacity: saving ? 0.6 : 1,
@@ -1038,7 +1040,7 @@ function PlayerSlugCombobox({ value, onChange, players }) {
 
   const q = (value || "").trim().toLowerCase();
   const filtered = (q
-    ? players.filter((p) => (`${p.First} ${p.Last}`).toLowerCase().includes(q) || (p.Slug || "").toLowerCase().includes(q))
+    ? players.filter((p) => (p.First + " " + p.Last).toLowerCase().includes(q) || (p.Slug || "").toLowerCase().includes(q))
     : players
   ).slice(0, 8);
 
@@ -1315,7 +1317,7 @@ function VideosSection() {
                     display: "flex", gap: "10px",
                     padding: "10px 14px", cursor: "pointer",
                     background: isSelected ? "#eaf1ff" : "#fff",
-                    borderLeft: isSelected ? `4px solid ${BLUE}` : "4px solid transparent",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
                     borderBottom: "1px solid #f0f0f0",
                   }}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
@@ -1339,7 +1341,7 @@ function VideosSection() {
                           const p = playersBySlug.get(it.slug);
                           return (
                             <span key={i} style={{ fontSize: "10px", fontWeight: 700, color: "#666", background: "#f0f0f0", borderRadius: "8px", padding: "1px 7px" }}>
-                              {p ? `${p.First} ${p.Last}` : it.slug}
+                              {p ? p.First + " " + p.Last : it.slug}
                             </span>
                           );
                         })}
@@ -1412,7 +1414,7 @@ function VideosSection() {
               disabled={saving}
               style={{
                 width: "100%", marginTop: "18px",
-                background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
                 borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
                 textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
                 opacity: saving ? 0.6 : 1,
@@ -1444,6 +1446,100 @@ function VideosSection() {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Analytics section — dashboard shell only, no data source wired yet.
+// Laid out as stat cards + a chart placeholder rather than the list/edit
+// pattern Trends/Videos use, since analytics reads (site traffic, eval
+// counts, etc.) don't map to a single-record edit form the way a player
+// or video doc does. STAT_CARD_PLACEHOLDERS below is the placeholder shape
+// to fill in once a real metrics source (Firestore aggregation, GA4, etc.)
+// is picked — swap the "—" values for real numbers and this renders as-is. ──
+const STAT_CARD_PLACEHOLDERS = [
+  { label: "Total Players" },
+  { label: "Total Evaluations" },
+  { label: "Active Users (7d)" },
+  { label: "Page Views (7d)" },
+  { label: "New Signups (7d)" },
+  { label: "Community Board Posts" },
+];
+
+function AnalyticsSection() {
+  const [rangeDays, setRangeDays] = useState(7);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{
+          background: BLUE, padding: "10px 16px",
+          display: "flex", alignItems: "center", gap: "10px",
+        }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Analytics
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+            {[7, 30, 90].map((d) => (
+              <button
+                key={d}
+                onClick={() => setRangeDays(d)}
+                style={{
+                  padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                  border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+                  background: rangeDays === d ? GOLD : "transparent",
+                  color: "#fff",
+                  whiteSpace: "nowrap", transition: "background 0.15s",
+                }}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontSize: "12px", fontWeight: 700, color: "#999" }}>
+          No metrics source connected yet — this is the layout shell. Cards and chart below will populate once a data source is wired in.
+        </div>
+
+        {/* ── Stat card grid ── */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "1px", background: "#eee",
+        }}>
+          {STAT_CARD_PLACEHOLDERS.map((card) => (
+            <div key={card.label} style={{ background: "#fff", padding: "18px 16px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
+                {card.label}
+              </div>
+              <div style={{ fontSize: "26px", fontWeight: 900, color: BLUE }}>
+                —
+              </div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb", marginTop: "4px" }}>
+                vs. previous {rangeDays}d
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Chart placeholder ── */}
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Traffic Over Time
+          </div>
+        </div>
+        <div style={{
+          padding: "60px 24px", textAlign: "center", background: "#fafafa",
+          border: "2px dashed #ddd", margin: "16px", borderRadius: "8px",
+        }}>
+          <div style={{ fontSize: "32px", marginBottom: "12px" }}>📊</div>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "#aaa" }}>
+            Chart will render here once analytics data is connected.
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1501,6 +1597,7 @@ export default function AdminPanel() {
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "trends" && <TrendsSection />}
             {activeSection === "videos" && <VideosSection />}
+            {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "content" && <ComingSoonPane label="Content Management" />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
