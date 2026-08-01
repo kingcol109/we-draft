@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, query, where, serverTimestamp } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, query, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -8,19 +8,10 @@ import { useAuth } from "../context/AuthContext";
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
-// 2026 is archived — the draft already happened, so it's excluded from
-// normal browsing/filtering and only reachable via the explicit Archive
-// toggle. Mirrors the ARCHIVE_YEARS / ACTIVE_YEARS split CommunityBoard.js
-// uses for the same reason.
 const ARCHIVE_YEARS = ["2026"];
 const ACTIVE_YEARS = ["2027", "2028", "2029"];
-// Full list — still used by the create/edit form's Eligible dropdown, since
-// correcting a typo on an existing 2026 record is a legitimate edit even
-// though 2026 isn't part of normal browsing.
 const ELIGIBLE_YEARS = [...ARCHIVE_YEARS, ...ACTIVE_YEARS];
 
-// Same priority order CommunityBoard.js uses for its position filter bar —
-// known positions first in this order, then anything else alphabetically.
 const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
 
 const POSITIONS = [
@@ -34,32 +25,47 @@ const FLAIR_OPTIONS = [
   "Early Contributor", "Year 2 Contributor", "Developmental", "Proven",
 ];
 
+// ── Grade scale — mirrors PlayerProfile.js exactly, so average-grade math
+// in the admin panel matches what the public site shows. "Watchlist" is
+// intentionally absent — it isn't a scored grade there either. ──
+const gradeScale = {
+  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3, "Second Round": 4,
+  "Third Round": 5, "Fourth Round": 6, "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, "UDFA": 10,
+};
+const gradeLabels = {
+  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round", 4: "Second Round",
+  5: "Third Round", 6: "Fourth Round", 7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
+};
+const gradeDisplayMap = {
+  "Watchlist": { short: "W", bg: "#5F5E5A", border: "#444441" },
+  "Early First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+  "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+  "Late First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+  "Second Round": { short: "2nd", bg: "#0F6E56", border: "#085041" },
+  "Third Round": { short: "3rd", bg: "#185FA5", border: "#0C447C" },
+  "Fourth Round": { short: "4th", bg: "#BA7517", border: "#854F0B" },
+  "Fifth Round": { short: "5th", bg: "#BA7517", border: "#854F0B" },
+  "Sixth Round": { short: "6th", bg: "#993C1D", border: "#712B13" },
+  "Seventh Round": { short: "7th", bg: "#993C1D", border: "#712B13" },
+  "UDFA": { short: "U", bg: "#A32D2D", border: "#791F1F" },
+};
+const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", border: "#444441" };
+
 const BLANK_PLAYER_FORM = {
   First: "", Last: "", School: "", Position: "", Eligible: "",
   Height: "", Weight: "", Flair: "", Live: true,
 };
 
-// ── Slug generator — ports the Google Sheets formula exactly so IDs
-// created here match what the sheet has been producing:
-//   =REGEXREPLACE(LOWER(REGEXREPLACE(REGEXREPLACE(REGEXREPLACE(
-//     A2&"-"&B2&"-"&C2&"-"&P2, "['\u2019\u0060.]", ""), "[^a-zA-Z0-9- ]", ""),
-//     "\s+", "-")), "-+", "-")
-// Column order in the sheet is First(A) - Last(B) - Eligible year(C) -
-// Position(P) — NOT School. School isn't part of the slug at all. ──
 function generateSlug(first, last, position, eligible) {
   const raw = (first || "") + "-" + (last || "") + "-" + (eligible || "") + "-" + (position || "");
-  let s = raw.replace(/['\u2019`.]/g, "");    // strip curly/straight apostrophes, backtick, period
-  s = s.replace(/[^a-zA-Z0-9\- ]/g, "");      // keep only letters, numbers, dash, space
-  s = s.replace(/\s+/g, "-");                 // collapse whitespace runs to a single dash
+  let s = raw.replace(/['\u2019`.]/g, "");
+  s = s.replace(/[^a-zA-Z0-9\- ]/g, "");
+  s = s.replace(/\s+/g, "-");
   s = s.toLowerCase();
-  s = s.replace(/-+/g, "-");                  // collapse repeated dashes to one
+  s = s.replace(/-+/g, "-");
   return s;
 }
 
-// ── Sections for the sidebar. Only `key: "players"`, `"trends"`, `"videos"`,
-// and `"analytics"` are wired to real (or laid-out) panes right now — the
-// rest render a placeholder pane so the layout/nav is in place to build
-// into next. Add new entries here as sections come online. ──
 const SECTIONS = [
   { key: "players", label: "Player Data", icon: "🏈", ready: true },
   { key: "trends", label: "Trends", icon: "📈", ready: true },
@@ -124,11 +130,6 @@ function ComingSoonPane({ label }) {
   );
 }
 
-// ── Typeable school dropdown — a plain text input with a filtered
-// suggestion list underneath, not a locked <select>. Options come from the
-// `schools` collection, but free text is still allowed (e.g. a school not
-// in that collection yet), so this only assists rather than restricts.
-// Used in the create/edit form (single value, not a filter). ──
 function SchoolCombobox({ value, onChange, options }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -177,10 +178,6 @@ function SchoolCombobox({ value, onChange, options }) {
   );
 }
 
-// ── Multi-select filter, click-to-open panel — used for School since the
-// option list is large (100+ schools) and a plain button row would be
-// unreadable at that size. Same pattern as CommunityBoard.js's
-// DropdownChecklist: default `selected = []` means no restriction. ──
 function DropdownChecklist({ title, options, selected, setSelected }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -240,11 +237,6 @@ function DropdownChecklist({ title, options, selected, setSelected }) {
   );
 }
 
-// ── Multi-select filter bar — plain buttons, no dropdown/click-to-open
-// panel. Toggling a button adds/removes it from `selected`; an empty
-// `selected` array means "no restriction, show everything," which is the
-// default state. Used for Position, where the option count is small enough
-// to show as a direct row of buttons. ──
 function FilterBar({ label, options, selected, setSelected }) {
   const toggle = (opt) => setSelected((prev) => prev.includes(opt) ? prev.filter((x) => x !== opt) : [...prev, opt]);
   if (options.length === 0) return null;
@@ -280,16 +272,6 @@ function FilterBar({ label, options, selected, setSelected }) {
   );
 }
 
-// ── Player Data section. Fetches the ENTIRE players collection once (this
-// is a low-traffic internal admin tool, so one broader read up front is
-// fine), then filters client-side. 2026 (archived) is excluded from normal
-// browsing entirely and only shown when the Archive toggle is on — it never
-// blends into the active-year filters. Position and School filters both
-// default to blank (no restriction). Selecting a row loads it into an edit
-// form; Save does a targeted updateDoc. "+ Add Player" opens the same form
-// blank — Save there does a slug-uniqueness check, then addDoc (Firestore
-// auto-generates the doc ID, same random-ID shape as every existing
-// player), and the row flips into edit mode against the new doc. ──
 function PlayerDataSection() {
   const [allPlayers, setAllPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -297,13 +279,12 @@ function PlayerDataSection() {
   const [selectedYears, setSelectedYears] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedSchools, setSelectedSchools] = useState([]);
-  const [selectedPlayer, setSelectedPlayer] = useState(null); // null | { id: null, isNew: true } | existing player
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [formState, setFormState] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [schoolOptions, setSchoolOptions] = useState([]);
 
-  // Fetched once — schools don't depend on the player filters below.
   useEffect(() => {
     const fetchSchools = async () => {
       try {
@@ -336,10 +317,6 @@ function PlayerDataSection() {
     fetchAllPlayers();
   }, []);
 
-  // Positions actually present in whichever years are currently relevant
-  // (respecting the same year-inclusion rule `filtered` below uses), ordered
-  // the same way CommunityBoard.js orders its position filter bar:
-  // POSITION_ORDER first, anything else appended alphabetically.
   const allPositions = useMemo(() => {
     const pool = allPlayers.filter((p) => {
       if (selectedYears.length === 0) return p.Eligible !== "2026";
@@ -356,11 +333,6 @@ function PlayerDataSection() {
     });
   }, [allPlayers, selectedYears]);
 
-  // 2026 is the one exception to "blank selection = show everything": since
-  // it's the already-completed draft class, it stays out of the default
-  // view. It's still a perfectly normal button in the year filter row below
-  // though — click it (alone or alongside active years) to include it, same
-  // as any other filter option.
   const filtered = allPlayers.filter((p) => {
     if (selectedYears.length === 0) {
       if (p.Eligible === "2026") return false;
@@ -406,10 +378,6 @@ function PlayerDataSection() {
     setFormState((prev) => ({ ...prev, [field]: value }));
   };
 
-  // Live preview of the slug that will be assigned on create — same formula
-  // as the sheet, recomputed as the admin types. Not used for existing
-  // players; their stored Slug is shown as-is and never auto-recomputed,
-  // since it's already the canonical, indexed URL for that player.
   const previewSlug = useMemo(() => {
     if (!formState) return "";
     return generateSlug(formState.First, formState.Last, formState.Position, formState.Eligible);
@@ -434,7 +402,6 @@ function PlayerDataSection() {
       setSaving(true);
       setSaveMessage("");
       try {
-        // Guard against slug collisions across the whole players collection.
         const dupSnap = await getDocs(query(collection(db, "players"), where("Slug", "==", slug)));
         if (!dupSnap.empty) {
           setSaveMessage("Slug \"" + slug + "\" is already in use — adjust name/position/year to make it unique.");
@@ -447,9 +414,6 @@ function PlayerDataSection() {
         const newPlayer = { id: newDocRef.id, ...payload };
 
         setAllPlayers((prev) => [...prev, newPlayer].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")));
-
-        // Flip into edit mode against the real doc so further saves update
-        // rather than create again.
         setSelectedPlayer(newPlayer);
         setSaveMessage("Player created — slug \"" + slug + "\".");
       } catch (e) {
@@ -461,7 +425,6 @@ function PlayerDataSection() {
       return;
     }
 
-    // Existing player — unchanged update path.
     setSaving(true);
     setSaveMessage("");
     try {
@@ -480,7 +443,6 @@ function PlayerDataSection() {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
-      {/* ── List / search column ── */}
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -602,7 +564,6 @@ function PlayerDataSection() {
         )}
       </div>
 
-      {/* ── Edit / create column ── */}
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
         <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -681,10 +642,6 @@ function PlayerDataSection() {
                 </label>
               </FieldRow>
 
-              {/* Slug — read-only. New players show a live preview of what
-                  will be assigned on save; existing players show their
-                  actual stored slug, never editable here (it's the
-                  canonical, already-indexed URL for that player). */}
               <FieldRow label={isNew ? "Slug (auto-generated preview)" : "Slug"}>
                 <div style={{
                   width: "100%", border: "2px solid #eee", borderRadius: "6px",
@@ -722,22 +679,13 @@ function PlayerDataSection() {
   );
 }
 
-// ── Trends section — lets an admin flag a player as "Up" or "Breakout"
-// (mirrors what PlayerProfile.js reads from the `trends` collection, keyed
-// by player Slug) and attach a few short notes that show in that page's
-// tooltip. Scoped to active-year players only (2027–2029) — trends are a
-// pre-draft storyline signal, not something relevant for archived 2026
-// players. Adding and removing are two distinct, explicit actions: Save
-// always requires a Trend value selected, and Remove is its own button
-// that deletes the doc outright rather than trying to infer removal from
-// an emptied dropdown. ──
 function TrendsSection() {
   const [allPlayers, setAllPlayers] = useState([]);
-  const [trendsMap, setTrendsMap] = useState(new Map()); // slug -> { Trend, Notes }
+  const [trendsMap, setTrendsMap] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const [formState, setFormState] = useState(null); // { Trend, Notes }
+  const [formState, setFormState] = useState(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -769,7 +717,7 @@ function TrendsSection() {
   }, []);
 
   const filtered = allPlayers.filter((p) => {
-    if (!p.Slug) return false; // a trend doc is keyed by Slug — can't attach one without it
+    if (!p.Slug) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.trim().toLowerCase();
     return (
@@ -859,7 +807,6 @@ function TrendsSection() {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
-      {/* ── List / search column ── */}
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px" }}>
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -918,7 +865,6 @@ function TrendsSection() {
         )}
       </div>
 
-      {/* ── Edit column ── */}
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
         <div style={{ background: GOLD, padding: "10px 16px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -1014,7 +960,6 @@ const toMs = (ts) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
-// Firestore Timestamp / JS Date / string → "yyyy-mm-dd" for a <input type="date">.
 function toDateInputValue(d) {
   if (!d) return "";
   const dateObj = d?.toDate ? d.toDate() : d instanceof Date ? d : new Date(d);
@@ -1022,12 +967,6 @@ function toDateInputValue(d) {
   return dateObj.toISOString().slice(0, 10);
 }
 
-// ── Typeable player picker for a video's item slots. The input's value IS
-// the stored slug (same "value is the source of truth" pattern as
-// SchoolCombobox) — typing filters suggestions by name or slug, and
-// selecting a suggestion replaces the field's text with that player's slug.
-// Free text is still allowed, so a slug can be pasted directly for a player
-// not in the fetched list. ──
 function PlayerSlugCombobox({ value, onChange, players }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -1082,25 +1021,6 @@ function PlayerSlugCombobox({ value, onChange, players }) {
 
 const BLANK_VIDEO_ITEM = { slug: "", title: "", thumb: "" };
 
-// ── Videos section — manages the `videos` collection that PlayerProfile.js,
-// TeamPage.js, and CommunityBoard.js all read from. Two things matter for
-// correctness here, both direct consequences of how those pages query:
-//
-// 1. The top-level `slugs` array — not `items[].slug` — is what the
-//    array-contains / array-contains-any queries actually filter on
-//    (PlayerProfile.js: where("slugs","array-contains",slug); TeamPage.js:
-//    where("slugs","array-contains-any",chunk)). So `slugs` has to be
-//    rebuilt from `items` on every save, or a video becomes invisible on
-//    the pages that reference it even though `items` looks correct.
-// 2. `GenTitle`/`GenThumb` are the fallback title/thumb CommunityBoard.js's
-//    sidebar uses (data.GenTitle || items[0]?.title); PlayerProfile.js
-//    instead prefers the matching item for the current player, falling
-//    back to items[0]. Leaving Gen* blank is fine — items[0] covers it —
-//    but filling them in gives a sensible default when no per-player
-//    slug matches on a given page.
-//
-// `sheetKey` (visible on existing sheet-synced docs) is a sync bookkeeping
-// field nothing in the app reads — admin-created videos don't need it. ──
 function VideosSection() {
   const [videos, setVideos] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
@@ -1219,8 +1139,6 @@ function VideosSection() {
         GenTitle: formState.GenTitle.trim(),
         GenThumb: formState.GenThumb.trim(),
         items: cleanedItems,
-        // Kept in sync with `items` — this is the field TeamPage.js and
-        // PlayerProfile.js actually query against.
         slugs: cleanedItems.map((it) => it.slug),
         updatedAt: serverTimestamp(),
       };
@@ -1268,7 +1186,6 @@ function VideosSection() {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
-      {/* ── List / search column ── */}
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -1355,7 +1272,6 @@ function VideosSection() {
         )}
       </div>
 
-      {/* ── Edit / create column ── */}
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
         <div style={{ background: GOLD, padding: "10px 16px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -1451,24 +1367,127 @@ function VideosSection() {
   );
 }
 
-// ── Analytics section — dashboard shell only, no data source wired yet.
-// Laid out as stat cards + a chart placeholder rather than the list/edit
-// pattern Trends/Videos use, since analytics reads (site traffic, eval
-// counts, etc.) don't map to a single-record edit form the way a player
-// or video doc does. STAT_CARD_PLACEHOLDERS below is the placeholder shape
-// to fill in once a real metrics source (Firestore aggregation, GA4, etc.)
-// is picked — swap the "—" values for real numbers and this renders as-is. ──
-const STAT_CARD_PLACEHOLDERS = [
-  { label: "Total Players" },
-  { label: "Total Evaluations" },
-  { label: "Active Users (7d)" },
-  { label: "Page Views (7d)" },
-  { label: "New Signups (7d)" },
-  { label: "Community Board Posts" },
-];
-
+// ── Analytics section — read-only dashboard pulling real numbers from
+// Firestore. Evaluations live in a players/{playerId}/evaluations/{uid}
+// subcollection (see PlayerProfile.js), so this reads via
+// collectionGroup(db, "evaluations") — one query instead of iterating each
+// player's subcollection individually. playerId is taken from the doc's
+// parent path (d.ref.parent.parent.id) rather than the stored playerId
+// field, since the path is correct even if that field is stale.
+//
+// This is reads only — no page-view/visit tracking exists yet, so
+// "Active Users" style traffic metrics aren't derivable from current data.
+// Everything below IS derivable from the players, evaluations, and users
+// collections as they exist today. Write tracking is a separate follow-up. ──
 function AnalyticsSection() {
   const [rangeDays, setRangeDays] = useState(7);
+  const [loading, setLoading] = useState(true);
+  const [allEvals, setAllEvals] = useState([]);
+  const [totalUsers, setTotalUsers] = useState(null);
+  const [totalPlayers, setTotalPlayers] = useState(null);
+  const [fetchErrors, setFetchErrors] = useState([]);
+
+  // ── Two evaluation copies exist per save: the canonical
+  // players/{playerId}/evaluations/{uid} doc, and a mirrored
+  // users/{uid}/evaluations/{playerId} doc (see PlayerProfile.js
+  // handleSaveEvaluation — it writes both). Both subcollections are named
+  // "evaluations", so collectionGroup() returns both copies of every eval
+  // unless filtered. d.ref.parent.parent.parent.id is the top-level
+  // collection two levels up from the doc — "players" for the canonical
+  // copy, "users" for the mirror — so filtering on that keeps exactly one
+  // copy per real evaluation. Promise.allSettled (not Promise.all) so one
+  // failing query doesn't blank out the other two — and the failure gets
+  // shown on screen instead of only logged to console. ──
+  useEffect(() => {
+    const fetchAll = async () => {
+      setLoading(true);
+      setFetchErrors([]);
+      const errors = [];
+      const [evalRes, usersRes, playersRes] = await Promise.allSettled([
+        getDocs(collectionGroup(db, "evaluations")),
+        getDocs(collection(db, "users")),
+        getDocs(collection(db, "players")),
+      ]);
+
+      if (evalRes.status === "fulfilled") {
+        const evals = evalRes.value.docs
+          .filter((d) => d.ref.parent?.parent?.parent?.id === "players")
+          .map((d) => {
+            const data = d.data();
+            const playerId = data.playerId || d.ref.parent.parent?.id || null;
+            return {
+              playerId,
+              uid: data.uid || d.id,
+              visibility: data.visibility || "public",
+              grade: data.grade || "",
+              updatedAtMs: toMs(data.updatedAt),
+            };
+          });
+        setAllEvals(evals);
+      } else {
+        console.error("Admin analytics evaluations fetch error:", evalRes.reason);
+        setAllEvals([]);
+        errors.push("Evaluations: " + (evalRes.reason?.message || "read failed — likely missing a Firestore rule for collection-group reads on \"evaluations\"."));
+      }
+
+      if (usersRes.status === "fulfilled") {
+        setTotalUsers(usersRes.value.size);
+      } else {
+        console.error("Admin analytics users fetch error:", usersRes.reason);
+        setTotalUsers(null);
+        errors.push("Users: " + (usersRes.reason?.message || "read failed."));
+      }
+
+      if (playersRes.status === "fulfilled") {
+        setTotalPlayers(playersRes.value.size);
+      } else {
+        console.error("Admin analytics players fetch error:", playersRes.reason);
+        setTotalPlayers(null);
+        errors.push("Players: " + (playersRes.reason?.message || "read failed."));
+      }
+
+      setFetchErrors(errors);
+      setLoading(false);
+    };
+    fetchAll();
+  }, []);
+
+  const cutoffMs = useMemo(() => Date.now() - rangeDays * 24 * 60 * 60 * 1000, [rangeDays]);
+  const evalsInRange = useMemo(() => allEvals.filter((e) => e.updatedAtMs >= cutoffMs), [allEvals, cutoffMs]);
+
+  const totalEvaluations = allEvals.length;
+  const publicEvaluations = allEvals.filter((e) => e.visibility === "public").length;
+  const activeEvaluators = useMemo(() => new Set(evalsInRange.map((e) => e.uid)).size, [evalsInRange]);
+  const playersWithEvals = useMemo(() => new Set(allEvals.map((e) => e.playerId).filter(Boolean)).size, [allEvals]);
+  const avgPerPlayer = playersWithEvals > 0 ? (totalEvaluations / playersWithEvals).toFixed(1) : "0";
+
+  const dailyCounts = useMemo(() => {
+    const buckets = new Map();
+    for (let i = rangeDays - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      buckets.set(d.getTime(), 0);
+    }
+    evalsInRange.forEach((e) => {
+      const d = new Date(e.updatedAtMs);
+      d.setHours(0, 0, 0, 0);
+      const key = d.getTime();
+      if (buckets.has(key)) buckets.set(key, buckets.get(key) + 1);
+    });
+    return Array.from(buckets.entries()).map(([ts, count]) => ({ ts, count }));
+  }, [evalsInRange, rangeDays]);
+
+  const maxCount = Math.max(1, ...dailyCounts.map((d) => d.count));
+
+  const STAT_CARDS = [
+    { label: "Total Evaluations", value: totalEvaluations },
+    { label: "Public Evaluations", value: publicEvaluations },
+    { label: "Active Evaluators", value: activeEvaluators, sub: "last " + rangeDays + "d" },
+    { label: "Players Evaluated", value: totalPlayers != null ? (playersWithEvals + " / " + totalPlayers) : playersWithEvals },
+    { label: "Avg Evals / Player", value: avgPerPlayer },
+    { label: "Registered Users", value: totalUsers != null ? totalUsers : "—" },
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -1500,47 +1519,390 @@ function AnalyticsSection() {
           </div>
         </div>
         <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontSize: "12px", fontWeight: 700, color: "#999" }}>
-          No metrics source connected yet — this is the layout shell. Cards and chart below will populate once a data source is wired in.
+          {loading
+            ? "Loading live numbers from Firestore…"
+            : "Read-only — pulled from the players, evaluations, and users collections. No page-view/visit tracking exists yet."}
         </div>
 
-        {/* ── Stat card grid ── */}
+        {!loading && fetchErrors.length > 0 && (
+          <div style={{ padding: "10px 16px", background: "#fff3f0", borderBottom: "2px solid #c0392b" }}>
+            {fetchErrors.map((msg, i) => (
+              <div key={i} style={{ fontSize: "12px", fontWeight: 700, color: "#a52a1e" }}>⚠ {msg}</div>
+            ))}
+          </div>
+        )}
+
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
           gap: "1px", background: "#eee",
         }}>
-          {STAT_CARD_PLACEHOLDERS.map((card) => (
+          {STAT_CARDS.map((card) => (
             <div key={card.label} style={{ background: "#fff", padding: "18px 16px" }}>
               <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
                 {card.label}
               </div>
               <div style={{ fontSize: "26px", fontWeight: 900, color: BLUE }}>
-                —
+                {loading ? "—" : card.value}
               </div>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb", marginTop: "4px" }}>
-                vs. previous {rangeDays}d
-              </div>
+              {card.sub && (
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb", marginTop: "4px" }}>
+                  {card.sub}
+                </div>
+              )}
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── Chart placeholder ── */}
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: GOLD, padding: "10px 16px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Traffic Over Time
+            Evaluations Saved — Last {rangeDays} Days
           </div>
         </div>
-        <div style={{
-          padding: "60px 24px", textAlign: "center", background: "#fafafa",
-          border: "2px dashed #ddd", margin: "16px", borderRadius: "8px",
-        }}>
-          <div style={{ fontSize: "32px", marginBottom: "12px" }}>📊</div>
-          <div style={{ fontSize: "13px", fontWeight: 700, color: "#aaa" }}>
-            Chart will render here once analytics data is connected.
-          </div>
+        <div style={{ padding: "20px 16px" }}>
+          {loading ? (
+            <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+          ) : dailyCounts.every((d) => d.count === 0) ? (
+            <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+              No evaluations saved in this range yet.
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: rangeDays > 30 ? "1px" : "3px", height: "160px" }}>
+              {dailyCounts.map((d) => {
+                const h = Math.max(2, (d.count / maxCount) * 150);
+                const dateLabel = new Date(d.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+                return (
+                  <div
+                    key={d.ts}
+                    title={dateLabel + ": " + d.count + " evaluation" + (d.count !== 1 ? "s" : "")}
+                    style={{
+                      flex: 1, height: h + "px", background: BLUE, borderRadius: "2px 2px 0 0",
+                      minWidth: rangeDays > 60 ? "2px" : "4px",
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+          {!loading && dailyCounts.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "10px", fontWeight: 700, color: "#aaa" }}>
+              <span>{new Date(dailyCounts[0].ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+              <span>{new Date(dailyCounts[dailyCounts.length - 1].ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+            </div>
+          )}
         </div>
       </div>
+
+      <PlayerEvaluationsTable />
+    </div>
+  );
+}
+
+// ── Players + Evaluations table — same filter pattern as Player Data
+// (search, School dropdown, Eligible Year, Position bar; 2026 excluded by
+// default), but read-only and joined against a per-player evaluation
+// summary instead of an edit form. Same join-key reasoning as
+// AnalyticsSection above (d.ref.parent.parent.id). Columns are sortable
+// by clicking the header. ──
+function PlayerEvaluationsTable() {
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [statsByPlayer, setStatsByPlayer] = useState(new Map());
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedYears, setSelectedYears] = useState([]);
+  const [selectedPositions, setSelectedPositions] = useState([]);
+  const [selectedSchools, setSelectedSchools] = useState([]);
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [sortKey, setSortKey] = useState("count");
+  const [sortDir, setSortDir] = useState("desc");
+  const [fetchErrors, setFetchErrors] = useState([]);
+
+  useEffect(() => {
+    const fetchSchools = async () => {
+      try {
+        const snap = await getDocs(collection(db, "schools"));
+        const names = snap.docs.map((d) => d.data().School).filter(Boolean).sort();
+        setSchoolOptions(names);
+      } catch (e) {
+        setSchoolOptions([]);
+      }
+    };
+    fetchSchools();
+  }, []);
+
+  // ── Same canonical-copy filtering as AnalyticsSection: evaluations are
+  // written to both players/{playerId}/evaluations/{uid} (canonical) and a
+  // mirrored users/{uid}/evaluations/{playerId} doc, both collections named
+  // "evaluations" — collectionGroup() returns both unless filtered down to
+  // the players-rooted copy via d.ref.parent.parent.parent.id. Promise
+  // .allSettled so a failed evaluations read still lets the player list
+  // render (with zeroed stats) instead of blanking the whole table, and the
+  // failure is shown on screen rather than only logged. ──
+  useEffect(() => {
+    const fetchAll = async () => {
+      setLoading(true);
+      setFetchErrors([]);
+      const errors = [];
+      const [playersRes, evalRes] = await Promise.allSettled([
+        getDocs(collection(db, "players")),
+        getDocs(collectionGroup(db, "evaluations")),
+      ]);
+
+      if (playersRes.status === "fulfilled") {
+        const players = playersRes.value.docs.map((d) => ({ id: d.id, ...d.data() }));
+        players.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
+        setAllPlayers(players);
+      } else {
+        console.error("Admin player-evaluations players fetch error:", playersRes.reason);
+        setAllPlayers([]);
+        errors.push("Players: " + (playersRes.reason?.message || "read failed."));
+      }
+
+      if (evalRes.status === "fulfilled") {
+        const map = new Map();
+        evalRes.value.docs
+          .filter((d) => d.ref.parent?.parent?.parent?.id === "players")
+          .forEach((d) => {
+            const data = d.data();
+            const playerId = data.playerId || d.ref.parent.parent?.id;
+            if (!playerId) return;
+            const entry = map.get(playerId) || { count: 0, publicCount: 0, grades: [], lastUpdatedMs: 0 };
+            entry.count += 1;
+            if ((data.visibility || "public") === "public") entry.publicCount += 1;
+            if (data.grade && gradeScale[data.grade] != null) entry.grades.push(gradeScale[data.grade]);
+            const ms = toMs(data.updatedAt);
+            if (ms > entry.lastUpdatedMs) entry.lastUpdatedMs = ms;
+            map.set(playerId, entry);
+          });
+        setStatsByPlayer(map);
+      } else {
+        console.error("Admin player-evaluations evaluations fetch error:", evalRes.reason);
+        setStatsByPlayer(new Map());
+        errors.push("Evaluations: " + (evalRes.reason?.message || "read failed — likely missing a Firestore rule for collection-group reads on \"evaluations\"."));
+      }
+
+      setFetchErrors(errors);
+      setLoading(false);
+    };
+    fetchAll();
+  }, []);
+
+  const allPositions = useMemo(() => {
+    const pool = allPlayers.filter((p) => {
+      if (selectedYears.length === 0) return p.Eligible !== "2026";
+      return selectedYears.includes(p.Eligible);
+    });
+    const set = [...new Set(pool.map((p) => p.Position).filter(Boolean))];
+    return set.sort((a, b) => {
+      const ai = POSITION_ORDER.indexOf(a);
+      const bi = POSITION_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [allPlayers, selectedYears]);
+
+  const rows = useMemo(() => {
+    const filtered = allPlayers.filter((p) => {
+      if (selectedYears.length === 0) {
+        if (p.Eligible === "2026") return false;
+      } else {
+        if (!selectedYears.includes(p.Eligible)) return false;
+      }
+      if (selectedPositions.length > 0 && !selectedPositions.includes(p.Position)) return false;
+      if (selectedSchools.length > 0 && !selectedSchools.includes(p.School)) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const matches =
+          ((p.First || "") + " " + (p.Last || "")).toLowerCase().includes(q) ||
+          (p.School || "").toLowerCase().includes(q) ||
+          (p.Slug || "").toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+
+    const withStats = filtered.map((p) => {
+      const stats = statsByPlayer.get(p.id) || { count: 0, publicCount: 0, grades: [], lastUpdatedMs: 0 };
+      const avgGrade = stats.grades.length > 0
+        ? stats.grades.reduce((a, b) => a + b, 0) / stats.grades.length
+        : null;
+      const avgGradeLabel = avgGrade != null ? gradeLabels[Math.round(avgGrade)] : null;
+      return {
+        ...p,
+        evalCount: stats.count,
+        publicCount: stats.publicCount,
+        privateCount: stats.count - stats.publicCount,
+        avgGradeLabel,
+        lastUpdatedMs: stats.lastUpdatedMs,
+      };
+    });
+
+    withStats.sort((a, b) => {
+      let av, bv;
+      if (sortKey === "name") { av = a.Last || ""; bv = b.Last || ""; }
+      else if (sortKey === "grade") { av = a.avgGradeLabel ? gradeScale[a.avgGradeLabel] : 99; bv = b.avgGradeLabel ? gradeScale[b.avgGradeLabel] : 99; }
+      else if (sortKey === "updated") { av = a.lastUpdatedMs; bv = b.lastUpdatedMs; }
+      else { av = a.evalCount; bv = b.evalCount; }
+      if (typeof av === "string") {
+        const cmp = av.localeCompare(bv);
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+
+    return withStats;
+  }, [allPlayers, statsByPlayer, selectedYears, selectedPositions, selectedSchools, searchQuery, sortKey, sortDir]);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const SortHeader = ({ label, sortId, align }) => (
+    <th
+      onClick={() => toggleSort(sortId)}
+      style={{
+        padding: "9px 10px", cursor: "pointer", userSelect: "none",
+        fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase",
+        letterSpacing: "0.06em", textAlign: align || "left", whiteSpace: "nowrap",
+      }}
+    >
+      {label}{sortKey === sortId ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+    </th>
+  );
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Players &amp; Evaluations
+        </div>
+      </div>
+
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search name, school, or slug..."
+          style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+        />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start" }}>
+          <DropdownChecklist title="School" options={schoolOptions} selected={selectedSchools} setSelected={setSelectedSchools} />
+        </div>
+        <div>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "5px" }}>
+            Eligible Year
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {[...ACTIVE_YEARS, "2026"].map((yr) => {
+              const isArchive = yr === "2026";
+              const active = selectedYears.includes(yr);
+              return (
+                <button
+                  key={yr}
+                  onClick={() => setSelectedYears((prev) => prev.includes(yr) ? prev.filter((y) => y !== yr) : [...prev, yr])}
+                  title={isArchive ? "2026 — completed draft class, not shown by default" : undefined}
+                  style={{
+                    padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                    textTransform: "uppercase", letterSpacing: "0.04em",
+                    border: "2px solid " + (isArchive ? "#7a5c00" : GOLD), borderRadius: "20px", cursor: "pointer",
+                    background: active ? (isArchive ? "#7a5c00" : BLUE) : "#fff",
+                    color: active ? "#fff" : (isArchive ? "#7a5c00" : BLUE),
+                    whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+                  }}
+                >
+                  {isArchive ? "📦 2026" : yr}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <FilterBar label="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+      </div>
+
+      {!loading && fetchErrors.length > 0 && (
+        <div style={{ padding: "10px 16px", background: "#fff3f0", borderBottom: "2px solid #c0392b" }}>
+          {fetchErrors.map((msg, i) => (
+            <div key={i} style={{ fontSize: "12px", fontWeight: 700, color: "#a52a1e" }}>⚠ {msg}</div>
+          ))}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players match.</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+            {rows.length} player{rows.length !== 1 ? "s" : ""}
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: BLUE }}>
+                <SortHeader label="Player" sortId="name" />
+                <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>Pos</th>
+                <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>School</th>
+                <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>Year</th>
+                <SortHeader label="Evals" sortId="count" align="center" />
+                <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", whiteSpace: "nowrap" }}>Pub / Priv</th>
+                <SortHeader label="Avg Grade" sortId="grade" align="center" />
+                <SortHeader label="Last Updated" sortId="updated" align="right" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p, i) => {
+                const gd = p.avgGradeLabel ? gradeBadgeInfo(p.avgGradeLabel) : null;
+                return (
+                  <tr
+                    key={p.id}
+                    style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}
+                  >
+                    <td style={{ padding: "9px 10px", fontWeight: 900, fontSize: "13px", color: BLUE, whiteSpace: "nowrap" }}>
+                      {(p.First || "") + " " + (p.Last || "")}
+                      {p.Live === false && (
+                        <span style={{ marginLeft: "6px", fontSize: "8px", fontWeight: 900, color: "#c0392b", border: "1px solid #c0392b", borderRadius: "10px", padding: "1px 5px" }}>
+                          HIDDEN
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666" }}>{p.Position || "—"}</td>
+                    <td style={{ padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666" }}>{p.School || "—"}</td>
+                    <td style={{ padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666" }}>{p.Eligible || "—"}</td>
+                    <td style={{ padding: "9px 10px", fontSize: "13px", fontWeight: 900, color: p.evalCount > 0 ? BLUE : "#ccc", textAlign: "center" }}>{p.evalCount}</td>
+                    <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#888", textAlign: "center" }}>
+                      {p.evalCount > 0 ? (p.publicCount + " / " + p.privateCount) : "—"}
+                    </td>
+                    <td style={{ padding: "9px 10px", textAlign: "center" }}>
+                      {gd ? (
+                        <span style={{
+                          display: "inline-block", fontSize: "10px", fontWeight: 900, color: "#fff",
+                          background: gd.bg, border: "1px solid " + gd.border, borderRadius: "10px", padding: "2px 8px",
+                        }}>
+                          {gd.short}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: "11px", color: "#ccc" }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#999", textAlign: "right", whiteSpace: "nowrap" }}>
+                      {p.lastUpdatedMs > 0 ? new Date(p.lastUpdatedMs).toLocaleDateString() : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1572,7 +1934,6 @@ export default function AdminPanel() {
 
   return (
     <>
-      {/* Admin pages should never be indexed or appear in search results. */}
       <Helmet>
         <title>Admin | We-Draft.com</title>
         <meta name="robots" content="noindex, nofollow" />
