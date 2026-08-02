@@ -53,7 +53,7 @@ const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", b
 
 const BLANK_PLAYER_FORM = {
   First: "", Last: "", School: "", Position: "", Eligible: "",
-  Height: "", Weight: "", Flair: "", Live: true,
+  Height: "", Weight: "", Flair: "", Live: true, AdminNotes: "",
 };
 
 function generateSlug(first, last, position, eligible) {
@@ -364,6 +364,7 @@ function PlayerDataSection() {
       Weight: p.Weight || "",
       Flair: p.Flair || "",
       Live: p.Live !== false,
+      AdminNotes: p.AdminNotes || "",
     });
     setSaveMessage("");
   };
@@ -640,6 +641,14 @@ function PlayerDataSection() {
                   />
                   Visible on site
                 </label>
+              </FieldRow>
+              <FieldRow label="Admin Notes (internal only)">
+                <textarea
+                  value={formState.AdminNotes}
+                  onChange={(e) => handleFieldChange("AdminNotes", e.target.value)}
+                  placeholder="Internal notes — not shown on the public site"
+                  style={{ ...inputStyle, height: "80px", resize: "vertical", fontFamily: "inherit" }}
+                />
               </FieldRow>
 
               <FieldRow label={isNew ? "Slug (auto-generated preview)" : "Slug"}>
