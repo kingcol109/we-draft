@@ -25,6 +25,12 @@ const FLAIR_OPTIONS = [
   "Early Contributor", "Year 2 Contributor", "Developmental", "Proven",
 ];
 
+const FLAG_COLORS = [
+  { key: "red", hex: "#c0392b" },
+  { key: "green", hex: "#2e7d32" },
+  { key: "blue", hex: "#1565c0" },
+];
+
 // ── Grade scale — mirrors PlayerProfile.js exactly, so average-grade math
 // in the admin panel matches what the public site shows. "Watchlist" is
 // intentionally absent — it isn't a scored grade there either. ──
@@ -53,7 +59,7 @@ const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", b
 
 const BLANK_PLAYER_FORM = {
   First: "", Last: "", School: "", Position: "", Eligible: "",
-  Height: "", Weight: "", Flair: "", Live: true, AdminNotes: "",
+  Height: "", Weight: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
 };
 
 function generateSlug(first, last, position, eligible) {
@@ -279,6 +285,7 @@ function PlayerDataSection() {
   const [selectedYears, setSelectedYears] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedSchools, setSelectedSchools] = useState([]);
+  const [selectedFlags, setSelectedFlags] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [formState, setFormState] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -341,6 +348,7 @@ function PlayerDataSection() {
     }
     if (selectedPositions.length > 0 && !selectedPositions.includes(p.Position)) return false;
     if (selectedSchools.length > 0 && !selectedSchools.includes(p.School)) return false;
+    if (selectedFlags.length > 0 && !selectedFlags.includes(p.Flag)) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       const matches =
@@ -365,6 +373,7 @@ function PlayerDataSection() {
       Flair: p.Flair || "",
       Live: p.Live !== false,
       AdminNotes: p.AdminNotes || "",
+      Flag: p.Flag || "",
     });
     setSaveMessage("");
   };
@@ -501,6 +510,28 @@ function PlayerDataSection() {
             </div>
           </div>
           <FilterBar label="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+          <div>
+            <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "5px" }}>
+              Flag
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {FLAG_COLORS.map((f) => {
+                const active = selectedFlags.includes(f.key);
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => setSelectedFlags((prev) => prev.includes(f.key) ? prev.filter((x) => x !== f.key) : [...prev, f.key])}
+                    title={f.key + " flag"}
+                    style={{
+                      width: "26px", height: "26px", borderRadius: "50%", cursor: "pointer",
+                      background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
+                      boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {loading ? (
@@ -530,6 +561,15 @@ function PlayerDataSection() {
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE }}>
+                      {p.Flag && (
+                        <span
+                          title={p.Flag + " flag"}
+                          style={{
+                            display: "inline-block", width: "9px", height: "9px", borderRadius: "50%",
+                            marginRight: "7px", background: (FLAG_COLORS.find((f) => f.key === p.Flag) || {}).hex || "#999",
+                          }}
+                        />
+                      )}
                       {(p.First || "") + " " + (p.Last || "")}
                       {p.Live === false && (
                         <span style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 900, color: "#c0392b", border: "1px solid #c0392b", borderRadius: "10px", padding: "1px 6px" }}>
@@ -641,6 +681,38 @@ function PlayerDataSection() {
                   />
                   Visible on site
                 </label>
+              </FieldRow>
+              <FieldRow label="Flag">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {FLAG_COLORS.map((f) => {
+                    const active = formState.Flag === f.key;
+                    return (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => handleFieldChange("Flag", active ? "" : f.key)}
+                        title={f.key + " flag"}
+                        style={{
+                          width: "28px", height: "28px", borderRadius: "50%", cursor: "pointer",
+                          background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
+                          boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                        }}
+                      />
+                    );
+                  })}
+                  {formState.Flag && (
+                    <button
+                      type="button"
+                      onClick={() => handleFieldChange("Flag", "")}
+                      style={{
+                        background: "none", border: "none", color: "#999", cursor: "pointer",
+                        fontWeight: 700, fontSize: "12px", textDecoration: "underline",
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </FieldRow>
               <FieldRow label="Admin Notes (internal only)">
                 <textarea
