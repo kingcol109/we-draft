@@ -31,7 +31,7 @@ async function getAccessToken() {
   return token;
 }
 
-// ── Fetches page views per pagePath across four windows: 24h/7d/30d/total.
+// ── Fetches page views per pagePath across six windows: 24h/7d/30d/90d/1y/total.
 //
 // Originally attempted as a single runReport call using GA4's multi-
 // dateRange feature with a `dateRange` dimension to distinguish rows per
@@ -62,6 +62,8 @@ async function fetchPageViewsByPath() {
     { name: "last24Hours", startDate: "today", endDate: "today" },
     { name: "last7Days", startDate: "6daysAgo", endDate: "today" },
     { name: "last30Days", startDate: "29daysAgo", endDate: "today" },
+    { name: "last90Days", startDate: "89daysAgo", endDate: "today" },
+    { name: "lastYear", startDate: "364daysAgo", endDate: "today" },
     // GA4's API has no built-in "all time" keyword. This is a stand-in
     // start date early enough to predate the property in practice —
     // adjust if the property is older than this.

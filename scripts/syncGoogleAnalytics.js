@@ -32,10 +32,11 @@ function extractSlug(pagePath) {
 }
 
 // ── Reshapes GA4's row-per-(pagePath, dateRange) format into one object
-// per slug: { last24Hours, last7Days, last30Days, total }. Rows for paths
-// outside /player/ are dropped here — this is the one place that decides
-// what counts as "a player page", so future path patterns (e.g. if
-// /team/{slug} analytics gets added later) only need a change here. ──
+// per slug: { last24Hours, last7Days, last30Days, last90Days, lastYear,
+// total }. Rows for paths outside /player/ are dropped here — this is the
+// one place that decides what counts as "a player page", so future path
+// patterns (e.g. if /team/{slug} analytics gets added later) only need a
+// change here. ──
 function aggregateBySlug(rows) {
   const bySlug = new Map();
 
@@ -48,7 +49,7 @@ function aggregateBySlug(rows) {
     if (!slug) continue;
 
     if (!bySlug.has(slug)) {
-      bySlug.set(slug, { last24Hours: 0, last7Days: 0, last30Days: 0, total: 0 });
+      bySlug.set(slug, { last24Hours: 0, last7Days: 0, last30Days: 0, last90Days: 0, lastYear: 0, total: 0 });
     }
     const entry = bySlug.get(slug);
 
@@ -58,6 +59,8 @@ function aggregateBySlug(rows) {
     if (dateRangeName === "last24Hours") entry.last24Hours += views;
     else if (dateRangeName === "last7Days") entry.last7Days += views;
     else if (dateRangeName === "last30Days") entry.last30Days += views;
+    else if (dateRangeName === "last90Days") entry.last90Days += views;
+    else if (dateRangeName === "lastYear") entry.lastYear += views;
     else if (dateRangeName === "total") entry.total += views;
   }
 

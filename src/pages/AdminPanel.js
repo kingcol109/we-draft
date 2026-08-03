@@ -77,6 +77,7 @@ const SECTIONS = [
   { key: "trends", label: "Trends", icon: "📈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
+  { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "content", label: "Content", icon: "📰", ready: false },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
@@ -291,6 +292,9 @@ function PlayerDataSection() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [schoolOptions, setSchoolOptions] = useState([]);
+  const [duplicateMatches, setDuplicateMatches] = useState(null);
+  const [removing, setRemoving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -376,16 +380,24 @@ function PlayerDataSection() {
       Flag: p.Flag || "",
     });
     setSaveMessage("");
+    setDuplicateMatches(null);
+    setConfirmDelete(false);
   };
 
   const startNewPlayer = () => {
     setSelectedPlayer({ id: null, isNew: true });
     setFormState({ ...BLANK_PLAYER_FORM });
     setSaveMessage("");
+    setDuplicateMatches(null);
+    setConfirmDelete(false);
   };
 
   const handleFieldChange = (field, value) => {
     setFormState((prev) => ({ ...prev, [field]: value }));
+    // Editing the name after a duplicate warning was shown invalidates that
+    // check — force it to re-run against the new value on the next save
+    // attempt rather than trusting a match found for the old name.
+    setDuplicateMatches(null);
   };
 
   const previewSlug = useMemo(() => {
@@ -395,7 +407,21 @@ function PlayerDataSection() {
 
   const isNew = selectedPlayer?.isNew === true;
 
-  const handleSave = async () => {
+  // ── Same-name check runs against the already-loaded `allPlayers` list
+  // (no extra Firestore read needed) rather than the Slug, since two
+  // different real players can share a name — Slug already disambiguates
+  // by position/year, so this is specifically about catching an admin
+  // re-adding someone who's already in the system under a different
+  // position/year/school by mistake. ──
+  const findNameMatches = (first, last) => {
+    const normFirst = first.trim().toLowerCase();
+    const normLast = last.trim().toLowerCase();
+    return allPlayers.filter(
+      (p) => (p.First || "").trim().toLowerCase() === normFirst && (p.Last || "").trim().toLowerCase() === normLast
+    );
+  };
+
+  const handleSave = async (forceDuplicate = false) => {
     if (!selectedPlayer || !formState) return;
 
     if (isNew) {
@@ -408,6 +434,16 @@ function PlayerDataSection() {
         setSaveMessage("Couldn't generate a valid slug from these fields.");
         return;
       }
+
+      if (!forceDuplicate) {
+        const matches = findNameMatches(formState.First, formState.Last);
+        if (matches.length > 0) {
+          setDuplicateMatches(matches);
+          setSaveMessage("");
+          return;
+        }
+      }
+      setDuplicateMatches(null);
 
       setSaving(true);
       setSaveMessage("");
@@ -448,6 +484,36 @@ function PlayerDataSection() {
       setSaveMessage("Failed to save — check console.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Delete requires an explicit in-panel confirmation step (setConfirmDelete)
+  // rather than a native window.confirm(), matching the duplicate-name
+  // check's pattern — clicking "Delete Player" only reveals the warning;
+  // the actual deleteDoc only runs from the "Yes, Delete Permanently" button. ──
+  const handleDelete = async () => {
+    if (!selectedPlayer || isNew) return;
+    setRemoving(true);
+    setSaveMessage("");
+    try {
+      // Clean up the player's own evaluations subcollection first — leaving
+      // it behind would keep counting toward site-wide averages via
+      // collectionGroup(db, "evaluations") queries elsewhere in the admin
+      // panel even after the player itself is gone.
+      const evalSnap = await getDocs(collection(db, "players", selectedPlayer.id, "evaluations"));
+      await Promise.all(evalSnap.docs.map((d) => deleteDoc(d.ref)));
+
+      await deleteDoc(doc(db, "players", selectedPlayer.id));
+      setAllPlayers((prev) => prev.filter((p) => p.id !== selectedPlayer.id));
+      setSelectedPlayer(null);
+      setFormState(null);
+      setConfirmDelete(false);
+      setSaveMessage("");
+    } catch (e) {
+      console.error("Admin player delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -735,22 +801,120 @@ function PlayerDataSection() {
               </FieldRow>
             </FieldGroup>
 
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={{
-                width: "100%", marginTop: "16px",
-                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
-                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
-                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
-                opacity: saving ? 0.6 : 1,
-              }}
-            >
-              {saving ? "Saving..." : isNew ? "Create Player" : "Save Changes"}
-            </button>
+            {duplicateMatches && duplicateMatches.length > 0 ? (
+              <div style={{ marginTop: "16px", border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                  ⚠ Possible Duplicate — {duplicateMatches.length} existing player{duplicateMatches.length !== 1 ? "s" : ""} named "{formState.First} {formState.Last}"
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
+                  {duplicateMatches.map((m) => (
+                    <div key={m.id} style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+                      {m.Position || "—"} · {m.School || "—"} · {m.Eligible || "—"}
+                      {m.Slug && (
+                        <a
+                          href={"/player/" + m.Slug} target="_blank" rel="noopener noreferrer"
+                          style={{ marginLeft: "8px", color: BLUE, fontWeight: 900, textDecoration: "none" }}
+                        >
+                          View ↗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => setDuplicateMatches(null)}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSave(true)}
+                    disabled={saving}
+                    style={{
+                      flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                      opacity: saving ? 0.6 : 1,
+                    }}
+                  >
+                    {saving ? "Creating..." : "Yes, Create Anyway"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleSave()}
+                disabled={saving}
+                style={{
+                  width: "100%", marginTop: "16px",
+                  background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                  borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >
+                {saving ? "Saving..." : isNew ? "Create Player" : "Save Changes"}
+              </button>
+            )}
             {saveMessage && (
               <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") || saveMessage.includes("required") || saveMessage.includes("already in use") ? "#c0392b" : "#2e7d32" }}>
                 {saveMessage}
+              </div>
+            )}
+
+            {!isNew && (
+              <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+                {confirmDelete ? (
+                  <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                    <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                      ⚠ Permanently delete {(selectedPlayer.First || "") + " " + (selectedPlayer.Last || "")}?
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                      This removes the player record and their evaluations, and cannot be undone.
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        onClick={() => setConfirmDelete(false)}
+                        disabled={removing}
+                        style={{
+                          flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={removing}
+                        style={{
+                          flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                          opacity: removing ? 0.6 : 1,
+                        }}
+                      >
+                        {removing ? "Deleting..." : "Yes, Delete Permanently"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    style={{
+                      width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    Delete Player
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1041,6 +1205,91 @@ const toMs = (ts) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
+const RANGE_OPTIONS = [
+  { days: 7, label: "7D" },
+  { days: 30, label: "30D" },
+  { days: 90, label: "90D" },
+  { days: 365, label: "1Y" },
+];
+
+// Same four rolling windows as RANGE_OPTIONS plus an "All Time" choice —
+// used by the Players & Evaluations table, which (unlike the chart above)
+// has a real all-time figure to fall back on for both evals and views.
+// `days: null` is the sentinel for that no-cutoff case.
+const TABLE_RANGE_OPTIONS = [
+  { days: 7, label: "7D" },
+  { days: 30, label: "30D" },
+  { days: 90, label: "90D" },
+  { days: 365, label: "1Y" },
+  { days: null, label: "All Time" },
+];
+
+// Maps a TABLE_RANGE_OPTIONS.days value to the matching field on
+// analytics/{slug}.pageViews, written by scripts/syncGoogleAnalytics.js.
+const VIEW_FIELD_BY_RANGE_DAYS = {
+  7: "last7Days",
+  30: "last30Days",
+  90: "last90Days",
+  365: "lastYear",
+};
+
+// Buckets a list of ms timestamps into one count per day over the last
+// `rangeDays` days (oldest first) — shared by every daily bar chart below.
+function bucketDaily(msList, rangeDays) {
+  const buckets = new Map();
+  for (let i = rangeDays - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    buckets.set(d.getTime(), 0);
+  }
+  msList.forEach((ms) => {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    const key = d.getTime();
+    if (buckets.has(key)) buckets.set(key, buckets.get(key) + 1);
+  });
+  return Array.from(buckets.entries()).map(([ts, count]) => ({ ts, count }));
+}
+
+function DailyBarChart({ dailyCounts, rangeDays, loading, color, emptyLabel, unitLabel }) {
+  const maxCount = Math.max(1, ...dailyCounts.map((d) => d.count));
+  return (
+    <div style={{ padding: "20px 16px" }}>
+      {loading ? (
+        <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+      ) : dailyCounts.every((d) => d.count === 0) ? (
+        <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+          {emptyLabel}
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "flex-end", gap: rangeDays > 30 ? "1px" : "3px", height: "160px" }}>
+          {dailyCounts.map((d) => {
+            const h = Math.max(2, (d.count / maxCount) * 150);
+            const dateLabel = new Date(d.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+            return (
+              <div
+                key={d.ts}
+                title={dateLabel + ": " + d.count + " " + unitLabel + (d.count !== 1 ? "s" : "")}
+                style={{
+                  flex: 1, height: h + "px", background: color, borderRadius: "2px 2px 0 0",
+                  minWidth: rangeDays > 60 ? "2px" : "4px",
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+      {!loading && dailyCounts.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "10px", fontWeight: 700, color: "#aaa" }}>
+          <span>{new Date(dailyCounts[0].ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+          <span>{new Date(dailyCounts[dailyCounts.length - 1].ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function toDateInputValue(d) {
   if (!d) return "";
   const dateObj = d?.toDate ? d.toDate() : d instanceof Date ? d : new Date(d);
@@ -1048,7 +1297,14 @@ function toDateInputValue(d) {
   return dateObj.toISOString().slice(0, 10);
 }
 
-function PlayerSlugCombobox({ value, onChange, players }) {
+// ── Player lookup — search by name, connect by ID. Unlike the old
+// PlayerSlugCombobox this replaced, the input never displays or accepts the
+// connected value directly (an ID isn't something an admin would ever type
+// or recognize) — it holds its own search text, shows the selected player's
+// name when idle, and only ever calls onChange with a player's doc ID,
+// picked from the dropdown. No free-text fallback. ──
+function PlayerLookupCombobox({ playerId, onChange, players }) {
+  const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -1058,22 +1314,41 @@ function PlayerSlugCombobox({ value, onChange, players }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const q = (value || "").trim().toLowerCase();
+  const selected = players.find((p) => p.id === playerId) || null;
+  const displayValue = open ? query : (selected ? selected.First + " " + selected.Last : "");
+
+  const q = query.trim().toLowerCase();
   const filtered = (q
-    ? players.filter((p) => (p.First + " " + p.Last).toLowerCase().includes(q) || (p.Slug || "").toLowerCase().includes(q))
+    ? players.filter((p) => (p.First + " " + p.Last).toLowerCase().includes(q))
     : players
   ).slice(0, 8);
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <input
-        value={value}
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder="Type a name or paste a slug..."
-        autoComplete="off"
-        style={inputStyle}
-      />
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <input
+          value={displayValue}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
+          placeholder="Search player by name..."
+          autoComplete="off"
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        {selected && !open && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            title="Clear"
+            style={{
+              flexShrink: 0, width: "26px", height: "26px", borderRadius: "6px",
+              border: "2px solid #ddd", background: "#fff", color: "#999",
+              fontWeight: 900, fontSize: "13px", cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
       {open && filtered.length > 0 && (
         <div style={{
           position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
@@ -1082,15 +1357,15 @@ function PlayerSlugCombobox({ value, onChange, players }) {
         }}>
           {filtered.map((p) => (
             <div
-              key={p.Slug}
-              onClick={() => { onChange(p.Slug); setOpen(false); }}
+              key={p.id}
+              onClick={() => { onChange(p.id); setQuery(""); setOpen(false); }}
               style={{ padding: "8px 10px", cursor: "pointer" }}
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
               <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{p.First} {p.Last}</div>
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
-                {p.Position || "—"} · {p.School || "—"} · {p.Slug}
+                {p.Position || "—"} · {p.School || "—"}
               </div>
             </div>
           ))}
@@ -1100,7 +1375,7 @@ function PlayerSlugCombobox({ value, onChange, players }) {
   );
 }
 
-const BLANK_VIDEO_ITEM = { slug: "", title: "", thumb: "" };
+const BLANK_VIDEO_ITEM = { playerId: "", title: "", thumb: "" };
 
 function VideosSection() {
   const [videos, setVideos] = useState([]);
@@ -1112,6 +1387,8 @@ function VideosSection() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [migrating, setMigrating] = useState(false);
+  const [migrateMessage, setMigrateMessage] = useState("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1141,9 +1418,9 @@ function VideosSection() {
     fetchData();
   }, []);
 
-  const playersBySlug = useMemo(() => {
+  const playersById = useMemo(() => {
     const map = new Map();
-    allPlayers.forEach((p) => map.set(p.Slug, p));
+    allPlayers.forEach((p) => map.set(p.id, p));
     return map;
   }, [allPlayers]);
 
@@ -1154,7 +1431,10 @@ function VideosSection() {
     return (
       (v.GenTitle || "").toLowerCase().includes(q) ||
       (v.Video || "").toLowerCase().includes(q) ||
-      items.some((it) => (it.slug || "").toLowerCase().includes(q) || (it.title || "").toLowerCase().includes(q))
+      items.some((it) => {
+        const p = playersById.get(it.playerId);
+        return (p && (p.First + " " + p.Last).toLowerCase().includes(q)) || (it.title || "").toLowerCase().includes(q);
+      })
     );
   });
 
@@ -1167,7 +1447,7 @@ function VideosSection() {
       GenTitle: v.GenTitle || "",
       GenThumb: v.GenThumb || "",
       items: [0, 1, 2].map((i) => ({
-        slug: items[i]?.slug || "",
+        playerId: items[i]?.playerId || "",
         title: items[i]?.title || "",
         thumb: items[i]?.thumb || "",
       })),
@@ -1211,8 +1491,8 @@ function VideosSection() {
     setSaveMessage("");
     try {
       const cleanedItems = formState.items
-        .filter((it) => it.slug.trim())
-        .map((it) => ({ slug: it.slug.trim(), title: it.title.trim(), thumb: it.thumb.trim() }));
+        .filter((it) => it.playerId)
+        .map((it) => ({ playerId: it.playerId, title: it.title.trim(), thumb: it.thumb.trim() }));
 
       const payload = {
         Video: formState.Video.trim(),
@@ -1220,7 +1500,7 @@ function VideosSection() {
         GenTitle: formState.GenTitle.trim(),
         GenThumb: formState.GenThumb.trim(),
         items: cleanedItems,
-        slugs: cleanedItems.map((it) => it.slug),
+        playerIds: cleanedItems.map((it) => it.playerId),
         updatedAt: serverTimestamp(),
       };
 
@@ -1265,6 +1545,64 @@ function VideosSection() {
     }
   };
 
+  // ── One-time migration for videos saved before the playerId schema —
+  // resolves each legacy item's `slug` against the currently-loaded player
+  // list and rewrites `items`/`playerIds` in place. Additive only: the old
+  // `slugs` field on the doc is left untouched rather than deleted, and any
+  // doc whose slug no longer matches a real player (e.g. a since-deleted
+  // player) is skipped and reported rather than silently dropped. ──
+  const migrateLegacyVideos = async () => {
+    setMigrating(true);
+    setMigrateMessage("");
+    const slugToId = new Map(allPlayers.map((p) => [p.Slug, p.id]));
+    const unresolved = new Set();
+    let migratedCount = 0;
+    try {
+      const legacy = videos.filter((v) =>
+        !Array.isArray(v.playerIds) &&
+        Array.isArray(v.items) &&
+        v.items.some((it) => it.slug && !it.playerId)
+      );
+
+      for (const v of legacy) {
+        const items = v.items
+          .map((it) => {
+            if (it.playerId) return it;
+            const id = slugToId.get(it.slug);
+            if (!id) { if (it.slug) unresolved.add(it.slug); return null; }
+            return { playerId: id, title: it.title || "", thumb: it.thumb || "" };
+          })
+          .filter(Boolean);
+        if (items.length === 0) continue;
+        await updateDoc(doc(db, "videos", v.id), {
+          items,
+          playerIds: items.map((it) => it.playerId),
+          updatedAt: serverTimestamp(),
+        });
+        migratedCount++;
+      }
+
+      setVideos((prev) => prev.map((v) => {
+        const match = legacy.find((lv) => lv.id === v.id);
+        if (!match) return v;
+        const items = match.items
+          .map((it) => (it.playerId ? it : (slugToId.get(it.slug) ? { playerId: slugToId.get(it.slug), title: it.title || "", thumb: it.thumb || "" } : null)))
+          .filter(Boolean);
+        return items.length > 0 ? { ...v, items, playerIds: items.map((it) => it.playerId) } : v;
+      }));
+
+      setMigrateMessage(
+        migratedCount + " video" + (migratedCount !== 1 ? "s" : "") + " migrated to player IDs." +
+        (unresolved.size > 0 ? " Unresolved slugs (no matching player): " + Array.from(unresolved).join(", ") : "")
+      );
+    } catch (e) {
+      console.error("Admin video migration error:", e);
+      setMigrateMessage("Migration failed — check console.");
+    } finally {
+      setMigrating(false);
+    }
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
@@ -1273,9 +1611,22 @@ function VideosSection() {
             Videos
           </div>
           <button
+            onClick={migrateLegacyVideos}
+            disabled={migrating || loading}
+            title="Backfill playerIds on videos still using the old slug-only schema"
+            style={{
+              marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid #fff",
+              borderRadius: "6px", padding: "5px 11px", fontWeight: 900, fontSize: "11px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: migrating || loading ? "default" : "pointer",
+              opacity: migrating || loading ? 0.6 : 1,
+            }}
+          >
+            {migrating ? "Migrating..." : "Migrate Legacy Videos"}
+          </button>
+          <button
             onClick={startNewVideo}
             style={{
-              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              background: GOLD, color: "#fff", border: "none",
               borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
               textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
             }}
@@ -1288,10 +1639,16 @@ function VideosSection() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search title, URL, player name, or slug..."
+            placeholder="Search title, URL, or player name..."
             style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
           />
         </div>
+
+        {migrateMessage && (
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #eee", fontSize: "12px", fontWeight: 700, color: "#555" }}>
+            {migrateMessage}
+          </div>
+        )}
 
         {loading ? (
           <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
@@ -1336,10 +1693,22 @@ function VideosSection() {
                     {items.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
                         {items.map((it, i) => {
-                          const p = playersBySlug.get(it.slug);
+                          const p = playersById.get(it.playerId);
                           return (
-                            <span key={i} style={{ fontSize: "10px", fontWeight: 700, color: "#666", background: "#f0f0f0", borderRadius: "8px", padding: "1px 7px" }}>
-                              {p ? p.First + " " + p.Last : it.slug}
+                            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "10px", fontWeight: 700, color: "#666", background: "#f0f0f0", borderRadius: "8px", padding: "1px 7px" }}>
+                              {p ? p.First + " " + p.Last : "Unmigrated player"}
+                              {p?.Slug && (
+                                <a
+                                  href={"/player/" + p.Slug}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="Open player page in a new tab"
+                                  style={{ color: BLUE, textDecoration: "none", fontWeight: 900 }}
+                                >
+                                  ↗
+                                </a>
+                              )}
                             </span>
                           );
                         })}
@@ -1389,12 +1758,25 @@ function VideosSection() {
                   Player {i + 1}
                 </div>
                 <FieldGroup>
-                  <FieldRow label="Slug (search by name or paste directly)">
-                    <PlayerSlugCombobox
-                      value={formState.items[i].slug}
-                      onChange={(v) => handleItemChange(i, "slug", v)}
+                  <FieldRow label="Player">
+                    <PlayerLookupCombobox
+                      playerId={formState.items[i].playerId}
+                      onChange={(v) => handleItemChange(i, "playerId", v)}
                       players={allPlayers}
                     />
+                    {(() => {
+                      const p = playersById.get(formState.items[i].playerId);
+                      return p?.Slug ? (
+                        <a
+                          href={"/player/" + p.Slug}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ display: "inline-block", marginTop: "6px", fontSize: "11px", fontWeight: 800, color: BLUE, textDecoration: "none" }}
+                        >
+                          View player page ↗
+                        </a>
+                      ) : null;
+                    })()}
                   </FieldRow>
                   <FieldRow label="Title override">
                     <input value={formState.items[i].title} onChange={(e) => handleItemChange(i, "title", e.target.value)} placeholder="Shown on this player's page" style={inputStyle} />
@@ -1456,16 +1838,30 @@ function VideosSection() {
 // parent path (d.ref.parent.parent.id) rather than the stored playerId
 // field, since the path is correct even if that field is stale.
 //
-// This is reads only — no page-view/visit tracking exists yet, so
-// "Active Users" style traffic metrics aren't derivable from current data.
-// Everything below IS derivable from the players, evaluations, and users
-// collections as they exist today. Write tracking is a separate follow-up. ──
+// Page views come from the `analytics` collection — populated separately by
+// scripts/syncGoogleAnalytics.js (a daily GitHub Actions cron pulling from
+// GA4), keyed by player Slug. This section only reads it; it doesn't
+// trigger a sync. "Last synced" is the max updatedAt across all analytics
+// docs, so a stale/broken cron job is visible here rather than silent.
+//
+// Signups come from users/{uid}.createdAt, stamped by AuthContext.js at
+// first sign-in for every provider (including Google, which never wrote a
+// profile doc otherwise). Accounts created before that write existed won't
+// have createdAt and are excluded from the New Accounts chart rather than
+// miscounted.
+//
+// One chart panel, not two — chartMetric toggles which series (Evaluations
+// vs. New Accounts) DailyBarChart renders; both share the same rangeDays.
+// Page views aren't part of that toggle since the analytics docs only store
+// four fixed rolling windows (24h/7d/30d/total), not a daily-granularity
+// history, so there's no per-day series to plot. ──
 function AnalyticsSection() {
   const [rangeDays, setRangeDays] = useState(7);
+  const [chartMetric, setChartMetric] = useState("evaluations");
   const [loading, setLoading] = useState(true);
   const [allEvals, setAllEvals] = useState([]);
-  const [totalUsers, setTotalUsers] = useState(null);
-  const [totalPlayers, setTotalPlayers] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
+  const [pageViewTotals, setPageViewTotals] = useState({ last24: 0, last7: 0, last30: 0, total: 0, lastSyncedMs: 0, playerCount: 0 });
   const [fetchErrors, setFetchErrors] = useState([]);
 
   // ── Two evaluation copies exist per save: the canonical
@@ -1477,17 +1873,17 @@ function AnalyticsSection() {
   // collection two levels up from the doc — "players" for the canonical
   // copy, "users" for the mirror — so filtering on that keeps exactly one
   // copy per real evaluation. Promise.allSettled (not Promise.all) so one
-  // failing query doesn't blank out the other two — and the failure gets
-  // shown on screen instead of only logged to console. ──
+  // failing query doesn't blank out the others — and the failure gets shown
+  // on screen instead of only logged to console. ──
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
       setFetchErrors([]);
       const errors = [];
-      const [evalRes, usersRes, playersRes] = await Promise.allSettled([
+      const [evalRes, usersRes, analyticsRes] = await Promise.allSettled([
         getDocs(collectionGroup(db, "evaluations")),
         getDocs(collection(db, "users")),
-        getDocs(collection(db, "players")),
+        getDocs(collection(db, "analytics")),
       ]);
 
       if (evalRes.status === "fulfilled") {
@@ -1512,19 +1908,31 @@ function AnalyticsSection() {
       }
 
       if (usersRes.status === "fulfilled") {
-        setTotalUsers(usersRes.value.size);
+        const users = usersRes.value.docs.map((d) => ({ id: d.id, createdAtMs: toMs(d.data().createdAt) }));
+        setAllUsers(users);
       } else {
         console.error("Admin analytics users fetch error:", usersRes.reason);
-        setTotalUsers(null);
+        setAllUsers([]);
         errors.push("Users: " + (usersRes.reason?.message || "read failed."));
       }
 
-      if (playersRes.status === "fulfilled") {
-        setTotalPlayers(playersRes.value.size);
+      if (analyticsRes.status === "fulfilled") {
+        let last24 = 0, last7 = 0, last30 = 0, total = 0, lastSyncedMs = 0;
+        analyticsRes.value.docs.forEach((d) => {
+          const data = d.data();
+          const pv = data.pageViews || {};
+          last24 += Number(pv.last24Hours) || 0;
+          last7 += Number(pv.last7Days) || 0;
+          last30 += Number(pv.last30Days) || 0;
+          total += Number(pv.total) || 0;
+          const ms = toMs(data.updatedAt);
+          if (ms > lastSyncedMs) lastSyncedMs = ms;
+        });
+        setPageViewTotals({ last24, last7, last30, total, lastSyncedMs, playerCount: analyticsRes.value.docs.length });
       } else {
-        console.error("Admin analytics players fetch error:", playersRes.reason);
-        setTotalPlayers(null);
-        errors.push("Players: " + (playersRes.reason?.message || "read failed."));
+        console.error("Admin analytics page-views fetch error:", analyticsRes.reason);
+        setPageViewTotals({ last24: 0, last7: 0, last30: 0, total: 0, lastSyncedMs: 0, playerCount: 0 });
+        errors.push("Page Views: " + (analyticsRes.reason?.message || "read failed."));
       }
 
       setFetchErrors(errors);
@@ -1535,40 +1943,46 @@ function AnalyticsSection() {
 
   const cutoffMs = useMemo(() => Date.now() - rangeDays * 24 * 60 * 60 * 1000, [rangeDays]);
   const evalsInRange = useMemo(() => allEvals.filter((e) => e.updatedAtMs >= cutoffMs), [allEvals, cutoffMs]);
+  const signupsInRange = useMemo(() => allUsers.filter((u) => u.createdAtMs >= cutoffMs), [allUsers, cutoffMs]);
 
-  const totalEvaluations = allEvals.length;
-  const publicEvaluations = allEvals.filter((e) => e.visibility === "public").length;
   const activeEvaluators = useMemo(() => new Set(evalsInRange.map((e) => e.uid)).size, [evalsInRange]);
-  const playersWithEvals = useMemo(() => new Set(allEvals.map((e) => e.playerId).filter(Boolean)).size, [allEvals]);
-  const avgPerPlayer = playersWithEvals > 0 ? (totalEvaluations / playersWithEvals).toFixed(1) : "0";
+  const totalUsers = allUsers.length;
 
-  const dailyCounts = useMemo(() => {
-    const buckets = new Map();
-    for (let i = rangeDays - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - i);
-      buckets.set(d.getTime(), 0);
-    }
-    evalsInRange.forEach((e) => {
-      const d = new Date(e.updatedAtMs);
-      d.setHours(0, 0, 0, 0);
-      const key = d.getTime();
-      if (buckets.has(key)) buckets.set(key, buckets.get(key) + 1);
-    });
-    return Array.from(buckets.entries()).map(([ts, count]) => ({ ts, count }));
-  }, [evalsInRange, rangeDays]);
-
-  const maxCount = Math.max(1, ...dailyCounts.map((d) => d.count));
+  const evalDailyCounts = useMemo(
+    () => bucketDaily(evalsInRange.map((e) => e.updatedAtMs), rangeDays),
+    [evalsInRange, rangeDays]
+  );
+  const signupDailyCounts = useMemo(
+    () => bucketDaily(signupsInRange.map((u) => u.createdAtMs), rangeDays),
+    [signupsInRange, rangeDays]
+  );
 
   const STAT_CARDS = [
-    { label: "Total Evaluations", value: totalEvaluations },
-    { label: "Public Evaluations", value: publicEvaluations },
     { label: "Active Evaluators", value: activeEvaluators, sub: "last " + rangeDays + "d" },
-    { label: "Players Evaluated", value: totalPlayers != null ? (playersWithEvals + " / " + totalPlayers) : playersWithEvals },
-    { label: "Avg Evals / Player", value: avgPerPlayer },
-    { label: "Registered Users", value: totalUsers != null ? totalUsers : "—" },
+    { label: "New Accounts", value: signupsInRange.length, sub: "last " + rangeDays + "d" },
+    { label: "Registered Users", value: totalUsers },
   ];
+
+  const rangeLabel = (RANGE_OPTIONS.find((o) => o.days === rangeDays) || {}).label || rangeDays + "d";
+
+  const CHART_METRICS = [
+    {
+      key: "evaluations", label: "Evaluations", title: "Evaluations Saved", color: BLUE,
+      unitLabel: "evaluation", emptyLabel: "No evaluations saved in this range yet.",
+      dailyCounts: evalDailyCounts,
+    },
+    {
+      key: "signups", label: "New Accounts", title: "New Accounts", color: "#2e7d32",
+      unitLabel: "signup", emptyLabel: "No new accounts in this range yet.",
+      dailyCounts: signupDailyCounts,
+    },
+  ];
+  const activeMetric = CHART_METRICS.find((m) => m.key === chartMetric) || CHART_METRICS[0];
+
+  const lastSyncedLabel = pageViewTotals.lastSyncedMs > 0
+    ? new Date(pageViewTotals.lastSyncedMs).toLocaleString()
+    : "Never synced";
+  const syncIsStale = pageViewTotals.lastSyncedMs > 0 && (Date.now() - pageViewTotals.lastSyncedMs) > 36 * 60 * 60 * 1000; // >36h old
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -1581,20 +1995,20 @@ function AnalyticsSection() {
             Analytics
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
-            {[7, 30, 90].map((d) => (
+            {RANGE_OPTIONS.map((opt) => (
               <button
-                key={d}
-                onClick={() => setRangeDays(d)}
+                key={opt.days}
+                onClick={() => setRangeDays(opt.days)}
                 style={{
                   padding: "6px 14px", fontWeight: 900, fontSize: "12px",
                   textTransform: "uppercase", letterSpacing: "0.04em",
                   border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
-                  background: rangeDays === d ? GOLD : "transparent",
+                  background: rangeDays === opt.days ? GOLD : "transparent",
                   color: "#fff",
                   whiteSpace: "nowrap", transition: "background 0.15s",
                 }}
               >
-                {d}d
+                {opt.label}
               </button>
             ))}
           </div>
@@ -1602,7 +2016,7 @@ function AnalyticsSection() {
         <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontSize: "12px", fontWeight: 700, color: "#999" }}>
           {loading
             ? "Loading live numbers from Firestore…"
-            : "Read-only — pulled from the players, evaluations, and users collections. No page-view/visit tracking exists yet."}
+            : "Read-only — pulled from the evaluations, users, and analytics collections."}
         </div>
 
         {!loading && fetchErrors.length > 0 && (
@@ -1635,44 +2049,75 @@ function AnalyticsSection() {
         </div>
       </div>
 
-      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
-        <div style={{ background: GOLD, padding: "10px 16px" }}>
-          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Evaluations Saved — Last {rangeDays} Days
+      {/* ── Page Views (Google Analytics, via analytics/{slug}) ── */}
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Page Views
+          </div>
+          <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Google Analytics
           </div>
         </div>
-        <div style={{ padding: "20px 16px" }}>
-          {loading ? (
-            <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
-          ) : dailyCounts.every((d) => d.count === 0) ? (
-            <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
-              No evaluations saved in this range yet.
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "flex-end", gap: rangeDays > 30 ? "1px" : "3px", height: "160px" }}>
-              {dailyCounts.map((d) => {
-                const h = Math.max(2, (d.count / maxCount) * 150);
-                const dateLabel = new Date(d.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                return (
-                  <div
-                    key={d.ts}
-                    title={dateLabel + ": " + d.count + " evaluation" + (d.count !== 1 ? "s" : "")}
-                    style={{
-                      flex: 1, height: h + "px", background: BLUE, borderRadius: "2px 2px 0 0",
-                      minWidth: rangeDays > 60 ? "2px" : "4px",
-                    }}
-                  />
-                );
-              })}
-            </div>
-          )}
-          {!loading && dailyCounts.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "10px", fontWeight: 700, color: "#aaa" }}>
-              <span>{new Date(dailyCounts[0].ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-              <span>{new Date(dailyCounts[dailyCounts.length - 1].ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-            </div>
-          )}
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", fontSize: "12px", fontWeight: 700, color: syncIsStale ? "#a52a1e" : "#999" }}>
+          {loading
+            ? "Loading…"
+            : "Last synced: " + lastSyncedLabel + (syncIsStale ? " — sync may be stale, check the GitHub Actions cron." : "") + " · " + pageViewTotals.playerCount + " player page" + (pageViewTotals.playerCount !== 1 ? "s" : "") + " tracked"}
         </div>
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: "1px", background: "#eee",
+        }}>
+          {[
+            { label: "Views (24h)", value: pageViewTotals.last24 },
+            { label: "Views (7d)", value: pageViewTotals.last7 },
+            { label: "Views (30d)", value: pageViewTotals.last30 },
+            { label: "Views (All-Time)", value: pageViewTotals.total },
+          ].map((card) => (
+            <div key={card.label} style={{ background: "#fff", padding: "16px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>
+                {card.label}
+              </div>
+              <div style={{ fontSize: "22px", fontWeight: 900, color: BLUE }}>
+                {loading ? "—" : card.value.toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {activeMetric.title} — {rangeLabel}
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+            {CHART_METRICS.map((m) => (
+              <button
+                key={m.key}
+                onClick={() => setChartMetric(m.key)}
+                style={{
+                  padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                  border: "2px solid #fff", borderRadius: "20px", cursor: "pointer",
+                  background: chartMetric === m.key ? "#fff" : "transparent",
+                  color: chartMetric === m.key ? GOLD : "#fff",
+                  whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <DailyBarChart
+          dailyCounts={activeMetric.dailyCounts}
+          rangeDays={rangeDays}
+          loading={loading}
+          color={activeMetric.color}
+          unitLabel={activeMetric.unitLabel}
+          emptyLabel={activeMetric.emptyLabel}
+        />
       </div>
 
       <PlayerEvaluationsTable />
@@ -1684,11 +2129,14 @@ function AnalyticsSection() {
 // (search, School dropdown, Eligible Year, Position bar; 2026 excluded by
 // default), but read-only and joined against a per-player evaluation
 // summary instead of an edit form. Same join-key reasoning as
-// AnalyticsSection above (d.ref.parent.parent.id). Columns are sortable
-// by clicking the header. ──
+// AnalyticsSection above (d.ref.parent.parent.id). Page views are joined
+// separately by Slug against the analytics collection — same field the
+// public site's /player/{slug} route and the sync script both key off of.
+// Columns are sortable by clicking the header. ──
 function PlayerEvaluationsTable() {
   const [allPlayers, setAllPlayers] = useState([]);
-  const [statsByPlayer, setStatsByPlayer] = useState(new Map());
+  const [allEvals, setAllEvals] = useState([]);
+  const [pageViewsBySlug, setPageViewsBySlug] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedYears, setSelectedYears] = useState([]);
@@ -1698,6 +2146,7 @@ function PlayerEvaluationsTable() {
   const [sortKey, setSortKey] = useState("count");
   const [sortDir, setSortDir] = useState("desc");
   const [fetchErrors, setFetchErrors] = useState([]);
+  const [rangeDays, setRangeDays] = useState(null); // null = All Time
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -1717,17 +2166,18 @@ function PlayerEvaluationsTable() {
   // mirrored users/{uid}/evaluations/{playerId} doc, both collections named
   // "evaluations" — collectionGroup() returns both unless filtered down to
   // the players-rooted copy via d.ref.parent.parent.parent.id. Promise
-  // .allSettled so a failed evaluations read still lets the player list
-  // render (with zeroed stats) instead of blanking the whole table, and the
+  // .allSettled so a failed read on any one of the three sources still lets
+  // the other two render instead of blanking the whole table, and each
   // failure is shown on screen rather than only logged. ──
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
       setFetchErrors([]);
       const errors = [];
-      const [playersRes, evalRes] = await Promise.allSettled([
+      const [playersRes, evalRes, analyticsRes] = await Promise.allSettled([
         getDocs(collection(db, "players")),
         getDocs(collectionGroup(db, "evaluations")),
+        getDocs(collection(db, "analytics")),
       ]);
 
       if (playersRes.status === "fulfilled") {
@@ -1741,26 +2191,36 @@ function PlayerEvaluationsTable() {
       }
 
       if (evalRes.status === "fulfilled") {
-        const map = new Map();
-        evalRes.value.docs
+        const evals = evalRes.value.docs
           .filter((d) => d.ref.parent?.parent?.parent?.id === "players")
-          .forEach((d) => {
+          .map((d) => {
             const data = d.data();
-            const playerId = data.playerId || d.ref.parent.parent?.id;
-            if (!playerId) return;
-            const entry = map.get(playerId) || { count: 0, publicCount: 0, grades: [], lastUpdatedMs: 0 };
-            entry.count += 1;
-            if ((data.visibility || "public") === "public") entry.publicCount += 1;
-            if (data.grade && gradeScale[data.grade] != null) entry.grades.push(gradeScale[data.grade]);
-            const ms = toMs(data.updatedAt);
-            if (ms > entry.lastUpdatedMs) entry.lastUpdatedMs = ms;
-            map.set(playerId, entry);
+            const playerId = data.playerId || d.ref.parent.parent?.id || null;
+            return {
+              playerId,
+              visibility: data.visibility || "public",
+              grade: data.grade || "",
+              updatedAtMs: toMs(data.updatedAt),
+            };
           });
-        setStatsByPlayer(map);
+        setAllEvals(evals);
       } else {
         console.error("Admin player-evaluations evaluations fetch error:", evalRes.reason);
-        setStatsByPlayer(new Map());
+        setAllEvals([]);
         errors.push("Evaluations: " + (evalRes.reason?.message || "read failed — likely missing a Firestore rule for collection-group reads on \"evaluations\"."));
+      }
+
+      if (analyticsRes.status === "fulfilled") {
+        const map = new Map();
+        analyticsRes.value.docs.forEach((d) => {
+          const data = d.data();
+          map.set(d.id, data.pageViews || { last24Hours: 0, last7Days: 0, last30Days: 0, last90Days: 0, lastYear: 0, total: 0 });
+        });
+        setPageViewsBySlug(map);
+      } else {
+        console.error("Admin player-evaluations page-views fetch error:", analyticsRes.reason);
+        setPageViewsBySlug(new Map());
+        errors.push("Page Views: " + (analyticsRes.reason?.message || "read failed."));
       }
 
       setFetchErrors(errors);
@@ -1784,6 +2244,31 @@ function PlayerEvaluationsTable() {
       return ai - bi;
     });
   }, [allPlayers, selectedYears]);
+
+  // rangeDays === null is "All Time" — no cutoff, every evaluation counts.
+  const cutoffMs = useMemo(
+    () => (rangeDays == null ? 0 : Date.now() - rangeDays * 24 * 60 * 60 * 1000),
+    [rangeDays]
+  );
+  const viewField = rangeDays == null ? "total" : VIEW_FIELD_BY_RANGE_DAYS[rangeDays];
+
+  // Re-aggregated per player whenever the selected range changes, rather
+  // than once up front — Evals/Pub-Priv/Last-Updated all need to reflect
+  // only the evaluations that fall inside the chosen window.
+  const statsByPlayer = useMemo(() => {
+    const map = new Map();
+    allEvals.forEach((e) => {
+      if (!e.playerId) return;
+      if (e.updatedAtMs < cutoffMs) return;
+      const entry = map.get(e.playerId) || { count: 0, publicCount: 0, grades: [], lastUpdatedMs: 0 };
+      entry.count += 1;
+      if (e.visibility === "public") entry.publicCount += 1;
+      if (e.grade && gradeScale[e.grade] != null) entry.grades.push(gradeScale[e.grade]);
+      if (e.updatedAtMs > entry.lastUpdatedMs) entry.lastUpdatedMs = e.updatedAtMs;
+      map.set(e.playerId, entry);
+    });
+    return map;
+  }, [allEvals, cutoffMs]);
 
   const rows = useMemo(() => {
     const filtered = allPlayers.filter((p) => {
@@ -1811,6 +2296,12 @@ function PlayerEvaluationsTable() {
         ? stats.grades.reduce((a, b) => a + b, 0) / stats.grades.length
         : null;
       const avgGradeLabel = avgGrade != null ? gradeLabels[Math.round(avgGrade)] : null;
+      const pageViews = (p.Slug && pageViewsBySlug.get(p.Slug)) || null;
+      // Undefined (not 0) means this window hasn't been synced yet for this
+      // slug — e.g. last90Days/lastYear on analytics docs written before
+      // those fields existed — so it renders as "—" rather than a
+      // misleading zero.
+      const viewsRaw = pageViews ? pageViews[viewField] : null;
       return {
         ...p,
         evalCount: stats.count,
@@ -1818,6 +2309,7 @@ function PlayerEvaluationsTable() {
         privateCount: stats.count - stats.publicCount,
         avgGradeLabel,
         lastUpdatedMs: stats.lastUpdatedMs,
+        views: viewsRaw != null ? (Number(viewsRaw) || 0) : null,
       };
     });
 
@@ -1826,6 +2318,7 @@ function PlayerEvaluationsTable() {
       if (sortKey === "name") { av = a.Last || ""; bv = b.Last || ""; }
       else if (sortKey === "grade") { av = a.avgGradeLabel ? gradeScale[a.avgGradeLabel] : 99; bv = b.avgGradeLabel ? gradeScale[b.avgGradeLabel] : 99; }
       else if (sortKey === "updated") { av = a.lastUpdatedMs; bv = b.lastUpdatedMs; }
+      else if (sortKey === "views") { av = a.views ?? -1; bv = b.views ?? -1; }
       else { av = a.evalCount; bv = b.evalCount; }
       if (typeof av === "string") {
         const cmp = av.localeCompare(bv);
@@ -1835,7 +2328,7 @@ function PlayerEvaluationsTable() {
     });
 
     return withStats;
-  }, [allPlayers, statsByPlayer, selectedYears, selectedPositions, selectedSchools, searchQuery, sortKey, sortDir]);
+  }, [allPlayers, statsByPlayer, pageViewsBySlug, viewField, selectedYears, selectedPositions, selectedSchools, searchQuery, sortKey, sortDir]);
 
   const toggleSort = (key) => {
     if (sortKey === key) {
@@ -1845,6 +2338,8 @@ function PlayerEvaluationsTable() {
       setSortDir("desc");
     }
   };
+
+  const rangeLabel = (TABLE_RANGE_OPTIONS.find((o) => o.days === rangeDays) || {}).label || "All Time";
 
   const SortHeader = ({ label, sortId, align }) => (
     <th
@@ -1861,9 +2356,27 @@ function PlayerEvaluationsTable() {
 
   return (
     <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
-      <div style={{ background: BLUE, padding: "10px 16px" }}>
+      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
         <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
           Players &amp; Evaluations
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+          {TABLE_RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => setRangeDays(opt.days)}
+              style={{
+                padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                textTransform: "uppercase", letterSpacing: "0.04em",
+                border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+                background: rangeDays === opt.days ? GOLD : "transparent",
+                color: "#fff",
+                whiteSpace: "nowrap", transition: "background 0.15s",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1933,9 +2446,10 @@ function PlayerEvaluationsTable() {
                 <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>Pos</th>
                 <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>School</th>
                 <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>Year</th>
-                <SortHeader label="Evals" sortId="count" align="center" />
+                <SortHeader label={"Evals (" + rangeLabel + ")"} sortId="count" align="center" />
                 <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", whiteSpace: "nowrap" }}>Pub / Priv</th>
                 <SortHeader label="Avg Grade" sortId="grade" align="center" />
+                <SortHeader label={"Views (" + rangeLabel + ")"} sortId="views" align="center" />
                 <SortHeader label="Last Updated" sortId="updated" align="right" />
               </tr>
             </thead>
@@ -1974,6 +2488,9 @@ function PlayerEvaluationsTable() {
                         <span style={{ fontSize: "11px", color: "#ccc" }}>—</span>
                       )}
                     </td>
+                    <td style={{ padding: "9px 10px", fontSize: "13px", fontWeight: 900, color: p.views != null && p.views > 0 ? BLUE : "#ccc", textAlign: "center" }}>
+                      {p.views != null ? p.views.toLocaleString() : "—"}
+                    </td>
                     <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#999", textAlign: "right", whiteSpace: "nowrap" }}>
                       {p.lastUpdatedMs > 0 ? new Date(p.lastUpdatedMs).toLocaleDateString() : "—"}
                     </td>
@@ -1993,6 +2510,500 @@ const inputStyle = {
   padding: "8px 10px", fontWeight: 700, fontSize: "13px",
   outline: "none", boxSizing: "border-box", fontFamily: "inherit",
 };
+
+// ── Branding — logos & colors for CFB (schools) and NFL (nfl) teams. This
+// is both the lookup point for pulling brand assets to build graphics
+// (banners, social cards, etc.) and the place to fix them — edits write
+// straight to the same schools/{School} and nfl/{Abbreviation} docs every
+// public team page, player card, and draft graphic already reads from. ──
+const LEAGUE_CONFIG = {
+  cfb: {
+    label: "CFB",
+    collectionName: "schools",
+    nameField: "School",
+    subLabelField: "Mascot",
+    groupField: "Conference",
+    searchPlaceholder: "Search school, mascot, or conference...",
+  },
+  nfl: {
+    label: "NFL",
+    collectionName: "nfl",
+    nameField: "Team",
+    subLabelField: "City",
+    groupField: "Conference",
+    searchPlaceholder: "Search team, city, or conference...",
+  },
+};
+
+// Classic CSS checkerboard trick — lets a transparent-background logo PNG
+// be told apart from "no logo set" instead of both rendering as blank white.
+const CHECKER_BG = {
+  backgroundColor: "#fff",
+  backgroundImage:
+    "linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), " +
+    "linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%)",
+  backgroundSize: "12px 12px",
+  backgroundPosition: "0 0, 0 6px, 6px -6px, -6px 0px",
+};
+
+// Many of the logo URLs stored in schools/nfl are bare "imgur.com/xxx.png"
+// links — Imgur happily serves the raw image bytes from that host (that's
+// why the <img> previews render fine), but it caps that domain's
+// Access-Control-Allow-Origin to https://imgur.com itself, which blocks the
+// cross-origin canvas read a clipboard-image-copy needs. The i.imgur.com
+// CDN subdomain serves the identical bytes with a permissive CORS header,
+// so rewrite to it before fetching. No-op for every other host.
+function corsFriendlyImageUrl(url) {
+  return url.replace(/^(https?:\/\/)imgur\.com\//i, "$1i.imgur.com/");
+}
+
+// ── Draws a (possibly cross-origin) logo URL onto a canvas and exports it
+// as a PNG blob, so it can be written to the clipboard as actual image data
+// rather than just a URL string — the point being to paste straight into
+// Canva/Photoshop/etc. Requires the image host to serve CORS headers
+// (Access-Control-Allow-Origin); if it doesn't, the canvas comes back
+// "tainted" and toBlob throws a SecurityError, which the caller treats as a
+// normal copy failure rather than crashing. ──
+function loadImageAsPngBlob(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Canvas failed to export the image."));
+        }, "image/png");
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error("Image failed to load for clipboard copy."));
+    img.src = corsFriendlyImageUrl(url);
+  });
+}
+
+// `status` drives both the label and color: "idle" | "copying" | "copied" | "failed".
+function CopyButton({ onClick, disabled, status, idleLabel }) {
+  const isBusy = status === "copying";
+  const isSuccess = status === "copied";
+  const isError = status === "failed";
+  const label = isBusy ? "Copying…" : isSuccess ? "Copied ✓" : isError ? "Failed" : (idleLabel || "Copy");
+  const accent = isSuccess ? "#2e7d32" : isError ? "#c0392b" : null;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || isBusy}
+      style={{
+        flexShrink: 0, padding: "8px 12px", fontWeight: 900, fontSize: "11px",
+        textTransform: "uppercase", letterSpacing: "0.04em", cursor: (disabled || isBusy) ? "default" : "pointer",
+        border: "2px solid " + (accent || "#ddd"), borderRadius: "6px",
+        background: accent || "#fff", color: accent ? "#fff" : "#666",
+        opacity: disabled ? 0.5 : 1, whiteSpace: "nowrap", minWidth: "88px",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function LogoUrlField({ label, value, onChange, onCopy, copyStatus }) {
+  return (
+    <FieldRow label={label}>
+      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div style={{
+          flexShrink: 0, width: "52px", height: "52px", borderRadius: "6px",
+          border: "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center",
+          overflow: "hidden", ...CHECKER_BG,
+        }}>
+          {value ? (
+            <img
+              src={value} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+            />
+          ) : (
+            <span style={{ fontSize: "8px", color: "#bbb", fontWeight: 700, textAlign: "center" }}>No logo</span>
+          )}
+        </div>
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://..."
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <CopyButton onClick={onCopy} disabled={!value} status={copyStatus} idleLabel="Copy Image" />
+      </div>
+      {copyStatus === "failed" && (
+        <div style={{ fontSize: "10px", fontWeight: 700, color: "#c0392b", marginTop: "5px" }}>
+          Couldn't copy the image directly (often a cross-origin restriction from the image host) —
+          right-click the preview thumbnail above and choose "Copy image" instead.
+        </div>
+      )}
+    </FieldRow>
+  );
+}
+
+function ColorHexField({ label, value, onChange, onCopy, copied }) {
+  const pickerValue = /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#000000";
+  return (
+    <FieldRow label={label}>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <input
+          type="color"
+          value={pickerValue}
+          onChange={(e) => onChange(e.target.value)}
+          title="Pick a color"
+          style={{ width: "40px", height: "36px", flexShrink: 0, border: "2px solid #ddd", borderRadius: "6px", padding: "2px", cursor: "pointer", background: "#fff" }}
+        />
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="#000000"
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <CopyButton onClick={onCopy} disabled={!value} status={copied ? "copied" : "idle"} idleLabel="Copy" />
+      </div>
+    </FieldRow>
+  );
+}
+
+function BrandingSection() {
+  const [league, setLeague] = useState("cfb");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", gap: "8px" }}>
+        {Object.entries(LEAGUE_CONFIG).map(([key, cfg]) => (
+          <button
+            key={key}
+            onClick={() => setLeague(key)}
+            style={{
+              padding: "9px 22px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.06em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: league === key ? BLUE : "#fff",
+              color: league === key ? "#fff" : BLUE,
+            }}
+          >
+            {cfg.label}
+          </button>
+        ))}
+      </div>
+      {/* key={league} forces a clean remount on toggle rather than trying to
+          reuse fetch/selection state across two entirely different collections. */}
+      <TeamBrandingPane key={league} league={league} />
+    </div>
+  );
+}
+
+function TeamBrandingPane({ league }) {
+  const cfg = LEAGUE_CONFIG[league];
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedGroups, setSelectedGroups] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState(null);
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [copiedField, setCopiedField] = useState("");
+  const [logoCopyStatus, setLogoCopyStatus] = useState({});
+
+  useEffect(() => {
+    const fetchTeams = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, cfg.collectionName));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data.sort((a, b) => (a[cfg.nameField] || "").localeCompare(b[cfg.nameField] || ""));
+        setTeams(data);
+      } catch (e) {
+        console.error("Admin branding fetch error (" + league + "):", e);
+        setTeams([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchTeams();
+  }, [league, cfg.collectionName, cfg.nameField]);
+
+  const groupOptions = useMemo(() => {
+    const set = [...new Set(teams.map((t) => t[cfg.groupField]).filter(Boolean))];
+    return set.sort();
+  }, [teams, cfg.groupField]);
+
+  const filtered = useMemo(() => {
+    return teams.filter((t) => {
+      if (selectedGroups.length > 0 && !selectedGroups.includes(t[cfg.groupField])) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const matches =
+          (t[cfg.nameField] || "").toLowerCase().includes(q) ||
+          (t[cfg.subLabelField] || "").toLowerCase().includes(q) ||
+          (t[cfg.groupField] || "").toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [teams, selectedGroups, searchQuery, cfg]);
+
+  const selectTeam = (t) => {
+    setSelectedTeam(t);
+    setFormState({
+      Logo1: t.Logo1 || "",
+      Logo2: t.Logo2 || "",
+      Color1: t.Color1 || BLUE,
+      Color2: t.Color2 || GOLD,
+    });
+    setSaveMessage("");
+    setCopiedField("");
+    setLogoCopyStatus({});
+  };
+
+  const handleFieldChange = (field, value) => {
+    setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleCopy = async (field, value) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField((f) => (f === field ? "" : f)), 1500);
+    } catch (e) {
+      console.error("Clipboard copy failed:", e);
+    }
+  };
+
+  // ── Copies the actual logo pixels (not the URL) so it can be pasted
+  // straight into a graphics tool. navigator.clipboard.write() is called
+  // synchronously (with a pending Promise<Blob> as the value) rather than
+  // after an awaited fetch, since some browsers only honor clipboard writes
+  // that happen within the original click's user-activation window. ──
+  const handleCopyImage = (field, url) => {
+    if (!url) return;
+    setLogoCopyStatus((prev) => ({ ...prev, [field]: "copying" }));
+    let clipboardPromise;
+    try {
+      clipboardPromise = navigator.clipboard.write([
+        new window.ClipboardItem({ "image/png": loadImageAsPngBlob(url) }),
+      ]);
+    } catch (e) {
+      clipboardPromise = Promise.reject(e);
+    }
+    clipboardPromise
+      .then(() => setLogoCopyStatus((prev) => ({ ...prev, [field]: "copied" })))
+      .catch((e) => {
+        console.error("Copy image to clipboard failed:", e);
+        setLogoCopyStatus((prev) => ({ ...prev, [field]: "failed" }));
+      })
+      .finally(() => {
+        setTimeout(() => {
+          setLogoCopyStatus((prev) => (prev[field] === "copying" ? prev : { ...prev, [field]: "idle" }));
+        }, 2400);
+      });
+  };
+
+  const handleSave = async () => {
+    if (!selectedTeam || !formState) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        Logo1: formState.Logo1.trim(),
+        Logo2: formState.Logo2.trim(),
+        Color1: formState.Color1.trim(),
+        Color2: formState.Color2.trim(),
+        updatedAt: serverTimestamp(),
+      };
+      await updateDoc(doc(db, cfg.collectionName, selectedTeam.id), payload);
+      setTeams((prev) => prev.map((t) => (t.id === selectedTeam.id ? { ...t, ...payload } : t)));
+      setSelectedTeam((prev) => (prev ? { ...prev, ...payload } : prev));
+      setSaveMessage("Saved.");
+    } catch (e) {
+      console.error("Admin branding save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {cfg.label} Teams
+          </div>
+        </div>
+
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={cfg.searchPlaceholder}
+            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+          />
+          <DropdownChecklist title="Conference" options={groupOptions} selected={selectedGroups} setSelected={setSelectedGroups} />
+        </div>
+
+        {loading ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No teams match.</div>
+        ) : (
+          <div style={{ maxHeight: "640px", overflowY: "auto" }}>
+            <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+              {filtered.length} team{filtered.length !== 1 ? "s" : ""}
+            </div>
+            {filtered.map((t) => {
+              const isSelected = selectedTeam?.id === t.id;
+              const c1 = t.Color1 || "#ccc";
+              const c2 = t.Color2 || "#eee";
+              return (
+                <div
+                  key={t.id}
+                  onClick={() => selectTeam(t)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "12px",
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{
+                    flexShrink: 0, width: "40px", height: "40px", borderRadius: "8px",
+                    background: c1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                  }}>
+                    {t.Logo1 ? (
+                      <img src={t.Logo1} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ color: "#fff", fontWeight: 900, fontSize: "14px" }}>{(t[cfg.nameField] || "?").charAt(0)}</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {t[cfg.nameField] || "Untitled"}
+                    </div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {[t[cfg.subLabelField], t[cfg.groupField]].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                    <div title={"Color 1: " + c1} style={{ width: "16px", height: "16px", borderRadius: "50%", background: c1, border: "1px solid rgba(0,0,0,0.15)" }} />
+                    <div title={"Color 2: " + c2} style={{ width: "16px", height: "16px", borderRadius: "50%", background: c2, border: "1px solid rgba(0,0,0,0.15)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {selectedTeam ? (selectedTeam[cfg.nameField] || "Edit Team") : "Select a Team"}
+          </div>
+        </div>
+
+        {!selectedTeam || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a team from the list to view and edit its logos and colors.
+          </div>
+        ) : (
+          <div style={{ padding: "16px", maxHeight: "760px", overflowY: "auto" }}>
+            <div style={{ marginBottom: "18px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+                Graphic Preview
+              </div>
+              <div style={{ borderRadius: "10px", overflow: "hidden", border: "2px solid #eee" }}>
+                <div style={{
+                  background: /^#[0-9a-fA-F]{3,8}$/.test(formState.Color1) ? formState.Color1 : BLUE,
+                  padding: "24px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
+                }}>
+                  <div style={{
+                    width: "64px", height: "64px", borderRadius: "50%", background: "#fff",
+                    display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                  }}>
+                    {formState.Logo1 ? (
+                      <img src={formState.Logo1} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ color: "#ccc", fontWeight: 900, fontSize: "20px" }}>?</span>
+                    )}
+                  </div>
+                  <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>
+                    {selectedTeam[cfg.nameField]}
+                  </div>
+                </div>
+                <div style={{ height: "6px", background: /^#[0-9a-fA-F]{3,8}$/.test(formState.Color2) ? formState.Color2 : GOLD }} />
+              </div>
+            </div>
+
+            <FieldGroup>
+              <LogoUrlField
+                label="Logo 1 (Primary)"
+                value={formState.Logo1}
+                onChange={(v) => handleFieldChange("Logo1", v)}
+                onCopy={() => handleCopyImage("Logo1", formState.Logo1)}
+                copyStatus={logoCopyStatus.Logo1 || "idle"}
+              />
+              <LogoUrlField
+                label="Logo 2 (Secondary / Alt)"
+                value={formState.Logo2}
+                onChange={(v) => handleFieldChange("Logo2", v)}
+                onCopy={() => handleCopyImage("Logo2", formState.Logo2)}
+                copyStatus={logoCopyStatus.Logo2 || "idle"}
+              />
+              <ColorHexField
+                label="Color 1 (Primary)"
+                value={formState.Color1}
+                onChange={(v) => handleFieldChange("Color1", v)}
+                onCopy={() => handleCopy("Color1", formState.Color1)}
+                copied={copiedField === "Color1"}
+              />
+              <ColorHexField
+                label="Color 2 (Secondary)"
+                value={formState.Color2}
+                onChange={(v) => handleFieldChange("Color2", v)}
+                onCopy={() => handleCopy("Color2", formState.Color2)}
+                copied={copiedField === "Color2"}
+              />
+            </FieldGroup>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%", marginTop: "18px",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function FieldGroup({ children }) {
   return <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>{children}</div>;
@@ -2040,6 +3051,7 @@ export default function AdminPanel() {
             {activeSection === "trends" && <TrendsSection />}
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
+            {activeSection === "branding" && <BrandingSection />}
             {activeSection === "content" && <ComingSoonPane label="Content Management" />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
