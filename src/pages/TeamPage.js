@@ -1164,21 +1164,21 @@ export default function TeamPage() {
           setHistoricalPlayers([]);
         }
 
-        // Videos — roster slugs are every player from Prospects (2027-2029) plus
+        // Videos — roster IDs are every player from Prospects (2027-2029) plus
         // the drafted 2026 archive class. Firestore caps array-contains-any at 10
         // values per query, so chunk the roster into groups of 10 and merge results.
         try {
-          const rosterSlugs = new Set();
-          Object.values(prospectResults).forEach((arr) => arr.forEach((p) => { if (p.Slug) rosterSlugs.add(p.Slug); }));
-          archivePlrs.forEach((p) => { if (p.Slug) rosterSlugs.add(p.Slug); });
+          const rosterIds = new Set();
+          Object.values(prospectResults).forEach((arr) => arr.forEach((p) => { if (p.id) rosterIds.add(p.id); }));
+          archivePlrs.forEach((p) => { if (p.id) rosterIds.add(p.id); });
 
-          const slugArray = Array.from(rosterSlugs);
-          if (slugArray.length > 0) {
+          const idArray = Array.from(rosterIds);
+          if (idArray.length > 0) {
             const chunks = [];
-            for (let i = 0; i < slugArray.length; i += 10) chunks.push(slugArray.slice(i, i + 10));
+            for (let i = 0; i < idArray.length; i += 10) chunks.push(idArray.slice(i, i + 10));
 
             const chunkSnaps = await Promise.all(
-              chunks.map((chunk) => getDocs(query(collection(db, "videos"), where("slugs", "array-contains-any", chunk))))
+              chunks.map((chunk) => getDocs(query(collection(db, "videos"), where("playerIds", "array-contains-any", chunk))))
             );
 
             const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
@@ -1191,8 +1191,8 @@ export default function TeamPage() {
                 const data = d.data();
                 const items = Array.isArray(data.items) ? data.items : [];
                 // Prefer whichever item belongs to a player on this roster; fall
-                // back to items[0] (Slug1) per-field, same pattern as the player page.
-                const matched = items.find((it) => rosterSlugs.has(it.slug)) || null;
+                // back to items[0] per-field, same pattern as the player page.
+                const matched = items.find((it) => rosterIds.has(it.playerId)) || null;
                 const first = items[0] || null;
                 vids.push({
                   id: d.id,
@@ -1264,11 +1264,20 @@ export default function TeamPage() {
     </div>
   );
 
-  const pageTitle = school?.Mascot
-    ? `${canonicalSchool} ${school.Mascot} Draft Prospects | We-Draft.com`
-    : `${canonicalSchool} Draft Prospects | We-Draft.com`;
+  const teamLabel = school?.Mascot ? `${canonicalSchool} ${school.Mascot}` : canonicalSchool;
 
-  const pageDescription = `View ${canonicalSchool}'s NFL Draft prospects. View draft history, write player evaluations, and create your own draft board on We-Draft.com.`;
+  const pageTitle = `${teamLabel} Draft Prospects | Individual Player Scouting Reports`;
+
+  // ── Keyword coverage for the meta description: draft-class years actually
+  // present, plus the distinct positions among this team's prospects (e.g.
+  // "QB, WR, EDGE") — both pulled from already-loaded data rather than
+  // hardcoded, so the description stays accurate as rosters change. ──
+  const allProspectsFlat = PROSPECT_YEARS.flatMap((yr) => prospects[yr] || []);
+  const prospectPositions = [...new Set(allProspectsFlat.map((p) => p.Position).filter(Boolean))];
+  const yearsWithProspects = PROSPECT_YEARS.filter((yr) => (prospects[yr]?.length || 0) > 0);
+  const draftClassesLabel = yearsWithProspects.length > 0 ? yearsWithProspects.join(", ") : PROSPECT_YEARS.join(", ");
+
+  const pageDescription = `${teamLabel} NFL Draft prospects — scouting reports, community grades, and mock draft projections for every ${canonicalSchool} prospect in the ${draftClassesLabel} draft classes${prospectPositions.length > 0 ? `, including ${prospectPositions.join(", ")} evaluations` : ""}. Plus ${canonicalSchool} draft history back to 2000 — free on We-Draft.com.`;
 
   const ConferenceSidebar = (
     <SidebarCard
@@ -1621,14 +1630,34 @@ export default function TeamPage() {
       <Helmet>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
+        <meta name="keywords" content={[
+          `${canonicalSchool} NFL Draft prospects`,
+          `${teamLabel} scouting reports`,
+          `${canonicalSchool} draft grades`,
+          "college football draft prospects",
+          "NFL mock draft",
+          ...prospectPositions.map((p) => `${canonicalSchool} ${p} prospects`),
+        ].join(", ")} />
+        <meta name="robots" content="index, follow" />
         <link rel="canonical" href={`https://we-draft.com/team/${slug}`} />
+        <meta property="og:type" content="website" />
         <meta property="og:title" content={pageTitle} />
         <meta property="og:description" content={pageDescription} />
         <meta property="og:url" content={`https://we-draft.com/team/${slug}`} />
         <meta property="og:site_name" content="We-Draft.com" />
-        <meta name="twitter:card" content="summary" />
+        <meta property="og:image" content={sanitizeUrl(branding?.logo1) || "https://we-draft.com/logo512.png"} />
+        <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={pageTitle} />
         <meta name="twitter:description" content={pageDescription} />
+        <meta name="twitter:image" content={sanitizeUrl(branding?.logo1) || "https://we-draft.com/logo512.png"} />
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://we-draft.com/" },
+            { "@type": "ListItem", "position": 2, "name": "College Football", "item": "https://we-draft.com/cfb" },
+            { "@type": "ListItem", "position": 3, "name": teamLabel, "item": `https://we-draft.com/team/${slug}` },
+          ],
+        })}</script>
       </Helmet>
 
       {teamVideos.length > 0 && (

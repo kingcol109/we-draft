@@ -117,9 +117,9 @@ export default function EditArticle() {
 
       const playerSnap = await getDocs(collection(db, "players"));
       setPlayers(
-        playerSnap.docs.map((doc) => {
-          const d = doc.data();
-          return { slug: d.Slug, name: `${d.First} ${d.Last}`, position: d.Position, team: d.School };
+        playerSnap.docs.map((docSnap) => {
+          const d = docSnap.data();
+          return { id: docSnap.id, slug: d.Slug, name: `${d.First} ${d.Last}`, position: d.Position, team: d.School };
         })
       );
 
@@ -155,7 +155,7 @@ export default function EditArticle() {
 
   const insertPlayer = (player) => {
     if (!editor) return;
-    editor.chain().focus().insertContent(`<a href="/player/${player.slug}">${player.name}</a> `).run();
+    editor.chain().focus().insertContent(`<a href="/player/${player.slug}" data-player-id="${player.id}">${player.name}</a> `).run();
     setShowPlayerPicker(false);
   };
 
@@ -204,11 +204,16 @@ export default function EditArticle() {
     const div = document.createElement("div");
     div.innerHTML = html;
 
+    // Prefer data-player-id (set by insertPlayer); fall back to resolving
+    // the href's slug against the loaded players list for links that
+    // predate this attribute, so editing an old article without re-touching
+    // its player links doesn't silently drop the linkage.
+    const slugToPlayerId = new Map(players.map((p) => [p.slug, p.id]));
     const playerLinks = div.querySelectorAll("a[href^='/player/']");
-    const playerSet = new Set();
+    const playerIdSet = new Set();
     playerLinks.forEach((link) => {
-      const slug = link.getAttribute("href").split("/player/")[1];
-      if (slug) playerSet.add(slug);
+      const pid = link.getAttribute("data-player-id") || slugToPlayerId.get(link.getAttribute("href").split("/player/")[1]);
+      if (pid) playerIdSet.add(pid);
     });
 
     const teamLinks = div.querySelectorAll("a[href^='/team/']");
@@ -221,7 +226,7 @@ export default function EditArticle() {
     await updateDoc(ref, {
       title, slug, priority, content: html, status, author,
       publishedAt: publishedAt ? (() => { const [y,m,d] = publishedAt.split("-"); return new Date(+y, +m-1, +d); })() : null,
-      slugs: Array.from(playerSet),
+      playerIds: Array.from(playerIdSet),
       teamSlugs: Array.from(teamSet),
       videoUrl: savedVideoUrl || "",
       updatedAt: serverTimestamp(),

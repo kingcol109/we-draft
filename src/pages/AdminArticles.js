@@ -6,6 +6,8 @@ import {
   query,
   where,
   addDoc,
+  updateDoc,
+  doc as firestoreDoc,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -71,6 +73,9 @@ export default function AdminArticles() {
 
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);
+
+  const [migrating, setMigrating] = useState(false);
+  const [migrateMessage, setMigrateMessage] = useState("");
 
   const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
@@ -160,9 +165,10 @@ useEffect(() => {
       // 🔥 PLAYERS
       const playerSnap = await getDocs(collection(db, "players"));
       setPlayers(
-        playerSnap.docs.map((doc) => {
-          const d = doc.data();
+        playerSnap.docs.map((docSnap) => {
+          const d = docSnap.data();
           return {
+            id: docSnap.id,
             slug: d.Slug,
             name: `${d.First} ${d.Last}`,
             position: d.Position,
@@ -195,10 +201,13 @@ setTeams(formattedTeams);
     fetchData();
   }, [user]);
 
-  // 🔥 INSERT PLAYER
+  // 🔥 INSERT PLAYER — href stays slug-based (that's still the live route),
+  // but data-player-id is what handleCreateArticle/EditArticle actually
+  // read to build the playerIds join field, so the connection survives even
+  // if a slug were ever to change.
   const insertPlayer = (player) => {
     if (!editor) return;
-    editor.chain().focus().insertContent(`<a href="/player/${player.slug}">${player.name}</a> `).run();
+    editor.chain().focus().insertContent(`<a href="/player/${player.slug}" data-player-id="${player.id}">${player.name}</a> `).run();
     setShowPlayerPicker(false);
   };
 
@@ -245,11 +254,17 @@ setTeams(formattedTeams);
     const div = document.createElement("div");
     div.innerHTML = html;
 
+    // Player links are the join key for "related articles" on a player's
+    // page. Prefer the data-player-id baked in by insertPlayer; fall back to
+    // resolving the href's slug against the loaded players list for links
+    // that predate this attribute (e.g. pasted-in HTML, or an old article's
+    // links that haven't been re-inserted).
+    const slugToPlayerId = new Map(players.map((p) => [p.slug, p.id]));
     const playerLinks = div.querySelectorAll("a[href^='/player/']");
-    const playerSet = new Set();
+    const playerIdSet = new Set();
     playerLinks.forEach((link) => {
-      const linkSlug = link.getAttribute("href").split("/player/")[1];
-      if (linkSlug) playerSet.add(linkSlug);
+      const pid = link.getAttribute("data-player-id") || slugToPlayerId.get(link.getAttribute("href").split("/player/")[1]);
+      if (pid) playerIdSet.add(pid);
     });
 
     const teamLinks = div.querySelectorAll("a[href^='/team/']");
@@ -273,7 +288,7 @@ setTeams(formattedTeams);
               return new Date(+y, +m - 1, +d);
             })()
           : null,
-        slugs: Array.from(playerSet),
+        playerIds: Array.from(playerIdSet),
         teamSlugs: Array.from(teamSet),
         videoUrl: savedVideoUrl || "",
         authorId: user.uid,
@@ -287,6 +302,48 @@ setTeams(formattedTeams);
       window.location.reload();
     } catch (err) {
       setMessage("❌ Error");
+    }
+  };
+
+  // ── One-time migration for articles saved before the playerId schema —
+  // resolves each legacy doc's `slugs[]` (player-linkage field) against the
+  // currently-loaded player list and writes `playerIds`. Additive only: the
+  // old `slugs` field is left in place rather than deleted, and any slug
+  // that no longer matches a real player is reported rather than dropped
+  // silently. ──
+  const migrateLegacyArticles = async () => {
+    setMigrating(true);
+    setMigrateMessage("");
+    const slugToId = new Map(players.map((p) => [p.slug, p.id]));
+    const unresolved = new Set();
+    let migratedCount = 0;
+    try {
+      const legacy = articles.filter((a) => !Array.isArray(a.playerIds) && Array.isArray(a.slugs) && a.slugs.length > 0);
+      for (const a of legacy) {
+        const ids = a.slugs.map((s) => {
+          const id = slugToId.get(s);
+          if (!id) unresolved.add(s);
+          return id;
+        }).filter(Boolean);
+        if (ids.length === 0) continue;
+        await updateDoc(firestoreDoc(db, "articles", a.id), { playerIds: ids });
+        migratedCount++;
+      }
+      setArticles((prev) => prev.map((a) => {
+        const match = legacy.find((la) => la.id === a.id);
+        if (!match) return a;
+        const ids = match.slugs.map((s) => slugToId.get(s)).filter(Boolean);
+        return ids.length > 0 ? { ...a, playerIds: ids } : a;
+      }));
+      setMigrateMessage(
+        migratedCount + " article" + (migratedCount !== 1 ? "s" : "") + " migrated to player IDs." +
+        (unresolved.size > 0 ? " Unresolved slugs (no matching player): " + Array.from(unresolved).join(", ") : "")
+      );
+    } catch (e) {
+      console.error("Admin article migration error:", e);
+      setMigrateMessage("Migration failed — check console.");
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -323,10 +380,26 @@ setTeams(formattedTeams);
       >
         <h1 style={{ color: "#0055a5", margin: 0 }}>Article Dashboard</h1>
 
-        <button style={btn} onClick={() => setShowCreate(true)}>
-          + Create Article
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button
+            style={{ ...btn, background: "#fff", color: "#0055a5", border: "2px solid #0055a5" }}
+            onClick={migrateLegacyArticles}
+            disabled={migrating}
+            title="Backfill playerIds on articles still using the old slug-only schema"
+          >
+            {migrating ? "Migrating..." : "Migrate Legacy Articles"}
+          </button>
+          <button style={btn} onClick={() => setShowCreate(true)}>
+            + Create Article
+          </button>
+        </div>
       </div>
+
+      {migrateMessage && (
+        <div style={{ marginBottom: "16px", fontSize: "13px", fontWeight: 700, color: "#555" }}>
+          {migrateMessage}
+        </div>
+      )}
 
       {showCreate && (
         <div style={card}>
