@@ -87,7 +87,19 @@ export function AuthProvider({ children }) {
           if (snap.exists()) {
             setProfile(snap.data());
           } else {
-            setProfile(null);
+            // First sign-in with no Firestore doc yet — happens for Google
+            // sign-in, which (unlike signUpWithEmail) never wrote one.
+            // Create it now so createdAt is captured at actual signup time
+            // instead of whenever/if the user later visits Edit Profile.
+            const newProfile = {
+              uid: u.uid,
+              email: u.email || "",
+              username: "",
+              usernameLower: "",
+              createdAt: new Date().toISOString(),
+            };
+            await setDoc(ref, newProfile, { merge: true });
+            setProfile(newProfile);
           }
         } catch (err) {
           console.error("Failed to load user profile:", err);

@@ -1,14 +1,65 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ── Reusable check: does the requesting user's own users/{uid} doc
+    // have role == "admin"? Used to gate admin-only writes below. Reading
+    // another document from inside a rule (get()) is allowed and is the
+    // standard pattern for role-based rules in Firestore. ──
+    function isAdmin() {
+      return request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // ── Same idea as isAdmin(), but also lets the "writer" role through —
+    // AdminArticles.js already gates its own UI on role in ["admin","writer"],
+    // this just enforces the same thing server-side for article writes. ──
+    function isAdminOrWriter() {
+      return request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ["admin", "writer"];
+    }
+
     match /players/{playerId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isAdmin();
       match /evaluations/{uid} {
         allow read: if true;
         allow write: if request.auth != null && request.auth.uid == uid;
       }
+      match /reactions/{uid} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
     }
+
+    // ── Collection-group rule for "evaluations", needed for the Admin
+    // Panel's Analytics tab, which runs collectionGroup(db, "evaluations")
+    // to total evaluations across every player in one query instead of
+    // N per-player reads. The individual match block above
+    // (players/{playerId}/evaluations/{uid}) only governs direct,
+    // path-specific queries and reads — it is NOT consulted for
+    // collection-group queries, which is why that query was originally
+    // being denied.
+    //
+    // Unconditional on purpose: a `list`-type collection-group query must
+    // be provably allowed for every document the query could return, using
+    // only the query's own constraints. A path-dependent condition (e.g.
+    // checking whether the doc lives under players/ vs users/) can't be
+    // proven for an unfiltered scan across both, so Firestore rejects the
+    // whole query rather than partially filtering it — that's what an
+    // earlier, conditional version of this rule was doing wrong.
+    //
+    // This doesn't expose anything new: "evaluations" exists at two paths —
+    //   - players/{playerId}/evaluations/{uid}   (canonical, already
+    //     `allow read: if true` via the nested match block above)
+    //   - users/{uid}/evaluations/{playerId}      (private mirror)
+    // PlayerProfile.js's handleSaveEvaluation writes the identical evalData
+    // object to both on every save, so the mirror was never actually more
+    // sensitive than the already-public canonical copy. ──
+    match /{path=**}/evaluations/{evalId} {
+      allow read: if true;
+    }
+
     match /schools/{school} { allow read, write: if true; }
     match /nfl/{team} { allow read, write: if true; }
     match /draftOrder/{pick} { allow read, write: if true; }
@@ -21,9 +72,13 @@ service cloud.firestore {
     match /playerStats/{doc} { allow read, write: if true; }
     match /teamPositionRanks/{doc} { allow read, write: if true; }
     match /rosters/{doc} { allow read, write: if true; }
+    match /schedule26/{doc} { allow read, write: if true; }
+    match /trends/{doc} { allow read, write: if true; }
+    match /videos/{doc} { allow read, write: if true; }
+    match /ads/{doc} { allow read, write: if true; }
     match /articles/{doc} {
       allow read: if true;
-      allow write: if false;
+      allow write: if isAdminOrWriter();
     }
     match /users/{uid} {
       allow read: if true;
@@ -64,15 +119,12 @@ service cloud.firestore {
       allow get: if request.auth != null
                  && (resource == null || resource.data.uid == request.auth.uid);
       allow list: if request.auth != null;
-
       allow create: if request.auth != null
                     && request.resource.data.uid == request.auth.uid
                     && docId == request.auth.uid + "_" + request.resource.data.draftClass;
-
       allow update: if request.auth != null
                     && resource.data.uid == request.auth.uid
                     && request.resource.data.uid == request.auth.uid;
-
       allow delete: if request.auth != null
                     && resource.data.uid == request.auth.uid;
     }
