@@ -272,7 +272,11 @@ export default function PlayerProfile() {
   const [trend, setTrend] = useState(null);
   const [reactionCounts, setReactionCounts] = useState({ likes: 0, up: 0, down: 0 });
   const [myReaction, setMyReaction] = useState({ liked: false, vote: null });
-  const [showFlairTip, setShowFlairTip] = useState(false);
+  // Right-side hero box (flair badge, or team logo when there's no flair) and
+  // left-side hero box (school/NFL logo) each "grow" into their own popup on
+  // hover/tap rather than showing a separate floating tooltip card.
+  const [showRightBoxTip, setShowRightBoxTip] = useState(false);
+  const [showLeftBoxTip, setShowLeftBoxTip] = useState(false);
   const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
   const [showBreakoutTip, setShowBreakoutTip] = useState(false);
   const [showTrendUpTip, setShowTrendUpTip] = useState(false);
@@ -530,11 +534,13 @@ export default function PlayerProfile() {
         const playerNewsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:1, ...d.data() }));
 
         let playerArticleItems = [];
-        try {
-          const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
-          playerArticleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", _priority:1, ...d.data() }));
-        } catch(articleErr) {
-          console.warn("Articles index missing, skipping:", articleErr);
+        if (player?.id) {
+          try {
+            const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("playerIds","array-contains",player.id), orderBy("publishedAt","desc")));
+            playerArticleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", _priority:1, ...d.data() }));
+          } catch(articleErr) {
+            console.warn("Articles index missing, skipping:", articleErr);
+          }
         }
 
         // 2. School articles — fill remaining slots when player content is sparse
@@ -564,23 +570,24 @@ export default function PlayerProfile() {
       } catch(e) { setPlayerNews([]); }
     };
     fetch();
-  }, [slug, player?.School]);
+  }, [slug, player?.id, player?.School]);
 
-  // ── Videos attached to this player's slug (Google Sheet "Videos" tab synced
-  // to the `videos` collection). Each video can reference up to 3 slugs, each
-  // with its own title/thumb override — fall back to items[0] (Slug1's
-  // title/thumb) if this player's own slug has no override set. ──
+  // ── Videos attached to this player's ID (Google Sheet "Videos" tab synced
+  // to the `videos` collection, migrated from slug- to playerId-keyed items —
+  // see AdminPanel.js VideosSection). Each video can reference up to 3
+  // players, each with its own title/thumb override — fall back to items[0]
+  // if this player's own tag has no override set. ──
   useEffect(() => {
-    if (!slug) return;
+    if (!player?.id) return;
     const fetch = async () => {
       try {
-        const snap = await getDocs(query(collection(db,"videos"), where("slugs","array-contains",slug)));
+        const snap = await getDocs(query(collection(db,"videos"), where("playerIds","array-contains",player.id)));
         const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
         const vids = snap.docs
           .map((d) => {
             const data = d.data();
             const items = Array.isArray(data.items) ? data.items : [];
-            const matched = items.find((it) => it.slug === slug) || null;
+            const matched = items.find((it) => it.playerId === player.id) || null;
             const first = items[0] || null;
             return {
               id: d.id,
@@ -597,7 +604,7 @@ export default function PlayerProfile() {
       } catch(e) { setPlayerVideos([]); }
     };
     fetch();
-  }, [slug]);
+  }, [player?.id]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -1441,8 +1448,8 @@ useEffect(() => {
       ) : (
         <>
           {displayList.map((p, i) => {
-          const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : null;
-          const gd = gradeLabel ? gradeDisplay(gradeLabel) : null;
+          const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : "Watchlist";
+          const gd = gradeDisplay(gradeLabel);
           const rowStyle = {
             display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px",
             textDecoration: "none",
@@ -1456,14 +1463,14 @@ useEffect(() => {
                 style={{
                   flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                   width: "28px", height: "28px", borderRadius: "5px",
-                  backgroundColor: gd ? gd.bg : "#eee",
-                  border: `2px solid ${gd ? gd.border : "#ddd"}`,
-                  color: gd ? "#fff" : "#bbb",
+                  backgroundColor: gd.bg,
+                  border: `2px solid ${gd.border}`,
+                  color: "#fff",
                   fontSize: "10px", fontWeight: 900,
                 }}
-                title={gradeLabel || "No grade yet"}
+                title={gradeLabel}
               >
-                {gd ? gd.short : "—"}
+                {gd.short}
               </div>
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                 <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "14px", lineHeight: 1.2 }}>
@@ -1910,41 +1917,45 @@ useEffect(() => {
           </div>
 
           <div className="bg-white flex items-center" style={{ gap:isMobile?"8px":"16px", padding:isMobile?"12px 10px 8px":"20px 24px 10px" }}>
-            <div className="flex-shrink-0 flex items-center justify-center" style={{ width:isMobile?60:112, height:isMobile?60:112, background:"#f8f8f8", border:`2px solid ${color2}`, borderRadius:"8px" }}>
-              {draftedBy ? (
-                branding?.nflLogo ? <img src={sanitizeUrl(branding.nflLogo)} alt="NFL" style={{ height:isMobile?50:96, objectFit:"contain" }} /> : null
-              ) : branding?.logo1 ? (
-                <Link to={`/team/${teamSlug}`} className="group relative flex items-center justify-center w-full h-full">
-                  <img src={sanitizeUrl(branding.logo1)} alt={player.School} style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
-                  <div
-                    className="hidden group-hover:flex"
-                    style={{
-                      position:"absolute",
-                      top:"calc(100% + 12px)",
-                      left:"50%",
-                      transform:"translateX(-50%)",
-                      background:"#fff",
-                      border:`1.5px solid ${color1}`,
-                      borderRadius:"10px",
-                      padding:"7px 14px",
-                      boxShadow:"0 10px 24px rgba(0,0,0,0.14)",
-                      zIndex:50,
-                      whiteSpace:"nowrap",
-                      alignItems:"center",
-                      justifyContent:"center",
-                      gap:"6px",
-                      pointerEvents:"none",
-                    }}
+            <div className="flex-shrink-0" style={{ position:"relative", width:isMobile?60:112, height:isMobile?60:112 }}>
+              <div
+                className="flex items-center justify-center"
+                style={{
+                  position:"absolute", top:0, left:0, overflow:"hidden", boxSizing:"border-box",
+                  width: showLeftBoxTip ? (isMobile?150:190) : (isMobile?60:112),
+                  height: showLeftBoxTip ? (isMobile?90:112) : (isMobile?60:112),
+                  background:"#f8f8f8", border:`2px solid ${color2}`, borderRadius:"8px",
+                  boxShadow: showLeftBoxTip ? "0 14px 30px rgba(0,0,0,0.16)" : "none",
+                  zIndex: showLeftBoxTip ? 50 : 1,
+                  transition:"width 0.22s ease, height 0.22s ease, box-shadow 0.22s ease",
+                }}
+                onMouseEnter={() => branding?.logo1 && !draftedBy && setShowLeftBoxTip(true)}
+                onMouseLeave={() => setShowLeftBoxTip(false)}
+              >
+                {draftedBy ? (
+                  branding?.nflLogo ? <img src={sanitizeUrl(branding.nflLogo)} alt="NFL" style={{ height:isMobile?50:96, objectFit:"contain" }} /> : null
+                ) : branding?.logo1 ? (
+                  <Link
+                    to={`/team/${teamSlug}`}
+                    className="flex items-center justify-center w-full h-full"
+                    style={{ flexDirection:"column", gap: showLeftBoxTip ? "8px" : 0 }}
                   >
-                    <span style={{ fontSize:"12px" }}>🔗</span>
-                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1 }}>
-                      Team Page
-                    </span>
-                    <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"11px", height:"11px", background:color1, borderRadius:"2px" }} />
-                    <div style={{ position:"absolute", bottom:"calc(100% - 6px)", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"8px", height:"8px", background:"#fff", borderRadius:"1px" }} />
-                  </div>
-                </Link>
-              ) : null}
+                    <img
+                      src={sanitizeUrl(branding.logo1)} alt={player.School}
+                      style={{ height: showLeftBoxTip ? (isMobile?36:44) : (isMobile?50:96), objectFit:"contain", transition:"height 0.22s ease" }}
+                      referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy"
+                    />
+                    {showLeftBoxTip && (
+                      <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
+                        <span style={{ fontSize:"12px" }}>🔗</span>
+                        <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1, whiteSpace:"nowrap" }}>
+                          Team Page
+                        </span>
+                      </div>
+                    )}
+                  </Link>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex-1 text-center">
@@ -2121,72 +2132,36 @@ useEffect(() => {
               )}
             </div>
 
-            <div
-              className="flex-shrink-0 flex items-center justify-center"
-              style={{
-                width:isMobile?60:112, height:isMobile?60:112,
-                background: flairInfo
-                  ? `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), #f2f4f6 55%, #e9edf0 100%)`
-                  : "#f8f8f8",
-                border:`2px solid ${flairInfo ? flairInfo.stroke : "#eee"}`,
-                borderRadius:"8px",
-                position:"relative",
-              }}
-              onMouseEnter={() => flairInfo && setShowFlairTip(true)}
-              onMouseLeave={() => setShowFlairTip(false)}
-              onClick={() => flairInfo && setShowFlairTip((v) => !v)}
-            >
-              {flairInfo ? (
-                <>
-                  {/* clipped layer for the image + shine sweep only — kept separate
-                      from the outer container so the tooltip below isn't clipped too */}
-                  <div
-                    style={{
-                      position:"absolute", inset:0, borderRadius:"6px",
-                      overflow:"hidden",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                    }}
-                  >
-                    <img
-                      src={flairInfo.img}
-                      alt={player.Flair}
-                      style={{
-                        height:isMobile?50:96, objectFit:"contain", cursor:"pointer",
-                        filter:"drop-shadow(0 3px 5px rgba(0,0,0,0.18))",
-                        position:"relative", zIndex:1,
-                      }}
-                    />
-                    {/* glossy sheen sweep — gives the badge a bit of life instead of sitting flat */}
-                    <div
-                      className="wd-flair-shine"
-                      style={{
-                        position:"absolute", top:0, left:"-60%", width:"40%", height:"100%",
-                        background:"linear-gradient(115deg, transparent, rgba(255,255,255,0.65), transparent)",
-                        transform:"skewX(-20deg)",
-                        pointerEvents:"none",
-                        zIndex:2,
-                      }}
-                    />
-                  </div>
-                  {showFlairTip && (
-                    <div
-                      style={{
-                        position:"absolute",
-                        top:"calc(100% + 14px)",
-                        right:0,
-                        width:isMobile?"190px":"240px",
-                        background:"#fff",
-                        border:`1.5px solid ${flairInfo.stroke}`,
-                        borderRadius:"14px",
-                        padding:"14px 16px",
-                        boxShadow:"0 16px 36px rgba(0,0,0,0.16)",
-                        zIndex:50,
-                        textAlign:"left",
-                        pointerEvents:"none",
-                      }}
-                    >
-                      <div style={{ position:"absolute", bottom:"100%", right:isMobile?"22px":"48px", width:"13px", height:"13px", transform:"rotate(45deg)", background:"#fff", border:`1.5px solid ${flairInfo.stroke}`, borderRadius:"2px" }} />
-                      <div style={{ display:"flex", alignItems:"center", gap:"7px", marginBottom:"7px" }}>
+            <div className="flex-shrink-0" style={{ position:"relative", width:isMobile?60:112, height:isMobile?60:112 }}>
+              <div
+                className="flex items-center justify-center"
+                style={{
+                  position:"absolute", top:0, right:0, overflow:"hidden", boxSizing:"border-box",
+                  width: showRightBoxTip ? (isMobile?200:250) : (isMobile?60:112),
+                  height: showRightBoxTip ? "auto" : (isMobile?60:112),
+                  minHeight: isMobile?60:112,
+                  background: flairInfo
+                    ? `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), #f2f4f6 55%, #e9edf0 100%)`
+                    : "#f8f8f8",
+                  border:`2px solid ${flairInfo ? flairInfo.stroke : (draftedBy ? color1 : branding?.logo2 ? color1 : "#eee")}`,
+                  borderRadius:"8px",
+                  boxShadow: showRightBoxTip ? "0 14px 30px rgba(0,0,0,0.16)" : "none",
+                  zIndex: showRightBoxTip ? 50 : 1,
+                  flexDirection:"column",
+                  alignItems: showRightBoxTip && flairInfo ? "flex-start" : "center",
+                  justifyContent: showRightBoxTip && flairInfo ? "flex-start" : "center",
+                  textAlign: showRightBoxTip && flairInfo ? "left" : "center",
+                  padding: showRightBoxTip && flairInfo ? "12px 14px" : 0,
+                  transition:"width 0.22s ease, height 0.22s ease, box-shadow 0.22s ease",
+                }}
+                onMouseEnter={() => (flairInfo || (draftedBy ? branding?.cfbLogo : branding?.logo2)) && setShowRightBoxTip(true)}
+                onMouseLeave={() => setShowRightBoxTip(false)}
+                onClick={() => flairInfo && setShowRightBoxTip((v) => !v)}
+              >
+                {flairInfo ? (
+                  showRightBoxTip ? (
+                    <>
+                      <div style={{ display:"flex", alignItems:"center", gap:"7px", marginBottom:"7px", width:"100%" }}>
                         <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:flairInfo.stroke, flexShrink:0 }} />
                         <div
                           style={{
@@ -2209,76 +2184,78 @@ useEffect(() => {
                           </span>
                         )}
                       </div>
-                      <div style={{ height:"1px", background:`linear-gradient(90deg, ${flairInfo.stroke}66, transparent)`, marginBottom:"8px" }} />
+                      <div style={{ height:"1px", background:`linear-gradient(90deg, ${flairInfo.stroke}66, transparent)`, marginBottom:"8px", width:"100%" }} />
                       <div style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#555", lineHeight:1.5 }}>
                         {flairInfo.desc || "Description coming soon."}
                       </div>
+                    </>
+                  ) : (
+                    <div style={{ position:"relative", width:"100%", height:"100%", overflow:"hidden", borderRadius:"6px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      <img
+                        src={flairInfo.img}
+                        alt={player.Flair}
+                        style={{
+                          height:isMobile?50:96, objectFit:"contain", cursor:"pointer",
+                          filter:"drop-shadow(0 3px 5px rgba(0,0,0,0.18))",
+                          position:"relative", zIndex:1,
+                        }}
+                      />
+                      {/* glossy sheen sweep — gives the badge a bit of life instead of sitting flat */}
+                      <div
+                        className="wd-flair-shine"
+                        style={{
+                          position:"absolute", top:0, left:"-60%", width:"40%", height:"100%",
+                          background:"linear-gradient(115deg, transparent, rgba(255,255,255,0.65), transparent)",
+                          transform:"skewX(-20deg)",
+                          pointerEvents:"none",
+                          zIndex:2,
+                        }}
+                      />
                     </div>
-                  )}
-                </>
-              ) : draftedBy ? (
-                branding?.cfbLogo ? (
-                  <Link to={`/team/${teamSlug}`} className="group relative flex items-center justify-center w-full h-full">
-                    <img src={sanitizeUrl(branding.cfbLogo)} alt="College" style={{ height:isMobile?42:88, objectFit:"contain" }} />
-                    <div
-                      className="hidden group-hover:flex"
-                      style={{
-                        position:"absolute",
-                        top:"calc(100% + 12px)",
-                        right:0,
-                        background:"#fff",
-                        border:`1.5px solid ${color1}`,
-                        borderRadius:"10px",
-                        padding:"7px 14px",
-                        boxShadow:"0 10px 24px rgba(0,0,0,0.14)",
-                        zIndex:50,
-                        whiteSpace:"nowrap",
-                        alignItems:"center",
-                        justifyContent:"center",
-                        gap:"6px",
-                        pointerEvents:"none",
-                      }}
+                  )
+                ) : draftedBy ? (
+                  branding?.cfbLogo ? (
+                    <Link
+                      to={`/team/${teamSlug}`}
+                      className="flex items-center justify-center w-full h-full"
+                      style={{ flexDirection:"column", gap: showRightBoxTip ? "8px" : 0 }}
                     >
-                      <span style={{ fontSize:"12px" }}>🔗</span>
-                      <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1 }}>
-                        Team Page
-                      </span>
-                      <div style={{ position:"absolute", bottom:"100%", right:"20px", width:"11px", height:"11px", transform:"rotate(45deg)", background:color1, borderRadius:"2px" }} />
-                      <div style={{ position:"absolute", bottom:"calc(100% - 6px)", right:"20px", width:"8px", height:"8px", transform:"rotate(45deg)", background:"#fff", borderRadius:"1px" }} />
-                    </div>
-                  </Link>
-                ) : null
-              ) : branding?.logo2 ? (
-                <Link to={`/team/${teamSlug}`} className="group relative flex items-center justify-center w-full h-full">
-                  <img src={sanitizeUrl(branding.logo2)} alt="" style={{ height:isMobile?50:96, objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy" />
-                  <div
-                    className="hidden group-hover:flex"
-                    style={{
-                      position:"absolute",
-                      top:"calc(100% + 12px)",
-                      right:0,
-                      background:"#fff",
-                      border:`1.5px solid ${color1}`,
-                      borderRadius:"10px",
-                      padding:"7px 14px",
-                      boxShadow:"0 10px 24px rgba(0,0,0,0.14)",
-                      zIndex:50,
-                      whiteSpace:"nowrap",
-                      alignItems:"center",
-                      justifyContent:"center",
-                      gap:"6px",
-                      pointerEvents:"none",
-                    }}
+                      <img
+                        src={sanitizeUrl(branding.cfbLogo)} alt="College"
+                        style={{ height: showRightBoxTip ? (isMobile?32:40) : (isMobile?42:88), objectFit:"contain", transition:"height 0.22s ease" }}
+                      />
+                      {showRightBoxTip && (
+                        <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
+                          <span style={{ fontSize:"12px" }}>🔗</span>
+                          <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1, whiteSpace:"nowrap" }}>
+                            Team Page
+                          </span>
+                        </div>
+                      )}
+                    </Link>
+                  ) : null
+                ) : branding?.logo2 ? (
+                  <Link
+                    to={`/team/${teamSlug}`}
+                    className="flex items-center justify-center w-full h-full"
+                    style={{ flexDirection:"column", gap: showRightBoxTip ? "8px" : 0 }}
                   >
-                    <span style={{ fontSize:"12px" }}>🔗</span>
-                    <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1 }}>
-                      Team Page
-                    </span>
-                    <div style={{ position:"absolute", bottom:"100%", right:"20px", width:"11px", height:"11px", transform:"rotate(45deg)", background:color1, borderRadius:"2px" }} />
-                    <div style={{ position:"absolute", bottom:"calc(100% - 6px)", right:"20px", width:"8px", height:"8px", transform:"rotate(45deg)", background:"#fff", borderRadius:"1px" }} />
-                  </div>
-                </Link>
-              ) : null}
+                    <img
+                      src={sanitizeUrl(branding.logo2)} alt=""
+                      style={{ height: showRightBoxTip ? (isMobile?36:44) : (isMobile?50:96), objectFit:"contain", transition:"height 0.22s ease" }}
+                      referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy"
+                    />
+                    {showRightBoxTip && (
+                      <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
+                        <span style={{ fontSize:"12px" }}>🔗</span>
+                        <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1, whiteSpace:"nowrap" }}>
+                          Team Page
+                        </span>
+                      </div>
+                    )}
+                  </Link>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -2393,8 +2370,12 @@ useEffect(() => {
               <div className="flex items-start gap-4 px-3 py-3" style={{ borderBottom:"1px solid #e5e7eb" }}>
                 <div style={{ flex:"0 0 100px" }}>
                   <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Grade</div>
-                  {community.avgGrade ? (() => {
-                    const label = gradeLabels[Math.round(community.avgGrade)];
+                  {(() => {
+                    // No scored evaluations yet -> represent that as a Watchlist
+                    // grade (already a real, selectable grade value) rather than
+                    // a blank "no grade" state, since that's what it means.
+                    const hasGrade = community.avgGrade != null;
+                    const label = hasGrade ? gradeLabels[Math.round(community.avgGrade)] : "Watchlist";
                     const { short, bg, border } = gradeDisplay(label);
                     return (
                       <div>
@@ -2402,12 +2383,14 @@ useEffect(() => {
                           <div style={{ fontSize:"28px", fontWeight:900, color:"#fff", lineHeight:1 }}>{short}</div>
                           <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", marginTop:"2px" }}>{label}</div>
                         </div>
-                        <div className="mt-2">
-                          <div style={{ height:"5px", background:"#eee", borderRadius:"3px", position:"relative", overflow:"hidden" }}>
-                            <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"3px" }} />
+                        {hasGrade && (
+                          <div className="mt-2">
+                            <div style={{ height:"5px", background:"#eee", borderRadius:"3px", position:"relative", overflow:"hidden" }}>
+                              <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"3px" }} />
+                            </div>
+                            <div className="flex justify-between mt-1" style={{ fontSize:"8px", color:"#bbb", fontWeight:700 }}><span>1st</span><span>UDFA</span></div>
                           </div>
-                          <div className="flex justify-between mt-1" style={{ fontSize:"8px", color:"#bbb", fontWeight:700 }}><span>1st</span><span>UDFA</span></div>
-                        </div>
+                        )}
                         {(selfIndex >= 0 || classRank) && (
                           <div className="mt-3">
                             <div className="text-xs font-black uppercase pb-1 mb-1 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em", fontSize:"9px" }}>Class Rank</div>
@@ -2419,7 +2402,7 @@ useEffect(() => {
                         )}
                       </div>
                     );
-                  })() : <p className="italic text-gray-400 text-xs text-center">No grade</p>}
+                  })()}
                 </div>
                 <div style={{ flex:1 }}>
                   <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
@@ -2467,8 +2450,12 @@ useEffect(() => {
             <div className="flex bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
               <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
                 <div className="text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Grade</div>
-                {community.avgGrade ? (() => {
-                  const label = gradeLabels[Math.round(community.avgGrade)];
+                {(() => {
+                  // No scored evaluations yet -> represent that as a Watchlist
+                  // grade (already a real, selectable grade value) rather than
+                  // a blank "no grade" state, since that's what it means.
+                  const hasGrade = community.avgGrade != null;
+                  const label = hasGrade ? gradeLabels[Math.round(community.avgGrade)] : "Watchlist";
                   const { short, bg, border } = gradeDisplay(label);
                   return (
                     <>
@@ -2476,14 +2463,16 @@ useEffect(() => {
                         <div style={{ fontSize:"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
                         <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{label}</div>
                       </div>
-                      <div className="mt-4 w-full">
-                        <div className="flex justify-between mb-1" style={{ fontSize:"9px", fontWeight:800, color:"#bbb", letterSpacing:"0.06em", textTransform:"uppercase" }}>
-                          <span>1st Rd</span><span>UDFA</span>
+                      {hasGrade && (
+                        <div className="mt-4 w-full">
+                          <div className="flex justify-between mb-1" style={{ fontSize:"9px", fontWeight:800, color:"#bbb", letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                            <span>1st Rd</span><span>UDFA</span>
+                          </div>
+                          <div style={{ height:"8px", background:"#eee", borderRadius:"4px", position:"relative", overflow:"hidden" }}>
+                            <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"4px" }} />
+                          </div>
                         </div>
-                        <div style={{ height:"8px", background:"#eee", borderRadius:"4px", position:"relative", overflow:"hidden" }}>
-                          <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"4px" }} />
-                        </div>
-                      </div>
+                      )}
                       {(selfIndex >= 0 || classRank) && (
                         <div className="mt-4 w-full">
                           <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.1em" }}>Class Rank</div>
@@ -2495,7 +2484,7 @@ useEffect(() => {
                       )}
                     </>
                   );
-                })() : <p className="italic text-gray-400 text-sm">No grade yet</p>}
+                })()}
               </div>
               <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
                 <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Strengths</div>
