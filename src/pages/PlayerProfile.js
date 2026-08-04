@@ -18,6 +18,7 @@ import {
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
@@ -90,6 +91,36 @@ const FLAIR_CONFIG = {
   // "Raw Talent": image not uploaded yet — add here once you have it, e.g.
   // "Raw Talent": { img: RawTalentFlair, stroke: "#hexcode", desc: "..." },
   "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
+};
+
+// ── Trend → visual treatment. badgeBg/badgeBorder color the small icon
+// square in both the Top 5 Trending sidebar and match the header trend
+// badges (see the "On Fire" / "Breakout" / "Trending Up" tags further down)
+// so a player's trend reads consistently everywhere it shows up. softClass
+// is the sidebar-only muted glow applied to each row's own box (see the
+// wd-*-box-soft keyframes) — deliberately separate from the header tags'
+// bolder wd-*-tag animations, which are unchanged. ──
+const TREND_STYLE = {
+  up: {
+    icon: "▲", label: "Up",
+    badgeBg: "#16a34a", badgeBorder: "#0f6e33",
+    boxBorder: "#bdf0cf",
+    softClass: "wd-trendup-box-soft",
+  },
+  breakout: {
+    icon: "⚡", label: "Breakout",
+    badgeBg: "#4a535e", badgeBorder: "#2c333b",
+    boxBorder: "#bfe6fb",
+    softClass: "wd-breakout-box-soft",
+  },
+  "on fire": {
+    // Yellow (not orange) background so the 🔥 glyph itself has contrast to
+    // pop against, instead of blending into a same-toned orange square.
+    icon: "🔥", label: "On Fire",
+    badgeBg: "#ffcc00", badgeBorder: "#b38600",
+    boxBorder: "#ffd7ae",
+    softClass: "wd-onfire-box-soft",
+  },
 };
 
 const toTeamSlug = (school) => {
@@ -244,6 +275,7 @@ export default function PlayerProfile() {
   const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
   const cfbLogoRef = useRef("");
+  const cfbWordmarkRef = useRef("");
   const schoolSlugRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [evalCount, setEvalCount] = useState(0);
@@ -280,6 +312,7 @@ export default function PlayerProfile() {
   const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
   const [showBreakoutTip, setShowBreakoutTip] = useState(false);
   const [showTrendUpTip, setShowTrendUpTip] = useState(false);
+  const [showOnFireTip, setShowOnFireTip] = useState(false);
 
   // ── Sponsored margin ads (Homage) — desktop-only, wide-viewport-only.
   // Layout (width + per-side offset) is measured from the actual rendered
@@ -299,6 +332,14 @@ export default function PlayerProfile() {
   const [draftClassLoading, setDraftClassLoading] = useState(false);
   const [classRank, setClassRank] = useState(null);
   const [classSize, setClassSize] = useState(0);
+
+  // ── Top 5 Trending sidebar — site-wide spotlight, same on every player
+  // page. Order is curated by drag-and-drop in the Admin Panel's Active
+  // Trends list (trends/{slug}.Order); not tied to whichever player is
+  // currently being viewed, so this only needs to fetch once. ──
+  const [trendingTop5, setTrendingTop5] = useState([]);
+  const [trendingLoaded, setTrendingLoaded] = useState(false);
+  const [hoveredTrendSlug, setHoveredTrendSlug] = useState(null);
 
   // ── Measures the real left/right gutter around the content grid (the
   // space actually left over, not an estimate) and derives the ad card's
@@ -614,8 +655,9 @@ export default function PlayerProfile() {
         if (sSnap.exists()) {
           const b = sSnap.data();
           cfbLogoRef.current = b.Logo1 || b.Logo2 || "";
+          cfbWordmarkRef.current = b.Wordmark || "";
           schoolSlugRef.current = b.Slug || "";
-          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
+          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", wordmark:b.Wordmark||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
         } else { setBranding(null); }
       } catch(e) { setBranding(null); }
       finally {
@@ -637,7 +679,7 @@ export default function PlayerProfile() {
         const snap = await getDoc(doc(db,"nfl",draftedBy));
         if (snap.exists()) {
           const n = snap.data();
-          setBranding({ color1:n.Color1, color2:n.Color2, nflLogo:n.Logo1, cfbLogo:cfbLogoRef.current, slug:schoolSlugRef.current });
+          setBranding({ color1:n.Color1, color2:n.Color2, nflLogo:n.Logo1, cfbLogo:cfbLogoRef.current, cfbWordmark:cfbWordmarkRef.current, slug:schoolSlugRef.current });
         }
       } catch(e) { console.error(e); }
     };
@@ -731,6 +773,32 @@ useEffect(() => {
     };
     fetch();
   }, [player]);
+
+  // ── Top 5 Trending sidebar data — same list on every player page, so this
+  // fetches once rather than re-running per player. Filters by Shown === true
+  // client-side rather than a where()+orderBy() query — "shown" is an
+  // explicit field, not a position within the collection, and the whole
+  // trends collection is small (admin-curated), so there's no real cost to
+  // reading all of it and sorting here instead of needing a composite index. ──
+  useEffect(() => {
+    const fetchTrending = async () => {
+      try {
+        const snap = await getDocs(collection(db, "trends"));
+        const shown = snap.docs
+          .map((d) => ({ slug: d.id, ...d.data() }))
+          .filter((t) => t.Shown === true)
+          .sort((a, b) => (a.Order ?? 0) - (b.Order ?? 0))
+          .slice(0, 5);
+        setTrendingTop5(shown);
+      } catch (e) {
+        console.error("Failed to load trending players:", e);
+        setTrendingTop5([]);
+      } finally {
+        setTrendingLoaded(true);
+      }
+    };
+    fetchTrending();
+  }, []);
 
   useEffect(() => {
     const fetch = async () => {
@@ -1050,28 +1118,12 @@ useEffect(() => {
     catch { return ""; }
   };
 
-  if (!player) return (
-    <div
-      className="flex justify-center items-center h-screen text-xl font-bold"
-      style={{
-        color:SITE_BLUE,
-        opacity:1,
-        animation:"wdLoadingFadeIn 0.2s ease",
-      }}
-    >
-      <style>{`
-        @keyframes wdLoadingFadeIn {
-          0%   { opacity: 0; }
-          100% { opacity: 1; }
-        }
-      `}</style>
-      Loading Player...
-    </div>
-  );
+  if (!player) return <LoadingSpinner label="Loading Player" size={56} minHeight="100vh" />;
 
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
   const isTrendingUp = (trend?.Trend || "").toString().trim().toLowerCase() === "up";
   const isBreakoutTrend = (trend?.Trend || "").toString().trim().toLowerCase() === "breakout";
+  const isOnFireTrend = (trend?.Trend || "").toString().trim().toLowerCase() === "on fire";
   const breakoutStats = (trend?.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
   const trendNotesList = breakoutStats;
 
@@ -1442,7 +1494,7 @@ useEffect(() => {
         Full {formatEligible(player.Eligible)} Board →
       </Link>
       {draftClassLoading ? (
-        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontWeight: 700 }}>Loading…</div>
+        <LoadingSpinner label="Loading" size={24} minHeight="60px" />
       ) : draftClassPlayers.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No other prospects yet.</div>
       ) : (
@@ -1532,6 +1584,123 @@ useEffect(() => {
       {DraftClassListContent}
     </details>
   );
+
+  // ── Top 5 Trending sidebar — mirrors the Draft Class positional-rankings
+  // card above it (same row layout: badged square + name + school). The
+  // trend's animation lives on the row's own box (a soft ambient glow, see
+  // wd-*-box-soft) rather than on the name text. Hovering a row grows it in
+  // place to reveal that player's trend Notes — same "the hovered box turns
+  // into the popup" pattern as the flair/logo hero boxes above, rather than
+  // a floating tooltip. ──
+  const TrendingListContent = (
+    <>
+      {trendingTop5.map((t) => {
+        const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
+        if (!style) return null;
+        const isSelf = t.slug === player.Slug;
+        const isHovered = hoveredTrendSlug === t.slug;
+        const notesList = (t.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+
+        const rowContent = (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                  width: "28px", height: "28px", borderRadius: "5px",
+                  backgroundColor: style.badgeBg, border: `2px solid ${style.badgeBorder}`,
+                  color: "#fff", fontSize: "12px", fontWeight: 900,
+                }}
+                title={style.label}
+              >
+                {style.icon}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "14px", lineHeight: 1.2 }}>
+                  {t.First} {t.Last}
+                </span>
+                <span style={{ color: "#777", fontWeight: 700, fontSize: "12px", marginTop: "2px" }}>
+                  {t.School || "—"}
+                </span>
+              </div>
+            </div>
+            {isHovered && (
+              <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: `1px solid ${style.boxBorder}` }}>
+                {notesList.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {notesList.map((s, i) => (
+                      <div key={i} style={{ fontSize: "11px", fontWeight: 600, color: "#666", lineHeight: 1.4 }}>{s}</div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "11px", fontWeight: 600, color: "#aaa", fontStyle: "italic" }}>No notes yet.</div>
+                )}
+              </div>
+            )}
+          </>
+        );
+
+        // The reserve wrapper keeps a stable min-height in normal flow so
+        // neighboring rows don't jump when this one's box grows on hover.
+        const rowBoxStyle = {
+          display: "flex", flexDirection: "column", justifyContent: "center",
+          padding: isHovered ? "10px 14px 12px" : "10px 14px",
+          textDecoration: "none",
+          background: isSelf ? "#fff8e6" : (isHovered ? "#fbfbfe" : "#fff"),
+          borderLeft: `4px solid ${isSelf ? SITE_GOLD : style.badgeBorder}`,
+          borderBottom: "1px solid #f0f0f0",
+          position: "relative", zIndex: isHovered ? 5 : 1,
+        };
+
+        const handlers = {
+          onMouseEnter: () => setHoveredTrendSlug(t.slug),
+          onMouseLeave: () => setHoveredTrendSlug(null),
+        };
+
+        return (
+          <div key={t.slug} style={{ minHeight: "54px" }}>
+            {isSelf ? (
+              <div className={style.softClass} style={rowBoxStyle} {...handlers}>{rowContent}</div>
+            ) : (
+              <Link to={`/player/${t.slug}`} className={style.softClass} style={rowBoxStyle} {...handlers}>
+                {rowContent}
+              </Link>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+
+  const showTrendingSidebar = trendingLoaded && trendingTop5.length > 0;
+
+  const TrendingSidebarCard = showTrendingSidebar ? (
+    <SidebarCard title="🔥 Trending" color1={SITE_BLUE} color2={SITE_GOLD}>
+      {TrendingListContent}
+    </SidebarCard>
+  ) : null;
+
+  const TrendingSidebarDropdown = showTrendingSidebar ? (
+    <details style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+      <summary style={{
+        backgroundColor: SITE_BLUE,
+        padding: "10px 14px",
+        cursor: "pointer",
+        listStyle: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        userSelect: "none",
+      }}>
+        <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          🔥 Trending ▾
+        </div>
+        <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "18px" }}>⬇</span>
+      </summary>
+      <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
+      {TrendingListContent}
+    </details>
+  ) : null;
 
   // ── Videos sidebar — only rendered at all when the player has at least one
   // attached video; each row shows that video's per-slug title/thumb as a
@@ -1711,25 +1880,62 @@ useEffect(() => {
         `}</style>
       )}
 
-      {isBreakoutTrend && (
-        <style>{`
-          @keyframes wdBreakoutTagGlow {
-            0%, 100% { box-shadow: 0 0 6px 1px rgba(143,216,255,0.45); }
-            50%      { box-shadow: 0 0 12px 3px rgba(143,216,255,0.85); }
-          }
-          .wd-breakout-tag { animation: wdBreakoutTagGlow 2.4s ease-in-out infinite; }
-        `}</style>
-      )}
+      {/* Trend glow/flicker keyframes — rendered unconditionally (not gated on
+          this page's own trend) since the Top 5 Trending sidebar can show any
+          of these three trend types regardless of which player's page you're
+          on. On Fire uses faster, irregular keyframe stops (vs. the other
+          tags' smooth 0/50/100 pulse) so it reads as a flicker rather than a
+          heartbeat, plus its own icon jitter/scale animation on top so the
+          🔥 itself reads as an actual flickering flame. */}
+      <style>{`
+        @keyframes wdBreakoutTagGlow {
+          0%, 100% { box-shadow: 0 0 6px 1px rgba(143,216,255,0.45); }
+          50%      { box-shadow: 0 0 12px 3px rgba(143,216,255,0.85); }
+        }
+        .wd-breakout-tag { animation: wdBreakoutTagGlow 2.4s ease-in-out infinite; }
 
-      {isTrendingUp && (
-        <style>{`
-          @keyframes wdTrendUpTagGlow {
-            0%, 100% { box-shadow: 0 0 6px 1px rgba(74,222,128,0.45); }
-            50%      { box-shadow: 0 0 12px 3px rgba(74,222,128,0.85); }
-          }
-          .wd-trendup-tag { animation: wdTrendUpTagGlow 2.4s ease-in-out infinite; }
-        `}</style>
-      )}
+        @keyframes wdTrendUpTagGlow {
+          0%, 100% { box-shadow: 0 0 6px 1px rgba(74,222,128,0.45); }
+          50%      { box-shadow: 0 0 12px 3px rgba(74,222,128,0.85); }
+        }
+        .wd-trendup-tag { animation: wdTrendUpTagGlow 2.4s ease-in-out infinite; }
+
+        @keyframes wdOnFireTagGlow {
+          0%   { box-shadow: 0 0 6px 1px rgba(255,120,0,0.5), 0 0 16px 4px rgba(255,60,0,0.25); }
+          20%  { box-shadow: 0 0 10px 3px rgba(255,180,0,0.65), 0 0 20px 6px rgba(255,80,0,0.35); }
+          40%  { box-shadow: 0 0 7px 2px rgba(255,100,0,0.55), 0 0 14px 3px rgba(255,50,0,0.3); }
+          60%  { box-shadow: 0 0 13px 4px rgba(255,150,0,0.75), 0 0 22px 7px rgba(255,70,0,0.4); }
+          80%  { box-shadow: 0 0 8px 2px rgba(255,110,0,0.5), 0 0 16px 4px rgba(255,60,0,0.3); }
+          100% { box-shadow: 0 0 6px 1px rgba(255,120,0,0.5), 0 0 16px 4px rgba(255,60,0,0.25); }
+        }
+        .wd-onfire-tag { animation: wdOnFireTagGlow 1.4s ease-in-out infinite; }
+        @keyframes wdOnFireIconFlicker {
+          0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(255,140,0,0.9)); }
+          25%      { transform: scale(1.08) rotate(-3deg); filter: drop-shadow(0 0 6px rgba(255,90,0,1)); }
+          50%      { transform: scale(0.96) rotate(2deg); filter: drop-shadow(0 0 4px rgba(255,180,0,0.85)); }
+          75%      { transform: scale(1.05) rotate(-2deg); filter: drop-shadow(0 0 7px rgba(255,60,0,1)); }
+        }
+        .wd-onfire-icon { display:inline-block; animation: wdOnFireIconFlicker 0.9s ease-in-out infinite; }
+
+        /* Top 5 Trending sidebar — same three trends, much quieter: a slow,
+           smooth pulse (no flicker, no icon jitter) on each row's own box
+           rather than the header tags' bolder glow. */
+        @keyframes wdTrendUpBoxSoft {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(74,222,128,0.16), 0 0 4px 1px rgba(74,222,128,0.16); }
+          50%      { box-shadow: 0 0 0 1px rgba(74,222,128,0.28), 0 0 7px 2px rgba(74,222,128,0.3); }
+        }
+        .wd-trendup-box-soft { animation: wdTrendUpBoxSoft 3.2s ease-in-out infinite; }
+        @keyframes wdBreakoutBoxSoft {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(143,216,255,0.16), 0 0 4px 1px rgba(143,216,255,0.16); }
+          50%      { box-shadow: 0 0 0 1px rgba(143,216,255,0.28), 0 0 7px 2px rgba(143,216,255,0.3); }
+        }
+        .wd-breakout-box-soft { animation: wdBreakoutBoxSoft 3.2s ease-in-out infinite; }
+        @keyframes wdOnFireBoxSoft {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(255,140,0,0.16), 0 0 4px 1px rgba(255,90,0,0.16); }
+          50%      { box-shadow: 0 0 0 1px rgba(255,140,0,0.3), 0 0 8px 2px rgba(255,90,0,0.32); }
+        }
+        .wd-onfire-box-soft { animation: wdOnFireBoxSoft 3.2s ease-in-out infinite; }
+      `}</style>
 
       {showBreakoutAnim && (
         <>
@@ -1827,11 +2033,15 @@ useEffect(() => {
         }
       >
 
-        {/* ===== LEFT COLUMN: Draft Class ===== */}
+        {/* ===== LEFT COLUMN: Trending + Draft Class ===== */}
         {isMobile ? (
-          DraftClassDropdown
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {TrendingSidebarDropdown}
+            {DraftClassDropdown}
+          </div>
         ) : (
-          <div style={{ position: "sticky", top: "20px" }}>
+          <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            {TrendingSidebarCard}
             {DraftClassList}
           </div>
         )}
@@ -1941,7 +2151,7 @@ useEffect(() => {
                     style={{ flexDirection:"column", gap: showLeftBoxTip ? "8px" : 0 }}
                   >
                     <img
-                      src={sanitizeUrl(branding.logo1)} alt={player.School}
+                      src={sanitizeUrl(showLeftBoxTip && branding.wordmark ? branding.wordmark : branding.logo1)} alt={player.School}
                       style={{ height: showLeftBoxTip ? (isMobile?36:44) : (isMobile?50:96), objectFit:"contain", transition:"height 0.22s ease" }}
                       referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy"
                     />
@@ -2115,12 +2325,97 @@ useEffect(() => {
                     </div>
                   </>
                 )}
+                {isOnFireTrend && (
+                  <>
+                    <span style={{ color:"#ccc" }}>·</span>
+                    <div
+                      style={{ position:"relative", display:"inline-block" }}
+                      onMouseEnter={() => setShowOnFireTip(true)}
+                      onMouseLeave={() => setShowOnFireTip(false)}
+                      onClick={() => setShowOnFireTip((v) => !v)}
+                    >
+                      <span
+                        className="font-extrabold rounded-full wd-onfire-tag"
+                        style={{
+                          display:"inline-flex", alignItems:"center", gap:"5px",
+                          backgroundImage:"linear-gradient(135deg, #7a1f00, #ff6a00)",
+                          border:"1px solid #ffb347",
+                          color:"#fff3e6",
+                          letterSpacing:"0.06em",
+                          fontSize:isMobile?"11px":"16px",
+                          padding:isMobile?"2px 10px":"3px 15px",
+                          textTransform:"uppercase",
+                          cursor:"pointer",
+                        }}
+                      >
+                        <span className="wd-onfire-icon">🔥</span> On Fire
+                      </span>
+                      {showOnFireTip && (
+                        <div
+                          style={{
+                            position:"absolute",
+                            top:"calc(100% + 14px)",
+                            left:"50%",
+                            transform:"translateX(-50%)",
+                            width:isMobile?"220px":"264px",
+                            backgroundImage:"linear-gradient(135deg, #3a1400, #6b2800)",
+                            border:"1px solid rgba(255,179,71,0.55)",
+                            borderRadius:"14px",
+                            padding:"14px 16px",
+                            boxShadow:"0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,179,71,0.08)",
+                            zIndex:60,
+                            textAlign:"left",
+                            pointerEvents:"none",
+                          }}
+                        >
+                          <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"13px", height:"13px", background:"#6b2800", border:"1px solid rgba(255,179,71,0.55)", borderRadius:"2px" }} />
+                          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"7px" }}>
+                            <span style={{ fontSize:"12px" }}>🔥</span>
+                            <div style={{
+                              fontSize:isMobile?"11px":"12px",
+                              fontWeight:900,
+                              textTransform:"uppercase",
+                              letterSpacing:"0.06em",
+                              color:"#fff3e6",
+                            }}>
+                              {`${player.First||""} ${player.Last||""}`.trim()} On Fire
+                            </div>
+                          </div>
+                          <div style={{ height:"1px", background:"linear-gradient(90deg, rgba(255,179,71,0.6), transparent)", marginBottom:"8px" }} />
+                          {trendNotesList.length > 0 && (
+                            <div style={{ display:"flex", flexDirection:"column", gap:"5px" }}>
+                              {trendNotesList.map((s, i) => (
+                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#ffe0c2", lineHeight:1.4 }}>
+                                  {s}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
               {draftedBy && draftInfo && (
                 <div className="flex items-center justify-center gap-3 mt-2">
-                  <div className="flex flex-col items-center justify-center rounded text-center" style={{ backgroundColor:color1, border:`2px solid ${color2}`, padding:"4px 12px", minWidth:"68px" }}>
-                    <div style={{ fontSize:"11px", fontWeight:900, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", letterSpacing:"0.1em" }}>Round {draftInfo.round}</div>
-                    <div style={{ fontSize:"9px", fontWeight:700, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", marginTop:"1px" }}>Pick {draftInfo.pick}</div>
+                  <div style={{ display:"flex", gap:"6px" }}>
+                    <div style={{
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                      width:"44px", height:"44px", borderRadius:"8px",
+                      backgroundColor:color1, border:`2px solid ${color2}`,
+                    }}>
+                      <span style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1 }}>Rd</span>
+                      <span style={{ fontSize:"20px", fontWeight:900, color:"#fff", lineHeight:1.1, marginTop:"2px" }}>{draftInfo.round}</span>
+                    </div>
+                    <div style={{
+                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                      width:"44px", height:"44px", borderRadius:"8px",
+                      backgroundColor:"#fff", border:`2px solid ${color1}`,
+                    }}>
+                      <span style={{ fontSize:"20px", fontWeight:900, color:color1, lineHeight:1.1 }}>{draftInfo.pick}</span>
+                      <span style={{ fontSize:"8px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1, marginTop:"2px" }}>Pick</span>
+                    </div>
                   </div>
                   <div className="text-left">
                     <div style={{ fontSize:"10px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.1em" }}>Selected by</div>
@@ -2161,7 +2456,7 @@ useEffect(() => {
                 {flairInfo ? (
                   showRightBoxTip ? (
                     <>
-                      <div style={{ display:"flex", alignItems:"center", gap:"7px", marginBottom:"7px", width:"100%" }}>
+                      <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:"7px", rowGap:"5px", marginBottom:"7px", width:"100%" }}>
                         <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:flairInfo.stroke, flexShrink:0 }} />
                         <div
                           style={{
@@ -2174,11 +2469,15 @@ useEffect(() => {
                         >
                           {player.Flair}
                         </div>
+                        {/* Outlined (not solid-fill) so the tag stays readable
+                            regardless of how light the flair's own accent color
+                            is — a white-on-bright-yellow solid fill was
+                            unreadable for "Developmental". */}
                         {flairInfo.tag && (
                           <span style={{
                             fontSize:"8px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.05em",
-                            color:"#fff", background:flairInfo.stroke, padding:"2px 6px", borderRadius:"20px",
-                            marginLeft:"2px",
+                            color:flairInfo.stroke, background:"#fff", border:`1px solid ${flairInfo.stroke}`,
+                            padding:"2px 6px", borderRadius:"20px", whiteSpace:"nowrap", flexShrink:0,
                           }}>
                             {flairInfo.tag}
                           </span>
@@ -2221,7 +2520,7 @@ useEffect(() => {
                       style={{ flexDirection:"column", gap: showRightBoxTip ? "8px" : 0 }}
                     >
                       <img
-                        src={sanitizeUrl(branding.cfbLogo)} alt="College"
+                        src={sanitizeUrl(showRightBoxTip && branding.cfbWordmark ? branding.cfbWordmark : branding.cfbLogo)} alt="College"
                         style={{ height: showRightBoxTip ? (isMobile?32:40) : (isMobile?42:88), objectFit:"contain", transition:"height 0.22s ease" }}
                       />
                       {showRightBoxTip && (

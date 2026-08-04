@@ -4,6 +4,11 @@ import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, d
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
+import { DndContext, closestCenter, useSensor, useSensors, PointerSensor } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import ArticlesManager from "../components/ArticlesManager";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -78,7 +83,7 @@ const SECTIONS = [
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
-  { key: "content", label: "Content", icon: "📰", ready: false },
+  { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
 ];
@@ -601,7 +606,7 @@ function PlayerDataSection() {
         </div>
 
         {loading ? (
-          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading players…</div>
+          <LoadingSpinner label="Loading players" size={28} minHeight="100px" />
         ) : filtered.length === 0 ? (
           <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players match.</div>
         ) : (
@@ -924,6 +929,157 @@ function PlayerDataSection() {
   );
 }
 
+function TrendBadge({ value }) {
+  if (!value) return <span style={{ fontSize: "10px", fontWeight: 700, color: "#bbb" }}>No trend</span>;
+  const lower = value.toLowerCase();
+  if (lower === "breakout") {
+    return (
+      <span style={{ fontSize: "10px", fontWeight: 900, color: "#0a6b8f", background: "#e6f7ff", border: "1px solid #8fd8ff", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+        ⚡ Breakout
+      </span>
+    );
+  }
+  if (lower === "up") {
+    return (
+      <span style={{ fontSize: "10px", fontWeight: 900, color: "#16a34a", background: "#eafff0", border: "1px solid #4ade80", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+        ▲ Up
+      </span>
+    );
+  }
+  if (lower === "on fire") {
+    return (
+      <span style={{ fontSize: "10px", fontWeight: 900, color: "#c2410c", background: "#fff1e6", border: "1px solid #ff9d4d", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+        🔥 On Fire
+      </span>
+    );
+  }
+  return (
+    <span style={{ fontSize: "10px", fontWeight: 900, color: "#666", background: "#f0f0f0", border: "1px solid #ddd", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+      {value}
+    </span>
+  );
+}
+
+// ── One draggable row inside the Active Trends panel. The grip handle (⠿)
+// is the only part wired to dnd-kit's listeners — the row itself keeps its
+// plain onClick to select the player, so a normal click still works instead
+// of being swallowed by drag-gesture detection. Dragging persists a new
+// Order value for every active trend (see handleTrendDragEnd in
+// TrendsSection), which is what the public player pages' "Top 5 Trending"
+// spotlight sorts by. ──
+function SortableTrendRow({ trend, isSelected, onSelect }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: trend.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={onSelect}
+      style={{
+        ...style,
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+        padding: "9px 14px", cursor: "pointer",
+        background: isSelected ? "#eaf1ff" : "#fff",
+        borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+        borderBottom: "1px solid #f0f0f0",
+      }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: 0 }}>
+        <span
+          {...attributes}
+          {...listeners}
+          onClick={(e) => e.stopPropagation()}
+          title="Drag to reorder"
+          style={{ cursor: "grab", color: "#bbb", fontSize: "14px", flexShrink: 0, touchAction: "none", padding: "4px" }}
+        >
+          ⠿
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>
+            {(trend.First || "") + " " + (trend.Last || "")}
+          </div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
+            {trend.Position || "—"} · {trend.School || "—"} · {trend.Eligible || "—"}
+          </div>
+        </div>
+      </div>
+      <TrendBadge value={trend.Trend} />
+    </div>
+  );
+}
+
+// ── A non-draggable row for the "Not Shown" section — visually identical to
+// SortableTrendRow minus the grip handle, since membership (shown vs. not)
+// is now set via the dropdown in the edit panel rather than by dragging a
+// trend across a section boundary (that cross-container drag was unreliable
+// — see the "Show on Player Pages" field in TrendsSection instead). ──
+function PlainTrendRow({ trend, isSelected, onSelect }) {
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+        padding: "9px 14px 9px 24px", cursor: "pointer",
+        background: isSelected ? "#eaf1ff" : "#fff",
+        borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+        borderBottom: "1px solid #f0f0f0",
+      }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>
+          {(trend.First || "") + " " + (trend.Last || "")}
+        </div>
+        <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
+          {trend.Position || "—"} · {trend.School || "—"} · {trend.Eligible || "—"}
+        </div>
+      </div>
+      <TrendBadge value={trend.Trend} />
+    </div>
+  );
+}
+
+// ── The "Showing on Player Pages" section — drag-to-reorder only (order
+// within the top 5 still matters for the public spotlight), no cross-section
+// dropping. The "Not Shown" section renders as a plain, non-draggable list. ──
+function TrendSection({ label, sublabel, accentColor, items, selectedId, onSelect, emptyLabel, maxHeight, sortable }) {
+  return (
+    <div>
+      <div style={{ padding: "8px 14px", background: "#f7f8fa", borderBottom: "1px solid #eee" }}>
+        <div style={{ fontSize: "11px", fontWeight: 900, color: accentColor, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {label}
+        </div>
+        {sublabel && (
+          <div style={{ fontSize: "10px", fontWeight: 700, color: "#999", marginTop: "1px" }}>{sublabel}</div>
+        )}
+      </div>
+      <div style={{ maxHeight: maxHeight || undefined, overflowY: maxHeight ? "auto" : undefined }}>
+        {items.length === 0 ? (
+          <div style={{ padding: "16px 14px", textAlign: "center", color: "#bbb", fontWeight: 700, fontSize: "12px", fontStyle: "italic" }}>
+            {emptyLabel}
+          </div>
+        ) : sortable ? (
+          <SortableContext items={items.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+            {items.map((t) => (
+              <SortableTrendRow key={t.id} trend={t} isSelected={selectedId === t.id} onSelect={() => onSelect(t)} />
+            ))}
+          </SortableContext>
+        ) : (
+          items.map((t) => (
+            <PlainTrendRow key={t.id} trend={t} isSelected={selectedId === t.id} onSelect={() => onSelect(t)} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TrendsSection() {
   const [allPlayers, setAllPlayers] = useState([]);
   const [trendsMap, setTrendsMap] = useState(new Map());
@@ -972,12 +1128,63 @@ function TrendsSection() {
     );
   });
 
+  // Every player currently carrying a trend, joined against allPlayers so
+  // the summary panel can show name/position/school without a second read —
+  // trends is keyed by Slug, so this only surfaces trends whose player is
+  // still in the currently-loaded (active-years) roster. `Shown` (an
+  // explicit boolean, set via the "Show on Player Pages" dropdown below) is
+  // the actual source of truth for membership — NOT array position. An
+  // earlier version inferred "shown" purely from being among the first
+  // TOP5_LIMIT by Order, which silently broke as soon as there were fewer
+  // than 5 total active trends: with only 4 trends, every one of them is
+  // "first 5 by position" whether an admin wants it featured or not, so
+  // there was no way to actually exclude one. Order only breaks ties within
+  // whichever bucket (shown/bench) a trend is already in.
+  const activeTrends = useMemo(() => {
+    const TREND_ORDER = { Breakout: 0, "On Fire": 1, Up: 2 };
+    const list = [];
+    allPlayers.forEach((p) => {
+      if (!p.Slug) return;
+      const t = trendsMap.get(p.Slug);
+      if (t?.Trend) list.push({ ...p, Trend: t.Trend, Notes: t.Notes || "", Order: t.Order, Shown: t.Shown === true });
+    });
+    list.sort((a, b) => {
+      const aHasOrder = typeof a.Order === "number";
+      const bHasOrder = typeof b.Order === "number";
+      if (aHasOrder && bHasOrder) return a.Order - b.Order;
+      if (aHasOrder) return -1;
+      if (bHasOrder) return 1;
+      const ao = TREND_ORDER[a.Trend] ?? 2;
+      const bo = TREND_ORDER[b.Trend] ?? 2;
+      if (ao !== bo) return ao - bo;
+      return (a.Last || "").localeCompare(b.Last || "");
+    });
+    return list;
+  }, [allPlayers, trendsMap]);
+
+  // The public player pages read every trend with Shown === true (ordered
+  // by Order among themselves), capped at TOP5_LIMIT — everything else is
+  // "active" (still shown in the admin list/badges) but not featured in the
+  // public spotlight. Membership is set via the "Show on Player Pages"
+  // dropdown in the edit panel below (see handleSave) rather than by
+  // dragging a trend across a section boundary — that cross-list drag
+  // turned out to be unreliable right at the boundary.
+  const TOP5_LIMIT = 5;
+  const top5Trends = activeTrends.filter((t) => t.Shown);
+  const benchedTrends = activeTrends.filter((t) => !t.Shown);
+
+  const dragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
   const selectPlayer = (p) => {
     setSelectedPlayer(p);
     const existing = trendsMap.get(p.Slug);
     setFormState({
       Trend: existing?.Trend || "",
       Notes: existing?.Notes || "",
+      // Defaults to "yes" for a brand-new trend as long as there's room in
+      // the top 5, matching the old auto-fill behavior; reflects the actual
+      // current Shown value for a trend that already exists.
+      ShowOnPages: existing ? (existing.Shown ? "yes" : "no") : (top5Trends.length < TOP5_LIMIT ? "yes" : "no"),
     });
     setSaveMessage("");
   };
@@ -991,9 +1198,63 @@ function TrendsSection() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const payload = { Trend: formState.Trend, Notes: formState.Notes || "" };
+      const existing = trendsMap.get(selectedPlayer.Slug);
+      const wasShown = existing?.Shown === true;
+      const wantShown = formState.ShowOnPages === "yes";
+
+      // bumpUpdate holds the one OTHER trend that needs to flip to
+      // Shown:false as a side effect — only happens when featuring this one
+      // would push the shown count above TOP5_LIMIT, in which case the
+      // current lowest-priority (highest Order) shown trend gets bumped.
+      let order;
+      let bumpUpdate = null;
+
+      if (existing && typeof existing.Order === "number" && wasShown === wantShown) {
+        // Membership isn't changing — leave this trend's position alone so
+        // editing notes/trend type never silently reshuffles the order.
+        order = existing.Order;
+      } else if (wantShown) {
+        const otherShown = top5Trends.filter((t) => t.Slug !== selectedPlayer.Slug);
+        if (otherShown.length >= TOP5_LIMIT) {
+          const toBump = otherShown.reduce((max, t) => ((t.Order ?? 0) > (max.Order ?? 0) ? t : max), otherShown[0]);
+          bumpUpdate = { slug: toBump.Slug };
+        }
+        const maxOrder = otherShown.reduce((m, t) => Math.max(m, typeof t.Order === "number" ? t.Order : -1), -1);
+        order = maxOrder + 1;
+      } else {
+        const otherBench = benchedTrends.filter((t) => t.Slug !== selectedPlayer.Slug);
+        const maxOrder = otherBench.reduce((m, t) => Math.max(m, typeof t.Order === "number" ? t.Order : -1), -1);
+        order = maxOrder + 1;
+      }
+
+      // First/Last/Position/School/Eligible are denormalized onto the trend
+      // doc so the public player-page "Top 5 Trending" panel can render
+      // straight from a single trends query instead of a join against
+      // players on every page load.
+      const payload = {
+        Trend: formState.Trend,
+        Notes: formState.Notes || "",
+        Shown: wantShown,
+        Order: order,
+        First: selectedPlayer.First || "",
+        Last: selectedPlayer.Last || "",
+        Position: selectedPlayer.Position || "",
+        School: selectedPlayer.School || "",
+        Eligible: selectedPlayer.Eligible || "",
+      };
       await setDoc(doc(db, "trends", selectedPlayer.Slug), payload);
-      setTrendsMap((prev) => new Map(prev).set(selectedPlayer.Slug, payload));
+      if (bumpUpdate) {
+        await updateDoc(doc(db, "trends", bumpUpdate.slug), { Shown: false });
+      }
+      setTrendsMap((prev) => {
+        const next = new Map(prev);
+        next.set(selectedPlayer.Slug, payload);
+        if (bumpUpdate) {
+          const cur = next.get(bumpUpdate.slug);
+          if (cur) next.set(bumpUpdate.slug, { ...cur, Shown: false });
+        }
+        return next;
+      });
       setSaveMessage("Saved.");
     } catch (e) {
       console.error("Admin trend save error:", e);
@@ -1016,7 +1277,7 @@ function TrendsSection() {
         next.delete(selectedPlayer.Slug);
         return next;
       });
-      setFormState({ Trend: "", Notes: "" });
+      setFormState({ Trend: "", Notes: "", ShowOnPages: "no" });
       setSaveMessage("Trend removed.");
     } catch (e) {
       console.error("Admin trend remove error:", e);
@@ -1026,88 +1287,142 @@ function TrendsSection() {
     }
   };
 
-  const TrendBadge = ({ value }) => {
-    if (!value) return <span style={{ fontSize: "10px", fontWeight: 700, color: "#bbb" }}>No trend</span>;
-    const lower = value.toLowerCase();
-    if (lower === "breakout") {
-      return (
-        <span style={{ fontSize: "10px", fontWeight: 900, color: "#0a6b8f", background: "#e6f7ff", border: "1px solid #8fd8ff", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
-          ⚡ Breakout
-        </span>
-      );
+  // ── Drag-to-reorder only within the "Showing on Player Pages" list — no
+  // cross-section dropping (see the "Show on Player Pages" dropdown in the
+  // edit panel for moving a trend between sections instead). Since
+  // membership is now the explicit Shown field rather than array position,
+  // this only ever needs to renumber the shown bucket itself. ──
+  const handleTrendDragEnd = async (event) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = top5Trends.findIndex((t) => t.id === active.id);
+    const newIndex = top5Trends.findIndex((t) => t.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(top5Trends, oldIndex, newIndex);
+    const updates = reordered.map((t, i) => ({ slug: t.Slug, Order: i }));
+
+    setTrendsMap((prev) => {
+      const next = new Map(prev);
+      updates.forEach(({ slug, Order }) => {
+        const cur = next.get(slug);
+        if (cur) next.set(slug, { ...cur, Order });
+      });
+      return next;
+    });
+
+    try {
+      await Promise.all(updates.map(({ slug, Order }) => updateDoc(doc(db, "trends", slug), { Order })));
+    } catch (e) {
+      console.error("Admin trend reorder error:", e);
     }
-    if (lower === "up") {
-      return (
-        <span style={{ fontSize: "10px", fontWeight: 900, color: "#16a34a", background: "#eafff0", border: "1px solid #4ade80", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
-          ▲ Up
-        </span>
-      );
-    }
-    return (
-      <span style={{ fontSize: "10px", fontWeight: 900, color: "#666", background: "#f0f0f0", border: "1px solid #ddd", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
-        {value}
-      </span>
-    );
   };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
-      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
-        <div style={{ background: BLUE, padding: "10px 16px" }}>
-          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Trends
+      <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+        <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
+          <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Active Trends
+            </div>
+            <div style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
+              {top5Trends.length}/{TOP5_LIMIT} shown · {benchedTrends.length} benched
+            </div>
           </div>
-        </div>
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search name, school, or slug..."
-            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
-          />
+          <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa", borderBottom: "1px solid #f0f0f0" }}>
+            Drag ⠿ to reorder — use "Show on Player Pages" in the edit panel to move a trend between sections.
+          </div>
+          {loading ? (
+            <LoadingSpinner label="Loading" size={28} minHeight="80px" />
+          ) : activeTrends.length === 0 ? (
+            <div style={{ padding: "20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+              No active trends — set one below.
+            </div>
+          ) : (
+            <>
+              <DndContext sensors={dragSensors} collisionDetection={closestCenter} onDragEnd={handleTrendDragEnd}>
+                <TrendSection
+                  label="Showing on Player Pages"
+                  sublabel={"Top " + TOP5_LIMIT + " — order matters"}
+                  accentColor={GOLD}
+                  items={top5Trends}
+                  selectedId={selectedPlayer?.id}
+                  onSelect={selectPlayer}
+                  emptyLabel='No trends set to "Show on Player Pages" yet.'
+                  sortable
+                />
+              </DndContext>
+              <TrendSection
+                label="Not Shown"
+                sublabel="Active, but not in the spotlight"
+                accentColor="#888"
+                items={benchedTrends}
+                selectedId={selectedPlayer?.id}
+                onSelect={selectPlayer}
+                emptyLabel="Nothing benched."
+                maxHeight="220px"
+              />
+            </>
+          )}
         </div>
 
-        {loading ? (
-          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players match.</div>
-        ) : (
-          <div style={{ maxHeight: "600px", overflowY: "auto" }}>
-            <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
-              {filtered.length} player{filtered.length !== 1 ? "s" : ""} · {trendsMap.size} with a trend
+        <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+          <div style={{ background: BLUE, padding: "10px 16px" }}>
+            <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Trends
             </div>
-            {filtered.map((p) => {
-              const isSelected = selectedPlayer?.id === p.id;
-              const existing = trendsMap.get(p.Slug);
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => selectPlayer(p)}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
-                    padding: "10px 14px", cursor: "pointer",
-                    background: isSelected ? "#eaf1ff" : "#fff",
-                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
-                    borderBottom: "1px solid #f0f0f0",
-                  }}
-                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
-                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE }}>
-                      {(p.First || "") + " " + (p.Last || "")}
-                    </div>
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#888" }}>
-                      {p.Position || "—"} · {p.School || "—"} · {p.Eligible || "—"}
-                    </div>
-                  </div>
-                  <TrendBadge value={existing?.Trend} />
-                </div>
-              );
-            })}
           </div>
-        )}
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search name, school, or slug..."
+              style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
+
+          {loading ? (
+            <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players match.</div>
+          ) : (
+            <div style={{ maxHeight: "600px", overflowY: "auto" }}>
+              <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+                {filtered.length} player{filtered.length !== 1 ? "s" : ""} · {trendsMap.size} with a trend
+              </div>
+              {filtered.map((p) => {
+                const isSelected = selectedPlayer?.id === p.id;
+                const existing = trendsMap.get(p.Slug);
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => selectPlayer(p)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+                      padding: "10px 14px", cursor: "pointer",
+                      background: isSelected ? "#eaf1ff" : "#fff",
+                      borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                      borderBottom: "1px solid #f0f0f0",
+                    }}
+                    onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                    onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE }}>
+                        {(p.First || "") + " " + (p.Last || "")}
+                      </div>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#888" }}>
+                        {p.Position || "—"} · {p.School || "—"} · {p.Eligible || "—"}
+                      </div>
+                    </div>
+                    <TrendBadge value={existing?.Trend} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
@@ -1142,6 +1457,17 @@ function TrendsSection() {
                   <option value="">— None —</option>
                   <option value="Up">▲ Up</option>
                   <option value="Breakout">⚡ Breakout</option>
+                  <option value="On Fire">🔥 On Fire</option>
+                </select>
+              </FieldRow>
+              <FieldRow label="Show on Player Pages">
+                <select
+                  value={formState.ShowOnPages}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, ShowOnPages: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="yes">Yes — in the Top {TOP5_LIMIT} spotlight</option>
+                  <option value="no">No — active, but not shown</option>
                 </select>
               </FieldRow>
               <FieldRow label="Notes (one per line)">
@@ -1257,7 +1583,7 @@ function DailyBarChart({ dailyCounts, rangeDays, loading, color, emptyLabel, uni
   return (
     <div style={{ padding: "20px 16px" }}>
       {loading ? (
-        <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+        <LoadingSpinner label="Loading" size={28} minHeight="140px" />
       ) : dailyCounts.every((d) => d.count === 0) ? (
         <div style={{ padding: "40px 0", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
           {emptyLabel}
@@ -1651,7 +1977,7 @@ function VideosSection() {
         )}
 
         {loading ? (
-          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+          <LoadingSpinner label="Loading" size={28} minHeight="100px" />
         ) : filtered.length === 0 ? (
           <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No videos match.</div>
         ) : (
@@ -2431,7 +2757,7 @@ function PlayerEvaluationsTable() {
       )}
 
       {loading ? (
-        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+        <LoadingSpinner label="Loading" size={28} minHeight="100px" />
       ) : rows.length === 0 ? (
         <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players match.</div>
       ) : (
@@ -2755,6 +3081,8 @@ function TeamBrandingPane({ league }) {
     setFormState({
       Logo1: t.Logo1 || "",
       Logo2: t.Logo2 || "",
+      Wordmark: t.Wordmark || "",
+      LogoDark: t.LogoDark || "",
       Color1: t.Color1 || BLUE,
       Color2: t.Color2 || GOLD,
     });
@@ -2815,6 +3143,8 @@ function TeamBrandingPane({ league }) {
       const payload = {
         Logo1: formState.Logo1.trim(),
         Logo2: formState.Logo2.trim(),
+        Wordmark: formState.Wordmark.trim(),
+        LogoDark: formState.LogoDark.trim(),
         Color1: formState.Color1.trim(),
         Color2: formState.Color2.trim(),
         updatedAt: serverTimestamp(),
@@ -2852,7 +3182,7 @@ function TeamBrandingPane({ league }) {
         </div>
 
         {loading ? (
-          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Loading…</div>
+          <LoadingSpinner label="Loading" size={28} minHeight="100px" />
         ) : filtered.length === 0 ? (
           <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No teams match.</div>
         ) : (
@@ -2882,8 +3212,8 @@ function TeamBrandingPane({ league }) {
                     flexShrink: 0, width: "40px", height: "40px", borderRadius: "8px",
                     background: c1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
                   }}>
-                    {t.Logo1 ? (
-                      <img src={t.Logo1} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    {(t.LogoDark || t.Logo1) ? (
+                      <img src={t.LogoDark || t.Logo1} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                     ) : (
                       <span style={{ color: "#fff", fontWeight: 900, fontSize: "14px" }}>{(t[cfg.nameField] || "?").charAt(0)}</span>
                     )}
@@ -2962,6 +3292,20 @@ function TeamBrandingPane({ league }) {
                 onChange={(v) => handleFieldChange("Logo2", v)}
                 onCopy={() => handleCopyImage("Logo2", formState.Logo2)}
                 copyStatus={logoCopyStatus.Logo2 || "idle"}
+              />
+              <LogoUrlField
+                label="Wordmark"
+                value={formState.Wordmark}
+                onChange={(v) => handleFieldChange("Wordmark", v)}
+                onCopy={() => handleCopyImage("Wordmark", formState.Wordmark)}
+                copyStatus={logoCopyStatus.Wordmark || "idle"}
+              />
+              <LogoUrlField
+                label="Logo (Dark)"
+                value={formState.LogoDark}
+                onChange={(v) => handleFieldChange("LogoDark", v)}
+                onCopy={() => handleCopyImage("LogoDark", formState.LogoDark)}
+                copyStatus={logoCopyStatus.LogoDark || "idle"}
               />
               <ColorHexField
                 label="Color 1 (Primary)"
@@ -3052,7 +3396,7 @@ export default function AdminPanel() {
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "branding" && <BrandingSection />}
-            {activeSection === "content" && <ComingSoonPane label="Content Management" />}
+            {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
           </div>

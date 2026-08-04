@@ -6,6 +6,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { collection, getDocs, getDoc, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { useRef } from "react";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -494,9 +495,9 @@ export default function Whiteboard() {
 
   if (!board) {
     return (
-      <div className="wb-state-page" style={{ background: SITE_BG, minHeight: "100vh", color: "#8a93a3" }}>
+      <div style={{ background: SITE_BG, minHeight: "100vh" }}>
         <style>{boardStyles}</style>
-        Loading your whiteboard...
+        <LoadingSpinner label="Loading your whiteboard" size={48} minHeight="100vh" />
       </div>
     );
   }

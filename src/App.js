@@ -40,8 +40,6 @@ import DraftTracker from "./pages/DraftTracker";
 import NFLPage from "./pages/NFLPage";
 
 // Articles
-import AdminArticles from "./pages/AdminArticles";
-import EditArticle from "./pages/EditArticle";
 import ArticlePage from "./pages/ArticlePage";
 
 // Admin
@@ -101,8 +99,6 @@ function MainLayout() {
           <Route path="/draft" element={<DraftPage />} />
           <Route path="/my-draft-class" element={<MyDraftClass />} />
           <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
-          <Route path="/admin/articles" element={<AdminArticles />} />
-          <Route path="/admin/articles/:id" element={<EditArticle />} />
           <Route path="/article/:slug" element={<ArticlePage />} />
           <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
         </Routes>

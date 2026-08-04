@@ -3,6 +3,7 @@ import ReactDOM from "react-dom";
 import { useParams, Link } from "react-router-dom";
 import { collection, getDocs, getDoc, doc, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
 import EliteFlair from "../assets/elite.png";
 import StarFlair from "../assets/star.png";
@@ -950,11 +951,10 @@ export default function TeamPage() {
             color1: schoolData.Color1 || BLUE,
             color2: schoolData.Color2 || GOLD,
             logo1: schoolData.Logo1 || "",
-            logo2: schoolData.Logo2 || "",
             depthChart: schoolData.DepthChart || "",
           });
         } else {
-          setBranding({ color1: BLUE, color2: GOLD, logo1: "", logo2: "", depthChart: "" });
+          setBranding({ color1: BLUE, color2: GOLD, logo1: "", depthChart: "" });
         }
 
         const resolvedSchool = schoolData?.School || slugFallback;
@@ -1227,42 +1227,7 @@ export default function TeamPage() {
   const color2 = branding?.color2 || GOLD;
   const totalProspects = PROSPECT_YEARS.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
 
-  if (loading) return (
-    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      <div style={{ position: "relative", width: "64px", height: "64px" }}>
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          border: `5px solid ${BLUE}`, opacity: 0.15,
-        }} />
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          border: "5px solid transparent", borderTopColor: BLUE, borderRightColor: GOLD,
-          animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
-        }} />
-      </div>
-      <div style={{ fontSize: 19, fontWeight: 900, color: BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
-        Loading Team
-        <span style={{ display: "inline-flex", marginLeft: "3px" }}>
-          {[0, 1, 2].map((i) => (
-            <span key={i} style={{
-              animation: "wdDotPulse 1.2s ease-in-out infinite",
-              animationDelay: `${i * 0.15}s`,
-            }}>.</span>
-          ))}
-        </span>
-      </div>
-      <style>{`
-        @keyframes wdSpinnerRotate {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        @keyframes wdDotPulse {
-          0%, 80%, 100% { opacity: 0.15; }
-          40% { opacity: 1; }
-        }
-      `}</style>
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading Team" size={64} minHeight="100vh" />;
 
   const teamLabel = school?.Mascot ? `${canonicalSchool} ${school.Mascot}` : canonicalSchool;
 
@@ -1786,20 +1751,6 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile 
               src={sanitizeUrl(branding.logo1)}
               alt={canonicalSchool}
               style={{ height: isMobile ? "48px" : "72px", objectFit: "contain" }}
-              onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
-            />
-          </div>
-        )}
-        {branding?.logo2 && !isMobile && (
-          <div style={{
-            background: "#fff", borderRadius: "10px", padding: "8px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
-          }}>
-            <img
-              src={sanitizeUrl(branding.logo2)}
-              alt={canonicalSchool}
-              style={{ height: "72px", objectFit: "contain" }}
               onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
             />
           </div>

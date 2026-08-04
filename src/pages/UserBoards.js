@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -501,11 +502,7 @@ export default function UserBoards() {
     </div>
   );
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading Board...
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading Board" size={56} minHeight="100vh" />;
 
   return (
     <>

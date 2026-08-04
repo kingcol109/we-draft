@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -173,7 +174,7 @@ export default function DraftPage() {
 
         {/* Pick counter */}
         <div style={{ marginBottom: "18px", display: "flex", alignItems: "center", gap: "12px" }}>
-          {loading && <div style={{ color: "#999", fontSize: "13px", fontWeight: 700 }}>Loading...</div>}
+          {loading && <LoadingSpinner label="Loading" size={24} inline />}
         </div>
 
         {/* ===== Round tabs ===== */}

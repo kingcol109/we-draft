@@ -3,6 +3,7 @@ import ReactDOM from "react-dom";
 import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo2 from "../assets/Logo2.png";
@@ -1002,40 +1003,7 @@ export default function CommunityBoard() {
     return (
       <>
         {SeoTags}
-        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "22px", height: "100vh", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-          <div style={{ position: "relative", width: "64px", height: "64px" }}>
-            <div style={{
-              position: "absolute", inset: 0, borderRadius: "50%",
-              border: `5px solid ${BLUE}`, opacity: 0.15,
-            }} />
-            <div style={{
-              position: "absolute", inset: 0, borderRadius: "50%",
-              border: "5px solid transparent", borderTopColor: BLUE, borderRightColor: GOLD,
-              animation: "wdSpinnerRotate 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite",
-            }} />
-          </div>
-          <div style={{ fontSize: 19, fontWeight: 900, color: BLUE, letterSpacing: "0.03em", display: "flex", alignItems: "baseline" }}>
-            Loading Board
-            <span style={{ display: "inline-flex", marginLeft: "3px" }}>
-              {[0, 1, 2].map((i) => (
-                <span key={i} style={{
-                  animation: "wdDotPulse 1.2s ease-in-out infinite",
-                  animationDelay: `${i * 0.15}s`,
-                }}>.</span>
-              ))}
-            </span>
-          </div>
-          <style>{`
-            @keyframes wdSpinnerRotate {
-              0% { transform: rotate(0deg); }
-              100% { transform: rotate(360deg); }
-            }
-            @keyframes wdDotPulse {
-              0%, 80%, 100% { opacity: 0.15; }
-              40% { opacity: 1; }
-            }
-          `}</style>
-        </div>
+        <LoadingSpinner label="Loading Board" size={64} minHeight="100vh" />
       </>
     );
   }

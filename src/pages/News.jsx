@@ -4,6 +4,7 @@ import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -72,9 +73,7 @@ export default function News() {
 
         {/* ===== Content ===== */}
         {loading ? (
-          <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>
-            Loading…
-          </div>
+          <LoadingSpinner label="Loading" size={28} minHeight="200px" />
         ) : news.length === 0 ? (
           <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>
             No news available.

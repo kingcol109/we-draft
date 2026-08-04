@@ -4,6 +4,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -60,11 +61,7 @@ export default function ViewMock() {
     load();
   }, [mockId]);
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading…
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (!mock) return (
     <div style={{ maxWidth: "600px", margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: "'Arial Black', Arial, sans-serif" }}>

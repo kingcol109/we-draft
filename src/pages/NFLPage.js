@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import { Helmet } from "react-helmet-async";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -50,11 +51,7 @@ export default function NFLPage() {
     });
   });
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: 20, fontWeight: 900, color: SITE_BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading Teams…
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading Teams" size={56} minHeight="100vh" />;
 
   return (
     <>

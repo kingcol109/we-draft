@@ -15,6 +15,8 @@ import {
 import { db } from "../firebase";
 import Logo from "../assets/Logo1.png";
 import verifiedBadge from "../assets/verified.png";
+import ArticlesManager from "../components/ArticlesManager";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -121,7 +123,7 @@ export default function UserProfile() {
   };
 
   if (!user) return <p style={{ textAlign: "center", color: "red", marginTop: "40px" }}>Please sign in first.</p>;
-  if (loading) return <p style={{ textAlign: "center", marginTop: "40px", color: BLUE, fontWeight: 900 }}>Loading...</p>;
+  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="60vh" />;
 
   const SectionHeader = ({ label, open, onToggle }) => (
     <button
@@ -164,7 +166,8 @@ export default function UserProfile() {
   });
 
   return (
-    <div style={{ maxWidth: "520px", margin: "0 auto", padding: isMobile ? "12px 12px 60px" : "28px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+    <div style={{ maxWidth: role === "writer" ? "1200px" : "520px", margin: "0 auto", padding: isMobile ? "12px 12px 60px" : "28px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+    <div style={{ maxWidth: "520px", margin: role === "writer" ? "0 auto 32px" : "0 auto" }}>
 
       {/* Page Header */}
       <div style={{ marginBottom: "24px" }}>
@@ -232,12 +235,6 @@ export default function UserProfile() {
 
           <button onClick={logout} style={btnStyle("secondary")}>Log Out</button>
 
-          {(role === "admin" || role === "writer") && (
-            <button onClick={() => window.location.href = "/admin/articles"} style={btnStyle("gold")}>
-              Article Dashboard
-            </button>
-          )}
-
           {role === "admin" && (
             <button onClick={() => window.location.href = "/admin"} style={btnStyle("gold")}>
               Admin Panel
@@ -274,6 +271,20 @@ export default function UserProfile() {
 
         </div>
       </div>
+    </div>
+
+    {role === "writer" && (
+      <div>
+        <div style={{ marginBottom: "14px" }}>
+          <div style={{ fontSize: "20px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>
+            My Articles
+          </div>
+          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginTop: "6px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        </div>
+        <ArticlesManager />
+      </div>
+    )}
     </div>
   );
 }

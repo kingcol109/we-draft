@@ -6,6 +6,7 @@ import {
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -87,11 +88,7 @@ export default function NewsArticle() {
     fetch();
   }, [id]);
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading…
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (!article) return (
     <div style={{ textAlign: "center", marginTop: "80px", color: "#999", fontStyle: "italic", fontSize: "16px" }}>

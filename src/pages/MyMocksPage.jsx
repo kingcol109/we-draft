@@ -5,6 +5,7 @@ import { collection, getDocs, query, where, deleteDoc, doc } from "firebase/fire
 import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const MAX_MOCKS_PER_CLASS = 5;
 const ACTIVE_YEARS = ["2027", "2028"];
@@ -118,11 +119,7 @@ export default function MyMocksPage() {
   const filteredMocks = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
   const atLimit = filteredMocks.length >= MAX_MOCKS_PER_CLASS;
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading…
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (!user) return (
     <div style={{ maxWidth: "600px", margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: "'Arial Black', Arial, sans-serif" }}>

@@ -9,6 +9,7 @@ import verifiedBadge from "../assets/verified.png";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -116,7 +117,7 @@ function TopDraftBoard({ isMobile, year }) {
   }, [year]);
 
   if (loading) return (
-    <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>Loading...</div>
+    <LoadingSpinner label="Loading" size={24} minHeight="100px" />
   );
 
   const rankColors = [
@@ -650,7 +651,7 @@ export default function Home() {
               </div>
               <div style={{ height: "3px", background: GOLD }} />
               {loading ? (
-                <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>Loading...</div>
+                <LoadingSpinner label="Loading" size={24} minHeight="100px" />
               ) : recentEvals.length > 0 ? recentEvals.map((ev, i) => (
                 <div key={i} style={{ padding: "12px 14px", background: "#fff", borderBottom: i < recentEvals.length - 1 ? "1px solid #f0f0f0" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "6px", flexWrap: "wrap" }}>

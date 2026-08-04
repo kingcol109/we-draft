@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { collection, onSnapshot, getDoc, doc, getDocs, query, where, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { Link } from "react-router-dom";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -136,11 +137,7 @@ export default function DraftTracker() {
       {/* Body */}
       <div style={{ flex: 1, overflowY: "auto" }}>
 
-        {loading && (
-          <div style={{ padding: "24px", textAlign: "center", fontSize: "12px", color: "#999", fontWeight: 700 }}>
-            Loading...
-          </div>
-        )}
+        {loading && <LoadingSpinner label="Loading" size={28} minHeight="100px" />}
 
         {/* PRE-DRAFT: top 10 */}
         {!loading && noPicks && (

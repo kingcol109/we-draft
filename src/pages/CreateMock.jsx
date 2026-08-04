@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { useParams } from "react-router-dom";
 import { useRef } from "react";
 import Logo1 from "../assets/Logo1.png";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -406,11 +407,7 @@ export default function CreateMock() {
     );
   }
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: SITE_BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading…
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   /* ===================== VIEW MODE ===================== */
   const mock2026Locked = draftClass === "2026" && new Date() >= MOCK_LOCK_DATE;
@@ -542,7 +539,7 @@ export default function CreateMock() {
                         <div style={{ fontSize: "8px", fontWeight: 900, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em" }}>Comm</div>
                         {communityLoading && !cd ? (
                           <div style={{ width: "64px", height: "52px", borderRadius: "6px", background: "#f0f0f0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <div style={{ width: "14px", height: "14px", borderRadius: "50%", border: "2px solid #ddd", borderTopColor: SITE_BLUE, animation: "spin 0.8s linear infinite" }} />
+                            <LoadingSpinner inline size={16} />
                           </div>
                         ) : gd ? (
                           <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`, borderRadius: "6px", width: "64px", height: "52px" }}>
@@ -579,8 +576,6 @@ export default function CreateMock() {
           })}
         </div>
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </>
     );
   }
@@ -801,7 +796,7 @@ export default function CreateMock() {
 
             <div style={{ overflowY: "auto", flex: 1, background: "#fafafa" }}>
               {bankLoading ? (
-                <div style={{ padding: 24, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 13 }}>Loading players…</div>
+                <LoadingSpinner label="Loading players" size={28} minHeight="120px" />
               ) : sortedPlayers.length === 0 ? (
                 <div style={{ padding: 24, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 13 }}>No players match your filters</div>
               ) : sortedPlayers.map((p) => (
@@ -828,8 +823,6 @@ export default function CreateMock() {
           </div>
         )}
       </div>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
 import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -284,7 +285,7 @@ export default function MockDraftHub() {
         </div>
 
         {loading ? (
-          <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>Loading…</div>
+          <LoadingSpinner label="Loading" size={28} minHeight="200px" />
         ) : (() => {
           const filtered = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
           return filtered.length === 0 ? (

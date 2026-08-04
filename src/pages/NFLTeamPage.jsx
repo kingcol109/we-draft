@@ -6,6 +6,7 @@ import {
 import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -277,11 +278,7 @@ export default function NFLTeamPage() {
   const ungrouped = roster.filter((p) => !allGroupedPositions.has(p.position));
   if (ungrouped.length > 0) groupedRoster["Other"] = ungrouped;
 
-  if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: "18px", fontWeight: 900, color: BLUE, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      Loading…
-    </div>
-  );
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (!team) return (
     <div style={{ textAlign: "center", marginTop: 80, color: "red", fontWeight: 900 }}>Team not found</div>
@@ -348,13 +345,6 @@ export default function NFLTeamPage() {
                 </button>
               </div>
             </div>
-
-            {/* Right logo */}
-            <div style={{ flexShrink: 0, width: isMobile ? 72 : 140, height: isMobile ? 72 : 140, display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f8f8", border: "1px solid #eee", borderRadius: 8 }}>
-              <img src={sanitizeUrl(team.Logo2)} alt={team.Team}
-                style={{ height: isMobile ? 60 : 120, objectFit: "contain" }}
-                onError={(e) => { e.currentTarget.style.display = "none"; }} />
-            </div>
           </div>
           {/* Gold accent bar */}
           <div style={{ height: 5, backgroundColor: c2 }} />
@@ -380,7 +370,7 @@ export default function NFLTeamPage() {
           </div>
 
           {rosterLoading ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 14 }}>Loading roster…</div>
+            <LoadingSpinner label="Loading roster" size={28} minHeight="140px" />
           ) : roster.length === 0 ? (
             <div style={{ padding: 40, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 14 }}>Roster unavailable.</div>
           ) : (
