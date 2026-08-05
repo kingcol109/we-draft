@@ -8,6 +8,7 @@ import { DndContext, closestCenter, useSensor, useSensors, PointerSensor } from 
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import ArticlesManager from "../components/ArticlesManager";
+import PerformancesManager from "../components/PerformancesManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 
 const BLUE = "#0055a5";
@@ -84,6 +85,8 @@ const SECTIONS = [
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
+  { key: "performances", label: "Performances", icon: "⭐", ready: true },
+  { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
 ];
@@ -2837,6 +2840,326 @@ const inputStyle = {
   outline: "none", boxSizing: "border-box", fontFamily: "inherit",
 };
 
+// ── CFB Schedule — direct editor for the schedule26 collection (each doc is
+// one game: Home, Away, Date, Week, optional Home/AwayScore once played).
+// This is the same collection TeamPage.js reads for its Schedule sidebar and
+// PerformancesManager.js reads to list a player's games — editing here is
+// the only way to fix a wrong score/date/matchup short of going into the
+// Firebase console directly. ──
+const BLANK_GAME_FORM = { Home: "", Away: "", Date: "", Time: "", Week: "", Neutral: false, HomeScore: "", AwayScore: "" };
+
+const weekNumber = (w) => {
+  const m = /(\d+)/.exec(w || "");
+  return m ? Number(m[1]) : 999;
+};
+
+// Games within a day have no natural order until a kickoff Time is entered
+// (the Date field alone is always midnight — see handleSave below) — this
+// layers the optional Time on top of the date for a real chronological sort,
+// and games without a Time just sort to the start of their day rather than
+// blocking the rest of the week from ordering correctly.
+const timeToMinutes = (t) => {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  return isNaN(h) || isNaN(m) ? null : h * 60 + m;
+};
+const formatTime12h = (t) => {
+  const mins = timeToMinutes(t);
+  if (mins == null) return "";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+};
+const gameSortMs = (g) => {
+  const mins = timeToMinutes(g.Time);
+  return toMs(g.Date) + (mins != null ? mins * 60000 : 0);
+};
+
+function CFBScheduleSection() {
+  const [games, setGames] = useState([]);
+  const [schoolNames, setSchoolNames] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedWeek, setSelectedWeek] = useState("");
+  const [selectedGame, setSelectedGame] = useState(null);
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [gamesSnap, schoolsSnap] = await Promise.all([
+          getDocs(collection(db, "schedule26")),
+          getDocs(collection(db, "schools")),
+        ]);
+        const gameDocs = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setGames(gameDocs);
+        setSchoolNames(schoolsSnap.docs.map((d) => d.data().School).filter(Boolean).sort());
+
+        const weeks = Array.from(new Set(gameDocs.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
+        if (weeks.length > 0) setSelectedWeek(weeks[0]);
+      } catch (e) {
+        console.error("CFB schedule fetch error:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const weekOptions = useMemo(
+    () => Array.from(new Set(games.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b)),
+    [games]
+  );
+
+  const gamesForWeek = useMemo(() => {
+    return games
+      .filter((g) => g.Week === selectedWeek)
+      .sort((a, b) => (gameSortMs(a) - gameSortMs(b)) || (a.Home || "").localeCompare(b.Home || ""));
+  }, [games, selectedWeek]);
+
+  const selectGame = (g) => {
+    setSelectedGame(g);
+    setFormState({
+      Home: g.Home || "", Away: g.Away || "",
+      Date: toDateInputValue(g.Date), Time: g.Time || "", Week: g.Week || selectedWeek,
+      Neutral: !!g.Neutral,
+      HomeScore: g.HomeScore != null ? String(g.HomeScore) : "",
+      AwayScore: g.AwayScore != null ? String(g.AwayScore) : "",
+    });
+    setSaveMessage("");
+  };
+
+  const startNewGame = () => {
+    setSelectedGame({ id: null, isNew: true });
+    setFormState({ ...BLANK_GAME_FORM, Week: selectedWeek });
+    setSaveMessage("");
+  };
+
+  const isNew = selectedGame?.isNew === true;
+
+  const handleSave = async () => {
+    if (!formState) return;
+    if (!formState.Home.trim() || !formState.Away.trim() || !formState.Week.trim()) {
+      setSaveMessage("Failed: Home, Away, and Week are required.");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        Home: formState.Home.trim(),
+        Away: formState.Away.trim(),
+        Week: formState.Week.trim(),
+        Neutral: formState.Neutral,
+        updatedAt: serverTimestamp(),
+      };
+      if (formState.Date) payload.Date = new Date(formState.Date);
+      if (formState.Time) payload.Time = formState.Time;
+      // Scores are left out entirely (rather than set to null/undefined) when
+      // blank — Firestore rejects `undefined` field values outright, and an
+      // explicit null would show as "0–0" everywhere a game's played-ness is
+      // checked via `!= null`.
+      if (formState.HomeScore.trim() !== "") payload.HomeScore = Number(formState.HomeScore);
+      if (formState.AwayScore.trim() !== "") payload.AwayScore = Number(formState.AwayScore);
+
+      if (isNew) {
+        const newRef = await addDoc(collection(db, "schedule26"), payload);
+        const newGame = { id: newRef.id, ...payload };
+        setGames((prev) => [...prev, newGame]);
+        setSelectedGame(newGame);
+        setSaveMessage("Game created.");
+      } else {
+        await updateDoc(doc(db, "schedule26", selectedGame.id), payload);
+        setGames((prev) => prev.map((g) => (g.id === selectedGame.id ? { ...g, ...payload } : g)));
+        setSaveMessage("Saved.");
+      }
+      if (payload.Week !== selectedWeek) setSelectedWeek(payload.Week);
+    } catch (e) {
+      console.error("CFB schedule save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedGame || isNew) return;
+    if (!window.confirm("Delete this game? This cannot be undone.")) return;
+    setRemoving(true);
+    setSaveMessage("");
+    try {
+      await deleteDoc(doc(db, "schedule26", selectedGame.id));
+      setGames((prev) => prev.filter((g) => g.id !== selectedGame.id));
+      setSelectedGame(null);
+      setFormState(null);
+    } catch (e) {
+      console.error("CFB schedule delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            CFB Schedule
+          </div>
+          <button
+            onClick={startNewGame}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + New
+          </button>
+        </div>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+          <select value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} style={inputStyle}>
+            {weekOptions.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </div>
+
+        {gamesForWeek.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No games in this week.</div>
+        ) : (
+          <div style={{ maxHeight: "700px", overflowY: "auto" }}>
+            {gamesForWeek.map((g) => {
+              const isSelected = selectedGame?.id === g.id;
+              const played = g.HomeScore != null && g.AwayScore != null;
+              const dateStr = toMs(g.Date) ? new Date(toMs(g.Date)).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "TBD";
+              const timeStr = formatTime12h(g.Time);
+              return (
+                <div
+                  key={g.id}
+                  onClick={() => selectGame(g)}
+                  style={{
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{g.Away} at {g.Home}</div>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#999", flexShrink: 0 }}>{dateStr}{timeStr ? ` · ${timeStr}` : ""}</span>
+                  </div>
+                  {played && (
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
+                      Final: {g.Home} {g.HomeScore} – {g.AwayScore} {g.Away}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {isNew ? "New Game" : selectedGame ? "Edit Game" : "Select a Game"}
+          </div>
+        </div>
+
+        {!selectedGame || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a game from the list to edit it, or "+ New" to add one to {selectedWeek || "a week"}.
+          </div>
+        ) : (
+          <div style={{ padding: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Away</div>
+                <SchoolCombobox value={formState.Away} onChange={(v) => setFormState((p) => ({ ...p, Away: v }))} options={schoolNames} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Home</div>
+                <SchoolCombobox value={formState.Home} onChange={(v) => setFormState((p) => ({ ...p, Home: v }))} options={schoolNames} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Date</div>
+                <input type="date" value={formState.Date} onChange={(e) => setFormState((p) => ({ ...p, Date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Kickoff Time (optional)</div>
+                <input type="time" value={formState.Time} onChange={(e) => setFormState((p) => ({ ...p, Time: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Week</div>
+                <input value={formState.Week} onChange={(e) => setFormState((p) => ({ ...p, Week: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Away Score</div>
+                <input type="number" value={formState.AwayScore} onChange={(e) => setFormState((p) => ({ ...p, AwayScore: e.target.value }))} placeholder="—" style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Home Score</div>
+                <input type="number" value={formState.HomeScore} onChange={(e) => setFormState((p) => ({ ...p, HomeScore: e.target.value }))} placeholder="—" style={inputStyle} />
+              </div>
+            </div>
+
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", cursor: "pointer" }}>
+              <input type="checkbox" checked={formState.Neutral} onChange={(e) => setFormState((p) => ({ ...p, Neutral: e.target.checked }))} />
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>Neutral site</span>
+            </label>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : isNew ? "Create Game" : "Save Changes"}
+            </button>
+
+            {!isNew && (
+              <button
+                onClick={handleDelete}
+                disabled={removing}
+                style={{
+                  width: "100%", marginTop: "8px",
+                  background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                  borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: removing ? "default" : "pointer",
+                  opacity: removing ? 0.6 : 1,
+                }}
+              >
+                {removing ? "Deleting..." : "Delete Game"}
+              </button>
+            )}
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Branding — logos & colors for CFB (schools) and NFL (nfl) teams. This
 // is both the lookup point for pulling brand assets to build graphics
 // (banners, social cards, etc.) and the place to fix them — edits write
@@ -3397,6 +3720,8 @@ export default function AdminPanel() {
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
+            {activeSection === "performances" && <PerformancesManager />}
+            {activeSection === "cfbschedule" && <CFBScheduleSection />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
           </div>

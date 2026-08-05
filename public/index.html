@@ -13,10 +13,12 @@
     <link rel="icon" href="%PUBLIC_URL%/sec logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="The community-powered NFL Draft scouting platform. Grade prospects, build your personal draft board, and see how your takes compare — free to join."
-    />
+    <!-- No static <meta name="description"> here on purpose — every page
+         sets its own via <Helmet>, and a fallback default lives in App.js's
+         root Helmet. A static tag here would sit alongside (not replace)
+         each page's Helmet-managed one, since Helmet can only dedupe tags
+         it's tracking — the fallback in App.js is, so nested page Helmets
+         correctly override it, which a raw static tag in this file can't be. -->
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/sec.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <title>We-Draft.com — Community NFL Draft Scouting</title>

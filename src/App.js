@@ -1,7 +1,7 @@
 // src/App.js
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
-import { HelmetProvider } from "react-helmet-async";
+import { HelmetProvider, Helmet } from "react-helmet-async";
 // Components
 import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
@@ -41,6 +41,8 @@ import NFLPage from "./pages/NFLPage";
 
 // Articles
 import ArticlePage from "./pages/ArticlePage";
+import PerformancePage from "./pages/PerformancePage";
+import PerformancesHub from "./pages/PerformancesHub";
 
 // Admin
 import AdminPanel from "./pages/AdminPanel";
@@ -51,6 +53,17 @@ import MyDraftClass from "./pages/MyDraftClass";
 function App() {
   return (
     <HelmetProvider>
+      {/* Site-wide default — every page overrides this via its own <Helmet>
+          (nested Helmets win over this root one for same-named tags), so
+          this only ever actually shows on a page that doesn't set its own
+          description. Lives here instead of a static tag in public/index.html
+          so it's part of the same Helmet-managed set and can be overridden;
+          a raw static tag there would just sit alongside each page's tag
+          rather than being replaced by it. */}
+      <Helmet>
+        <title>We-Draft.com — Community NFL Draft Scouting</title>
+        <meta name="description" content="The community-powered NFL Draft scouting platform. Grade prospects, build your personal draft board, and see how your takes compare — free to join." />
+      </Helmet>
       <Router>
         <Routes>
           {/* Standalone — no navbar, no padding */}
@@ -100,6 +113,8 @@ function MainLayout() {
           <Route path="/my-draft-class" element={<MyDraftClass />} />
           <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
           <Route path="/article/:slug" element={<ArticlePage />} />
+          <Route path="/performances" element={<PerformancesHub />} />
+          <Route path="/performance/:slug" element={<PerformancePage />} />
           <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
         </Routes>
       </div>

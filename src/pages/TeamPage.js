@@ -43,6 +43,40 @@ const FLAIR_CONFIG = {
 const PROSPECT_YEARS = ["2027", "2028", "2029"];
 const ARCHIVE_YEAR = "2026";
 const NEWS_LIMIT = 8;
+
+// Mirrors PerformancesManager.js / PerformancePage.js's grade badge colors.
+const gradeStylesPerf = {
+  Dominant: { background: "#e6f4ea", color: "#1a7f37" },
+  Great: { background: "#eaf6ec", color: "#2e7d32" },
+  Good: { background: "#eaf1ff", color: "#0055a5" },
+  Productive: { background: "#fff8e1", color: "#9c7a00" },
+  Average: { background: "#f0f0f0", color: "#666" },
+  Bad: { background: "#fdeaea", color: "#c0392b" },
+};
+
+// Grade → sidebar-row "pop" effect — same tiered glow as PerformancePage.js's
+// "More Performances" sidebar. Dominant really pops, Great is quieter, Good
+// is a static hint, Productive/Average/Bad get nothing.
+const gradeGlowClass = (grade) => {
+  if (grade === "Dominant") return "wd-perf-glow-dominant";
+  if (grade === "Great") return "wd-perf-glow-great";
+  if (grade === "Good") return "wd-perf-glow-good";
+  return "";
+};
+
+const GRADE_GLOW_STYLE = `
+  @keyframes wdPerfGlowDominant {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
+    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
+  }
+  .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
+  @keyframes wdPerfGlowGreat {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
+    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
+  }
+  .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
+  .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
+`;
 const VIDEO_INITIAL_COUNT = 3;
 const VIDEO_MAX_TOTAL = 9;
 
@@ -901,6 +935,7 @@ export default function TeamPage() {
 
   const [conferenceTeams, setConferenceTeams] = useState([]);
   const [teamNews, setTeamNews] = useState([]);
+  const [teamPerformances, setTeamPerformances] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [schoolsMap, setSchoolsMap] = useState({});
   const [teamVideos, setTeamVideos] = useState([]);
@@ -983,6 +1018,19 @@ export default function TeamPage() {
             .slice(0, NEWS_LIMIT);
           setTeamNews(combined);
         } catch { setTeamNews([]); }
+
+        // Performances tagged to this team's games — matched by school name
+        // (same denormalized field Performances-by-week and the player
+        // profile sidebar use), not by slug, since that's how the Admin
+        // Panel's Performances tab stores it.
+        try {
+          const perfSnap = await getDocs(query(collection(db, "performances"), where("school", "==", resolvedSchool), where("status", "==", "published")));
+          const perfs = perfSnap.docs
+            .map((d) => ({ id: d.id, type: "performance", ...d.data() }))
+            .sort((a, b) => (b.gameDate?.toMillis?.() || 0) - (a.gameDate?.toMillis?.() || 0))
+            .slice(0, NEWS_LIMIT);
+          setTeamPerformances(perfs);
+        } catch { setTeamPerformances([]); }
 
         const nflSnap = await getDocs(collection(db, "nfl"));
         const nflMap = {};
@@ -1590,8 +1638,73 @@ export default function TeamPage() {
     </SidebarCard>
   );
 
+  const PerformancesSidebar = (
+    <SidebarCard title="Performances" color1={BLUE} color2={GOLD}>
+      {teamPerformances.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No performances yet.</div>
+      ) : (
+        teamPerformances.map((p, i) => {
+          const d = p.gameDate?.toDate?.();
+          const g = gradeStylesPerf[p.grade];
+          return (
+            <Link
+              key={p.id}
+              to={`/performance/${p.slug}`}
+              className={gradeGlowClass(p.grade)}
+              style={{
+                display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
+                textDecoration: "none", background: "#fff",
+                borderBottom: i < teamPerformances.length - 1 ? "1px solid #f0f0f0" : "none",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
+                  <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    {d?.toLocaleDateString(undefined, { month: "short" })}
+                  </span>
+                </div>
+                <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
+                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+                    {d?.toLocaleDateString(undefined, { day: "numeric" })}
+                  </span>
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", gap: "4px", marginBottom: "3px", flexWrap: "wrap" }}>
+                  <span style={{
+                    backgroundColor: "#7c3aed", color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
+                    padding: "2px 5px", display: "inline-block", borderRadius: "2px",
+                    fontWeight: 900, textTransform: "uppercase",
+                  }}>
+                    Performance
+                  </span>
+                  {g && (
+                    <span style={{
+                      background: g.background, color: g.color, letterSpacing: "0.06em", fontSize: "7px",
+                      padding: "2px 5px", display: "inline-block", borderRadius: "2px",
+                      fontWeight: 900, textTransform: "uppercase",
+                    }}>
+                      {p.grade}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
+                  {p.titleShort}
+                </div>
+              </div>
+            </Link>
+          );
+        })
+      )}
+    </SidebarCard>
+  );
+
   return (
     <>
+      <style>{GRADE_GLOW_STYLE}</style>
       <Helmet>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
@@ -1692,6 +1805,7 @@ export default function TeamPage() {
             </details>
             {ScheduleSidebar}
             {teamVideos.length > 0 && VideosSidebar}
+            {teamPerformances.length > 0 && PerformancesSidebar}
             {NewsSidebar}
           </div>
         ) : (
@@ -1722,6 +1836,7 @@ export default function TeamPage() {
             <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
               {ScheduleSidebar}
               {teamVideos.length > 0 && VideosSidebar}
+              {teamPerformances.length > 0 && PerformancesSidebar}
               {NewsSidebar}
             </div>
           </div>

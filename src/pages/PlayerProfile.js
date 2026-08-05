@@ -570,9 +570,19 @@ export default function PlayerProfile() {
     if (!slug) return;
     const fetch = async () => {
       try {
-        // 1. Player-specific news and articles
-        const newsSnap = await getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
-        const playerNewsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:1, ...d.data() }));
+        // 1. Player-specific news and articles — wrapped in its own
+        // try/catch (matching the article/performance/school-item fetches
+        // below) so a missing index or transient failure here only drops
+        // the news items, instead of throwing up to the outer catch and
+        // wiping out articles/performances/school items that already loaded
+        // fine.
+        let playerNewsItems = [];
+        try {
+          const newsSnap = await getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
+          playerNewsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:1, ...d.data() }));
+        } catch(newsErr) {
+          console.warn("News index missing, skipping:", newsErr);
+        }
 
         let playerArticleItems = [];
         if (player?.id) {
@@ -584,8 +594,36 @@ export default function PlayerProfile() {
           }
         }
 
+        // 1b. Game performances — authored from the Admin Panel's Performances
+        // tab. Matched the same way as articles (playerIds array-contains,
+        // published only) so a performance mentioning several players shows
+        // up on all of their profiles, not just the primary subject's.
+        // Sorted client-side rather than via orderBy so this doesn't need its
+        // own composite Firestore index on top of the ones articles/news
+        // already have. The displayed/sorted date is always the game's date,
+        // never the authoring date — a performance should read as "what
+        // happened in this game," not "when the write-up was published."
+        let playerPerformanceItems = [];
+        if (player?.id) {
+          try {
+            const perfSnap = await getDocs(query(collection(db,"performances"), where("playerIds","array-contains",player.id), where("status","==","published")));
+            playerPerformanceItems = perfSnap.docs
+              .map((d) => {
+                const data = d.data();
+                return {
+                  id: d.id, type:"performance", _priority:1, ...data,
+                  title: data.titleShort || data.titleLong,
+                  publishedAt: data.gameDate,
+                };
+              })
+              .sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0));
+          } catch(perfErr) {
+            console.warn("Performances unavailable, skipping:", perfErr);
+          }
+        }
+
         // 2. School articles — fill remaining slots when player content is sparse
-        const existingIds = new Set([...playerNewsItems, ...playerArticleItems].map((n) => n.id));
+        const existingIds = new Set([...playerNewsItems, ...playerArticleItems, ...playerPerformanceItems].map((n) => n.id));
         let schoolItems = [];
         if (player?.School) {
           const schoolSlug = toTeamSlug(player.School);
@@ -602,7 +640,7 @@ export default function PlayerProfile() {
         }
 
         // Sort: player content first, school content second, each sorted by date within group
-        const combined = [...playerArticleItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
+        const combined = [...playerArticleItems, ...playerPerformanceItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
           if (a._priority !== b._priority) return a._priority - b._priority;
           return (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0);
         });
@@ -1787,6 +1825,15 @@ useEffect(() => {
     </SidebarCard>
   );
 
+  // Grade → sidebar-row "pop" effect for performance items — see the
+  // wd-perf-glow-* keyframes injected below.
+  const gradeGlowClass = (grade) => {
+    if (grade === "Dominant") return "wd-perf-glow-dominant";
+    if (grade === "Great") return "wd-perf-glow-great";
+    if (grade === "Good") return "wd-perf-glow-good";
+    return "";
+  };
+
   // ── In The News sidebar ──
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={SITE_BLUE} color2={SITE_GOLD}>
@@ -1794,7 +1841,8 @@ useEffect(() => {
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No recent news.</div>
       ) : (
         playerNews.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
-          <Link key={n.slug || n.id} to={`/news/${n.slug}`}
+          <Link key={n.slug || n.id} to={n.type === "performance" ? `/performance/${n.slug}` : `/news/${n.slug}`}
+            className={n.type === "performance" ? gradeGlowClass(n.grade) : ""}
             style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
@@ -1812,8 +1860,8 @@ useEffect(() => {
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "article" ? SITE_GOLD : SITE_BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
-                {n.type === "article" ? "Article" : "News"}
+              <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "performance" ? "#7c3aed" : n.type === "article" ? SITE_GOLD : SITE_BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
+                {n.type === "performance" ? "Performance" : n.type === "article" ? "Article" : "News"}
               </span>
               <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
             </div>
@@ -1935,6 +1983,23 @@ useEffect(() => {
           50%      { box-shadow: 0 0 0 1px rgba(255,140,0,0.3), 0 0 8px 2px rgba(255,90,0,0.32); }
         }
         .wd-onfire-box-soft { animation: wdOnFireBoxSoft 3.2s ease-in-out infinite; }
+
+        /* Performance sidebar rows — "pop" scaled to how good the grade
+           was. Dominant really pops, Great is quieter, Good is a static
+           hint, Productive/Average/Bad get nothing. Same tiered-glow
+           language as the trend rows above, just gold instead of trend
+           colors since it's the site's own grade signal, not a trend type. */
+        @keyframes wdPerfGlowDominant {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
+          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
+        }
+        .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
+        @keyframes wdPerfGlowGreat {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
+          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
+        }
+        .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
+        .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
       `}</style>
 
       {showBreakoutAnim && (

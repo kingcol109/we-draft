@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  collection, query, where, getDocs, orderBy, limit,
+  collection, query, where, getDocs, orderBy, limit, doc, getDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import MarginAds from "../components/MarginAds";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -15,13 +16,30 @@ export default function NewsArticle() {
   const { id } = useParams();
   const [article, setArticle] = useState(null);
   const [sidebarItems, setSidebarItems] = useState([]);
+  const [mentionedPlayers, setMentionedPlayers] = useState([]);
+  const [schoolLogos, setSchoolLogos] = useState({});
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  const contentRef = useRef(null);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 900);
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // School name → logo, for the "Players Mentioned" row logos. Fetched once
+  // (the schools collection is small) rather than per-player.
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "schools"));
+        const map = {};
+        snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data.Logo1 || ""; });
+        setSchoolLogos(map);
+      } catch (e) { /* logos are non-critical */ }
+    };
+    fetch();
   }, []);
 
   // Inject article content styles
@@ -66,6 +84,21 @@ export default function NewsArticle() {
     };
     fetch();
   }, [id]);
+
+  // Players mentioned — only articles carry a playerIds array (built from
+  // the "+Player" links the editor inserts into the body); news items don't
+  // have this field, so there's nothing to show for those.
+  useEffect(() => {
+    setMentionedPlayers([]);
+    if (article?.type !== "article" || !article.playerIds?.length) return;
+    const fetch = async () => {
+      try {
+        const snaps = await Promise.all(article.playerIds.map((pid) => getDoc(doc(db, "players", pid))));
+        setMentionedPlayers(snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() })));
+      } catch (err) { console.error("Error loading mentioned players:", err); }
+    };
+    fetch();
+  }, [article]);
 
   // Fetch sidebar items
   useEffect(() => {
@@ -168,7 +201,7 @@ export default function NewsArticle() {
         })}</script>
       </Helmet>
 
-      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div ref={contentRef} style={{ maxWidth: "1200px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* Page header */}
         <div style={{ marginBottom: "24px" }}>
@@ -269,16 +302,76 @@ export default function NewsArticle() {
           </div>
 
           {/* Sidebar */}
-          <div style={{ position: isMobile ? "static" : "sticky", top: "24px", order: isMobile ? 1 : 2 }}>
-            <div style={{ marginBottom: "14px" }}>
-              <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                More News
-              </div>
-              <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-              <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-            </div>
+          <div style={{ position: isMobile ? "static" : "sticky", top: "24px", order: isMobile ? 1 : 2, display: "flex", flexDirection: "column", gap: "24px" }}>
 
-            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+            {/* Players Mentioned — same badge + name + school row style used
+                on PerformancePage.js and the draft-class board list on
+                PlayerProfile.js. Articles only, since news items don't carry
+                a playerIds array. */}
+            {mentionedPlayers.length > 0 && (
+              <div>
+                <div style={{ marginBottom: "14px" }}>
+                  <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+                    Players Mentioned
+                  </div>
+                  <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+                  <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+                </div>
+                <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+                  {mentionedPlayers.map((p, i) => {
+                    const logo = schoolLogos[p.School];
+                    return (
+                      <Link
+                        key={p.id}
+                        to={`/player/${p.Slug}`}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
+                          textDecoration: "none",
+                          borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
+                          background: "#fff",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                      >
+                        <div style={{
+                          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                          width: "52px", height: "52px", borderRadius: "8px",
+                          background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
+                        }}>
+                          {logo ? (
+                            <img
+                              src={logo} alt={p.School || ""} style={{ width: "80%", height: "80%", objectFit: "contain" }}
+                              referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
+                            />
+                          ) : (
+                            <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                          <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
+                            {p.First} {p.Last}
+                          </span>
+                          <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                            {p.Position || "—"}
+                          </span>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <div style={{ marginBottom: "14px" }}>
+                <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+                  More News
+                </div>
+                <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+                <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+              </div>
+
+              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
               <div style={{ background: BLUE, padding: "8px 14px" }}>
                 <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
               </div>
@@ -306,7 +399,11 @@ export default function NewsArticle() {
           </div>
 
         </div>
+
+        </div>
       </div>
+
+      <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} />
     </>
   );
 }
