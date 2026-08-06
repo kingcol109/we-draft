@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, query, where, serverTimestamp } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -3107,13 +3107,35 @@ function CFBScheduleSection() {
         updatedAt: serverTimestamp(),
       };
       if (formState.Date) payload.Date = new Date(formState.Date);
-      if (formState.Time) payload.Time = formState.Time;
-      // Scores are left out entirely (rather than set to null/undefined) when
-      // blank — Firestore rejects `undefined` field values outright, and an
-      // explicit null would show as "0–0" everywhere a game's played-ness is
-      // checked via `!= null`.
-      if (formState.HomeScore.trim() !== "") payload.HomeScore = Number(formState.HomeScore);
-      if (formState.AwayScore.trim() !== "") payload.AwayScore = Number(formState.AwayScore);
+      // Same delete-vs-omit distinction as the scores below: a cleared
+      // kickoff Time on an existing doc has to be explicitly deleted, or
+      // updateDoc() just leaves whatever Time was saved before in place.
+      let timeCleared = false;
+      if (formState.Time) {
+        payload.Time = formState.Time;
+      } else if (!isNew) {
+        payload.Time = deleteField();
+        timeCleared = true;
+      }
+      // Blank scores are simply omitted on a brand-new doc (Firestore
+      // rejects `undefined` outright, and there's nothing to remove yet).
+      // On an EXISTING doc, though, omitting the key is not the same as
+      // clearing it — updateDoc() only touches fields present in the
+      // payload, so a blanked-out score previously saved as e.g. 34 would
+      // silently stay 34 forever unless explicitly deleted here.
+      let homeScoreCleared = false, awayScoreCleared = false;
+      if (formState.HomeScore.trim() !== "") {
+        payload.HomeScore = Number(formState.HomeScore);
+      } else if (!isNew) {
+        payload.HomeScore = deleteField();
+        homeScoreCleared = true;
+      }
+      if (formState.AwayScore.trim() !== "") {
+        payload.AwayScore = Number(formState.AwayScore);
+      } else if (!isNew) {
+        payload.AwayScore = deleteField();
+        awayScoreCleared = true;
+      }
 
       if (isNew) {
         const newRef = await addDoc(collection(db, "schedule26"), payload);
@@ -3123,7 +3145,16 @@ function CFBScheduleSection() {
         setSaveMessage("Game created.");
       } else {
         await updateDoc(doc(db, "schedule26", selectedGame.id), payload);
-        setGames((prev) => prev.map((g) => (g.id === selectedGame.id ? { ...g, ...payload } : g)));
+        setGames((prev) => prev.map((g) => {
+          if (g.id !== selectedGame.id) return g;
+          // deleteField() sentinels aren't real values — mirror the
+          // deletion in local state instead of spreading the sentinel in.
+          const merged = { ...g, ...payload };
+          if (homeScoreCleared) delete merged.HomeScore;
+          if (awayScoreCleared) delete merged.AwayScore;
+          if (timeCleared) delete merged.Time;
+          return merged;
+        }));
         setSaveMessage("Saved.");
       }
       if (payload.Week !== selectedWeek) setSelectedWeek(payload.Week);
