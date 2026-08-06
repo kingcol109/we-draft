@@ -50,6 +50,8 @@ export default function Navbar() {
   const [nflTimeout, setNflTimeout] = useState(null);
   const [communityOpen, setCommunityOpen] = useState(false);
   const [communityTimeout, setCommunityTimeout] = useState(null);
+  const [boardsOpen, setBoardsOpen] = useState(false);
+  const [boardsTimeout, setBoardsTimeout] = useState(null);
 
   /* ======================
      MOBILE DETECTION
@@ -255,7 +257,7 @@ export default function Navbar() {
         }
         .community-year-link:last-child { border-bottom: none; }
         .community-year-link:hover { background: #f0f5ff; color: #0055a5; }
-        .community-myboards-link {
+        .boards-highlight-link {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -265,10 +267,24 @@ export default function Navbar() {
           font-size: 14px;
           transition: background 0.12s ease;
           background: #fff8e6;
-          border-bottom: 2px solid #f6a21d;
+          border-bottom: 1px solid #f0f0f0;
           color: #0055a5;
         }
-        .community-myboards-link:hover { background: #fff0c0; }
+        .boards-highlight-link:hover { background: #fff0c0; }
+        .boards-link {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 16px;
+          text-decoration: none;
+          color: #222;
+          font-weight: 700;
+          font-size: 14px;
+          transition: background 0.12s ease;
+          border-bottom: 1px solid #f0f0f0;
+        }
+        .boards-link:last-child { border-bottom: none; }
+        .boards-link:hover { background: #f0f5ff; color: #0055a5; }
         .mobile-nav-link {
           display: flex;
           align-items: center;
@@ -362,16 +378,6 @@ export default function Navbar() {
                   </div>
                   <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
 
-                  {/* My Boards */}
-                  <Link
-                    to="/boards"
-                    className="community-myboards-link"
-                    onClick={() => setCommunityOpen(false)}
-                  >
-                    <span style={{ fontSize: "16px", lineHeight: 1 }}>📋</span>
-                    My Boards
-                  </Link>
-
                   {/* Year links */}
                   {COMMUNITY_YEARS.map((yr) => (
                     <Link
@@ -386,6 +392,57 @@ export default function Navbar() {
                 </div>
               )}
             </div>
+
+            {/* ── MY BOARDS DROPDOWN — signed-in users only ── */}
+            {user && (
+              <div
+                style={{ position: "relative" }}
+                onMouseEnter={() => { if (boardsTimeout) clearTimeout(boardsTimeout); setBoardsOpen(true); }}
+                onMouseLeave={() => { const t = setTimeout(() => setBoardsOpen(false), 150); setBoardsTimeout(t); }}
+              >
+                <Link to="/boards" style={baseStyle}>My Boards</Link>
+
+                {boardsOpen && (
+                  <div
+                    onMouseEnter={() => { if (boardsTimeout) clearTimeout(boardsTimeout); setBoardsOpen(true); }}
+                    onMouseLeave={() => setBoardsOpen(false)}
+                    style={{
+                      position: "fixed",
+                      top: "60px",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      width: "220px",
+                      background: "#ffffff",
+                      border: "2px solid #0055a5",
+                      borderRadius: "10px",
+                      boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                      zIndex: 10002,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div style={{ backgroundColor: "#0055a5", padding: "10px 14px" }}>
+                      <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                        My Boards
+                      </div>
+                    </div>
+                    <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
+
+                    <Link to="/boards" className="boards-highlight-link" onClick={() => setBoardsOpen(false)}>
+                      <span style={{ fontSize: "16px", lineHeight: 1 }}>📋</span>
+                      My Draft Board
+                    </Link>
+                    <Link to="/whiteboard" className="boards-link" onClick={() => setBoardsOpen(false)}>
+                      <span style={{ fontSize: "16px", lineHeight: 1 }}>📝</span>
+                      My Whiteboard
+                    </Link>
+                    <Link to="/boards/feed" className="boards-link" onClick={() => setBoardsOpen(false)}>
+                      <span style={{ fontSize: "16px", lineHeight: 1 }}>🔔</span>
+                      My Feed
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
 
             <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
 
@@ -574,13 +631,27 @@ export default function Navbar() {
               position: "relative",
             }}
           >
-            <Link to="/boards" className="mobile-nav-link"
-              style={{ background: "#fff8e6", borderColor: "#f6a21d" }}
-              onClick={() => setMenuOpen(false)}>
-              📋 My Boards
+            <Link to="/community" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
+              Community Board
             </Link>
+            {/* My Boards sits right after Community Board here too, matching
+                the desktop nav's order. */}
+            {user && (
+              <>
+                <Link to="/boards" className="mobile-nav-link"
+                  style={{ background: "#fff8e6", borderColor: "#f6a21d" }}
+                  onClick={() => setMenuOpen(false)}>
+                  📋 My Draft Board
+                </Link>
+                <Link to="/whiteboard" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
+                  📝 My Whiteboard
+                </Link>
+                <Link to="/boards/feed" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
+                  🔔 My Feed
+                </Link>
+              </>
+            )}
             {[
-              { path: "/community", label: "Community Board" },
               { path: "/community/2028", label: "2028 Board" },
               { path: "/community/2029", label: "2029 Board" },
               { path: "/mocks", label: "Mock Drafts" },

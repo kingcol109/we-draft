@@ -44,6 +44,7 @@ import ArticlePage from "./pages/ArticlePage";
 import PerformancePage from "./pages/PerformancePage";
 import PerformancesHub from "./pages/PerformancesHub";
 import GamePage from "./pages/GamePage";
+import MyFeed from "./pages/MyFeed";
 
 // Admin
 import AdminPanel from "./pages/AdminPanel";
@@ -109,6 +110,7 @@ function MainLayout() {
           <Route path="/team/:teamId" element={<TeamPage />} />
           <Route path="/nfl/:teamId" element={<NFLTeamPage />} />
           <Route path="/boards" element={<UserBoards />} />
+          <Route path="/boards/feed" element={<MyFeed />} />
           <Route path="/profile" element={<UserProfile />} />
           <Route path="/mocks" element={<MockDraftHub />} />
           <Route path="/mocks/my" element={<MyMocksPage />} />

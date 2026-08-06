@@ -95,6 +95,14 @@ const GRADE_GLOW_STYLE = `
     50%      { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.75); }
   }
   .wd-schedule-row-featured { animation: wdFeaturedRowGlow 2.2s ease-in-out infinite; }
+  /* Game of the Week — same higher tier as the individual game page's
+     ribbon (GamePage.js), shown instead of the Featured glow rather than
+     alongside it. */
+  @keyframes wdGotwRowGlow {
+    0%, 100% { box-shadow: inset 0 0 0 2px rgba(255,69,0,0.35); }
+    50%      { box-shadow: inset 0 0 0 2px rgba(255,69,0,0.7); }
+  }
+  .wd-schedule-row-gotw { animation: wdGotwRowGlow 3.4s ease-in-out infinite; }
   .wd-terminal-row { transition: background 0.15s ease; }
   .wd-terminal-row:hover { background: rgba(255,255,255,0.05) !important; }
 `;
@@ -118,9 +126,9 @@ const toMs = (ts) => {
 };
 
 // Which logo a team should show, in order of preference: an admin-uploaded
-// 8-bit version (Branding manager's "Logo (8-Bit)" field) if one's been
+// black version (Branding manager's "Logo (Black)" field) if one's been
 // set, else the dark logo, else the plain primary logo.
-const preferredLogo = (schoolData) => schoolData?.Logo8Bit || schoolData?.LogoDark || schoolData?.Logo1 || "";
+const preferredLogo = (schoolData) => schoolData?.LogoBlack || schoolData?.LogoDark || schoolData?.Logo1 || "";
 
 // Same admin-entered kickoff Time layered on top of the game's Date as
 // AdminPanel.js's CFBScheduleSection — games without a Time just sort to
@@ -608,18 +616,21 @@ export default function PerformancesHub() {
                       const awayWon = played && g.AwayScore > g.HomeScore;
                       const homeWon = played && g.HomeScore > g.AwayScore;
 
+                      const awayColor = away?.Color1 || "rgba(255,255,255,0.15)";
+                      const homeColor = home?.Color1 || "rgba(255,255,255,0.15)";
+
                       const TeamRow = ({ school, data, score, won }) => {
                         const logoSrc = preferredLogo(data);
                         return (
                           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                             {logoSrc ? (
-                              <img src={logoSrc} alt="" style={{ width: "28px", height: "28px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                              <img src={logoSrc} alt="" style={{ width: "36px", height: "36px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                             ) : (
-                              <div style={{ width: "28px", height: "28px", flexShrink: 0, borderRadius: "6px", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)", fontSize: "11px", fontWeight: 900 }}>
+                              <div style={{ width: "36px", height: "36px", flexShrink: 0, borderRadius: "6px", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)", fontSize: "13px", fontWeight: 900 }}>
                                 {(school || "?").charAt(0)}
                               </div>
                             )}
-                            <span style={{ fontFamily: TERMINAL_MONO, fontWeight: 900, fontSize: "13px", color: played ? (won ? "#fff" : "rgba(255,255,255,0.45)") : "#fff" }}>
+                            <span style={{ fontFamily: TERMINAL_MONO, fontWeight: 900, fontSize: "14px", color: played ? (won ? "#fff" : "rgba(255,255,255,0.45)") : "#fff" }}>
                               {school}
                             </span>
                             {played && (
@@ -633,10 +644,15 @@ export default function PerformancesHub() {
                         <Link
                           key={g.id}
                           to={g.Slug ? `/game/${g.Slug}` : "#"}
-                          className={`wd-terminal-row${g.Featured ? " wd-schedule-row-featured" : ""}`}
+                          className={`wd-terminal-row${g.GameOfWeek ? " wd-schedule-row-gotw" : g.Featured ? " wd-schedule-row-featured" : ""}`}
                           style={{
                             display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px",
-                            padding: "14px 16px", textDecoration: "none",
+                            padding: "14px 16px 14px 20px",
+                            // Same team-color sliver GamePage.js's hero and
+                            // CFBPage.js's schedule rows use, compressed to a
+                            // 4px accent at the row's left edge.
+                            background: `linear-gradient(to bottom, ${awayColor} 50%, ${homeColor} 50%) left / 4px 100% no-repeat`,
+                            textDecoration: "none",
                             borderBottom: i < gamesForWeek.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none",
                             pointerEvents: g.Slug ? "auto" : "none",
                           }}
@@ -646,7 +662,16 @@ export default function PerformancesHub() {
                             <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} />
                           </div>
                           <div style={{ fontFamily: TERMINAL_MONO, fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", flexShrink: 0, textAlign: "right" }}>
-                            {g.Featured && (
+                            {g.GameOfWeek ? (
+                              <span style={{
+                                display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
+                                background: "linear-gradient(90deg, #ff4500, #ffb347)", color: "#3a0f00",
+                                fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
+                                textTransform: "uppercase", letterSpacing: "0.05em",
+                              }}>
+                                🔥 Game of the Week
+                              </span>
+                            ) : g.Featured && (
                               <span style={{
                                 display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
                                 background: "linear-gradient(90deg, #f6a21d, #ffd35c)", color: "#3a2900",

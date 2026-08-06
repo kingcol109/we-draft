@@ -7,6 +7,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  deleteDoc,
   collection,
   getDocs,
   query,
@@ -371,6 +372,11 @@ export default function PlayerProfile() {
   const [trend, setTrend] = useState(null);
   const [reactionCounts, setReactionCounts] = useState({ likes: 0, up: 0, down: 0 });
   const [myReaction, setMyReaction] = useState({ liked: false, vote: null });
+  // Whether the signed-in user follows this player — separate from evaluations/
+  // reactions above, stored at users/{uid}/follows/{playerId} so "My Feed"
+  // (MyFeed.js) can list a user's own follows without a collection-group scan.
+  const [following, setFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
   // Right-side hero box (flair badge, or team logo when there's no flair) and
   // left-side hero box (school/NFL logo) each "grow" into their own popup on
   // hover/tap rather than showing a separate floating tooltip card.
@@ -1010,6 +1016,53 @@ useEffect(() => {
     setDoc(doc(db,"players",player.id,"reactions",user.uid), {
       uid: user.uid, liked: myReaction.liked, vote: nextVote, updatedAt: serverTimestamp(),
     }, { merge: true }).catch((e) => console.error(e));
+  };
+
+  // ── Follow status — single-doc read at users/{uid}/follows/{playerId},
+  // not a whole-subcollection scan like reactions above (there's nothing to
+  // aggregate here, just "does this doc exist"). ──
+  useEffect(() => {
+    const fetch = async () => {
+      if (!player?.id || !user) { setFollowing(false); return; }
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid, "follows", player.id));
+        setFollowing(snap.exists());
+      } catch (e) { console.error(e); }
+    };
+    fetch();
+  }, [player, user]);
+
+  // ── Toggle follow: writes/deletes users/{uid}/follows/{playerId}, denormalizing
+  // just enough display fields (name/school/position/eligible year) for MyFeed.js
+  // and BoardsMarginSidebars.js to list a user's follows without re-fetching each
+  // player doc. Optimistic UI, reverted on write failure. ──
+  const handleToggleFollow = async () => {
+    if (!user) { login(); return; }
+    if (!player?.id || followLoading) return;
+    const next = !following;
+    setFollowing(next);
+    setFollowLoading(true);
+    try {
+      const ref = doc(db, "users", user.uid, "follows", player.id);
+      if (next) {
+        await setDoc(ref, {
+          playerId: player.id,
+          playerSlug: player.Slug || "",
+          playerName: `${player.First || ""} ${player.Last || ""}`.trim(),
+          playerSchool: player.School || "",
+          playerPosition: player.Position || "",
+          playerEligible: player.Eligible || "",
+          followedAt: serverTimestamp(),
+        });
+      } else {
+        await deleteDoc(ref);
+      }
+    } catch (e) {
+      console.error(e);
+      setFollowing(!next);
+    } finally {
+      setFollowLoading(false);
+    }
   };
 
   // ── Fetch draft class (whole class once; position group + class rank both derive from it) ──
@@ -2188,13 +2241,22 @@ useEffect(() => {
 
         {/* ===== HERO CARD ===== */}
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border: `3px solid ${color1}` }}>
-          <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px", flexWrap:"wrap", rowGap:"8px" }}>
+          {/* A 3-column grid (not justify-content:space-between, which only
+              balances the *gap* on either side and drifts off-center as
+              soon as the Back button and the Follow/Film/Evaluate group
+              aren't the same width) so the Like/Up/Down group sits on the
+              same center axis as the player's name below, instead of
+              looking askew — and unlike centering it via absolute
+              positioning, grid columns never overlap, so it can't collide
+              with the button group on a narrow screen with Follow+Film+
+              Evaluate all showing. */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", columnGap:isMobile?"8px":"16px", backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
-              style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
+              style={{ justifySelf:"start", border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
 
-            <div className="flex items-center" style={{ gap:isMobile?"16px":"24px" }}>
+            <div className="flex items-center" style={{ gap:isMobile?"12px":"18px" }}>
               <button
                 onClick={handleToggleLike}
                 title="Like"
@@ -2245,18 +2307,35 @@ useEffect(() => {
               </button>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2" style={{ justifySelf:"end", flexWrap:"wrap", rowGap:"6px" }}>
+              <button
+                onClick={handleToggleFollow}
+                title={following ? "Unfollow" : "Follow — get their news & performances in your feed"}
+                className="font-extrabold rounded-full transition hover:opacity-90"
+                style={{
+                  border: "2px solid #fff",
+                  background: following ? "#fff" : "rgba(255,255,255,0.12)",
+                  color: following ? color1 : "#fff",
+                  fontSize: isMobile ? "14px" : "16px",
+                  padding: isMobile ? "7px 14px" : "9px 18px",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  opacity: followLoading ? 0.6 : 1,
+                }}
+              >
+                {following ? "✓ Following" : "+ Follow"}
+              </button>
               {player.Link && String(player.Eligible) === "2026" && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
                   className="text-white font-extrabold rounded-full transition hover:opacity-80"
-                  style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px" }}>
+                  style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}>
                   Film
                 </button>
               )}
               {!draftedBy && (
                 <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
                   className="font-extrabold rounded-full transition hover:opacity-90"
-                  style={{ backgroundColor:color2, border:"2px solid #fff", color:"#fff", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", fontWeight:900 }}>
+                  style={{ backgroundColor:color2, border:"2px solid #fff", color:"#fff", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px", fontWeight:900 }}>
                   Evaluate
                 </button>
               )}

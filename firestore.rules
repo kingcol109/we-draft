@@ -93,6 +93,12 @@ service cloud.firestore {
       match /archivedEvaluations/{playerId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
+      // Players a user follows — own-uid-scoped, same shape as evaluations
+      // above. Read/write both gated to the owner; nothing here needs to be
+      // publicly readable (no follower counts are shown anywhere).
+      match /follows/{playerId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
     }
     match /mockDrafts/{draftId} {
       allow read: if resource.data.visibility == 'public'

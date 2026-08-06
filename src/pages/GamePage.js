@@ -5,22 +5,57 @@
 // two states off the same schedule26 doc: pregame (matchup + key players +
 // preview notes) and final (score + review notes + each team's top
 // performances — key players step aside once there's real performance data
-// to show instead). The "AWAY"/"HOME" tags plus each side's own logo do the
-// work of identifying the matchup, so nothing here restates a school's full
-// name a second time next to it.
+// to show instead). Left/right position is the only "AWAY"/"HOME" label
+// anywhere on the page — each side's own logo identifies the school, so
+// nothing here restates a full name a second time next to it or spells out
+// which side is which.
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
-import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
+
+// Same flair badge assets/config as PlayerProfile.js's hero (duplicated
+// rather than imported cross-page, matching this codebase's own convention
+// for small shared constants — see MarginSidebars.js's file header) — Key
+// Players rows show a player's own flair badge here instead of a plain
+// rank number, the same badge that'd show on their profile page.
+import EliteFlair from "../assets/elite.png";
+import StarFlair from "../assets/star.png";
+import DiamondFlair from "../assets/dir.png";
+import RadarFlair from "../assets/radar.png";
+import SecondFlair from "../assets/second.png";
+import AlienFlair from "../assets/alien.png";
+import FutureStarFlair from "../assets/futurestar.png";
+import CurveFlair from "../assets/curve.png";
+import EarlyImpactFlair from "../assets/early impact.png";
+import EarlyContributorFlair from "../assets/early contributor.png";
+import Year2ContributorFlair from "../assets/y2contributor.png";
+import DevelopmentalFlair from "../assets/developmental.png";
+import ProvenFlair from "../assets/proven.png";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 // Fallback tint for a side whose school doc has no Color1 on file.
 const NEUTRAL_TEAM_COLOR = "#243447";
+
+const FLAIR_CONFIG = {
+  "Elite":                { img: EliteFlair,            stroke: "#ff0000" },
+  "Star":                 { img: StarFlair,             stroke: "#ebac02" },
+  "Diamond in the Rough":  { img: DiamondFlair,          stroke: "#00d2ff" },
+  "Under the Radar":      { img: RadarFlair,            stroke: "#79f146" },
+  "Future Star":          { img: FutureStarFlair,       stroke: "#0055a5" },
+  "Alien":                { img: AlienFlair,            stroke: "#5c04c9" },
+  "Second Chance":        { img: SecondFlair,           stroke: "#ff6600" },
+  "Ahead of the Curve":   { img: CurveFlair,            stroke: "#008aff" },
+  "Early Impact":         { img: EarlyImpactFlair,      stroke: "#009295" },
+  "Early Contributor":    { img: EarlyContributorFlair, stroke: "#ff00f0" },
+  "Year 2 Contributor":   { img: Year2ContributorFlair, stroke: "#3b6b03" },
+  "Developmental":        { img: DevelopmentalFlair,    stroke: "#fff600" },
+  "Proven":               { img: ProvenFlair,           stroke: "#00124b" },
+};
 
 const GRADE_PRIORITY = { Dominant: 0, Great: 1, Good: 2, Productive: 3, Average: 4, Bad: 5 };
 const gradePriority = (grade) => (grade in GRADE_PRIORITY ? GRADE_PRIORITY[grade] : 6);
@@ -56,6 +91,38 @@ const GRADE_GLOW_STYLE = `
     100% { background-position: 200% 50%; }
   }
   .wd-featured-ribbon { animation: wdFeaturedShimmer 3.5s linear infinite; }
+
+  /* Game of the Week — a separate, more intense tier than Featured: a
+     fire-toned shimmer on the ribbon, plus a slow pulsing glow around the
+     whole card (rgba(255,69,0,...) matches the ribbon's orange). Both
+     slowed down and toned down from an earlier pass that felt too frantic. */
+  @keyframes wdGotwShimmer {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  .wd-gotw-ribbon { animation: wdGotwShimmer 4s linear infinite; }
+  @keyframes wdGotwCardGlow {
+    0%, 100% { box-shadow: 0 10px 30px rgba(0,0,0,0.12), 0 0 0px rgba(255,69,0,0); }
+    50%      { box-shadow: 0 10px 32px rgba(0,0,0,0.14), 0 0 20px rgba(255,69,0,0.35); }
+  }
+  .wd-gotw-card-glow { animation: wdGotwCardGlow 3.6s ease-in-out infinite; }
+
+  /* Hero background "energy" — a slowly drifting yard-line texture and a
+     breathing spotlight, so the banner isn't a static image. */
+  @keyframes wdFieldDrift {
+    0%   { transform: translate(0, 0); }
+    100% { transform: translate(-80px, -46px); }
+  }
+  @keyframes wdSpotlightPulse {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+  }
+
+  /* Key Player hover note — collapsed by default, expands under the row's
+     name when that row is hovered (see AdminPanel.js's per-player note
+     field in the CFB Schedule editor). */
+  .wd-keyplayer-note-wrap { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease; }
+  .wd-perf-row-link:hover .wd-keyplayer-note-wrap { max-height: 80px; opacity: 1; margin-top: 6px; }
 `;
 
 function sanitizeUrl(url) {
@@ -148,84 +215,100 @@ const formatTime12h = (t) => {
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 };
 
-// One side of the hero matchup — AWAY/HOME tag, a big logo, and the
-// school's Wordmark standing in for its name (falls back to plain text if
-// the school has no wordmark asset). Logo preference: an admin-uploaded
-// 8-bit version (Branding manager's "Logo (8-Bit)" field) if one's been
-// set, else LogoDark (reads better against the hero's colored background
-// than a school's normal logo), else the plain primary logo. The wordmark
-// sits in a fixed-height box with its own auto-trimmed image (see
-// useTrimmedImage) so every school's name reads at the same visual size
-// regardless of how much padding its source file happens to have.
-function TeamHeroSide({ side, school, schoolData, isMobile, dimmed }) {
+// One side of the hero matchup — just a big logo and that school's wordmark
+// as a huge, faint backdrop behind it (no separate AWAY/HOME tag — which
+// side is which is already implied by left/right position, matching the
+// Away/Home columns below). No room needed for ad rails on this page, just
+// the margin sidebars, so the hero can spend the extra width on scale
+// instead. Logo preference for this page: LogoDark (reads better against
+// the hero's colored background than a school's normal logo) else the plain
+// primary logo — LogoBlack is a separate asset meant for the Performances
+// terminal's near-black background, not a colored one like this hero's, so
+// it isn't part of this chain.
+//
+// Backdrop wordmark: WordmarkDark if the school has one, else the plain
+// Wordmark used the same way (a low-opacity backdrop doesn't need the
+// contrast guarantee a foreground element would — 30% opacity over the
+// team's own color reads fine either way). Sized as wide as the column will
+// take (112%/135% of it — the column's own width is well-defined since it's
+// a flex item with an explicit width:0 basis, so percentage widths on an
+// absolutely-positioned child resolve correctly), while its *vertical*
+// anchor is a plain pixel offset computed from logoSize instead of a
+// percentage/calc — this column's rendered height is undefined for
+// percentage-resolution purposes (flex auto-height), but a literal px value
+// doesn't need that resolution step at all. Together that's "as big as
+// fits the width" with its own vertical center landing about a third of
+// the way up the logo (logoSize * 2/3 down from the logo's own top) —
+// centering rather than anchoring by its top edge, since schools' wordmarks
+// render at very different heights for the same width, and centering keeps
+// that difference from pushing some schools' text further off the bottom
+// of the hero than others.
+function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const [wordmarkFailed, setWordmarkFailed] = useState(false);
+  const [wordmarkDarkFailed, setWordmarkDarkFailed] = useState(false);
   const wordmarkSrc = useTrimmedImage(schoolData?.Wordmark ? sanitizeUrl(schoolData.Wordmark) : null);
+  const wordmarkDarkSrc = useTrimmedImage(schoolData?.WordmarkDark ? sanitizeUrl(schoolData.WordmarkDark) : null);
 
-  const logoSrc = schoolData?.Logo8Bit || schoolData?.LogoDark || schoolData?.Logo1 || schoolData?.Logo2 || "";
-  // The 8-bit asset is deliberately low-res pixel art — force crisp,
-  // unsmoothed scaling so the browser doesn't blur its edges back out.
-  const logoIsPixelArt = !!schoolData?.Logo8Bit;
+  const logoSrc = schoolData?.LogoDark || schoolData?.Logo1 || "";
   const accent = schoolData?.Color1 || NEUTRAL_TEAM_COLOR;
-  const logoSize = isMobile ? 64 : 116;
-  const wordmarkBoxHeight = isMobile ? 24 : 36;
+  const logoSize = isMobile ? 112 : 250;
+  const backdropTop = Math.round((logoSize * 2) / 3);
+
+  const showWordmarkDark = !!wordmarkDarkSrc && !wordmarkDarkFailed;
+  const showWordmarkFallback = !showWordmarkDark && !!wordmarkSrc && !wordmarkFailed;
+  const backdropSrc = showWordmarkDark ? wordmarkDarkSrc : (showWordmarkFallback ? wordmarkSrc : null);
+
+  const style = {
+    position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+    textDecoration: "none", flex: "1 1 0", minWidth: 0, width: 0,
+    opacity: dimmed ? 0.55 : 1, transition: "opacity 0.3s ease",
+  };
 
   const inner = (
     <>
-      <span style={{
-        background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.5)",
-        color: "#fff", fontSize: isMobile ? "9px" : "10px", fontWeight: 900,
-        padding: "3px 12px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.12em",
-        backdropFilter: "blur(2px)",
-      }}>
-        {side}
-      </span>
+      {backdropSrc && (
+        <img
+          src={backdropSrc} alt="" aria-hidden="true"
+          onError={() => (showWordmarkDark ? setWordmarkDarkFailed(true) : setWordmarkFailed(true))}
+          style={{
+            // Anchored by its own vertical CENTER landing at backdropTop,
+            // not its top edge — wordmarks render at wildly different
+            // heights for the same width depending on their own aspect
+            // ratio, so anchoring by top edge let a taller one hang
+            // further down than a shorter one (uneven side to side) and
+            // sometimes run off the bottom of the hero. Centering splits
+            // that extra height evenly above/below the same target point
+            // for every school instead of dumping it all downward.
+            position: "absolute", top: `${backdropTop}px`, left: "50%", transform: "translate(-50%, -50%)",
+            width: isMobile ? "135%" : "112%", height: "auto",
+            opacity: 0.3, objectFit: "contain", pointerEvents: "none", zIndex: 0,
+          }}
+        />
+      )}
 
       {logoSrc && !logoFailed ? (
         <img
           src={sanitizeUrl(logoSrc)} alt={school}
           style={{
+            position: "relative", zIndex: 1,
             height: `${logoSize}px`, width: `${logoSize}px`, objectFit: "contain",
-            filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.5))",
-            imageRendering: logoIsPixelArt ? "pixelated" : "auto",
+            filter: "drop-shadow(0 10px 22px rgba(0,0,0,0.55))",
           }}
           onError={() => setLogoFailed(true)}
         />
       ) : (
         <div style={{
+          position: "relative", zIndex: 1,
           height: `${logoSize}px`, width: `${logoSize}px`, borderRadius: "50%",
           background: accent, display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", fontSize: isMobile ? "22px" : "36px", fontWeight: 900,
+          color: "#fff", fontSize: isMobile ? "36px" : "68px", fontWeight: 900,
         }}>
           {(school || "?").charAt(0)}
         </div>
       )}
-
-      {wordmarkSrc && !wordmarkFailed ? (
-        <div style={{
-          background: "#fff", borderRadius: "8px", padding: isMobile ? "3px 10px" : "5px 16px",
-          boxShadow: "0 3px 12px rgba(0,0,0,0.35)", height: `${wordmarkBoxHeight}px`, boxSizing: "content-box",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <img
-            src={wordmarkSrc} alt={school}
-            style={{ height: "100%", width: "auto", maxWidth: isMobile ? "120px" : "190px", objectFit: "contain", display: "block" }}
-            onError={() => setWordmarkFailed(true)}
-          />
-        </div>
-      ) : (
-        <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "18px", textAlign: "center", lineHeight: 1.2, textShadow: "0 2px 6px rgba(0,0,0,0.5)" }}>
-          {school}
-        </span>
-      )}
     </>
   );
-
-  const style = {
-    display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? "8px" : "12px",
-    textDecoration: "none", flex: "1 1 0", minWidth: 0,
-    opacity: dimmed ? 0.55 : 1, transition: "opacity 0.3s ease",
-  };
 
   return schoolData?.Slug ? (
     <Link to={`/team/${schoolData.Slug}`} style={style}>{inner}</Link>
@@ -234,74 +317,134 @@ function TeamHeroSide({ side, school, schoolData, isMobile, dimmed }) {
   );
 }
 
-// Small inline identity for a content-section column — a mini team logo
-// plus the AWAY/HOME tag, instead of restating the school's full name a
-// second time (already established, big, at the top of the page).
-function SideTag({ tag, schoolData }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
-      {schoolData?.Logo1 ? (
-        <img src={sanitizeUrl(schoolData.Logo1)} alt="" style={{ width: "22px", height: "22px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-      ) : null}
-      <span style={{ fontSize: "11px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.1em" }}>{tag}</span>
-    </div>
-  );
-}
-
 // One team's content column — Key Players pregame, Top Performances once
 // Final (never both; Key Players steps aside for real performance data the
-// moment there's some to show).
-function TeamColumn({ tag, schoolData, keyPlayers, performances, mode }) {
+// moment there's some to show). The whole column is one card headed by a
+// strip in that team's own Color1/Color2 (the same colors as its half of
+// the hero above, and the same AWAY/HOME pill styling) so this reads as a
+// continuation of the matchup rather than a plain white list bolted on
+// underneath it — previously just a small gray "AWAY"/"HOME" label sat
+// above a differently-colored (site BLUE) box, which is exactly the kind of
+// "doesn't feel like part of the game" seam this closes.
+function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayerNotes }) {
+  const accent1 = schoolData?.Color1 || BLUE;
+  const accent2 = schoolData?.Color2 || GOLD;
+  const isFinalMode = mode === "final";
+  const items = isFinalMode ? performances : keyPlayers;
+
   return (
-    <div>
-      <SideTag tag={tag} schoolData={schoolData} />
-      {mode === "final" ? (
-        performances.length === 0 ? (
-          <div style={{ color: "#bbb", fontSize: "12px", fontStyle: "italic", padding: "8px 0" }}>No performances written up yet.</div>
-        ) : (
-          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-            {/* Just the player and their stat line — the title/grade text
-                lives on the performance's own page; the grade still shows
-                up here as the row's glow (see gradeGlowClass), not as text. */}
-            {performances.map((perf, i) => (
-              <Link
-                key={perf.id}
-                to={`/performance/${perf.slug}`}
-                className={`wd-perf-row-link ${gradeGlowClass(perf.grade)}`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < performances.length - 1 ? "1px solid #f0f0f0" : "none" }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: "#222", fontWeight: 900, fontSize: "14px", lineHeight: 1.3 }}>
-                    {perf.playerName || perf.titleShort}
-                  </div>
-                  {perf.statLine && (
-                    <div style={{ color: "#555", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", marginTop: "3px" }}>
-                      {perf.statLine}
-                    </div>
-                  )}
-                </div>
-                <span className="wd-perf-row-chevron" style={{ color: BLUE, fontSize: "18px", fontWeight: 900, flexShrink: 0 }}>›</span>
-              </Link>
-            ))}
+    <div style={{ border: `2px solid ${accent1}`, borderRadius: "12px", overflow: "hidden", background: "#fff", boxShadow: "0 6px 18px rgba(0,0,0,0.1)" }}>
+      {/* Just the mini logo — no "AWAY"/"HOME" label needed, this column
+          already sits under the matching side of the hero above it. */}
+      <div style={{ background: accent1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {schoolData?.Logo1 ? (
+          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+            <img
+              src={sanitizeUrl(schoolData.Logo1)} alt={tag}
+              style={{ width: "78%", height: "78%", objectFit: "contain" }}
+              onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
+            />
           </div>
-        )
-      ) : keyPlayers.length === 0 ? (
-        <div style={{ color: "#bbb", fontSize: "12px", fontStyle: "italic", padding: "8px 0" }}>None selected yet.</div>
+        ) : (
+          <span style={{ color: "#fff", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.14em" }}>{tag}</span>
+        )}
+      </div>
+      <div style={{ height: "3px", background: accent2 }} />
+
+      {items.length === 0 ? (
+        <div style={{ color: "#bbb", fontSize: "13px", fontStyle: "italic", padding: "16px" }}>
+          {isFinalMode ? "No performances written up yet." : "None selected yet."}
+        </div>
+      ) : isFinalMode ? (
+        // Just the player and their stat line — the title/grade text lives
+        // on the performance's own page; the grade still shows up here as
+        // the row's glow (see gradeGlowClass), not as text.
+        performances.map((perf, i) => (
+          <Link
+            key={perf.id}
+            to={`/performance/${perf.slug}`}
+            className={`wd-perf-row-link ${gradeGlowClass(perf.grade)}`}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "12px 16px", textDecoration: "none",
+              borderBottom: i < performances.length - 1 ? "1px solid #f0f0f0" : "none",
+              borderLeft: `4px solid ${accent1}`,
+              background: `linear-gradient(90deg, ${accent1}0d, transparent 40%)`,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "#222", fontWeight: 900, fontSize: "16px", lineHeight: 1.3 }}>
+                {perf.playerName || perf.titleShort}
+              </div>
+              {perf.statLine && (
+                <div style={{ color: "#555", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", marginTop: "3px" }}>
+                  {perf.statLine}
+                </div>
+              )}
+            </div>
+            <span className="wd-perf-row-chevron" style={{ color: accent1, fontSize: "18px", fontWeight: 900, flexShrink: 0 }}>›</span>
+          </Link>
+        ))
       ) : (
-        <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-          {keyPlayers.map((p, i) => (
+        keyPlayers.map((p, i) => {
+          // A player's own flair badge (same asset/config as their profile
+          // page's hero) stands in for a plain rank number when they have
+          // one — falls back to the number for players without a flair set.
+          const flairInfo = p.Flair ? FLAIR_CONFIG[String(p.Flair).trim()] : null;
+          const note = keyPlayerNotes?.[p.id];
+          return (
             <Link
               key={p.id}
               to={`/player/${p.Slug}`}
-              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < keyPlayers.length - 1 ? "1px solid #f0f0f0" : "none" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+              className="wd-perf-row-link"
+              style={{
+                display: "flex", alignItems: "center", gap: "16px", padding: "16px 18px", textDecoration: "none",
+                borderBottom: i < keyPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
+                borderLeft: `4px solid ${accent1}`,
+                background: `linear-gradient(90deg, ${accent1}0d, transparent 40%)`,
+              }}
             >
-              <span style={{ color: BLUE, fontWeight: 900, fontSize: "13px" }}>{p.First} {p.Last}</span>
-              <span style={{ color: "#999", fontWeight: 700, fontSize: "11px", textTransform: "uppercase", flexShrink: 0 }}>{p.Position || "—"}</span>
+              {flairInfo ? (
+                <div style={{
+                  flexShrink: 0, width: "46px", height: "46px", borderRadius: "10px",
+                  background: "#fff", border: `2px solid ${flairInfo.stroke}`,
+                  boxShadow: `0 0 12px ${flairInfo.stroke}66`,
+                  display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                }} title={p.Flair}>
+                  <img src={flairInfo.img} alt={p.Flair} style={{ height: "80%", width: "80%", objectFit: "contain" }} />
+                </div>
+              ) : (
+                <div style={{
+                  flexShrink: 0, width: "42px", height: "42px", borderRadius: "50%",
+                  background: accent1, border: `2px solid ${accent2}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontWeight: 900, fontSize: "17px",
+                }}>
+                  {i + 1}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: BLUE, fontWeight: 900, fontSize: "19px", lineHeight: 1.2 }}>{p.First} {p.Last}</div>
+                {/* Admin-written note (AdminPanel.js's CFB Schedule editor) —
+                    collapsed until this row is hovered (see .wd-keyplayer-note-wrap
+                    in GRADE_GLOW_STYLE), so the list stays compact by default. */}
+                {note && (
+                  <div className="wd-keyplayer-note-wrap">
+                    <div style={{ color: "#666", fontWeight: 600, fontSize: "12.5px", lineHeight: 1.4, fontStyle: "italic" }}>
+                      {note}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <span style={{
+                background: accent1, color: "#fff", fontWeight: 900, fontSize: "12px",
+                padding: "6px 13px", borderRadius: "6px", textTransform: "uppercase", letterSpacing: "0.04em", flexShrink: 0,
+              }}>
+                {p.Position || "—"}
+              </span>
+              <span className="wd-perf-row-chevron" style={{ color: accent1, fontSize: "20px", fontWeight: 900, flexShrink: 0 }}>›</span>
             </Link>
-          ))}
-        </div>
+          );
+        })
       )}
     </div>
   );
@@ -401,6 +544,14 @@ export default function GamePage() {
   const homeWon = isFinal && game.HomeScore > game.AwayScore;
   const awayColor = awaySchool?.Color1 || NEUTRAL_TEAM_COLOR;
   const homeColor = homeSchool?.Color1 || NEUTRAL_TEAM_COLOR;
+  // Pregame, an empty Key Players section entirely is just unfilled admin
+  // scaffolding, not meaningful context worth showing — unlike a Final game
+  // with no performances written up yet, which still stays visible as real
+  // information. But once at least one side has a pick, both columns show
+  // side by side as usual — the empty one just falls back to its own
+  // "None selected yet." message rather than disappearing and leaving a
+  // lopsided single-column layout.
+  const showKeyPlayersSection = isFinal || keyPlayersAway.length > 0 || keyPlayersHome.length > 0;
   // "Back" always means this game's week slate — the CFB schedule for that
   // week (every game, not just the ones with performances) — not the
   // Performances hub. Only falls back to the CFB schedule's own default
@@ -431,29 +582,65 @@ export default function GamePage() {
         <meta property="og:site_name" content="We-Draft" />
       </Helmet>
 
-      <div ref={contentRef} style={{ maxWidth: "1000px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      {/* This page only needs to leave room for the margin sidebars
+          (GameMarginSidebars.js), not the wider gutter an ad rail would
+          need, so the main content can run wider than the standard
+          1000px reading column and give the hero more room to be big. */}
+      <div ref={contentRef} style={{ maxWidth: "1150px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
-        {/* Page header */}
-        <div style={{ marginBottom: "24px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
-            <div style={{ fontSize: isMobile ? "16px" : "20px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
-              Game
-            </div>
-            <Link to={weekSlateUrl} style={{ marginLeft: "auto", color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline" }}>
+        <div className={game.GameOfWeek ? "wd-gotw-card-glow" : ""} style={{ border: `2px solid ${BLUE}`, borderRadius: "14px", overflow: "hidden", boxShadow: game.GameOfWeek ? undefined : "0 10px 30px rgba(0,0,0,0.12)" }}>
+
+          {/* Masthead — folded into the card itself (instead of a plain
+              title line sitting above it) so it reads as the top of the
+              same graphic as the hero below it, rather than a separate,
+              disconnected element. No "GAME" label needed — the whole page
+              is obviously a game page. Date/time live here now rather than
+              in the hero's own status strip, so they're not lost among the
+              team colors and stay put regardless of matchup colors. */}
+          <div style={{ background: BLUE, padding: isMobile ? "11px 14px" : "14px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+            {dateStr && (
+              <div>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "16px" : "21px" }}>{dateStr}</div>
+                {timeStr && (
+                  <div style={{ color: GOLD, fontWeight: 800, fontSize: isMobile ? "13px" : "16px", marginTop: "2px" }}>{timeStr}</div>
+                )}
+              </div>
+            )}
+            <Link
+              to={weekSlateUrl}
+              style={{
+                color: "#fff", background: "rgba(255,255,255,0.14)", border: `2px solid ${GOLD}`,
+                borderRadius: "8px", padding: isMobile ? "7px 14px" : "9px 22px",
+                fontWeight: 900, fontSize: isMobile ? "13px" : "15px", textDecoration: "none",
+                textTransform: "uppercase", letterSpacing: "0.04em", marginLeft: "auto",
+              }}
+            >
               {weekSlateLabel}
             </Link>
           </div>
-          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-        </div>
+          <div style={{ height: "3px", background: GOLD }} />
 
-        <div style={{ border: `2px solid ${BLUE}`, borderRadius: "14px", overflow: "hidden" }}>
-
-          {/* Featured ribbon — a proud, branded banner rather than a small
-              pill buried in the status strip, with a slow shimmer sweep for
-              a bit of showcase energy. */}
-          {game.Featured && (
+          {/* Featured / Game of the Week ribbon — a proud, branded banner
+              rather than a small pill buried in the status strip. Game of
+              the Week is a separate, higher tier (see AdminPanel.js) and
+              gets a more intense fire-toned, faster-shimmering version
+              instead of Featured's gold one when both are set — showing
+              both would be redundant noise on the same card. */}
+          {game.GameOfWeek ? (
+            <div
+              className="wd-gotw-ribbon"
+              style={{
+                background: "linear-gradient(90deg, #ff4500, #ffb347, #ff4500, #ffb347, #ff4500)",
+                backgroundSize: "200% 100%",
+                padding: isMobile ? "10px 14px" : "13px 20px",
+                textAlign: "center",
+              }}
+            >
+              <span style={{ color: "#3a0f00", fontWeight: 900, fontSize: isMobile ? "13px" : "16px", textTransform: "uppercase", letterSpacing: "0.16em", textShadow: "0 1px 2px rgba(255,255,255,0.35)" }}>
+                🔥 Game of the Week 🔥
+              </span>
+            </div>
+          ) : game.Featured && (
             <div
               className="wd-featured-ribbon"
               style={{
@@ -469,51 +656,91 @@ export default function GamePage() {
             </div>
           )}
 
-          {/* Hero — status strip + big branded matchup. Background is split
-              between each team's own Color1 (a flat dark overlay layered on
-              top keeps white text/logos legible no matter how light either
-              team's color happens to be). */}
+          {/* Hero — status strip + big branded matchup, built to fill space
+              the way a Madden matchup splash screen does rather than sit as
+              a modest banner: bigger logos/wordmarks, more padding, and a
+              couple of animated overlay layers (a slowly drifting "yard
+              line" texture + a breathing spotlight — see wdFieldDrift/
+              wdSpotlightPulse below) so the background has some life to it
+              instead of sitting static. The two team colors blend across a
+              wide middle band (32%–68%) rather than meeting at a narrow
+              seam — a hard vertical line down the middle is exactly what
+              read as "the page split in half" instead of one banner (the
+              dark overlay keeps white text/logos legible no matter how
+              light either team's color happens to be). */}
           <div style={{
-            background: `linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4)), linear-gradient(90deg, ${awayColor} 0%, ${awayColor} 46%, ${homeColor} 54%, ${homeColor} 100%)`,
-            padding: isMobile ? "18px 14px 28px" : "22px 32px 40px",
+            position: "relative", overflow: "hidden",
+            background: [
+              "linear-gradient(rgba(0,0,0,0.42), rgba(0,0,0,0.42))",
+              `linear-gradient(90deg, ${awayColor} 0%, ${awayColor} 32%, ${homeColor} 68%, ${homeColor} 100%)`,
+            ].join(", "),
+            padding: isMobile ? "22px 16px 34px" : "40px 40px 60px",
           }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", marginBottom: isMobile ? "20px" : "32px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <span style={{ background: isFinal ? "#1a7f37" : "#7c3aed", color: "#fff", fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                  {isFinal ? "Final" : "Preview"}
-                </span>
-                {game.Week && (
-                  <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "12px", fontWeight: 700 }}>{game.Week}</span>
-                )}
-              </div>
-              {dateStr && (
-                <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "12px", fontWeight: 700 }}>
-                  {dateStr}{timeStr ? ` · ${timeStr}` : ""}
-                </span>
+            {/* Overlay layers are separate absolutely-positioned divs
+                (rather than more entries in the background above) so each
+                can carry its own animation — CSS can't independently
+                animate one layer's position within a single composited
+                multi-layer background. Both zIndex:0, sitting behind the
+                zIndex:1 content below. */}
+            <div aria-hidden="true" style={{
+              position: "absolute", inset: "-20%", zIndex: 0, pointerEvents: "none",
+              background: "repeating-linear-gradient(115deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 2px, transparent 2px, transparent 40px)",
+              animation: "wdFieldDrift 16s linear infinite",
+            }} />
+            <div aria-hidden="true" style={{
+              position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
+              background: "radial-gradient(circle at 50% 28%, rgba(255,255,255,0.16), transparent 55%)",
+              animation: "wdSpotlightPulse 4s ease-in-out infinite",
+            }} />
+
+            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px", flexWrap: "wrap", marginBottom: isMobile ? "22px" : "40px" }}>
+              <span style={{
+                background: isFinal ? "#1a7f37" : "#7c3aed", color: "#fff",
+                fontSize: isMobile ? "11px" : "13px", fontWeight: 900,
+                padding: isMobile ? "4px 12px" : "6px 16px", borderRadius: "6px",
+                textTransform: "uppercase", letterSpacing: "0.1em",
+                boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
+              }}>
+                {isFinal ? "🏁 Final" : "🔮 Preview"}
+              </span>
+              {game.Week && (
+                <span style={{ color: "#fff", fontSize: isMobile ? "13px" : "17px", fontWeight: 900, textShadow: "0 2px 5px rgba(0,0,0,0.4)" }}>{game.Week}</span>
               )}
             </div>
 
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: isMobile ? "10px" : "28px" }}>
-              <TeamHeroSide key={`${game.id}-away`} side="Away" school={game.Away} schoolData={awaySchool} isMobile={isMobile} dimmed={isFinal && homeWon} />
+            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", gap: isMobile ? "12px" : "36px" }}>
+              <TeamHeroSide key={`${game.id}-away`} school={game.Away} schoolData={awaySchool} isMobile={isMobile} dimmed={isFinal && homeWon} />
 
-              <div style={{ textAlign: "center", flexShrink: 0, paddingTop: isMobile ? "16px" : "34px" }}>
+              <div style={{ textAlign: "center", flexShrink: 0, paddingTop: isMobile ? "26px" : "58px" }}>
                 {isFinal ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "6px" : "10px" }}>
-                    <span style={{ fontSize: isMobile ? "26px" : "44px", fontWeight: 900, color: awayWon ? "#fff" : "rgba(255,255,255,0.4)" }}>{game.AwayScore}</span>
-                    <span style={{ fontSize: isMobile ? "14px" : "18px", fontWeight: 900, color: "rgba(255,255,255,0.3)" }}>–</span>
-                    <span style={{ fontSize: isMobile ? "26px" : "44px", fontWeight: 900, color: homeWon ? "#fff" : "rgba(255,255,255,0.4)" }}>{game.HomeScore}</span>
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: isMobile ? "8px" : "14px",
+                    background: "rgba(0,0,0,0.32)", border: "2px solid rgba(255,255,255,0.25)",
+                    borderRadius: "14px", padding: isMobile ? "8px 14px" : "14px 26px",
+                    boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
+                  }}>
+                    <span style={{ fontSize: isMobile ? "28px" : "52px", fontWeight: 900, color: awayWon ? "#fff" : "rgba(255,255,255,0.45)", lineHeight: 1 }}>{game.AwayScore}</span>
+                    <span style={{ fontSize: isMobile ? "14px" : "20px", fontWeight: 900, color: "rgba(255,255,255,0.3)" }}>–</span>
+                    <span style={{ fontSize: isMobile ? "28px" : "52px", fontWeight: 900, color: homeWon ? "#fff" : "rgba(255,255,255,0.45)", lineHeight: 1 }}>{game.HomeScore}</span>
                   </div>
                 ) : (
-                  <span style={{ fontSize: isMobile ? "14px" : "18px", fontWeight: 900, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>
-                    {game.Neutral ? "vs" : "@"}
-                  </span>
+                  <div style={{
+                    width: isMobile ? "48px" : "88px", height: isMobile ? "48px" : "88px", borderRadius: "50%",
+                    background: "rgba(0,0,0,0.32)", border: `3px solid ${GOLD}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    boxShadow: "0 8px 22px rgba(0,0,0,0.4)",
+                  }}>
+                    <span style={{ fontSize: isMobile ? "13px" : "22px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      {game.Neutral ? "vs" : "at"}
+                    </span>
+                  </div>
                 )}
                 {game.Neutral && (
-                  <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "4px" }}>Neutral Site</div>
+                  <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "8px" }}>Neutral Site</div>
                 )}
               </div>
 
-              <TeamHeroSide key={`${game.id}-home`} side="Home" school={game.Home} schoolData={homeSchool} isMobile={isMobile} dimmed={isFinal && awayWon} />
+              <TeamHeroSide key={`${game.id}-home`} school={game.Home} schoolData={homeSchool} isMobile={isMobile} dimmed={isFinal && awayWon} />
             </div>
           </div>
           <div style={{ height: "3px", background: GOLD }} />
@@ -545,30 +772,38 @@ export default function GamePage() {
               </div>
             )}
 
-            {/* Key Players (pregame) or Top Performances (final) — never both */}
-            <div style={{ marginBottom: "10px" }}>
-              <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                {isFinal ? "Top Performances" : "Key Players"}
-              </div>
-              <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-              <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "24px" : "32px" }}>
-              <TeamColumn
-                tag="Away"
-                schoolData={awaySchool}
-                keyPlayers={keyPlayersAway}
-                performances={performancesAway}
-                mode={isFinal ? "final" : "pregame"}
-              />
-              <TeamColumn
-                tag="Home"
-                schoolData={homeSchool}
-                keyPlayers={keyPlayersHome}
-                performances={performancesHome}
-                mode={isFinal ? "final" : "pregame"}
-              />
-            </div>
+            {/* Key Players (pregame) or Top Performances (final) — never both,
+                and pregame the whole section steps aside if nobody's been
+                picked for either side yet (see showKeyPlayersSection above). */}
+            {showKeyPlayersSection && (
+              <>
+                <div style={{ marginBottom: "10px" }}>
+                  <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+                    {isFinal ? "Top Performances" : "Key Players"}
+                  </div>
+                  <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+                  <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "24px" : "32px" }}>
+                  <TeamColumn
+                    tag="Away"
+                    schoolData={awaySchool}
+                    keyPlayers={keyPlayersAway}
+                    performances={performancesAway}
+                    mode={isFinal ? "final" : "pregame"}
+                    keyPlayerNotes={game.KeyPlayerNotes}
+                  />
+                  <TeamColumn
+                    tag="Home"
+                    schoolData={homeSchool}
+                    keyPlayers={keyPlayersHome}
+                    performances={performancesHome}
+                    mode={isFinal ? "final" : "pregame"}
+                    keyPlayerNotes={game.KeyPlayerNotes}
+                  />
+                </div>
+              </>
+            )}
 
             {/* Footer */}
             <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: "2px solid #eee", display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: "10px" }}>

@@ -197,6 +197,17 @@ export default function CFBPage() {
         .wd-schedule-row-featured {
           animation: wdFeaturedRowGlow 2.2s ease-in-out infinite;
         }
+        /* Game of the Week — same higher tier as the individual game page's
+           ribbon (GamePage.js), shown instead of the Featured glow rather
+           than alongside it. Slower/calmer than an early GamePage.js pass
+           at this same fire-toned glow, which read as too frantic there. */
+        @keyframes wdGotwRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 2px rgba(255,69,0,0.35); }
+          50% { box-shadow: inset 0 0 0 2px rgba(255,69,0,0.7); }
+        }
+        .wd-schedule-row-gotw {
+          animation: wdGotwRowGlow 3.4s ease-in-out infinite;
+        }
       `}</style>
       {/* ===== Page Header ===== */}
       <div className="mb-8">
@@ -428,16 +439,19 @@ export default function CFBPage() {
                     const awayWon = played && g.AwayScore > g.HomeScore;
                     const homeWon = played && g.HomeScore > g.AwayScore;
 
+                    const awayColor = away?.Color1 || "#ccc";
+                    const homeColor = home?.Color1 || "#ccc";
+
                     const TeamRow = ({ school, data, score, won }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                         {data?.Logo1 ? (
-                          <img src={data.Logo1} alt="" style={{ width: "28px", height: "28px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                          <img src={data.Logo1} alt="" style={{ width: "36px", height: "36px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                         ) : (
-                          <div style={{ width: "28px", height: "28px", flexShrink: 0, borderRadius: "6px", background: "#eee", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: "11px", fontWeight: 900 }}>
+                          <div style={{ width: "36px", height: "36px", flexShrink: 0, borderRadius: "6px", background: "#eee", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: "13px", fontWeight: 900 }}>
                             {(school || "?").charAt(0)}
                           </div>
                         )}
-                        <span style={{ fontWeight: 900, fontSize: "14px", color: played ? (won ? "#222" : "#999") : "#222" }}>
+                        <span style={{ fontWeight: 900, fontSize: "15px", color: played ? (won ? "#222" : "#999") : "#222" }}>
                           {school}
                         </span>
                         {played && (
@@ -450,10 +464,16 @@ export default function CFBPage() {
                       <Link
                         key={g.id}
                         to={g.Slug ? `/game/${g.Slug}` : "#"}
-                        className={`wd-schedule-row${g.Featured ? " wd-schedule-row-featured" : ""}`}
+                        className={`wd-schedule-row${g.GameOfWeek ? " wd-schedule-row-gotw" : g.Featured ? " wd-schedule-row-featured" : ""}`}
                         style={{
                           display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px",
-                          padding: "14px 16px", background: "#fff", textDecoration: "none",
+                          padding: "14px 16px 14px 20px", textDecoration: "none",
+                          // A thin two-tone sliver (away color on top, home
+                          // color on bottom) at the row's left edge — the same
+                          // team-color association the game page's hero makes,
+                          // just compressed down to a 4px accent instead of a
+                          // full banner.
+                          background: `linear-gradient(to bottom, ${awayColor} 50%, ${homeColor} 50%) left / 4px 100% no-repeat, #fff`,
                           borderBottom: i < gamesForWeek.length - 1 ? "1px solid #f0f0f0" : "none",
                           pointerEvents: g.Slug ? "auto" : "none",
                         }}
@@ -463,7 +483,16 @@ export default function CFBPage() {
                           <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} />
                         </div>
                         <div style={{ fontSize: "12px", fontWeight: 700, color: "#aaa", flexShrink: 0, textAlign: "right" }}>
-                          {g.Featured && (
+                          {g.GameOfWeek ? (
+                            <span style={{
+                              display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
+                              background: "linear-gradient(90deg, #ff4500, #ffb347)", color: "#3a0f00",
+                              fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
+                              textTransform: "uppercase", letterSpacing: "0.05em",
+                            }}>
+                              🔥 Game of the Week
+                            </span>
+                          ) : g.Featured && (
                             <span style={{
                               display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
                               background: "linear-gradient(90deg, #f6a21d, #ffd35c)", color: "#3a2900",

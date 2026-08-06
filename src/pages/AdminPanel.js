@@ -2848,7 +2848,12 @@ const inputStyle = {
 // Firebase console directly. ──
 const BLANK_GAME_FORM = {
   Home: "", Away: "", Date: "", Time: "", Week: "", Neutral: false, HomeScore: "", AwayScore: "",
-  Featured: false, Final: false, Notes: "", KeyPlayersHome: [], KeyPlayersAway: [],
+  // GameOfWeek is a separate, higher tier than Featured (see GamePage.js's
+  // ribbon — GameOfWeek shows a bigger, fire-themed one instead of the gold
+  // Featured one when both are set) rather than replacing it, so a game can
+  // be Featured most weeks and additionally called out as THE game some weeks.
+  Featured: false, GameOfWeek: false, Final: false, Notes: "",
+  KeyPlayersHome: [], KeyPlayersAway: [], KeyPlayerNotes: {},
 };
 
 const weekNumber = (w) => {
@@ -2899,34 +2904,36 @@ const gameSortMs = (g) => {
   return toMs(g.Date) + (mins != null ? mins * 60000 : 0);
 };
 
-// Renders the current Key Players selections as removable chips — same
-// visual language as PerformancesManager.js's "Players Mentioned" chips.
-function KeyPlayersChips({ playerIds, allPlayers, onRemove }) {
+// Renders the current Key Players selections — one row per player rather
+// than PerformancesManager.js's compact flex-wrap pill, since each one now
+// also carries an optional note (shown on GamePage.js when that player's
+// row is hovered) that needs room for a text field.
+function KeyPlayersChips({ playerIds, allPlayers, onRemove, notes, onNoteChange }) {
   if (!playerIds.length) return null;
   const byId = new Map(allPlayers.map((p) => [p.id, p]));
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "8px" }}>
       {playerIds.map((pid) => {
         const p = byId.get(pid);
         return (
-          <span
-            key={pid}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: "6px",
-              background: "#f5f5f5", border: "2px solid #ddd",
-              borderRadius: "20px", padding: "3px 6px 3px 10px",
-              fontSize: "12px", fontWeight: 800, color: "#555",
-            }}
-          >
-            {p ? `${p.First} ${p.Last}` : "Unknown"}
-            <button
-              type="button"
-              onClick={() => onRemove(pid)}
-              style={{ background: "none", border: "none", color: "#999", fontWeight: 900, fontSize: "13px", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
-            >
-              ×
-            </button>
-          </span>
+          <div key={pid} style={{ background: "#f5f5f5", border: "2px solid #ddd", borderRadius: "8px", padding: "6px 8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "5px" }}>
+              <span style={{ flex: 1, fontSize: "12px", fontWeight: 800, color: "#555" }}>{p ? `${p.First} ${p.Last}` : "Unknown"}</span>
+              <button
+                type="button"
+                onClick={() => onRemove(pid)}
+                style={{ background: "none", border: "none", color: "#999", fontWeight: 900, fontSize: "14px", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+            <input
+              value={notes[pid] || ""}
+              onChange={(e) => onNoteChange(pid, e.target.value)}
+              placeholder="Note shown when hovered on the game page (optional)..."
+              style={{ ...inputStyle, fontSize: "11px", padding: "5px 8px" }}
+            />
+          </div>
         );
       })}
     </div>
@@ -3059,10 +3066,12 @@ function CFBScheduleSection() {
       HomeScore: g.HomeScore != null ? String(g.HomeScore) : "",
       AwayScore: g.AwayScore != null ? String(g.AwayScore) : "",
       Featured: !!g.Featured,
+      GameOfWeek: !!g.GameOfWeek,
       Final: !!g.Final,
       Notes: g.Notes || "",
       KeyPlayersHome: g.KeyPlayersHome || [],
       KeyPlayersAway: g.KeyPlayersAway || [],
+      KeyPlayerNotes: g.KeyPlayerNotes || {},
     });
     setSaveMessage("");
   };
@@ -3099,10 +3108,12 @@ function CFBScheduleSection() {
         Week: formState.Week.trim(),
         Neutral: formState.Neutral,
         Featured: formState.Featured,
+        GameOfWeek: formState.GameOfWeek,
         Final: formState.Final && canMarkFinal,
         Notes: formState.Notes || "",
         KeyPlayersHome: formState.KeyPlayersHome,
         KeyPlayersAway: formState.KeyPlayersAway,
+        KeyPlayerNotes: formState.KeyPlayerNotes,
         Slug: gameSlugFor(formState.Away.trim(), formState.Home.trim(), formState.Date),
         updatedAt: serverTimestamp(),
       };
@@ -3237,6 +3248,7 @@ function CFBScheduleSection() {
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                     <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, display: "flex", alignItems: "center", gap: "5px" }}>
+                      {g.GameOfWeek && <span title="Game of the Week">🔥</span>}
                       {g.Featured && <span title="Featured">⭐</span>}
                       {g.Away} at {g.Home}
                     </div>
@@ -3311,6 +3323,14 @@ function CFBScheduleSection() {
                 <input type="checkbox" checked={formState.Featured} onChange={(e) => setFormState((p) => ({ ...p, Featured: e.target.checked }))} />
                 <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>⭐ Featured game</span>
               </label>
+              {/* A separate, higher tier than Featured (see GamePage.js's
+                  ribbon) rather than a replacement — a game can be Featured
+                  most weeks and additionally called out as THE game some
+                  weeks. */}
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={formState.GameOfWeek} onChange={(e) => setFormState((p) => ({ ...p, GameOfWeek: e.target.checked }))} />
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>🔥 Game of the Week</span>
+              </label>
             </div>
 
             {/* Key Players — same search-and-add chip pattern as the
@@ -3325,7 +3345,13 @@ function CFBScheduleSection() {
                 <KeyPlayersChips
                   playerIds={formState.KeyPlayersAway}
                   allPlayers={allPlayers}
-                  onRemove={(pid) => setFormState((p) => ({ ...p, KeyPlayersAway: p.KeyPlayersAway.filter((id) => id !== pid) }))}
+                  notes={formState.KeyPlayerNotes}
+                  onNoteChange={(pid, note) => setFormState((p) => ({ ...p, KeyPlayerNotes: { ...p.KeyPlayerNotes, [pid]: note } }))}
+                  onRemove={(pid) => setFormState((p) => {
+                    const KeyPlayerNotes = { ...p.KeyPlayerNotes };
+                    delete KeyPlayerNotes[pid];
+                    return { ...p, KeyPlayersAway: p.KeyPlayersAway.filter((id) => id !== pid), KeyPlayerNotes };
+                  })}
                 />
                 <KeyPlayersCombobox
                   school={formState.Away}
@@ -3341,7 +3367,13 @@ function CFBScheduleSection() {
                 <KeyPlayersChips
                   playerIds={formState.KeyPlayersHome}
                   allPlayers={allPlayers}
-                  onRemove={(pid) => setFormState((p) => ({ ...p, KeyPlayersHome: p.KeyPlayersHome.filter((id) => id !== pid) }))}
+                  notes={formState.KeyPlayerNotes}
+                  onNoteChange={(pid, note) => setFormState((p) => ({ ...p, KeyPlayerNotes: { ...p.KeyPlayerNotes, [pid]: note } }))}
+                  onRemove={(pid) => setFormState((p) => {
+                    const KeyPlayerNotes = { ...p.KeyPlayerNotes };
+                    delete KeyPlayerNotes[pid];
+                    return { ...p, KeyPlayersHome: p.KeyPlayersHome.filter((id) => id !== pid), KeyPlayerNotes };
+                  })}
                 />
                 <KeyPlayersCombobox
                   school={formState.Home}
@@ -3427,6 +3459,15 @@ function CFBScheduleSection() {
   );
 }
 
+// Same 11 conferences Navbar.js's CFB dropdown groups schools into — kept
+// as its own constant here (rather than imported) since every other small
+// shared list in this codebase (BLUE/GOLD, TREND_STYLE, etc.) is duplicated
+// per-file the same way instead of factored out.
+const CFB_CONFERENCES = [
+  "ACC", "Big 10", "Big 12", "SEC", "Pac 12", "Independent",
+  "AAC", "CUSA", "MAC", "Mountain West", "Sun Belt",
+];
+
 // ── Branding — logos & colors for CFB (schools) and NFL (nfl) teams. This
 // is both the lookup point for pulling brand assets to build graphics
 // (banners, social cards, etc.) and the place to fix them — edits write
@@ -3439,6 +3480,15 @@ const LEAGUE_CONFIG = {
     nameField: "School",
     subLabelField: "Mascot",
     groupField: "Conference",
+    // The school's own short-form abbreviation (e.g. "Bama") — GameMarginSidebars.js's
+    // scoreboard bug and PerformancesManager.js's auto-generated hashtags both read this.
+    shortField: "Short",
+    shortLabel: "Short Name",
+    conferenceOptions: CFB_CONFERENCES,
+    // Which NFL team this school is associated with (MarginAds.js matches
+    // ads.Team against it) — an NFL team has no analogous "parent" team, so
+    // this only applies to the CFB side.
+    hasNflAssociation: true,
     searchPlaceholder: "Search school, mascot, or conference...",
   },
   nfl: {
@@ -3447,6 +3497,10 @@ const LEAGUE_CONFIG = {
     nameField: "Team",
     subLabelField: "City",
     groupField: "Conference",
+    shortField: "Abbreviation",
+    shortLabel: "Abbreviation",
+    conferenceOptions: ["AFC", "NFC"],
+    hasNflAssociation: false,
     searchPlaceholder: "Search team, city, or conference...",
   },
 };
@@ -3627,6 +3681,9 @@ function TeamBrandingPane({ league }) {
   const [saveMessage, setSaveMessage] = useState("");
   const [copiedField, setCopiedField] = useState("");
   const [logoCopyStatus, setLogoCopyStatus] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [nflTeamOptions, setNflTeamOptions] = useState([]);
 
   useEffect(() => {
     const fetchTeams = async () => {
@@ -3645,6 +3702,25 @@ function TeamBrandingPane({ league }) {
     };
     fetchTeams();
   }, [league, cfg.collectionName, cfg.nameField]);
+
+  // NFL team options for the CFB side's "NFL Team" association dropdown —
+  // skipped entirely on the NFL pane, which has no such field.
+  useEffect(() => {
+    if (!cfg.hasNflAssociation) { setNflTeamOptions([]); return; }
+    const fetchNflTeams = async () => {
+      try {
+        const snap = await getDocs(collection(db, "nfl"));
+        const opts = snap.docs
+          .map((d) => ({ id: d.id, label: `${d.data().City || ""} ${d.data().Team || d.id}`.trim() + ` (${d.data().Abbreviation || d.id})` }))
+          .sort((a, b) => a.label.localeCompare(b.label));
+        setNflTeamOptions(opts);
+      } catch (e) {
+        console.error("Admin branding NFL-options fetch error:", e);
+        setNflTeamOptions([]);
+      }
+    };
+    fetchNflTeams();
+  }, [cfg.hasNflAssociation]);
 
   const groupOptions = useMemo(() => {
     const set = [...new Set(teams.map((t) => t[cfg.groupField]).filter(Boolean))];
@@ -3669,17 +3745,22 @@ function TeamBrandingPane({ league }) {
   const selectTeam = (t) => {
     setSelectedTeam(t);
     setFormState({
+      [cfg.groupField]: t[cfg.groupField] || "",
+      [cfg.shortField]: t[cfg.shortField] || "",
+      ...(cfg.hasNflAssociation ? { NFL: t.NFL || "" } : {}),
       Logo1: t.Logo1 || "",
       Logo2: t.Logo2 || "",
       Wordmark: t.Wordmark || "",
+      WordmarkDark: t.WordmarkDark || "",
       LogoDark: t.LogoDark || "",
-      Logo8Bit: t.Logo8Bit || "",
+      LogoBlack: t.LogoBlack || "",
       Color1: t.Color1 || BLUE,
       Color2: t.Color2 || GOLD,
     });
     setSaveMessage("");
     setCopiedField("");
     setLogoCopyStatus({});
+    setConfirmDelete(false);
   };
 
   const handleFieldChange = (field, value) => {
@@ -3732,11 +3813,15 @@ function TeamBrandingPane({ league }) {
     setSaveMessage("");
     try {
       const payload = {
+        [cfg.groupField]: formState[cfg.groupField].trim(),
+        [cfg.shortField]: formState[cfg.shortField].trim(),
+        ...(cfg.hasNflAssociation ? { NFL: formState.NFL.trim() } : {}),
         Logo1: formState.Logo1.trim(),
         Logo2: formState.Logo2.trim(),
         Wordmark: formState.Wordmark.trim(),
+        WordmarkDark: formState.WordmarkDark.trim(),
         LogoDark: formState.LogoDark.trim(),
-        Logo8Bit: formState.Logo8Bit.trim(),
+        LogoBlack: formState.LogoBlack.trim(),
         Color1: formState.Color1.trim(),
         Color2: formState.Color2.trim(),
         updatedAt: serverTimestamp(),
@@ -3750,6 +3835,31 @@ function TeamBrandingPane({ league }) {
       setSaveMessage("Failed to save — check console.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Same two-step in-panel confirmation as the Player delete (clicking
+  // "Delete Team" only reveals the warning; the actual deleteDoc only runs
+  // from "Yes, Delete Permanently") rather than a native window.confirm() —
+  // deleting a team is higher blast-radius than the video/game/trend deletes
+  // that do use window.confirm() elsewhere, since players, schedule games,
+  // performances, and ads all reference a team by name/abbreviation and
+  // aren't cleaned up here (see the warning copy below). ──
+  const handleDeleteTeam = async () => {
+    if (!selectedTeam) return;
+    setRemoving(true);
+    setSaveMessage("");
+    try {
+      await deleteDoc(doc(db, cfg.collectionName, selectedTeam.id));
+      setTeams((prev) => prev.filter((t) => t.id !== selectedTeam.id));
+      setSelectedTeam(null);
+      setFormState(null);
+      setConfirmDelete(false);
+    } catch (e) {
+      console.error("Admin branding delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -3871,6 +3981,40 @@ function TeamBrandingPane({ league }) {
             </div>
 
             <FieldGroup>
+              <FieldRow label="Conference">
+                <select
+                  value={formState[cfg.groupField]}
+                  onChange={(e) => handleFieldChange(cfg.groupField, e.target.value)}
+                  style={inputStyle}
+                >
+                  <option value="">— Select —</option>
+                  {cfg.conferenceOptions.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </FieldRow>
+              <FieldRow label={cfg.shortLabel}>
+                <input
+                  value={formState[cfg.shortField]}
+                  onChange={(e) => handleFieldChange(cfg.shortField, e.target.value)}
+                  placeholder={cfg.shortLabel}
+                  style={inputStyle}
+                />
+              </FieldRow>
+              {cfg.hasNflAssociation && (
+                <FieldRow label="NFL Team">
+                  <select
+                    value={formState.NFL}
+                    onChange={(e) => handleFieldChange("NFL", e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="">— None —</option>
+                    {nflTeamOptions.map((o) => (
+                      <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                  </select>
+                </FieldRow>
+              )}
               <LogoUrlField
                 label="Logo 1 (Primary)"
                 value={formState.Logo1}
@@ -3893,6 +4037,13 @@ function TeamBrandingPane({ league }) {
                 copyStatus={logoCopyStatus.Wordmark || "idle"}
               />
               <LogoUrlField
+                label="Wordmark (Dark)"
+                value={formState.WordmarkDark}
+                onChange={(v) => handleFieldChange("WordmarkDark", v)}
+                onCopy={() => handleCopyImage("WordmarkDark", formState.WordmarkDark)}
+                copyStatus={logoCopyStatus.WordmarkDark || "idle"}
+              />
+              <LogoUrlField
                 label="Logo (Dark)"
                 value={formState.LogoDark}
                 onChange={(v) => handleFieldChange("LogoDark", v)}
@@ -3900,14 +4051,14 @@ function TeamBrandingPane({ league }) {
                 copyStatus={logoCopyStatus.LogoDark || "idle"}
               />
               <LogoUrlField
-                label="Logo (8-Bit)"
-                value={formState.Logo8Bit}
-                onChange={(v) => handleFieldChange("Logo8Bit", v)}
-                onCopy={() => handleCopyImage("Logo8Bit", formState.Logo8Bit)}
-                copyStatus={logoCopyStatus.Logo8Bit || "idle"}
+                label="Logo (Black)"
+                value={formState.LogoBlack}
+                onChange={(v) => handleFieldChange("LogoBlack", v)}
+                onCopy={() => handleCopyImage("LogoBlack", formState.LogoBlack)}
+                copyStatus={logoCopyStatus.LogoBlack || "idle"}
               />
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "-8px" }}>
-                Optional — wherever a page shows this team's dark logo, it'll use this 8-bit version instead once set.
+                Optional — the Performances terminal uses this team's dark logo by default and switches to this black version once set.
               </div>
               <ColorHexField
                 label="Color 1 (Primary)"
@@ -3944,6 +4095,57 @@ function TeamBrandingPane({ league }) {
                 {saveMessage}
               </div>
             )}
+
+            <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+              {confirmDelete ? (
+                <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                  <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                    ⚠ Permanently delete {selectedTeam[cfg.nameField] || "this team"}?
+                  </div>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                    This removes the {cfg.label} team record and cannot be undone. Players, schedule games,
+                    performances, and ads that still reference "{selectedTeam[cfg.nameField]}" by name won't be
+                    cleaned up automatically and may show broken logos/links afterward.
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      disabled={removing}
+                      style={{
+                        flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                        borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteTeam}
+                      disabled={removing}
+                      style={{
+                        flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                        borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                        opacity: removing ? 0.6 : 1,
+                      }}
+                    >
+                      {removing ? "Deleting..." : "Yes, Delete Permanently"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                    borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                    textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                  }}
+                >
+                  Delete Team
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

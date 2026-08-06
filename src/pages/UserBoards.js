@@ -6,6 +6,7 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import BoardsMarginSidebars from "../components/BoardsMarginSidebars";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -210,6 +211,7 @@ export default function UserBoards() {
   const [playerCache, setPlayerCache] = useState({});
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const contentRef = useRef(null);
 
   const [draftMap, setDraftMap] = useState({});
   const [nflTeams, setNflTeams] = useState({});
@@ -508,7 +510,7 @@ export default function UserBoards() {
     <>
       <Helmet><title>{boardsTitle} | We-Draft</title></Helmet>
 
-      <div style={{ maxWidth: "1300px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "18px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div ref={contentRef} style={{ maxWidth: "1300px", margin: "0 auto", padding: isMobile ? "10px 10px 60px" : "18px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* Page Header */}
         <div style={{ marginBottom: "16px" }}>
@@ -576,6 +578,14 @@ export default function UserBoards() {
                     style={{ flex: 1, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
                   <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
                 </div>
+                <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                  <Link to="/whiteboard" style={{ flex: 1, textAlign: "center", padding: "8px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: BLUE, border: `2px solid ${GOLD}`, borderRadius: "8px", textDecoration: "none" }}>
+                    Whiteboard ↗
+                  </Link>
+                  <Link to="/boards/feed" style={{ flex: 1, textAlign: "center", padding: "8px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", color: BLUE, background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "8px", textDecoration: "none" }}>
+                    🔔 My Feed
+                  </Link>
+                </div>
               </div>
             ) : (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "16px" }}>
@@ -613,6 +623,9 @@ export default function UserBoards() {
                     </div>
                   )}
                 </div>
+                <Link to="/boards/feed" style={{ padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: BLUE, background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "8px", textDecoration: "none", whiteSpace: "nowrap" }}>
+                  🔔 View My Feed →
+                </Link>
                 <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
               </div>
             )}
@@ -794,6 +807,8 @@ export default function UserBoards() {
           </>
         )}
       </div>
+
+      <BoardsMarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={isMobile ? 10 : 24} />
     </>
   );
 }
