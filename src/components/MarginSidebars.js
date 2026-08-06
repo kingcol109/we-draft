@@ -2,13 +2,14 @@
 //
 // News.jsx and PerformancesHub.jsx's margin sidebars — a different pairing
 // than MarginAds.js's Homage rails (those stay on player/article pages).
-// Left margin: the same "Top 5 Trending" widget PlayerProfile.js shows,
-// rebuilt standalone here rather than imported, since PlayerProfile.js's
-// version is entangled with that page's own hover/self-highlight state.
+// Left margin: the same "Trending" widget PlayerProfile.js shows, rebuilt
+// standalone here rather than imported (since PlayerProfile.js's version is
+// entangled with that page's own hover/self-highlight state) and sized for
+// more entries — this sidebar has the vertical room a player page doesn't.
 // Right margin: a "follow us" social card stacked above a compact feed of
 // the *other* content type (performances on the News page, news/articles on
 // the Performances page) ending in a link to that page.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
@@ -22,6 +23,38 @@ const TREND_STYLE = {
   "on fire": { icon: "🔥", label: "On Fire", badgeBg: "#ffcc00", badgeBorder: "#b38600" },
 };
 
+// Same class-rank computation PlayerProfile.js's "same draft class" sidebar
+// uses, replicated here for the "Top 2027 Prospects" fallback (see the
+// trending-fetch effect below) — kept as plain module-level constants since
+// nothing here depends on component state.
+const gradeScale = {
+  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3, "Second Round": 4,
+  "Third Round": 5, "Fourth Round": 6, "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, "UDFA": 10,
+};
+const gradeLabels = {
+  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round", 4: "Second Round",
+  5: "Third Round", 6: "Fourth Round", 7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
+};
+// Same round-color badge map as PlayerProfile.js's own draft-class sidebar
+// rows, so the "Top 2027 Prospects" fallback here reads as the same feature
+// rather than a lookalike with its own color language.
+const gradeDisplay = (g) => {
+  const map = {
+    "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
+    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
+    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
+    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
+    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
+    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
+    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
+    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
+    "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
+  };
+  return map[g] || { short: g, bg: "#5F5E5A", border: "#444441" };
+};
+
 // Same tiered "pop" effect used everywhere else performances show up.
 const gradeGlowClass = (grade) => {
   if (grade === "Dominant") return "wd-perf-glow-dominant";
@@ -30,10 +63,12 @@ const gradeGlowClass = (grade) => {
   return "";
 };
 
+// Brand-appropriate button color per platform, rather than one uniform blue
+// outline for all three — icon stays inline so it reads at a glance.
 const SOCIAL_LINKS = [
-  { label: "Twitter / X", icon: "𝕏", href: "https://twitter.com/WeDraftSite" },
-  { label: "Instagram", icon: "📸", href: "https://www.instagram.com/wedraftsite" },
-  { label: "YouTube", icon: "▶", href: "https://www.youtube.com/@kingcoldsports" },
+  { label: "Twitter / X", icon: "𝕏", href: "https://twitter.com/WeDraftSite", bg: "#000000" },
+  { label: "Instagram", icon: "📸", href: "https://www.instagram.com/wedraftsite", bg: "linear-gradient(135deg, #f58529, #dd2a7b 45%, #8134af)" },
+  { label: "YouTube", icon: "▶", href: "https://www.youtube.com/@kingcoldsports", bg: "#ff0000" },
 ];
 
 const toMs = (ts) => {
@@ -63,9 +98,10 @@ const cardShell = {
  *   card's feed pulls from (the type the *current* page is NOT).
  */
 export default function MarginSidebars({ contentRef, isMobile, horizontalPadding = 20, otherStream }) {
-  const [layout, setLayout] = useState({ width: 160, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
+  const [layout, setLayout] = useState({ width: 200, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
   const [visible, setVisible] = useState(false);
   const [trending, setTrending] = useState([]);
+  const [topProspects, setTopProspects] = useState([]);
   const [feedItems, setFeedItems] = useState([]);
   const [schoolLogos, setSchoolLogos] = useState({});
   // This component renders after (below, in DOM order) the main content it
@@ -88,7 +124,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     const minGutter = Math.min(leftGutter, rightGutter);
     const MIN_USABLE_GUTTER = 170;
     if (minGutter < MIN_USABLE_GUTTER) { setLayout((p) => ({ ...p, show: false })); return; }
-    const width = Math.max(150, Math.min(230, minGutter - 16));
+    const width = Math.max(190, Math.min(300, minGutter - 16));
     // Both rects are measured in the same viewport-relative coordinate
     // system at the same instant, so this delta is correct regardless of
     // scroll position or what (if anything) up the tree is positioned.
@@ -105,15 +141,70 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     return () => { window.removeEventListener("resize", handler); clearTimeout(t1); clearTimeout(t2); };
   }, [isMobile]);
 
+  // The host page's content height changes for all sorts of reasons this
+  // component has no visibility into (switching weeks, switching tabs,
+  // toggling filters, data finishing a fetch) — each one moves this
+  // component's own anchor point further down or up the document. Without
+  // re-measuring on every such change, topOffset goes stale and the
+  // sidebar drifts out of alignment with the content instead of staying
+  // anchored to it.
+  useEffect(() => {
+    if (!contentRef.current || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => recompute.current());
+    ro.observe(contentRef.current);
+    return () => ro.disconnect();
+  }, [contentRef]);
+
   useEffect(() => {
     if (!layout.show) return;
     const t = setTimeout(() => setVisible(true), 20);
     return () => clearTimeout(t);
   }, [layout.show]);
 
-  // Left — Top 5 Trending, same source as PlayerProfile.js's sidebar.
+  // Left — Trending, same source as PlayerProfile.js's sidebar. The
+  // trends collection is hand-curated by the admin and is frequently empty —
+  // when it is, this sidebar shouldn't just render nothing, so it falls back
+  // to a "Top 2027 Prospects" leaderboard using the same avgGrade-from-
+  // evaluations computation PlayerProfile.js's own draft-class rank uses.
   useEffect(() => {
     if (isMobile) return;
+
+    const fetchTopProspects = async () => {
+      try {
+        const q = query(collection(db, "players"), where("Eligible", "==", "2027"));
+        const snap = await getDocs(q);
+        const list = await Promise.all(
+          snap.docs
+            .filter((d) => d.data().Live !== false)
+            .map(async (d) => {
+              const data = d.data();
+              let avgGrade = null;
+              try {
+                const evalsSnap = await getDocs(collection(db, "players", d.id, "evaluations"));
+                const grades = [];
+                evalsSnap.forEach((ev) => {
+                  const g = ev.data().grade;
+                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                });
+                if (grades.length > 0) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
+              } catch { }
+              return { id: d.id, First: data.First || "", Last: data.Last || "", School: data.School || "", Slug: data.Slug || "", avgGrade };
+            })
+        );
+        list.sort((a, b) => {
+          const aLabel = a.avgGrade != null ? gradeLabels[Math.round(a.avgGrade)] : null;
+          const bLabel = b.avgGrade != null ? gradeLabels[Math.round(b.avgGrade)] : null;
+          const aV = aLabel ? gradeScale[aLabel] : null;
+          const bV = bLabel ? gradeScale[bLabel] : null;
+          if (aV && bV) return aV - bV;
+          if (aV && !bV) return -1;
+          if (!aV && bV) return 1;
+          return 0;
+        });
+        setTopProspects(list.filter((p) => p.Slug).slice(0, 8));
+      } catch (e) { setTopProspects([]); }
+    };
+
     const fetch = async () => {
       try {
         const snap = await getDocs(collection(db, "trends"));
@@ -121,9 +212,10 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
           .map((d) => ({ slug: d.id, ...d.data() }))
           .filter((t) => t.Shown === true)
           .sort((a, b) => (a.Order ?? 0) - (b.Order ?? 0))
-          .slice(0, 5);
+          .slice(0, 8);
         setTrending(shown);
-      } catch (e) { setTrending([]); }
+        if (shown.length === 0) fetchTopProspects();
+      } catch (e) { setTrending([]); fetchTopProspects(); }
     };
     fetch();
   }, [isMobile]);
@@ -157,7 +249,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
             .map((d) => ({ id: d.id, ...d.data(), _kind: "performance" }))
             .filter((p) => ["Dominant", "Great", "Good"].includes(p.grade))
             .sort((a, b) => toMs(b.gameDate) - toMs(a.gameDate))
-            .slice(0, 4);
+            .slice(0, 6);
           setFeedItems(items);
         } else {
           const [newsSnap, articleSnap] = await Promise.all([
@@ -170,7 +262,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
             .filter((a) => [1, 2].includes(a.priority));
           const combined = [...newsItems, ...articleItems]
             .sort((a, b) => toMs(b.publishedAt || b.updatedAt) - toMs(a.publishedAt || a.updatedAt))
-            .slice(0, 4);
+            .slice(0, 6);
           setFeedItems(combined);
         }
       } catch (e) { setFeedItems([]); }
@@ -206,7 +298,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
         .wd-margin-breakout { animation: wdBreakoutBoxSoft 3.2s ease-in-out infinite; }
         @keyframes wdOnFireBoxSoft { 0%, 100% { box-shadow: 0 0 0 1px rgba(255,140,0,0.16), 0 0 4px 1px rgba(255,90,0,0.16); } 50% { box-shadow: 0 0 0 1px rgba(255,140,0,0.3), 0 0 8px 2px rgba(255,90,0,0.32); } }
         .wd-margin-onfire { animation: wdOnFireBoxSoft 3.2s ease-in-out infinite; }
-        .wd-margin-social-link:hover { background: #f0f5ff; }
+        .wd-margin-social-link:hover { filter: brightness(1.12); }
         .wd-margin-feed-item:hover { background: #f0f5ff; }
         @keyframes wdPerfGlowDominant {
           0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
@@ -221,8 +313,9 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
         .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
       `}</style>
 
-      {/* ===== Left: Top 5 Trending ===== */}
-      {trending.length > 0 && (
+      {/* ===== Left: Top 5 Trending, or Top 2027 Prospects when there's no
+          trend data to show — this slot should never just be empty. ===== */}
+      {trending.length > 0 ? (
         <div style={positionStyle("left")}>
           <div style={cardShell}>
             <div style={{ background: BLUE, padding: "10px 12px", textAlign: "center" }}>
@@ -268,22 +361,72 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
             })}
           </div>
         </div>
-      )}
+      ) : topProspects.length > 0 ? (
+        <div style={positionStyle("left")}>
+          <div style={cardShell}>
+            <div style={{ background: BLUE, padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.06em", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+                ⭐ Top 2027 Prospects
+              </div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+            {topProspects.map((p, i) => {
+              const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : "Watchlist";
+              const gd = gradeDisplay(gradeLabel);
+              return (
+                <Link
+                  key={p.id}
+                  to={`/player/${p.Slug}`}
+                  className="wd-margin-feed-item"
+                  style={{
+                    display: "flex", alignItems: "center", gap: "9px", padding: "9px 10px",
+                    textDecoration: "none", background: "#fff",
+                    borderBottom: i < topProspects.length - 1 ? "1px solid #f0f0f0" : "none",
+                  }}
+                >
+                  <div
+                    style={{
+                      flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                      width: "24px", height: "24px", borderRadius: "5px",
+                      backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
+                      color: "#fff", fontSize: "9px", fontWeight: 900,
+                    }}
+                    title={gradeLabel}
+                  >
+                    {gd.short}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ color: BLUE, fontWeight: 900, fontSize: "11px", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p.First} {p.Last}
+                    </span>
+                    <span style={{ color: "#888", fontWeight: 700, fontSize: "10px", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p.School || "—"}
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {/* ===== Right: Follow-us ad + other-stream feed ===== */}
       <div style={positionStyle("right")}>
         <div style={cardShell}>
-          <div style={{ fontSize: "9px", fontWeight: 800, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.1em", textAlign: "center", padding: "8px 10px 0" }}>
-            Sponsored
-          </div>
-          <div style={{ padding: "8px 14px 12px" }}>
-            <div style={{ fontWeight: 900, fontSize: "12px", color: BLUE, textAlign: "center", marginBottom: "6px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-              Follow We-Draft
+          {/* Same BLUE-header + GOLD-accent-bar language as every other card
+              here, instead of a flat white card with a plain gray label —
+              no sponsorship disclosure needed, these are our own socials. */}
+          <div style={{ background: BLUE, padding: "10px 12px", textAlign: "center" }}>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.06em", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+              📣 Follow We-Draft
             </div>
+          </div>
+          <div style={{ height: "3px", background: GOLD }} />
+          <div style={{ padding: "10px 14px 12px" }}>
             <p style={{ fontSize: "11px", fontWeight: 600, color: "#666", lineHeight: 1.4, textAlign: "center", margin: "0 0 10px" }}>
-              Follow us on social media for live updates of draft prospects and college football players!
+              Get live updates on draft prospects and college football players!
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
               {SOCIAL_LINKS.map((s) => (
                 <a
                   key={s.label}
@@ -293,11 +436,12 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
                   className="wd-margin-social-link"
                   style={{
                     display: "flex", alignItems: "center", gap: "8px",
-                    border: `1px solid ${BLUE}`, borderRadius: "8px", padding: "6px 10px",
-                    textDecoration: "none", color: BLUE, fontWeight: 900, fontSize: "11px",
+                    background: s.bg, borderRadius: "8px", padding: "7px 10px",
+                    textDecoration: "none", color: "#fff", fontWeight: 900, fontSize: "11px",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)", transition: "filter 0.15s ease",
                   }}
                 >
-                  <span>{s.icon}</span> {s.label}
+                  <span style={{ fontSize: "13px" }}>{s.icon}</span> {s.label}
                 </a>
               ))}
             </div>

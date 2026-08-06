@@ -142,6 +142,16 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     return () => { window.removeEventListener("resize", handler); clearTimeout(t1); clearTimeout(t2); };
   }, [isMobile]);
 
+  // Content height can change for reasons that aren't a window resize (data
+  // finishing a fetch, images loading in) — re-measure whenever it does so
+  // topOffset doesn't go stale and the sidebar drift out of alignment.
+  useEffect(() => {
+    if (!contentRef.current || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => recompute.current());
+    ro.observe(contentRef.current);
+    return () => ro.disconnect();
+  }, [contentRef]);
+
   useEffect(() => {
     if (!layout.show) return;
     const t = setTimeout(() => setVisible(true), 20);
