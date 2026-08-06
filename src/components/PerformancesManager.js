@@ -46,10 +46,46 @@ const slugFor = (titleShort, gameDate) => {
 };
 
 const BLANK_FORM = {
-  titleLong: "", titleShort: "", body: "", videoId: "", author: "", status: "draft", grade: "", playerIds: [],
+  titleLong: "", titleShort: "", body: "", statLine: "", videoId: "", author: "", status: "draft", grade: "", playerIds: [],
 };
 
 const GRADE_OPTIONS = ["Dominant", "Great", "Good", "Productive", "Average", "Bad"];
+
+// Mirrors PlayerProfile.js's grade-to-rank-value mapping — needed here to
+// replicate its "position rank within draft class" computation for the
+// Generate Tweet feature below (this isn't a stored/denormalized field
+// anywhere, so it has to be recomputed the same way on demand).
+const gradeScale = {
+  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3, "Second Round": 4,
+  "Third Round": 5, "Fourth Round": 6, "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, "UDFA": 10,
+};
+const gradeLabels = {
+  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round", 4: "Second Round",
+  5: "Third Round", 6: "Fourth Round", 7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
+};
+
+// Position abbreviation -> plural noun, for the "ranked Nth out of M
+// {year} {plural}" sentence in a generated tweet.
+const POSITION_PLURAL = {
+  QB: "quarterbacks", RB: "running backs", WR: "wide receivers", TE: "tight ends",
+  OL: "offensive linemen", OT: "offensive tackles", OG: "offensive guards", C: "centers",
+  IOL: "interior offensive linemen", EDGE: "edge rushers", DL: "defensive linemen",
+  DT: "defensive tackles", DE: "defensive ends", LB: "linebackers", ILB: "inside linebackers",
+  OLB: "outside linebackers", DB: "defensive backs", CB: "cornerbacks", S: "safeties",
+  FS: "free safeties", SS: "strong safeties", K: "kickers", P: "punters", LS: "long snappers",
+  ATH: "athletes",
+};
+
+const ordinal = (n) => {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+};
 
 const gradeStyles = {
   Dominant: { background: "#e6f4ea", color: "#1a7f37" },
@@ -88,7 +124,9 @@ const toMs = (ts) => {
 const formatGameDate = (ts) => {
   const ms = toMs(ts);
   if (!ms) return "TBD";
-  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  // Date-only field is stored as UTC midnight — format in UTC too, or a
+  // viewer west of it sees the game roll back a calendar day.
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 };
 
 const weekNumber = (w) => {
@@ -237,7 +275,16 @@ export default function PerformancesManager() {
   const [allPlayers, setAllPlayers] = useState([]);
   const [videos, setVideos] = useState([]);
   const [performances, setPerformances] = useState([]);
+  const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Generate Tweet — copy-pasteable promo text for the performance being
+  // edited, computed on demand (not stored) from the player's live
+  // position rank + the subject/opponent schools' abbreviation & mascot.
+  const [tweetText, setTweetText] = useState("");
+  const [tweetLoading, setTweetLoading] = useState(false);
+  const [tweetError, setTweetError] = useState("");
+  const [tweetCopied, setTweetCopied] = useState(false);
 
   const [playerSearch, setPlayerSearch] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
@@ -262,14 +309,16 @@ export default function PerformancesManager() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [playersSnap, videosSnap, performancesSnap] = await Promise.all([
+        const [playersSnap, videosSnap, performancesSnap, schoolsSnap] = await Promise.all([
           getDocs(collection(db, "players")),
           getDocs(collection(db, "videos")),
           getDocs(collection(db, "performances")),
+          getDocs(collection(db, "schools")),
         ]);
         setAllPlayers(playersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setVideos(videosSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setPerformances(performancesSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setSchools(schoolsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       } catch (e) {
         console.error("Performances fetch error:", e);
       } finally {
@@ -308,6 +357,12 @@ export default function PerformancesManager() {
     allPlayers.forEach((p) => m.set(p.id, p));
     return m;
   }, [allPlayers]);
+
+  const schoolsByName = useMemo(() => {
+    const m = new Map();
+    schools.forEach((s) => { if (s.School) m.set(s.School, s); });
+    return m;
+  }, [schools]);
 
   const weekOptions = useMemo(
     () => Array.from(new Set(performances.map((p) => p.week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b)),
@@ -398,14 +453,19 @@ export default function PerformancesManager() {
     setSelectedPerformance(null);
     setFormState(null);
     setSaveMessage("");
+    setTweetText("");
+    setTweetError("");
   };
 
   const selectPerformance = (perf) => {
     setSelectedPerformance(perf);
+    setTweetText("");
+    setTweetError("");
     setFormState({
       titleLong: perf.titleLong || "",
       titleShort: perf.titleShort || "",
       body: perf.body || "",
+      statLine: perf.statLine || "",
       videoId: perf.videoId || "",
       author: perf.author || "",
       status: perf.status || "draft",
@@ -421,6 +481,99 @@ export default function PerformancesManager() {
     setSelectedPerformance({ id: null, isNew: true });
     setFormState({ ...BLANK_FORM, playerIds: [selectedPlayer.id] });
     setSaveMessage("");
+    setTweetText("");
+    setTweetError("");
+  };
+
+  // Replicates PlayerProfile.js's fetchDraftClass effect: pull every player
+  // in the same draft class (Eligible year), average each one's evaluation
+  // grades into a rank value, sort, then filter down to just this player's
+  // position to get rank/total. Not a stored field — recomputed live so it
+  // always reflects the current community grades at the moment of tweeting.
+  const computePositionRank = async (player) => {
+    if (!player?.Position || !player?.Eligible) return null;
+    const q = query(collection(db, "players"), where("Eligible", "==", player.Eligible));
+    const snap = await getDocs(q);
+    const list = await Promise.all(
+      snap.docs
+        .filter((d) => d.id === player.id || d.data().Live !== false)
+        .map(async (d) => {
+          const data = d.data();
+          let avgGrade = null;
+          try {
+            const evalsSnap = await getDocs(collection(db, "players", d.id, "evaluations"));
+            const grades = [];
+            evalsSnap.forEach((ev) => {
+              const g = ev.data().grade;
+              if (g && gradeScale[g]) grades.push(gradeScale[g]);
+            });
+            if (grades.length > 0) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
+          } catch { /* no evaluations subcollection access — leave avgGrade null */ }
+          return { id: d.id, Position: data.Position || "", avgGrade, isSelf: d.id === player.id };
+        })
+    );
+    list.sort((a, b) => {
+      const aLabel = a.avgGrade != null ? gradeLabels[Math.round(a.avgGrade)] : null;
+      const bLabel = b.avgGrade != null ? gradeLabels[Math.round(b.avgGrade)] : null;
+      const aV = aLabel ? gradeScale[aLabel] : null;
+      const bV = bLabel ? gradeScale[bLabel] : null;
+      if (aV && bV) return aV - bV;
+      if (aV && !bV) return -1;
+      if (!aV && bV) return 1;
+      return 0;
+    });
+    const filtered = list.filter((p) => p.Position === player.Position);
+    const selfIndex = filtered.findIndex((p) => p.isSelf);
+    return { rank: selfIndex >= 0 ? selfIndex + 1 : null, total: filtered.length };
+  };
+
+  const handleGenerateTweet = async () => {
+    if (!formState || !selectedPlayer || !selectedGame) return;
+    setTweetLoading(true);
+    setTweetError("");
+    setTweetCopied(false);
+    try {
+      const rankInfo = await computePositionRank(selectedPlayer);
+      const opponentName = selectedGame.Home === selectedPlayer.School ? selectedGame.Away : selectedGame.Home;
+      const subjectSchool = schoolsByName.get(selectedPlayer.School) || null;
+      const opponentSchool = schoolsByName.get(opponentName) || null;
+      const fullName = `${selectedPlayer.First || ""} ${selectedPlayer.Last || ""}`.trim();
+      const positionPlural = POSITION_PLURAL[selectedPlayer.Position] || `${(selectedPlayer.Position || "player").toLowerCase()}s`;
+
+      const lines = [];
+      if (formState.body.trim()) lines.push(formState.body.trim());
+
+      if (rankInfo?.rank && rankInfo?.total && selectedPlayer.Eligible) {
+        lines.push(`${fullName} is currently ranked ${ordinal(rankInfo.rank)} out of ${rankInfo.total} ${selectedPlayer.Eligible} ${positionPlural} on We-Draft.com.`);
+      }
+
+      lines.push(`Evaluate ${fullName} and more draft prospects on We-Draft.com.`);
+
+      const hashtags = [];
+      if (subjectSchool?.School) hashtags.push(`#${createSlug(subjectSchool.School).replace(/-/g, "")}football`);
+      if (subjectSchool?.Mascot) hashtags.push(`#${createSlug(subjectSchool.Mascot).replace(/-/g, "")}`);
+      if (subjectSchool?.Short && opponentSchool?.Short) hashtags.push(`#${subjectSchool.Short}vs${opponentSchool.Short}`);
+      if (selectedPlayer.Eligible) hashtags.push(`#nfldraft${selectedPlayer.Eligible}`);
+      if (hashtags.length) lines.push(`${hashtags.join(" ")}.`);
+
+      setTweetText(lines.join("\n\n"));
+    } catch (e) {
+      console.error("Generate tweet error:", e);
+      setTweetError("Failed to generate — check console.");
+    } finally {
+      setTweetLoading(false);
+    }
+  };
+
+  const handleCopyTweet = async () => {
+    if (!tweetText) return;
+    try {
+      await navigator.clipboard.writeText(tweetText);
+      setTweetCopied(true);
+      setTimeout(() => setTweetCopied(false), 2000);
+    } catch (e) {
+      console.error("Copy tweet error:", e);
+    }
   };
 
   const isNew = selectedPerformance?.isNew === true;
@@ -447,6 +600,10 @@ export default function PerformancesManager() {
           playerId: selectedPlayer.id,
           playerIds,
           playerSlug: selectedPlayer.Slug || "",
+          // Denormalized so display surfaces (GamePage's "Top Performances"
+          // list, sidebars) can show the subject's name without an extra
+          // fetch per performance.
+          playerName: `${selectedPlayer.First || ""} ${selectedPlayer.Last || ""}`.trim(),
           gameId: selectedGame.id,
           school: selectedPlayer.School || "",
           opponent: opponent || "",
@@ -456,6 +613,7 @@ export default function PerformancesManager() {
           titleLong: formState.titleLong.trim(),
           titleShort: formState.titleShort.trim(),
           body: formState.body,
+          statLine: formState.statLine || "",
           videoId: formState.videoId || "",
           author: formState.author,
           status: formState.status,
@@ -474,7 +632,9 @@ export default function PerformancesManager() {
           titleShort: formState.titleShort.trim(),
           slug,
           playerIds,
+          playerName: `${selectedPlayer.First || ""} ${selectedPlayer.Last || ""}`.trim(),
           body: formState.body,
+          statLine: formState.statLine || "",
           videoId: formState.videoId || "",
           author: formState.author,
           status: formState.status,
@@ -875,9 +1035,66 @@ export default function PerformancesManager() {
                   <VideoLookupCombobox videoId={formState.videoId} onChange={(id) => setFormState((p) => ({ ...p, videoId: id }))} videos={videos} />
                 </div>
 
+                <div style={{ marginBottom: "10px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                    Stat Line
+                  </div>
+                  <input
+                    value={formState.statLine}
+                    onChange={(e) => setFormState((p) => ({ ...p, statLine: e.target.value }))}
+                    placeholder="e.g. 24/31, 312 YDS, 3 TD"
+                    style={inputStyle}
+                  />
+                </div>
+
                 <div style={{ marginBottom: "14px" }}>
                   <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Write-up</div>
                   <textarea value={formState.body} onChange={(e) => setFormState((p) => ({ ...p, body: e.target.value }))} style={textareaStyle} />
+                </div>
+
+                <div style={{ marginBottom: "14px" }}>
+                  <button
+                    type="button"
+                    onClick={handleGenerateTweet}
+                    disabled={tweetLoading || !formState.body.trim()}
+                    title={!formState.body.trim() ? "Write the body text first" : ""}
+                    style={{
+                      width: "100%", background: "#fff", color: BLUE, border: "2px solid " + BLUE,
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                      cursor: tweetLoading || !formState.body.trim() ? "default" : "pointer",
+                      opacity: tweetLoading || !formState.body.trim() ? 0.5 : 1,
+                    }}
+                  >
+                    {tweetLoading ? "Generating..." : "Generate Tweet"}
+                  </button>
+
+                  {tweetError && (
+                    <div style={{ marginTop: "8px", fontSize: "12px", fontWeight: 800, color: "#c0392b" }}>{tweetError}</div>
+                  )}
+
+                  {tweetText && (
+                    <div style={{ marginTop: "10px" }}>
+                      <textarea
+                        readOnly
+                        value={tweetText}
+                        onFocus={(e) => e.target.select()}
+                        style={{ ...textareaStyle, minHeight: "150px", fontWeight: 600 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCopyTweet}
+                        style={{
+                          width: "100%", marginTop: "6px",
+                          background: tweetCopied ? "#e6f4ea" : GOLD, color: tweetCopied ? "#1a7f37" : "#fff",
+                          border: "none", borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                        }}
+                      >
+                        {tweetCopied ? "Copied!" : "Copy to Clipboard"}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <button

@@ -7,7 +7,7 @@
 // effect). If a week has no performances entered yet, falls back to showing
 // that week's schedule so the page never looks broken/empty.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
@@ -35,6 +35,40 @@ const gradeStyles = {
   Bad: { background: "#fdeaea", color: "#c0392b" },
 };
 
+// Same trend styling MarginSidebars.js's "Top 5 Trending" widget uses —
+// duplicated rather than shared since that widget's version is entangled
+// with its own gutter-measurement code.
+const TREND_STYLE = {
+  up: { icon: "▲", label: "Trending Up", badgeBg: "#16a34a", badgeBorder: "#0f6e33" },
+  breakout: { icon: "⚡", label: "Breakout", badgeBg: "#4a535e", badgeBorder: "#2c333b" },
+  "on fire": { icon: "🔥", label: "On Fire", badgeBg: "#ffcc00", badgeBorder: "#b38600" },
+};
+// Brighter versions of the same three trend colors (same hues as the
+// margin widget's soft-glow effect) for use as text/accents against the
+// terminal's near-black background, where TREND_STYLE's own badgeBg
+// ("breakout" especially) would be too close to the background to read.
+const TREND_ACCENT = { up: "#4ade80", breakout: "#8fd8ff", "on fire": "#ffd23d" };
+
+// Terminal-panel palette — a dark data readout distinct from the rest of
+// the site's light chrome, so the performance list itself feels like a
+// dense feed of real data rather than another row of pretty cards. Gold
+// stays gold (Dominant already means "pop" everywhere else on the site);
+// the rest maps loosely onto a ticker's green/blue/gray/red scale.
+// Every one of these needs to read clearly as *text* against TERMINAL_BG,
+// not just as a color swatch — Productive/Average were originally too dark
+// (close to the background itself) to actually read as stat-line text.
+const TERMINAL_GRADE_COLOR = {
+  Dominant: "#f6a21d",
+  Great: "#2ecc71",
+  Good: "#4da6ff",
+  Productive: "#b7c2d0",
+  Average: "#9aa5b5",
+  Bad: "#ff6b5b",
+};
+const TERMINAL_GRADE_COLOR_FALLBACK = "#8b98a8";
+const TERMINAL_BG = "#0a1420";
+const TERMINAL_MONO = "'Courier New', Courier, monospace";
+
 const gradeGlowClass = (grade) => {
   if (grade === "Dominant") return "wd-perf-glow-dominant";
   if (grade === "Great") return "wd-perf-glow-great";
@@ -56,8 +90,13 @@ const GRADE_GLOW_STYLE = `
   .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); }
   @keyframes wdLiveDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .wd-live-dot { animation: wdLiveDot 1.1s ease-in-out infinite; }
-  .wd-perf-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
-  .wd-perf-card:hover { transform: translateY(-3px); }
+  @keyframes wdFeaturedRowGlow {
+    0%, 100% { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.35); }
+    50%      { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.75); }
+  }
+  .wd-schedule-row-featured { animation: wdFeaturedRowGlow 2.2s ease-in-out infinite; }
+  .wd-terminal-row { transition: background 0.15s ease; }
+  .wd-terminal-row:hover { background: rgba(255,255,255,0.05) !important; }
 `;
 
 const weekNumber = (w) => {
@@ -77,6 +116,11 @@ const toMs = (ts) => {
   const parsed = Date.parse(ts);
   return isNaN(parsed) ? 0 : parsed;
 };
+
+// Which logo a team should show, in order of preference: an admin-uploaded
+// 8-bit version (Branding manager's "Logo (8-Bit)" field) if one's been
+// set, else the dark logo, else the plain primary logo.
+const preferredLogo = (schoolData) => schoolData?.Logo8Bit || schoolData?.LogoDark || schoolData?.Logo1 || "";
 
 // Same admin-entered kickoff Time layered on top of the game's Date as
 // AdminPanel.js's CFBScheduleSection — games without a Time just sort to
@@ -125,18 +169,18 @@ function Checklist({ options, selected, setSelected, noun, styleFor }) {
         onClick={() => setOpen((v) => !v)}
         style={{
           display: "flex", alignItems: "center", gap: "8px",
-          border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "10px 14px",
-          fontWeight: 900, fontSize: "13px", color: BLUE, background: "#fff",
+          border: "1px solid rgba(255,255,255,0.25)", borderRadius: "6px", padding: "9px 14px",
+          fontFamily: TERMINAL_MONO, fontWeight: 700, fontSize: "12px", color: "rgba(255,255,255,0.85)", background: "rgba(255,255,255,0.06)",
           outline: "none", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.03em",
         }}
       >
-        {label} <span style={{ fontSize: "10px" }}>▾</span>
+        {label} <span style={{ fontSize: "10px", color: GOLD }}>▾</span>
       </button>
       {open && (
         <div style={{
           position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
-          background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "10px",
-          boxShadow: "0 8px 22px rgba(0,0,0,0.14)", padding: "10px", minWidth: "180px",
+          background: "#0f1e30", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "10px",
+          boxShadow: "0 8px 22px rgba(0,0,0,0.5)", padding: "10px", minWidth: "180px",
         }}>
           {options.map((opt) => {
             const st = styleFor ? styleFor(opt) : null;
@@ -145,10 +189,10 @@ function Checklist({ options, selected, setSelected, noun, styleFor }) {
               <label
                 key={opt}
                 style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 6px", cursor: "pointer", borderRadius: "6px" }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
-                <input type="checkbox" checked={checked} onChange={() => toggle(opt)} style={{ width: "15px", height: "15px", accentColor: BLUE, cursor: "pointer" }} />
+                <input type="checkbox" checked={checked} onChange={() => toggle(opt)} style={{ width: "15px", height: "15px", accentColor: GOLD, cursor: "pointer" }} />
                 <span style={{
                   fontSize: "11px", fontWeight: 900, padding: "2px 8px", borderRadius: "20px",
                   background: st ? st.background : "#f0f0f0", color: st ? st.color : "#333",
@@ -165,7 +209,71 @@ function Checklist({ options, selected, setSelected, noun, styleFor }) {
   );
 }
 
+// Full-page version of the margin widget's "Top 5 Trending" — every shown
+// trend, not just the first 5, with room to actually show the admin's
+// Notes rather than just a name and school.
+function TrendsTab({ trends, loading }) {
+  if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="200px" />;
+
+  return (
+    <div style={{ background: TERMINAL_BG, border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: trends.length === 0 ? 0 : "18px", boxShadow: "0 8px 26px rgba(0,0,0,0.28)" }}>
+      {trends.length === 0 ? (
+        <div style={{ padding: "60px", textAlign: "center", color: "rgba(255,255,255,0.5)", fontStyle: "italic", fontSize: "14px" }}>
+          No trends have been marked yet — check back soon.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+          {trends.map((t) => {
+            const key = (t.Trend || "").toString().trim().toLowerCase();
+            const style = TREND_STYLE[key];
+            const accent = TREND_ACCENT[key] || TERMINAL_GRADE_COLOR_FALLBACK;
+            return (
+              <Link
+                key={t.slug}
+                to={`/player/${t.slug}`}
+                className="wd-terminal-row"
+                style={{
+                  display: "block", background: "rgba(255,255,255,0.03)", borderRadius: "8px",
+                  border: "1px solid rgba(255,255,255,0.12)", borderLeft: `4px solid ${accent}`,
+                  overflow: "hidden", textDecoration: "none", padding: "14px 16px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "13px" }}>{style ? style.icon : "•"}</span>
+                  <span style={{ fontFamily: TERMINAL_MONO, color: accent, fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    {style ? style.label : (t.Trend || "Trending")}
+                  </span>
+                </div>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: "16px", textTransform: "uppercase", letterSpacing: "0.02em", marginBottom: "4px" }}>
+                  {t.First} {t.Last}
+                </div>
+                <div style={{ fontFamily: TERMINAL_MONO, fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.6)", marginBottom: t.Notes ? "10px" : 0 }}>
+                  {t.School || "—"}
+                </div>
+                {t.Notes && (
+                  <div style={{ fontSize: "12.5px", fontWeight: 500, color: "rgba(255,255,255,0.82)", lineHeight: 1.5 }}>
+                    {t.Notes}
+                  </div>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PerformancesHub() {
+  // Optional — present when reached via /performances/:week (e.g. from a
+  // game page's "back to this week's slate" link), absent on the bare
+  // /performances hub, which still falls back to auto-detecting "current".
+  const { week: weekParam } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  // Trends is a literal path (see App.js), ranked ahead of :week for that
+  // exact segment — anything else is the "This Week" tab.
+  const activeTab = location.pathname === "/performances/trends" ? "trends" : "week";
   const [performances, setPerformances] = useState([]);
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -175,8 +283,33 @@ export default function PerformancesHub() {
   const [selectedYears, setSelectedYears] = useState(ACTIVE_YEARS);
   const [prospectsOnly, setProspectsOnly] = useState(false);
   const [playersById, setPlayersById] = useState({});
+  const [schoolsByName, setSchoolsByName] = useState({});
+  const [trends, setTrends] = useState([]);
+  const [trendsLoading, setTrendsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const contentRef = useRef(null);
+
+  // Trends tab's data — every shown trend (not capped at 5 like the margin
+  // widget), ordered the same way.
+  useEffect(() => {
+    const fetch = async () => {
+      setTrendsLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "trends"));
+        const shown = snap.docs
+          .map((d) => ({ slug: d.id, ...d.data() }))
+          .filter((t) => t.Shown === true)
+          .sort((a, b) => (a.Order ?? 0) - (b.Order ?? 0));
+        setTrends(shown);
+      } catch (e) {
+        console.error("Trends fetch error:", e);
+        setTrends([]);
+      } finally {
+        setTrendsLoading(false);
+      }
+    };
+    fetch();
+  }, []);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -187,14 +320,18 @@ export default function PerformancesHub() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const [perfSnap, gamesSnap] = await Promise.all([
+        const [perfSnap, gamesSnap, schoolsSnap] = await Promise.all([
           getDocs(query(collection(db, "performances"), where("status", "==", "published"))),
           getDocs(collection(db, "schedule26")),
+          getDocs(collection(db, "schools")),
         ]);
         const perfs = perfSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         const gameDocs = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setPerformances(perfs);
         setGames(gameDocs);
+        const schoolsMap = {};
+        schoolsSnap.docs.forEach((d) => { const data = d.data(); if (data.School) schoolsMap[data.School] = data; });
+        setSchoolsByName(schoolsMap);
 
         // Current week = the latest week whose earliest game has already
         // kicked off — so a week stays "current" through the whole
@@ -222,7 +359,15 @@ export default function PerformancesHub() {
         const current = (nextWeek && weeksWithPerf.has(nextWeek)) ? nextWeek : dateBasedWeek;
 
         setCurrentWeek(current);
-        setSelectedWeek(current);
+        // A week named in the URL (deep-linked from a game page) wins over
+        // the auto-detected "current" week — decodeURIComponent defensively
+        // even though react-router already decodes path params, since a
+        // raw already-decoded string just passes through unchanged.
+        let initialWeek = current;
+        if (weekParam) {
+          try { initialWeek = decodeURIComponent(weekParam); } catch { initialWeek = weekParam; }
+        }
+        setSelectedWeek(initialWeek);
       } catch (err) {
         console.error("Error fetching performances:", err);
       } finally {
@@ -291,6 +436,17 @@ export default function PerformancesHub() {
     [games, selectedWeek]
   );
 
+  // Grade counts across every performance entered for this week — computed
+  // before the grade/year filters apply, so the ticker always reflects the
+  // week's real total supply of data, not just whatever the user currently
+  // has checked.
+  const weekGradeCounts = useMemo(() => {
+    const counts = {};
+    GRADE_ORDER.forEach((g) => { counts[g] = 0; });
+    performancesForWeek.forEach((p) => { if (counts[p.grade] !== undefined) counts[p.grade]++; });
+    return counts;
+  }, [performancesForWeek]);
+
   const isSaturday = new Date().getDay() === 6;
   const showLive = isSaturday && selectedWeek === currentWeek;
 
@@ -328,7 +484,30 @@ export default function PerformancesHub() {
           </Link>
         </div>
 
-        {loading ? (
+        {/* ===== Tab toggle ===== */}
+        <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+          {[
+            { key: "week", label: "This Week", to: "/performances" },
+            { key: "trends", label: "🔥 Trends", to: "/performances/trends" },
+          ].map((tab) => (
+            <Link
+              key={tab.key}
+              to={tab.to}
+              style={{
+                border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "10px 20px",
+                fontWeight: 900, fontSize: isMobile ? "12px" : "13px", textTransform: "uppercase", letterSpacing: "0.04em",
+                background: activeTab === tab.key ? BLUE : "#fff", color: activeTab === tab.key ? "#fff" : BLUE,
+                cursor: "pointer", textDecoration: "none", display: "inline-block",
+              }}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+
+        {activeTab === "trends" ? (
+          <TrendsTab trends={trends} loading={trendsLoading} />
+        ) : loading ? (
           <LoadingSpinner label="Loading" size={28} minHeight="200px" />
         ) : !currentWeek ? (
           <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>
@@ -336,19 +515,38 @@ export default function PerformancesHub() {
           </div>
         ) : (
           <>
-            {/* ===== Controls ===== */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "20px" }}>
+            {/* ===== Controls — same dark terminal readout as the data
+                below, so the filters read as part of the instrument rather
+                than a separate light toolbar bolted on top of it. ===== */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px",
+              marginBottom: "20px", background: TERMINAL_BG, border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "10px", padding: "14px 16px",
+            }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                 <select
                   value={selectedWeek}
-                  onChange={(e) => setSelectedWeek(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedWeek(e.target.value);
+                    navigate(`/performances/${encodeURIComponent(e.target.value)}`, { replace: true });
+                  }}
                   style={{
-                    border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "10px 14px",
-                    fontWeight: 900, fontSize: "14px", color: BLUE, background: "#fff",
+                    border: "1px solid rgba(255,255,255,0.25)", borderRadius: "6px", padding: "9px 14px",
+                    fontFamily: TERMINAL_MONO, fontWeight: 700, fontSize: "13px", color: "#fff", background: "rgba(255,255,255,0.06)",
                     outline: "none", cursor: "pointer",
                   }}
                 >
-                  {weekOptions.map((w) => <option key={w} value={w}>{w}{w === currentWeek ? " (Current)" : ""}</option>)}
+                  {/* Most browsers render the open dropdown list using the
+                      OS's default white background regardless of the
+                      <select>'s own dark styling, but DO respect color/
+                      background set on each <option> directly — without
+                      this, the <select>'s white text becomes invisible
+                      white-on-white once the list opens. */}
+                  {weekOptions.map((w) => (
+                    <option key={w} value={w} style={{ background: "#0f1e30", color: "#fff" }}>
+                      {w}{w === currentWeek ? " (Current)" : ""}
+                    </option>
+                  ))}
                 </select>
                 {showLive && (
                   <span style={{
@@ -372,9 +570,9 @@ export default function PerformancesHub() {
                     type="button"
                     onClick={() => setProspectsOnly((v) => !v)}
                     style={{
-                      border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "10px 14px",
-                      fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.03em",
-                      background: prospectsOnly ? BLUE : "#fff", color: prospectsOnly ? "#fff" : BLUE,
+                      border: "1px solid rgba(255,255,255,0.25)", borderRadius: "6px", padding: "9px 14px",
+                      fontFamily: TERMINAL_MONO, fontWeight: 700, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.03em",
+                      background: prospectsOnly ? GOLD : "rgba(255,255,255,0.06)", color: prospectsOnly ? "#3a2900" : "rgba(255,255,255,0.85)",
                       cursor: "pointer", outline: "none",
                     }}
                   >
@@ -386,111 +584,175 @@ export default function PerformancesHub() {
 
             {/* ===== Content ===== */}
             {performancesForWeek.length === 0 ? (
-              // No performances entered for this week yet — show the schedule instead.
-              <div>
-                <div style={{ marginBottom: "12px", padding: "12px 16px", background: "#fff8e6", border: `2px solid ${GOLD}`, borderRadius: "8px", fontSize: "13px", fontWeight: 700, color: "#8a6300" }}>
-                  No performances have been entered for {selectedWeek} yet — here's the schedule.
+              // No performances entered for this week yet — show the
+              // schedule instead, same dark terminal readout as the
+              // performance rows below rather than a separate light panel.
+              <div style={{ borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 26px rgba(0,0,0,0.28)" }}>
+                <div style={{ background: TERMINAL_BG, padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                  <span style={{ fontFamily: TERMINAL_MONO, fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                    {selectedWeek} ▸ NO PERFORMANCES YET — SCHEDULE
+                  </span>
                 </div>
                 {gamesForWeek.length === 0 ? (
-                  <div style={{ padding: "40px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>
+                  <div style={{ background: TERMINAL_BG, padding: "50px", textAlign: "center", color: "rgba(255,255,255,0.6)", fontStyle: "italic", fontSize: "14px" }}>
                     No games found for {selectedWeek}.
                   </div>
                 ) : (
-                  <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-                    <div style={{ background: BLUE, padding: "8px 16px" }}>
-                      <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                        {selectedWeek} Schedule
-                      </div>
-                    </div>
-                    <div style={{ height: "3px", background: GOLD }} />
+                  <div style={{ background: TERMINAL_BG }}>
                     {gamesForWeek.map((g, i) => {
                       const d = g.Date?.toDate?.();
                       const timeStr = formatTime12h(g.Time);
-                      const played = g.HomeScore != null && g.AwayScore != null;
-                      return (
-                        <div
-                          key={g.id}
-                          style={{
-                            display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
-                            padding: "12px 16px", background: "#fff",
-                            borderBottom: i < gamesForWeek.length - 1 ? "1px solid #f0f0f0" : "none",
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 900, fontSize: "14px", color: "#222" }}>
-                              {g.Away} at {g.Home}
-                            </div>
-                            {played && (
-                              <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
-                                Final: {g.Home} {g.HomeScore} – {g.AwayScore} {g.Away}
+                      const played = g.Final && g.HomeScore != null && g.AwayScore != null;
+                      const away = schoolsByName[g.Away];
+                      const home = schoolsByName[g.Home];
+                      const awayWon = played && g.AwayScore > g.HomeScore;
+                      const homeWon = played && g.HomeScore > g.AwayScore;
+
+                      const TeamRow = ({ school, data, score, won }) => {
+                        const logoSrc = preferredLogo(data);
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            {logoSrc ? (
+                              <img src={logoSrc} alt="" style={{ width: "28px", height: "28px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            ) : (
+                              <div style={{ width: "28px", height: "28px", flexShrink: 0, borderRadius: "6px", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)", fontSize: "11px", fontWeight: 900 }}>
+                                {(school || "?").charAt(0)}
                               </div>
                             )}
+                            <span style={{ fontFamily: TERMINAL_MONO, fontWeight: 900, fontSize: "13px", color: played ? (won ? "#fff" : "rgba(255,255,255,0.45)") : "#fff" }}>
+                              {school}
+                            </span>
+                            {played && (
+                              <span style={{ marginLeft: "auto", fontFamily: TERMINAL_MONO, fontWeight: 900, fontSize: "18px", color: won ? GOLD : "rgba(255,255,255,0.35)" }}>{score}</span>
+                            )}
                           </div>
-                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#aaa", flexShrink: 0, textAlign: "right" }}>
-                            {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "TBD"}
-                            {timeStr && <div>{timeStr}</div>}
+                        );
+                      };
+
+                      return (
+                        <Link
+                          key={g.id}
+                          to={g.Slug ? `/game/${g.Slug}` : "#"}
+                          className={`wd-terminal-row${g.Featured ? " wd-schedule-row-featured" : ""}`}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px",
+                            padding: "14px 16px", textDecoration: "none",
+                            borderBottom: i < gamesForWeek.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none",
+                            pointerEvents: g.Slug ? "auto" : "none",
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <TeamRow school={g.Away} data={away} score={g.AwayScore} won={awayWon} />
+                            <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} />
                           </div>
-                        </div>
+                          <div style={{ fontFamily: TERMINAL_MONO, fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", flexShrink: 0, textAlign: "right" }}>
+                            {g.Featured && (
+                              <span style={{
+                                display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
+                                background: "linear-gradient(90deg, #f6a21d, #ffd35c)", color: "#3a2900",
+                                fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
+                                textTransform: "uppercase", letterSpacing: "0.05em",
+                              }}>
+                                ⭐ Featured
+                              </span>
+                            )}
+                            <div>
+                              {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD"}
+                              {timeStr && <div>{timeStr}</div>}
+                            </div>
+                          </div>
+                        </Link>
                       );
                     })}
                   </div>
                 )}
               </div>
-            ) : filteredItems.length === 0 ? (
-              <div style={{ padding: "50px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px", border: "2px dashed #ddd", borderRadius: "10px" }}>
-                No performances match the selected filters for {selectedWeek}.
-              </div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: "16px" }}>
-                {filteredItems.map((p) => {
-                  const date = p.gameDate?.toDate?.();
-                  const grade = gradeStyles[p.grade];
-                  const game = games.find((g) => g.id === p.gameId);
-                  const played = game?.HomeScore != null && game?.AwayScore != null;
+              <div style={{ borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 26px rgba(0,0,0,0.28)" }}>
+                {/* ===== Ticker — grade counts for the whole week, ahead of
+                    any filtering, so it always reads as the week's real
+                    total data supply. ===== */}
+                <div style={{
+                  background: TERMINAL_BG, padding: "10px 16px",
+                  display: "flex", gap: "18px", flexWrap: "wrap", alignItems: "center",
+                  borderBottom: "1px solid rgba(255,255,255,0.1)",
+                }}>
+                  <span style={{ fontFamily: TERMINAL_MONO, fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                    {selectedWeek} ▸
+                  </span>
+                  {GRADE_ORDER.map((g) => (
+                    <div key={g} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: TERMINAL_GRADE_COLOR[g], flexShrink: 0 }} />
+                      <span style={{ fontFamily: TERMINAL_MONO, fontSize: "10.5px", fontWeight: 700, color: "rgba(255,255,255,0.75)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {g}
+                      </span>
+                      <span style={{ fontFamily: TERMINAL_MONO, fontSize: "13px", fontWeight: 900, color: "#fff" }}>
+                        {weekGradeCounts[g]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
 
-                  return (
-                    <Link
-                      key={p.id}
-                      to={`/performance/${p.slug || p.id}`}
-                      className={`wd-perf-card ${gradeGlowClass(p.grade)}`}
-                      style={{
-                        display: "block", background: "#fff", borderRadius: "12px",
-                        border: "2px solid #eee", overflow: "hidden", textDecoration: "none",
-                      }}
-                    >
-                      <div style={{ height: "5px", background: grade ? grade.color : "#ddd" }} />
-                      <div style={{ padding: "16px 18px" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "10px" }}>
-                          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                            {grade && (
-                              <span style={{ background: grade.background, color: grade.color, fontSize: "10px", fontWeight: 900, padding: "3px 10px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                                {p.grade}
-                              </span>
+                {/* ===== Data rows ===== */}
+                {filteredItems.length === 0 ? (
+                  <div style={{ background: TERMINAL_BG, padding: "50px", textAlign: "center", color: "rgba(255,255,255,0.6)", fontStyle: "italic", fontSize: "14px" }}>
+                    No performances match the selected filters for {selectedWeek}.
+                  </div>
+                ) : (
+                  <div style={{ background: TERMINAL_BG }}>
+                    {filteredItems.map((p, i) => {
+                      const date = p.gameDate?.toDate?.();
+                      const dateStr = date?.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+                      const game = games.find((g) => g.id === p.gameId);
+                      const played = game?.HomeScore != null && game?.AwayScore != null;
+                      const logo = preferredLogo(schoolsByName[p.school]);
+                      const tickColor = TERMINAL_GRADE_COLOR[p.grade] || TERMINAL_GRADE_COLOR_FALLBACK;
+
+                      return (
+                        <Link
+                          key={p.id}
+                          to={`/performance/${p.slug || p.id}`}
+                          className={`wd-terminal-row ${gradeGlowClass(p.grade)}`}
+                          style={{
+                            display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px",
+                            textDecoration: "none", borderBottom: i < filteredItems.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none",
+                          }}
+                        >
+                          <span style={{ width: "4px", height: "34px", borderRadius: "2px", background: tickColor, flexShrink: 0 }} />
+                          {logo ? (
+                            <img src={logo} alt="" style={{ width: "24px", height: "24px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                          ) : (
+                            <span style={{ width: "24px", height: "24px", flexShrink: 0, borderRadius: "4px", background: "rgba(255,255,255,0.08)", display: "inline-block" }} />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {p.playerName || p.titleShort}
+                            </div>
+                            {p.statLine && (
+                              <div style={{ fontFamily: TERMINAL_MONO, fontSize: "11.5px", fontWeight: 700, color: tickColor, marginTop: "2px" }}>
+                                {p.statLine}
+                              </div>
+                            )}
+                            <div style={{ fontFamily: TERMINAL_MONO, fontSize: "10px", color: "rgba(255,255,255,0.6)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {p.school}{p.opponent ? ` vs ${p.opponent}` : ""}
+                              {played && ` · FINAL ${game.HomeScore}-${game.AwayScore}`}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <div style={{ fontSize: "9px", fontWeight: 900, color: tickColor, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                              {p.grade}
+                            </div>
+                            {dateStr && (
+                              <div style={{ fontFamily: TERMINAL_MONO, fontSize: "10px", color: "rgba(255,255,255,0.55)", marginTop: "3px" }}>
+                                {dateStr}
+                              </div>
                             )}
                           </div>
-                          {date && (
-                            <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
-                              {date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                            </span>
-                          )}
-                        </div>
-
-                        <div style={{ color: BLUE, fontWeight: 900, fontSize: "17px", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.3, marginBottom: "6px" }}>
-                          {p.titleShort}
-                        </div>
-
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#888" }}>
-                          {p.school}{p.opponent ? ` vs ${p.opponent}` : ""}
-                        </div>
-                        {played && (
-                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
-                            Final: {game.Home} {game.HomeScore} – {game.AwayScore} {game.Away}
-                          </div>
-                        )}
-                      </div>
-                    </Link>
-                  );
-                })}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </>

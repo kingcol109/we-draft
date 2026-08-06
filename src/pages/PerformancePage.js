@@ -61,6 +61,10 @@ const GRADE_GLOW_STYLE = `
   .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
   .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
   .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .wd-perf-result-link { transition: background 0.15s ease; }
+  .wd-perf-result-link:hover { background: #d5e4ff !important; }
+  .wd-perf-result-chevron { display: inline-block; transition: transform 0.15s ease; }
+  .wd-perf-result-link:hover .wd-perf-result-chevron { transform: translateX(3px); }
 `;
 
 export default function PerformancePage() {
@@ -189,7 +193,9 @@ export default function PerformancePage() {
 
   const grade = gradeStyles[performance.grade];
   const gameDate = performance.gameDate?.toDate ? performance.gameDate.toDate() : null;
-  const dateStr = gameDate?.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+  // Date-only field is stored as UTC midnight — format in UTC too, or a
+  // viewer west of it sees the game roll back a calendar day.
+  const dateStr = gameDate?.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   // Same per-player title/thumb override resolution as PlayerProfile.js's
   // video cards — prefer the item tagged to this performance's subject,
   // fall back to the first item, then the video's generic title/thumb.
@@ -208,8 +214,8 @@ export default function PerformancePage() {
   const seoDescription = (performance.body || "").replace(/\s+/g, " ").trim().slice(0, 160);
 
   const SidebarItem = ({ item }) => {
-    const d = item.gameDate?.toDate?.()?.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    const g = gradeStyles[item.grade];
+    const d = item.gameDate?.toDate?.()?.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+    const logo = schoolLogos[item.school];
     return (
       <Link
         to={`/performance/${item.slug}`}
@@ -229,17 +235,20 @@ export default function PerformancePage() {
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ marginBottom: "3px", display: "flex", gap: "4px", flexWrap: "wrap" }}>
-            <span style={{ background: "#7c3aed", color: "#fff", fontSize: "7px", fontWeight: 900, padding: "1px 5px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Performance
-            </span>
-            {g && (
-              <span style={{ background: g.background, color: g.color, fontSize: "7px", fontWeight: 900, padding: "1px 5px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                {item.grade}
-              </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+            {logo && (
+              <img src={logo} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
             )}
+            <span style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "12px", color: BLUE, lineHeight: 1.25 }}>
+              {item.playerName || item.titleShort}
+            </span>
           </div>
-          <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "11px", color: "#222", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.3 }}>
+          {item.statLine && (
+            <div style={{ fontFamily: "'Courier New', monospace", fontSize: "11px", fontWeight: 700, color: "#555", marginBottom: "3px" }}>
+              {item.statLine}
+            </div>
+          )}
+          <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 700, fontSize: "9.5px", color: "#999", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.3 }}>
             {item.titleShort}
           </div>
         </div>
@@ -321,19 +330,35 @@ export default function PerformancePage() {
                   {performance.titleLong}
                 </h1>
 
-                {/* Game meta line — school, opponent, week, and the score if played */}
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-                  <span style={{ fontSize: "13px", fontWeight: 700, color: "#888" }}>
-                    {performance.school}{performance.opponent ? ` vs ${performance.opponent}` : ""}{performance.week ? ` · ${performance.week}` : ""}
-                  </span>
-                  {played && (
-                    <span style={{
-                      fontSize: "11px", fontWeight: 900, padding: "3px 10px", borderRadius: "20px",
-                      background: "#eaf1ff", color: BLUE, textTransform: "uppercase", letterSpacing: "0.03em",
-                    }}>
+                {/* Game meta line — just the result once there is one (the
+                    matchup itself is implicit in "Final: X – Y"), rather than
+                    repeating school/opponent/week right above it. Clicks
+                    through to the game's own page either way. */}
+                <div style={{ marginBottom: "20px" }}>
+                  {played && game?.Slug ? (
+                    <Link
+                      to={`/game/${game.Slug}`}
+                      className="wd-perf-result-link"
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none",
+                        fontSize: "11px", fontWeight: 900, padding: "5px 12px", borderRadius: "20px",
+                        background: "#eaf1ff", color: BLUE, textTransform: "uppercase", letterSpacing: "0.03em",
+                      }}
+                    >
                       Final: {game.Home} {game.HomeScore} – {game.AwayScore} {game.Away}
-                    </span>
-                  )}
+                      <span className="wd-perf-result-chevron">›</span>
+                    </Link>
+                  ) : (() => {
+                    const matchupText = `${performance.school}${performance.opponent ? ` vs ${performance.opponent}` : ""}${performance.week ? ` · ${performance.week}` : ""}`;
+                    return game?.Slug ? (
+                      <Link to={`/game/${game.Slug}`} className="wd-perf-result-link" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 700, color: BLUE, textDecoration: "none", borderRadius: "6px", padding: "4px 8px" }}>
+                        {matchupText}
+                        <span className="wd-perf-result-chevron">›</span>
+                      </Link>
+                    ) : (
+                      <span style={{ fontSize: "13px", fontWeight: 700, color: "#888" }}>{matchupText}</span>
+                    );
+                  })()}
                 </div>
 
                 {/* Divider */}

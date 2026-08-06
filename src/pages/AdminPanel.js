@@ -2846,11 +2846,33 @@ const inputStyle = {
 // PerformancesManager.js reads to list a player's games — editing here is
 // the only way to fix a wrong score/date/matchup short of going into the
 // Firebase console directly. ──
-const BLANK_GAME_FORM = { Home: "", Away: "", Date: "", Time: "", Week: "", Neutral: false, HomeScore: "", AwayScore: "" };
+const BLANK_GAME_FORM = {
+  Home: "", Away: "", Date: "", Time: "", Week: "", Neutral: false, HomeScore: "", AwayScore: "",
+  Featured: false, Final: false, Notes: "", KeyPlayersHome: [], KeyPlayersAway: [],
+};
 
 const weekNumber = (w) => {
   const m = /(\d+)/.exec(w || "");
   return m ? Number(m[1]) : 999;
+};
+
+const createSlug = (text) => (text || "").toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-");
+
+// Individual game page slug — "away-vs-home-month-day", e.g.
+// "florida-state-vs-miami-10-29". Matches the schedule's own "Away at Home"
+// ordering, just with the away team leading here too. Recomputed from
+// scratch on every save (rather than only set once) so a corrected
+// matchup/date always keeps the slug in sync — nothing else derives an
+// identity from the old slug, since the doc ID (not the slug) is the
+// canonical foreign key every other collection (performances) points at.
+const gameSlugFor = (away, home, dateInputValue) => {
+  const parts = [createSlug(away), "vs", createSlug(home)];
+  if (dateInputValue) {
+    // dateInputValue is an <input type="date"> value: "YYYY-MM-DD".
+    const [, m, d] = dateInputValue.split("-");
+    if (m && d) parts.push(`${Number(m)}-${Number(d)}`);
+  }
+  return parts.filter(Boolean).join("-");
 };
 
 // Games within a day have no natural order until a kickoff Time is entered
@@ -2877,9 +2899,113 @@ const gameSortMs = (g) => {
   return toMs(g.Date) + (mins != null ? mins * 60000 : 0);
 };
 
+// Renders the current Key Players selections as removable chips — same
+// visual language as PerformancesManager.js's "Players Mentioned" chips.
+function KeyPlayersChips({ playerIds, allPlayers, onRemove }) {
+  if (!playerIds.length) return null;
+  const byId = new Map(allPlayers.map((p) => [p.id, p]));
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+      {playerIds.map((pid) => {
+        const p = byId.get(pid);
+        return (
+          <span
+            key={pid}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "6px",
+              background: "#f5f5f5", border: "2px solid #ddd",
+              borderRadius: "20px", padding: "3px 6px 3px 10px",
+              fontSize: "12px", fontWeight: 800, color: "#555",
+            }}
+          >
+            {p ? `${p.First} ${p.Last}` : "Unknown"}
+            <button
+              type="button"
+              onClick={() => onRemove(pid)}
+              style={{ background: "none", border: "none", color: "#999", fontWeight: 900, fontSize: "13px", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// Key Players are meant to be the future draft picks worth watching in a
+// given matchup, not every senior on the roster — restricted to the three
+// classes still actively evaluated as prospects (this season's true
+// freshmen through juniors), same as the CFB rankings' upcoming-class scope.
+const KEY_PLAYER_ELIGIBLE_YEARS = ["2027", "2028", "2029"];
+
+// Search-and-add combobox scoped to one team's roster (School) — used
+// twice per game (Away/Home) to pick that side's Key Players. Disabled
+// until a school is chosen for that side, since "key players" without a
+// team to filter by would just be the entire ~4,000-player database.
+function KeyPlayersCombobox({ school, excludeIds, players, onAdd }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const roster = players.filter((p) => p.School === school && KEY_PLAYER_ELIGIBLE_YEARS.includes(p.Eligible));
+  const q = query.trim().toLowerCase();
+  const excluded = new Set(excludeIds);
+  const filtered = (q
+    ? roster.filter((p) => `${p.First} ${p.Last}`.toLowerCase().includes(q))
+    : roster
+  ).filter((p) => !excluded.has(p.id)).slice(0, 8);
+
+  if (!school) {
+    return (
+      <input disabled placeholder="Select this team first..." style={{ ...inputStyle, opacity: 0.5, cursor: "not-allowed" }} />
+    );
+  }
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <input
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Add a key player..."
+        autoComplete="off"
+        style={inputStyle}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+          background: "#fff", border: "2px solid #ddd", borderRadius: "6px",
+          maxHeight: "220px", overflowY: "auto", boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+        }}>
+          {filtered.map((p) => (
+            <div
+              key={p.id}
+              onClick={() => { onAdd(p.id); setQuery(""); setOpen(false); }}
+              style={{ padding: "8px 10px", cursor: "pointer" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{p.First} {p.Last}</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>{p.Position || "—"} · {p.Eligible || "—"}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CFBScheduleSection() {
   const [games, setGames] = useState([]);
   const [schoolNames, setSchoolNames] = useState([]);
+  const [allPlayers, setAllPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedWeek, setSelectedWeek] = useState("");
   const [selectedGame, setSelectedGame] = useState(null);
@@ -2892,13 +3018,15 @@ function CFBScheduleSection() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [gamesSnap, schoolsSnap] = await Promise.all([
+        const [gamesSnap, schoolsSnap, playersSnap] = await Promise.all([
           getDocs(collection(db, "schedule26")),
           getDocs(collection(db, "schools")),
+          getDocs(collection(db, "players")),
         ]);
         const gameDocs = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setGames(gameDocs);
         setSchoolNames(schoolsSnap.docs.map((d) => d.data().School).filter(Boolean).sort());
+        setAllPlayers(playersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
         const weeks = Array.from(new Set(gameDocs.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
         if (weeks.length > 0) setSelectedWeek(weeks[0]);
@@ -2930,6 +3058,11 @@ function CFBScheduleSection() {
       Neutral: !!g.Neutral,
       HomeScore: g.HomeScore != null ? String(g.HomeScore) : "",
       AwayScore: g.AwayScore != null ? String(g.AwayScore) : "",
+      Featured: !!g.Featured,
+      Final: !!g.Final,
+      Notes: g.Notes || "",
+      KeyPlayersHome: g.KeyPlayersHome || [],
+      KeyPlayersAway: g.KeyPlayersAway || [],
     });
     setSaveMessage("");
   };
@@ -2942,10 +3075,19 @@ function CFBScheduleSection() {
 
   const isNew = selectedGame?.isNew === true;
 
+  // "Final" can only be set once both scores are entered — this is the
+  // explicit admin action that flips the game (and its public page) from
+  // pregame to postgame state, distinct from just having scores typed in.
+  const canMarkFinal = formState?.HomeScore?.trim() !== "" && formState?.AwayScore?.trim() !== "";
+
   const handleSave = async () => {
     if (!formState) return;
     if (!formState.Home.trim() || !formState.Away.trim() || !formState.Week.trim()) {
       setSaveMessage("Failed: Home, Away, and Week are required.");
+      return;
+    }
+    if (formState.Final && !canMarkFinal) {
+      setSaveMessage("Failed: enter both scores before marking this game Final.");
       return;
     }
     setSaving(true);
@@ -2956,6 +3098,12 @@ function CFBScheduleSection() {
         Away: formState.Away.trim(),
         Week: formState.Week.trim(),
         Neutral: formState.Neutral,
+        Featured: formState.Featured,
+        Final: formState.Final && canMarkFinal,
+        Notes: formState.Notes || "",
+        KeyPlayersHome: formState.KeyPlayersHome,
+        KeyPlayersAway: formState.KeyPlayersAway,
+        Slug: gameSlugFor(formState.Away.trim(), formState.Home.trim(), formState.Date),
         updatedAt: serverTimestamp(),
       };
       if (formState.Date) payload.Date = new Date(formState.Date);
@@ -3038,7 +3186,10 @@ function CFBScheduleSection() {
             {gamesForWeek.map((g) => {
               const isSelected = selectedGame?.id === g.id;
               const played = g.HomeScore != null && g.AwayScore != null;
-              const dateStr = toMs(g.Date) ? new Date(toMs(g.Date)).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "TBD";
+              // Date-only field is stored as UTC midnight (`new Date("YYYY-MM-DD")`
+              // below in handleSave) — formatting it in the viewer's local zone can
+              // roll it back a calendar day west of UTC, so pin display to UTC too.
+              const dateStr = toMs(g.Date) ? new Date(toMs(g.Date)).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
               const timeStr = formatTime12h(g.Time);
               return (
                 <div
@@ -3054,14 +3205,21 @@ function CFBScheduleSection() {
                   onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{g.Away} at {g.Home}</div>
+                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, display: "flex", alignItems: "center", gap: "5px" }}>
+                      {g.Featured && <span title="Featured">⭐</span>}
+                      {g.Away} at {g.Home}
+                    </div>
                     <span style={{ fontSize: "11px", fontWeight: 700, color: "#999", flexShrink: 0 }}>{dateStr}{timeStr ? ` · ${timeStr}` : ""}</span>
                   </div>
-                  {played && (
+                  {g.Final && played ? (
                     <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
                       Final: {g.Home} {g.HomeScore} – {g.AwayScore} {g.Away}
                     </div>
-                  )}
+                  ) : played ? (
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#c98a00", marginTop: "2px" }}>
+                      Score entered, not yet marked Final
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -3113,9 +3271,87 @@ function CFBScheduleSection() {
               </div>
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", cursor: "pointer" }}>
-              <input type="checkbox" checked={formState.Neutral} onChange={(e) => setFormState((p) => ({ ...p, Neutral: e.target.checked }))} />
-              <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>Neutral site</span>
+            <div style={{ display: "flex", gap: "20px", marginBottom: "16px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={formState.Neutral} onChange={(e) => setFormState((p) => ({ ...p, Neutral: e.target.checked }))} />
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>Neutral site</span>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={formState.Featured} onChange={(e) => setFormState((p) => ({ ...p, Featured: e.target.checked }))} />
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>⭐ Featured game</span>
+              </label>
+            </div>
+
+            {/* Key Players — same search-and-add chip pattern as the
+                Performances editor's "Players Mentioned" field, just split
+                into two lists (one per side) so each team's picks stay
+                scoped to that team's roster. */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                  Key Players — Away{formState.Away ? ` (${formState.Away})` : ""}
+                </div>
+                <KeyPlayersChips
+                  playerIds={formState.KeyPlayersAway}
+                  allPlayers={allPlayers}
+                  onRemove={(pid) => setFormState((p) => ({ ...p, KeyPlayersAway: p.KeyPlayersAway.filter((id) => id !== pid) }))}
+                />
+                <KeyPlayersCombobox
+                  school={formState.Away}
+                  excludeIds={formState.KeyPlayersAway}
+                  players={allPlayers}
+                  onAdd={(pid) => setFormState((p) => ({ ...p, KeyPlayersAway: [...p.KeyPlayersAway, pid] }))}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                  Key Players — Home{formState.Home ? ` (${formState.Home})` : ""}
+                </div>
+                <KeyPlayersChips
+                  playerIds={formState.KeyPlayersHome}
+                  allPlayers={allPlayers}
+                  onRemove={(pid) => setFormState((p) => ({ ...p, KeyPlayersHome: p.KeyPlayersHome.filter((id) => id !== pid) }))}
+                />
+                <KeyPlayersCombobox
+                  school={formState.Home}
+                  excludeIds={formState.KeyPlayersHome}
+                  players={allPlayers}
+                  onAdd={(pid) => setFormState((p) => ({ ...p, KeyPlayersHome: [...p.KeyPlayersHome, pid] }))}
+                />
+              </div>
+            </div>
+
+            {/* Notes — one field whose purpose (and label) flips once the
+                game is marked Final: pregame it's forward-looking preview
+                copy, postgame the admin overwrites it with a recap. */}
+            <div style={{ marginBottom: "14px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                {formState.Final ? "Review Notes" : "Preview Notes"} (public)
+              </div>
+              <textarea
+                value={formState.Notes}
+                onChange={(e) => setFormState((p) => ({ ...p, Notes: e.target.value }))}
+                placeholder={formState.Final ? "Recap the game for the public game page..." : "Preview the matchup for the public game page..."}
+                style={{ ...inputStyle, minHeight: "110px", resize: "vertical", lineHeight: 1.5, fontWeight: 500 }}
+              />
+            </div>
+
+            <label
+              title={!canMarkFinal ? "Enter both scores before marking Final" : ""}
+              style={{
+                display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px",
+                cursor: canMarkFinal ? "pointer" : "not-allowed", opacity: canMarkFinal ? 1 : 0.5,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={formState.Final}
+                disabled={!canMarkFinal}
+                onChange={(e) => setFormState((p) => ({ ...p, Final: e.target.checked }))}
+              />
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+                Mark game Final {!canMarkFinal && "(enter both scores first)"}
+              </span>
             </label>
 
             <button
@@ -3406,6 +3642,7 @@ function TeamBrandingPane({ league }) {
       Logo2: t.Logo2 || "",
       Wordmark: t.Wordmark || "",
       LogoDark: t.LogoDark || "",
+      Logo8Bit: t.Logo8Bit || "",
       Color1: t.Color1 || BLUE,
       Color2: t.Color2 || GOLD,
     });
@@ -3468,6 +3705,7 @@ function TeamBrandingPane({ league }) {
         Logo2: formState.Logo2.trim(),
         Wordmark: formState.Wordmark.trim(),
         LogoDark: formState.LogoDark.trim(),
+        Logo8Bit: formState.Logo8Bit.trim(),
         Color1: formState.Color1.trim(),
         Color2: formState.Color2.trim(),
         updatedAt: serverTimestamp(),
@@ -3630,6 +3868,16 @@ function TeamBrandingPane({ league }) {
                 onCopy={() => handleCopyImage("LogoDark", formState.LogoDark)}
                 copyStatus={logoCopyStatus.LogoDark || "idle"}
               />
+              <LogoUrlField
+                label="Logo (8-Bit)"
+                value={formState.Logo8Bit}
+                onChange={(v) => handleFieldChange("Logo8Bit", v)}
+                onCopy={() => handleCopyImage("Logo8Bit", formState.Logo8Bit)}
+                copyStatus={logoCopyStatus.Logo8Bit || "idle"}
+              />
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "-8px" }}>
+                Optional — wherever a page shows this team's dark logo, it'll use this 8-bit version instead once set.
+              </div>
               <ColorHexField
                 label="Color 1 (Primary)"
                 value={formState.Color1}

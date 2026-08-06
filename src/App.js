@@ -43,6 +43,7 @@ import NFLPage from "./pages/NFLPage";
 import ArticlePage from "./pages/ArticlePage";
 import PerformancePage from "./pages/PerformancePage";
 import PerformancesHub from "./pages/PerformancesHub";
+import GamePage from "./pages/GamePage";
 
 // Admin
 import AdminPanel from "./pages/AdminPanel";
@@ -86,6 +87,11 @@ function MainLayout() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/cfb" element={<CFBPage />} />
+          {/* Schedule gets its own addressable path (and optionally a
+              specific week) instead of living behind in-page tab state that
+              resets to Teams on every reload/navigation. */}
+          <Route path="/cfb/schedule" element={<CFBPage />} />
+          <Route path="/cfb/schedule/:week" element={<CFBPage />} />
           <Route path="/nfl" element={<NFLPage />} />
           <Route path="/news" element={<News />} />
           <Route path="/news/:id" element={<NewsArticle />} />
@@ -114,7 +120,16 @@ function MainLayout() {
           <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
           <Route path="/article/:slug" element={<ArticlePage />} />
           <Route path="/performances" element={<PerformancesHub />} />
+          {/* Trends is a literal path, ranked ahead of the dynamic :week
+              route below by React Router regardless of declaration order —
+              same page, its own tab. */}
+          <Route path="/performances/trends" element={<PerformancesHub />} />
+          {/* A specific week's slate — same page, just deep-linkable to one
+              week instead of always landing on "current" (see GamePage.js's
+              back-navigation, which points here rather than the bare hub). */}
+          <Route path="/performances/:week" element={<PerformancesHub />} />
           <Route path="/performance/:slug" element={<PerformancePage />} />
+          <Route path="/game/:slug" element={<GamePage />} />
           <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
         </Routes>
       </div>

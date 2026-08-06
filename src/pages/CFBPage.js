@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -7,8 +7,53 @@ import LoadingSpinner from "../components/LoadingSpinner";
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
+const weekNumber = (w) => {
+  const m = /(\d+)/.exec(w || "");
+  return m ? Number(m[1]) : 999;
+};
+
+const toMs = (ts) => {
+  if (!ts) return 0;
+  if (ts?.toDate) return ts.toDate().getTime();
+  if (ts instanceof Date) return ts.getTime();
+  const parsed = Date.parse(ts);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+// Same admin-entered kickoff Time layered on top of the game's Date as
+// AdminPanel.js's CFBScheduleSection — games without a Time just sort to
+// the start of their day.
+const timeToMinutes = (t) => {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  return isNaN(h) || isNaN(m) ? null : h * 60 + m;
+};
+const formatTime12h = (t) => {
+  const mins = timeToMinutes(t);
+  if (mins == null) return "";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+};
+const gameSortMs = (g) => {
+  const mins = timeToMinutes(g.Time);
+  return toMs(g.Date) + (mins != null ? mins * 60000 : 0);
+};
+
 export default function CFBPage() {
+  // Tab lives in the URL (/cfb vs /cfb/schedule[/:week]) instead of local
+  // state, so it survives a reload and is actually linkable/shareable —
+  // it used to always reset back to Teams on navigation.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { week: weekParam } = useParams();
+  const activeTab = location.pathname.startsWith("/cfb/schedule") ? "schedule" : "teams";
   const [schools, setSchools] = useState([]);
+  const [schoolsByName, setSchoolsByName] = useState({});
+  const [games, setGames] = useState([]);
+  const [selectedWeek, setSelectedWeek] = useState("");
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
@@ -35,22 +80,68 @@ export default function CFBPage() {
   }, []);
 
   useEffect(() => {
-    async function fetchSchools() {
+    async function fetchData() {
       try {
-        const snapshot = await getDocs(collection(db, "schools"));
-        const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const [schoolsSnap, gamesSnap] = await Promise.all([
+          getDocs(collection(db, "schools")),
+          getDocs(collection(db, "schedule26")),
+        ]);
+        const data = schoolsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         const filtered = data.filter((school) =>
           conferenceOrder.includes(school.Conference)
         );
         setSchools(filtered);
+        // Unfiltered by conference — the schedule includes plenty of
+        // FCS/unlisted opponents (e.g. Howard, Morgan State) that the Teams
+        // tab intentionally excludes but the Schedule tab still needs logos
+        // and short names for.
+        const nameMap = {};
+        data.forEach((s) => { if (s.School) nameMap[s.School] = s; });
+        setSchoolsByName(nameMap);
+
+        const gameDocs = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setGames(gameDocs);
+
+        // Default to the latest week whose earliest game has already
+        // kicked off — same "current week" notion PerformancesHub.jsx uses.
+        const startMs = {};
+        gameDocs.forEach((g) => {
+          if (!g.Week || !g.Date) return;
+          const ms = toMs(g.Date);
+          if (!startMs[g.Week] || ms < startMs[g.Week]) startMs[g.Week] = ms;
+        });
+        const allWeeks = Object.keys(startMs).sort((a, b) => weekNumber(a) - weekNumber(b));
+        const now = Date.now();
+        let current = allWeeks[0] || "";
+        for (const w of allWeeks) {
+          if (startMs[w] <= now) current = w;
+          else break;
+        }
+        // A week named in the URL (e.g. deep-linked from elsewhere) wins
+        // over the auto-detected "current" week.
+        let initialWeek = current;
+        if (weekParam) {
+          try { initialWeek = decodeURIComponent(weekParam); } catch { initialWeek = weekParam; }
+        }
+        setSelectedWeek(initialWeek);
       } catch (err) {
-        console.error("Error fetching schools:", err);
+        console.error("Error fetching CFB page data:", err);
       } finally {
         setLoading(false);
       }
     }
-    fetchSchools();
+    fetchData();
   }, []);
+
+  const weekOptions = useMemo(
+    () => Array.from(new Set(games.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b)),
+    [games]
+  );
+
+  const gamesForWeek = useMemo(
+    () => games.filter((g) => g.Week === selectedWeek).sort((a, b) => gameSortMs(a) - gameSortMs(b)),
+    [games, selectedWeek]
+  );
 
   const grouped = conferenceOrder.reduce((acc, conf) => {
     acc[conf] = schools
@@ -93,6 +184,19 @@ export default function CFBPage() {
         .team-accent {
           transition: height 0.18s ease;
         }
+        .wd-schedule-row {
+          transition: background 0.15s ease;
+        }
+        .wd-schedule-row:hover {
+          background: #f7f9fc !important;
+        }
+        @keyframes wdFeaturedRowGlow {
+          0%, 100% { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.35); }
+          50% { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.75); }
+        }
+        .wd-schedule-row-featured {
+          animation: wdFeaturedRowGlow 2.2s ease-in-out infinite;
+        }
       `}</style>
       {/* ===== Page Header ===== */}
       <div className="mb-8">
@@ -125,8 +229,29 @@ export default function CFBPage() {
         />
       </div>
 
+      {/* ===== Tab toggle ===== */}
+      <div style={{ display: "flex", gap: "10px", marginBottom: isMobile ? "20px" : "28px" }}>
+        {[
+          { key: "teams", label: "Teams", to: "/cfb" },
+          { key: "schedule", label: "Full Schedule", to: "/cfb/schedule" },
+        ].map((tab) => (
+          <Link
+            key={tab.key}
+            to={tab.to}
+            style={{
+              border: `2px solid ${SITE_BLUE}`, borderRadius: "8px", padding: "10px 20px",
+              fontWeight: 900, fontSize: isMobile ? "12px" : "13px", textTransform: "uppercase", letterSpacing: "0.04em",
+              background: activeTab === tab.key ? SITE_BLUE : "#fff", color: activeTab === tab.key ? "#fff" : SITE_BLUE,
+              cursor: "pointer", textDecoration: "none", display: "inline-block",
+            }}
+          >
+            {tab.label}
+          </Link>
+        ))}
+      </div>
+
       {/* ===== Conference Sections ===== */}
-      {conferenceOrder.map((conf) => {
+      {activeTab === "teams" && conferenceOrder.map((conf) => {
         const teams = grouped[conf];
         if (!teams || teams.length === 0) return null;
 
@@ -255,6 +380,113 @@ export default function CFBPage() {
           </div>
         );
       })}
+
+      {/* ===== Full Schedule ===== */}
+      {activeTab === "schedule" && (
+        <div>
+          {weekOptions.length === 0 ? (
+            <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>
+              No schedule available yet.
+            </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: "16px", maxWidth: "260px" }}>
+                <select
+                  value={selectedWeek}
+                  onChange={(e) => {
+                    setSelectedWeek(e.target.value);
+                    navigate(`/cfb/schedule/${encodeURIComponent(e.target.value)}`, { replace: true });
+                  }}
+                  style={{
+                    width: "100%", border: `2px solid ${SITE_BLUE}`, borderRadius: "8px",
+                    padding: "10px 12px", fontWeight: 900, fontSize: "14px", color: SITE_BLUE,
+                    outline: "none", background: "#fff",
+                  }}
+                >
+                  {weekOptions.map((w) => <option key={w} value={w}>{w}</option>)}
+                </select>
+              </div>
+
+              {gamesForWeek.length === 0 ? (
+                <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>
+                  No games found for {selectedWeek}.
+                </div>
+              ) : (
+                <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+                  <div style={{ background: SITE_BLUE, padding: "10px 16px" }}>
+                    <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                      {selectedWeek} · {gamesForWeek.length} Games
+                    </div>
+                  </div>
+                  <div style={{ height: "3px", background: SITE_GOLD }} />
+                  {gamesForWeek.map((g, i) => {
+                    const d = g.Date?.toDate?.();
+                    const timeStr = formatTime12h(g.Time);
+                    const played = g.Final && g.HomeScore != null && g.AwayScore != null;
+                    const away = schoolsByName[g.Away];
+                    const home = schoolsByName[g.Home];
+                    const awayWon = played && g.AwayScore > g.HomeScore;
+                    const homeWon = played && g.HomeScore > g.AwayScore;
+
+                    const TeamRow = ({ school, data, score, won }) => (
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        {data?.Logo1 ? (
+                          <img src={data.Logo1} alt="" style={{ width: "28px", height: "28px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                        ) : (
+                          <div style={{ width: "28px", height: "28px", flexShrink: 0, borderRadius: "6px", background: "#eee", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: "11px", fontWeight: 900 }}>
+                            {(school || "?").charAt(0)}
+                          </div>
+                        )}
+                        <span style={{ fontWeight: 900, fontSize: "14px", color: played ? (won ? "#222" : "#999") : "#222" }}>
+                          {school}
+                        </span>
+                        {played && (
+                          <span style={{ marginLeft: "auto", fontWeight: 900, fontSize: "18px", color: won ? SITE_BLUE : "#bbb" }}>{score}</span>
+                        )}
+                      </div>
+                    );
+
+                    return (
+                      <Link
+                        key={g.id}
+                        to={g.Slug ? `/game/${g.Slug}` : "#"}
+                        className={`wd-schedule-row${g.Featured ? " wd-schedule-row-featured" : ""}`}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px",
+                          padding: "14px 16px", background: "#fff", textDecoration: "none",
+                          borderBottom: i < gamesForWeek.length - 1 ? "1px solid #f0f0f0" : "none",
+                          pointerEvents: g.Slug ? "auto" : "none",
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+                          <TeamRow school={g.Away} data={away} score={g.AwayScore} won={awayWon} />
+                          <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} />
+                        </div>
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#aaa", flexShrink: 0, textAlign: "right" }}>
+                          {g.Featured && (
+                            <span style={{
+                              display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
+                              background: "linear-gradient(90deg, #f6a21d, #ffd35c)", color: "#3a2900",
+                              fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
+                              textTransform: "uppercase", letterSpacing: "0.05em",
+                            }}>
+                              ⭐ Featured
+                            </span>
+                          )}
+                          <div>
+                            {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD"}
+                            {timeStr && <div>{timeStr}</div>}
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

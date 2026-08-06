@@ -68,6 +68,69 @@ function sanitizeUrl(url) {
   return u;
 }
 
+// Every school's Wordmark is exported at the same canvas size, but the
+// actual logotype fills wildly different fractions of that canvas from one
+// school to the next — at a shared display height with no further work, a
+// tightly-cropped wordmark reads much bigger than one sitting in a sea of
+// transparent padding (same fix as GamePage.js's team-hero wordmarks, here
+// for the hover "team page" tooltip on the college/NFL logo boxes). Shows
+// the untouched original immediately, then swaps in the trimmed version
+// once the canvas scan finishes (or leaves the original in place if the
+// read fails, e.g. a non-CORS-friendly host).
+function useTrimmedImage(url) {
+  const [src, setSrc] = useState(url || null);
+
+  useEffect(() => {
+    if (!url) { setSrc(null); return; }
+    setSrc(url);
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        const ALPHA_THRESHOLD = 12;
+        let top = h, bottom = -1, left = w, right = -1;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            if (data[(y * w + x) * 4 + 3] > ALPHA_THRESHOLD) {
+              if (y < top) top = y;
+              if (y > bottom) bottom = y;
+              if (x < left) left = x;
+              if (x > right) right = x;
+            }
+          }
+        }
+        if (right < left || bottom < top) return; // fully transparent — keep original
+        const cropW = right - left + 1, cropH = bottom - top + 1;
+        if (cropW === w && cropH === h) return; // already tight — nothing to gain
+        const out = document.createElement("canvas");
+        out.width = cropW;
+        out.height = cropH;
+        out.getContext("2d").drawImage(canvas, left, top, cropW, cropH, 0, 0, cropW, cropH);
+        if (!cancelled) setSrc(out.toDataURL("image/png"));
+      } catch (e) { /* CORS-tainted canvas or decode failure — keep the untrimmed original */ }
+    };
+    // sanitizeImgur only rewrites extension-less imgur.com links (single-image
+    // share URLs) to the CORS-friendly i.imgur.com CDN — most Wordmark values
+    // are already full "imgur.com/xxxx.png" URLs, which its regex doesn't
+    // match, so the canvas read still needs its own rewrite here regardless
+    // of what the caller already sanitized.
+    img.src = url.replace(/^(https?:\/\/)imgur\.com\//i, "$1i.imgur.com/");
+    return () => { cancelled = true; };
+  }, [url]);
+
+  return src;
+}
+
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
@@ -274,6 +337,10 @@ export default function PlayerProfile() {
   const [visibleVideoCount, setVisibleVideoCount] = useState(3);
   const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
+  // Auto-trimmed wordmarks for the hover "team page" tooltips below — see
+  // useTrimmedImage's comment for why this is needed.
+  const trimmedWordmark = useTrimmedImage(branding?.wordmark ? sanitizeUrl(branding.wordmark) : null);
+  const trimmedCfbWordmark = useTrimmedImage(branding?.cfbWordmark ? sanitizeUrl(branding.cfbWordmark) : null);
   const cfbLogoRef = useRef("");
   const cfbWordmarkRef = useRef("");
   const schoolSlugRef = useRef("");
@@ -1864,6 +1931,11 @@ useEffect(() => {
                 {n.type === "performance" ? "Performance" : n.type === "article" ? "Article" : "News"}
               </span>
               <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
+              {n.type === "performance" && n.statLine && (
+                <div style={{ fontFamily: "'Courier New', monospace", fontWeight: 700, fontSize: "10.5px", color: "#666", marginTop: "3px" }}>
+                  {n.statLine}
+                </div>
+              )}
             </div>
           </Link>
         ))
@@ -2216,7 +2288,7 @@ useEffect(() => {
                     style={{ flexDirection:"column", gap: showLeftBoxTip ? "8px" : 0 }}
                   >
                     <img
-                      src={sanitizeUrl(showLeftBoxTip && branding.wordmark ? branding.wordmark : branding.logo1)} alt={player.School}
+                      src={showLeftBoxTip && trimmedWordmark ? trimmedWordmark : sanitizeUrl(branding.logo1)} alt={player.School}
                       style={{ height: showLeftBoxTip ? (isMobile?36:44) : (isMobile?50:96), objectFit:"contain", transition:"height 0.22s ease" }}
                       referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy"
                     />
@@ -2585,7 +2657,7 @@ useEffect(() => {
                       style={{ flexDirection:"column", gap: showRightBoxTip ? "8px" : 0 }}
                     >
                       <img
-                        src={sanitizeUrl(showRightBoxTip && branding.cfbWordmark ? branding.cfbWordmark : branding.cfbLogo)} alt="College"
+                        src={showRightBoxTip && trimmedCfbWordmark ? trimmedCfbWordmark : sanitizeUrl(branding.cfbLogo)} alt="College"
                         style={{ height: showRightBoxTip ? (isMobile?32:40) : (isMobile?42:88), objectFit:"contain", transition:"height 0.22s ease" }}
                       />
                       {showRightBoxTip && (

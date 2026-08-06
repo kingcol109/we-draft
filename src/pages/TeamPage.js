@@ -1430,23 +1430,30 @@ export default function TeamPage() {
             else { resultLabel = `T ${ownScore}-${oppScore}`; resultColor = "#888"; }
           }
 
+          // Date-only field is stored as UTC midnight — format in UTC too, or a
+          // viewer west of it sees the game roll back a calendar day.
           let dateLabel = "";
           if (g.Date?.toDate) {
-            dateLabel = g.Date.toDate().toLocaleDateString(undefined, { month: "short", day: "numeric" });
+            dateLabel = g.Date.toDate().toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
           } else if (g.Date) {
             const d = new Date(g.Date);
-            dateLabel = isNaN(d.getTime()) ? String(g.Date) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+            dateLabel = isNaN(d.getTime()) ? String(g.Date) : d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
           }
 
-          return (
-            <div
-              key={g.id || i}
-              style={{
-                display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
-                background: "#fff",
-                borderBottom: i < schedule.length - 1 ? "1px solid #f0f0f0" : "none",
-              }}
-            >
+          // Whole row is now a single link — to the game's own page when one
+          // exists (the common case, since every schedule26 doc has a Slug),
+          // falling back to the opponent's team page for the rare row that
+          // somehow doesn't (e.g. missing Home/Away at the time it was
+          // synced). Only one of the two, never nested, to avoid an <a>
+          // inside an <a>.
+          const hasGamePage = !!g.Slug;
+          const rowStyle2 = {
+            display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+            background: "#fff", textDecoration: "none",
+            borderBottom: i < schedule.length - 1 ? "1px solid #f0f0f0" : "none",
+          };
+          const rowContent2 = (
+            <>
               <div style={{ flexShrink: 0, width: "34px", textAlign: "center" }}>
                 <div style={{ fontSize: "9px", fontWeight: 900, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   {g.Week ? g.Week.replace("Week ", "Wk ") : ""}
@@ -1480,26 +1487,45 @@ export default function TeamPage() {
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
                   <span style={{ color: "#888", fontWeight: 700 }}>{(isHome || g.Neutral) ? "vs " : "@ "}</span>
-                  {isClickable ? (
-                    <Link
-                      to={`/team/${opponentData.Slug}`}
-                      style={{ color: BLUE, textDecoration: "none" }}
-                      onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-                    >
-                      {(opponentData?.Short || opponentName).toUpperCase()}
-                    </Link>
-                  ) : (
-                    <span style={{ color: "#444" }}>{(opponentData?.Short || opponentName).toUpperCase()}</span>
-                  )}
+                  <span style={{ color: (hasGamePage || isClickable) ? BLUE : "#444" }}>
+                    {(opponentData?.Short || opponentName).toUpperCase()}
+                  </span>
                   {g.Neutral ? <span style={{ color: "#bbb", fontWeight: 700 }}> (N)</span> : null}
                 </div>
                 <div style={{ fontSize: "10px", fontWeight: 700, color: resultLabel ? resultColor : "#aaa", lineHeight: 1.3 }}>
                   {resultLabel || dateLabel}
                 </div>
               </div>
-            </div>
+            </>
           );
+
+          if (hasGamePage) {
+            return (
+              <Link
+                key={g.id || i}
+                to={`/game/${g.Slug}`}
+                style={rowStyle2}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+              >
+                {rowContent2}
+              </Link>
+            );
+          }
+          if (isClickable) {
+            return (
+              <Link
+                key={g.id || i}
+                to={`/team/${opponentData.Slug}`}
+                style={rowStyle2}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+              >
+                {rowContent2}
+              </Link>
+            );
+          }
+          return <div key={g.id || i} style={rowStyle2}>{rowContent2}</div>;
         })
       )}
     </SidebarCard>

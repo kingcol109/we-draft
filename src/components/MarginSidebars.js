@@ -22,10 +22,12 @@ const TREND_STYLE = {
   "on fire": { icon: "🔥", label: "On Fire", badgeBg: "#ffcc00", badgeBorder: "#b38600" },
 };
 
-const gradeStyles = {
-  Dominant: { background: "#e6f4ea", color: "#1a7f37" },
-  Great: { background: "#eaf6ec", color: "#2e7d32" },
-  Good: { background: "#eaf1ff", color: BLUE },
+// Same tiered "pop" effect used everywhere else performances show up.
+const gradeGlowClass = (grade) => {
+  if (grade === "Dominant") return "wd-perf-glow-dominant";
+  if (grade === "Great") return "wd-perf-glow-great";
+  if (grade === "Good") return "wd-perf-glow-good";
+  return "";
 };
 
 const SOCIAL_LINKS = [
@@ -42,10 +44,13 @@ const toMs = (ts) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
+// A visibly solid card (site-standard 2px blue border) with a light,
+// grounded shadow rather than a heavy "floating" one — paired with
+// anchoring the whole sidebar to scroll with the page (see positionStyle).
 const cardShell = {
-  width: "100%", borderRadius: "14px", overflow: "hidden",
-  border: "1px solid #eee", background: "#fff",
-  boxShadow: "0 4px 18px rgba(0,0,0,0.08)",
+  width: "100%", borderRadius: "10px", overflow: "hidden",
+  border: `2px solid ${BLUE}`, background: "#fff",
+  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
 };
 
 /**
@@ -58,15 +63,24 @@ const cardShell = {
  *   card's feed pulls from (the type the *current* page is NOT).
  */
 export default function MarginSidebars({ contentRef, isMobile, horizontalPadding = 20, otherStream }) {
-  const [layout, setLayout] = useState({ width: 160, leftGutter: 0, rightGutter: 0, show: false });
+  const [layout, setLayout] = useState({ width: 160, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
   const [visible, setVisible] = useState(false);
   const [trending, setTrending] = useState([]);
   const [feedItems, setFeedItems] = useState([]);
+  const [schoolLogos, setSchoolLogos] = useState({});
+  // This component renders after (below, in DOM order) the main content it
+  // measures — anchorRef marks *this* component's own position so the
+  // sidebar cards, positioned absolute beneath it, can be offset by the
+  // (negative) distance back up to where the content starts, landing them
+  // near its top while still scrolling naturally with the page (unlike the
+  // old position:fixed, which ignored scroll entirely).
+  const anchorRef = useRef(null);
 
   const recompute = useRef(() => {});
   recompute.current = () => {
-    if (isMobile || !contentRef.current) { setLayout((p) => ({ ...p, show: false })); return; }
+    if (isMobile || !contentRef.current || !anchorRef.current) { setLayout((p) => ({ ...p, show: false })); return; }
     const rect = contentRef.current.getBoundingClientRect();
+    const anchorRect = anchorRef.current.getBoundingClientRect();
     const visibleLeftEdge = rect.left + horizontalPadding;
     const visibleRightEdge = rect.right - horizontalPadding;
     const leftGutter = Math.max(0, visibleLeftEdge);
@@ -75,7 +89,11 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     const MIN_USABLE_GUTTER = 170;
     if (minGutter < MIN_USABLE_GUTTER) { setLayout((p) => ({ ...p, show: false })); return; }
     const width = Math.max(150, Math.min(230, minGutter - 16));
-    setLayout({ width, leftGutter, rightGutter, show: true });
+    // Both rects are measured in the same viewport-relative coordinate
+    // system at the same instant, so this delta is correct regardless of
+    // scroll position or what (if anything) up the tree is positioned.
+    const topOffset = (rect.top - anchorRect.top) + 40;
+    setLayout({ width, leftGutter, rightGutter, topOffset, show: true });
   };
 
   useEffect(() => {
@@ -109,6 +127,20 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     };
     fetch();
   }, [isMobile]);
+
+  // School name → logo, for the performance feed's team icons.
+  useEffect(() => {
+    if (isMobile || otherStream !== "performances") return;
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "schools"));
+        const map = {};
+        snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data.Logo1 || ""; });
+        setSchoolLogos(map);
+      } catch (e) { /* logos are non-critical */ }
+    };
+    fetch();
+  }, [isMobile, otherStream]);
 
   // Right — the other content type's feed, pre-filtered the same way the
   // hub pages themselves default to: News page's feed only shows
@@ -146,21 +178,27 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     fetch();
   }, [isMobile, otherStream]);
 
+  // Anchored to a point just below where the main content starts, in
+  // document coordinates — scrolls along with the page like everything
+  // else instead of hovering fixed in the viewport regardless of scroll.
+  // top uses the measured topOffset (see recompute) so these cards land
+  // near the top of the actual content and scroll along with the page,
+  // instead of position:fixed hovering in the viewport regardless of scroll.
   const positionStyle = (side) => {
     const gutter = side === "left" ? layout.leftGutter : layout.rightGutter;
     const offset = Math.max(8, (gutter - layout.width) / 2);
     return {
-      position: "fixed", top: "50%", [side]: `${offset}px`,
-      transform: "translateY(-50%)", width: `${layout.width}px`,
+      position: "absolute", top: `${layout.topOffset}px`, [side]: `${offset}px`,
+      width: `${layout.width}px`,
       display: "flex", flexDirection: "column", gap: "16px",
       zIndex: 5, opacity: visible ? 1 : 0, transition: "opacity 0.7s ease",
     };
   };
 
-  if (!layout.show || isMobile) return null;
-
   return (
-    <>
+    <div ref={anchorRef} style={{ position: "relative", height: 0 }}>
+      {(!layout.show || isMobile) ? null : (
+      <>
       <style>{`
         @keyframes wdTrendUpBoxSoft { 0%, 100% { box-shadow: 0 0 0 1px rgba(74,222,128,0.16), 0 0 4px 1px rgba(74,222,128,0.16); } 50% { box-shadow: 0 0 0 1px rgba(74,222,128,0.28), 0 0 7px 2px rgba(74,222,128,0.3); } }
         .wd-margin-trendup { animation: wdTrendUpBoxSoft 3.2s ease-in-out infinite; }
@@ -170,6 +208,17 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
         .wd-margin-onfire { animation: wdOnFireBoxSoft 3.2s ease-in-out infinite; }
         .wd-margin-social-link:hover { background: #f0f5ff; }
         .wd-margin-feed-item:hover { background: #f0f5ff; }
+        @keyframes wdPerfGlowDominant {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
+          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
+        }
+        .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
+        @keyframes wdPerfGlowGreat {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
+          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
+        }
+        .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
+        .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
       `}</style>
 
       {/* ===== Left: Top 5 Trending ===== */}
@@ -264,26 +313,35 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
             </div>
             <div style={{ height: "3px", background: GOLD }} />
             {feedItems.map((item, i) => {
-              const grade = item._kind === "performance" ? gradeStyles[item.grade] : null;
-              const href = item._kind === "performance" ? `/performance/${item.slug || item.id}` : `/news/${item.slug}`;
-              const title = item._kind === "performance" ? item.titleShort : item.title;
+              const isPerf = item._kind === "performance";
+              const href = isPerf ? `/performance/${item.slug || item.id}` : `/news/${item.slug}`;
+              const logo = isPerf ? schoolLogos[item.school] : null;
               return (
                 <Link
                   key={item.id}
                   to={href}
-                  className="wd-margin-feed-item"
+                  className={`wd-margin-feed-item ${isPerf ? gradeGlowClass(item.grade) : ""}`}
                   style={{
-                    display: "block", padding: "9px 10px", textDecoration: "none",
+                    display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none",
                     borderBottom: i < feedItems.length - 1 ? "1px solid #f0f0f0" : "none",
                   }}
                 >
-                  {grade && (
-                    <span style={{ display: "inline-block", marginBottom: "3px", fontSize: "8px", fontWeight: 900, padding: "1px 6px", borderRadius: "3px", background: grade.background, color: grade.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                      {item.grade}
-                    </span>
+                  {isPerf && (
+                    logo ? (
+                      <img src={logo} alt="" style={{ width: "20px", height: "20px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: "#eee", display: "inline-block" }} />
+                    )
                   )}
-                  <div style={{ fontSize: "11px", fontWeight: 900, color: "#222", lineHeight: 1.3 }}>
-                    {title}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "11px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: isPerf ? "nowrap" : "normal", overflow: isPerf ? "hidden" : "visible", textOverflow: isPerf ? "ellipsis" : "clip" }}>
+                      {isPerf ? (item.playerName || item.titleShort) : item.title}
+                    </div>
+                    {isPerf && item.statLine && (
+                      <div style={{ fontFamily: "'Courier New', monospace", fontSize: "10px", fontWeight: 700, color: "#666", marginTop: "2px" }}>
+                        {item.statLine}
+                      </div>
+                    )}
                   </div>
                 </Link>
               );
@@ -301,6 +359,8 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
           </div>
         )}
       </div>
-    </>
+      </>
+      )}
+    </div>
   );
 }
