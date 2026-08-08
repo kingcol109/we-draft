@@ -445,6 +445,7 @@ export default function Navbar() {
             )}
 
             <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
+            <Link to="/we-pick" style={baseStyle}>We-Pick</Link>
 
             {/* ── NFL DROPDOWN ── */}
             <div
@@ -655,6 +656,7 @@ export default function Navbar() {
               { path: "/community/2028", label: "2028 Board" },
               { path: "/community/2029", label: "2029 Board" },
               { path: "/mocks", label: "Mock Drafts" },
+              { path: "/we-pick", label: "We-Pick" },
               { path: "/nfl", label: "NFL Teams" },
               { path: "/cfb", label: "CFB Teams" },
             ].map((l) => (

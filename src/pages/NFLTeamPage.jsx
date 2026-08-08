@@ -98,6 +98,21 @@ function parseStats(statsData, pos) {
   };
 }
 
+// Hero "energy" overlays — same drifting yard-line texture + breathing
+// spotlight recipe as GamePage.js's matchup hero (and TeamPage.js's own
+// copy of it), renamed per-page since this file doesn't import from
+// either. Gives the hero some life instead of sitting as a flat card.
+const HERO_STYLE = `
+  @keyframes wdNflHeroDrift {
+    0%   { transform: translate(0, 0); }
+    100% { transform: translate(-80px, -46px); }
+  }
+  @keyframes wdNflHeroSpotlight {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+  }
+`;
+
 function sanitizeUrl(url) {
   if (!url) return "";
   const u = url.trim();
@@ -161,13 +176,17 @@ export default function NFLTeamPage() {
         const picksData = picksSnap.docs.map((d) => d.data());
         setPicks(picksData);
 
+        // One query per drafted player, fired concurrently rather than
+        // awaited one at a time — a full draft class's worth of picks
+        // otherwise meant that many round trips in series before Draft
+        // Picks had anything to show.
         const slugs = [...new Set(picksData.map((p) => p.Selection).filter((s) => typeof s === "string" && s.trim()))];
         const playerMap = {};
-        for (const slug of slugs) {
+        await Promise.all(slugs.map(async (slug) => {
           const q = query(collection(db, "players"), where("Slug", "==", slug));
           const snap = await getDocs(q);
           if (!snap.empty) playerMap[slug] = snap.docs[0].data();
-        }
+        }));
         setPlayersBySlug(playerMap);
         setLoading(false);
       } finally {
@@ -278,7 +297,14 @@ export default function NFLTeamPage() {
   const ungrouped = roster.filter((p) => !allGroupedPositions.has(p.position));
   if (ungrouped.length > 0) groupedRoster["Other"] = ungrouped;
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  // Blocks first paint only until the team doc itself resolves (the single
+  // getDoc at the top of the load effect) — not the draft-picks query and
+  // per-pick player lookups behind it, which the Draft Picks section below
+  // gates on its own instead. Still falls back to this full-page spinner if
+  // that first fetch fails outright (loading flips false via the effect's
+  // own early return without team ever getting set), so a bad teamId still
+  // correctly reaches "Team not found" below instead of spinning forever.
+  if (!team && loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (!team) return (
     <div style={{ textAlign: "center", marginTop: 80, color: "red", fontWeight: 900 }}>Team not found</div>
@@ -289,9 +315,21 @@ export default function NFLTeamPage() {
   const teamName = `${team.City} ${team.Team}`.trim();
   const metaDescription = `${teamName} NFL Draft Hub — mock drafts, player grades, and draft archives for the ${teamName}.`;
   const pageUrl = `https://we-draft.com/nfl/${teamId}`;
+  // LogoDark/WordmarkDark are the dark-background-safe branding variants
+  // (see AdminPanel.js's branding manager) — read straight and better
+  // against the hero's saturated team-color gradient than the plain Logo1
+  // this used to be limited to; Wordmark/Logo2 are the light-background
+  // fallbacks when a team doesn't have a dark variant uploaded yet.
+  const heroLogo = team.LogoDark || team.Logo1;
+  // Oversized and faded — no logo fallback, since a wordmark is what's
+  // meant to read as a soft background graphic; without one, the hero
+  // just has no watermark. No separate foreground wordmark image either —
+  // City/Team are always shown as text, stacked as two bold lines.
+  const watermarkWordmark = team.WordmarkDark || team.Wordmark || "";
 
   return (
     <>
+      <style>{HERO_STYLE}</style>
       <Helmet>
         <title>{teamName} Draft Hub</title>
         <meta name="description" content={metaDescription} />
@@ -309,45 +347,73 @@ export default function NFLTeamPage() {
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* ===== HERO ===== */}
-        <div style={{ border: `3px solid ${c1}`, borderRadius: 12, overflow: "hidden", marginBottom: 24 }}>
-          {/* White card — logos + team name */}
-          <div style={{ backgroundColor: "#fff", display: "flex", alignItems: "center", gap: isMobile ? 12 : 24, padding: isMobile ? "16px" : "24px 32px" }}>
-            {/* Left logo */}
-            <div style={{ flexShrink: 0, width: isMobile ? 72 : 140, height: isMobile ? 72 : 140, display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f8f8", border: "1px solid #eee", borderRadius: 8 }}>
-              <img src={sanitizeUrl(team.Logo1)} alt={team.Team}
-                style={{ height: isMobile ? 60 : 120, objectFit: "contain" }}
-                onError={(e) => { e.currentTarget.style.display = "none"; }} />
-            </div>
+        {/* Built on the same recipe as GamePage.js's matchup hero (see
+            HERO_STYLE above) instead of the old flat white card: a
+            color1→color2 blend, a drifting stripe texture + breathing
+            spotlight, a plain (no badge/ring) logo, and a giant faded
+            wordmark bleeding off the edge for depth. */}
+        <div style={{
+          position: "relative", overflow: "hidden", borderRadius: 12,
+          border: `3px solid ${c2}`, marginBottom: 24,
+          boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
+          background: [
+            "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4))",
+            `linear-gradient(120deg, ${c1} 0%, ${c1} 60%, ${c2} 100%)`,
+          ].join(", "),
+          padding: isMobile ? "22px 16px" : "34px 32px",
+        }}>
+          <div aria-hidden="true" style={{
+            position: "absolute", inset: "-20%", zIndex: 0, pointerEvents: "none",
+            background: "repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 2px, transparent 2px, transparent 40px)",
+            animation: "wdNflHeroDrift 18s linear infinite",
+          }} />
+          <div aria-hidden="true" style={{
+            position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
+            background: "radial-gradient(circle at 50% 22%, rgba(255,255,255,0.18), transparent 55%)",
+            animation: "wdNflHeroSpotlight 5s ease-in-out infinite",
+          }} />
+          {watermarkWordmark && !isMobile && (
+            <img
+              src={sanitizeUrl(watermarkWordmark)} alt="" aria-hidden="true"
+              style={{
+                position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+                width: "75%", maxWidth: "680px", height: "auto", objectFit: "contain",
+                opacity: 0.13, zIndex: 0, pointerEvents: "none",
+              }}
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+            />
+          )}
 
-            {/* Center */}
-            <div style={{ flex: 1, textAlign: "center" }}>
-              <div style={{ fontSize: isMobile ? "clamp(12px, 3vw, 18px)" : "clamp(16px, 2.5vw, 24px)", fontWeight: 900, color: c1, lineHeight: 1, letterSpacing: "0.08em", textTransform: "uppercase", opacity: 0.7 }}>
-                {team.City}
-              </div>
-              <div style={{ fontSize: isMobile ? "clamp(28px, 8vw, 44px)" : "clamp(44px, 6vw, 72px)", fontWeight: 900, color: c1, lineHeight: 1, letterSpacing: "0.02em", textTransform: "uppercase", marginTop: 4 }}>
-                {team.Team}
-              </div>
-              <div style={{ marginTop: 8, display: "inline-block", backgroundColor: c1, color: "#fff", fontWeight: 900, fontSize: isMobile ? 11 : 13, padding: "3px 14px", borderRadius: 20, letterSpacing: "0.05em" }}>
-                {team.Conference} · {team.Division}
-              </div>
-              {/* Draft picks scroll button */}
-              <div style={{ marginTop: 10 }}>
-                <button
-                  onClick={() => picksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  style={{
-                    background: "#fff", border: `2px solid ${c1}`, color: c1,
-                    borderRadius: 8, padding: "6px 18px", fontWeight: 900,
-                    fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em",
-                    cursor: "pointer",
-                  }}
-                >
-                  2026 Draft Picks ↓
-                </button>
-              </div>
+          <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+            {heroLogo && (
+              <img src={sanitizeUrl(heroLogo)} alt={team.Team}
+                style={{ width: isMobile ? 100 : 170, height: isMobile ? 100 : 170, objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))", marginBottom: 14 }}
+                onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            )}
+            <div style={{ fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(28px, 3.4vw, 44px)", fontWeight: 900, color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
+              {team.City}
+            </div>
+            <div style={{ fontSize: isMobile ? "clamp(28px, 8vw, 44px)" : "clamp(44px, 6vw, 72px)", fontWeight: 900, color: "#fff", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
+              {team.Team}
+            </div>
+            <div style={{ marginTop: 10, display: "inline-block", background: "rgba(0,0,0,0.32)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", fontWeight: 900, fontSize: isMobile ? 11 : 13, padding: "4px 16px", borderRadius: 20, letterSpacing: "0.05em" }}>
+              {team.Conference} · {team.Division}
+            </div>
+            {/* Draft picks scroll button */}
+            <div style={{ marginTop: 14 }}>
+              <button
+                onClick={() => picksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                style={{
+                  background: "rgba(255,255,255,0.95)", border: "2px solid #fff", color: c1,
+                  borderRadius: 8, padding: "8px 20px", fontWeight: 900,
+                  fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em",
+                  cursor: "pointer", boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
+                }}
+              >
+                2026 Draft Picks ↓
+              </button>
             </div>
           </div>
-          {/* Gold accent bar */}
-          <div style={{ height: 5, backgroundColor: c2 }} />
         </div>
 
         {/* ===== STAFF ===== */}
@@ -481,12 +547,16 @@ export default function NFLTeamPage() {
         <div style={{ border: `2px solid ${c1}`, borderRadius: 10, overflow: "hidden" }}>
           <div style={{ background: c1, padding: "8px 16px" }}>
             <div style={{ color: c2, fontWeight: 900, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-              {picks.length} Pick{picks.length !== 1 ? "s" : ""}
+              {loading ? "Loading…" : `${picks.length} Pick${picks.length !== 1 ? "s" : ""}`}
             </div>
           </div>
           <div style={{ height: 3, background: c2 }} />
 
-          {picks.length === 0 ? (
+          {loading ? (
+            <div style={{ padding: 32, background: "#fff" }}>
+              <LoadingSpinner label="Loading picks" size={24} minHeight="80px" />
+            </div>
+          ) : picks.length === 0 ? (
             <div style={{ padding: 32, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 14, background: "#fff" }}>No picks</div>
           ) : (
             picks.map((p, i) => {

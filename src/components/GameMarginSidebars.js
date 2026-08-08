@@ -96,11 +96,20 @@ const cardShell = {
  * @param {boolean} isMobile - hidden entirely on mobile (no gutter room).
  * @param {number} horizontalPadding - contentRef's own left/right padding.
  * @param {string} excludeGameId - the current game's doc id, kept out of the
- *   "Other Featured Games" list on the right.
+ *   "Other Featured Games" list on the right (and out of the week-slate list
+ *   on the left, since a link back to the page you're already on is dead
+ *   weight).
+ * @param {string} gameWeek - the current game's own Week field (e.g. "Week
+ *   0"), not necessarily the current calendar week — drives the "This
+ *   Week's Slate" card so it always matches the game being viewed, even for
+ *   a past or future week's page.
+ * @param {string} weekSlateUrl - full-schedule link for that same week, used
+ *   as the slate card's "See Full Slate" footer link.
  */
-export default function GameMarginSidebars({ contentRef, isMobile, horizontalPadding = 20, excludeGameId }) {
+export default function GameMarginSidebars({ contentRef, isMobile, horizontalPadding = 20, excludeGameId, gameWeek, weekSlateUrl }) {
   const [layout, setLayout] = useState({ width: 160, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
   const [visible, setVisible] = useState(false);
+  const [weekSlate, setWeekSlate] = useState([]);
   const [topPerformances, setTopPerformances] = useState([]);
   const [featuredGames, setFeaturedGames] = useState([]);
   const [newsItems, setNewsItems] = useState([]);
@@ -172,8 +181,34 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     fetch();
   }, [isMobile]);
 
-  // Left — sitewide Top Performances (same grade filter the News/Performances
-  // margin feeds already use), most recent first.
+  // Left (first card) — every other game in this game's own Week, in kickoff
+  // order, so a reader can jump straight to another game on the same slate
+  // without going all the way back to the full schedule page. Keyed off the
+  // game's own Week field (not "the current calendar week" like the
+  // Featured Games card on the right) so this stays correct when looking at
+  // a past or future week's game.
+  useEffect(() => {
+    if (isMobile || !gameWeek) { setWeekSlate([]); return; }
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "schedule26"), where("Week", "==", gameWeek)));
+        const items = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((g) => g.id !== excludeGameId && g.Slug)
+          .sort((a, b) => {
+            const dateDiff = toMs(a.Date) - toMs(b.Date);
+            if (dateDiff !== 0) return dateDiff;
+            return (timeToMinutes(a.Time) ?? 9999) - (timeToMinutes(b.Time) ?? 9999);
+          })
+          .slice(0, 8);
+        setWeekSlate(items);
+      } catch (e) { setWeekSlate([]); }
+    };
+    fetch();
+  }, [isMobile, gameWeek, excludeGameId]);
+
+  // Left (second card) — sitewide Top Performances (same grade filter the
+  // News/Performances margin feeds already use), most recent first.
   useEffect(() => {
     if (isMobile) return;
     const fetch = async () => {
@@ -190,20 +225,30 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     fetch();
   }, [isMobile]);
 
-  // Right — other Featured games happening THIS calendar week (Mon–Sun UTC),
-  // so the "This Week's Featured Games" label is actually true rather than
-  // just an approximation from sorting by time-proximity.
+  // Right — Game of the Week and Featured games happening THIS calendar
+  // week (Mon–Sun UTC), so the label is actually true rather than just an
+  // approximation from sorting by time-proximity. Two separate queries
+  // (Firestore can't OR across two different boolean fields in one query)
+  // merged and de-duped — a game marked both just needs to not appear
+  // twice — then sorted with Game of the Week first: it's the site's
+  // higher, rarer tier (see AdminPanel.js), so it gets priority placement
+  // in this card ahead of the more common Featured tag, before falling
+  // back to kickoff order within each tier.
   useEffect(() => {
     if (isMobile) return;
     const fetch = async () => {
       try {
-        const snap = await getDocs(query(collection(db, "schedule26"), where("Featured", "==", true)));
+        const [featuredSnap, gotwSnap] = await Promise.all([
+          getDocs(query(collection(db, "schedule26"), where("Featured", "==", true))),
+          getDocs(query(collection(db, "schedule26"), where("GameOfWeek", "==", true))),
+        ]);
         const { start, end } = currentWeekBoundsUtc();
-        const items = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
+        const byId = new Map();
+        [...featuredSnap.docs, ...gotwSnap.docs].forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
+        const items = Array.from(byId.values())
           .filter((g) => g.id !== excludeGameId && g.Slug)
           .filter((g) => { const ms = toMs(g.Date); return ms >= start && ms <= end; })
-          .sort((a, b) => toMs(a.Date) - toMs(b.Date))
+          .sort((a, b) => (b.GameOfWeek ? 1 : 0) - (a.GameOfWeek ? 1 : 0) || toMs(a.Date) - toMs(b.Date))
           .slice(0, 5);
         setFeaturedGames(items);
       } catch (e) { setFeaturedGames([]); }
@@ -257,9 +302,85 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
       <>
       <style>{GRADE_GLOW_STYLE}</style>
 
-      {/* ===== Left: Top Performances — team logo, player, stat line ===== */}
-      {topPerformances.length > 0 && (
+      {/* ===== Left: This Week's Slate (every other game in the current
+          game's own Week), stacked above sitewide Top Performances ===== */}
+      {(weekSlate.length > 0 || topPerformances.length > 0) && (
         <div style={positionStyle("left")}>
+          {weekSlate.length > 0 && (
+          <div style={cardShell}>
+            <div style={{ background: BLUE, padding: "8px 12px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+                {gameWeek ? `${gameWeek} Slate` : "This Week's Slate"}
+              </div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+            {weekSlate.map((g, i) => {
+              const played = g.Final && g.HomeScore != null && g.AwayScore != null;
+              const away = schoolsByName[g.Away];
+              const home = schoolsByName[g.Home];
+              const awayWon = played && g.AwayScore > g.HomeScore;
+              const homeWon = played && g.HomeScore > g.AwayScore;
+              const dateMs = toMs(g.Date);
+              const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
+              const timeStr = formatTime12h(g.Time);
+
+              // Same stacked "bug" row (one line per team, logo+code fixed
+              // on the left, score fixed on the right) as the Featured
+              // Games card below — a single "away @ home" line squeezed
+              // both teams' logos/codes/scores into one row and nothing
+              // lined up between games of different name lengths.
+              const bugRow = (short, school, logo, score, won) => (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+                    {logo ? (
+                      <img src={sanitizeUrl(logo)} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ width: "16px", height: "16px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
+                    )}
+                    <span style={{ fontSize: "11px", fontWeight: 900, color: played ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {short || school}
+                    </span>
+                  </div>
+                  {played && (
+                    <span style={{ fontSize: "15px", fontWeight: 900, color: won ? BLUE : "#bbb", flexShrink: 0 }}>{score}</span>
+                  )}
+                </div>
+              );
+
+              return (
+                <Link
+                  key={g.id}
+                  to={`/game/${g.Slug}`}
+                  style={{ display: "block", padding: "9px 10px", textDecoration: "none", borderBottom: i < weekSlate.length - 1 ? "1px solid #f0f0f0" : "none" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                >
+                  {bugRow(away?.Short, g.Away, away?.Logo1, g.AwayScore, awayWon)}
+                  {bugRow(home?.Short, g.Home, home?.Logo1, g.HomeScore, homeWon)}
+                  {!played && (
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
+                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
+            {weekSlateUrl && (
+              <Link
+                to={weekSlateUrl}
+                style={{
+                  display: "block", textAlign: "center", background: BLUE, color: "#fff",
+                  fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.05em",
+                  padding: "9px", textDecoration: "none",
+                }}
+              >
+                See Full Slate →
+              </Link>
+            )}
+          </div>
+          )}
+
+          {topPerformances.length > 0 && (
           <div style={cardShell}>
             <div style={{ background: BLUE, padding: "8px 12px" }}>
               <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -297,21 +418,24 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
               );
             })}
           </div>
+          )}
         </div>
       )}
 
       {/* ===== Right: This Week's Featured Games (compact scoreboard "bug"
           per game — short team codes + logos, big score once final or the
           kickoff date/time while still pregame) stacked above Top Stories.
-          Each card renders independently so one being empty doesn't hide
-          the other. ===== */}
+          Game of the Week entries sort first (see the fetch above) and get
+          their own 🔥 flag so they still stand out once mixed in with
+          plain Featured games. Each card renders independently so one
+          being empty doesn't hide the other. ===== */}
       {(featuredGames.length > 0 || newsItems.length > 0) && (
         <div style={positionStyle("right")}>
           {featuredGames.length > 0 && (
           <div style={cardShell}>
             <div style={{ background: BLUE, padding: "8px 12px" }}>
               <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-                ⭐ This Week's Featured Games
+                ⭐ This Week's Top Games
               </div>
             </div>
             <div style={{ height: "3px", background: GOLD }} />
@@ -351,6 +475,11 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                   onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                 >
+                  {g.GameOfWeek && (
+                    <div style={{ fontSize: "9px", fontWeight: 900, color: "#c2680a", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "3px" }}>
+                      🔥 Game of the Week
+                    </div>
+                  )}
                   {bugRow(away?.Short, g.Away, away?.Logo1, g.AwayScore, awayWon)}
                   {bugRow(home?.Short, g.Home, home?.Logo1, g.HomeScore, homeWon)}
                   {!played && (

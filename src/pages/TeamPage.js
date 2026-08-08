@@ -77,6 +77,22 @@ const GRADE_GLOW_STYLE = `
   .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
   .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
 `;
+
+// Hero "energy" overlays — same drifting yard-line texture + breathing
+// spotlight recipe as GamePage.js's own matchup hero (wdFieldDrift/
+// wdSpotlightPulse there), renamed per-page rather than shared since this
+// file doesn't import from GamePage.js. Gives the team hero some life
+// instead of sitting as a static color block.
+const HERO_STYLE = `
+  @keyframes wdTeamHeroDrift {
+    0%   { transform: translate(0, 0); }
+    100% { transform: translate(-80px, -46px); }
+  }
+  @keyframes wdTeamHeroSpotlight {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+  }
+`;
 const VIDEO_INITIAL_COUNT = 3;
 const VIDEO_MAX_TOTAL = 9;
 
@@ -995,226 +1011,259 @@ export default function TeamPage() {
         const resolvedSchool = schoolData?.School || slugFallback;
         setCanonicalSchool(resolvedSchool);
 
-        if (schoolData?.Conference) {
-          const confSnap = await getDocs(query(
-            collection(db, "schools"),
-            where("Conference", "==", schoolData.Conference)
-          ));
-          const confTeams = confSnap.docs
-            .map((d) => d.data())
-            .sort((a, b) => a.School.localeCompare(b.School));
-          setConferenceTeams(confTeams);
-        }
-
-        try {
-          const [newsSnap, articleSnap] = await Promise.all([
-            getDocs(query(collection(db, "news"), where("active", "==", true), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
-            getDocs(query(collection(db, "articles"), where("status", "==", "published"), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
-          ]);
-          const combined = [
-            ...newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() })),
-            ...articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() })),
-          ].sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
-            .slice(0, NEWS_LIMIT);
-          setTeamNews(combined);
-        } catch { setTeamNews([]); }
-
-        // Performances tagged to this team's games — matched by school name
-        // (same denormalized field Performances-by-week and the player
-        // profile sidebar use), not by slug, since that's how the Admin
-        // Panel's Performances tab stores it.
-        try {
-          const perfSnap = await getDocs(query(collection(db, "performances"), where("school", "==", resolvedSchool), where("status", "==", "published")));
-          const perfs = perfSnap.docs
-            .map((d) => ({ id: d.id, type: "performance", ...d.data() }))
-            .sort((a, b) => (b.gameDate?.toMillis?.() || 0) - (a.gameDate?.toMillis?.() || 0))
-            .slice(0, NEWS_LIMIT);
-          setTeamPerformances(perfs);
-        } catch { setTeamPerformances([]); }
-
-        const nflSnap = await getDocs(collection(db, "nfl"));
-        const nflMap = {};
-        nflSnap.docs.forEach((d) => { nflMap[d.id] = d.data(); });
-        setNflTeams(nflMap);
-
-        // Full schools map — used to resolve schedule opponents (needed regardless
-        // of which conference they're in, unlike the conference-scoped query above)
-        try {
-          const allSchoolsSnap = await getDocs(collection(db, "schools"));
-          const allSchoolsMap = {};
-          allSchoolsSnap.docs.forEach((d) => {
-            const data = d.data();
-            if (data.School) allSchoolsMap[data.School] = data;
-          });
-          setSchoolsMap(allSchoolsMap);
-        } catch {
-          setSchoolsMap({});
-        }
-
-        const draftSnap = await getDocs(collection(db, "draftOrder"));
-        const dMap = {};
-        draftSnap.docs.forEach((d) => {
-          const data = d.data();
-          if (data.Selection) dMap[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
-        });
-        setDraftMap(dMap);
-
-        // Schedule — a team can appear as either Away or Home, so run both queries and merge
-        try {
-          const [awaySnap, homeSnap] = await Promise.all([
-            getDocs(query(collection(db, "schedule26"), where("Away", "==", resolvedSchool))),
-            getDocs(query(collection(db, "schedule26"), where("Home", "==", resolvedSchool))),
-          ]);
-          const seenIds = new Set();
-          const games = [...awaySnap.docs, ...homeSnap.docs]
-            .filter((d) => { if (seenIds.has(d.id)) return false; seenIds.add(d.id); return true; })
-            .map((d) => ({ id: d.id, ...d.data() }));
-
-          const getGameTime = (g) => {
-            if (g.Date?.toDate) return g.Date.toDate().getTime();
-            if (g.Date) { const t = new Date(g.Date).getTime(); if (!isNaN(t)) return t; }
-            return 0;
-          };
-          games.sort((a, b) => getGameTime(a) - getGameTime(b));
-
-          setSchedule(games);
-        } catch (e) {
-          console.error("Schedule load error:", e);
-          setSchedule([]);
-        }
-
-        const prospectResults = {};
-        await Promise.all(
-          PROSPECT_YEARS.map(async (yr) => {
-            const snap = await getDocs(query(
-              collection(db, "players"),
-              where("School", "==", resolvedSchool),
-              where("Eligible", "==", yr)
+        // ── Stage 1: everything below is independent of everything else in
+        // this stage (only resolvedSchool/schoolData.Conference feed in) —
+        // this used to be a strictly serial chain of awaits and was the
+        // single biggest contributor to this page's load time. dMap is
+        // hoisted above the Promise.all (rather than declared inside its
+        // own IIFE) because the archive-players stage below needs it once
+        // this stage finishes. ──
+        let dMap = {};
+        await Promise.all([
+          (async () => {
+            if (!schoolData?.Conference) return;
+            const confSnap = await getDocs(query(
+              collection(db, "schools"),
+              where("Conference", "==", schoolData.Conference)
             ));
-            // Dedup by Slug — multiple sheet rows can produce duplicate Firestore docs
-            const seenProspectSlugs = new Set();
-            const dedupedDocs = snap.docs.filter((docSnap) => {
-              const slug = docSnap.data().Slug;
-              if (!slug || seenProspectSlugs.has(slug)) return false;
-              seenProspectSlugs.add(slug);
-              return true;
+            const confTeams = confSnap.docs
+              .map((d) => d.data())
+              .sort((a, b) => a.School.localeCompare(b.School));
+            setConferenceTeams(confTeams);
+          })(),
+          (async () => {
+            try {
+              const [newsSnap, articleSnap] = await Promise.all([
+                getDocs(query(collection(db, "news"), where("active", "==", true), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+                getDocs(query(collection(db, "articles"), where("status", "==", "published"), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+              ]);
+              const combined = [
+                ...newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() })),
+                ...articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() })),
+              ].sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
+                .slice(0, NEWS_LIMIT);
+              setTeamNews(combined);
+            } catch { setTeamNews([]); }
+          })(),
+          // Performances tagged to this team's games — matched by school name
+          // (same denormalized field Performances-by-week and the player
+          // profile sidebar use), not by slug, since that's how the Admin
+          // Panel's Performances tab stores it.
+          (async () => {
+            try {
+              const perfSnap = await getDocs(query(collection(db, "performances"), where("school", "==", resolvedSchool), where("status", "==", "published")));
+              const perfs = perfSnap.docs
+                .map((d) => ({ id: d.id, type: "performance", ...d.data() }))
+                .sort((a, b) => (b.gameDate?.toMillis?.() || 0) - (a.gameDate?.toMillis?.() || 0))
+                .slice(0, NEWS_LIMIT);
+              setTeamPerformances(perfs);
+            } catch { setTeamPerformances([]); }
+          })(),
+          (async () => {
+            const nflSnap = await getDocs(collection(db, "nfl"));
+            const nflMap = {};
+            nflSnap.docs.forEach((d) => { nflMap[d.id] = d.data(); });
+            setNflTeams(nflMap);
+          })(),
+          // Full schools map — used to resolve schedule opponents (needed regardless
+          // of which conference they're in, unlike the conference-scoped query above)
+          (async () => {
+            try {
+              const allSchoolsSnap = await getDocs(collection(db, "schools"));
+              const allSchoolsMap = {};
+              allSchoolsSnap.docs.forEach((d) => {
+                const data = d.data();
+                if (data.School) allSchoolsMap[data.School] = data;
+              });
+              setSchoolsMap(allSchoolsMap);
+            } catch {
+              setSchoolsMap({});
+            }
+          })(),
+          (async () => {
+            const draftSnap = await getDocs(collection(db, "draftOrder"));
+            const built = {};
+            draftSnap.docs.forEach((d) => {
+              const data = d.data();
+              if (data.Selection) built[data.Selection] = { team: data.Team, round: data.Round, pick: data.Pick };
             });
-            const players = await Promise.all(
-              dedupedDocs.map(async (docSnap) => {
-                const p = { id: docSnap.id, ...docSnap.data() };
-                try {
-                  const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-                  const grades = [];
-                  evalsSnap.forEach((e) => {
-                    const g = e.data().grade;
-                    if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                  });
-                  p.commGrade = grades.length > 0
-                    ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                    : null;
-                  p.commGradeScore = grades.length > 0
-                    ? grades.reduce((a, b) => a + b, 0) / grades.length
-                    : 999;
-                } catch {
-                  p.commGrade = null;
-                  p.commGradeScore = 999;
-                }
-                return p;
+            dMap = built;
+            setDraftMap(built);
+          })(),
+          // Schedule — a team can appear as either Away or Home, so run both queries and merge
+          (async () => {
+            try {
+              const [awaySnap, homeSnap] = await Promise.all([
+                getDocs(query(collection(db, "schedule26"), where("Away", "==", resolvedSchool))),
+                getDocs(query(collection(db, "schedule26"), where("Home", "==", resolvedSchool))),
+              ]);
+              const seenIds = new Set();
+              const games = [...awaySnap.docs, ...homeSnap.docs]
+                .filter((d) => { if (seenIds.has(d.id)) return false; seenIds.add(d.id); return true; })
+                .map((d) => ({ id: d.id, ...d.data() }));
+
+              const getGameTime = (g) => {
+                if (g.Date?.toDate) return g.Date.toDate().getTime();
+                if (g.Date) { const t = new Date(g.Date).getTime(); if (!isNaN(t)) return t; }
+                return 0;
+              };
+              games.sort((a, b) => getGameTime(a) - getGameTime(b));
+
+              setSchedule(games);
+            } catch (e) {
+              console.error("Schedule load error:", e);
+              setSchedule([]);
+            }
+          })(),
+        ]);
+
+        // ── Stage 2: prospects/archive/historical are independent of each
+        // other too (archive only needs dMap, already resolved by Stage 1
+        // above) — same concurrency treatment. prospectResults and
+        // archivePlrs are hoisted for the same reason dMap was: the videos
+        // stage below needs both once this one finishes. ──
+        const prospectResults = {};
+        let archivePlrs = [];
+        await Promise.all([
+          (async () => {
+            await Promise.all(
+              PROSPECT_YEARS.map(async (yr) => {
+                const snap = await getDocs(query(
+                  collection(db, "players"),
+                  where("School", "==", resolvedSchool),
+                  where("Eligible", "==", yr)
+                ));
+                // Dedup by Slug — multiple sheet rows can produce duplicate Firestore docs
+                const seenProspectSlugs = new Set();
+                const dedupedDocs = snap.docs.filter((docSnap) => {
+                  const slug = docSnap.data().Slug;
+                  if (!slug || seenProspectSlugs.has(slug)) return false;
+                  seenProspectSlugs.add(slug);
+                  return true;
+                });
+                const players = await Promise.all(
+                  dedupedDocs.map(async (docSnap) => {
+                    const p = { id: docSnap.id, ...docSnap.data() };
+                    try {
+                      const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
+                      const grades = [];
+                      evalsSnap.forEach((e) => {
+                        const g = e.data().grade;
+                        if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                      });
+                      p.commGrade = grades.length > 0
+                        ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+                        : null;
+                      p.commGradeScore = grades.length > 0
+                        ? grades.reduce((a, b) => a + b, 0) / grades.length
+                        : 999;
+                    } catch {
+                      p.commGrade = null;
+                      p.commGradeScore = 999;
+                    }
+                    return p;
+                  })
+                );
+                players.sort((a, b) => a.commGradeScore - b.commGradeScore);
+                prospectResults[yr] = players;
               })
             );
-            players.sort((a, b) => a.commGradeScore - b.commGradeScore);
-            prospectResults[yr] = players;
-          })
-        );
-        setProspects(prospectResults);
+            setProspects(prospectResults);
+          })(),
+          (async () => {
+            const archiveSnap = await getDocs(query(
+              collection(db, "players"),
+              where("School", "==", resolvedSchool),
+              where("Eligible", "==", ARCHIVE_YEAR)
+            ));
 
-        const archiveSnap = await getDocs(query(
-          collection(db, "players"),
-          where("School", "==", resolvedSchool),
-          where("Eligible", "==", ARCHIVE_YEAR)
-        ));
-
-        // Dedup by Slug first — multiple sheet rows can produce multiple Firestore docs
-        // with the same Slug. Keep only the first doc per Slug.
-        const seenSlugs = new Set();
-        const dedupedArchiveDocs = archiveSnap.docs.filter((docSnap) => {
-          const slug = docSnap.data().Slug;
-          if (!slug || seenSlugs.has(slug)) return false;
-          seenSlugs.add(slug);
-          return true;
-        });
-
-        const archivePlrs = await Promise.all(
-          dedupedArchiveDocs
-            .filter((docSnap) => !!dMap[docSnap.data().Slug])
-            .map(async (docSnap) => {
-              const p = { id: docSnap.id, ...docSnap.data() };
-              try {
-                const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-                const grades = [];
-                evalsSnap.forEach((e) => {
-                  const g = e.data().grade;
-                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                });
-                p.commGrade = grades.length > 0
-                  ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                  : null;
-              } catch {
-                p.commGrade = null;
-              }
-              return p;
-            })
-        );
-        archivePlrs.sort((a, b) => {
-          const aDraft = dMap[a.Slug];
-          const bDraft = dMap[b.Slug];
-          return (aDraft?.pick || 9999) - (bDraft?.pick || 9999);
-        });
-        setArchivePlayers(archivePlrs);
-
-        try {
-          const histSnap = await getDocs(query(
-            collection(db, "historical"),
-            where("School", "==", resolvedSchool)
-          ));
-          const histRaw = histSnap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
-            .filter((h) => h.Year && parseInt(h.Year) <= 2025)
-            .sort((a, b) => {
-              if (b.Year !== a.Year) return parseInt(b.Year) - parseInt(a.Year);
-              return parseInt(a.Pick || 999) - parseInt(b.Pick || 999);
+            // Dedup by Slug first — multiple sheet rows can produce multiple Firestore docs
+            // with the same Slug. Keep only the first doc per Slug.
+            const seenSlugs = new Set();
+            const dedupedArchiveDocs = archiveSnap.docs.filter((docSnap) => {
+              const slug = docSnap.data().Slug;
+              if (!slug || seenSlugs.has(slug)) return false;
+              seenSlugs.add(slug);
+              return true;
             });
 
-          // Dedup by year+pick, then year+name — duplicate rows in Firestore
-          // come from multiple sheet rows for the same player
-          const hSeenPick = new Set();
-          const hSeenName = new Set();
-          const histPlayers = histRaw.filter((h) => {
-            const year = parseInt(h.Year);
-            const pick = parseInt(h.Pick);
-            if (pick && pick !== 999) {
-              const pickKey = `${year}-${pick}`;
-              if (hSeenPick.has(pickKey)) return false;
-              hSeenPick.add(pickKey);
-            }
-            const name = (h.Player || "").trim().toLowerCase();
-            if (name) {
-              const nameKey = `${year}-${name}`;
-              if (hSeenName.has(nameKey)) return false;
-              hSeenName.add(nameKey);
-            }
-            return true;
-          });
+            const players = await Promise.all(
+              dedupedArchiveDocs
+                .filter((docSnap) => !!dMap[docSnap.data().Slug])
+                .map(async (docSnap) => {
+                  const p = { id: docSnap.id, ...docSnap.data() };
+                  try {
+                    const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
+                    const grades = [];
+                    evalsSnap.forEach((e) => {
+                      const g = e.data().grade;
+                      if (g && gradeScale[g]) grades.push(gradeScale[g]);
+                    });
+                    p.commGrade = grades.length > 0
+                      ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+                      : null;
+                  } catch {
+                    p.commGrade = null;
+                  }
+                  return p;
+                })
+            );
+            players.sort((a, b) => {
+              const aDraft = dMap[a.Slug];
+              const bDraft = dMap[b.Slug];
+              return (aDraft?.pick || 9999) - (bDraft?.pick || 9999);
+            });
+            archivePlrs = players;
+            setArchivePlayers(archivePlrs);
+          })(),
+          (async () => {
+            try {
+              const histSnap = await getDocs(query(
+                collection(db, "historical"),
+                where("School", "==", resolvedSchool)
+              ));
+              const histRaw = histSnap.docs
+                .map((d) => ({ id: d.id, ...d.data() }))
+                .filter((h) => h.Year && parseInt(h.Year) <= 2025)
+                .sort((a, b) => {
+                  if (b.Year !== a.Year) return parseInt(b.Year) - parseInt(a.Year);
+                  return parseInt(a.Pick || 999) - parseInt(b.Pick || 999);
+                });
 
-          setHistoricalPlayers(histPlayers);
-        } catch (e) {
-          console.error("Historical load error:", e);
-          setHistoricalPlayers([]);
-        }
+              // Dedup by year+pick, then year+name — duplicate rows in Firestore
+              // come from multiple sheet rows for the same player
+              const hSeenPick = new Set();
+              const hSeenName = new Set();
+              const histPlayers = histRaw.filter((h) => {
+                const year = parseInt(h.Year);
+                const pick = parseInt(h.Pick);
+                if (pick && pick !== 999) {
+                  const pickKey = `${year}-${pick}`;
+                  if (hSeenPick.has(pickKey)) return false;
+                  hSeenPick.add(pickKey);
+                }
+                const name = (h.Player || "").trim().toLowerCase();
+                if (name) {
+                  const nameKey = `${year}-${name}`;
+                  if (hSeenName.has(nameKey)) return false;
+                  hSeenName.add(nameKey);
+                }
+                return true;
+              });
+
+              setHistoricalPlayers(histPlayers);
+            } catch (e) {
+              console.error("Historical load error:", e);
+              setHistoricalPlayers([]);
+            }
+          })(),
+        ]);
 
         // Videos — roster IDs are every player from Prospects (2027-2029) plus
         // the drafted 2026 archive class. Firestore caps array-contains-any at 10
         // values per query, so chunk the roster into groups of 10 and merge results.
+        // Runs after Stage 2 (not folded into it) since it needs both
+        // prospectResults and archivePlrs fully resolved first.
         try {
           const rosterIds = new Set();
           Object.values(prospectResults).forEach((arr) => arr.forEach((p) => { if (p.id) rosterIds.add(p.id); }));
@@ -1275,7 +1324,13 @@ export default function TeamPage() {
   const color2 = branding?.color2 || GOLD;
   const totalProspects = PROSPECT_YEARS.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
 
-  if (loading) return <LoadingSpinner label="Loading Team" size={64} minHeight="100vh" />;
+  // Blocks first paint only until branding (the school doc itself) has
+  // resolved — the fast first query in the effect above — not the whole
+  // waterfall behind it. Still falls back to the full-page spinner if that
+  // first query itself fails (loading flips false via the effect's own
+  // finally without branding ever getting set), so a hard failure doesn't
+  // strand this on a spinner forever.
+  if (!branding && loading) return <LoadingSpinner label="Loading Team" size={64} minHeight="100vh" />;
 
   const teamLabel = school?.Mascot ? `${canonicalSchool} ${school.Mascot}` : canonicalSchool;
 
@@ -1731,6 +1786,7 @@ export default function TeamPage() {
   return (
     <>
       <style>{GRADE_GLOW_STYLE}</style>
+      <style>{HERO_STYLE}</style>
       <Helmet>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
@@ -1778,61 +1834,72 @@ export default function TeamPage() {
       }}>
         {isMobile ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            {/* Hero renders the instant branding is ready (see the render
+                gate above) — everything below it that depends on the rest
+                of the load effect (prospects, schedule, news, etc.) stays
+                behind its own lightweight spinner until that settles,
+                rather than holding the whole page hostage to it. */}
             <HeroCard
               school={school} branding={branding} canonicalSchool={canonicalSchool}
               color1={color1} color2={color2} isMobile={isMobile}
             />
-            <MainContent
-              school={school} canonicalSchool={canonicalSchool}
-              color1={color1} color2={color2} isMobile={isMobile}
-              activeTab={activeTab} setActiveTab={setActiveTab}
-              prospects={prospects} archivePlayers={archivePlayers}
-              historicalPlayers={historicalPlayers}
-              draftMap={draftMap} nflTeams={nflTeams}
-              totalProspects={totalProspects}
-            />
-            <details style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <summary style={{ backgroundColor: BLUE, padding: "10px 14px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
-                <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                  {school?.Conference || "Conference"} Teams ▾
-                </div>
-              </summary>
-              <div style={{ height: "4px", backgroundColor: GOLD }} />
-              <div style={{ background: "#fff" }}>
-                {conferenceTeams.map((team, i) => {
-                  const isSelf = team.School === canonicalSchool;
-                  const rowStyle = {
-                    display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
-                    textDecoration: "none",
-                    background: isSelf ? "#fff8e6" : "#fff",
-                    borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
-                    borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
-                  };
-                  const rowContent = (
-                    <>
-                      {team.Logo1 ? (
-                        <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <img src={sanitizeUrl(team.Logo1)} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                        </div>
-                      ) : null}
-                      <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>
-                      {!isSelf && <span style={{ color: "#ccc", fontSize: "14px", marginLeft: "auto" }}>›</span>}
-                    </>
-                  );
-                  return isSelf ? (
-                    <div key={team.Slug || team.School} style={rowStyle}>{rowContent}</div>
-                  ) : (
-                    <Link key={team.Slug || team.School} to={`/team/${team.Slug}`} style={rowStyle}>
-                      {rowContent}
-                    </Link>
-                  );
-                })}
-              </div>
-            </details>
-            {ScheduleSidebar}
-            {teamVideos.length > 0 && VideosSidebar}
-            {teamPerformances.length > 0 && PerformancesSidebar}
-            {NewsSidebar}
+            {loading ? (
+              <LoadingSpinner label="Loading roster, schedule & more" size={36} minHeight="200px" />
+            ) : (
+              <>
+                <MainContent
+                  school={school} canonicalSchool={canonicalSchool}
+                  color1={color1} color2={color2} isMobile={isMobile}
+                  activeTab={activeTab} setActiveTab={setActiveTab}
+                  prospects={prospects} archivePlayers={archivePlayers}
+                  historicalPlayers={historicalPlayers}
+                  draftMap={draftMap} nflTeams={nflTeams}
+                  totalProspects={totalProspects}
+                />
+                <details style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+                  <summary style={{ backgroundColor: BLUE, padding: "10px 14px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+                    <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                      {school?.Conference || "Conference"} Teams ▾
+                    </div>
+                  </summary>
+                  <div style={{ height: "4px", backgroundColor: GOLD }} />
+                  <div style={{ background: "#fff" }}>
+                    {conferenceTeams.map((team, i) => {
+                      const isSelf = team.School === canonicalSchool;
+                      const rowStyle = {
+                        display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+                        textDecoration: "none",
+                        background: isSelf ? "#fff8e6" : "#fff",
+                        borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
+                        borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+                      };
+                      const rowContent = (
+                        <>
+                          {team.Logo1 ? (
+                            <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <img src={sanitizeUrl(team.Logo1)} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            </div>
+                          ) : null}
+                          <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>
+                          {!isSelf && <span style={{ color: "#ccc", fontSize: "14px", marginLeft: "auto" }}>›</span>}
+                        </>
+                      );
+                      return isSelf ? (
+                        <div key={team.Slug || team.School} style={rowStyle}>{rowContent}</div>
+                      ) : (
+                        <Link key={team.Slug || team.School} to={`/team/${team.Slug}`} style={rowStyle}>
+                          {rowContent}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </details>
+                {ScheduleSidebar}
+                {teamVideos.length > 0 && VideosSidebar}
+                {teamPerformances.length > 0 && PerformancesSidebar}
+                {NewsSidebar}
+              </>
+            )}
           </div>
         ) : (
           <div style={{
@@ -1842,28 +1909,36 @@ export default function TeamPage() {
             alignItems: "start",
           }}>
             <div style={{ position: "sticky", top: "20px" }}>
-              {ConferenceSidebar}
+              {!loading && ConferenceSidebar}
             </div>
             <div>
               <HeroCard
                 school={school} branding={branding} canonicalSchool={canonicalSchool}
                 color1={color1} color2={color2} isMobile={isMobile}
               />
-              <MainContent
-                school={school} canonicalSchool={canonicalSchool}
-                color1={color1} color2={color2} isMobile={isMobile}
-                activeTab={activeTab} setActiveTab={setActiveTab}
-                prospects={prospects} archivePlayers={archivePlayers}
-                historicalPlayers={historicalPlayers}
-                draftMap={draftMap} nflTeams={nflTeams}
-                totalProspects={totalProspects}
-              />
+              {loading ? (
+                <LoadingSpinner label="Loading roster, schedule & more" size={36} minHeight="280px" />
+              ) : (
+                <MainContent
+                  school={school} canonicalSchool={canonicalSchool}
+                  color1={color1} color2={color2} isMobile={isMobile}
+                  activeTab={activeTab} setActiveTab={setActiveTab}
+                  prospects={prospects} archivePlayers={archivePlayers}
+                  historicalPlayers={historicalPlayers}
+                  draftMap={draftMap} nflTeams={nflTeams}
+                  totalProspects={totalProspects}
+                />
+              )}
             </div>
             <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
-              {ScheduleSidebar}
-              {teamVideos.length > 0 && VideosSidebar}
-              {teamPerformances.length > 0 && PerformancesSidebar}
-              {NewsSidebar}
+              {!loading && (
+                <>
+                  {ScheduleSidebar}
+                  {teamVideos.length > 0 && VideosSidebar}
+                  {teamPerformances.length > 0 && PerformancesSidebar}
+                  {NewsSidebar}
+                </>
+              )}
             </div>
           </div>
         )}
@@ -1872,90 +1947,109 @@ export default function TeamPage() {
   );
 }
 
+// Built as a scaled-down version of GamePage.js's own matchup hero (see
+// HERO_STYLE above) rather than the old flat gradient card — a wide
+// color1→color2 blend, a drifting stripe texture + breathing spotlight so
+// the banner has some life, a big plain (no badge/ring) logo, and a giant
+// low-opacity wordmark bleeding off the edge for depth (LogoDark/
+// WordmarkDark, added after this hero first shipped — see
+// AdminPanel.js's branding manager — read far better against a saturated
+// team-color gradient than the plain full-color Logo1 this used to be
+// limited to). The name is always the school's own typed name + mascot
+// stacked as two bold lines ("CLEMSON" / "TIGERS") — no separate
+// foreground wordmark image and no conference label competing with it;
+// the wordmark's only appearance is the big background watermark.
 function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile }) {
+  const heroLogo = school?.LogoDark || branding?.logo1 || "";
+  // Oversized and faded — no logo fallback, since a wordmark is what's
+  // meant to read as a soft background graphic; without one, the hero
+  // just has no watermark.
+  const watermarkWordmark = school?.WordmarkDark || school?.Wordmark || "";
+  const depthChartHref = branding?.depthChart ? sanitizeUrl(branding.depthChart) : "";
+
   return (
     <div style={{
-      background: `linear-gradient(135deg, ${color1} 0%, ${color1}cc 100%)`,
-      borderRadius: "12px", border: `2px solid ${color2}`,
-      padding: isMobile ? "18px 16px" : "24px 28px",
-      marginBottom: "20px",
-      display: "flex", alignItems: "center", gap: isMobile ? "14px" : "22px",
+      position: "relative", overflow: "hidden", borderRadius: "14px",
+      border: `2px solid ${color2}`, marginBottom: "20px",
+      boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
+      background: [
+        "linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.38))",
+        `linear-gradient(120deg, ${color1} 0%, ${color1} 60%, ${color2} 100%)`,
+      ].join(", "),
+      padding: isMobile ? "20px 16px" : "30px 32px",
     }}>
-      <div style={{ display: "flex", gap: "10px", flexShrink: 0 }}>
-        {branding?.logo1 && (
+      {/* Animated overlay layers — see HERO_STYLE; both sit behind the
+          zIndex:1 content below. */}
+      <div aria-hidden="true" style={{
+        position: "absolute", inset: "-20%", zIndex: 0, pointerEvents: "none",
+        background: "repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 2px, transparent 2px, transparent 40px)",
+        animation: "wdTeamHeroDrift 18s linear infinite",
+      }} />
+      <div aria-hidden="true" style={{
+        position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
+        background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.18), transparent 55%)",
+        animation: "wdTeamHeroSpotlight 5s ease-in-out infinite",
+      }} />
+      {/* Giant faded wordmark — hidden on mobile, where there isn't room
+          for it to read as anything but clutter. */}
+      {watermarkWordmark && !isMobile && (
+        <img
+          src={sanitizeUrl(watermarkWordmark)} alt="" aria-hidden="true"
+          style={{
+            position: "absolute", top: "50%", right: "-4%", transform: "translateY(-50%)",
+            width: "65%", maxWidth: "620px", height: "auto", objectFit: "contain",
+            opacity: 0.14, zIndex: 0, pointerEvents: "none",
+          }}
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+        />
+      )}
+
+      <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "16px" : "28px" }}>
+        {heroLogo && (
+          <img
+            src={sanitizeUrl(heroLogo)}
+            alt={canonicalSchool}
+            style={{ flexShrink: 0, width: isMobile ? "84px" : "150px", height: isMobile ? "84px" : "150px", objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            background: "#fff", borderRadius: "10px", padding: isMobile ? "6px" : "8px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+            fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(36px, 4vw, 52px)", fontWeight: 900, color: "#fff",
+            lineHeight: 1.05, letterSpacing: "0.02em",
+            textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
           }}>
-            <img
-              src={sanitizeUrl(branding.logo1)}
-              alt={canonicalSchool}
-              style={{ height: isMobile ? "48px" : "72px", objectFit: "contain" }}
-              onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
-            />
+            {canonicalSchool}
           </div>
+          {school?.Mascot && (
+            <div style={{
+              fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(28px, 3.2vw, 42px)", fontWeight: 900,
+              color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em",
+              textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
+            }}>
+              {school.Mascot}
+            </div>
+          )}
+        </div>
+        {depthChartHref && (
+          <a
+            href={depthChartHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              flexShrink: 0, background: color2, color: "#fff",
+              border: "2px solid #fff", borderRadius: isMobile ? "6px" : "8px",
+              padding: isMobile ? "6px 10px" : "10px 20px",
+              fontWeight: 900, fontSize: isMobile ? "10px" : "13px",
+              textTransform: "uppercase", letterSpacing: isMobile ? "0.04em" : "0.06em",
+              textDecoration: "none", whiteSpace: "nowrap",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
+            }}
+          >
+            {isMobile ? "Depth ↗" : "Depth Chart ↗"}
+          </a>
         )}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: isMobile ? "9px" : "10px", fontWeight: 900, color: color2,
-          textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: "4px",
-        }}>
-          {school?.Conference || "College Football"}
-        </div>
-        <div style={{
-          fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(36px, 4vw, 52px)", fontWeight: 900, color: "#fff",
-          lineHeight: 1.05, letterSpacing: "0.02em", marginBottom: "6px",
-          textTransform: "uppercase", wordBreak: "break-word",
-        }}>
-          {canonicalSchool}
-        </div>
-        {school?.Mascot && (
-          <div style={{
-            fontSize: isMobile ? "14px" : "18px", fontWeight: 700,
-            color: "rgba(255,255,255,0.75)", textTransform: "uppercase", letterSpacing: "0.1em",
-          }}>
-            {school.Mascot}
-          </div>
-        )}
-      </div>
-      {branding?.depthChart && !isMobile && (
-        <a
-          href={sanitizeUrl(branding.depthChart)}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            flexShrink: 0, background: color2, color: "#fff",
-            border: "2px solid #fff", borderRadius: "8px",
-            padding: "10px 20px",
-            fontWeight: 900, fontSize: "13px",
-            textTransform: "uppercase", letterSpacing: "0.06em",
-            textDecoration: "none", whiteSpace: "nowrap",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
-          }}
-        >
-          Depth Chart ↗
-        </a>
-      )}
-      {branding?.depthChart && isMobile && (
-        <a
-          href={sanitizeUrl(branding.depthChart)}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            flexShrink: 0, background: color2, color: "#fff",
-            border: "2px solid #fff", borderRadius: "6px",
-            padding: "6px 10px",
-            fontWeight: 900, fontSize: "10px",
-            textTransform: "uppercase", letterSpacing: "0.04em",
-            textDecoration: "none", whiteSpace: "nowrap",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-          }}
-        >
-          Depth ↗
-        </a>
-      )}
     </div>
   );
 }

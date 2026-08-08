@@ -1184,10 +1184,11 @@ function TrendsSection() {
     setFormState({
       Trend: existing?.Trend || "",
       Notes: existing?.Notes || "",
-      // Defaults to "yes" for a brand-new trend as long as there's room in
-      // the top 5, matching the old auto-fill behavior; reflects the actual
-      // current Shown value for a trend that already exists.
-      ShowOnPages: existing ? (existing.Shown ? "yes" : "no") : (top5Trends.length < TOP5_LIMIT ? "yes" : "no"),
+      // A brand-new trend always defaults to "no" — an admin has to
+      // deliberately opt a player into the public top group rather than it
+      // happening automatically just because there was room left. Only
+      // reflects the actual current Shown value once a trend already exists.
+      ShowOnPages: existing ? (existing.Shown ? "yes" : "no") : "no",
     });
     setSaveMessage("");
   };
@@ -2854,6 +2855,15 @@ const BLANK_GAME_FORM = {
   // be Featured most weeks and additionally called out as THE game some weeks.
   Featured: false, GameOfWeek: false, Final: false, Notes: "",
   KeyPlayersHome: [], KeyPlayersAway: [], KeyPlayerNotes: {},
+  // Score picks (GamePage.js's "Make Your Pick") normally unlock the Monday
+  // before the game's own week and lock again once it's Final — this lets
+  // an admin override that and open picks early for a specific game.
+  PicksForceOpen: false,
+  // Excludes this game from We-Pick's ranked "Pick 6" lineup (WePickHub.js)
+  // — still fully pickable for unranked score/winner picks either way, this
+  // only gates ranked eligibility (e.g. a lopsided or otherwise uninteresting
+  // matchup an admin doesn't want counting toward the leaderboard).
+  RankedDisqualified: false,
 };
 
 const weekNumber = (w) => {
@@ -2863,19 +2873,25 @@ const weekNumber = (w) => {
 
 const createSlug = (text) => (text || "").toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-");
 
-// Individual game page slug — "away-vs-home-month-day", e.g.
-// "florida-state-vs-miami-10-29". Matches the schedule's own "Away at Home"
-// ordering, just with the away team leading here too. Recomputed from
-// scratch on every save (rather than only set once) so a corrected
-// matchup/date always keeps the slug in sync — nothing else derives an
-// identity from the old slug, since the doc ID (not the slug) is the
-// canonical foreign key every other collection (performances) points at.
+// Individual game page slug — "away-vs-home-month-day-year", e.g.
+// "florida-state-vs-miami-10-29-2026" — the year keeps an annual rivalry
+// (same two teams, same month/day every year) from colliding across
+// seasons. Matches the schedule's own "Away at Home" ordering, just with
+// the away team leading here too. Recomputed from scratch on every save
+// (rather than only set once) so a corrected matchup/date always keeps the
+// slug in sync — nothing else derives an identity from the old slug, since
+// the doc ID (not the slug) is the canonical foreign key every other
+// collection (performances) points at. Every existing game was also
+// one-time backfilled to a year-inclusive slug (previously only games
+// saved after this function was added got one) via a script run directly
+// against schedule26 — no schedule26 doc should be missing the year now.
 const gameSlugFor = (away, home, dateInputValue) => {
   const parts = [createSlug(away), "vs", createSlug(home)];
   if (dateInputValue) {
     // dateInputValue is an <input type="date"> value: "YYYY-MM-DD".
-    const [, m, d] = dateInputValue.split("-");
+    const [y, m, d] = dateInputValue.split("-");
     if (m && d) parts.push(`${Number(m)}-${Number(d)}`);
+    if (y) parts.push(y);
   }
   return parts.filter(Boolean).join("-");
 };
@@ -3010,6 +3026,7 @@ function KeyPlayersCombobox({ school, excludeIds, players, onAdd }) {
 }
 
 function CFBScheduleSection() {
+  const [cfbTab, setCfbTab] = useState("schedule");
   const [games, setGames] = useState([]);
   const [schoolNames, setSchoolNames] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
@@ -3072,6 +3089,8 @@ function CFBScheduleSection() {
       KeyPlayersHome: g.KeyPlayersHome || [],
       KeyPlayersAway: g.KeyPlayersAway || [],
       KeyPlayerNotes: g.KeyPlayerNotes || {},
+      PicksForceOpen: !!g.PicksForceOpen,
+      RankedDisqualified: !!g.RankedDisqualified,
     });
     setSaveMessage("");
   };
@@ -3095,6 +3114,13 @@ function CFBScheduleSection() {
       setSaveMessage("Failed: Home, Away, and Week are required.");
       return;
     }
+    // Date is required too — every game page shows a date/pick-lock date
+    // derived from it (see GamePage.js), so a game saved without one would
+    // render with a blank masthead date and never unlock for picks.
+    if (!formState.Date) {
+      setSaveMessage("Failed: Date is required.");
+      return;
+    }
     if (formState.Final && !canMarkFinal) {
       setSaveMessage("Failed: enter both scores before marking this game Final.");
       return;
@@ -3109,6 +3135,8 @@ function CFBScheduleSection() {
         Neutral: formState.Neutral,
         Featured: formState.Featured,
         GameOfWeek: formState.GameOfWeek,
+        PicksForceOpen: formState.PicksForceOpen,
+        RankedDisqualified: formState.RankedDisqualified,
         Final: formState.Final && canMarkFinal,
         Notes: formState.Notes || "",
         KeyPlayersHome: formState.KeyPlayersHome,
@@ -3198,7 +3226,31 @@ function CFBScheduleSection() {
   if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: "18px", alignItems: "start" }}>
+    <div>
+      {/* Internal tab bar — Rivalries lives here alongside the Schedule
+          editor (not as its own top-level sidebar section) since it's
+          schedule-adjacent metadata (used to badge/flavor individual game
+          pages), authored by the same admin working the schedule. */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+        {[["schedule", "📅 Schedule"], ["rivalries", "⚔️ Rivalries"]].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setCfbTab(key)}
+            style={{
+              background: cfbTab === key ? BLUE : "#fff", color: cfbTab === key ? "#fff" : BLUE,
+              border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "8px 18px",
+              fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {cfbTab === "rivalries" ? (
+        <RivalriesSection schoolNames={schoolNames} />
+      ) : (
+      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -3251,6 +3303,11 @@ function CFBScheduleSection() {
                       {g.GameOfWeek && <span title="Game of the Week">🔥</span>}
                       {g.Featured && <span title="Featured">⭐</span>}
                       {g.Away} at {g.Home}
+                      {g.RankedDisqualified && (
+                        <span style={{ flexShrink: 0, background: "#eee", color: "#999", fontSize: "9px", fontWeight: 900, padding: "1px 6px", borderRadius: "4px", letterSpacing: "0.03em" }}>
+                          NOT QUALIFIED
+                        </span>
+                      )}
                     </div>
                     <span style={{ fontSize: "11px", fontWeight: 700, color: "#999", flexShrink: 0 }}>{dateStr}{timeStr ? ` · ${timeStr}` : ""}</span>
                   </div>
@@ -3330,6 +3387,20 @@ function CFBScheduleSection() {
               <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
                 <input type="checkbox" checked={formState.GameOfWeek} onChange={(e) => setFormState((p) => ({ ...p, GameOfWeek: e.target.checked }))} />
                 <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>🔥 Game of the Week</span>
+              </label>
+              {/* Score picks normally unlock the Monday before the game's
+                  own week and lock again once it's Final (see GamePage.js) —
+                  this overrides that to open picks early for this game. */}
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={formState.PicksForceOpen} onChange={(e) => setFormState((p) => ({ ...p, PicksForceOpen: e.target.checked }))} />
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>🔓 Force picks open</span>
+              </label>
+              {/* Still fully pickable either way (unranked score/winner
+                  picks stay open) — this only excludes the game from
+                  We-Pick's ranked "Pick 6" lineup (WePickHub.js). */}
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={formState.RankedDisqualified} onChange={(e) => setFormState((p) => ({ ...p, RankedDisqualified: e.target.checked }))} />
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>🚫 Disqualify from Ranked We-Pick</span>
               </label>
             </div>
 
@@ -3449,6 +3520,255 @@ function CFBScheduleSection() {
 
             {saveMessage && (
               <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+      )}
+    </div>
+  );
+}
+
+const BLANK_RIVALRY_FORM = { Title: "", TeamA: "", TeamB: "", Logo: "", Description: "" };
+
+// Admin editor for the "rivalries" collection — two designated teams, an
+// optional rivalry-specific logo (a trophy graphic, a shared nickname
+// badge, etc. — same "paste a URL" convention every other logo field in
+// this app uses, no real file upload anywhere in this codebase), and a
+// short writeup, so a game page between two rivals can badge/flavor itself
+// accordingly. Lives as a tab inside CFB Schedule (see CFBScheduleSection)
+// rather than its own top-level sidebar section since it's schedule-
+// adjacent metadata authored by the same admin.
+function RivalriesSection({ schoolNames }) {
+  const [rivalries, setRivalries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    const fetchRivalries = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "rivalries"));
+        setRivalries(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("Rivalries fetch error:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRivalries();
+  }, []);
+
+  const selectRivalry = (r) => {
+    setSelected(r);
+    setFormState({ Title: r.Title || "", TeamA: r.TeamA || "", TeamB: r.TeamB || "", Logo: r.Logo || "", Description: r.Description || "" });
+    setSaveMessage("");
+  };
+
+  const startNew = () => {
+    setSelected({ id: null, isNew: true });
+    setFormState({ ...BLANK_RIVALRY_FORM });
+    setSaveMessage("");
+  };
+
+  const isNew = selected?.isNew === true;
+
+  const handleSave = async () => {
+    if (!formState) return;
+    if (!formState.Title.trim()) {
+      setSaveMessage("Failed: give the rivalry a title.");
+      return;
+    }
+    if (!formState.TeamA || !formState.TeamB) {
+      setSaveMessage("Failed: choose both teams.");
+      return;
+    }
+    if (formState.TeamA === formState.TeamB) {
+      setSaveMessage("Failed: pick two different teams.");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        Title: formState.Title.trim(),
+        TeamA: formState.TeamA,
+        TeamB: formState.TeamB,
+        Logo: formState.Logo.trim(),
+        Description: formState.Description.trim(),
+        updatedAt: serverTimestamp(),
+      };
+      if (isNew) {
+        const ref = await addDoc(collection(db, "rivalries"), payload);
+        const newRivalry = { id: ref.id, ...payload };
+        setRivalries((prev) => [...prev, newRivalry]);
+        setSelected(newRivalry);
+      } else {
+        await setDoc(doc(db, "rivalries", selected.id), payload, { merge: true });
+        setRivalries((prev) => prev.map((r) => (r.id === selected.id ? { ...r, ...payload } : r)));
+      }
+      setSaveMessage("Saved!");
+    } catch (e) {
+      console.error("Rivalry save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selected || isNew) return;
+    if (!window.confirm("Delete this rivalry? This cannot be undone.")) return;
+    setRemoving(true);
+    try {
+      await deleteDoc(doc(db, "rivalries", selected.id));
+      setRivalries((prev) => prev.filter((r) => r.id !== selected.id));
+      setSelected(null);
+      setFormState(null);
+    } catch (e) {
+      console.error("Rivalry delete error:", e);
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Rivalries
+          </div>
+          <button
+            onClick={startNew}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + New
+          </button>
+        </div>
+        {rivalries.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No rivalries yet.</div>
+        ) : (
+          <div style={{ maxHeight: "700px", overflowY: "auto" }}>
+            {rivalries.map((r) => {
+              const isSelected = selected?.id === r.id;
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => selectRivalry(r)}
+                  style={{
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: "13px", color: "#222" }}>{r.Title || `${r.TeamA} vs ${r.TeamB}`}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", marginTop: "1px" }}>{r.TeamA} vs {r.TeamB}</div>
+                  {r.Description && (
+                    <div style={{ fontSize: "11px", color: "#888", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.Description}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        {!formState ? (
+          <div style={{ padding: "40px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Select a rivalry, or start a new one.
+          </div>
+        ) : (
+          <div style={{ padding: "16px" }}>
+            <FieldGroup>
+              <FieldRow label="Rivalry Title">
+                <input
+                  value={formState.Title}
+                  onChange={(e) => setFormState((p) => ({ ...p, Title: e.target.value }))}
+                  placeholder='e.g. "The Iron Bowl"'
+                  style={inputStyle}
+                />
+              </FieldRow>
+              <FieldRow label="Team A">
+                <select value={formState.TeamA} onChange={(e) => setFormState((p) => ({ ...p, TeamA: e.target.value }))} style={inputStyle}>
+                  <option value="">— Select —</option>
+                  {schoolNames.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Team B">
+                <select value={formState.TeamB} onChange={(e) => setFormState((p) => ({ ...p, TeamB: e.target.value }))} style={inputStyle}>
+                  <option value="">— Select —</option>
+                  {schoolNames.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Rivalry Logo">
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <div style={{
+                    flexShrink: 0, width: "52px", height: "52px", borderRadius: "6px",
+                    border: "2px solid #ddd", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                  }}>
+                    {formState.Logo ? (
+                      <img src={formState.Logo} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ fontSize: "8px", color: "#bbb", fontWeight: 700, textAlign: "center" }}>No logo</span>
+                    )}
+                  </div>
+                  <input
+                    value={formState.Logo}
+                    onChange={(e) => setFormState((p) => ({ ...p, Logo: e.target.value }))}
+                    placeholder="https://..."
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                </div>
+              </FieldRow>
+              <FieldRow label="Description">
+                <textarea
+                  value={formState.Description}
+                  onChange={(e) => setFormState((p) => ({ ...p, Description: e.target.value }))}
+                  rows={5}
+                  placeholder="What makes this one a rivalry — history, trophy, streak, anything worth telling..."
+                  style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+                />
+              </FieldRow>
+            </FieldGroup>
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "16px", alignItems: "center" }}>
+              {!isNew && (
+                <button
+                  onClick={handleDelete}
+                  disabled={removing}
+                  style={{ background: "#fff", color: "#c0392b", border: "2px solid #c0392b", borderRadius: "8px", padding: "9px 16px", fontWeight: 900, fontSize: "12px", cursor: removing ? "default" : "pointer", opacity: removing ? 0.6 : 1 }}
+                >
+                  {removing ? "Deleting…" : "Delete"}
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                style={{ marginLeft: "auto", background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "9px 20px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}
+              >
+                {saving ? "Saving…" : isNew ? "Create Rivalry" : "Save Changes"}
+              </button>
+            </div>
+            {saveMessage && (
+              <div style={{ marginTop: "10px", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
                 {saveMessage}
               </div>
             )}
@@ -3745,9 +4065,11 @@ function TeamBrandingPane({ league }) {
   const selectTeam = (t) => {
     setSelectedTeam(t);
     setFormState({
+      [cfg.subLabelField]: t[cfg.subLabelField] || "",
       [cfg.groupField]: t[cfg.groupField] || "",
       [cfg.shortField]: t[cfg.shortField] || "",
       ...(cfg.hasNflAssociation ? { NFL: t.NFL || "" } : {}),
+      ...(league === "cfb" ? { FCS: !!t.FCS } : {}),
       Logo1: t.Logo1 || "",
       Logo2: t.Logo2 || "",
       Wordmark: t.Wordmark || "",
@@ -3762,6 +4084,37 @@ function TeamBrandingPane({ league }) {
     setLogoCopyStatus({});
     setConfirmDelete(false);
   };
+
+  // ── Add a brand-new team (school or NFL club) — same form as editing, plus
+  // a name/mascot pair up top that only ever applies here: an existing
+  // team's name is treated as immutable everywhere else in this pane since
+  // players, games, performances, and ads all reference it by that exact
+  // string, and silently renaming it would orphan every reference. ──
+  const startNewTeam = () => {
+    setSelectedTeam({ id: null, isNew: true });
+    setFormState({
+      [cfg.nameField]: "",
+      [cfg.subLabelField]: "",
+      [cfg.groupField]: "",
+      [cfg.shortField]: "",
+      ...(cfg.hasNflAssociation ? { NFL: "" } : {}),
+      ...(league === "cfb" ? { FCS: false } : {}),
+      Logo1: "",
+      Logo2: "",
+      Wordmark: "",
+      WordmarkDark: "",
+      LogoDark: "",
+      LogoBlack: "",
+      Color1: BLUE,
+      Color2: GOLD,
+    });
+    setSaveMessage("");
+    setCopiedField("");
+    setLogoCopyStatus({});
+    setConfirmDelete(false);
+  };
+
+  const isNewTeam = selectedTeam?.isNew === true;
 
   const handleFieldChange = (field, value) => {
     setFormState((prev) => ({ ...prev, [field]: value }));
@@ -3809,13 +4162,25 @@ function TeamBrandingPane({ league }) {
 
   const handleSave = async () => {
     if (!selectedTeam || !formState) return;
+    if (isNewTeam && !formState[cfg.nameField]?.trim()) {
+      setSaveMessage(`Failed: ${cfg.nameField} name is required.`);
+      return;
+    }
     setSaving(true);
     setSaveMessage("");
     try {
       const payload = {
+        // The name itself only ever gets set here at creation — see
+        // startNewTeam's own comment for why an existing team's name is
+        // treated as immutable in this pane. subLabelField (Mascot for
+        // CFB, City for NFL) isn't load-bearing the same way anything else
+        // references it by, so unlike the name it stays editable anytime.
+        ...(isNewTeam ? { [cfg.nameField]: formState[cfg.nameField].trim() } : {}),
+        [cfg.subLabelField]: (formState[cfg.subLabelField] || "").trim(),
         [cfg.groupField]: formState[cfg.groupField].trim(),
         [cfg.shortField]: formState[cfg.shortField].trim(),
         ...(cfg.hasNflAssociation ? { NFL: formState.NFL.trim() } : {}),
+        ...(league === "cfb" ? { FCS: !!formState.FCS } : {}),
         Logo1: formState.Logo1.trim(),
         Logo2: formState.Logo2.trim(),
         Wordmark: formState.Wordmark.trim(),
@@ -3826,10 +4191,18 @@ function TeamBrandingPane({ league }) {
         Color2: formState.Color2.trim(),
         updatedAt: serverTimestamp(),
       };
-      await updateDoc(doc(db, cfg.collectionName, selectedTeam.id), payload);
-      setTeams((prev) => prev.map((t) => (t.id === selectedTeam.id ? { ...t, ...payload } : t)));
-      setSelectedTeam((prev) => (prev ? { ...prev, ...payload } : prev));
-      setSaveMessage("Saved.");
+      if (isNewTeam) {
+        const ref = await addDoc(collection(db, cfg.collectionName), payload);
+        const newTeam = { id: ref.id, ...payload };
+        setTeams((prev) => [...prev, newTeam].sort((a, b) => (a[cfg.nameField] || "").localeCompare(b[cfg.nameField] || "")));
+        setSelectedTeam(newTeam);
+        setSaveMessage("Team created.");
+      } else {
+        await updateDoc(doc(db, cfg.collectionName, selectedTeam.id), payload);
+        setTeams((prev) => prev.map((t) => (t.id === selectedTeam.id ? { ...t, ...payload } : t)));
+        setSelectedTeam((prev) => (prev ? { ...prev, ...payload } : prev));
+        setSaveMessage("Saved.");
+      }
     } catch (e) {
       console.error("Admin branding save error:", e);
       setSaveMessage("Failed to save — check console.");
@@ -3846,7 +4219,7 @@ function TeamBrandingPane({ league }) {
   // performances, and ads all reference a team by name/abbreviation and
   // aren't cleaned up here (see the warning copy below). ──
   const handleDeleteTeam = async () => {
-    if (!selectedTeam) return;
+    if (!selectedTeam || isNewTeam) return;
     setRemoving(true);
     setSaveMessage("");
     try {
@@ -3866,10 +4239,20 @@ function TeamBrandingPane({ league }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
-        <div style={{ background: BLUE, padding: "10px 16px" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             {cfg.label} Teams
           </div>
+          <button
+            onClick={startNewTeam}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + New Team
+          </button>
         </div>
 
         <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -3921,8 +4304,15 @@ function TeamBrandingPane({ league }) {
                     )}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {t[cfg.nameField] || "Untitled"}
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {t[cfg.nameField] || "Untitled"}
+                      </div>
+                      {t.FCS && (
+                        <span style={{ flexShrink: 0, background: "#eee", color: "#666", fontSize: "9px", fontWeight: 900, padding: "1px 6px", borderRadius: "4px", letterSpacing: "0.04em" }}>
+                          FCS
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {[t[cfg.subLabelField], t[cfg.groupField]].filter(Boolean).join(" · ") || "—"}
@@ -3942,16 +4332,41 @@ function TeamBrandingPane({ league }) {
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
         <div style={{ background: GOLD, padding: "10px 16px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            {selectedTeam ? (selectedTeam[cfg.nameField] || "Edit Team") : "Select a Team"}
+            {isNewTeam ? (formState?.[cfg.nameField] || `New ${cfg.label} Team`) : (selectedTeam ? (selectedTeam[cfg.nameField] || "Edit Team") : "Select a Team")}
           </div>
         </div>
 
         {!selectedTeam || !formState ? (
           <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
-            Click a team from the list to view and edit its logos and colors.
+            Click a team from the list to view and edit its logos and colors, or "+ New Team" to add one.
           </div>
         ) : (
           <div style={{ padding: "16px", maxHeight: "760px", overflowY: "auto" }}>
+            {/* The name field only ever shows at creation (see handleSave's
+                own comment for why an existing team's name is immutable
+                here), but subLabelField — Mascot for CFB, City for NFL —
+                stays editable anytime, not just when the team is first
+                created. */}
+            <FieldGroup>
+              {isNewTeam && (
+                <FieldRow label={`${cfg.nameField} Name`}>
+                  <input
+                    value={formState[cfg.nameField]}
+                    onChange={(e) => handleFieldChange(cfg.nameField, e.target.value)}
+                    placeholder={cfg.nameField}
+                    style={inputStyle}
+                  />
+                </FieldRow>
+              )}
+              <FieldRow label={cfg.subLabelField}>
+                <input
+                  value={formState[cfg.subLabelField]}
+                  onChange={(e) => handleFieldChange(cfg.subLabelField, e.target.value)}
+                  placeholder={cfg.subLabelField}
+                  style={inputStyle}
+                />
+              </FieldRow>
+            </FieldGroup>
             <div style={{ marginBottom: "18px" }}>
               <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
                 Graphic Preview
@@ -3973,7 +4388,7 @@ function TeamBrandingPane({ league }) {
                     )}
                   </div>
                   <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>
-                    {selectedTeam[cfg.nameField]}
+                    {isNewTeam ? (formState[cfg.nameField] || "New Team") : selectedTeam[cfg.nameField]}
                   </div>
                 </div>
                 <div style={{ height: "6px", background: /^#[0-9a-fA-F]{3,8}$/.test(formState.Color2) ? formState.Color2 : GOLD }} />
@@ -4013,6 +4428,20 @@ function TeamBrandingPane({ league }) {
                       <option key={o.id} value={o.id}>{o.label}</option>
                     ))}
                   </select>
+                </FieldRow>
+              )}
+              {league === "cfb" && (
+                <FieldRow label="Division">
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={!!formState.FCS}
+                      onChange={(e) => handleFieldChange("FCS", e.target.checked)}
+                    />
+                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#444" }}>
+                      This is an FCS team (unchecked = FBS)
+                    </span>
+                  </label>
                 </FieldRow>
               )}
               <LogoUrlField
@@ -4087,7 +4516,7 @@ function TeamBrandingPane({ league }) {
                 opacity: saving ? 0.6 : 1,
               }}
             >
-              {saving ? "Saving..." : "Save Changes"}
+              {saving ? "Saving..." : isNewTeam ? "Create Team" : "Save Changes"}
             </button>
 
             {saveMessage && (
@@ -4096,6 +4525,7 @@ function TeamBrandingPane({ league }) {
               </div>
             )}
 
+            {!isNewTeam && (
             <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
               {confirmDelete ? (
                 <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
@@ -4146,6 +4576,7 @@ function TeamBrandingPane({ league }) {
                 </button>
               )}
             </div>
+            )}
           </div>
         )}
       </div>

@@ -72,8 +72,46 @@ service cloud.firestore {
     match /playerStats/{doc} { allow read, write: if true; }
     match /teamPositionRanks/{doc} { allow read, write: if true; }
     match /rosters/{doc} { allow read, write: if true; }
-    match /schedule26/{doc} { allow read, write: if true; }
+    match /schedule26/{doc} {
+      allow read, write: if true;
+      // A user's score/text prediction for this game — public read (so
+      // aggregate stats and the public-picks list can be computed
+      // client-side across everyone's picks, private ones included in the
+      // numbers but not shown individually), write restricted to the pick's
+      // own owner, same as evaluations/reactions elsewhere.
+      match /picks/{uid} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
+      // Whether a user has "hyped" this game — same public-read/owner-write
+      // shape as picks, existence of the doc is the only signal needed.
+      match /hype/{uid} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+    // We-Pick's ranked standings — one doc per leaderboard ("season", or a
+    // week label like "Week 1") holding a denormalized `entries` array, so
+    // the Standings tab (WePickHub.js) reads one doc instead of scanning
+    // every user's picks client-side. Nobody computes/writes this yet
+    // (scoring logic is still TBD) — public read now so the page's empty
+    // state works for signed-out visitors too, write locked to admin since
+    // this will end up populated by a trusted process, never by a user
+    // writing their own standing.
+    match /wePickStandings2026/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // A user's locked-in Ranked 6 for a given week (WePickHub.js's "Submit
+    // for Ranking" button) — same public-read/owner-write shape as
+    // schedule26's picks subcollection, since the eventual scoring job
+    // needs to read every user's submission for a week in one place.
+    match /wePickSubmissions/{week}/entries/{uid} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
     match /trends/{doc} { allow read, write: if true; }
+    match /rivalries/{doc} { allow read, write: if true; }
     match /videos/{doc} { allow read, write: if true; }
     match /ads/{doc} { allow read, write: if true; }
     match /articles/{doc} {
@@ -98,6 +136,27 @@ service cloud.firestore {
       // publicly readable (no follower counts are shown anywhere).
       match /follows/{playerId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      // Private mirror of a user's own game picks (doc id == the game's
+      // schedule26 id), written alongside the canonical
+      // schedule26/{gameId}/picks/{uid} doc on every save/remove — same
+      // "canonical + private mirror" shape evaluations already uses above.
+      // Lets We-Pick's My Picks page (WePickHub.js) list everything a user
+      // has picked with one collection read instead of a collection-group
+      // query across every game. Owner-only; the canonical copy already
+      // covers public reads for aggregation.
+      match /picks/{gameId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      // We-Pick's My Stats tab (WePickHub.js) — the one stat that can't be
+      // computed client-side from a user's own picks (Highest Leaderboard
+      // Rank needs everyone else's results too). Owner-read only, same as
+      // picks above; write locked to admin like wePickStandings2026, since
+      // this shouldn't be something a user can just write themselves a
+      // flattering number into.
+      match /wePickStats/{season} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if isAdmin();
       }
     }
     match /mockDrafts/{draftId} {

@@ -52,6 +52,9 @@ import AdminPanel from "./pages/AdminPanel";
 // Games
 import MyDraftClass from "./pages/MyDraftClass";
 
+// We-Pick
+import WePickHub from "./pages/WePickHub";
+
 function App() {
   return (
     <HelmetProvider>
@@ -132,6 +135,15 @@ function MainLayout() {
           <Route path="/performances/:week" element={<PerformancesHub />} />
           <Route path="/performance/:slug" element={<PerformancePage />} />
           <Route path="/game/:slug" element={<GamePage />} />
+          <Route path="/we-pick" element={<WePickHub />} />
+          {/* Standings — same page component, tab + optional week param
+              (see WePickHub.js's own activeTab/useParams handling), mirroring
+              how /performances and /performances/:week share PerformancesHub. */}
+          <Route path="/we-pick/standings" element={<WePickHub />} />
+          <Route path="/we-pick/standings/:week" element={<WePickHub />} />
+          {/* My Stats — same page component, third tab (see WePickHub.js's
+              own activeTab handling). */}
+          <Route path="/we-pick/stats" element={<WePickHub />} />
           <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
         </Routes>
       </div>

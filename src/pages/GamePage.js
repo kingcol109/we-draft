@@ -13,9 +13,12 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
+import { useAuth } from "../context/AuthContext";
+import verifiedBadge from "../assets/verified.png";
+import confetti from "canvas-confetti";
 
 // Same flair badge assets/config as PlayerProfile.js's hero (duplicated
 // rather than imported cross-page, matching this codebase's own convention
@@ -83,27 +86,31 @@ const GRADE_GLOW_STYLE = `
   .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
   .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
   .wd-perf-row-link { transition: background 0.15s ease, padding-left 0.15s ease; }
-  .wd-perf-row-link:hover { background: #eaf1ff; padding-left: 20px; }
+  .wd-perf-row-link:hover { background: rgba(255,255,255,0.14); padding-left: 20px; }
   .wd-perf-row-chevron { opacity: 0; transform: translateX(-6px); transition: opacity 0.15s ease, transform 0.15s ease; }
   .wd-perf-row-link:hover .wd-perf-row-chevron { opacity: 1; transform: translateX(0); }
-  @keyframes wdFeaturedShimmer {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 200% 50%; }
+  /* Game of the Week / Featured badge — lives inside the hero itself now
+     (see GamePage.js's render), so it only needs a quiet glow pulse to feel
+     special, not the old moving shimmer that read as a separate banner
+     bolted on top of the hero. Game of the Week glows gold against its own
+     navy/blue badge — We-Draft's own palette, not a generic fire-orange —
+     so it reads as "this site's top honor" rather than a stock hype color. */
+  @keyframes wdGotwBadgePulse {
+    0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+    50%      { box-shadow: 0 4px 22px rgba(246,162,29,0.65); }
   }
-  .wd-featured-ribbon { animation: wdFeaturedShimmer 3.5s linear infinite; }
+  .wd-gotw-badge { animation: wdGotwBadgePulse 2.6s ease-in-out infinite; }
+  @keyframes wdFeaturedBadgePulse {
+    0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
+    50%      { box-shadow: 0 4px 18px rgba(246,162,29,0.55); }
+  }
+  .wd-featured-badge { animation: wdFeaturedBadgePulse 3.2s ease-in-out infinite; }
 
-  /* Game of the Week — a separate, more intense tier than Featured: a
-     fire-toned shimmer on the ribbon, plus a slow pulsing glow around the
-     whole card (rgba(255,69,0,...) matches the ribbon's orange). Both
-     slowed down and toned down from an earlier pass that felt too frantic. */
-  @keyframes wdGotwShimmer {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 200% 50%; }
-  }
-  .wd-gotw-ribbon { animation: wdGotwShimmer 4s linear infinite; }
+  /* Game of the Week — a slow pulsing gold glow around the whole card,
+     matching the badge's own gold instead of the old fire-orange. */
   @keyframes wdGotwCardGlow {
-    0%, 100% { box-shadow: 0 10px 30px rgba(0,0,0,0.12), 0 0 0px rgba(255,69,0,0); }
-    50%      { box-shadow: 0 10px 32px rgba(0,0,0,0.14), 0 0 20px rgba(255,69,0,0.35); }
+    0%, 100% { box-shadow: 0 10px 30px rgba(0,0,0,0.12), 0 0 0px rgba(246,162,29,0); }
+    50%      { box-shadow: 0 10px 32px rgba(0,0,0,0.14), 0 0 20px rgba(246,162,29,0.4); }
   }
   .wd-gotw-card-glow { animation: wdGotwCardGlow 3.6s ease-in-out infinite; }
 
@@ -123,6 +130,12 @@ const GRADE_GLOW_STYLE = `
      field in the CFB Schedule editor). */
   .wd-keyplayer-note-wrap { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease; }
   .wd-perf-row-link:hover .wd-keyplayer-note-wrap { max-height: 80px; opacity: 1; margin-top: 6px; }
+
+  /* Pick-form score inputs — plain number fields without the browser's
+     up/down spinner clutter, since the field is big and tappable enough on
+     its own. */
+  .wd-no-spinner::-webkit-inner-spin-button, .wd-no-spinner::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .wd-no-spinner { -moz-appearance: textfield; }
 `;
 
 function sanitizeUrl(url) {
@@ -215,6 +228,71 @@ const formatTime12h = (t) => {
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 };
 
+// Admin enters Kickoff Time as a plain "HH:MM" with no timezone attached —
+// CFB kickoffs are always quoted in US Eastern, so that's the zone assumed
+// here (same helper as WePickHub.js's own kickoffMs). Reads the actual UTC
+// offset for America/New_York on the game's own date via Intl instead of
+// hardcoding UTC-5, so this stays correct across the EDT/EST switch partway
+// through the season rather than drifting an hour on one side of it.
+const ET_OFFSET_FALLBACK_MIN = -300; // EST — only used if Intl's parse ever fails
+const etOffsetMinutesAt = (ms) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(ms));
+    const tz = parts.find((p) => p.type === "timeZoneName")?.value || "";
+    const m = /GMT([+-]\d+)(?::(\d+))?/.exec(tz);
+    if (!m) return ET_OFFSET_FALLBACK_MIN;
+    const h = parseInt(m[1], 10);
+    const mins = m[2] ? parseInt(m[2], 10) : 0;
+    return h * 60 + (h < 0 ? -mins : mins);
+  } catch {
+    return ET_OFFSET_FALLBACK_MIN;
+  }
+};
+
+// The actual UTC instant a game kicks off, combining a Date-ms value (UTC
+// midnight) with Time (ET wall-clock) — null when either is missing, since
+// Kickoff Time is optional in the admin form and there's no hour to lock at
+// without one (picksLocked below falls back to Final-only locking then,
+// same as before kickoff-locking existed).
+const kickoffMsFromDate = (dateMs, time) => {
+  const mins = timeToMinutes(time);
+  if (!dateMs || mins == null) return null;
+  return dateMs + mins * 60000 - etOffsetMinutesAt(dateMs) * 60000;
+};
+
+// Score picks unlock at 00:00 UTC on the Monday of the game's own week —
+// same "Monday-to-Sunday, computed in UTC" boundary GameMarginSidebars.js
+// uses for "this week", just anchored to an arbitrary game date instead of
+// "now". A game's Date field is stored as UTC midnight, so this has to stay
+// in UTC too or the Monday would drift by a day for anyone west of it.
+const mondayOfWeekUtc = (ms) => {
+  const d = new Date(ms);
+  const utcDay = d.getUTCDay(); // 0=Sun..6=Sat
+  const diffToMonday = (utcDay === 0 ? -6 : 1) - utcDay;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diffToMonday, 0, 0, 0, 0);
+};
+
+const toMs = (ts) => {
+  if (!ts) return 0;
+  if (ts?.toDate) return ts.toDate().getTime();
+  if (ts instanceof Date) return ts.getTime();
+  const parsed = Date.parse(ts);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+// Which side a pick calls to win — "away" | "home" | null. Prefers the
+// explicit pickedTeam field (always set for both score picks and the newer
+// winner-only picks, see handleSavePick), falling back to comparing scores
+// for picks written before pickedTeam existed, so old data keeps working
+// without a migration.
+const pickedSideOf = (p) => {
+  if (p.pickedTeam === "away" || p.pickedTeam === "home") return p.pickedTeam;
+  if (p.awayScore == null || p.homeScore == null) return null;
+  if (p.awayScore > p.homeScore) return "away";
+  if (p.homeScore > p.awayScore) return "home";
+  return null;
+};
+
 // One side of the hero matchup — just a big logo and that school's wordmark
 // as a huge, faint backdrop behind it (no separate AWAY/HOME tag — which
 // side is which is already implied by left/right position, matching the
@@ -229,7 +307,11 @@ const formatTime12h = (t) => {
 // Backdrop wordmark: WordmarkDark if the school has one, else the plain
 // Wordmark used the same way (a low-opacity backdrop doesn't need the
 // contrast guarantee a foreground element would — 30% opacity over the
-// team's own color reads fine either way). Sized as wide as the column will
+// team's own color reads fine either way). If a school has no wordmark
+// uploaded at all (or both fail to load), the backdrop falls back to the
+// same LogoDark/Logo1 chain the foreground logo already uses below, rather
+// than a school without a wordmark just going without a backdrop entirely.
+// Sized as wide as the column will
 // take (112%/135% of it — the column's own width is well-defined since it's
 // a flex item with an explicit width:0 basis, so percentage widths on an
 // absolutely-positioned child resolve correctly), while its *vertical*
@@ -257,7 +339,14 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
 
   const showWordmarkDark = !!wordmarkDarkSrc && !wordmarkDarkFailed;
   const showWordmarkFallback = !showWordmarkDark && !!wordmarkSrc && !wordmarkFailed;
-  const backdropSrc = showWordmarkDark ? wordmarkDarkSrc : (showWordmarkFallback ? wordmarkSrc : null);
+  // Last resort once neither wordmark is available (missing or failed) —
+  // same LogoDark-then-Logo1 chain as logoSrc below, just reused as the
+  // backdrop image instead of going without one.
+  const showLogoBackdrop = !showWordmarkDark && !showWordmarkFallback && !!logoSrc && !logoFailed;
+  const backdropSrc = showWordmarkDark ? wordmarkDarkSrc
+    : showWordmarkFallback ? wordmarkSrc
+    : showLogoBackdrop ? sanitizeUrl(logoSrc)
+    : null;
 
   const style = {
     position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
@@ -270,7 +359,11 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
       {backdropSrc && (
         <img
           src={backdropSrc} alt="" aria-hidden="true"
-          onError={() => (showWordmarkDark ? setWordmarkDarkFailed(true) : setWordmarkFailed(true))}
+          onError={() => {
+            if (showWordmarkDark) setWordmarkDarkFailed(true);
+            else if (showWordmarkFallback) setWordmarkFailed(true);
+            else setLogoFailed(true);
+          }}
           style={{
             // Anchored by its own vertical CENTER landing at backdropTop,
             // not its top edge — wordmarks render at wildly different
@@ -319,42 +412,40 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
 
 // One team's content column — Key Players pregame, Top Performances once
 // Final (never both; Key Players steps aside for real performance data the
-// moment there's some to show). The whole column is one card headed by a
-// strip in that team's own Color1/Color2 (the same colors as its half of
-// the hero above, and the same AWAY/HOME pill styling) so this reads as a
-// continuation of the matchup rather than a plain white list bolted on
-// underneath it — previously just a small gray "AWAY"/"HOME" label sat
-// above a differently-colored (site BLUE) box, which is exactly the kind of
-// "doesn't feel like part of the game" seam this closes.
-function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayerNotes }) {
+// moment there's some to show). Sits directly in the hero, below that
+// team's own big logo (see the caller), so no mini-logo/team-label header
+// is needed here anymore — which side this is is already obvious from
+// position alone. A translucent glass panel (not a white card) so it reads
+// as part of the same dark hero graphic instead of a light box bolted on
+// top of it.
+function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes }) {
   const accent1 = schoolData?.Color1 || BLUE;
   const accent2 = schoolData?.Color2 || GOLD;
   const isFinalMode = mode === "final";
   const items = isFinalMode ? performances : keyPlayers;
 
-  return (
-    <div style={{ border: `2px solid ${accent1}`, borderRadius: "12px", overflow: "hidden", background: "#fff", boxShadow: "0 6px 18px rgba(0,0,0,0.1)" }}>
-      {/* Just the mini logo — no "AWAY"/"HOME" label needed, this column
-          already sits under the matching side of the hero above it. */}
-      <div style={{ background: accent1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {schoolData?.Logo1 ? (
-          <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
-            <img
-              src={sanitizeUrl(schoolData.Logo1)} alt={tag}
-              style={{ width: "78%", height: "78%", objectFit: "contain" }}
-              onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }}
-            />
-          </div>
-        ) : (
-          <span style={{ color: "#fff", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.14em" }}>{tag}</span>
-        )}
-      </div>
-      <div style={{ height: "3px", background: accent2 }} />
+  // A faded wordmark (dark version preferred, since it sits on a dark
+  // panel — plain Wordmark as the fallback, not Logo1, which reads as a
+  // small circular badge rather than filling the empty space) — or Logo1
+  // as a last resort for a school with no wordmark art at all.
+  const emptyWatermark = schoolData?.WordmarkDark || schoolData?.Wordmark || schoolData?.Logo1;
 
+  return (
+    <div style={{ position: "relative", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "12px", overflow: "hidden", background: "rgba(0,0,0,0.28)", boxShadow: "0 6px 18px rgba(0,0,0,0.3)", minHeight: items.length === 0 ? "150px" : undefined }}>
       {items.length === 0 ? (
-        <div style={{ color: "#bbb", fontSize: "13px", fontStyle: "italic", padding: "16px" }}>
-          {isFinalMode ? "No performances written up yet." : "None selected yet."}
-        </div>
+        // This side has nothing to show while the other one does (the
+        // section wouldn't render at all if both were empty — see
+        // showKeyPlayersSection) — just a big, faded watermark of the
+        // team's own wordmark fills the space, no "nothing here" text.
+        emptyWatermark && (
+          <img
+            src={sanitizeUrl(emptyWatermark)} alt="" aria-hidden="true"
+            style={{
+              position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+              width: "70%", maxWidth: "220px", height: "auto", opacity: 0.35, objectFit: "contain", pointerEvents: "none",
+            }}
+          />
+        )
       ) : isFinalMode ? (
         // Just the player and their stat line — the title/grade text lives
         // on the performance's own page; the grade still shows up here as
@@ -366,22 +457,21 @@ function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayer
             className={`wd-perf-row-link ${gradeGlowClass(perf.grade)}`}
             style={{
               display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "12px 16px", textDecoration: "none",
-              borderBottom: i < performances.length - 1 ? "1px solid #f0f0f0" : "none",
-              borderLeft: `4px solid ${accent1}`,
-              background: `linear-gradient(90deg, ${accent1}0d, transparent 40%)`,
+              borderBottom: i < performances.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
+              borderLeft: `4px solid ${accent2}`,
             }}
           >
             <div style={{ minWidth: 0 }}>
-              <div style={{ color: "#222", fontWeight: 900, fontSize: "16px", lineHeight: 1.3 }}>
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: "16px", lineHeight: 1.3, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>
                 {perf.playerName || perf.titleShort}
               </div>
               {perf.statLine && (
-                <div style={{ color: "#555", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", marginTop: "3px" }}>
+                <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", marginTop: "3px" }}>
                   {perf.statLine}
                 </div>
               )}
             </div>
-            <span className="wd-perf-row-chevron" style={{ color: accent1, fontSize: "18px", fontWeight: 900, flexShrink: 0 }}>›</span>
+            <span className="wd-perf-row-chevron" style={{ color: GOLD, fontSize: "18px", fontWeight: 900, flexShrink: 0 }}>›</span>
           </Link>
         ))
       ) : (
@@ -398,9 +488,8 @@ function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayer
               className="wd-perf-row-link"
               style={{
                 display: "flex", alignItems: "center", gap: "16px", padding: "16px 18px", textDecoration: "none",
-                borderBottom: i < keyPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
-                borderLeft: `4px solid ${accent1}`,
-                background: `linear-gradient(90deg, ${accent1}0d, transparent 40%)`,
+                borderBottom: i < keyPlayers.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
+                borderLeft: `4px solid ${accent2}`,
               }}
             >
               {flairInfo ? (
@@ -423,13 +512,13 @@ function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayer
                 </div>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: BLUE, fontWeight: 900, fontSize: "19px", lineHeight: 1.2 }}>{p.First} {p.Last}</div>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: "19px", lineHeight: 1.2, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{p.First} {p.Last}</div>
                 {/* Admin-written note (AdminPanel.js's CFB Schedule editor) —
                     collapsed until this row is hovered (see .wd-keyplayer-note-wrap
                     in GRADE_GLOW_STYLE), so the list stays compact by default. */}
                 {note && (
                   <div className="wd-keyplayer-note-wrap">
-                    <div style={{ color: "#666", fontWeight: 600, fontSize: "12.5px", lineHeight: 1.4, fontStyle: "italic" }}>
+                    <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 600, fontSize: "12.5px", lineHeight: 1.4, fontStyle: "italic" }}>
                       {note}
                     </div>
                   </div>
@@ -441,7 +530,7 @@ function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayer
               }}>
                 {p.Position || "—"}
               </span>
-              <span className="wd-perf-row-chevron" style={{ color: accent1, fontSize: "20px", fontWeight: 900, flexShrink: 0 }}>›</span>
+              <span className="wd-perf-row-chevron" style={{ color: GOLD, fontSize: "20px", fontWeight: 900, flexShrink: 0 }}>›</span>
             </Link>
           );
         })
@@ -452,6 +541,7 @@ function TeamColumn({ tag, schoolData, keyPlayers, performances, mode, keyPlayer
 
 export default function GamePage() {
   const { slug } = useParams();
+  const { user, profile, login } = useAuth();
   const [game, setGame] = useState(null);
   const [awaySchool, setAwaySchool] = useState(null);
   const [homeSchool, setHomeSchool] = useState(null);
@@ -459,10 +549,27 @@ export default function GamePage() {
   const [keyPlayersHome, setKeyPlayersHome] = useState([]);
   const [performancesAway, setPerformancesAway] = useState([]);
   const [performancesHome, setPerformancesHome] = useState([]);
+  const [picks, setPicks] = useState([]);
+  const [verifiedByUid, setVerifiedByUid] = useState({});
+  const [pickMode, setPickMode] = useState("score"); // "score" | "winner"
+  const [pickAway, setPickAway] = useState("");
+  const [pickHome, setPickHome] = useState("");
+  const [pickWinnerSide, setPickWinnerSide] = useState(""); // "away" | "home", winner-only mode
+  const [pickText, setPickText] = useState("");
+  const [pickVisibility, setPickVisibility] = useState("public");
+  const [pickSaving, setPickSaving] = useState(false);
+  const [pickRemoving, setPickRemoving] = useState(false);
+  const [pickMessage, setPickMessage] = useState("");
+  const [rankedToggling, setRankedToggling] = useState(false);
+  const [hypeUids, setHypeUids] = useState(new Set());
+  const [hypeToggling, setHypeToggling] = useState(false);
+  const [picksExpanded, setPicksExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const contentRef = useRef(null);
+  const pickFormRef = useRef(null);
+  const communityPicksRef = useRef(null);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 900);
@@ -478,6 +585,10 @@ export default function GamePage() {
     setKeyPlayersHome([]);
     setPerformancesAway([]);
     setPerformancesHome([]);
+    setPicks([]);
+    setVerifiedByUid({});
+    setHypeUids(new Set());
+    setPicksExpanded(false);
     setNotFound(false);
     setLoading(true);
 
@@ -495,18 +606,34 @@ export default function GamePage() {
         const keyAwayIds = isFinal ? [] : (g.KeyPlayersAway || []);
         const keyHomeIds = isFinal ? [] : (g.KeyPlayersHome || []);
 
-        const [awaySchoolSnap, homeSchoolSnap, keyAwaySnaps, keyHomeSnaps, perfSnap] = await Promise.all([
+        const [awaySchoolSnap, homeSchoolSnap, keyAwaySnaps, keyHomeSnaps, perfSnap, picksSnap, hypeSnap] = await Promise.all([
           g.Away ? getDocs(query(collection(db, "schools"), where("School", "==", g.Away))) : null,
           g.Home ? getDocs(query(collection(db, "schools"), where("School", "==", g.Home))) : null,
           Promise.all(keyAwayIds.map((id) => getDoc(doc(db, "players", id)))),
           Promise.all(keyHomeIds.map((id) => getDoc(doc(db, "players", id)))),
           isFinal ? getDocs(query(collection(db, "performances"), where("gameId", "==", g.id), where("status", "==", "published"))) : null,
+          getDocs(collection(db, "schedule26", g.id, "picks")),
+          getDocs(collection(db, "schedule26", g.id, "hype")),
         ]);
 
         if (awaySchoolSnap && !awaySchoolSnap.empty) setAwaySchool({ id: awaySchoolSnap.docs[0].id, ...awaySchoolSnap.docs[0].data() });
         if (homeSchoolSnap && !homeSchoolSnap.empty) setHomeSchool({ id: homeSchoolSnap.docs[0].id, ...homeSchoolSnap.docs[0].data() });
         setKeyPlayersAway(keyAwaySnaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() })));
         setKeyPlayersHome(keyHomeSnaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() })));
+        const loadedPicks = picksSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setPicks(loadedPicks);
+        setHypeUids(new Set(hypeSnap.docs.map((d) => d.id)));
+
+        // Batch-fetch each picker's users/{uid} doc for the "verified" badge,
+        // same pattern PlayerProfile.js uses for community evaluations —
+        // build a plain {uid: bool} map rather than storing whole profiles.
+        const pickUids = [...new Set(loadedPicks.map((p) => p.id))];
+        if (pickUids.length) {
+          const userSnaps = await Promise.all(pickUids.map((uid) => getDoc(doc(db, "users", uid))));
+          const vMap = {};
+          userSnaps.forEach((s, idx) => { vMap[pickUids[idx]] = !!(s.exists() && s.data().verified); });
+          setVerifiedByUid(vMap);
+        }
 
         if (perfSnap) {
           const all = perfSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -523,6 +650,174 @@ export default function GamePage() {
     };
     fetch();
   }, [slug]);
+
+  // Seeds the pick form from the signed-in user's own existing pick (if
+  // any) once both are known — user/profile resolve from AuthContext on
+  // their own timeline, separate from the game-data fetch above, so this
+  // can't just live inside that effect.
+  useEffect(() => {
+    if (!user) {
+      setPickAway(""); setPickHome(""); setPickText(""); setPickVisibility("public");
+      setPickMode("score"); setPickWinnerSide("");
+      return;
+    }
+    const mine = picks.find((p) => p.id === user.uid);
+    if (mine) {
+      const isWinnerOnly = mine.pickType === "winner" || mine.awayScore == null;
+      setPickMode(isWinnerOnly ? "winner" : "score");
+      setPickWinnerSide(isWinnerOnly ? (pickedSideOf(mine) || "") : "");
+      setPickAway(mine.awayScore != null ? String(mine.awayScore) : "");
+      setPickHome(mine.homeScore != null ? String(mine.homeScore) : "");
+      setPickText(mine.prediction || "");
+      setPickVisibility(mine.visibility || "public");
+    }
+  }, [user, picks]);
+
+  const handleSavePick = async (gameId) => {
+    if (!user) { login(); return; }
+    let payload;
+    if (pickMode === "winner") {
+      if (!pickWinnerSide) {
+        setPickMessage("Pick a team to win.");
+        return;
+      }
+      payload = {
+        uid: user.uid,
+        displayName: profile?.username?.trim() || "Anonymous Fan",
+        pickType: "winner",
+        pickedTeam: pickWinnerSide,
+        awayScore: null,
+        homeScore: null,
+        prediction: pickText.trim(),
+        // Winner-only picks can never count toward Ranked — there's no
+        // score to grade accuracy on — same rule We-Pick's My Picks tab
+        // enforces (see handleToggleRanked below for the flip side).
+        ranked: false,
+        visibility: pickVisibility,
+        updatedAt: serverTimestamp(),
+      };
+    } else {
+      if (pickAway.trim() === "" || pickHome.trim() === "") {
+        setPickMessage("Enter a predicted score for both teams.");
+        return;
+      }
+      const awayScore = Math.max(0, Math.round(Number(pickAway)));
+      const homeScore = Math.max(0, Math.round(Number(pickHome)));
+      // Counting toward Ranked defaults ON the moment a real score gets
+      // submitted (same default We-Pick's My Picks tab uses) — only
+      // preserved from the existing pick when there was already a score to
+      // have a real ranked choice attached to it, so upgrading a prior
+      // winner-only pick's forced `ranked: false` still gets the same
+      // default-on treatment as a brand new pick.
+      const hadScore = myPick?.awayScore != null && myPick?.homeScore != null;
+      payload = {
+        uid: user.uid,
+        displayName: profile?.username?.trim() || "Anonymous Fan",
+        pickType: "score",
+        pickedTeam: awayScore > homeScore ? "away" : homeScore > awayScore ? "home" : null,
+        awayScore,
+        homeScore,
+        prediction: pickText.trim(),
+        ranked: hadScore ? (myPick.ranked ?? true) : true,
+        visibility: pickVisibility,
+        updatedAt: serverTimestamp(),
+      };
+    }
+    setPickSaving(true);
+    setPickMessage("");
+    try {
+      // Canonical doc (public read, drives this page's aggregation) plus a
+      // private mirror under the user's own account (see firestore.rules)
+      // so We-Pick's My Picks page can list everything a user has picked
+      // with one collection read instead of a collection-group query.
+      await Promise.all([
+        setDoc(doc(db, "schedule26", gameId, "picks", user.uid), payload),
+        setDoc(doc(db, "users", user.uid, "picks", gameId), payload),
+      ]);
+      setPicks((prev) => [...prev.filter((p) => p.id !== user.uid), { id: user.uid, ...payload }]);
+      setPickMessage("Pick saved!");
+
+      // Confetti in the picked-to-win team's colors — falls back to the
+      // site's own blue/gold on a tie, same call shape as the evaluation-
+      // save confetti in PlayerProfile.js.
+      const winnerSchool = payload.pickedTeam === "away" ? awaySchool : payload.pickedTeam === "home" ? homeSchool : null;
+      const color1 = winnerSchool?.Color1 || "#002b5c";
+      const color2 = winnerSchool?.Color2 || "#f4c430";
+      confetti({ particleCount: 140, spread: 75, origin: { y: 0.65 }, colors: [color1, color2, "#ffffff"] });
+    } catch (e) {
+      console.error("Save pick error:", e);
+      setPickMessage("Failed to save — try again.");
+    } finally {
+      setPickSaving(false);
+    }
+  };
+
+  const handleRemovePick = async (gameId) => {
+    if (!user) return;
+    setPickRemoving(true);
+    try {
+      await Promise.all([
+        deleteDoc(doc(db, "schedule26", gameId, "picks", user.uid)),
+        deleteDoc(doc(db, "users", user.uid, "picks", gameId)),
+      ]);
+      setPicks((prev) => prev.filter((p) => p.id !== user.uid));
+      setPickAway(""); setPickHome(""); setPickText(""); setPickVisibility("public");
+      setPickMode("score"); setPickWinnerSide("");
+      setPickMessage("");
+    } catch (e) {
+      console.error("Remove pick error:", e);
+    } finally {
+      setPickRemoving(false);
+    }
+  };
+
+  // The same star-equivalent as We-Pick's My Picks tab, just reachable from
+  // a game's own page — flips whether an existing score pick counts toward
+  // this week's Ranked 6. Only meaningful once there's a score to grade
+  // (a winner-only pick's `ranked` is permanently false, set in
+  // handleSavePick), so this refuses with an explanatory alert rather than
+  // silently doing nothing, same wording WePickHub.js's own star uses.
+  const handleToggleRanked = async (gameId) => {
+    if (!user || !myPick) return;
+    if (myPick.awayScore == null || myPick.homeScore == null) {
+      alert("Add a score to this pick before it can count toward Ranked.");
+      return;
+    }
+    const { id, ...rest } = myPick;
+    const payload = { ...rest, ranked: !myPick.ranked, updatedAt: serverTimestamp() };
+    setRankedToggling(true);
+    try {
+      await Promise.all([
+        setDoc(doc(db, "schedule26", gameId, "picks", user.uid), payload, { merge: true }),
+        setDoc(doc(db, "users", user.uid, "picks", gameId), payload, { merge: true }),
+      ]);
+      setPicks((prev) => prev.map((p) => (p.id === user.uid ? { ...p, ranked: payload.ranked } : p)));
+    } catch (e) {
+      console.error("Toggle ranked error:", e);
+    } finally {
+      setRankedToggling(false);
+    }
+  };
+
+  const handleToggleHype = async (gameId) => {
+    if (!user) { login(); return; }
+    setHypeToggling(true);
+    const hypeRef = doc(db, "schedule26", gameId, "hype", user.uid);
+    const alreadyHyped = hypeUids.has(user.uid);
+    try {
+      if (alreadyHyped) {
+        await deleteDoc(hypeRef);
+        setHypeUids((prev) => { const next = new Set(prev); next.delete(user.uid); return next; });
+      } else {
+        await setDoc(hypeRef, { uid: user.uid, createdAt: serverTimestamp() });
+        setHypeUids((prev) => new Set(prev).add(user.uid));
+      }
+    } catch (e) {
+      console.error("Toggle hype error:", e);
+    } finally {
+      setHypeToggling(false);
+    }
+  };
 
   if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
@@ -552,6 +847,41 @@ export default function GamePage() {
   // "None selected yet." message rather than disappearing and leaving a
   // lopsided single-column layout.
   const showKeyPlayersSection = isFinal || keyPlayersAway.length > 0 || keyPlayersHome.length > 0;
+
+  // Picks unlock at 00:00 UTC the Monday of the game's own week — before
+  // that, PicksForceOpen (an admin override, see AdminPanel.js) is the only
+  // way in. Week 0 is opened unconditionally instead, same special case as
+  // WePickHub.js's own isPickable — it kicks off before every other week,
+  // so there's no reason to make people wait on the calendar for it
+  // specifically. None of that overrides actual kickoff, though: once the
+  // ball's in the air picks lock for good regardless of PicksForceOpen or
+  // week, same as isFinal already did for a game once it's over.
+  const picksOpenAtMs = gameDateMs ? mondayOfWeekUtc(gameDateMs) : 0;
+  const picksDateReached = !gameDateMs || Date.now() >= picksOpenAtMs;
+  const kickoffAtMs = kickoffMsFromDate(gameDateMs, game.Time);
+  const kickoffPassed = kickoffAtMs != null && Date.now() >= kickoffAtMs;
+  const picksLocked = !isFinal && (kickoffPassed || (game.Week !== "Week 0" && !game.PicksForceOpen && !picksDateReached));
+  const myPick = user ? picks.find((p) => p.id === user.uid) : null;
+  const publicPicks = picks.filter((p) => p.visibility === "public").sort((a, b) => {
+    const aVerified = !!verifiedByUid[a.id];
+    const bVerified = !!verifiedByUid[b.id];
+    if (aVerified && !bVerified) return -1;
+    if (!aVerified && bVerified) return 1;
+    return toMs(b.updatedAt) - toMs(a.updatedAt);
+  });
+  const hypeCount = hypeUids.size;
+  const iHyped = user ? hypeUids.has(user.uid) : false;
+  const pickCount = picks.length;
+  // Averages only count picks that actually carry a score — a winner-only
+  // pick (see pickMode) has none, and would otherwise silently drag the
+  // average down toward 0 by averaging in a missing score as zero.
+  const scoredPicks = picks.filter((p) => p.awayScore != null && p.homeScore != null);
+  const avgAwayScore = scoredPicks.length ? Math.round(scoredPicks.reduce((s, p) => s + p.awayScore, 0) / scoredPicks.length) : null;
+  const avgHomeScore = scoredPicks.length ? Math.round(scoredPicks.reduce((s, p) => s + p.homeScore, 0) / scoredPicks.length) : null;
+  const awayPickWins = picks.filter((p) => pickedSideOf(p) === "away").length;
+  const homePickWins = picks.filter((p) => pickedSideOf(p) === "home").length;
+  const awayWinPct = pickCount ? Math.round((awayPickWins / pickCount) * 100) : 0;
+  const homeWinPct = pickCount ? Math.round((homePickWins / pickCount) * 100) : 0;
   // "Back" always means this game's week slate — the CFB schedule for that
   // week (every game, not just the ones with performances) — not the
   // Performances hub. Only falls back to the CFB schedule's own default
@@ -606,55 +936,45 @@ export default function GamePage() {
                 )}
               </div>
             )}
-            <Link
-              to={weekSlateUrl}
-              style={{
-                color: "#fff", background: "rgba(255,255,255,0.14)", border: `2px solid ${GOLD}`,
-                borderRadius: "8px", padding: isMobile ? "7px 14px" : "9px 22px",
-                fontWeight: 900, fontSize: isMobile ? "13px" : "15px", textDecoration: "none",
-                textTransform: "uppercase", letterSpacing: "0.04em", marginLeft: "auto",
-              }}
-            >
-              {weekSlateLabel}
-            </Link>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginLeft: "auto" }}>
+              {!isFinal && (
+                <button
+                  onClick={() => pickFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  style={{
+                    color: "#fff", background: GOLD, border: `2px solid ${GOLD}`,
+                    borderRadius: "8px", padding: isMobile ? "7px 14px" : "9px 22px", cursor: "pointer",
+                    fontWeight: 900, fontSize: isMobile ? "13px" : "15px",
+                    textTransform: "uppercase", letterSpacing: "0.04em",
+                  }}
+                >
+                  🔮 Pick This Game
+                </button>
+              )}
+              <button
+                onClick={() => communityPicksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                style={{
+                  color: "#fff", background: "rgba(255,255,255,0.14)", border: `2px solid ${GOLD}`,
+                  borderRadius: "8px", padding: isMobile ? "7px 14px" : "9px 22px", cursor: "pointer",
+                  fontWeight: 900, fontSize: isMobile ? "13px" : "15px",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                }}
+              >
+                📊 View Picks
+              </button>
+              <Link
+                to={weekSlateUrl}
+                style={{
+                  color: "#fff", background: "rgba(255,255,255,0.14)", border: `2px solid ${GOLD}`,
+                  borderRadius: "8px", padding: isMobile ? "7px 14px" : "9px 22px",
+                  fontWeight: 900, fontSize: isMobile ? "13px" : "15px", textDecoration: "none",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                }}
+              >
+                {weekSlateLabel}
+              </Link>
+            </div>
           </div>
           <div style={{ height: "3px", background: GOLD }} />
-
-          {/* Featured / Game of the Week ribbon — a proud, branded banner
-              rather than a small pill buried in the status strip. Game of
-              the Week is a separate, higher tier (see AdminPanel.js) and
-              gets a more intense fire-toned, faster-shimmering version
-              instead of Featured's gold one when both are set — showing
-              both would be redundant noise on the same card. */}
-          {game.GameOfWeek ? (
-            <div
-              className="wd-gotw-ribbon"
-              style={{
-                background: "linear-gradient(90deg, #ff4500, #ffb347, #ff4500, #ffb347, #ff4500)",
-                backgroundSize: "200% 100%",
-                padding: isMobile ? "10px 14px" : "13px 20px",
-                textAlign: "center",
-              }}
-            >
-              <span style={{ color: "#3a0f00", fontWeight: 900, fontSize: isMobile ? "13px" : "16px", textTransform: "uppercase", letterSpacing: "0.16em", textShadow: "0 1px 2px rgba(255,255,255,0.35)" }}>
-                🔥 Game of the Week 🔥
-              </span>
-            </div>
-          ) : game.Featured && (
-            <div
-              className="wd-featured-ribbon"
-              style={{
-                background: `linear-gradient(90deg, ${GOLD}, #ffe08a, ${GOLD}, #ffe08a, ${GOLD})`,
-                backgroundSize: "200% 100%",
-                padding: isMobile ? "8px 12px" : "10px 16px",
-                textAlign: "center",
-              }}
-            >
-              <span style={{ color: "#3a2900", fontWeight: 900, fontSize: isMobile ? "11px" : "13px", textTransform: "uppercase", letterSpacing: "0.14em" }}>
-                🏈 We-Draft.com's Featured Game
-              </span>
-            </div>
-          )}
 
           {/* Hero — status strip + big branded matchup, built to fill space
               the way a Madden matchup splash screen does rather than sit as
@@ -693,20 +1013,33 @@ export default function GamePage() {
               animation: "wdSpotlightPulse 4s ease-in-out infinite",
             }} />
 
-            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px", flexWrap: "wrap", marginBottom: isMobile ? "22px" : "40px" }}>
-              <span style={{
-                background: isFinal ? "#1a7f37" : "#7c3aed", color: "#fff",
-                fontSize: isMobile ? "11px" : "13px", fontWeight: 900,
-                padding: isMobile ? "4px 12px" : "6px 16px", borderRadius: "6px",
-                textTransform: "uppercase", letterSpacing: "0.1em",
-                boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
-              }}>
-                {isFinal ? "🏁 Final" : "🔮 Preview"}
-              </span>
-              {game.Week && (
-                <span style={{ color: "#fff", fontSize: isMobile ? "13px" : "17px", fontWeight: 900, textShadow: "0 2px 5px rgba(0,0,0,0.4)" }}>{game.Week}</span>
-              )}
-            </div>
+            {/* Game of the Week / Featured badge — sits right inside the
+                hero now (used to be its own separate banner strip above it)
+                so it reads as part of the same graphic instead of a
+                disconnected announcement bolted on top. Still gets its own
+                glow so it doesn't disappear into the background, just
+                without the old moving shimmer — a slow box-shadow pulse via
+                wd-gotw-badge/wd-featured-badge below is plenty of "this one
+                matters" without being distracting. */}
+            {(game.GameOfWeek || game.Featured) && (
+              <div style={{ position: "relative", zIndex: 1, textAlign: "center", marginBottom: isMobile ? "18px" : "26px" }}>
+                <span
+                  className={game.GameOfWeek ? "wd-gotw-badge" : "wd-featured-badge"}
+                  style={{
+                    display: "inline-block",
+                    background: game.GameOfWeek ? `linear-gradient(90deg, #003d82, ${BLUE}, #003d82)` : `linear-gradient(90deg, ${GOLD}, #ffe08a)`,
+                    color: game.GameOfWeek ? GOLD : "#3a2900",
+                    fontWeight: 900, fontSize: isMobile ? "11px" : "14px",
+                    padding: isMobile ? "6px 16px" : "8px 22px", borderRadius: "20px",
+                    textTransform: "uppercase", letterSpacing: "0.14em",
+                    border: `2px solid ${game.GameOfWeek ? GOLD : "rgba(255,255,255,0.4)"}`,
+                    textShadow: game.GameOfWeek ? "0 1px 2px rgba(0,0,0,0.4)" : "0 1px 2px rgba(255,255,255,0.35)",
+                  }}
+                >
+                  {game.GameOfWeek ? "🏈 We-Draft.com's Game of the Week 🏈" : "🏈 We-Draft.com's Featured Game"}
+                </span>
+              </div>
+            )}
 
             <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", gap: isMobile ? "12px" : "36px" }}>
               <TeamHeroSide key={`${game.id}-away`} school={game.Away} schoolData={awaySchool} isMobile={isMobile} dimmed={isFinal && homeWon} />
@@ -714,10 +1047,11 @@ export default function GamePage() {
               <div style={{ textAlign: "center", flexShrink: 0, paddingTop: isMobile ? "26px" : "58px" }}>
                 {isFinal ? (
                   <div style={{
-                    display: "flex", alignItems: "center", gap: isMobile ? "8px" : "14px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? "8px" : "14px",
                     background: "rgba(0,0,0,0.32)", border: "2px solid rgba(255,255,255,0.25)",
                     borderRadius: "14px", padding: isMobile ? "8px 14px" : "14px 26px",
                     boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
+                    width: "fit-content", margin: "0 auto",
                   }}>
                     <span style={{ fontSize: isMobile ? "28px" : "52px", fontWeight: 900, color: awayWon ? "#fff" : "rgba(255,255,255,0.45)", lineHeight: 1 }}>{game.AwayScore}</span>
                     <span style={{ fontSize: isMobile ? "14px" : "20px", fontWeight: 900, color: "rgba(255,255,255,0.3)" }}>–</span>
@@ -729,6 +1063,7 @@ export default function GamePage() {
                     background: "rgba(0,0,0,0.32)", border: `3px solid ${GOLD}`,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     boxShadow: "0 8px 22px rgba(0,0,0,0.4)",
+                    margin: "0 auto",
                   }}>
                     <span style={{ fontSize: isMobile ? "13px" : "22px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                       {game.Neutral ? "vs" : "at"}
@@ -738,55 +1073,99 @@ export default function GamePage() {
                 {game.Neutral && (
                   <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "8px" }}>Neutral Site</div>
                 )}
+                <button
+                  onClick={() => handleToggleHype(game.id)}
+                  disabled={hypeToggling}
+                  title={user ? (iHyped ? "Remove hype" : "Hype this game") : "Sign in to hype this game"}
+                  style={{
+                    marginTop: "14px", marginLeft: "auto", marginRight: "auto",
+                    width: "fit-content", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                    background: iHyped ? "linear-gradient(90deg, #ff6a00, #ffb347)" : "rgba(0,0,0,0.32)",
+                    border: `2px solid ${iHyped ? "#ffb347" : "rgba(255,255,255,0.35)"}`,
+                    borderRadius: "20px", padding: isMobile ? "6px 12px" : "7px 16px", cursor: hypeToggling ? "default" : "pointer",
+                    color: "#fff", fontWeight: 900, fontSize: isMobile ? "11px" : "13px",
+                    boxShadow: iHyped ? "0 4px 14px rgba(255,106,0,0.45)" : "0 4px 10px rgba(0,0,0,0.3)",
+                    opacity: hypeToggling ? 0.7 : 1, transition: "background 0.15s, box-shadow 0.15s",
+                  }}
+                >
+                  <span>🔥</span>
+                  <span>{iHyped ? "Hyped" : "Hype"}</span>
+                  <span style={{ color: iHyped ? "#3a1200" : "rgba(255,255,255,0.7)" }}>{hypeCount}</span>
+                </button>
+
+                {/* Fans-predict snapshot — the same average score + win-split
+                    bar the Community Picks card below computes, surfaced
+                    here too so the excitement (and the pulse of what
+                    everyone's calling it) is visible without scrolling. */}
+                {pickCount > 0 && (
+                  <div style={{
+                    marginTop: "14px", marginLeft: "auto", marginRight: "auto",
+                    width: "fit-content", background: "rgba(0,0,0,0.32)", border: "2px solid rgba(255,255,255,0.25)",
+                    borderRadius: "10px", padding: isMobile ? "8px 12px" : "10px 16px",
+                    minWidth: isMobile ? "130px" : "170px", boxShadow: "0 6px 16px rgba(0,0,0,0.3)",
+                  }}>
+                    <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.1em", textAlign: "center", marginBottom: "6px" }}>
+                      Fans Predict
+                    </div>
+                    {scoredPicks.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: "8px", marginBottom: "8px" }}>
+                        <span style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: awayWinPct >= homeWinPct ? "#fff" : "rgba(255,255,255,0.5)", lineHeight: 1 }}>{avgAwayScore}</span>
+                        <span style={{ fontSize: "13px", fontWeight: 900, color: "rgba(255,255,255,0.4)" }}>–</span>
+                        <span style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: homeWinPct > awayWinPct ? "#fff" : "rgba(255,255,255,0.5)", lineHeight: 1 }}>{avgHomeScore}</span>
+                      </div>
+                    )}
+                    <div style={{ display: "flex", height: "7px", borderRadius: "5px", overflow: "hidden", background: "rgba(255,255,255,0.15)" }}>
+                      <div style={{ width: `${awayWinPct}%`, background: awayColor }} />
+                      <div style={{ width: `${homeWinPct}%`, background: homeColor }} />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <TeamHeroSide key={`${game.id}-home`} school={game.Home} schoolData={homeSchool} isMobile={isMobile} dimmed={isFinal && awayWon} />
             </div>
-          </div>
-          <div style={{ height: "3px", background: GOLD }} />
 
-          {/* Body */}
-          <div style={{ background: "#fff", padding: isMobile ? "20px 16px" : "32px 32px" }}>
-
-            {/* Notes — relabeled Preview/Recap depending on game state, styled
-                as a pulled-quote card (colored spine + icon) rather than a
-                flat gray box. */}
+            {/* The admin-written Preview/Recap (game.Notes) — used to live
+                far down the page below Community Picks; now sits right in
+                the hero, above Key Players/Top Performances, restyled as a
+                translucent glass card so it reads as part of the same dark
+                graphic instead of a plain white box further down. */}
             {game.Notes && (
-              <div style={{ marginBottom: "28px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
-                  <span style={{ fontSize: "17px" }}>{isFinal ? "📰" : "🔮"}</span>
-                  <span style={{ fontSize: "13px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "26px" : "40px", maxWidth: "700px", marginLeft: "auto", marginRight: "auto" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "10px" }}>
+                  <span style={{ fontSize: "15px" }}>{isFinal ? "📰" : "🔮"}</span>
+                  <span style={{ color: "#fff", fontSize: isMobile ? "11px" : "13px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 5px rgba(0,0,0,0.4)" }}>
                     {isFinal ? "The Recap" : "The Preview"}
                   </span>
                 </div>
                 <div style={{
                   fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 700,
-                  fontSize: isMobile ? "14.5px" : "16.5px", letterSpacing: "0.01em",
-                  lineHeight: 1.6, color: "#161616", whiteSpace: "pre-wrap", wordWrap: "break-word",
-                  background: "#fff", borderLeft: `4px solid ${GOLD}`, borderRadius: "4px 10px 10px 4px",
-                  padding: isMobile ? "16px 18px" : "20px 26px",
-                  boxShadow: "0 4px 16px rgba(0,0,0,0.07)",
+                  fontSize: isMobile ? "13.5px" : "15px", letterSpacing: "0.01em",
+                  lineHeight: 1.6, color: "#fff", whiteSpace: "pre-wrap", wordWrap: "break-word",
+                  background: "rgba(0,0,0,0.32)", border: "2px solid rgba(255,255,255,0.25)",
+                  borderLeft: `4px solid ${GOLD}`, borderRadius: "4px 10px 10px 4px",
+                  padding: isMobile ? "14px 16px" : "18px 24px",
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.3)",
                 }}>
                   {game.Notes}
                 </div>
               </div>
             )}
 
-            {/* Key Players (pregame) or Top Performances (final) — never both,
-                and pregame the whole section steps aside if nobody's been
-                picked for either side yet (see showKeyPlayersSection above). */}
+            {/* Key Players (pregame) or Top Performances (final) — living
+                right in the hero, below the big logos, instead of stacked
+                far down the page under Notes, so this shows up as part of
+                the same matchup graphic rather than a separate section a
+                visitor might never scroll to. */}
             {showKeyPlayersSection && (
-              <>
-                <div style={{ marginBottom: "10px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+              <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "18px" : "24px" }}>
+                <div style={{ textAlign: "center", marginBottom: "14px" }}>
+                  <span style={{ color: "#fff", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 6px rgba(0,0,0,0.5)" }}>
                     {isFinal ? "Top Performances" : "Key Players"}
-                  </div>
-                  <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-                  <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+                  </span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "24px" : "32px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "16px" : "24px" }}>
                   <TeamColumn
-                    tag="Away"
                     schoolData={awaySchool}
                     keyPlayers={keyPlayersAway}
                     performances={performancesAway}
@@ -794,7 +1173,6 @@ export default function GamePage() {
                     keyPlayerNotes={game.KeyPlayerNotes}
                   />
                   <TeamColumn
-                    tag="Home"
                     schoolData={homeSchool}
                     keyPlayers={keyPlayersHome}
                     performances={performancesHome}
@@ -802,8 +1180,370 @@ export default function GamePage() {
                     keyPlayerNotes={game.KeyPlayerNotes}
                   />
                 </div>
-              </>
+              </div>
             )}
+          </div>
+          <div style={{ height: "3px", background: GOLD }} />
+
+          {/* Body */}
+          <div style={{ background: "#fff", padding: isMobile ? "20px 16px" : "32px 32px" }}>
+
+            {/* Make Your Pick — predict the score, optionally leave a note,
+                public or private. Locked pre-Monday (or once Final) unless
+                an admin has forced it open (see AdminPanel.js). */}
+            <div ref={pickFormRef} style={{ marginBottom: "28px" }}>
+              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden", boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}>
+                <div style={{ background: `linear-gradient(90deg, ${BLUE}, #003d82)`, padding: "12px 18px" }}>
+                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                    🔮 Make Your Pick
+                  </div>
+                </div>
+                <div style={{ height: "3px", background: GOLD }} />
+
+                {/* Body sits on the same team-color/dark-overlay gradient and
+                    drifting field texture as the hero above, instead of a
+                    flat white panel, so the pick form reads as part of the
+                    same charged matchup graphic rather than a bland utility
+                    box bolted on underneath it. */}
+                <div style={{
+                  position: "relative", overflow: "hidden",
+                  background: [
+                    "linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))",
+                    `linear-gradient(90deg, ${awayColor} 0%, ${awayColor} 30%, ${homeColor} 70%, ${homeColor} 100%)`,
+                  ].join(", "),
+                  padding: isMobile ? "20px 16px" : "28px 32px",
+                }}>
+                  <div aria-hidden="true" style={{
+                    position: "absolute", inset: "-20%", zIndex: 0, pointerEvents: "none",
+                    background: "repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 2px, transparent 2px, transparent 40px)",
+                    animation: "wdFieldDrift 20s linear infinite",
+                  }} />
+                  <div style={{ position: "relative", zIndex: 1 }}>
+                  {!user ? (
+                    <div style={{ textAlign: "center" }}>
+                      <p style={{ fontSize: "14px", fontWeight: 700, color: "#fff", marginBottom: "14px", textShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>
+                        Sign in to predict the score of this game.
+                      </p>
+                      <button
+                        onClick={login}
+                        style={{ background: GOLD, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "11px 26px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}
+                      >
+                        Sign In
+                      </button>
+                    </div>
+                  ) : isFinal ? (
+                    <div style={{ textAlign: "center", color: "rgba(255,255,255,0.85)", fontStyle: "italic", fontSize: "13px" }}>
+                      Picks are closed — this game is final.
+                      {myPick && (
+                        <div style={{ marginTop: "10px", fontStyle: "normal", fontWeight: 800, color: "#fff" }}>
+                          {myPick.awayScore != null && myPick.homeScore != null
+                            ? `Your pick: ${game.Away} ${myPick.awayScore} – ${game.Home} ${myPick.homeScore}`
+                            : `Your pick: ${pickedSideOf(myPick) === "away" ? game.Away : pickedSideOf(myPick) === "home" ? game.Home : "—"} to win`}
+                        </div>
+                      )}
+                    </div>
+                  ) : picksLocked ? (
+                    <div style={{ textAlign: "center", color: "rgba(255,255,255,0.85)", fontStyle: "italic", fontSize: "13px" }}>
+                      Pick this game starting {new Date(picksOpenAtMs).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}.
+                    </div>
+                  ) : (
+                    <>
+                      {/* Score prediction vs. just calling the winner — two
+                          different, mutually exclusive shapes of pick (see
+                          pickMode/handleSavePick), toggled here rather than
+                          being two separate forms. */}
+                      <div style={{ display: "flex", justifyContent: "center", gap: "10px", marginBottom: "20px" }}>
+                        {[["score", "🔢 Predict the Score"], ["winner", "✅ Just Pick a Winner"]].map(([key, label]) => (
+                          <button
+                            key={key}
+                            onClick={() => setPickMode(key)}
+                            style={{
+                              background: pickMode === key ? GOLD : "rgba(0,0,0,0.32)",
+                              color: pickMode === key ? "#fff" : "rgba(255,255,255,0.75)",
+                              border: `2px solid ${pickMode === key ? GOLD : "rgba(255,255,255,0.35)"}`,
+                              borderRadius: "20px", padding: isMobile ? "7px 14px" : "8px 18px", cursor: "pointer",
+                              fontWeight: 900, fontSize: isMobile ? "11px" : "13px",
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {pickMode === "score" ? (
+                        /* Teams stack vertically right on the hero-style
+                           background, left-aligned (away first, home second)
+                           instead of sitting in their own white cards — the
+                           only white left in this whole form is the score
+                           inputs themselves and the textarea below. Names get
+                           flex:1 + ellipsis (never wrap to a second line) so
+                           both rows' score inputs land at the exact same x
+                           position regardless of name length. */
+                        <div style={{ display: "flex", flexDirection: "column", gap: "18px", maxWidth: isMobile ? "100%" : "600px", margin: "0 auto 22px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                            {awaySchool?.Logo1 && (
+                              <img src={sanitizeUrl(awaySchool.Logo1)} alt={game.Away} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
+                            )}
+                            <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#fff", fontWeight: 900, fontSize: isMobile ? "17px" : "26px", textTransform: "uppercase", letterSpacing: "0.01em", textShadow: "0 2px 6px rgba(0,0,0,0.5)", lineHeight: 1.05 }}>{game.Away}</span>
+                            <input
+                              type="number" min="0" inputMode="numeric" value={pickAway}
+                              onChange={(e) => setPickAway(e.target.value)}
+                              className="wd-no-spinner"
+                              style={{ width: "72px", flexShrink: 0, textAlign: "center", fontSize: "28px", fontWeight: 900, border: `2px solid ${awayColor}`, borderRadius: "8px", padding: "6px", color: awayColor, outline: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.35)" }}
+                            />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                            {homeSchool?.Logo1 && (
+                              <img src={sanitizeUrl(homeSchool.Logo1)} alt={game.Home} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
+                            )}
+                            <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#fff", fontWeight: 900, fontSize: isMobile ? "17px" : "26px", textTransform: "uppercase", letterSpacing: "0.01em", textShadow: "0 2px 6px rgba(0,0,0,0.5)", lineHeight: 1.05 }}>{game.Home}</span>
+                            <input
+                              type="number" min="0" inputMode="numeric" value={pickHome}
+                              onChange={(e) => setPickHome(e.target.value)}
+                              className="wd-no-spinner"
+                              style={{ width: "72px", flexShrink: 0, textAlign: "center", fontSize: "28px", fontWeight: 900, border: `2px solid ${homeColor}`, borderRadius: "8px", padding: "6px", color: homeColor, outline: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.35)" }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        /* Winner-only — no score fields at all, just two big
+                           tappable team cards; the selected one gets a solid
+                           gold border/fill so the choice reads at a glance. */
+                        <div style={{ display: "flex", gap: isMobile ? "10px" : "16px", justifyContent: "center", marginBottom: "22px", flexWrap: "wrap" }}>
+                          {[["away", game.Away, awaySchool, awayColor], ["home", game.Home, homeSchool, homeColor]].map(([side, name, schoolData, color]) => (
+                            <button
+                              key={side}
+                              onClick={() => setPickWinnerSide(side)}
+                              style={{
+                                flex: "1 1 150px", maxWidth: "220px", display: "flex", flexDirection: "column", alignItems: "center",
+                                gap: "8px", padding: isMobile ? "16px 12px" : "20px 16px", borderRadius: "14px", cursor: "pointer",
+                                background: pickWinnerSide === side ? color : "rgba(0,0,0,0.32)",
+                                border: `3px solid ${pickWinnerSide === side ? GOLD : "rgba(255,255,255,0.3)"}`,
+                                boxShadow: pickWinnerSide === side ? "0 6px 18px rgba(0,0,0,0.4)" : "none",
+                                transition: "background 0.15s, border-color 0.15s",
+                              }}
+                            >
+                              {schoolData?.Logo1 && (
+                                <img src={sanitizeUrl(schoolData.Logo1)} alt={name} style={{ width: "48px", height: "48px", objectFit: "contain" }} />
+                              )}
+                              <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", textShadow: "0 2px 4px rgba(0,0,0,0.5)" }}>
+                                {name}
+                              </span>
+                              {pickWinnerSide === side && (
+                                <span style={{ color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em" }}>✓ Selected</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <textarea
+                        value={pickText}
+                        onChange={(e) => setPickText(e.target.value)}
+                        placeholder="Why do you like this pick? Call out the key matchup, a player to watch, anything. (optional)"
+                        rows={4}
+                        style={{ width: "100%", border: "none", borderRadius: "10px", padding: "14px 16px", fontFamily: "inherit", fontSize: "14px", fontWeight: 600, marginBottom: "16px", boxSizing: "border-box", resize: "vertical", outline: "none", lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.3)" }}
+                      />
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", background: "rgba(0,0,0,0.32)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "10px", padding: "14px 16px" }}>
+                        <div>
+                          <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Visibility</div>
+                          <select
+                            value={pickVisibility}
+                            onChange={(e) => setPickVisibility(e.target.value)}
+                            style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "9px 12px", fontWeight: 800, fontSize: "12px", color: BLUE, outline: "none", background: "#fff" }}
+                          >
+                            <option value="public">🌍 Public — shown in Community Picks</option>
+                            <option value="private">🔒 Private — counts, name hidden</option>
+                          </select>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                          {/* Same star-equivalent as We-Pick's My Picks tab
+                              (handleToggleRanked) — only shown once there's
+                              an actual pick to flag, never for a game an
+                              admin's disqualified from Ranked entirely. */}
+                          {myPick && !game.RankedDisqualified && (
+                            <button
+                              onClick={() => handleToggleRanked(game.id)}
+                              disabled={rankedToggling}
+                              title={myPick.awayScore != null && myPick.homeScore != null
+                                ? (myPick.ranked ? "Counts toward Ranked — click to remove" : "Click to count this pick toward Ranked")
+                                : "Add a score to count this pick toward Ranked"}
+                              style={{
+                                display: "flex", alignItems: "center", gap: "6px",
+                                background: myPick.ranked ? GOLD : "rgba(255,255,255,0.12)",
+                                color: myPick.ranked ? "#fff" : "rgba(255,255,255,0.8)",
+                                border: `2px solid ${myPick.ranked ? GOLD : "rgba(255,255,255,0.35)"}`,
+                                borderRadius: "8px", padding: "11px 16px", fontWeight: 900, fontSize: "12px",
+                                cursor: rankedToggling ? "default" : "pointer", opacity: rankedToggling ? 0.6 : 1,
+                              }}
+                            >
+                              <span style={{ filter: myPick.ranked ? "none" : "grayscale(1) opacity(0.6)" }}>⭐</span>
+                              {myPick.ranked ? "Ranked" : "Count for Ranked"}
+                            </button>
+                          )}
+                          {myPick && (
+                            <button
+                              onClick={() => handleRemovePick(game.id)}
+                              disabled={pickRemoving}
+                              style={{ background: "#fff", color: "#c0392b", border: "2px solid #c0392b", borderRadius: "8px", padding: "11px 18px", fontWeight: 900, fontSize: "12px", cursor: pickRemoving ? "default" : "pointer", opacity: pickRemoving ? 0.6 : 1 }}
+                            >
+                              {pickRemoving ? "Removing…" : "Remove Pick"}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleSavePick(game.id)}
+                            disabled={pickSaving}
+                            style={{ background: GOLD, color: "#fff", border: "2px solid #fff", borderRadius: "8px", padding: "11px 24px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.04em", cursor: pickSaving ? "default" : "pointer", opacity: pickSaving ? 0.6 : 1, boxShadow: "0 4px 14px rgba(0,0,0,0.4)" }}
+                          >
+                            {pickSaving ? "Saving…" : myPick ? "Update Pick" : "Save Pick"}
+                          </button>
+                        </div>
+                      </div>
+                      {pickMessage && (
+                        <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: pickMessage.startsWith("Failed") || pickMessage.startsWith("Enter") ? "#ffb3a7" : "#8ef0a5", textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+                          {pickMessage}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Community Picks — aggregate score/win-split stats across
+                everyone's picks (private ones included in the numbers),
+                plus a feed of the public ones' names and notes. */}
+            <div ref={communityPicksRef} style={{ marginBottom: "28px" }}>
+              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
+                <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ color: GOLD, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    📊 We-Draft.com Community Picks
+                  </div>
+                  <div style={{ color: "#fff", background: "rgba(255,255,255,0.18)", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, padding: "5px 14px", borderRadius: "20px" }}>
+                    {pickCount} pick{pickCount !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <div style={{ height: "3px", background: GOLD }} />
+                <div style={{ padding: isMobile ? "16px" : "20px 24px" }}>
+                  {pickCount === 0 ? (
+                    <div style={{ textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+                      No picks yet — be the first to call it.
+                    </div>
+                  ) : (
+                    <>
+                      {/* Each side gets a card tinted/bordered in its own
+                          team color, with the community's favorite called
+                          out (colored score, colored card) instead of both
+                          sides rendering identically in flat site-blue —
+                          the logos make it instantly clear whose colors
+                          are whose, not just which name is on top. */}
+                      <div style={{ display: "flex", justifyContent: "center", textAlign: "center", marginBottom: "16px", flexWrap: "wrap", gap: isMobile ? "10px" : "16px" }}>
+                        <div style={{
+                          flex: "1 1 150px", maxWidth: "220px", padding: isMobile ? "14px 10px" : "16px 14px",
+                          borderRadius: "12px", background: awayWinPct >= homeWinPct ? `${awayColor}14` : "#fafafa",
+                          border: `2px solid ${awayWinPct >= homeWinPct ? awayColor : "#eee"}`,
+                        }}>
+                          {awaySchool?.Logo1 && (
+                            <img src={sanitizeUrl(awaySchool.Logo1)} alt="" style={{ width: "34px", height: "34px", objectFit: "contain", marginBottom: "6px" }} />
+                          )}
+                          <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#888", textTransform: "uppercase", marginBottom: "6px" }}>{game.Away}</div>
+                          {scoredPicks.length > 0 && (
+                            <div style={{ fontSize: isMobile ? "40px" : "48px", fontWeight: 900, color: awayColor, lineHeight: 1 }}>{avgAwayScore}</div>
+                          )}
+                          <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#666", marginTop: "6px" }}>{awayWinPct}% picked to win</div>
+                        </div>
+                        <div style={{
+                          flex: "1 1 150px", maxWidth: "220px", padding: isMobile ? "14px 10px" : "16px 14px",
+                          borderRadius: "12px", background: homeWinPct > awayWinPct ? `${homeColor}14` : "#fafafa",
+                          border: `2px solid ${homeWinPct > awayWinPct ? homeColor : "#eee"}`,
+                        }}>
+                          {homeSchool?.Logo1 && (
+                            <img src={sanitizeUrl(homeSchool.Logo1)} alt="" style={{ width: "34px", height: "34px", objectFit: "contain", marginBottom: "6px" }} />
+                          )}
+                          <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#888", textTransform: "uppercase", marginBottom: "6px" }}>{game.Home}</div>
+                          {scoredPicks.length > 0 && (
+                            <div style={{ fontSize: isMobile ? "40px" : "48px", fontWeight: 900, color: homeColor, lineHeight: 1 }}>{avgHomeScore}</div>
+                          )}
+                          <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#666", marginTop: "6px" }}>{homeWinPct}% picked to win</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", height: "10px", borderRadius: "6px", overflow: "hidden", marginBottom: "20px", background: "#eee" }}>
+                        <div style={{ width: `${awayWinPct}%`, background: awayColor }} />
+                        <div style={{ width: `${homeWinPct}%`, background: homeColor }} />
+                      </div>
+                      {publicPicks.length > 0 && (
+                        <div style={{ border: "1px solid #eee", borderRadius: "8px", overflow: "hidden" }}>
+                          {(picksExpanded ? publicPicks : publicPicks.slice(0, 5)).map((p, i, arr) => {
+                            const side = pickedSideOf(p);
+                            const pickedAway = side === "away";
+                            const pickedHome = side === "home";
+                            const isScored = p.awayScore != null && p.homeScore != null;
+                            const pickedLogo = pickedAway ? awaySchool?.Logo1 : pickedHome ? homeSchool?.Logo1 : null;
+                            return (
+                              <div key={p.id} style={{ padding: "14px", borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none", display: "flex", alignItems: "center", gap: "14px" }}>
+                                {/* Score (or, for a winner-only pick, just the
+                                    called team's short name) sits all the way
+                                    on the left, in a fixed-width column with
+                                    each number in its own fixed-width slot —
+                                    keeps the dash (and the digits themselves)
+                                    lined up in a straight column from row to
+                                    row instead of drifting with digit count.
+                                    The logo right next to it already
+                                    identifies the picked team, so no
+                                    team-name caption is needed underneath
+                                    anymore. */}
+                                <div style={{ flexShrink: 0, width: isMobile ? "78px" : "92px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  {isScored ? (
+                                    <div style={{ display: "flex", alignItems: "baseline" }}>
+                                      <span style={{ display: "inline-block", width: "36px", textAlign: "right", fontSize: "30px", fontWeight: 900, color: pickedAway ? awayColor : "#ccc", fontFamily: "'Courier New', monospace", lineHeight: 1 }}>{p.awayScore}</span>
+                                      <span style={{ display: "inline-block", width: "18px", textAlign: "center", fontSize: "17px", fontWeight: 700, color: "#ccc" }}>-</span>
+                                      <span style={{ display: "inline-block", width: "36px", textAlign: "left", fontSize: "30px", fontWeight: 900, color: pickedHome ? homeColor : "#ccc", fontFamily: "'Courier New', monospace", lineHeight: 1 }}>{p.homeScore}</span>
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.03em", color: pickedAway ? awayColor : pickedHome ? homeColor : "#ccc" }}>
+                                      {pickedAway ? (awaySchool?.Short || "Win") : pickedHome ? (homeSchool?.Short || "Win") : "—"}
+                                    </span>
+                                  )}
+                                </div>
+                                {pickedLogo ? (
+                                  <img src={sanitizeUrl(pickedLogo)} alt={pickedAway ? game.Away : game.Home} title={`Picks ${pickedAway ? game.Away : game.Home}`} style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} />
+                                ) : (
+                                  <div style={{ width: "34px", height: "34px", flexShrink: 0 }} />
+                                )}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span style={{ display: "flex", alignItems: "center", gap: "5px", fontWeight: 900, fontSize: "13px", color: BLUE }}>
+                                    {p.displayName || "Anonymous Fan"}
+                                    {verifiedByUid[p.id] && (
+                                      <img src={verifiedBadge} alt="Verified" title="Verified" style={{ width: "14px", height: "14px" }} />
+                                    )}
+                                  </span>
+                                  {p.prediction && (
+                                    <div style={{ fontSize: "12px", fontWeight: 600, color: "#666", marginTop: "4px", lineHeight: 1.4 }}>{p.prediction}</div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {publicPicks.length > 5 && (
+                        <button
+                          onClick={() => setPicksExpanded((p) => !p)}
+                          style={{
+                            display: "block", width: "100%", marginTop: "10px", background: "#fff", color: BLUE,
+                            border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "9px", cursor: "pointer",
+                            fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                          }}
+                        >
+                          {picksExpanded ? "Show Less ▲" : `Show All ${publicPicks.length} Picks ▼`}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
 
             {/* Footer */}
             <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: "2px solid #eee", display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: "10px" }}>
@@ -815,7 +1555,7 @@ export default function GamePage() {
         </div>
       </div>
 
-      <GameMarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} excludeGameId={game.id} />
+      <GameMarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} excludeGameId={game.id} gameWeek={game.Week} weekSlateUrl={weekSlateUrl} />
     </>
   );
 }
