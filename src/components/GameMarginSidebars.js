@@ -114,6 +114,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
   const [featuredGames, setFeaturedGames] = useState([]);
   const [newsItems, setNewsItems] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
+  const [channelsByName, setChannelsByName] = useState({});
   // This component renders after (below, in DOM order) the main content it
   // measures — anchorRef marks *this* component's own position so the
   // sidebar cards, positioned absolute beneath it, can be offset by the
@@ -177,6 +178,22 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
         snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data; });
         setSchoolsByName(map);
       } catch (e) { /* logos/short names are non-critical */ }
+    };
+    fetch();
+  }, [isMobile]);
+
+  // Channel name (schedule26's own game.Channel, set via CFB Schedule's "TV
+  // Channel" field) → { Short }, so the date/time line can show e.g. "ACCN"
+  // instead of the full "ACC Network" crowding a narrow sidebar row.
+  useEffect(() => {
+    if (isMobile) return;
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "tvChannels"));
+        const map = {};
+        snap.docs.forEach((d) => { const data = d.data(); if (data.Name) map[data.Name] = data; });
+        setChannelsByName(map);
+      } catch (e) { /* channel short names are non-critical */ }
     };
     fetch();
   }, [isMobile]);
@@ -323,6 +340,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
               const dateMs = toMs(g.Date);
               const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
               const timeStr = formatTime12h(g.Time);
+              const channelShort = g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : "";
 
               // Same stacked "bug" row (one line per team, logo+code fixed
               // on the left, score fixed on the right) as the Featured
@@ -359,7 +377,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                   {bugRow(home?.Short, g.Home, home?.Logo1, g.HomeScore, homeWon)}
                   {!played && (
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
-                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}
+                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}{channelShort ? ` · ${channelShort}` : ""}
                     </div>
                   )}
                 </Link>
@@ -448,6 +466,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
               const dateMs = toMs(g.Date);
               const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
               const timeStr = formatTime12h(g.Time);
+              const channelShort = g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : "";
 
               const bugRow = (short, school, logo, score, won) => (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
@@ -484,7 +503,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                   {bugRow(home?.Short, g.Home, home?.Logo1, g.HomeScore, homeWon)}
                   {!played && (
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
-                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}
+                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}{channelShort ? ` · ${channelShort}` : ""}
                     </div>
                   )}
                 </Link>

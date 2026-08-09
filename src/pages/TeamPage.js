@@ -1974,7 +1974,7 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile 
       boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
       background: [
         "linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.38))",
-        `linear-gradient(120deg, ${color1} 0%, ${color1} 60%, ${color2} 100%)`,
+        `linear-gradient(120deg, ${color1} 0%, ${color1} 40%, ${color2} 100%)`,
       ].join(", "),
       padding: isMobile ? "20px 16px" : "30px 32px",
     }}>

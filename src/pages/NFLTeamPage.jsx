@@ -358,7 +358,7 @@ export default function NFLTeamPage() {
           boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
           background: [
             "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4))",
-            `linear-gradient(120deg, ${c1} 0%, ${c1} 60%, ${c2} 100%)`,
+            `linear-gradient(120deg, ${c1} 0%, ${c1} 40%, ${c2} 100%)`,
           ].join(", "),
           padding: isMobile ? "22px 16px" : "34px 32px",
         }}>

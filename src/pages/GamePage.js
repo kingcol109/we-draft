@@ -125,11 +125,19 @@ const GRADE_GLOW_STYLE = `
     50%      { opacity: 1; }
   }
 
-  /* Key Player hover note — collapsed by default, expands under the row's
-     name when that row is hovered (see AdminPanel.js's per-player note
-     field in the CFB Schedule editor). */
-  .wd-keyplayer-note-wrap { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease; }
-  .wd-perf-row-link:hover .wd-keyplayer-note-wrap { max-height: 80px; opacity: 1; margin-top: 6px; }
+  /* Key Player hover note — the name+note stack sits in a fixed-height
+     box (sized up front to fit both states) so revealing the note never
+     changes the row's own height. Instead, hovering slides the name up
+     to the top of that box and fades the note in underneath it, all
+     within space that was already reserved — nothing below the row
+     shifts, unlike an in-flow max-height reveal (which used to push
+     every row down the moment the mouse landed, occasionally shoving
+     that row out from under the cursor and flickering the hover state
+     on/off in a loop). */
+  .wd-keyplayer-name-anim { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); transition: top 0.2s ease, transform 0.2s ease; }
+  .wd-perf-row-link:hover .wd-keyplayer-name-anim { top: 0; transform: translateY(0); }
+  .wd-keyplayer-note-wrap { position: absolute; left: 0; right: 0; top: 25px; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+  .wd-perf-row-link:hover .wd-keyplayer-note-wrap { opacity: 1; }
 
   /* Pick-form score inputs — plain number fields without the browser's
      up/down spinner clutter, since the field is big and tappable enough on
@@ -349,7 +357,7 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
     : null;
 
   const style = {
-    position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+    position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
     textDecoration: "none", flex: "1 1 0", minWidth: 0, width: 0,
     opacity: dimmed ? 0.55 : 1, transition: "opacity 0.3s ease",
   };
@@ -400,6 +408,29 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
           {(school || "?").charAt(0)}
         </div>
       )}
+
+      {/* Name + mascot, stacked under the logo — same zIndex:1 as the logo
+          so both sit above the backdrop wordmark, and part of the same
+          Link/div school wraps everything in below, so clicking the name
+          navigates to the team page exactly like clicking the logo does. */}
+      <div style={{ position: "relative", zIndex: 1, textAlign: "center", marginTop: "16px" }}>
+        <div style={{
+          fontSize: isMobile ? "18px" : "30px", fontWeight: 900, color: "#fff",
+          textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.15,
+          textShadow: "0 2px 6px rgba(0,0,0,0.5)",
+        }}>
+          {school}
+        </div>
+        {schoolData?.Mascot && (
+          <div style={{
+            fontSize: isMobile ? "13px" : "19px", fontWeight: 700, color: "rgba(255,255,255,0.75)",
+            textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "4px",
+            textShadow: "0 1px 4px rgba(0,0,0,0.4)",
+          }}>
+            {schoolData.Mascot}
+          </div>
+        )}
+      </div>
     </>
   );
 
@@ -477,9 +508,13 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
       ) : (
         keyPlayers.map((p, i) => {
           // A player's own flair badge (same asset/config as their profile
-          // page's hero) stands in for a plain rank number when they have
-          // one — falls back to the number for players without a flair set.
+          // page's hero) stands in for the team logo when they have one —
+          // falls back to the team's own logo (LogoBlack/Logo1, same
+          // light-background preference WePickHub.js uses, since this badge
+          // sits on white) for players without a flair set, and only drops
+          // to a bare rank number if the team has no logo on file either.
           const flairInfo = p.Flair ? FLAIR_CONFIG[String(p.Flair).trim()] : null;
+          const fallbackLogo = schoolData?.LogoBlack || schoolData?.Logo1 || "";
           const note = keyPlayerNotes?.[p.id];
           return (
             <Link
@@ -489,7 +524,6 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
               style={{
                 display: "flex", alignItems: "center", gap: "16px", padding: "16px 18px", textDecoration: "none",
                 borderBottom: i < keyPlayers.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
-                borderLeft: `4px solid ${accent2}`,
               }}
             >
               {flairInfo ? (
@@ -500,6 +534,15 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
                   display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
                 }} title={p.Flair}>
                   <img src={flairInfo.img} alt={p.Flair} style={{ height: "80%", width: "80%", objectFit: "contain" }} />
+                </div>
+              ) : fallbackLogo ? (
+                <div style={{
+                  flexShrink: 0, width: "46px", height: "46px", borderRadius: "10px",
+                  background: "#fff", border: `2px solid ${accent2}`,
+                  boxShadow: `0 0 12px ${accent2}66`,
+                  display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                }}>
+                  <img src={fallbackLogo} alt="" style={{ height: "78%", width: "78%", objectFit: "contain" }} />
                 </div>
               ) : (
                 <div style={{
@@ -512,16 +555,23 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
                 </div>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: "#fff", fontWeight: 900, fontSize: "19px", lineHeight: 1.2, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{p.First} {p.Last}</div>
-                {/* Admin-written note (AdminPanel.js's CFB Schedule editor) —
-                    collapsed until this row is hovered (see .wd-keyplayer-note-wrap
-                    in GRADE_GLOW_STYLE), so the list stays compact by default. */}
-                {note && (
-                  <div className="wd-keyplayer-note-wrap">
-                    <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 600, fontSize: "12.5px", lineHeight: 1.4, fontStyle: "italic" }}>
-                      {note}
+                {note ? (
+                  // Admin-written note (AdminPanel.js's CFB Schedule editor) —
+                  // this box's height is fixed up front to fit both states, so
+                  // hovering just slides the name to the top of it and fades
+                  // the note in underneath, without changing the row's height.
+                  <div style={{ position: "relative", height: "50px" }}>
+                    <div className="wd-keyplayer-name-anim" style={{ color: "#fff", fontWeight: 900, fontSize: "19px", lineHeight: 1.2, textShadow: "0 1px 3px rgba(0,0,0,0.4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p.First} {p.Last}
+                    </div>
+                    <div className="wd-keyplayer-note-wrap">
+                      <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 600, fontSize: "12.5px", lineHeight: 1.4, fontStyle: "italic", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                        {note}
+                      </div>
                     </div>
                   </div>
+                ) : (
+                  <div style={{ color: "#fff", fontWeight: 900, fontSize: "19px", lineHeight: 1.2, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{p.First} {p.Last}</div>
                 )}
               </div>
               <span style={{
@@ -545,6 +595,13 @@ export default function GamePage() {
   const [game, setGame] = useState(null);
   const [awaySchool, setAwaySchool] = useState(null);
   const [homeSchool, setHomeSchool] = useState(null);
+  // The broadcasting channel's logo (looked up by Name — see
+  // CFBScheduleSection's own "TV Channel" field in AdminPanel.js), shown
+  // under the at/vs button in the hero. null until game.Channel resolves
+  // and its own fetch (below) finds a match; no channel set at all just
+  // means this stays null forever, which the hero already treats as
+  // "nothing to show" the same way it does for a missing school logo.
+  const [channelLogo, setChannelLogo] = useState(null);
   const [keyPlayersAway, setKeyPlayersAway] = useState([]);
   const [keyPlayersHome, setKeyPlayersHome] = useState([]);
   const [performancesAway, setPerformancesAway] = useState([]);
@@ -650,6 +707,28 @@ export default function GamePage() {
     };
     fetch();
   }, [slug]);
+
+  // Broadcasting channel's logo — a separate, independent lookup from the
+  // main fetch above rather than folded into it, since it only ever
+  // depends on game.Channel (itself only known once that fetch resolves)
+  // and most games won't have one set at all.
+  useEffect(() => {
+    if (!game?.Channel) { setChannelLogo(null); return; }
+    let cancelled = false;
+    const loadChannel = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "tvChannels"), where("Name", "==", game.Channel)));
+        if (cancelled) return;
+        const data = snap.docs[0]?.data();
+        setChannelLogo(data?.LogoDark || data?.Logo || null);
+      } catch (e) {
+        console.error("Channel logo fetch error:", e);
+        if (!cancelled) setChannelLogo(null);
+      }
+    };
+    loadChannel();
+    return () => { cancelled = true; };
+  }, [game?.Channel]);
 
   // Seeds the pick form from the signed-in user's own existing pick (if
   // any) once both are known — user/profile resolve from AuthContext on
@@ -862,7 +941,15 @@ export default function GamePage() {
   const kickoffPassed = kickoffAtMs != null && Date.now() >= kickoffAtMs;
   const picksLocked = !isFinal && (kickoffPassed || (game.Week !== "Week 0" && !game.PicksForceOpen && !picksDateReached));
   const myPick = user ? picks.find((p) => p.id === user.uid) : null;
+  // Picks with an actual written prediction lead the feed — those are the
+  // ones worth reading, not just a bare score/winner call — then verified
+  // pickers within each of those groups (the layer that was already here),
+  // then most-recently-updated as the final tiebreaker.
   const publicPicks = picks.filter((p) => p.visibility === "public").sort((a, b) => {
+    const aHasDesc = !!a.prediction?.trim();
+    const bHasDesc = !!b.prediction?.trim();
+    if (aHasDesc && !bHasDesc) return -1;
+    if (!aHasDesc && bHasDesc) return 1;
     const aVerified = !!verifiedByUid[a.id];
     const bVerified = !!verifiedByUid[b.id];
     if (aVerified && !bVerified) return -1;
@@ -890,13 +977,18 @@ export default function GamePage() {
   const weekSlateLabel = game.Week ? `← ${game.Week} Slate` : "← Full Schedule";
 
   const canonicalUrl = `https://we-draft.com/game/${game.Slug}`;
-  const seoTitle = isFinal
-    ? `Final: ${game.Away} ${game.AwayScore}, ${game.Home} ${game.HomeScore} | We-Draft`
-    : `${game.Away} at ${game.Home} — ${game.Week || "Preview"} | We-Draft`;
-  const seoDescription = (game.Notes || "").replace(/\s+/g, " ").trim().slice(0, 160)
-    || (isFinal
-      ? `${game.Away} ${game.AwayScore}, ${game.Home} ${game.HomeScore} — final score, top prospect performances, and more on We-Draft.com.`
-      : `${game.Away} at ${game.Home} preview — key draft prospects to watch on We-Draft.com.`);
+  const seoTitle = `${game.Away} vs ${game.Home} | Football Game Predictions, Where to Watch, and Key Players`;
+  // Date (+ kickoff time, pregame only — a final game's "at 7:00 PM" reads
+  // stale once it's over) always leads, then whatever prediction content
+  // actually exists: the community's own aggregate picks if there are any,
+  // else a plain nudge to go look at (or make) one, per the "we haven't
+  // graded this yet" instruction rather than inventing numbers.
+  const seoDateTime = dateStr ? (!isFinal && timeStr ? `${dateStr} at ${timeStr}` : dateStr) : "";
+  const seoPredictedWinner = awayWinPct > homeWinPct ? game.Away : homeWinPct > awayWinPct ? game.Home : null;
+  const seoPredictionSummary = pickCount > 0
+    ? `The We-Draft community${seoPredictedWinner ? ` favors ${seoPredictedWinner}` : ""}${avgAwayScore != null && avgHomeScore != null ? `, projecting a final score of ${game.Away} ${avgAwayScore}–${game.Home} ${avgHomeScore}` : ""} across ${pickCount} prediction${pickCount === 1 ? "" : "s"}.`
+    : "See the community's score predictions for this game, or make your own prediction and share your scouting notes on We-Draft.com.";
+  const seoDescription = `${seoDateTime ? `${seoDateTime}. ` : ""}${seoPredictionSummary}`;
 
   return (
     <>
@@ -987,7 +1079,9 @@ export default function GamePage() {
               seam — a hard vertical line down the middle is exactly what
               read as "the page split in half" instead of one banner (the
               dark overlay keeps white text/logos legible no matter how
-              light either team's color happens to be). */}
+              light either team's color happens to be). Each team's own
+              Color2 used to also glow in from that side's own two corners,
+              but that's been dropped — just the plain Color1 blend now. */}
           <div style={{
             position: "relative", overflow: "hidden",
             background: [
@@ -1041,7 +1135,14 @@ export default function GamePage() {
               </div>
             )}
 
-            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", gap: isMobile ? "12px" : "36px" }}>
+            {/* alignItems: stretch (not flex-start) so each TeamHeroSide
+                column takes the full row height — its own justifyContent:
+                "center" then centers the logo+name+mascot block within
+                that instead of it sitting pinned to the top with empty
+                space below. The center column's own content still just
+                stacks from the top via its paddingTop, unaffected by
+                being stretched taller. */}
+            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "stretch", justifyContent: "center", gap: isMobile ? "12px" : "36px" }}>
               <TeamHeroSide key={`${game.id}-away`} school={game.Away} schoolData={awaySchool} isMobile={isMobile} dimmed={isFinal && homeWon} />
 
               <div style={{ textAlign: "center", flexShrink: 0, paddingTop: isMobile ? "26px" : "58px" }}>
@@ -1072,6 +1173,18 @@ export default function GamePage() {
                 )}
                 {game.Neutral && (
                   <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "8px" }}>Neutral Site</div>
+                )}
+                {/* Broadcasting channel — set via CFB Schedule's "TV Channel"
+                    field, logo managed in Misc Branding (see channelLogo's
+                    own fetch above). Sits between the at/vs button and Hype,
+                    never both final-score-box and channel logo competing for
+                    the same slot since this renders regardless of isFinal. */}
+                {channelLogo && (
+                  <img
+                    src={sanitizeUrl(channelLogo)} alt={game.Channel} title={game.Channel}
+                    style={{ height: isMobile ? "68px" : "100px", maxWidth: isMobile ? "240px" : "340px", objectFit: "contain", margin: "10px auto 0", display: "block", filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.4))" }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
                 )}
                 <button
                   onClick={() => handleToggleHype(game.id)}
@@ -1281,8 +1394,8 @@ export default function GamePage() {
                            position regardless of name length. */
                         <div style={{ display: "flex", flexDirection: "column", gap: "18px", maxWidth: isMobile ? "100%" : "600px", margin: "0 auto 22px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                            {awaySchool?.Logo1 && (
-                              <img src={sanitizeUrl(awaySchool.Logo1)} alt={game.Away} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
+                            {(awaySchool?.LogoDark || awaySchool?.Logo1) && (
+                              <img src={sanitizeUrl(awaySchool.LogoDark || awaySchool.Logo1)} alt={game.Away} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
                             )}
                             <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#fff", fontWeight: 900, fontSize: isMobile ? "17px" : "26px", textTransform: "uppercase", letterSpacing: "0.01em", textShadow: "0 2px 6px rgba(0,0,0,0.5)", lineHeight: 1.05 }}>{game.Away}</span>
                             <input
@@ -1293,8 +1406,8 @@ export default function GamePage() {
                             />
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                            {homeSchool?.Logo1 && (
-                              <img src={sanitizeUrl(homeSchool.Logo1)} alt={game.Home} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
+                            {(homeSchool?.LogoDark || homeSchool?.Logo1) && (
+                              <img src={sanitizeUrl(homeSchool.LogoDark || homeSchool.Logo1)} alt={game.Home} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
                             )}
                             <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#fff", fontWeight: 900, fontSize: isMobile ? "17px" : "26px", textTransform: "uppercase", letterSpacing: "0.01em", textShadow: "0 2px 6px rgba(0,0,0,0.5)", lineHeight: 1.05 }}>{game.Home}</span>
                             <input
@@ -1323,8 +1436,8 @@ export default function GamePage() {
                                 transition: "background 0.15s, border-color 0.15s",
                               }}
                             >
-                              {schoolData?.Logo1 && (
-                                <img src={sanitizeUrl(schoolData.Logo1)} alt={name} style={{ width: "48px", height: "48px", objectFit: "contain" }} />
+                              {(schoolData?.LogoDark || schoolData?.Logo1) && (
+                                <img src={sanitizeUrl(schoolData.LogoDark || schoolData.Logo1)} alt={name} style={{ width: "48px", height: "48px", objectFit: "contain" }} />
                               )}
                               <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", textShadow: "0 2px 4px rgba(0,0,0,0.5)" }}>
                                 {name}
@@ -1426,9 +1539,14 @@ export default function GamePage() {
                 <div style={{ height: "3px", background: GOLD }} />
                 <div style={{ padding: isMobile ? "16px" : "20px 24px" }}>
                   {pickCount === 0 ? (
-                    <div style={{ textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
-                      No picks yet — be the first to call it.
-                    </div>
+                    // "Be the first to call it" is an invitation to act — not
+                    // one worth making while picks aren't even open yet (the
+                    // pick form above already explains when they will be).
+                    picksLocked ? null : (
+                      <div style={{ textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+                        No picks yet — be the first to call it.
+                      </div>
+                    )
                   ) : (
                     <>
                       {/* Each side gets a card tinted/bordered in its own

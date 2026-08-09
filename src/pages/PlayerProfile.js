@@ -69,71 +69,23 @@ function sanitizeUrl(url) {
   return u;
 }
 
-// Every school's Wordmark is exported at the same canvas size, but the
-// actual logotype fills wildly different fractions of that canvas from one
-// school to the next — at a shared display height with no further work, a
-// tightly-cropped wordmark reads much bigger than one sitting in a sea of
-// transparent padding (same fix as GamePage.js's team-hero wordmarks, here
-// for the hover "team page" tooltip on the college/NFL logo boxes). Shows
-// the untouched original immediately, then swaps in the trimmed version
-// once the canvas scan finishes (or leaves the original in place if the
-// read fails, e.g. a non-CORS-friendly host).
-function useTrimmedImage(url) {
-  const [src, setSrc] = useState(url || null);
-
-  useEffect(() => {
-    if (!url) { setSrc(null); return; }
-    setSrc(url);
-    let cancelled = false;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      if (cancelled) return;
-      try {
-        const w = img.naturalWidth, h = img.naturalHeight;
-        if (!w || !h) return;
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        const { data } = ctx.getImageData(0, 0, w, h);
-        const ALPHA_THRESHOLD = 12;
-        let top = h, bottom = -1, left = w, right = -1;
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            if (data[(y * w + x) * 4 + 3] > ALPHA_THRESHOLD) {
-              if (y < top) top = y;
-              if (y > bottom) bottom = y;
-              if (x < left) left = x;
-              if (x > right) right = x;
-            }
-          }
-        }
-        if (right < left || bottom < top) return; // fully transparent — keep original
-        const cropW = right - left + 1, cropH = bottom - top + 1;
-        if (cropW === w && cropH === h) return; // already tight — nothing to gain
-        const out = document.createElement("canvas");
-        out.width = cropW;
-        out.height = cropH;
-        out.getContext("2d").drawImage(canvas, left, top, cropW, cropH, 0, 0, cropW, cropH);
-        if (!cancelled) setSrc(out.toDataURL("image/png"));
-      } catch (e) { /* CORS-tainted canvas or decode failure — keep the untrimmed original */ }
-    };
-    // sanitizeImgur only rewrites extension-less imgur.com links (single-image
-    // share URLs) to the CORS-friendly i.imgur.com CDN — most Wordmark values
-    // are already full "imgur.com/xxxx.png" URLs, which its regex doesn't
-    // match, so the canvas read still needs its own rewrite here regardless
-    // of what the caller already sanitized.
-    img.src = url.replace(/^(https?:\/\/)imgur\.com\//i, "$1i.imgur.com/");
-    return () => { cancelled = true; };
-  }, [url]);
-
-  return src;
-}
-
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
+
+// Same drift/spotlight treatment as TeamPage.js's and GamePage.js's own
+// heroes (each page injects its own copy since CSS-in-JS here is scoped
+// per-component, not shared) — gives the player hero panel below the same
+// "family" feel as those two instead of the old flat color1 bar.
+const PLAYER_HERO_STYLE = `
+  @keyframes wdPlayerHeroDrift {
+    0%   { transform: translate(0, 0); }
+    100% { transform: translate(-80px, -46px); }
+  }
+  @keyframes wdPlayerHeroSpotlight {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+  }
+`;
 
 // ── Flair → { image, stroke color } config. The image renders in the
 // right-side hero logo square (replacing the second school/CFB logo) and
@@ -338,12 +290,7 @@ export default function PlayerProfile() {
   const [visibleVideoCount, setVisibleVideoCount] = useState(3);
   const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
-  // Auto-trimmed wordmarks for the hover "team page" tooltips below — see
-  // useTrimmedImage's comment for why this is needed.
-  const trimmedWordmark = useTrimmedImage(branding?.wordmark ? sanitizeUrl(branding.wordmark) : null);
-  const trimmedCfbWordmark = useTrimmedImage(branding?.cfbWordmark ? sanitizeUrl(branding.cfbWordmark) : null);
   const cfbLogoRef = useRef("");
-  const cfbWordmarkRef = useRef("");
   const schoolSlugRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [evalCount, setEvalCount] = useState(0);
@@ -377,11 +324,12 @@ export default function PlayerProfile() {
   // (MyFeed.js) can list a user's own follows without a collection-group scan.
   const [following, setFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
-  // Right-side hero box (flair badge, or team logo when there's no flair) and
-  // left-side hero box (school/NFL logo) each "grow" into their own popup on
-  // hover/tap rather than showing a separate floating tooltip card.
+  // Right-side hero box (flair badge, or team logo when there's no flair)
+  // "grows" into its own popup on hover/tap rather than showing a separate
+  // floating tooltip card. The left-side school/NFL logo used to have the
+  // same treatment, but now lives as a full-opacity background layer in the
+  // hero instead of a foreground box, so it has no hover state of its own.
   const [showRightBoxTip, setShowRightBoxTip] = useState(false);
-  const [showLeftBoxTip, setShowLeftBoxTip] = useState(false);
   const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
   const [showBreakoutTip, setShowBreakoutTip] = useState(false);
   const [showTrendUpTip, setShowTrendUpTip] = useState(false);
@@ -765,10 +713,13 @@ export default function PlayerProfile() {
         const sSnap = await getDoc(doc(db,"schools",player.School));
         if (sSnap.exists()) {
           const b = sSnap.data();
-          cfbLogoRef.current = b.Logo1 || b.Logo2 || "";
-          cfbWordmarkRef.current = b.Wordmark || "";
+          // Dark variant preferred — this now feeds a full-opacity
+          // background layer in the drafted-player hero (see heroCollegeLogo
+          // below), not a small box on a light card, so it needs the same
+          // dark-background-friendly mark as the NFL logo beside it.
+          cfbLogoRef.current = b.LogoDark || b.Logo2 || b.Logo1 || "";
           schoolSlugRef.current = b.Slug || "";
-          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logo2:b.Logo2||"", wordmark:b.Wordmark||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
+          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logoDark:b.LogoDark||"", wordmark:b.Wordmark||"", wordmarkDark:b.WordmarkDark||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
         } else { setBranding(null); }
       } catch(e) { setBranding(null); }
       finally {
@@ -790,7 +741,7 @@ export default function PlayerProfile() {
         const snap = await getDoc(doc(db,"nfl",draftedBy));
         if (snap.exists()) {
           const n = snap.data();
-          setBranding({ color1:n.Color1, color2:n.Color2, nflLogo:n.Logo1, cfbLogo:cfbLogoRef.current, cfbWordmark:cfbWordmarkRef.current, slug:schoolSlugRef.current });
+          setBranding({ color1:n.Color1, color2:n.Color2, nflLogo:n.Logo1, nflLogoDark:n.LogoDark||"", cfbLogo:cfbLogoRef.current, slug:schoolSlugRef.current });
         }
       } catch(e) { console.error(e); }
     };
@@ -1287,6 +1238,10 @@ useEffect(() => {
 
   // ── Flair lookup — drives the right-side hero logo square + its stroke ──
   const flairInfo = player.Flair ? FLAIR_CONFIG[String(player.Flair).trim()] : null;
+  // The right-side box is flair-only now — every other logo (team/NFL,
+  // college) lives in the hero's background instead (see heroLogo /
+  // heroCollegeLogo). No flair means no box at all, drafted or not.
+  const hasRightBoxContent = !!flairInfo;
 
   const buildMetaDescription = () => {
     const name = `${player.First || ""} ${player.Last || ""}`.trim();
@@ -1996,6 +1951,28 @@ useEffect(() => {
     </SidebarCard>
   );
 
+  // Giant faded watermark for the hero panel below — same "dark-background
+  // variant preferred" convention TeamPage.js/GamePage.js use for their own
+  // hero wordmarks. Drafted players drop it entirely — with the NFL logo
+  // and college logo both already sitting in the background (see below), a
+  // third mark just cluttered things. Non-drafted players keep it.
+  const heroWatermark = draftedBy
+    ? ""
+    : (branding?.wordmarkDark || branding?.wordmark || "");
+  // The main team/NFL logo, now rendered as a full-opacity background layer
+  // (no white card behind it) instead of a small foreground box — same
+  // dark-background-variant preference as heroWatermark above.
+  const heroLogo = draftedBy
+    ? (branding?.nflLogoDark || branding?.nflLogo || "")
+    : (branding?.logoDark || branding?.logo1 || "");
+  // Drafted players only: the college logo used to sit in the right-side
+  // box, but now joins the NFL logo as a second full-opacity background
+  // layer instead (branding.cfbLogo already prefers LogoDark — see the
+  // school-fetch effect above). Dropped entirely for players with no
+  // flair — without a badge of their own up front, a second background
+  // logo just reads as clutter.
+  const heroCollegeLogo = draftedBy && flairInfo ? (branding?.cfbLogo || "") : "";
+
   return (
     <>
       <Helmet>
@@ -2011,6 +1988,8 @@ useEffect(() => {
         <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`} />
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
+
+      <style>{PLAYER_HERO_STYLE}</style>
 
       {adData && (
         <style>{`
@@ -2125,6 +2104,16 @@ useEffect(() => {
         }
         .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
         .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
+
+        /* Hero's background team logo — still a live link to the team page,
+           so it gets its own hover reaction (grow + brighten) to read as
+           clickable despite sitting in the background layer, not a card. */
+        .wd-hero-logo-link { cursor: pointer; }
+        .wd-hero-logo-img { transition: transform 0.2s ease, filter 0.2s ease; }
+        .wd-hero-logo-link:hover .wd-hero-logo-img {
+          transform: scale(1.08);
+          filter: drop-shadow(0 6px 20px rgba(0,0,0,0.55)) brightness(1.1);
+        }
       `}</style>
 
       {showBreakoutAnim && (
@@ -2241,73 +2230,45 @@ useEffect(() => {
 
         {/* ===== HERO CARD ===== */}
         <div className="mb-6 rounded-lg overflow-hidden" style={{ border: `3px solid ${color1}` }}>
+          {/* Toolbar — kept as its own flat color1 bar, formatted exactly as
+              before (not part of the gradient hero below it); only the
+              up/down vote arrows were dropped, Like stays on its own. */}
           {/* A 3-column grid (not justify-content:space-between, which only
               balances the *gap* on either side and drifts off-center as
               soon as the Back button and the Follow/Film/Evaluate group
-              aren't the same width) so the Like/Up/Down group sits on the
-              same center axis as the player's name below, instead of
-              looking askew — and unlike centering it via absolute
-              positioning, grid columns never overlap, so it can't collide
-              with the button group on a narrow screen with Follow+Film+
-              Evaluate all showing. */}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", columnGap:isMobile?"8px":"16px", backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
+              aren't the same width) it used to need a 3-column grid to keep
+              a middle group centered; now that Like has moved into the
+              right-hand button group (directly left of Follow), it's just
+              two groups pinned to either edge. */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
             <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
-              style={{ justifySelf:"start", border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
+              style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
 
-            <div className="flex items-center" style={{ gap:isMobile?"12px":"18px" }}>
+            <div className="flex gap-2" style={{ flexWrap:"wrap", rowGap:"6px" }}>
+              {/* Mirrors the Follow/Evaluate pill buttons beside it — same
+                  border/fill/padding language, filled solid white (like
+                  Follow's "following" state) once liked instead of its old
+                  plain icon-only look. */}
               <button
                 onClick={handleToggleLike}
-                title="Like"
-                className="transition"
+                title={myReaction.liked ? "Unlike" : "Like"}
+                className="font-extrabold rounded-full transition hover:opacity-90"
                 style={{
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:"3px",
-                  background:"none", border:"none", cursor:"pointer",
-                }}
-              >
-                <span style={{
-                  fontSize:isMobile?"32px":"42px", lineHeight:1,
+                  display:"flex", alignItems:"center", gap:"6px",
+                  border: "2px solid #fff",
+                  background: myReaction.liked ? "#fff" : "rgba(255,255,255,0.12)",
                   color: myReaction.liked ? "#ff4d6d" : "#fff",
-                  WebkitTextStroke: myReaction.liked ? "1.5px #fff" : "0px transparent",
-                }}>♥</span>
-                <span style={{ fontSize:isMobile?"12px":"14px", fontWeight:900, color:"#fff" }}>{reactionCounts.likes}</span>
-              </button>
-              <button
-                onClick={()=>handleVote("up")}
-                title="Upvote"
-                className="transition"
-                style={{
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:"3px",
-                  background:"none", border:"none", cursor:"pointer",
+                  fontSize: isMobile ? "14px" : "16px",
+                  padding: isMobile ? "7px 14px" : "9px 18px",
+                  fontWeight: 900,
+                  cursor: "pointer",
                 }}
               >
-                <span style={{
-                  fontSize:isMobile?"30px":"40px", lineHeight:1,
-                  color: myReaction.vote==="up" ? "#4ade80" : "#fff",
-                  WebkitTextStroke: myReaction.vote==="up" ? "1.5px #fff" : "0px transparent",
-                }}>▲</span>
-                <span style={{ fontSize:isMobile?"12px":"14px", fontWeight:900, color:"#fff" }}>{reactionCounts.up}</span>
+                <span style={{ fontSize: isMobile ? "16px" : "18px", lineHeight: 1 }}>♥</span>
+                {reactionCounts.likes}
               </button>
-              <button
-                onClick={()=>handleVote("down")}
-                title="Downvote"
-                className="transition"
-                style={{
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:"3px",
-                  background:"none", border:"none", cursor:"pointer",
-                }}
-              >
-                <span style={{
-                  fontSize:isMobile?"30px":"40px", lineHeight:1,
-                  color: myReaction.vote==="down" ? "#f87171" : "#fff",
-                  WebkitTextStroke: myReaction.vote==="down" ? "1.5px #fff" : "0px transparent",
-                }}>▼</span>
-                <span style={{ fontSize:isMobile?"12px":"14px", fontWeight:900, color:"#fff" }}>{reactionCounts.down}</span>
-              </button>
-            </div>
-
-            <div className="flex gap-2" style={{ justifySelf:"end", flexWrap:"wrap", rowGap:"6px" }}>
               <button
                 onClick={handleToggleFollow}
                 title={following ? "Unfollow" : "Follow — get their news & performances in your feed"}
@@ -2342,68 +2303,134 @@ useEffect(() => {
             </div>
           </div>
 
-          <div className="bg-white flex items-center" style={{ gap:isMobile?"8px":"16px", padding:isMobile?"12px 10px 8px":"20px 24px 10px" }}>
-            <div className="flex-shrink-0" style={{ position:"relative", width:isMobile?60:112, height:isMobile?60:112 }}>
-              <div
-                className="flex items-center justify-center"
+          {/* Same DNA as TeamPage.js's HeroCard and GamePage.js's matchup
+              hero: a color1→color2 gradient with a dark overlay, a drifting
+              stripe texture + breathing spotlight (PLAYER_HERO_STYLE above),
+              a giant faded wordmark bleeding off the edge, and each team
+              color's own soft corner glow — instead of the old plain white
+              card. Just wraps the logo/name/flair band; the toolbar above
+              stays its own flat color1 bar. */}
+          <div style={{
+            position: "relative", overflow: "hidden",
+            background: [
+              `radial-gradient(circle 220px at top left, ${color2}55, transparent 100%)`,
+              `radial-gradient(circle 220px at bottom right, ${color2}55, transparent 100%)`,
+              "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4))",
+              `linear-gradient(120deg, ${color1} 0%, ${color1} 55%, ${color2} 100%)`,
+            ].join(", "),
+          }}>
+            {/* Animated overlay layers — see PLAYER_HERO_STYLE; both sit
+                behind the zIndex:1 content below. */}
+            <div aria-hidden="true" style={{
+              position: "absolute", inset: "-20%", zIndex: 0, pointerEvents: "none",
+              background: "repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 2px, transparent 2px, transparent 40px)",
+              animation: "wdPlayerHeroDrift 18s linear infinite",
+            }} />
+            <div aria-hidden="true" style={{
+              position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none",
+              background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.16), transparent 55%)",
+              animation: "wdPlayerHeroSpotlight 5s ease-in-out infinite",
+            }} />
+            {heroWatermark && !isMobile && (
+              <img
+                src={sanitizeUrl(heroWatermark)} alt="" aria-hidden="true"
                 style={{
-                  position:"absolute", top:0, left:0, overflow:"hidden", boxSizing:"border-box",
-                  width: showLeftBoxTip ? (isMobile?150:190) : (isMobile?60:112),
-                  height: showLeftBoxTip ? (isMobile?90:112) : (isMobile?60:112),
-                  background:"#f8f8f8", border:`2px solid ${color2}`, borderRadius:"8px",
-                  boxShadow: showLeftBoxTip ? "0 14px 30px rgba(0,0,0,0.16)" : "none",
-                  zIndex: showLeftBoxTip ? 50 : 1,
-                  transition:"width 0.22s ease, height 0.22s ease, box-shadow 0.22s ease",
+                  position: "absolute", top: "50%", right: "-4%", transform: "translateY(-50%)",
+                  width: "55%", maxWidth: "520px", height: "auto", objectFit: "contain",
+                  opacity: 0.14, zIndex: 0, pointerEvents: "none",
                 }}
-                onMouseEnter={() => branding?.logo1 && !draftedBy && setShowLeftBoxTip(true)}
-                onMouseLeave={() => setShowLeftBoxTip(false)}
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            )}
+            {/* Main logo — a background layer like heroWatermark above, but
+                at full opacity (not faded) since it's meant to read as the
+                hero's own art, not a soft decoration. Still a live link back
+                to the team page (with its own hover reaction, see
+                .wd-hero-logo-link below), same as the old foreground box. */}
+            {heroLogo && (
+              <Link
+                to={draftedBy ? `/nfl/${draftedBy.toLowerCase()}` : `/team/${teamSlug}`}
+                aria-label={draftedBy ? teamNameFromAbbr(draftedBy) : player.School}
+                className="wd-hero-logo-link"
+                style={{
+                  position: "absolute", top: "50%", left: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
+                  height: isMobile ? "60%" : "70%", zIndex: 2,
+                  display: "flex", alignItems: "center",
+                }}
               >
-                {draftedBy ? (
-                  branding?.nflLogo ? <img src={sanitizeUrl(branding.nflLogo)} alt="NFL" style={{ height:isMobile?50:96, objectFit:"contain" }} /> : null
-                ) : branding?.logo1 ? (
-                  <Link
-                    to={`/team/${teamSlug}`}
-                    className="flex items-center justify-center w-full h-full"
-                    style={{ flexDirection:"column", gap: showLeftBoxTip ? "8px" : 0 }}
-                  >
-                    <img
-                      src={showLeftBoxTip && trimmedWordmark ? trimmedWordmark : sanitizeUrl(branding.logo1)} alt={player.School}
-                      style={{ height: showLeftBoxTip ? (isMobile?36:44) : (isMobile?50:96), objectFit:"contain", transition:"height 0.22s ease" }}
-                      referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy"
-                    />
-                    {showLeftBoxTip && (
-                      <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
-                        <span style={{ fontSize:"12px" }}>🔗</span>
-                        <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1, whiteSpace:"nowrap" }}>
-                          Team Page
-                        </span>
-                      </div>
-                    )}
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-
+                <img
+                  src={sanitizeUrl(heroLogo)} alt={draftedBy ? teamNameFromAbbr(draftedBy) : player.School}
+                  className="wd-hero-logo-img"
+                  style={{
+                    height: "100%", width: "auto", maxWidth: isMobile ? "90px" : "220px", objectFit: "contain",
+                    opacity: 1, filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.45))",
+                  }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              </Link>
+            )}
+            {/* College logo — drafted players only, a smaller second
+                background layer opposite the NFL logo (used to live in the
+                right-side box; see heroCollegeLogo above for why it moved). */}
+            {heroCollegeLogo && (
+              <Link
+                to={`/team/${teamSlug}`}
+                aria-label={player.School}
+                className="wd-hero-logo-link"
+                style={{
+                  position: "absolute", top: "50%", right: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
+                  height: isMobile ? "45%" : "55%", zIndex: 2,
+                  display: "flex", alignItems: "center",
+                }}
+              >
+                <img
+                  src={sanitizeUrl(heroCollegeLogo)} alt={player.School}
+                  className="wd-hero-logo-img"
+                  style={{
+                    height: "100%", width: "auto", maxWidth: isMobile ? "70px" : "170px", objectFit: "contain",
+                    opacity: 1, filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.45))",
+                  }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              </Link>
+            )}
+            <div style={{ position: "relative", zIndex: 1 }}>
+          {/* pointerEvents:none here — this row is a full-width block (its
+              sole child is flex:1), so even the "empty" space around the
+              centered name geometrically sits on top of the background team
+              logos. The logos themselves also sit above this row's own
+              zIndex:1 (see their zIndex:2) so they win regardless — this is
+              belt-and-suspenders on top of that, so a click landing on any
+              other bit of "empty" row space (not just directly over a logo)
+              still falls through instead of being swallowed. Every actual
+              interactive element inside (the school-name link, the
+              trending-tag popovers, "Selected by" team link) opts back in
+              with its own pointerEvents:"auto". */}
+          <div className="flex items-center" style={{ position:"relative", padding:isMobile?"12px 10px 8px":"20px 24px 10px", pointerEvents:"none" }}>
+            {/* Now the sole flex child (the flair box floats out of flow to
+                the right, absolutely positioned, below) so text-center here
+                centers the name/tags on the row's true middle instead of
+                being skewed off-axis by a sibling box eating space. */}
             <div className="flex-1 text-center">
-              <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:color1, letterSpacing:"0.02em" }}>
+              <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:"#fff", letterSpacing:"0.02em", textShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
                 <div>{player.First}</div>
                 <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
               </h1>
               <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:isMobile?"6px":"10px" }}>
-                <span className="font-extrabold rounded-full" style={{ backgroundColor:color1, color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
+                <span className="font-extrabold rounded-full" style={{ background:"rgba(255,255,255,0.14)", border:"2px solid #fff", color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
                   {player.Position}
                 </span>
-                <span style={{ color:"#ccc" }}>·</span>
-                <span onClick={()=>navigate(`/team/${teamSlug}`)} className="font-extrabold hover:underline cursor-pointer" style={{ color:color1, fontSize:isMobile?"12px":"19px" }}>
+                <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
+                <span onClick={()=>navigate(`/team/${teamSlug}`)} className="font-extrabold hover:underline cursor-pointer" style={{ color:"#fff", fontSize:isMobile?"12px":"19px", textShadow:"0 1px 4px rgba(0,0,0,0.4)", pointerEvents:"auto" }}>
                   {player.School}
                 </span>
-                <span style={{ color:"#ccc" }}>·</span>
-                <span className="font-bold" style={{ color:"#666", fontSize:isMobile?"12px":"19px" }}>{formatEligible(player.Eligible)}</span>
+                <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
+                <span className="font-bold" style={{ color:"rgba(255,255,255,0.8)", fontSize:isMobile?"12px":"19px" }}>{formatEligible(player.Eligible)}</span>
                 {isTrendingUp && (
                   <>
-                    <span style={{ color:"#ccc" }}>·</span>
+                    <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <div
-                      style={{ position:"relative", display:"inline-block" }}
+                      style={{ position:"relative", display:"inline-block", pointerEvents:"auto" }}
                       onMouseEnter={() => setShowTrendUpTip(true)}
                       onMouseLeave={() => setShowTrendUpTip(false)}
                       onClick={() => setShowTrendUpTip((v) => !v)}
@@ -2472,9 +2499,9 @@ useEffect(() => {
                 )}
                 {isBreakoutTrend && (
                   <>
-                    <span style={{ color:"#ccc" }}>·</span>
+                    <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <div
-                      style={{ position:"relative", display:"inline-block" }}
+                      style={{ position:"relative", display:"inline-block", pointerEvents:"auto" }}
                       onMouseEnter={() => setShowBreakoutTip(true)}
                       onMouseLeave={() => setShowBreakoutTip(false)}
                       onClick={() => setShowBreakoutTip((v) => !v)}
@@ -2543,9 +2570,9 @@ useEffect(() => {
                 )}
                 {isOnFireTrend && (
                   <>
-                    <span style={{ color:"#ccc" }}>·</span>
+                    <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <div
-                      style={{ position:"relative", display:"inline-block" }}
+                      style={{ position:"relative", display:"inline-block", pointerEvents:"auto" }}
                       onMouseEnter={() => setShowOnFireTip(true)}
                       onMouseLeave={() => setShowOnFireTip(false)}
                       onClick={() => setShowOnFireTip((v) => !v)}
@@ -2634,8 +2661,8 @@ useEffect(() => {
                     </div>
                   </div>
                   <div className="text-left">
-                    <div style={{ fontSize:"10px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.1em" }}>Selected by</div>
-                    <span onClick={()=>navigate(`/nfl/${draftedBy.toLowerCase()}`)} className="font-black uppercase cursor-pointer hover:underline" style={{ fontSize:isMobile?"13px":"18px", color:color1, letterSpacing:"0.04em" }}>
+                    <div style={{ fontSize:"10px", fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.1em" }}>Selected by</div>
+                    <span onClick={()=>navigate(`/nfl/${draftedBy.toLowerCase()}`)} className="font-black uppercase cursor-pointer hover:underline" style={{ fontSize:isMobile?"13px":"18px", color:"#fff", letterSpacing:"0.04em", textShadow:"0 1px 4px rgba(0,0,0,0.4)", pointerEvents:"auto" }}>
                       {teamNameFromAbbr(draftedBy)}
                     </span>
                   </div>
@@ -2643,7 +2670,13 @@ useEffect(() => {
               )}
             </div>
 
-            <div className="flex-shrink-0" style={{ position:"relative", width:isMobile?60:112, height:isMobile?60:112 }}>
+            {/* Floated out of the flex flow (absolute, anchored to the
+                row's right edge) so it no longer competes with the name
+                block for width — that's what was skewing the centered name
+                off-axis. Only rendered when there's actually something to
+                put in it (see hasRightBoxContent above). */}
+            {hasRightBoxContent && (
+            <div style={{ position:"absolute", top:"50%", right:isMobile?"10px":"24px", transform:"translateY(-50%)", width:isMobile?60:112, height:isMobile?60:112, pointerEvents:"auto" }}>
               <div
                 className="flex items-center justify-center"
                 style={{
@@ -2651,25 +2684,23 @@ useEffect(() => {
                   width: showRightBoxTip ? (isMobile?200:250) : (isMobile?60:112),
                   height: showRightBoxTip ? "auto" : (isMobile?60:112),
                   minHeight: isMobile?60:112,
-                  background: flairInfo
-                    ? `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), #f2f4f6 55%, #e9edf0 100%)`
-                    : "#f8f8f8",
-                  border:`2px solid ${flairInfo ? flairInfo.stroke : (draftedBy ? color1 : branding?.logo2 ? color1 : "#eee")}`,
+                  background: `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), #f2f4f6 55%, #e9edf0 100%)`,
+                  border:`2px solid ${flairInfo.stroke}`,
                   borderRadius:"8px",
                   boxShadow: showRightBoxTip ? "0 14px 30px rgba(0,0,0,0.16)" : "none",
                   zIndex: showRightBoxTip ? 50 : 1,
                   flexDirection:"column",
-                  alignItems: showRightBoxTip && flairInfo ? "flex-start" : "center",
-                  justifyContent: showRightBoxTip && flairInfo ? "flex-start" : "center",
-                  textAlign: showRightBoxTip && flairInfo ? "left" : "center",
-                  padding: showRightBoxTip && flairInfo ? "12px 14px" : 0,
+                  alignItems: showRightBoxTip ? "flex-start" : "center",
+                  justifyContent: showRightBoxTip ? "flex-start" : "center",
+                  textAlign: showRightBoxTip ? "left" : "center",
+                  padding: showRightBoxTip ? "12px 14px" : 0,
                   transition:"width 0.22s ease, height 0.22s ease, box-shadow 0.22s ease",
                 }}
-                onMouseEnter={() => (flairInfo || (draftedBy ? branding?.cfbLogo : branding?.logo2)) && setShowRightBoxTip(true)}
+                onMouseEnter={() => setShowRightBoxTip(true)}
                 onMouseLeave={() => setShowRightBoxTip(false)}
-                onClick={() => flairInfo && setShowRightBoxTip((v) => !v)}
+                onClick={() => setShowRightBoxTip((v) => !v)}
               >
-                {flairInfo ? (
+                {(
                   showRightBoxTip ? (
                     <>
                       <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:"7px", rowGap:"5px", marginBottom:"7px", width:"100%" }}>
@@ -2728,51 +2759,14 @@ useEffect(() => {
                       />
                     </div>
                   )
-                ) : draftedBy ? (
-                  branding?.cfbLogo ? (
-                    <Link
-                      to={`/team/${teamSlug}`}
-                      className="flex items-center justify-center w-full h-full"
-                      style={{ flexDirection:"column", gap: showRightBoxTip ? "8px" : 0 }}
-                    >
-                      <img
-                        src={showRightBoxTip && trimmedCfbWordmark ? trimmedCfbWordmark : sanitizeUrl(branding.cfbLogo)} alt="College"
-                        style={{ height: showRightBoxTip ? (isMobile?32:40) : (isMobile?42:88), objectFit:"contain", transition:"height 0.22s ease" }}
-                      />
-                      {showRightBoxTip && (
-                        <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
-                          <span style={{ fontSize:"12px" }}>🔗</span>
-                          <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1, whiteSpace:"nowrap" }}>
-                            Team Page
-                          </span>
-                        </div>
-                      )}
-                    </Link>
-                  ) : null
-                ) : branding?.logo2 ? (
-                  <Link
-                    to={`/team/${teamSlug}`}
-                    className="flex items-center justify-center w-full h-full"
-                    style={{ flexDirection:"column", gap: showRightBoxTip ? "8px" : 0 }}
-                  >
-                    <img
-                      src={sanitizeUrl(branding.logo2)} alt=""
-                      style={{ height: showRightBoxTip ? (isMobile?36:44) : (isMobile?50:96), objectFit:"contain", transition:"height 0.22s ease" }}
-                      referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} loading="lazy"
-                    />
-                    {showRightBoxTip && (
-                      <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
-                        <span style={{ fontSize:"12px" }}>🔗</span>
-                        <span style={{ fontSize:"11px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.06em", color:color1, whiteSpace:"nowrap" }}>
-                          Team Page
-                        </span>
-                      </div>
-                    )}
-                  </Link>
-                ) : null}
+                )}
               </div>
             </div>
+            )}
           </div>
+            </div>
+          </div>
+          <div style={{ height: "4px", background: color2 }} />
 
           {physicalMeasurements.length > 0 && (
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>
@@ -2806,73 +2800,6 @@ useEffect(() => {
               )}
             </div>
           )}
-
-        {/* ===== Season Stats ===== */}
-        {playerStats && (() => {
-          const pos = (player.Position || "").toUpperCase();
-          const s = playerStats;
-          const n = (v) => (v !== undefined && v !== null && v !== "") ? String(v) : null;
-          const formatNum = (v) => { const n = Number(v); if (isNaN(n)) return v; return n.toLocaleString(); };
-          let statPills = [];
-          if (pos === "QB") {
-            const comp = n(s.PassComp), att = n(s.PassAtt), yds = n(s.PassYds), td = n(s.PassTD), ints = n(s.Int), ryds = n(s.RushYds), rtd = n(s.RushTD);
-            const pct = (comp && att && Number(att) > 0) ? Math.round((Number(comp) / Number(att)) * 100) + "%" : null;
-            if (comp && att) statPills.push({ val: `${formatNum(comp)}/${formatNum(att)}${pct ? ` (${pct})` : ""}`, label: "Comp/Att" });
-            if (yds) statPills.push({ val: formatNum(yds), label: "Pass Yds" });
-            if (td) statPills.push({ val: formatNum(td), label: "Pass TD" });
-            if (ints) statPills.push({ val: formatNum(ints), label: "Int" });
-            if (ryds) statPills.push({ val: formatNum(ryds), label: "Rush Yds" });
-            if (rtd) statPills.push({ val: formatNum(rtd), label: "Rush TD" });
-          } else if (pos === "RB") {
-            const att = n(s.RushAtt), yds = n(s.RushYds), td = n(s.RushTD), rec = n(s.Rec), ryds = n(s.RecYds), rtd = n(s.RecTD);
-            const ypc = (att && yds && Number(att) > 0) ? (Number(yds) / Number(att)).toFixed(1) : null;
-            if (yds) statPills.push({ val: `${formatNum(yds)}${ypc ? ` (${ypc})` : ""}`, label: "Rush Yds" });
-            if (td) statPills.push({ val: formatNum(td), label: "Rush TD" });
-            if (rec) statPills.push({ val: formatNum(rec), label: "Rec" });
-            if (ryds) statPills.push({ val: formatNum(ryds), label: "Rec Yds" });
-            if (rtd) statPills.push({ val: formatNum(rtd), label: "Rec TD" });
-          } else if (pos === "WR" || pos === "TE") {
-            const rec = n(s.Rec), yds = n(s.RecYds), td = n(s.RecTD);
-            if (rec) statPills.push({ val: formatNum(rec), label: "Rec" });
-            if (yds) statPills.push({ val: formatNum(yds), label: "Rec Yds" });
-            if (td) statPills.push({ val: formatNum(td), label: "Rec TD" });
-          } else if (pos === "DL" || pos === "EDGE" || pos === "DE" || pos === "DT") {
-            const tkl = n(s.Tkl), tfl = n(s.TFL), sk = n(s.Sk), ff = n(s.FF);
-            if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
-            if (tfl) statPills.push({ val: formatNum(tfl), label: "TFL" });
-            if (sk) statPills.push({ val: formatNum(sk), label: "Sacks" });
-            if (ff) statPills.push({ val: formatNum(ff), label: "FF" });
-          } else if (pos === "LB") {
-            const tkl = n(s.Tkl), tfl = n(s.TFL), sk = n(s.Sk), ff = n(s.FF), di = n(s.DefInt), pbu = n(s.PBU);
-            if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
-            if (tfl) statPills.push({ val: formatNum(tfl), label: "TFL" });
-            if (sk) statPills.push({ val: formatNum(sk), label: "Sacks" });
-            if (ff) statPills.push({ val: formatNum(ff), label: "FF" });
-            if (di) statPills.push({ val: formatNum(di), label: "INT" });
-            if (pbu) statPills.push({ val: formatNum(pbu), label: "PBU" });
-          } else if (pos === "DB" || pos === "CB" || pos === "S") {
-            const di = n(s.DefInt), pbu = n(s.PBU), tkl = n(s.Tkl);
-            if (di) statPills.push({ val: formatNum(di), label: "INT" });
-            if (pbu) statPills.push({ val: formatNum(pbu), label: "PBU" });
-            if (tkl) statPills.push({ val: formatNum(tkl), label: "Tkl" });
-          }
-          if (statPills.length === 0) return null;
-          return (
-            <div className="bg-white" style={{ padding: isMobile ? "6px 10px 12px" : "8px 24px 14px", borderTop: "1px solid #f0f0f0" }}>
-              <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: "#666", textAlign: "center", marginBottom: "8px" }}>
-                {s.season ? `${s.season} Season Stats` : "Season Stats"}
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", justifyContent: "center" }}>
-                {statPills.map((m) => (
-                  <div key={m.label} style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", background: "#fff", border: `2px solid ${color1}`, borderRadius: "8px", padding: isMobile ? "5px 10px" : "7px 16px", minWidth: isMobile ? "52px" : "68px" }}>
-                    <span style={{ fontSize: isMobile ? "12px" : "16px", fontWeight: 900, color: color1, lineHeight: 1.1 }}>{m.val}</span>
-                    <span style={{ fontSize: isMobile ? "9px" : "11px", fontWeight: 800, color: "#888", letterSpacing: "0.08em", marginTop: "3px", textTransform: "uppercase" }}>{m.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
 
           <div style={{ height:"5px", backgroundColor:color2 }} />
         </div>

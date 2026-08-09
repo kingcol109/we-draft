@@ -62,6 +62,16 @@ service cloud.firestore {
 
     match /schools/{school} { allow read, write: if true; }
     match /nfl/{team} { allow read, write: if true; }
+    // TV channel logos — Misc Branding (AdminPanel.js's MiscBrandingSection)
+    // manages these; CFB Schedule's "TV Channel" field and GamePage.js's own
+    // channel-logo display both read them by Name. Public read like
+    // schools/nfl above, but write locked to admin rather than copying
+    // their wide-open `if true` — no existing UI relies on a non-admin
+    // being able to write this one, so there's no reason to leave it open.
+    match /tvChannels/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /draftOrder/{pick} { allow read, write: if true; }
     match /draftOrder2027/{pick} { allow read, write: if true; }
     match /draftOrder2028/{pick} { allow read, write: if true; }

@@ -132,10 +132,17 @@ async function generateSitemap() {
       continue;
     }
 
+    // AdminPanel.js's player editor now stamps updatedAt on every save
+    // (both create and edit) — falls back to today for any player last
+    // touched before that started, which won't have the field at all.
+    const lastmod = data.updatedAt?.toDate?.()
+      ? data.updatedAt.toDate().toISOString().split("T")[0]
+      : today;
+
     playerPages.push({
       path: `/player/${slug}`,
       priority: 0.7,
-      lastmod: today,
+      lastmod,
     });
   }
 
@@ -197,10 +204,17 @@ for (const doc of allTeams) {
     continue;
   }
 
+  // AdminPanel.js's branding manager (TeamBrandingPane) already stamps
+  // updatedAt on every school save — falls back to today for any school
+  // that predates that field existing.
+  const lastmod = data.updatedAt?.toDate?.()
+    ? data.updatedAt.toDate().toISOString().split("T")[0]
+    : today;
+
   teamPages.push({
     path: `/team/${slug}`,
     priority: 0.65,
-    lastmod: today,
+    lastmod,
   });
 }
 
@@ -280,6 +294,9 @@ for (const doc of allTeams) {
     { path: "/community", priority: 0.8, lastmod: today },
     { path: "/boards", priority: 0.8, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
+    { path: "/we-pick", priority: 0.8, lastmod: today },
+    { path: "/we-pick/standings", priority: 0.7, lastmod: today },
+    { path: "/we-pick/stats", priority: 0.6, lastmod: today },
   ];
 
   /* =========================

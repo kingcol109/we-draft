@@ -84,6 +84,7 @@ const SECTIONS = [
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
+  { key: "miscbranding", label: "Misc Branding", icon: "📺", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "performances", label: "Performances", icon: "⭐", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
@@ -463,7 +464,7 @@ function PlayerDataSection() {
           return;
         }
 
-        const payload = { ...formState, Slug: slug };
+        const payload = { ...formState, Slug: slug, updatedAt: serverTimestamp() };
         const newDocRef = await addDoc(collection(db, "players"), payload);
         const newPlayer = { id: newDocRef.id, ...payload };
 
@@ -482,7 +483,11 @@ function PlayerDataSection() {
     setSaving(true);
     setSaveMessage("");
     try {
-      await updateDoc(doc(db, "players", selectedPlayer.id), { ...formState });
+      // updatedAt drives the player page's sitemap <lastmod> (see
+      // generate-sitemap.js) — without it every player showed the same
+      // sitemap-generation date regardless of when they were actually
+      // last edited.
+      await updateDoc(doc(db, "players", selectedPlayer.id), { ...formState, updatedAt: serverTimestamp() });
       setAllPlayers((prev) =>
         prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...formState } : p))
       );
@@ -2848,7 +2853,12 @@ const inputStyle = {
 // the only way to fix a wrong score/date/matchup short of going into the
 // Firebase console directly. ──
 const BLANK_GAME_FORM = {
-  Home: "", Away: "", Date: "", Time: "", Week: "", Neutral: false, HomeScore: "", AwayScore: "",
+  // Channel holds the TV channel's Name (matching tvChannels/{doc}.Name) —
+  // same "reference by name, not doc id" convention Home/Away already use
+  // for schools — so GamePage.js can look up that channel's logos with a
+  // plain equality check, no id plumbing needed. See Misc Branding
+  // (MiscBrandingSection) for where channels/logos actually get managed.
+  Home: "", Away: "", Date: "", Time: "", Week: "", Channel: "", Neutral: false, HomeScore: "", AwayScore: "",
   // GameOfWeek is a separate, higher tier than Featured (see GamePage.js's
   // ribbon — GameOfWeek shows a bigger, fire-themed one instead of the gold
   // Featured one when both are set) rather than replacing it, so a game can
@@ -3029,6 +3039,7 @@ function CFBScheduleSection() {
   const [cfbTab, setCfbTab] = useState("schedule");
   const [games, setGames] = useState([]);
   const [schoolNames, setSchoolNames] = useState([]);
+  const [channelNames, setChannelNames] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedWeek, setSelectedWeek] = useState("");
@@ -3042,15 +3053,17 @@ function CFBScheduleSection() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [gamesSnap, schoolsSnap, playersSnap] = await Promise.all([
+        const [gamesSnap, schoolsSnap, playersSnap, channelsSnap] = await Promise.all([
           getDocs(collection(db, "schedule26")),
           getDocs(collection(db, "schools")),
           getDocs(collection(db, "players")),
+          getDocs(collection(db, "tvChannels")),
         ]);
         const gameDocs = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setGames(gameDocs);
         setSchoolNames(schoolsSnap.docs.map((d) => d.data().School).filter(Boolean).sort());
         setAllPlayers(playersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setChannelNames(channelsSnap.docs.map((d) => d.data().Name).filter(Boolean).sort());
 
         const weeks = Array.from(new Set(gameDocs.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
         if (weeks.length > 0) setSelectedWeek(weeks[0]);
@@ -3078,7 +3091,7 @@ function CFBScheduleSection() {
     setSelectedGame(g);
     setFormState({
       Home: g.Home || "", Away: g.Away || "",
-      Date: toDateInputValue(g.Date), Time: g.Time || "", Week: g.Week || selectedWeek,
+      Date: toDateInputValue(g.Date), Time: g.Time || "", Week: g.Week || selectedWeek, Channel: g.Channel || "",
       Neutral: !!g.Neutral,
       HomeScore: g.HomeScore != null ? String(g.HomeScore) : "",
       AwayScore: g.AwayScore != null ? String(g.AwayScore) : "",
@@ -3156,6 +3169,16 @@ function CFBScheduleSection() {
         payload.Time = deleteField();
         timeCleared = true;
       }
+      // Same delete-vs-omit treatment for the TV channel — clearing it back
+      // to "— None —" on an existing game has to explicitly remove the
+      // field, or it'd just keep showing the old channel's logo forever.
+      let channelCleared = false;
+      if (formState.Channel) {
+        payload.Channel = formState.Channel;
+      } else if (!isNew) {
+        payload.Channel = deleteField();
+        channelCleared = true;
+      }
       // Blank scores are simply omitted on a brand-new doc (Firestore
       // rejects `undefined` outright, and there's nothing to remove yet).
       // On an EXISTING doc, though, omitting the key is not the same as
@@ -3192,6 +3215,7 @@ function CFBScheduleSection() {
           if (homeScoreCleared) delete merged.HomeScore;
           if (awayScoreCleared) delete merged.AwayScore;
           if (timeCleared) delete merged.Time;
+          if (channelCleared) delete merged.Channel;
           return merged;
         }));
         setSaveMessage("Saved.");
@@ -3360,6 +3384,16 @@ function CFBScheduleSection() {
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Week</div>
                 <input value={formState.Week} onChange={(e) => setFormState((p) => ({ ...p, Week: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                {/* Names come from tvChannels (Misc Branding, MiscBrandingSection)
+                    — GamePage.js looks up that channel's dark logo by this
+                    same Name to show under the at/vs button. */}
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>TV Channel</div>
+                <select value={formState.Channel} onChange={(e) => setFormState((p) => ({ ...p, Channel: e.target.value }))} style={inputStyle}>
+                  <option value="">— None —</option>
+                  {channelNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
               </div>
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Away Score</div>
@@ -4599,6 +4633,333 @@ function FieldRow({ label, children }) {
   );
 }
 
+// ── Misc Branding — a home for branding assets that aren't a school or NFL
+// team. TV channels are the first (only) resident: CFBScheduleSection's own
+// "TV Channel" dropdown references a channel by this same Name, and
+// GamePage.js looks up that channel's LogoDark to show under the at/vs
+// button. Deliberately its own simple manager rather than another
+// LEAGUE_CONFIG entry in TeamBrandingPane — a channel has no conference,
+// short name, or NFL association, just a name and two logos, so the
+// team-shaped machinery there would be mostly unused ceremony here. ──
+function MiscBrandingSection() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <TvChannelsManager />
+    </div>
+  );
+}
+
+function TvChannelsManager() {
+  const [channels, setChannels] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selected, setSelected] = useState(null); // { id, isNew } | full channel doc
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [logoCopyStatus, setLogoCopyStatus] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  useEffect(() => {
+    const fetchChannels = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "tvChannels"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
+        setChannels(data);
+      } catch (e) {
+        console.error("Admin TV channels fetch error:", e);
+        setChannels([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchChannels();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return channels;
+    return channels.filter((c) => (c.Name || "").toLowerCase().includes(q));
+  }, [channels, searchQuery]);
+
+  const selectChannel = (c) => {
+    setSelected(c);
+    setFormState({ Short: c.Short || "", Logo: c.Logo || "", LogoDark: c.LogoDark || "" });
+    setSaveMessage("");
+    setLogoCopyStatus({});
+    setConfirmDelete(false);
+  };
+
+  const startNewChannel = () => {
+    setSelected({ id: null, isNew: true });
+    setFormState({ Name: "", Short: "", Logo: "", LogoDark: "" });
+    setSaveMessage("");
+    setLogoCopyStatus({});
+    setConfirmDelete(false);
+  };
+
+  const isNewChannel = selected?.isNew === true;
+
+  const handleFieldChange = (field, value) => {
+    setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Same clipboard-image-copy as TeamBrandingPane's own handleCopyImage —
+  // duplicated rather than shared since that one is a closure over that
+  // component's own logoCopyStatus setter.
+  const handleCopyImage = (field, url) => {
+    if (!url) return;
+    setLogoCopyStatus((prev) => ({ ...prev, [field]: "copying" }));
+    let clipboardPromise;
+    try {
+      clipboardPromise = navigator.clipboard.write([
+        new window.ClipboardItem({ "image/png": loadImageAsPngBlob(url) }),
+      ]);
+    } catch (e) {
+      clipboardPromise = Promise.reject(e);
+    }
+    clipboardPromise
+      .then(() => setLogoCopyStatus((prev) => ({ ...prev, [field]: "copied" })))
+      .catch((e) => {
+        console.error("Copy image to clipboard failed:", e);
+        setLogoCopyStatus((prev) => ({ ...prev, [field]: "failed" }));
+      })
+      .finally(() => {
+        setTimeout(() => {
+          setLogoCopyStatus((prev) => (prev[field] === "copying" ? prev : { ...prev, [field]: "idle" }));
+        }, 2400);
+      });
+  };
+
+  const handleSave = async () => {
+    if (!selected || !formState) return;
+    if (isNewChannel && !formState.Name?.trim()) {
+      setSaveMessage("Failed: Channel name is required.");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        // Same immutable-after-creation rule as a school/NFL team's name
+        // (see TeamBrandingPane's handleSave) — CFBScheduleSection
+        // references channels by this exact string, so renaming one here
+        // would silently orphan every game already pointed at it.
+        ...(isNewChannel ? { Name: formState.Name.trim() } : {}),
+        // The short form shown next to date/time on the schedule sidebars
+        // (GameMarginSidebars.js) — e.g. "ESPN" stays "ESPN", but
+        // "ACC Network" becomes "ACCN" so it doesn't crowd a narrow row.
+        Short: (formState.Short || "").trim(),
+        Logo: (formState.Logo || "").trim(),
+        LogoDark: (formState.LogoDark || "").trim(),
+        updatedAt: serverTimestamp(),
+      };
+      if (isNewChannel) {
+        const ref = await addDoc(collection(db, "tvChannels"), payload);
+        const newChannel = { id: ref.id, ...payload };
+        setChannels((prev) => [...prev, newChannel].sort((a, b) => (a.Name || "").localeCompare(b.Name || "")));
+        setSelected(newChannel);
+        setSaveMessage("Channel created.");
+      } else {
+        await updateDoc(doc(db, "tvChannels", selected.id), payload);
+        setChannels((prev) => prev.map((c) => (c.id === selected.id ? { ...c, ...payload } : c)));
+        setSelected((prev) => (prev ? { ...prev, ...payload } : prev));
+        setSaveMessage("Saved.");
+      }
+    } catch (e) {
+      console.error("Admin TV channel save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteChannel = async () => {
+    if (!selected || isNewChannel) return;
+    setRemoving(true);
+    try {
+      await deleteDoc(doc(db, "tvChannels", selected.id));
+      setChannels((prev) => prev.filter((c) => c.id !== selected.id));
+      setSelected(null);
+      setFormState(null);
+    } catch (e) {
+      console.error("Admin TV channel delete error:", e);
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: "20px", fontWeight: 900, color: BLUE, marginBottom: "4px" }}>📺 TV Channels</div>
+      <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", marginBottom: "14px" }}>
+        Logos referenced by CFB Schedule's "TV Channel" field and shown on each game's own page.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "16px" }}>
+        <div style={{ border: "2px solid #eee", borderRadius: "10px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "10px", borderBottom: "1px solid #eee" }}>
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search channels..."
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ maxHeight: "560px", overflowY: "auto", flex: 1 }}>
+            {loading ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#999", fontSize: "13px" }}>Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No channels found.</div>
+            ) : (
+              filtered.map((c) => (
+                <div
+                  key={c.id}
+                  onClick={() => selectChannel(c)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", cursor: "pointer",
+                    background: selected?.id === c.id ? "#eaf1ff" : "#fff", borderBottom: "1px solid #f5f5f5",
+                  }}
+                >
+                  <div style={{ width: "28px", height: "28px", borderRadius: "4px", ...CHECKER_BG, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                    {(c.LogoDark || c.Logo) ? (
+                      <img src={c.LogoDark || c.Logo} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : null}
+                  </div>
+                  <span style={{ fontWeight: 800, fontSize: "13px", color: BLUE }}>{c.Name || "Untitled"}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <button
+            onClick={startNewChannel}
+            style={{ width: "100%", padding: "12px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.04em", background: GOLD, color: "#fff", border: "none", cursor: "pointer" }}
+          >
+            + New Channel
+          </button>
+        </div>
+
+        <div style={{ border: "2px solid #eee", borderRadius: "10px", padding: "16px" }}>
+          {!selected || !formState ? (
+            <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+              Click a channel from the list to edit its logos, or "+ New Channel" to add one.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontWeight: 900, fontSize: "16px", color: BLUE, marginBottom: "14px" }}>
+                {isNewChannel ? (formState.Name || "New Channel") : (selected.Name || "Edit Channel")}
+              </div>
+              <FieldGroup>
+                {isNewChannel && (
+                  <FieldRow label="Channel Name">
+                    <input
+                      value={formState.Name}
+                      onChange={(e) => handleFieldChange("Name", e.target.value)}
+                      placeholder="e.g. ACC Network"
+                      style={inputStyle}
+                    />
+                  </FieldRow>
+                )}
+                {/* Editable anytime, unlike Name — nothing references a
+                    channel by its Short form, so there's no orphan risk in
+                    changing it later. */}
+                <FieldRow label="Short Name (for schedule sidebars)">
+                  <input
+                    value={formState.Short}
+                    onChange={(e) => handleFieldChange("Short", e.target.value)}
+                    placeholder="e.g. ACCN"
+                    style={inputStyle}
+                  />
+                </FieldRow>
+                <LogoUrlField
+                  label="Logo"
+                  value={formState.Logo}
+                  onChange={(v) => handleFieldChange("Logo", v)}
+                  onCopy={() => handleCopyImage("Logo", formState.Logo)}
+                  copyStatus={logoCopyStatus.Logo || "idle"}
+                />
+                <LogoUrlField
+                  label="Logo (Dark)"
+                  value={formState.LogoDark}
+                  onChange={(v) => handleFieldChange("LogoDark", v)}
+                  onCopy={() => handleCopyImage("LogoDark", formState.LogoDark)}
+                  copyStatus={logoCopyStatus.LogoDark || "idle"}
+                />
+              </FieldGroup>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  style={{
+                    flex: 1, background: BLUE, color: "#fff", border: "none", borderRadius: "8px",
+                    padding: "12px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase",
+                    letterSpacing: "0.06em", cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {saving ? "Saving..." : isNewChannel ? "Create Channel" : "Save Changes"}
+                </button>
+              </div>
+              {saveMessage && (
+                <div style={{ marginTop: "10px", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                  {saveMessage}
+                </div>
+              )}
+
+              {!isNewChannel && (
+                <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+                  {!confirmDelete ? (
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      style={{
+                        width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                        borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                      }}
+                    >
+                      Delete Channel
+                    </button>
+                  ) : (
+                    <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff5f5" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 800, color: "#c0392b", marginBottom: "10px" }}>
+                        ⚠ Permanently delete {selected.Name || "this channel"}? Any game still pointed at it by name will just show no channel logo — this doesn't touch schedule26.
+                      </div>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          onClick={handleDeleteChannel}
+                          disabled={removing}
+                          style={{
+                            flex: 1, background: "#c0392b", color: "#fff", border: "none", borderRadius: "6px",
+                            padding: "9px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase",
+                            cursor: removing ? "default" : "pointer", opacity: removing ? 0.6 : 1,
+                          }}
+                        >
+                          {removing ? "Deleting…" : "Yes, Delete Permanently"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(false)}
+                          style={{
+                            flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd", borderRadius: "6px",
+                            padding: "9px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPanel() {
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState("players");
@@ -4631,6 +4992,7 @@ export default function AdminPanel() {
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "branding" && <BrandingSection />}
+            {activeSection === "miscbranding" && <MiscBrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "performances" && <PerformancesManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}

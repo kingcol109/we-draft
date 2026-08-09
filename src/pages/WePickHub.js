@@ -11,9 +11,10 @@
 // separate save button, a status line just reports whether the current
 // starred set satisfies the week's requirement (1 Game of the Week, at
 // least 2 Featured, 6 total) and what's still missing.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import * as htmlToImage from "html-to-image";
 import { db } from "../firebase";
 import { collection, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -313,12 +314,26 @@ export default function WePickHub() {
     : "picks";
 
   const TAB_TITLES = { standings: "Ranked Standings", stats: "My Stats" };
+  const pageTitle = TAB_TITLES[activeTab]
+    ? `${TAB_TITLES[activeTab]} | We-Pick | We-Draft`
+    : "We-Pick | Predict College Football Scores & Build Your Ranked 6";
+  const pageDescription = "Make your picks, see how they stack up against your friends and the community, and track them throughout the season with We-Draft's We-Pick.";
+  const canonicalUrl = `https://we-draft.com${location.pathname}`;
 
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
       <Helmet>
-        <title>{TAB_TITLES[activeTab] ? `${TAB_TITLES[activeTab]} | We-Pick | We-Draft` : "We-Pick | We-Draft"}</title>
-        <meta name="description" content="Predict college football scores, build your Ranked 6, and see where you stand on We-Draft.com's community standings." />
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+        <link rel="canonical" href={canonicalUrl} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={pageTitle} />
+        <meta property="og:description" content={pageDescription} />
+        <meta property="og:url" content={canonicalUrl} />
+        <meta property="og:site_name" content="We-Draft" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={pageDescription} />
       </Helmet>
 
       <div
@@ -395,10 +410,55 @@ function MyPicksSection() {
   // rather than showing a made-up number on something meant to be posted
   // publicly.
   const [weekPlacement, setWeekPlacement] = useState(null);
-  // "idle" | "copied" — only meaningful on the clipboard-fallback path of
-  // handleShareReportCard, to flash a brief confirmation since there's no
-  // OS share sheet to hand off to and confirm it visually.
-  const [shareState, setShareState] = useState("idle");
+  // Share modal — clicking either "Share Picks" or "Share Report Card"
+  // (see handleSharePicks/handleShareReportCard) fills this in with the
+  // card's content instead of sharing directly; the modal renders a hidden
+  // branded card off-screen (shareCardRef), captures it to a PNG (see the
+  // effect below), and offers Email/X/Text/Save-Image from there.
+  // { heading, weekLabel, lines: string[], filename, shareText } | null
+  const [shareModal, setShareModal] = useState(null);
+  const [shareImageUrl, setShareImageUrl] = useState(null);
+  const shareCardRef = useRef(null);
+
+  // Waits a frame after shareModal's data lands so the hidden card (below,
+  // in the render) has actually painted with that content before capturing
+  // it — capturing on the same tick as setShareModal would grab whatever
+  // was there before (usually nothing). skipFonts avoids inlining every
+  // site font as base64 (slow, unnecessary for this card's plain system
+  // stack); the IMG filter avoids CORS-tainting the canvas on an
+  // externally-hosted logo, same reasoning as PlayerProfile.js's own
+  // handleExportImage — this card is text-only for the same reason.
+  useEffect(() => {
+    if (!shareModal) { setShareImageUrl(null); return; }
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
+        if (cancelled || !shareCardRef.current) return;
+        try {
+          const dataUrl = await htmlToImage.toPng(shareCardRef.current, {
+            pixelRatio: 2, backgroundColor: "#ffffff", skipFonts: true,
+            filter: (node) => node.tagName !== "IMG",
+          });
+          if (!cancelled) setShareImageUrl(dataUrl);
+        } catch (e) {
+          console.error("We-Pick share-image render error:", e);
+        }
+      });
+    });
+    return () => { cancelled = true; };
+  }, [shareModal]);
+
+  const shareText = shareModal
+    ? [`${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`, ...shareModal.lines, "we-draft.com/we-pick"].join("\n")
+    : "";
+
+  const handleSaveShareImage = () => {
+    if (!shareImageUrl || !shareModal) return;
+    const link = document.createElement("a");
+    link.download = `${shareModal.filename}.png`;
+    link.href = shareImageUrl;
+    link.click();
+  };
 
   useEffect(() => {
     if (!user) { setLoading(false); return; }
@@ -521,7 +581,7 @@ function MyPicksSection() {
     return () => { cancelled = true; };
   }, [weekIsPast, user, selectedWeek]);
 
-  const handleSaveScore = async (gameId, awayStr, homeStr, visibility) => {
+  const handleSaveScore = async (gameId, awayStr, homeStr, visibility, noteStr) => {
     if (!user) return;
     const a = Math.max(0, Math.min(99, Math.round(Number(awayStr))));
     const h = Math.max(0, Math.min(99, Math.round(Number(homeStr))));
@@ -538,7 +598,7 @@ function MyPicksSection() {
       pickedTeam: a > h ? "away" : h > a ? "home" : null,
       awayScore: a,
       homeScore: h,
-      prediction: existing?.prediction || "",
+      prediction: (noteStr ?? existing?.prediction ?? "").trim(),
       // Whether this pick counts toward the week's Ranked 6 (the star, see
       // handleToggleRanked) — defaults ON the moment an actual score gets
       // submitted, so counting toward Ranked is the default outcome rather
@@ -741,13 +801,11 @@ function MyPicksSection() {
   const weekRankedTally = tallyAccuracy(rankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
   const weekUnrankedTally = tallyAccuracy(unrankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
 
-  // Native share sheet on mobile (opens straight to Instagram/Twitter/
-  // iMessage/etc. with this text pre-filled); desktop browsers without
-  // navigator.share fall back to copying the same text to the clipboard,
-  // with shareState flashing a brief "Copied!" confirmation since there's
-  // no OS share sheet to hand off to and confirm visually.
-  const handleShareReportCard = async () => {
-    const lines = [`🏆 My We-Pick Report Card — ${selectedWeek}`];
+  // Opens the share modal with this card's content — the modal (rendered
+  // near the bottom of this component) captures a hidden branded version of
+  // it to an image and offers Email/X/Text/Save-Image from there.
+  const handleShareReportCard = () => {
+    const lines = [];
     if (weekRankedTally.total > 0) {
       lines.push(`Ranked: ${weekRankedTally.correct}-${weekRankedTally.incorrect} (${Math.round((weekRankedTally.correct / weekRankedTally.total) * 100)}%)`);
     }
@@ -755,29 +813,28 @@ function MyPicksSection() {
       lines.push(`Unranked: ${weekUnrankedTally.correct}-${weekUnrankedTally.incorrect}`);
     }
     lines.push(weekPlacement ? `Finished #${weekPlacement.rank} of ${weekPlacement.outOf} this week 🔥` : "Ranked placement pending.");
-    lines.push("we-draft.com/we-pick");
-    const text = lines.join("\n");
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: "We-Pick Report Card", text });
-      } catch (e) {
-        // User backed out of the share sheet, or the platform rejected it —
-        // either way there's nothing useful to surface as an error.
-      }
-      return;
-    }
-    if (navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(text);
-        setShareState("copied");
-        setTimeout(() => setShareState("idle"), 2000);
-      } catch (e) {
-        console.error("We-Pick report-card copy error:", e);
-      }
-    }
+    setShareModal({
+      icon: "🏆", heading: "My We-Pick Report Card", weekLabel: selectedWeek, lines,
+      filename: `WePick_${selectedWeek.replace(/\s+/g, "")}_ReportCard`,
+    });
   };
 
+  // Same shape as handleShareReportCard above, but for bragging rights
+  // *before* kickoff — the actual Ranked 6 predictions, not results.
+  const handleSharePicks = () => {
+    const lines = rankedGames.map((g) => {
+      const p = myPicksById[g.id];
+      if (p?.awayScore != null && p?.homeScore != null) {
+        return `${g.Away} ${p.awayScore} – ${g.Home} ${p.homeScore}`;
+      }
+      const side = pickedSideOf(p);
+      return `${side === "away" ? g.Away : side === "home" ? g.Home : "?"} to win`;
+    });
+    setShareModal({
+      icon: "🔮", heading: "My Ranked 6", weekLabel: selectedWeek, lines,
+      filename: `WePick_${selectedWeek.replace(/\s+/g, "")}_Picks`,
+    });
+  };
   // Has the current Ranked 6 already been locked in exactly as-is? Two
   // things have to match the last submission, not just one: which games
   // are ranked (by set, not order — swapping in a different game while
@@ -894,7 +951,7 @@ function MyPicksSection() {
                     onClick={handleShareReportCard}
                     style={{ background: GOLD, color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
                   >
-                    {shareState === "copied" ? "✓ Copied!" : "🔗 Share"}
+                    🔗 Share
                   </button>
                 </div>
               </>
@@ -934,22 +991,47 @@ function MyPicksSection() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
                   <div style={{ fontSize: "13px", fontWeight: 800, color: status.isQualified ? "#8ef0a5" : "rgba(255,255,255,0.85)" }}>
-                    {status.text}
+                    {/* Being qualified doesn't count toward the leaderboard
+                        on its own — Submit for Ranking still has to happen
+                        (or happen again, if a score changed since the last
+                        submit — see alreadySubmitted). Say so right in the
+                        qualified message instead of leaving that only to
+                        the button's own label, which is easy to miss. */}
+                    {status.isQualified && !alreadySubmitted
+                      ? `${status.text} Submit your Ranked 6 below to lock it in.`
+                      : status.text}
                   </div>
                   {status.isQualified && (
-                    <button
-                      onClick={() => handleSubmitForRanking(rankedGameIds)}
-                      disabled={submitting || alreadySubmitted}
-                      style={{
-                        flexShrink: 0, border: "none", borderRadius: "8px", padding: "9px 18px",
-                        fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
-                        background: alreadySubmitted ? "rgba(142,240,165,0.18)" : GOLD,
-                        color: alreadySubmitted ? "#8ef0a5" : "#fff",
-                        cursor: submitting || alreadySubmitted ? "default" : "pointer",
-                      }}
-                    >
-                      {alreadySubmitted ? "✓ Submitted for Ranking" : submitting ? "Submitting…" : "Submit for Ranking"}
-                    </button>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {/* Bragging rights before kickoff — see
+                          handleSharePicks. Shown as soon as the Ranked 6
+                          qualifies, whether or not it's been submitted yet,
+                          since "qualified" already means all 6 picks are
+                          locked in on the player's own end. */}
+                      <button
+                        onClick={handleSharePicks}
+                        style={{
+                          flexShrink: 0, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "9px 18px",
+                          fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                          background: "rgba(246,162,29,0.12)", color: GOLD, cursor: "pointer",
+                        }}
+                      >
+                        🔗 Share Picks
+                      </button>
+                      <button
+                        onClick={() => handleSubmitForRanking(rankedGameIds)}
+                        disabled={submitting || alreadySubmitted}
+                        style={{
+                          flexShrink: 0, border: "none", borderRadius: "8px", padding: "9px 18px",
+                          fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                          background: alreadySubmitted ? "rgba(142,240,165,0.18)" : GOLD,
+                          color: alreadySubmitted ? "#8ef0a5" : "#fff",
+                          cursor: submitting || alreadySubmitted ? "default" : "pointer",
+                        }}
+                      >
+                        {alreadySubmitted ? "✓ Submitted for Ranking" : submitting ? "Submitting…" : "Submit for Ranking"}
+                      </button>
+                    </div>
                   )}
                 </div>
                 {/* Hard-to-miss confirmation that the click actually went
@@ -1076,6 +1158,106 @@ function MyPicksSection() {
         <div style={{ textAlign: "center", color: "rgba(255,255,255,0.6)", fontStyle: "italic", fontSize: "13px", padding: "10px 0" }}>
           No picks yet — enter a score above, or browse the{" "}
           <Link to="/cfb/schedule" style={{ color: GOLD, fontWeight: 800 }}>CFB Schedule</Link>.
+        </div>
+      )}
+
+      {/* ===== Hidden Share Card ===== */}
+      {/* Off-screen, only rendered while the share modal is open — the
+          modal's own effect (above) captures this to a PNG the instant it
+          paints with shareModal's content. Text-only (no logos) so
+          html-to-image never trips over an externally-hosted image tainting
+          the canvas, same reasoning as PlayerProfile.js's own export card. */}
+      {shareModal && (
+        <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
+          <div ref={shareCardRef} style={{ width: "700px", backgroundColor: "#ffffff", border: `6px solid ${BLUE}`, fontFamily: "'Arial Black', Arial, sans-serif", overflow: "hidden" }}>
+            <div style={{ backgroundColor: BLUE, padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ color: GOLD, fontSize: "24px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>We-Draft.com · We-Pick</div>
+            </div>
+            <div style={{ height: "5px", backgroundColor: GOLD }} />
+            <div style={{ padding: "30px 32px 18px", textAlign: "center" }}>
+              <div style={{ fontSize: "40px", lineHeight: 1 }}>{shareModal.icon}</div>
+              <div style={{ fontSize: "34px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.02em", marginTop: "8px" }}>{shareModal.heading}</div>
+              <div style={{ fontSize: "16px", fontWeight: 800, color: "#999", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "4px" }}>{shareModal.weekLabel}</div>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#666", marginTop: "10px" }}>{profile?.username?.trim() || "Anonymous Fan"}</div>
+            </div>
+            <div style={{ height: "2px", backgroundColor: GOLD, margin: "0 32px" }} />
+            <div style={{ padding: "16px 32px 24px" }}>
+              {shareModal.lines.length === 0 ? (
+                <div style={{ textAlign: "center", color: "#aaa", fontSize: "14px", fontStyle: "italic", padding: "10px 0" }}>No picks on record.</div>
+              ) : (
+                shareModal.lines.map((line, i) => (
+                  <div key={i} style={{ fontSize: "18px", fontWeight: 800, color: "#222", padding: "11px 0", borderBottom: i < shareModal.lines.length - 1 ? "1px solid #eee" : "none", textAlign: "center" }}>
+                    {line}
+                  </div>
+                ))
+              )}
+            </div>
+            <div style={{ height: "5px", backgroundColor: GOLD }} />
+            <div style={{ backgroundColor: BLUE, padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ color: GOLD, fontSize: "15px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase" }}>we-draft.com/we-pick</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Share Modal ===== */}
+      {shareModal && (
+        <div
+          onClick={() => setShareModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#151a22", border: `2px solid ${GOLD}`, borderRadius: "14px", maxWidth: "420px", width: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Share</div>
+              <button
+                onClick={() => setShareModal(null)}
+                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", fontSize: "22px", cursor: "pointer", lineHeight: 1, padding: 0 }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.15)", marginBottom: "16px", background: "#fff", minHeight: "160px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {shareImageUrl ? (
+                <img src={shareImageUrl} alt="Share preview" style={{ width: "100%", display: "block" }} />
+              ) : (
+                <div style={{ padding: "50px 0", color: "#999", fontSize: "13px", fontWeight: 700 }}>Building image…</div>
+              )}
+            </div>
+            <div style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
+              Share to
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <a
+                href={`mailto:?subject=${encodeURIComponent(`${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`)}&body=${encodeURIComponent(shareText)}`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
+              >
+                📧 Email
+              </a>
+              <a
+                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`}
+                target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
+              >
+                𝕏 X
+              </a>
+              <a
+                href={`sms:?&body=${encodeURIComponent(shareText)}`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
+              >
+                💬 Text
+              </a>
+              <button
+                onClick={handleSaveShareImage}
+                disabled={!shareImageUrl}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: GOLD, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", cursor: shareImageUrl ? "pointer" : "default", opacity: shareImageUrl ? 1 : 0.6 }}
+              >
+                💾 Save Image
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>
@@ -1608,12 +1790,18 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
   const [awayVal, setAwayVal] = useState(pick?.awayScore != null ? String(pick.awayScore) : "");
   const [homeVal, setHomeVal] = useState(pick?.homeScore != null ? String(pick.homeScore) : "");
   const [visibility, setVisibility] = useState(pick?.visibility || "public");
+  const [noteVal, setNoteVal] = useState(pick?.prediction || "");
+  // Collapsed by default (the + button below opens it) — starts open only
+  // if there's already a note on file, so an existing one isn't hidden
+  // behind an extra click every time this row mounts/re-renders.
+  const [notesOpen, setNotesOpen] = useState(!!pick?.prediction);
 
   useEffect(() => {
     setAwayVal(pick?.awayScore != null ? String(pick.awayScore) : "");
     setHomeVal(pick?.homeScore != null ? String(pick.homeScore) : "");
     setVisibility(pick?.visibility || "public");
-  }, [pick?.awayScore, pick?.homeScore, pick?.visibility, game.id]);
+    setNoteVal(pick?.prediction || "");
+  }, [pick?.awayScore, pick?.homeScore, pick?.visibility, pick?.prediction, game.id]);
 
   const awaySchool = schoolsByName?.[game.Away];
   const homeSchool = schoolsByName?.[game.Home];
@@ -1631,7 +1819,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
 
   const savedAway = pick?.awayScore != null ? String(pick.awayScore) : "";
   const savedHome = pick?.homeScore != null ? String(pick.homeScore) : "";
-  const dirty = awayVal !== savedAway || homeVal !== savedHome || visibility !== (pick?.visibility || "public");
+  const dirty = awayVal !== savedAway || homeVal !== savedHome || visibility !== (pick?.visibility || "public") || noteVal !== (pick?.prediction || "");
   const isTie = awayVal.trim() !== "" && homeVal.trim() !== "" && Number(awayVal) === Number(homeVal);
   const canSave = showInputs && awayVal.trim() !== "" && homeVal.trim() !== "" && dirty && !isTie;
 
@@ -1731,6 +1919,19 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
   // own row below the grid, so these controls don't add height to the card.
   const actionButtons = showInputs ? (
     <div style={{ display: "flex", alignItems: "center", gap: "5px", flexShrink: 0, pointerEvents: "auto" }}>
+      {/* Opens the notes textarea below (see the grid's own trailing
+          content) — gold once a note actually exists so there's a hint
+          it's there even while collapsed, not just a bare "+". */}
+      <button
+        onClick={() => setNotesOpen((v) => !v)}
+        title={notesOpen ? "Hide note" : pick?.prediction ? "Edit your note" : "Add a note"}
+        style={{
+          background: "none", border: "none", cursor: "pointer", fontSize: "15px", padding: "1px", flexShrink: 0,
+          color: pick?.prediction ? GOLD : "rgba(255,255,255,0.55)", fontWeight: 900, lineHeight: 1,
+        }}
+      >
+        {notesOpen ? "–" : "+"}
+      </button>
       <button
         onClick={() => setVisibility((v) => (v === "public" ? "private" : "public"))}
         title={visibility === "public" ? "Public — click to make private" : "Private — click to make public"}
@@ -1739,7 +1940,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
         {visibility === "public" ? "🌍" : "🔒"}
       </button>
       <button
-        onClick={() => onSaveScore(game.id, awayVal, homeVal, visibility)}
+        onClick={() => onSaveScore(game.id, awayVal, homeVal, visibility, noteVal)}
         disabled={!canSave || saving}
         style={{
           background: canSave ? GOLD : "rgba(255,255,255,0.12)", color: canSave ? "#fff" : "rgba(255,255,255,0.4)",
@@ -1771,9 +1972,14 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
 
   return (
     <div style={{ position: "relative", border: `2px solid ${CARD_BORDER}`, borderRadius: "10px", overflow: "hidden", background: CARD_BG }}>
-      {/* Stretched-link background — clicking anywhere on the card that
-          isn't an input/button navigates to the game's own page. */}
-      <Link to={`/game/${game.Slug}`} aria-label={`${game.Away} at ${game.Home}`} style={{ position: "absolute", inset: 0, zIndex: 0 }} />
+      {/* Stretched-link background, but only across the right two-thirds of
+          the card — the left third is where the score inputs/logos sit, so
+          a click meant for one of those (but just off-target) no longer
+          accidentally navigates away instead of doing nothing. Doesn't
+          affect any individual input/button elsewhere on the card, which
+          already sit above this (pointerEvents: "auto") regardless of
+          where this box ends. */}
+      <Link to={`/game/${game.Slug}`} aria-label={`${game.Away} at ${game.Home}`} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: "33.333%", zIndex: 0 }} />
 
       <div style={{ position: "relative", zIndex: 1, padding: "8px 12px", pointerEvents: "none" }}>
         {(hasTags || showStar) && (
@@ -1834,6 +2040,22 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
         {isTie && (
           <div style={{ fontSize: "11px", fontWeight: 700, color: "#ffb3a7", marginTop: "4px" }}>
             Scores can't tie — every game has a winner.
+          </div>
+        )}
+
+        {showInputs && notesOpen && (
+          <div style={{ marginTop: "6px", pointerEvents: "auto" }}>
+            <textarea
+              value={noteVal}
+              onChange={(e) => setNoteVal(e.target.value)}
+              placeholder="Why do you like this pick? (optional)"
+              rows={2}
+              style={{
+                width: "100%", boxSizing: "border-box", resize: "vertical", border: `2px solid ${BLUE}`,
+                borderRadius: "6px", padding: "6px 8px", fontFamily: "inherit", fontSize: "12px", fontWeight: 600,
+                color: "#222", outline: "none", lineHeight: 1.4,
+              }}
+            />
           </div>
         )}
 
