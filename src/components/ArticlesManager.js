@@ -67,9 +67,20 @@ const FontSize = Extension.create({
 
 const createSlug = (text) => text.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-");
 
+// Slug = short-form title + the published date — same deterministic,
+// no-manual-override-needed formula PerformancesManager.js uses (short
+// titles alone collide easily across articles). Only spent when the Slug
+// field itself is left blank — see handleSave — so a manually-set slug on
+// an existing article is never silently overwritten.
+const slugFor = (titleShort, publishedAtDate) => {
+  const d = publishedAtDate instanceof Date ? publishedAtDate : (publishedAtDate ? new Date(publishedAtDate) : null);
+  const dateStr = d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : "";
+  return [createSlug(titleShort || ""), dateStr].filter(Boolean).join("-");
+};
+
 const BLANK_FORM = {
-  title: "", slug: "", author: "", publishedAt: "",
-  status: "draft", priority: 2, videoUrl: "",
+  title: "", titleShort: "", slug: "", author: "", publishedAt: "",
+  status: "draft", priority: 2, videoUrl: "", seoDescription: "",
 };
 
 const inputStyle = {
@@ -125,6 +136,13 @@ export default function ArticlesManager() {
   const editor = useEditor({
     extensions: [StarterKit, Underline, TiptapLink.configure({ openOnClick: false }), TiptapImage, TextStyle, FontSize],
     content: "<p>Start writing your article...</p>",
+    // Tiptap v3 changed useEditor's default to NOT re-render the component
+    // on every transaction (a v2→v3 perf change) — without this, moving the
+    // cursor into already-bold/italic/underlined text or just selecting a
+    // range never re-evaluates editor.isActive(...) below, so the B/I/U
+    // toolbar buttons stay stuck showing whatever was active last time
+    // something else happened to re-render this component.
+    shouldRerenderOnTransaction: true,
   });
 
   // Injected once, globally — the ProseMirror editor content isn't inside
@@ -132,8 +150,17 @@ export default function ArticlesManager() {
   useEffect(() => {
     const style = document.createElement("style");
     style.innerHTML = `
-      .wd-article-editor .ProseMirror { min-height: 300px; width: 100%; cursor: text; outline: none; font-size: 16px; line-height: 1.6; }
+      /* AdminPanel.js's outer wrapper sets the whole admin UI's font to
+         Arial Black — a genuinely heavy face, not just "Arial + bold" — and
+         .wd-article-editor never overrode it, so every character in here
+         (including plain body text) rendered at that same black weight
+         regardless of whether an actual Bold mark was applied. Explicit
+         normal-weight Arial/Helvetica here fixes that; the Bold toolbar
+         button's own font-weight:bold below still reads as bold relative
+         to this normal baseline. */
+      .wd-article-editor .ProseMirror { min-height: 300px; width: 100%; cursor: text; outline: none; font-size: 16px; line-height: 1.6; font-family: Arial, Helvetica, sans-serif; font-weight: 400; }
       .wd-article-editor .ProseMirror p { margin: 0; }
+      .wd-article-editor .ProseMirror strong, .wd-article-editor .ProseMirror b { font-weight: 700; }
       .wd-article-editor .ProseMirror img { max-width: 100%; border-radius: 10px; margin: 10px 0; }
       .wd-article-editor .ProseMirror a { color: ${GOLD}; font-weight: bold; text-decoration: underline; }
     `;
@@ -188,12 +215,14 @@ export default function ArticlesManager() {
     setSelectedArticle(a);
     setFormState({
       title: a.title || "",
+      titleShort: a.titleShort || "",
       slug: a.slug || "",
       author: a.author || "",
       publishedAt: a.publishedAt?.toDate ? a.publishedAt.toDate().toISOString().split("T")[0] : "",
       status: a.status || "draft",
       priority: a.priority || 2,
       videoUrl: a.videoUrl || "",
+      seoDescription: a.seoDescription || "",
     });
     editor?.commands.setContent(a.content || "");
     resetPickers();
@@ -270,8 +299,8 @@ export default function ArticlesManager() {
   const handleSave = async () => {
     if (!formState) return;
     const html = editor?.getHTML() || "";
-    if (!formState.title.trim() || !html.trim()) {
-      setSaveMessage("Failed: Title and content are required.");
+    if (!formState.title.trim() || !formState.titleShort.trim() || !html.trim()) {
+      setSaveMessage("Failed: Title, short-form title, and content are required.");
       return;
     }
     setSaving(true);
@@ -282,17 +311,37 @@ export default function ArticlesManager() {
         ? (() => { const [y, m, d] = formState.publishedAt.split("-"); return new Date(+y, +m - 1, +d); })()
         : null;
 
+      // Team-page article association: which school(s) TeamPage.js's own
+      // automatic "articles about our players" feed should show this under
+      // — replacing the old team-mention-based teamSlugs above, which
+      // nothing actually reads anymore. Snapshotted the first time a player
+      // is linked, not recomputed from their live current school on every
+      // re-save — a player already linked before a transfer keeps whatever
+      // school was captured back then, so a later unrelated edit (fixing a
+      // typo, say) can't silently move the article to their new team. Only
+      // a player newly linked in *this* save contributes their current
+      // school.
+      const existingPlayerIds = new Set(Array.isArray(selectedArticle?.playerIds) ? selectedArticle.playerIds : []);
+      const schoolSet = new Set(Array.isArray(selectedArticle?.schools) ? selectedArticle.schools : []);
+      playerIds.filter((id) => !existingPlayerIds.has(id)).forEach((id) => {
+        const p = players.find((pl) => pl.id === id);
+        if (p?.team) schoolSet.add(p.team);
+      });
+      const schools = Array.from(schoolSet);
+
       if (isNew) {
         const payload = {
           title: formState.title,
-          slug: formState.slug.trim() ? formState.slug.trim() : createSlug(formState.title),
+          titleShort: formState.titleShort.trim(),
+          slug: formState.slug.trim() ? formState.slug.trim() : slugFor(formState.titleShort.trim(), publishedAtDate),
           content: html,
           status: formState.status,
           priority: formState.priority,
           author: formState.author,
           publishedAt: publishedAtDate,
-          playerIds, teamSlugs,
+          playerIds, teamSlugs, schools,
           videoUrl: formState.videoUrl || "",
+          seoDescription: formState.seoDescription.trim(),
           authorId: user.uid,
           createdAt: serverTimestamp(),
         };
@@ -304,14 +353,16 @@ export default function ArticlesManager() {
       } else {
         const payload = {
           title: formState.title,
+          titleShort: formState.titleShort.trim(),
           slug: formState.slug,
           content: html,
           status: formState.status,
           priority: formState.priority,
           author: formState.author,
           publishedAt: publishedAtDate,
-          playerIds, teamSlugs,
+          playerIds, teamSlugs, schools,
           videoUrl: formState.videoUrl || "",
+          seoDescription: formState.seoDescription.trim(),
           updatedAt: serverTimestamp(),
         };
         await updateDoc(doc(db, "articles", selectedArticle.id), payload);
@@ -502,8 +553,12 @@ export default function ArticlesManager() {
                 <input value={formState.title} onChange={(e) => setFormState((p) => ({ ...p, title: e.target.value }))} style={inputStyle} />
               </div>
               <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Short-form Title</div>
+                <input value={formState.titleShort} onChange={(e) => setFormState((p) => ({ ...p, titleShort: e.target.value }))} placeholder="used in the slug, e.g. with the date" style={inputStyle} />
+              </div>
+              <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Slug (optional)</div>
-                <input value={formState.slug} onChange={(e) => setFormState((p) => ({ ...p, slug: e.target.value }))} placeholder="auto-generated from title" style={inputStyle} />
+                <input value={formState.slug} onChange={(e) => setFormState((p) => ({ ...p, slug: e.target.value }))} placeholder="auto-generated from short title + date" style={inputStyle} />
               </div>
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Author</div>
@@ -529,6 +584,17 @@ export default function ArticlesManager() {
                   <option value={3}>Priority 3</option>
                 </select>
               </div>
+            </div>
+
+            <div style={{ marginBottom: "10px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>SEO Description</div>
+              <textarea
+                value={formState.seoDescription}
+                onChange={(e) => setFormState((p) => ({ ...p, seoDescription: e.target.value }))}
+                placeholder="A sentence or two for search engines — the meta description leads with the published date and mentioned players, then this."
+                rows={2}
+                style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+              />
             </div>
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>

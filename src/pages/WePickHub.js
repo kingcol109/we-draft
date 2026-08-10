@@ -435,8 +435,12 @@ function MyPicksSection() {
       requestAnimationFrame(async () => {
         if (cancelled || !shareCardRef.current) return;
         try {
+          // backgroundColor here only fills the four corners the card's own
+          // border-radius cuts away from its bounding box — matched to
+          // PAGE_BG's darkest stop (not white) so those corners blend into
+          // the card instead of showing as pale triangles.
           const dataUrl = await htmlToImage.toPng(shareCardRef.current, {
-            pixelRatio: 2, backgroundColor: "#ffffff", skipFonts: true,
+            pixelRatio: 2, backgroundColor: "#06162c", skipFonts: true,
             filter: (node) => node.tagName !== "IMG",
           });
           if (!cancelled) setShareImageUrl(dataUrl);
@@ -449,7 +453,11 @@ function MyPicksSection() {
   }, [shareModal]);
 
   const shareText = shareModal
-    ? [`${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`, ...shareModal.lines, "we-draft.com/we-pick"].join("\n")
+    ? [
+        `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
+        ...shareModal.rows.map((r) => `${r.label}: ${r.value}`),
+        "we-draft.com/we-pick",
+      ].join("\n")
     : "";
 
   const handleSaveShareImage = () => {
@@ -803,35 +811,65 @@ function MyPicksSection() {
 
   // Opens the share modal with this card's content — the modal (rendered
   // near the bottom of this component) captures a hidden branded version of
-  // it to an image and offers Email/X/Text/Save-Image from there.
+  // it to an image and offers Email/X/Text/Save-Image from there. `rows`
+  // are structured, not plain strings, so the card can render each as its
+  // own bordered pill the way the live page's own GameRow does — "stat"
+  // rows (label/value) for the report card, "matchup" rows (two team names,
+  // one bolded to show who's favored) for picks. See the Hidden Share
+  // Card's own comment for the actual styling.
   const handleShareReportCard = () => {
-    const lines = [];
+    const rows = [];
     if (weekRankedTally.total > 0) {
-      lines.push(`Ranked: ${weekRankedTally.correct}-${weekRankedTally.incorrect} (${Math.round((weekRankedTally.correct / weekRankedTally.total) * 100)}%)`);
+      rows.push({ kind: "stat", label: "Ranked", value: `${weekRankedTally.correct}-${weekRankedTally.incorrect} (${Math.round((weekRankedTally.correct / weekRankedTally.total) * 100)}%)` });
     }
     if (weekUnrankedTally.total > 0) {
-      lines.push(`Unranked: ${weekUnrankedTally.correct}-${weekUnrankedTally.incorrect}`);
+      rows.push({ kind: "stat", label: "Unranked", value: `${weekUnrankedTally.correct}-${weekUnrankedTally.incorrect}` });
     }
-    lines.push(weekPlacement ? `Finished #${weekPlacement.rank} of ${weekPlacement.outOf} this week 🔥` : "Ranked placement pending.");
+    rows.push({ kind: "stat", label: "Placement", value: weekPlacement ? `#${weekPlacement.rank} of ${weekPlacement.outOf} 🔥` : "Pending" });
     setShareModal({
-      icon: "🏆", heading: "My We-Pick Report Card", weekLabel: selectedWeek, lines,
+      icon: "🏆", heading: "My Report Card", weekLabel: selectedWeek, rows,
       filename: `WePick_${selectedWeek.replace(/\s+/g, "")}_ReportCard`,
     });
   };
 
   // Same shape as handleShareReportCard above, but for bragging rights
-  // *before* kickoff — the actual Ranked 6 predictions, not results.
+  // *before* kickoff — the actual Ranked 6 predictions, not results. Every
+  // row keeps both team names (even a winner-only pick, which only "knows"
+  // one side) so the card can bold/dim them to show who's favored at a
+  // glance instead of burying it in a score. accentColor is the favored
+  // team's own Color1 — the one bit of real team-color flavor this
+  // text-only card (see the html-to-image IMG filter below) can still
+  // carry without risking a CORS-tainted canvas on a logo image.
   const handleSharePicks = () => {
-    const lines = rankedGames.map((g) => {
+    const rows = rankedGames.map((g) => {
       const p = myPicksById[g.id];
+      const awaySchool = schoolsByName?.[g.Away];
+      const homeSchool = schoolsByName?.[g.Home];
       if (p?.awayScore != null && p?.homeScore != null) {
-        return `${g.Away} ${p.awayScore} – ${g.Home} ${p.homeScore}`;
+        const awayWinning = p.awayScore > p.homeScore;
+        return {
+          kind: "matchup",
+          label: `${g.Away} vs ${g.Home}`,
+          value: `${p.awayScore}–${p.homeScore}`,
+          awayName: g.Away, homeName: g.Home,
+          awayWinning, homeWinning: !awayWinning,
+          accentColor: (awayWinning ? awaySchool : homeSchool)?.Color1 || GOLD,
+        };
       }
       const side = pickedSideOf(p);
-      return `${side === "away" ? g.Away : side === "home" ? g.Home : "?"} to win`;
+      const awayWinning = side === "away";
+      const homeWinning = side === "home";
+      return {
+        kind: "matchup",
+        label: `${g.Away} vs ${g.Home}`,
+        value: "TO WIN",
+        awayName: g.Away, homeName: g.Home,
+        awayWinning, homeWinning,
+        accentColor: (awayWinning ? awaySchool : homeWinning ? homeSchool : null)?.Color1 || GOLD,
+      };
     });
     setShareModal({
-      icon: "🔮", heading: "My Ranked 6", weekLabel: selectedWeek, lines,
+      icon: "🔮", heading: "My Ranked 6", weekLabel: selectedWeek, rows,
       filename: `WePick_${selectedWeek.replace(/\s+/g, "")}_Picks`,
     });
   };
@@ -1164,37 +1202,86 @@ function MyPicksSection() {
       {/* ===== Hidden Share Card ===== */}
       {/* Off-screen, only rendered while the share modal is open — the
           modal's own effect (above) captures this to a PNG the instant it
-          paints with shareModal's content. Text-only (no logos) so
-          html-to-image never trips over an externally-hosted image tainting
-          the canvas, same reasoning as PlayerProfile.js's own export card. */}
+          paints with shareModal's content. Built to actually look like
+          We-Pick (PAGE_BG's navy gradient, gold borders/accents, each row
+          styled like a compact GameRow) instead of the plain white card
+          PlayerProfile.js's own export uses — this one's meant to be posted,
+          not printed. Still text-only (no logos) so html-to-image never
+          trips over an externally-hosted image tainting the canvas; each
+          row's accentColor (a flat CSS color, not an image) is as far as
+          real team branding can safely go here. */}
       {shareModal && (
         <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
-          <div ref={shareCardRef} style={{ width: "700px", backgroundColor: "#ffffff", border: `6px solid ${BLUE}`, fontFamily: "'Arial Black', Arial, sans-serif", overflow: "hidden" }}>
-            <div style={{ backgroundColor: BLUE, padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ color: GOLD, fontSize: "24px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>We-Draft.com · We-Pick</div>
+          <div ref={shareCardRef} style={{ width: "640px", background: PAGE_BG, border: `3px solid ${GOLD}`, borderRadius: "22px", fontFamily: "'Arial Black', Arial, sans-serif", overflow: "hidden" }}>
+            {/* WE-DRAFT.COM leads as the actual brand mark now (big, bold,
+                gold) — "We-Pick" is just the smaller subtitle under it,
+                same emphasis order as PlayerProfile.js's export card. The
+                crystal ball only shows once now, down by the heading. */}
+            <div style={{ padding: "28px 32px 0", textAlign: "center" }}>
+              <div style={{ fontSize: "32px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.05em", textShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>
+                WE-DRAFT.COM
+              </div>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.14em", marginTop: "4px" }}>
+                We-Pick
+              </div>
             </div>
-            <div style={{ height: "5px", backgroundColor: GOLD }} />
-            <div style={{ padding: "30px 32px 18px", textAlign: "center" }}>
-              <div style={{ fontSize: "40px", lineHeight: 1 }}>{shareModal.icon}</div>
-              <div style={{ fontSize: "34px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.02em", marginTop: "8px" }}>{shareModal.heading}</div>
-              <div style={{ fontSize: "16px", fontWeight: 800, color: "#999", textTransform: "uppercase", letterSpacing: "0.1em", marginTop: "4px" }}>{shareModal.weekLabel}</div>
-              <div style={{ fontSize: "14px", fontWeight: 700, color: "#666", marginTop: "10px" }}>{profile?.username?.trim() || "Anonymous Fan"}</div>
+
+            <div style={{ padding: "20px 32px 4px", textAlign: "center" }}>
+              <div style={{ fontSize: "38px", lineHeight: 1 }}>{shareModal.icon}</div>
+              <div style={{ fontSize: "30px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em", marginTop: "10px", textShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>
+                {shareModal.heading}
+              </div>
+              <div style={{ display: "inline-block", marginTop: "8px", background: GOLD, color: "#1a1005", fontSize: "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", padding: "4px 14px", borderRadius: "20px" }}>
+                {shareModal.weekLabel}
+              </div>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginTop: "10px" }}>
+                {profile?.username?.trim() || "Anonymous Fan"}
+              </div>
             </div>
-            <div style={{ height: "2px", backgroundColor: GOLD, margin: "0 32px" }} />
-            <div style={{ padding: "16px 32px 24px" }}>
-              {shareModal.lines.length === 0 ? (
-                <div style={{ textAlign: "center", color: "#aaa", fontSize: "14px", fontStyle: "italic", padding: "10px 0" }}>No picks on record.</div>
+
+            <div style={{ padding: "22px 28px 30px", display: "flex", flexDirection: "column", gap: "10px" }}>
+              {shareModal.rows.length === 0 ? (
+                <div style={{ textAlign: "center", color: "rgba(255,255,255,0.5)", fontSize: "14px", fontStyle: "italic", padding: "14px 0" }}>
+                  No picks on record.
+                </div>
               ) : (
-                shareModal.lines.map((line, i) => (
-                  <div key={i} style={{ fontSize: "18px", fontWeight: 800, color: "#222", padding: "11px 0", borderBottom: i < shareModal.lines.length - 1 ? "1px solid #eee" : "none", textAlign: "center" }}>
-                    {line}
+                shareModal.rows.map((row, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px",
+                      background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.14)",
+                      borderLeft: `5px solid ${row.accentColor || GOLD}`, borderRadius: "10px", padding: "12px 16px",
+                    }}
+                  >
+                    {row.kind === "matchup" ? (
+                      // The favored team (awayWinning/homeWinning) bolds
+                      // bright white; the other side dims — who's picked to
+                      // win reads at a glance instead of only living in the
+                      // score off to the side.
+                      <span style={{ fontSize: "14px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        <span style={{ color: row.awayWinning ? "#fff" : "rgba(255,255,255,0.4)" }}>{row.awayName}</span>
+                        <span style={{ color: "rgba(255,255,255,0.4)", fontWeight: 700 }}> vs </span>
+                        <span style={{ color: row.homeWinning ? "#fff" : "rgba(255,255,255,0.4)" }}>{row.homeName}</span>
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "14px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        {row.label}
+                      </span>
+                    )}
+                    <span style={{ fontSize: "18px", fontWeight: 900, color: GOLD, fontFamily: "'Courier New', monospace", flexShrink: 0 }}>
+                      {row.value}
+                    </span>
                   </div>
                 ))
               )}
             </div>
-            <div style={{ height: "5px", backgroundColor: GOLD }} />
-            <div style={{ backgroundColor: BLUE, padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ color: GOLD, fontSize: "15px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase" }}>we-draft.com/we-pick</div>
+
+            <div style={{ height: "3px", background: GOLD }} />
+            <div style={{ padding: "18px 28px", textAlign: "center", background: "rgba(0,0,0,0.2)" }}>
+              <div style={{ color: GOLD, fontSize: "22px", fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                we-draft.com/we-pick
+              </div>
             </div>
           </div>
         </div>
@@ -1219,7 +1306,7 @@ function MyPicksSection() {
                 ×
               </button>
             </div>
-            <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.15)", marginBottom: "16px", background: "#fff", minHeight: "160px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.15)", marginBottom: "16px", background: "#06162c", minHeight: "160px", display: "flex", alignItems: "center", justifyContent: "center" }}>
               {shareImageUrl ? (
                 <img src={shareImageUrl} alt="Share preview" style={{ width: "100%", display: "block" }} />
               ) : (

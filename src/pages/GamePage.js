@@ -138,6 +138,12 @@ const GRADE_GLOW_STYLE = `
   .wd-perf-row-link:hover .wd-keyplayer-name-anim { top: 0; transform: translateY(0); }
   .wd-keyplayer-note-wrap { position: absolute; left: 0; right: 0; top: 25px; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
   .wd-perf-row-link:hover .wd-keyplayer-note-wrap { opacity: 1; }
+  /* Mobile has no hover state to reveal a note with, so rows carrying a
+     note (see the isMobile-only className above) just render already
+     "hovered" — name up top, note visible underneath — instead of hiding
+     it behind an interaction touch devices can't perform. */
+  .wd-keyplayer-note-forced .wd-keyplayer-name-anim { top: 0; transform: translateY(0); }
+  .wd-keyplayer-note-forced .wd-keyplayer-note-wrap { opacity: 1; }
 
   /* Pick-form score inputs — plain number fields without the browser's
      up/down spinner clutter, since the field is big and tappable enough on
@@ -449,7 +455,7 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
 // position alone. A translucent glass panel (not a white card) so it reads
 // as part of the same dark hero graphic instead of a light box bolted on
 // top of it.
-function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes }) {
+function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes, isMobile }) {
   const accent1 = schoolData?.Color1 || BLUE;
   const accent2 = schoolData?.Color2 || GOLD;
   const isFinalMode = mode === "final";
@@ -520,7 +526,7 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
             <Link
               key={p.id}
               to={`/player/${p.Slug}`}
-              className="wd-perf-row-link"
+              className={`wd-perf-row-link${isMobile ? " wd-keyplayer-note-forced" : ""}`}
               style={{
                 display: "flex", alignItems: "center", gap: "16px", padding: "16px 18px", textDecoration: "none",
                 borderBottom: i < keyPlayers.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
@@ -1284,6 +1290,7 @@ export default function GamePage() {
                     performances={performancesAway}
                     mode={isFinal ? "final" : "pregame"}
                     keyPlayerNotes={game.KeyPlayerNotes}
+                    isMobile={isMobile}
                   />
                   <TeamColumn
                     schoolData={homeSchool}
@@ -1291,6 +1298,7 @@ export default function GamePage() {
                     performances={performancesHome}
                     mode={isFinal ? "final" : "pregame"}
                     keyPlayerNotes={game.KeyPlayerNotes}
+                    isMobile={isMobile}
                   />
                 </div>
               </div>

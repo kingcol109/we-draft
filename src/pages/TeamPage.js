@@ -1033,13 +1033,19 @@ export default function TeamPage() {
           })(),
           (async () => {
             try {
+              // Articles: pulled by `schools` (each linked player's school,
+              // snapshotted the first time they're linked — see
+              // ArticlesManager.js's own handleSave), not by whether this
+              // team happens to be mentioned/linked in the body. That
+              // snapshot is what keeps an article on its original team's
+              // page even after a linked player later transfers elsewhere.
               const [newsSnap, articleSnap] = await Promise.all([
                 getDocs(query(collection(db, "news"), where("active", "==", true), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
-                getDocs(query(collection(db, "articles"), where("status", "==", "published"), where("slugs", "array-contains", slug), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+                getDocs(query(collection(db, "articles"), where("status", "==", "published"), where("schools", "array-contains", resolvedSchool), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
               ]);
               const combined = [
                 ...newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() })),
-                ...articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() })),
+                ...articleSnap.docs.map((d) => { const data = d.data(); return { id: d.id, type: "article", ...data, title: data.titleShort || data.title }; }),
               ].sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
                 .slice(0, NEWS_LIMIT);
               setTeamNews(combined);
@@ -1710,7 +1716,7 @@ export default function TeamPage() {
                 {n.type === "article" ? "Article" : "News"}
               </span>
               <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
-                {n.title}
+                {n.titleShort || n.title}
               </div>
             </div>
           </Link>

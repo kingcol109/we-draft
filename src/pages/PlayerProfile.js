@@ -282,6 +282,11 @@ export default function PlayerProfile() {
   const { user, login } = useAuth();
   const evaluationFormRef = useRef(null);
   const exportCardRef = useRef(null);
+  // Share-evaluation modal — see handleShareEvaluation. null until a share
+  // image has actually been generated; evalShareOpen gates the dialog
+  // itself so closing it doesn't have to also clear the cached image.
+  const [evalShareImageUrl, setEvalShareImageUrl] = useState(null);
+  const [evalShareOpen, setEvalShareOpen] = useState(false);
   const evaluationTextareaRef = useRef(null);
   const [draftedBy, setDraftedBy] = useState(null);
   const [draftInfo, setDraftInfo] = useState(null);
@@ -609,7 +614,10 @@ export default function PlayerProfile() {
         if (player?.id) {
           try {
             const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("playerIds","array-contains",player.id), orderBy("publishedAt","desc")));
-            playerArticleItems = articleSnap.docs.map((d) => ({ id:d.id, type:"article", _priority:1, ...d.data() }));
+            // Same titleShort-over-title preference as the performances
+            // mapping below, once ArticlesManager.js's own short-form title
+            // field is set.
+            playerArticleItems = articleSnap.docs.map((d) => { const data = d.data(); return { id:d.id, type:"article", _priority:1, ...data, title: data.titleShort || data.title }; });
           } catch(articleErr) {
             console.warn("Articles index missing, skipping:", articleErr);
           }
@@ -654,7 +662,7 @@ export default function PlayerProfile() {
               getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",schoolSlug), limit(8))),
             ]);
             schoolItems = [
-              ...schoolArticleSnap.docs.map((d) => ({ id:d.id, type:"article", _priority:2, ...d.data() })),
+              ...schoolArticleSnap.docs.map((d) => { const data = d.data(); return { id:d.id, type:"article", _priority:2, ...data, title: data.titleShort || data.title }; }),
               ...schoolNewsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:2, ...d.data() })),
             ].filter((n) => !existingIds.has(n.id));
           } catch(e) { /* school articles unavailable */ }
@@ -1129,14 +1137,24 @@ useEffect(() => {
     fetch();
   }, [community.topFits]);
 
-  const handleExportImage = async () => {
+  // Same share-modal pattern WePickHub.js's own share buttons use: build the
+  // image first, show it in a preview dialog, then offer Email/X/Text/Save
+  // from there — instead of silently downloading a file the moment the
+  // button's clicked, with no chance to see what it looks like first.
+  const handleShareEvaluation = async () => {
     if (!exportCardRef.current) return;
     try {
       const dataUrl = await htmlToImage.toPng(exportCardRef.current, { pixelRatio:2, backgroundColor:"#ffffff", skipFonts:true, filter:(node)=>node.tagName!=="IMG" });
-      const link = document.createElement("a");
-      link.download = `${player.First}_${player.Last}_Evaluation.png`;
-      link.href = dataUrl; link.click();
-    } catch(e) { alert("Failed to export image. Please try again."); }
+      setEvalShareImageUrl(dataUrl);
+      setEvalShareOpen(true);
+    } catch(e) { alert("Failed to build the share image. Please try again."); }
+  };
+
+  const handleSaveEvalImage = () => {
+    if (!evalShareImageUrl) return;
+    const link = document.createElement("a");
+    link.download = `${player.First}_${player.Last}_Evaluation.png`;
+    link.href = evalShareImageUrl; link.click();
   };
 
   // ── Insert a bullet line into the evaluation textarea at the cursor,
@@ -2969,59 +2987,126 @@ useEffect(() => {
         </div>
 
         {/* ===== Hidden Export Card ===== */}
+        {/* Same overall vibe as before (light card, color1/color2 branding)
+            but sleeker: rounded throughout instead of hard rectangular
+            borders, Grade/Strengths/Weaknesses/NFL Fit sit in their own
+            soft rounded panels with breathing room between them instead of
+            thin dividers crammed edge-to-edge, and the header/footer get a
+            subtle gradient for depth instead of a flat fill. The footer
+            also no longer just repeats "WE-DRAFT.COM" from the header —
+            it's the player's own shareable URL instead, actual information
+            rather than the same wordmark twice. */}
         <div style={{ position:"absolute", left:"-9999px", top:0 }}>
-          <div ref={exportCardRef} style={{ width:"700px", backgroundColor:"#ffffff", border:`6px solid ${color1}`, fontFamily:"'Arial Black', Arial, sans-serif", overflow:"hidden" }}>
-            <div style={{ backgroundColor:color1, padding:"16px 28px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ color:color2, fontSize:"30px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase" }}>WE-DRAFT.COM</div>
+          <div ref={exportCardRef} style={{ width:"700px", backgroundColor:"#ffffff", borderRadius:"28px", overflow:"hidden", boxShadow:"0 24px 60px rgba(0,0,0,0.22)", border:"1px solid rgba(0,0,0,0.06)", fontFamily:"'Arial Black', Arial, sans-serif" }}>
+            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"20px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ color:color2, fontSize:"26px", fontWeight:900, letterSpacing:"0.16em", textTransform:"uppercase" }}>WE-DRAFT.COM</div>
             </div>
-            <div style={{ height:"5px", backgroundColor:color2 }} />
-            <div style={{ padding:"24px 28px 16px", textAlign:"center" }}>
-              <div style={{ fontSize:"56px", fontWeight:900, color:color1, lineHeight:1, letterSpacing:"0.02em", textTransform:"uppercase" }}>{player.First} {player.Last}</div>
-              <div style={{ fontSize:"13px", fontWeight:700, color:"#999", letterSpacing:"0.08em", textTransform:"uppercase", marginTop:"8px" }}>Scouted by {scoutName}</div>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"12px", marginTop:"12px" }}>
-                <span style={{ backgroundColor:color1, color:"#fff", fontWeight:900, fontSize:"16px", padding:"4px 18px", borderRadius:"20px", letterSpacing:"0.05em" }}>{player.Position}</span>
-                <span style={{ color:"#ccc", fontSize:"20px" }}>·</span>
-                <span style={{ color:color1, fontWeight:900, fontSize:"20px" }}>{player.School}</span>
-                <span style={{ color:"#ccc", fontSize:"20px" }}>·</span>
-                <span style={{ color:"#666", fontWeight:800, fontSize:"20px" }}>{formatEligible(player.Eligible)}</span>
+            <div style={{ height:"4px", background:`linear-gradient(90deg, ${color2}, ${color1})` }} />
+            <div style={{ padding:"32px 32px 20px", textAlign:"center" }}>
+              <div style={{ fontSize:"52px", fontWeight:900, color:color1, lineHeight:1.05, letterSpacing:"0.01em", textTransform:"uppercase" }}>{player.First} {player.Last}</div>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#aaa", letterSpacing:"0.12em", textTransform:"uppercase", marginTop:"10px" }}>Scouted by {scoutName}</div>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
+                <span style={{ backgroundColor:color1, color:"#fff", fontWeight:900, fontSize:"14px", padding:"6px 18px", borderRadius:"20px", letterSpacing:"0.05em" }}>{player.Position}</span>
+                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
+                <span style={{ color:color1, fontWeight:900, fontSize:"18px" }}>{player.School}</span>
+                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
+                <span style={{ color:"#888", fontWeight:800, fontSize:"18px" }}>{formatEligible(player.Eligible)}</span>
               </div>
             </div>
-            <div style={{ height:"2px", backgroundColor:color2, margin:"0 28px" }} />
-            <div style={{ display:"flex", padding:"20px 28px" }}>
-              <div style={{ flex:"0 0 160px", paddingRight:"24px", borderRight:"2px solid #eee", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", borderBottom:`3px solid ${color1}`, paddingBottom:"5px", marginBottom:"14px", width:"100%", textAlign:"center" }}>Grade</div>
-                {grade ? <GradeBadge g={grade} large={true} /> : <div style={{ color:"#aaa", fontSize:"13px", fontStyle:"italic" }}>No grade</div>}
+            <div style={{ display:"flex", gap:"12px", padding:"4px 24px 24px", alignItems:"stretch" }}>
+              <div style={{ flex:"0 0 150px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"14px" }}>Grade</div>
+                {grade ? <GradeBadge g={grade} large={true} /> : <div style={{ color:"#ccc", fontSize:"13px", fontStyle:"italic" }}>No grade</div>}
               </div>
-              <div style={{ flex:1, paddingLeft:"20px", paddingRight:"20px", borderRight:"2px solid #eee" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", borderBottom:`3px solid ${color1}`, paddingBottom:"5px", marginBottom:"12px" }}>Strengths</div>
-                {strengths.length > 0 ? strengths.map((s,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.06em", padding:"4px 0", borderBottom:i<strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>) : <div style={{ color:"#aaa", fontSize:"12px", fontStyle:"italic" }}>—</div>}
+              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Strengths</div>
+                {strengths.length > 0 ? strengths.map((s,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<strengths.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{s}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
               </div>
-              <div style={{ flex:1, paddingLeft:"20px", paddingRight:"20px", borderRight:"2px solid #eee" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", borderBottom:`3px solid ${color1}`, paddingBottom:"5px", marginBottom:"12px" }}>Weaknesses</div>
-                {weaknesses.length > 0 ? weaknesses.map((w,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.06em", padding:"4px 0", borderBottom:i<weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>) : <div style={{ color:"#aaa", fontSize:"12px", fontStyle:"italic" }}>—</div>}
+              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Weaknesses</div>
+                {weaknesses.length > 0 ? weaknesses.map((w,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<weaknesses.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{w}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
               </div>
-              <div style={{ flex:"0 0 110px", paddingLeft:"20px", display:"flex", flexDirection:"column", alignItems:"center" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", borderBottom:`3px solid ${color1}`, paddingBottom:"5px", marginBottom:"12px", width:"100%", textAlign:"center" }}>NFL Fit</div>
-                {nflFit ? <div style={{ fontSize:"12px", fontWeight:900, color:color1, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.04em", lineHeight:1.3 }}>{nflFit}</div> : <div style={{ color:"#aaa", fontSize:"12px", fontStyle:"italic" }}>—</div>}
-              </div>
+              {nflFit && (
+                <div style={{ flex:"0 0 110px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center" }}>
+                  <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px", textAlign:"center" }}>NFL Fit</div>
+                  <div style={{ fontSize:"12px", fontWeight:900, color:color1, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.04em", lineHeight:1.3 }}>{nflFit}</div>
+                </div>
+              )}
             </div>
             {evaluation && (
-              <>
-                <div style={{ height:"2px", backgroundColor:color2, margin:"0 28px" }} />
-                <div style={{ padding:"16px 28px" }}>
-                  <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", borderBottom:`3px solid ${color1}`, paddingBottom:"5px", marginBottom:"10px" }}>Scout's Take</div>
-                  <div style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.6 }}>
-                    {renderEvaluationText(evaluation, "export")}
-                  </div>
+              <div style={{ margin:"0 24px 28px", background:`${color1}0d`, borderLeft:`4px solid ${color2}`, borderRadius:"0 16px 16px 0", padding:"18px 22px" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"8px" }}>Scout's Take</div>
+                <div style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.7 }}>
+                  {renderEvaluationText(evaluation, "export")}
                 </div>
-              </>
+              </div>
             )}
-            <div style={{ height:"5px", backgroundColor:color2 }} />
-            <div style={{ backgroundColor:color1, padding:"16px 28px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ color:color2, fontSize:"30px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase" }}>WE-DRAFT.COM</div>
+            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ color:color2, fontSize:"18px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase" }}>Create Player Evaluations on We-Draft.com</div>
             </div>
           </div>
         </div>
+
+        {/* ===== Share Evaluation Modal ===== */}
+        {evalShareOpen && (
+          <div
+            onClick={() => setEvalShareOpen(false)}
+            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background:"#fff", border:`2px solid ${color1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"90vh", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
+            >
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
+                <div style={{ color:color1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>
+                <button
+                  onClick={() => setEvalShareOpen(false)}
+                  style={{ background:"none", border:"none", color:"#999", fontSize:"22px", cursor:"pointer", lineHeight:1, padding:0 }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ borderRadius:"10px", overflow:"hidden", border:"1px solid #eee", marginBottom:"16px", background:"#fafafa", minHeight:"160px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {evalShareImageUrl ? (
+                  <img src={evalShareImageUrl} alt="Evaluation preview" style={{ width:"100%", display:"block" }} />
+                ) : (
+                  <div style={{ padding:"50px 0", color:"#999", fontSize:"13px", fontWeight:700 }}>Building image…</div>
+                )}
+              </div>
+              <div style={{ fontSize:"11px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:"8px" }}>
+                Share to
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                <a
+                  href={`mailto:?subject=${encodeURIComponent(`${player.First} ${player.Last} — Scouting Report`)}&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position}):\nwe-draft.com/player/${slug}`)}`}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:color1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                >
+                  📧 Email
+                </a>
+                <a
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`My scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position})`)}&url=${encodeURIComponent(`https://we-draft.com/player/${slug}`)}`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:color1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                >
+                  𝕏 X
+                </a>
+                <a
+                  href={`sms:?&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last}: we-draft.com/player/${slug}`)}`}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:color1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                >
+                  💬 Text
+                </a>
+                <button
+                  onClick={handleSaveEvalImage}
+                  disabled={!evalShareImageUrl}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:color1, border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:"#fff", fontWeight:800, fontSize:"13px", cursor:evalShareImageUrl?"pointer":"default", opacity:evalShareImageUrl?1:0.6 }}
+                >
+                  💾 Save Image
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ===== Evaluation Form ===== */}
         <div ref={evaluationFormRef} className="mb-8">
@@ -3171,8 +3256,8 @@ useEffect(() => {
                   <button onClick={handleSaveEvaluation} disabled={saving} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:color1, border:`2px solid ${color2}`, color:"#fff", letterSpacing:"0.08em" }}>
                     {saving?"Saving...":"Save Evaluation"}
                   </button>
-                  <button onClick={handleExportImage} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${color1}`, color:color1, letterSpacing:"0.08em" }}>
-                    Export as Image
+                  <button onClick={handleShareEvaluation} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${color1}`, color:color1, letterSpacing:"0.08em" }}>
+                    Share Evaluation
                   </button>
                   {(lastUpdated || archivedEval) && (
                     <button onClick={handleArchiveEvaluation} disabled={archiving || !lastUpdated} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90"

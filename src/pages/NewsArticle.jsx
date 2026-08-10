@@ -134,10 +134,23 @@ export default function NewsArticle() {
   const videoLinks = article.videoUrl ? [{ href: article.videoUrl, label: "Watch Video" }] : [];
 
   const rawText = article.summary || rawHtml.replace(/<[^>]+>/g, "");
-  const description = rawText.slice(0, 160);
   const canonicalUrl = `https://we-draft.com/news/${article.slug}`;
   const pubDate = article.publishedAt?.toDate?.();
   const dateStr = pubDate?.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+
+  // SEO/social description — articles lead with the published date and
+  // mentioned players (mentionedPlayers only ever populates for
+  // type:"article", never "news"), then ArticlesManager.js's own SEO
+  // Description field. Falls back to a plain body-text snippet for news
+  // items, or any article saved before the SEO Description field existed.
+  const mentionedNames = mentionedPlayers.map((p) => `${p.First} ${p.Last}`).join(", ");
+  const seoParts = [];
+  if (article.type === "article") {
+    if (dateStr) seoParts.push(dateStr);
+    if (mentionedNames) seoParts.push(`featuring ${mentionedNames}`);
+    if (article.seoDescription?.trim()) seoParts.push(article.seoDescription.trim());
+  }
+  const description = seoParts.length > 0 ? seoParts.join(" — ") : rawText.slice(0, 160);
 
   const SidebarItem = ({ item }) => {
     const ts = item.publishedAt || item.updatedAt;
@@ -200,6 +213,34 @@ export default function NewsArticle() {
           "mainEntityOfPage": { "@type": "WebPage", "@id": canonicalUrl }
         })}</script>
       </Helmet>
+
+      {/* Players Mentioned row hover — a lift + shadow + gold glow on the
+          logo, plus a chevron that slides in, instead of just a flat
+          background swap. */}
+      <style>{`
+        .wd-mentioned-player-link {
+          transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+        .wd-mentioned-player-link:hover {
+          transform: translateX(4px);
+          background: #f7f9fc;
+          box-shadow: inset 3px 0 0 ${GOLD};
+        }
+        .wd-mentioned-player-logo {
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .wd-mentioned-player-link:hover .wd-mentioned-player-logo {
+          transform: scale(1.08);
+          box-shadow: 0 0 0 3px rgba(246,162,29,0.35);
+        }
+        .wd-mentioned-player-chevron {
+          opacity: 0; transform: translateX(-6px);
+          transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+        .wd-mentioned-player-link:hover .wd-mentioned-player-chevron {
+          opacity: 1; transform: translateX(0);
+        }
+      `}</style>
 
       <div ref={contentRef} style={{ maxWidth: "1200px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
@@ -324,16 +365,15 @@ export default function NewsArticle() {
                       <Link
                         key={p.id}
                         to={`/player/${p.Slug}`}
+                        className="wd-mentioned-player-link"
                         style={{
                           display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
                           textDecoration: "none",
                           borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
                           background: "#fff",
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                       >
-                        <div style={{
+                        <div className="wd-mentioned-player-logo" style={{
                           flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                           width: "52px", height: "52px", borderRadius: "8px",
                           background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
@@ -347,14 +387,16 @@ export default function NewsArticle() {
                             <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
                           )}
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
                           <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
                             {p.First} {p.Last}
                           </span>
-                          <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                            {p.Position || "—"}
+                          <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px" }}>
+                            <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{p.Position || "—"}</span>
+                            {p.School && <span> · {p.School}</span>}
                           </span>
                         </div>
+                        <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
                       </Link>
                     );
                   })}

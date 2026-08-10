@@ -27,11 +27,11 @@ export default function News() {
       try {
         const [newsSnap, articlesSnap] = await Promise.all([
           getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"))),
-          getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("updatedAt", "desc"))),
+          getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"))),
         ]);
 
         const newsItems = newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() }));
-        const articleItems = articlesSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data(), publishedAt: d.data().updatedAt }));
+        const articleItems = articlesSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() }));
 
         // Reverse chronological — unchanged.
         const combined = [...newsItems, ...articleItems].sort((a, b) =>
