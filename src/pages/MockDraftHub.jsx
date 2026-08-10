@@ -342,7 +342,12 @@ export default function MockDraftHub() {
                       borderBottom: i < filtered.length - 1 ? `1px solid #f0f0f0` : "none",
                       background: "#fff",
                     }}
-                    onClick={() => navigate(`/mocks/${mock.id}`)}
+                    // /view (ViewMock.js), not the bare /mocks/:mockId
+                    // editor route — this list is for browsing everyone's
+                    // public mocks, and if one of them happens to be the
+                    // current user's own, clicking it here shouldn't drop
+                    // them straight into edit mode.
+                    onClick={() => navigate(`/mocks/${mock.id}/view`)}
                   >
                     {/* Round badge */}
                     <div style={{
@@ -383,7 +388,7 @@ export default function MockDraftHub() {
 
                     {/* View button */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); navigate(`/mocks/${mock.id}`); }}
+                      onClick={(e) => { e.stopPropagation(); navigate(`/mocks/${mock.id}/view`); }}
                       style={{
                         flexShrink: 0, backgroundColor: GOLD, color: "#fff",
                         border: `2px solid #c98a10`, borderRadius: "8px",

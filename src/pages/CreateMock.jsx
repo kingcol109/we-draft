@@ -11,6 +11,7 @@ import { useParams } from "react-router-dom";
 import { useRef } from "react";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import ShareMockButton from "../components/ShareMockButton";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -586,6 +587,11 @@ export default function CreateMock() {
   const availableRoundsEdit = [...new Set(visiblePicks.map((p) => p.round))].sort((a, b) => a - b);
   const roundPicksEdit = visiblePicks.filter((p) => p.round === activeEditRound);
   const filledEditRoundPicks = roundPicksEdit.filter((p) => assignedPlayers[p.pickNumber]);
+  // ShareMockButton takes an already-normalized picks shape — here that
+  // means pulling each pick's player out of the separate assignedPlayers
+  // map (this page's own in-progress editing state keeps them apart, unlike
+  // a saved mock's picks map, which already has the player embedded).
+  const sharePicksEdit = roundPicksEdit.map((p) => ({ pickNumber: p.pickNumber, currentTeam: p.currentTeam, tradedFrom: p.tradedFrom, player: assignedPlayers[p.pickNumber] || null }));
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "10px 10px 80px" : 20, fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -641,6 +647,26 @@ export default function CreateMock() {
           style={{ background: "#fff", color: "#c0392b", border: "2px solid #e74c3c", borderRadius: 8, padding: "7px 14px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 12 }}>
           Clear All
         </button>
+
+        {/* Only once the mock actually has an id (i.e. it's been saved at
+            least once) — sharing an unsaved draft with no permanent URL
+            yet doesn't make sense. Reaching this render branch at all
+            already means the current user owns this mock (see the
+            !isOwner-gated read-only branch above), so no separate
+            ownership check is needed here. */}
+        {isEditMode && (
+          <ShareMockButton
+            variant="light"
+            mockName={mockName}
+            ownerLabel={ownerLabel}
+            roundLabel={`Round ${activeEditRound}`}
+            totalRounds={rounds}
+            visibility={visibility}
+            picks={sharePicksEdit}
+            teams={teams}
+            filenamePrefix={`WeDraft_${(mockName || "MockDraft").replace(/\s+/g, "")}_Rd${activeEditRound}`}
+          />
+        )}
 
         {isMobile && (
           <button onClick={() => setShowBank((o) => !o)}

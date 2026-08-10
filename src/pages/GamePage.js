@@ -477,6 +477,7 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
         emptyWatermark && (
           <img
             src={sanitizeUrl(emptyWatermark)} alt="" aria-hidden="true"
+            loading="lazy"
             style={{
               position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
               width: "70%", maxWidth: "220px", height: "auto", opacity: 0.35, objectFit: "contain", pointerEvents: "none",
@@ -539,7 +540,7 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
                   boxShadow: `0 0 12px ${flairInfo.stroke}66`,
                   display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
                 }} title={p.Flair}>
-                  <img src={flairInfo.img} alt={p.Flair} style={{ height: "80%", width: "80%", objectFit: "contain" }} />
+                  <img src={flairInfo.img} alt={p.Flair} loading="lazy" style={{ height: "80%", width: "80%", objectFit: "contain" }} />
                 </div>
               ) : fallbackLogo ? (
                 <div style={{
@@ -548,7 +549,7 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
                   boxShadow: `0 0 12px ${accent2}66`,
                   display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
                 }}>
-                  <img src={fallbackLogo} alt="" style={{ height: "78%", width: "78%", objectFit: "contain" }} />
+                  <img src={fallbackLogo} alt="" loading="lazy" style={{ height: "78%", width: "78%", objectFit: "contain" }} />
                 </div>
               ) : (
                 <div style={{
@@ -1188,6 +1189,7 @@ export default function GamePage() {
                 {channelLogo && (
                   <img
                     src={sanitizeUrl(channelLogo)} alt={game.Channel} title={game.Channel}
+                    loading="lazy"
                     style={{ height: isMobile ? "68px" : "100px", maxWidth: isMobile ? "240px" : "340px", objectFit: "contain", margin: "10px auto 0", display: "block", filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.4))" }}
                     onError={(e) => { e.currentTarget.style.display = "none"; }}
                   />
@@ -1403,7 +1405,7 @@ export default function GamePage() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "18px", maxWidth: isMobile ? "100%" : "600px", margin: "0 auto 22px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
                             {(awaySchool?.LogoDark || awaySchool?.Logo1) && (
-                              <img src={sanitizeUrl(awaySchool.LogoDark || awaySchool.Logo1)} alt={game.Away} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
+                              <img src={sanitizeUrl(awaySchool.LogoDark || awaySchool.Logo1)} alt={game.Away} loading="lazy" style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
                             )}
                             <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#fff", fontWeight: 900, fontSize: isMobile ? "17px" : "26px", textTransform: "uppercase", letterSpacing: "0.01em", textShadow: "0 2px 6px rgba(0,0,0,0.5)", lineHeight: 1.05 }}>{game.Away}</span>
                             <input
@@ -1415,7 +1417,7 @@ export default function GamePage() {
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
                             {(homeSchool?.LogoDark || homeSchool?.Logo1) && (
-                              <img src={sanitizeUrl(homeSchool.LogoDark || homeSchool.Logo1)} alt={game.Home} style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
+                              <img src={sanitizeUrl(homeSchool.LogoDark || homeSchool.Logo1)} alt={game.Home} loading="lazy" style={{ width: "52px", height: "52px", objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.5))" }} />
                             )}
                             <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#fff", fontWeight: 900, fontSize: isMobile ? "17px" : "26px", textTransform: "uppercase", letterSpacing: "0.01em", textShadow: "0 2px 6px rgba(0,0,0,0.5)", lineHeight: 1.05 }}>{game.Home}</span>
                             <input
@@ -1445,7 +1447,7 @@ export default function GamePage() {
                               }}
                             >
                               {(schoolData?.LogoDark || schoolData?.Logo1) && (
-                                <img src={sanitizeUrl(schoolData.LogoDark || schoolData.Logo1)} alt={name} style={{ width: "48px", height: "48px", objectFit: "contain" }} />
+                                <img src={sanitizeUrl(schoolData.LogoDark || schoolData.Logo1)} alt={name} loading="lazy" style={{ width: "48px", height: "48px", objectFit: "contain" }} />
                               )}
                               <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", textTransform: "uppercase", letterSpacing: "0.02em", textAlign: "center", textShadow: "0 2px 4px rgba(0,0,0,0.5)" }}>
                                 {name}
@@ -1570,7 +1572,7 @@ export default function GamePage() {
                           border: `2px solid ${awayWinPct >= homeWinPct ? awayColor : "#eee"}`,
                         }}>
                           {awaySchool?.Logo1 && (
-                            <img src={sanitizeUrl(awaySchool.Logo1)} alt="" style={{ width: "34px", height: "34px", objectFit: "contain", marginBottom: "6px" }} />
+                            <img src={sanitizeUrl(awaySchool.Logo1)} alt="" loading="lazy" style={{ width: "34px", height: "34px", objectFit: "contain", marginBottom: "6px" }} />
                           )}
                           <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#888", textTransform: "uppercase", marginBottom: "6px" }}>{game.Away}</div>
                           {scoredPicks.length > 0 && (
@@ -1584,7 +1586,7 @@ export default function GamePage() {
                           border: `2px solid ${homeWinPct > awayWinPct ? homeColor : "#eee"}`,
                         }}>
                           {homeSchool?.Logo1 && (
-                            <img src={sanitizeUrl(homeSchool.Logo1)} alt="" style={{ width: "34px", height: "34px", objectFit: "contain", marginBottom: "6px" }} />
+                            <img src={sanitizeUrl(homeSchool.Logo1)} alt="" loading="lazy" style={{ width: "34px", height: "34px", objectFit: "contain", marginBottom: "6px" }} />
                           )}
                           <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#888", textTransform: "uppercase", marginBottom: "6px" }}>{game.Home}</div>
                           {scoredPicks.length > 0 && (
@@ -1632,7 +1634,7 @@ export default function GamePage() {
                                   )}
                                 </div>
                                 {pickedLogo ? (
-                                  <img src={sanitizeUrl(pickedLogo)} alt={pickedAway ? game.Away : game.Home} title={`Picks ${pickedAway ? game.Away : game.Home}`} style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} />
+                                  <img src={sanitizeUrl(pickedLogo)} alt={pickedAway ? game.Away : game.Home} title={`Picks ${pickedAway ? game.Away : game.Home}`} loading="lazy" style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} />
                                 ) : (
                                   <div style={{ width: "34px", height: "34px", flexShrink: 0 }} />
                                 )}
@@ -1640,7 +1642,7 @@ export default function GamePage() {
                                   <span style={{ display: "flex", alignItems: "center", gap: "5px", fontWeight: 900, fontSize: "13px", color: BLUE }}>
                                     {p.displayName || "Anonymous Fan"}
                                     {verifiedByUid[p.id] && (
-                                      <img src={verifiedBadge} alt="Verified" title="Verified" style={{ width: "14px", height: "14px" }} />
+                                      <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "14px", height: "14px" }} />
                                     )}
                                   </span>
                                   {p.prediction && (

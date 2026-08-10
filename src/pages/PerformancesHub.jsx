@@ -624,7 +624,7 @@ export default function PerformancesHub() {
                         return (
                           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                             {logoSrc ? (
-                              <img src={logoSrc} alt="" style={{ width: "36px", height: "36px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                              <img src={logoSrc} alt="" loading="lazy" style={{ width: "36px", height: "36px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                             ) : (
                               <div style={{ width: "36px", height: "36px", flexShrink: 0, borderRadius: "6px", background: "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)", fontSize: "13px", fontWeight: 900 }}>
                                 {(school || "?").charAt(0)}
@@ -745,7 +745,7 @@ export default function PerformancesHub() {
                         >
                           <span style={{ width: "4px", height: "34px", borderRadius: "2px", background: tickColor, flexShrink: 0 }} />
                           {logo ? (
-                            <img src={logo} alt="" style={{ width: "24px", height: "24px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            <img src={logo} alt="" loading="lazy" style={{ width: "24px", height: "24px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                           ) : (
                             <span style={{ width: "24px", height: "24px", flexShrink: 0, borderRadius: "4px", background: "rgba(255,255,255,0.08)", display: "inline-block" }} />
                           )}

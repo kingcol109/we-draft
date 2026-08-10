@@ -605,7 +605,7 @@ export default function CommunityBoard() {
 
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: flairConfig ? "10px" : "12px" }}>
           {flairConfig && (
-            <img src={flairConfig.img} alt={player.Flair} style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} />
+            <img src={flairConfig.img} alt={player.Flair} loading="lazy" style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} />
           )}
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 900, fontSize: "17px", color: BLUE, lineHeight: 1.15 }}>
@@ -1299,7 +1299,7 @@ export default function CommunityBoard() {
                             <span style={{ fontSize: "13px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{draft.pick}</span>
                           </div>
                           {teamData && teamData.Logo1 ? (
-                            <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} style={{ width: "24px", height: "24px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} loading="lazy" style={{ width: "24px", height: "24px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                           ) : (
                             <span style={{ fontSize: "8px", fontWeight: 900, color: c1 }}>{draft.team}</span>
                           )}
@@ -1423,7 +1423,7 @@ export default function CommunityBoard() {
                       {is2026 && (
                         <div style={{ width: "56px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
                           {teamData && teamData.Logo1 ? (
-                            <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={(teamData && teamData.Name) || draft.team} style={{ width: "40px", height: "40px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            <img src={sanitizeUrl(teamData.Logo1)} alt={draft.team} title={(teamData && teamData.Name) || draft.team} loading="lazy" style={{ width: "40px", height: "40px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                           ) : draft ? <span style={{ fontSize: "11px", fontWeight: 900, color: c1 }}>{draft.team}</span> : <span style={{ color: "#ddd" }}>—</span>}
                         </div>
                       )}

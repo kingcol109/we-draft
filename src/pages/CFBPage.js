@@ -165,21 +165,54 @@ export default function CFBPage() {
     >
       <style>{`
         .team-card {
-          transition: transform 0.18s ease, box-shadow 0.18s ease;
+          transition: box-shadow 0.18s ease;
         }
         .team-card:hover {
-          transform: translateY(-5px) scale(1.04);
+          /* No transform here on purpose — the old translateY/scale lift
+             visually enlarged the whole chip on hover, which is exactly
+             the "box growing" this was supposed to not do. A shadow alone
+             still reads as hover feedback without touching the box's size
+             or position. */
           box-shadow: 0 8px 20px rgba(0,0,0,0.15);
           opacity: 1 !important;
         }
-        .team-card:hover .team-logo {
-          transform: scale(1.12);
+        /* Logo lives in its own absolutely-positioned layer, back at its
+           original resting inset (top:8px, sides:6px, bottom reserving
+           room for the name below it) — all four sides now animate
+           together toward a near-zero inset on hover, so the layer
+           actually expands to cover nearly the entire box in every
+           direction at once, not just downward. Equal insets on all sides
+           at the end of the animation keeps it symmetric. */
+        .team-logo-wrap {
+          transition: top 0.22s ease, bottom 0.22s ease, left 0.22s ease, right 0.22s ease;
         }
+        .team-card:hover .team-logo-wrap {
+          top: 3px;
+          bottom: 3px;
+          left: 3px;
+          right: 3px;
+        }
+        /* The logo itself sits at a small, fixed size at rest — the same
+           ballpark as the old fixed-px logo before this hover redesign —
+           and jumps to nearly the full size of its (also-growing) wrapper
+           on hover, so the two effects compound into a big, obvious
+           change. !important is needed here because it's overriding an
+           inline style, not another class. */
         .team-logo {
-          transition: transform 0.18s ease;
+          transition: width 0.22s ease, height 0.22s ease;
         }
-        .team-card:hover .team-accent {
-          height: 5px !important;
+        .team-card:hover .team-logo {
+          width: 100% !important;
+          height: 100% !important;
+        }
+        /* Name + accent bar fade out together on hover instead of moving —
+           they sit in their own absolutely-positioned layer at the bottom,
+           independent of the logo layer growing underneath/behind them. */
+        .team-card-info {
+          transition: opacity 0.18s ease;
+        }
+        .team-card:hover .team-card-info {
+          opacity: 0;
         }
         .team-accent {
           transition: height 0.18s ease;
@@ -308,82 +341,113 @@ export default function CFBPage() {
                 const primary = team.Color1 || SITE_BLUE;
                 const secondary = team.Color2 || SITE_GOLD;
 
+                const logoSrc = team.LogoDark || team.Logo1 || "";
+
                 return (
                   <Link
                     key={team.id}
                     to={`/team/${slug}`}
                     className="team-card"
                     style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: isMobile ? "10px 6px" : "14px 10px",
+                      position: "relative",
+                      // Fixed height (not content-sized) so the hover
+                      // animation below — the logo layer growing as the
+                      // name/accent layer fades — never changes the chip's
+                      // own footprint in the grid.
+                      height: isMobile ? "84px" : "104px",
                       borderRadius: "8px",
-                      backgroundColor: "#fff",
-                      border: `2px solid ${primary}`,
+                      backgroundColor: primary,
+                      border: `2px solid ${secondary}`,
                       textDecoration: "none",
-                      textAlign: "center",
-                      gap: isMobile ? "5px" : "8px",
+                      overflow: "hidden",
                     }}
                   >
-                    {/* Logo */}
-                    {team.Logo1 ? (
-                      <img
-                        src={team.Logo1}
-                        alt={team.School}
-                        className="team-logo"
-                        style={{
-                          width: isMobile ? "36px" : "48px",
-                          height: isMobile ? "36px" : "48px",
-                          objectFit: "contain",
-                        }}
-                        loading="lazy"
-                        onError={(e) => { e.currentTarget.style.display = "none"; }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: isMobile ? "36px" : "48px",
-                          height: isMobile ? "36px" : "48px",
-                          borderRadius: "50%",
-                          backgroundColor: primary,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#fff",
-                          fontSize: isMobile ? "10px" : "12px",
-                          fontWeight: 900,
-                        }}
-                      >
-                        {team.School.charAt(0)}
-                      </div>
-                    )}
-
-                    {/* School name */}
+                    {/* Logo layer, resting in its original spot (top:8px,
+                        sides:6px, bottom reserving room for the name below
+                        it). On hover all four sides animate toward a near-
+                        zero inset (see .team-logo-wrap above), expanding
+                        this layer — and the logo filling it — to cover
+                        nearly the entire box. Dark variant preferred now
+                        that the chip's own background is the team's color
+                        instead of white, same convention used everywhere
+                        else colored backgrounds sit behind a logo. */}
                     <div
+                      className="team-logo-wrap"
                       style={{
-                        fontSize: isMobile ? "10px" : "12px",
-                        fontWeight: 900,
-                        color: primary,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                        lineHeight: 1.2,
+                        position: "absolute", left: "6px", right: "6px", top: "8px",
+                        bottom: isMobile ? "26px" : "32px",
+                        display: "flex", alignItems: "center", justifyContent: "center",
                       }}
                     >
-                      {team.School}
+                      {logoSrc ? (
+                        <img
+                          src={logoSrc}
+                          alt={team.School}
+                          className="team-logo"
+                          style={{
+                            width: isMobile ? "36px" : "48px",
+                            height: isMobile ? "36px" : "48px",
+                            objectFit: "contain",
+                            filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.35))",
+                          }}
+                          loading="lazy"
+                          onError={(e) => { e.currentTarget.style.display = "none"; }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: isMobile ? "36px" : "48px",
+                            height: isMobile ? "36px" : "48px",
+                            borderRadius: "50%",
+                            backgroundColor: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: primary,
+                            fontSize: isMobile ? "10px" : "12px",
+                            fontWeight: 900,
+                          }}
+                        >
+                          {team.School.charAt(0)}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Color accent bar */}
+                    {/* Name + accent bar layer — fades out on hover (see
+                        .team-card:hover .team-card-info) instead of moving,
+                        independent of the logo layer growing behind it. */}
                     <div
-                      className="team-accent"
+                      className="team-card-info"
                       style={{
-                        width: "100%",
-                        height: "3px",
-                        backgroundColor: secondary,
-                        borderRadius: "2px",
+                        position: "absolute", left: 0, right: 0, bottom: 0,
+                        padding: isMobile ? "0 6px 8px" : "0 10px 10px",
+                        display: "flex", flexDirection: "column", alignItems: "center",
+                        gap: isMobile ? "4px" : "6px", textAlign: "center",
                       }}
-                    />
+                    >
+                      <div
+                        style={{
+                          fontSize: isMobile ? "10px" : "12px",
+                          fontWeight: 900,
+                          color: "#fff",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                          lineHeight: 1.2,
+                          textShadow: "0 1px 3px rgba(0,0,0,0.35)",
+                        }}
+                      >
+                        {team.School}
+                      </div>
+                      <div
+                        className="team-accent"
+                        style={{
+                          width: "100%",
+                          height: "3px",
+                          backgroundColor: secondary,
+                          borderRadius: "2px",
+                        }}
+                      />
+                    </div>
                   </Link>
                 );
               })}

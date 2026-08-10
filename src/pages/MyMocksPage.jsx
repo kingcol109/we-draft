@@ -283,7 +283,7 @@ export default function MyMocksPage() {
                   {/* Info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
-                      onClick={() => navigate(`/mocks/${mock.id}`)}
+                      onClick={() => navigate(`/mocks/${mock.id}/view`)}
                       style={{ fontWeight: 900, fontSize: isMobile ? "14px" : "17px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: "3px", cursor: "pointer" }}
                       onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
@@ -300,8 +300,24 @@ export default function MyMocksPage() {
                     </div>
                   </div>
 
-                  {/* Buttons */}
+                  {/* Buttons — View and Edit used to be the same single
+                      button (its label even lied about which one you'd get
+                      for archived draft classes), landing you on
+                      /mocks/:mockId either way, which is the editor — an
+                      owner had no way to just look at their own mock. Now
+                      they're two explicit, honest actions. */}
                   <div style={{ flexShrink: 0, display: "flex", gap: "6px" }}>
+                    <button
+                      onClick={() => navigate(`/mocks/${mock.id}/view`)}
+                      style={{
+                        backgroundColor: "#fff", color: BLUE, border: `2px solid ${BLUE}`,
+                        borderRadius: "8px", padding: isMobile ? "6px 12px" : "7px 16px",
+                        fontWeight: 900, fontSize: "12px", textTransform: "uppercase",
+                        letterSpacing: "0.06em", cursor: "pointer",
+                      }}
+                    >
+                      View
+                    </button>
                     <button
                       onClick={() => navigate(`/mocks/${mock.id}`)}
                       style={{
@@ -311,7 +327,7 @@ export default function MyMocksPage() {
                         letterSpacing: "0.06em", cursor: "pointer",
                       }}
                     >
-{ARCHIVE_YEARS.includes(mock.draftClass || "2026") ? "View →" : "Edit →"}
+                      Edit →
                     </button>
                     <button
                       onClick={() => handleDelete(mock.id)}

@@ -65,7 +65,7 @@ const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", b
 
 const BLANK_PLAYER_FORM = {
   First: "", Last: "", School: "", Position: "", Eligible: "",
-  Height: "", Weight: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
+  Height: "", Weight: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
 };
 
 function generateSlug(first, last, position, eligible) {
@@ -383,6 +383,7 @@ function PlayerDataSection() {
       Eligible: p.Eligible || "",
       Height: p.Height || "",
       Weight: p.Weight || "",
+      Bio: p.Bio || "",
       Flair: p.Flair || "",
       Live: p.Live !== false,
       AdminNotes: p.AdminNotes || "",
@@ -744,6 +745,14 @@ function PlayerDataSection() {
               </FieldRow>
               <FieldRow label="Weight">
                 <input value={formState.Weight} onChange={(e) => handleFieldChange("Weight", e.target.value)} placeholder="e.g. 215" style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Bio (shown on player page)">
+                <textarea
+                  value={formState.Bio}
+                  onChange={(e) => handleFieldChange("Bio", e.target.value)}
+                  placeholder="A short public bio — shown on the player's page, below the hero and above measurements."
+                  style={{ ...inputStyle, height: "100px", resize: "vertical", fontFamily: "inherit" }}
+                />
               </FieldRow>
               <FieldRow label="Flair">
                 <select value={formState.Flair} onChange={(e) => handleFieldChange("Flair", e.target.value)} style={inputStyle}>

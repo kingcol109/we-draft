@@ -508,6 +508,7 @@ export default function Navbar() {
                                     >
                                       {team.Logo1 && (
                                         <img src={team.Logo1} alt={team.Team}
+                                          loading="lazy"
                                           style={{ width: 14, height: 14, objectFit: "contain", flexShrink: 0 }}
                                           onError={(e) => { e.currentTarget.style.display = "none"; }} />
                                       )}
@@ -583,6 +584,7 @@ export default function Navbar() {
                               >
                                 {team.Logo1 && (
                                   <img src={team.Logo1} alt={team.School}
+                                    loading="lazy"
                                     style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }}
                                     onError={(e) => { e.currentTarget.style.display = "none"; }} />
                                 )}

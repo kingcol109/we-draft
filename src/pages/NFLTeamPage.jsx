@@ -475,6 +475,7 @@ export default function NFLTeamPage() {
                           <img
                             src={imgSrc}
                             alt={player.fullName}
+                            loading="lazy"
                             style={{ height: isLogo ? "70%" : "100%", objectFit: "contain", objectPosition: isLogo ? "center" : "top", opacity: isLogo ? 0.35 : 1 }}
                             onError={(e) => { e.currentTarget.style.display = "none"; }}
                           />

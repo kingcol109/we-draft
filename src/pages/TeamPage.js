@@ -358,6 +358,7 @@ function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, c
           {teamData?.Logo1 ? (
             <div style={{ width: "32px", height: "32px", background: "#f5f5f5", borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center", padding: "2px" }}>
               <img src={sanitizeUrl(teamData.Logo1)} alt={draft?.team}
+                loading="lazy"
                 style={{ width: "28px", height: "28px", objectFit: "contain" }}
                 onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
             </div>
@@ -382,6 +383,7 @@ function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, c
             <img
               src={flairInfo.img}
               alt={player.Flair}
+              loading="lazy"
               style={{
                 width: isMobile ? "26px" : "32px", height: isMobile ? "26px" : "32px",
                 objectFit: "contain", borderRadius: "6px", padding: "2px",
@@ -485,6 +487,7 @@ function HistoricalRow({ player, nflTeams, isMobile, color1, color2 }) {
           {teamLogo ? (
             <div style={{ width: "32px", height: "32px", background: "#f5f5f5", borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center", padding: "2px" }}>
               <img src={sanitizeUrl(teamLogo)} alt={nflTeamName}
+                loading="lazy"
                 style={{ width: "28px", height: "28px", objectFit: "contain" }}
                 onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
             </div>
@@ -1387,6 +1390,7 @@ export default function TeamPage() {
                   <img
                     src={sanitizeUrl(team.Logo1)}
                     alt={team.School}
+                    loading="lazy"
                     style={{ width: "24px", height: "24px", objectFit: "contain" }}
                     onError={(e) => { e.currentTarget.style.display = "none"; }}
                   />
@@ -1529,6 +1533,7 @@ export default function TeamPage() {
                   <img
                     src={sanitizeUrl(opponentData.Logo1)}
                     alt={opponentName}
+                    loading="lazy"
                     style={{ width: "22px", height: "22px", objectFit: "contain" }}
                     onError={(e) => { e.currentTarget.style.display = "none"; }}
                   />
@@ -1883,7 +1888,7 @@ export default function TeamPage() {
                         <>
                           {team.Logo1 ? (
                             <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <img src={sanitizeUrl(team.Logo1)} alt={team.School} style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                              <img src={sanitizeUrl(team.Logo1)} alt={team.School} loading="lazy" style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                             </div>
                           ) : null}
                           <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>

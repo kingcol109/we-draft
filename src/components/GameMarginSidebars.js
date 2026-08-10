@@ -351,7 +351,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
                     {logo ? (
-                      <img src={sanitizeUrl(logo)} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      <img src={sanitizeUrl(logo)} alt="" loading="lazy" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                     ) : (
                       <span style={{ width: "16px", height: "16px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
                     )}
@@ -418,7 +418,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                   onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                 >
                   {school?.Logo1 ? (
-                    <img src={sanitizeUrl(school.Logo1)} alt="" style={{ width: "22px", height: "22px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    <img src={sanitizeUrl(school.Logo1)} alt="" loading="lazy" style={{ width: "22px", height: "22px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   ) : (
                     <span style={{ width: "22px", height: "22px", flexShrink: 0, borderRadius: "4px", background: "#eee", display: "inline-block" }} />
                   )}
@@ -472,7 +472,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
                     {logo ? (
-                      <img src={sanitizeUrl(logo)} alt="" style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      <img src={sanitizeUrl(logo)} alt="" loading="lazy" style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                     ) : (
                       <span style={{ width: "18px", height: "18px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
                     )}

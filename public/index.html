@@ -13,6 +13,18 @@
     <link rel="icon" href="%PUBLIC_URL%/sec logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
+    <!-- Warms up the connection (DNS + TLS handshake) to the two hosts every
+         page's very first render depends on — Firestore for basically all
+         content, i.mgur.com for most team/player logos — before the app's
+         own JS has even parsed enough to issue those requests. Matters more
+         on mobile, where that handshake round-trip costs more to begin
+         with. crossorigin is required on preconnect even for same-origin-
+         looking hints when the actual requests will be CORS (fetch/XHR),
+         or the browser opens a second, wasted connection for the real one. -->
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://i.imgur.com" crossorigin />
+    <link rel="dns-prefetch" href="https://firestore.googleapis.com" />
+    <link rel="dns-prefetch" href="https://i.imgur.com" />
     <!-- No static <meta name="description"> here on purpose — every page
          sets its own via <Helmet>, and a fallback default lives in App.js's
          root Helmet. A static tag here would sit alongside (not replace)

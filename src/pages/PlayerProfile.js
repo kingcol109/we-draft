@@ -190,9 +190,9 @@ function SidebarCard({ title, color1, color2, children }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${color1}` }}>
       <div style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
-        <div className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
+        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
           {title}
-        </div>
+        </h2>
       </div>
       <div style={{ height: "4px", backgroundColor: color2 }} />
       <div style={{ background: "#fff" }}>{children}</div>
@@ -596,34 +596,41 @@ export default function PlayerProfile() {
     if (!slug) return;
     const fetch = async () => {
       try {
-        // 1. Player-specific news and articles — wrapped in its own
-        // try/catch (matching the article/performance/school-item fetches
-        // below) so a missing index or transient failure here only drops
-        // the news items, instead of throwing up to the outer catch and
-        // wiping out articles/performances/school items that already loaded
-        // fine.
-        let playerNewsItems = [];
-        try {
-          const newsSnap = await getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
-          playerNewsItems = newsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:1, ...d.data() }));
-        } catch(newsErr) {
-          console.warn("News index missing, skipping:", newsErr);
-        }
+        // These four reads (player news, player articles, player
+        // performances, school items) don't depend on each other at all —
+        // they used to run as four sequential awaits, one after another,
+        // which on a real network is four round-trips of latency stacked up
+        // for one sidebar feed. Firing them together via Promise.all cuts
+        // that to about one round-trip's worth of wall-clock time. Each
+        // still has its own try/catch (an unrelated missing index or
+        // transient failure in one shouldn't wipe out the others' results).
+        const schoolSlug = player?.School ? toTeamSlug(player.School) : null;
 
-        let playerArticleItems = [];
-        if (player?.id) {
+        const fetchPlayerNews = async () => {
+          try {
+            const newsSnap = await getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",slug), orderBy("publishedAt","desc")));
+            return newsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:1, ...d.data() }));
+          } catch(newsErr) {
+            console.warn("News index missing, skipping:", newsErr);
+            return [];
+          }
+        };
+
+        const fetchPlayerArticles = async () => {
+          if (!player?.id) return [];
           try {
             const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("playerIds","array-contains",player.id), orderBy("publishedAt","desc")));
             // Same titleShort-over-title preference as the performances
             // mapping below, once ArticlesManager.js's own short-form title
             // field is set.
-            playerArticleItems = articleSnap.docs.map((d) => { const data = d.data(); return { id:d.id, type:"article", _priority:1, ...data, title: data.titleShort || data.title }; });
+            return articleSnap.docs.map((d) => { const data = d.data(); return { id:d.id, type:"article", _priority:1, ...data, title: data.titleShort || data.title }; });
           } catch(articleErr) {
             console.warn("Articles index missing, skipping:", articleErr);
+            return [];
           }
-        }
+        };
 
-        // 1b. Game performances — authored from the Admin Panel's Performances
+        // Game performances — authored from the Admin Panel's Performances
         // tab. Matched the same way as articles (playerIds array-contains,
         // published only) so a performance mentioning several players shows
         // up on all of their profiles, not just the primary subject's.
@@ -632,11 +639,11 @@ export default function PlayerProfile() {
         // already have. The displayed/sorted date is always the game's date,
         // never the authoring date — a performance should read as "what
         // happened in this game," not "when the write-up was published."
-        let playerPerformanceItems = [];
-        if (player?.id) {
+        const fetchPlayerPerformances = async () => {
+          if (!player?.id) return [];
           try {
             const perfSnap = await getDocs(query(collection(db,"performances"), where("playerIds","array-contains",player.id), where("status","==","published")));
-            playerPerformanceItems = perfSnap.docs
+            return perfSnap.docs
               .map((d) => {
                 const data = d.data();
                 return {
@@ -648,25 +655,31 @@ export default function PlayerProfile() {
               .sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0));
           } catch(perfErr) {
             console.warn("Performances unavailable, skipping:", perfErr);
+            return [];
           }
-        }
+        };
 
-        // 2. School articles — fill remaining slots when player content is sparse
-        const existingIds = new Set([...playerNewsItems, ...playerArticleItems, ...playerPerformanceItems].map((n) => n.id));
-        let schoolItems = [];
-        if (player?.School) {
-          const schoolSlug = toTeamSlug(player.School);
+        // School articles/news — fill remaining slots when player content is sparse
+        const fetchSchoolItems = async () => {
+          if (!schoolSlug) return [];
           try {
             const [schoolArticleSnap, schoolNewsSnap] = await Promise.all([
               getDocs(query(collection(db,"articles"), where("status","==","published"), where("slugs","array-contains",schoolSlug), limit(8))),
               getDocs(query(collection(db,"news"), where("active","==",true), where("slugs","array-contains",schoolSlug), limit(8))),
             ]);
-            schoolItems = [
+            return [
               ...schoolArticleSnap.docs.map((d) => { const data = d.data(); return { id:d.id, type:"article", _priority:2, ...data, title: data.titleShort || data.title }; }),
               ...schoolNewsSnap.docs.map((d) => ({ id:d.id, type:"news", _priority:2, ...d.data() })),
-            ].filter((n) => !existingIds.has(n.id));
-          } catch(e) { /* school articles unavailable */ }
-        }
+            ];
+          } catch(e) { return []; }
+        };
+
+        const [playerNewsItems, playerArticleItems, playerPerformanceItems, schoolItemsRaw] = await Promise.all([
+          fetchPlayerNews(), fetchPlayerArticles(), fetchPlayerPerformances(), fetchSchoolItems(),
+        ]);
+
+        const existingIds = new Set([...playerNewsItems, ...playerArticleItems, ...playerPerformanceItems].map((n) => n.id));
+        const schoolItems = schoolItemsRaw.filter((n) => !existingIds.has(n.id));
 
         // Sort: player content first, school content second, each sorted by date within group
         const combined = [...playerArticleItems, ...playerPerformanceItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
@@ -1298,8 +1311,12 @@ useEffect(() => {
     </div>
   );
 
+  // Physical/Athletic Testing group labels — the only visible headings for
+  // the Measurables section (there's no separate umbrella title above
+  // them), so each one is its own <h2> rather than an <h3> with no <h2>
+  // parent in between the page's <h1> and here.
   const GroupLabel = ({ children }) => (
-    <div style={{ fontSize:"12px", fontWeight:900, letterSpacing:"0.12em", textTransform:"uppercase", color:"#666", marginBottom:"8px", textAlign:"center" }}>{children}</div>
+    <h2 style={{ fontSize:"12px", fontWeight:900, letterSpacing:"0.12em", textTransform:"uppercase", color:"#666", marginBottom:"8px", textAlign:"center" }}>{children}</h2>
   );
 
   // ── Shared fixed-position placement for both margin ad cards, derived from
@@ -1436,7 +1453,7 @@ useEffect(() => {
           </a>
 
           <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:"1px solid #f3f3f3" }}>
-            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} />
+            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
           </div>
         </div>
       </div>
@@ -1563,6 +1580,7 @@ useEffect(() => {
                 src={sanitizeUrl(tLogo)}
                 alt={teamLabel}
                 style={{ height:"64px", objectFit:"contain" }}
+                loading="lazy"
                 referrerPolicy="no-referrer"
                 onError={(e)=>{e.currentTarget.style.display="none";}}
               />
@@ -1570,7 +1588,7 @@ useEffect(() => {
           )}
 
           <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:`1px solid ${tColor1}22` }}>
-            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} />
+            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
           </div>
         </div>
       </div>
@@ -1579,7 +1597,7 @@ useEffect(() => {
 
   const SectionTitle = ({ children }) => (
     <>
-      <div className="font-black uppercase mb-2" style={{ color:color1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</div>
+      <h2 className="font-black uppercase mb-2" style={{ color:color1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</h2>
       <div className="mb-4 rounded-sm" style={{ height:"3px", backgroundColor:color1 }} />
     </>
   );
@@ -1705,9 +1723,9 @@ useEffect(() => {
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
             {playerFullName}
           </div>
-          <div style={{ color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: "11px", marginTop: "2px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          <h2 style={{ color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: "11px", marginTop: "2px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
             {draftClassLabel} Class ▾
-          </div>
+          </h2>
         </div>
         <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "18px" }}>⬇</span>
       </summary>
@@ -1823,9 +1841,9 @@ useEffect(() => {
         justifyContent: "space-between",
         userSelect: "none",
       }}>
-        <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+        <h2 style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
           🔥 Trending ▾
-        </div>
+        </h2>
         <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "18px" }}>⬇</span>
       </summary>
       <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
@@ -1890,9 +1908,9 @@ useEffect(() => {
 
             {v.title && (
               <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                <div className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
+                <h3 className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
                   {v.title}
-                </div>
+                </h3>
               </div>
             )}
           </div>
@@ -1956,7 +1974,7 @@ useEffect(() => {
               <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "performance" ? "#7c3aed" : n.type === "article" ? SITE_GOLD : SITE_BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
                 {n.type === "performance" ? "Performance" : n.type === "article" ? "Article" : "News"}
               </span>
-              <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
+              <h3 className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</h3>
               {n.type === "performance" && n.statLine && (
                 <div style={{ fontFamily: "'Courier New', monospace", fontWeight: 700, fontSize: "10.5px", color: "#666", marginTop: "3px" }}>
                   {n.statLine}
@@ -2786,14 +2804,22 @@ useEffect(() => {
           </div>
           <div style={{ height: "4px", background: color2 }} />
 
+          {player.Bio && (
+            <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "18px 32px", borderBottom: "1px solid #eee" }}>
+              <p style={{ margin: 0, fontSize: isMobile ? "13px" : "15px", fontWeight: 500, color: "#333", lineHeight: 1.65, textAlign: isMobile ? "left" : "center", maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
+                {player.Bio}
+              </p>
+            </div>
+          )}
+
           {physicalMeasurements.length > 0 && (
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>
               {isMobile ? (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
-                  <div style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginBottom:"4px" }}>Physical</div>
+                  <h2 style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginBottom:"4px" }}>Physical</h2>
                   {physicalMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                   {hasAthletic && <>
-                    <div style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginTop:"8px", marginBottom:"4px" }}>Athletic Testing</div>
+                    <h2 style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginTop:"8px", marginBottom:"4px" }}>Athletic Testing</h2>
                     {athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                   </>}
                 </div>
@@ -2829,7 +2855,7 @@ useEffect(() => {
             <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
               <div className="flex items-start gap-4 px-3 py-3" style={{ borderBottom:"1px solid #e5e7eb" }}>
                 <div style={{ flex:"0 0 100px" }}>
-                  <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Grade</div>
+                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Community Grade</h3>
                   {(() => {
                     // No scored evaluations yet -> represent that as a Watchlist
                     // grade (already a real, selectable grade value) rather than
@@ -2865,10 +2891,10 @@ useEffect(() => {
                   })()}
                 </div>
                 <div style={{ flex:1 }}>
-                  <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
+                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
                   {fitLogos.length > 0 ? (
                     <div className="flex justify-center gap-2">
-                      {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                      {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
                     </div>
                   ) : community.topFits.length > 0 ? (
                     <div className="flex flex-col items-center gap-1">
@@ -2879,7 +2905,7 @@ useEffect(() => {
               </div>
               <div className="flex">
                 <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
-                  <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Strengths</div>
+                  <h3 className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
@@ -2892,7 +2918,7 @@ useEffect(() => {
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
                 <div className="flex-1 px-3 py-3">
-                  <div className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Weaknesses</div>
+                  <h3 className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Top Weaknesses</h3>
                   {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                       <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
@@ -2909,7 +2935,7 @@ useEffect(() => {
           ) : (
             <div className="flex bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
               <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
-                <div className="text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Grade</div>
+                <h3 className="text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Community Grade</h3>
                 {(() => {
                   // No scored evaluations yet -> represent that as a Watchlist
                   // grade (already a real, selectable grade value) rather than
@@ -2947,7 +2973,7 @@ useEffect(() => {
                 })()}
               </div>
               <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
-                <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Strengths</div>
+                <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Top Strengths</h3>
                 {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
                     <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
@@ -2960,7 +2986,7 @@ useEffect(() => {
                 )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
               </div>
               <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
-                <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Weaknesses</div>
+                <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Top Weaknesses</h3>
                 {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
                     <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
@@ -2973,10 +2999,10 @@ useEffect(() => {
                 )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
               </div>
               <div className="flex flex-col px-5 py-5" style={{ flex:"0 0 150px" }}>
-                <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>NFL Fit</div>
+                <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
                 {fitLogos.length > 0 ? (
                   <div className="flex flex-col items-center justify-start flex-1 gap-3">
-                    {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                    {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
                   </div>
                 ) : community.topFits.length > 0 ? (
                   <div className="flex flex-col gap-1">{community.topFits.map((t,i) => <p key={i} className="text-sm font-bold text-gray-600">{t}</p>)}</div>
@@ -3116,7 +3142,7 @@ useEffect(() => {
               <div className="font-black uppercase text-white tracking-wide" style={{ fontSize:isMobile?"13px":"18px" }}>
                 {`${player.First||""} ${player.Last||""}`.toUpperCase()}
               </div>
-              <img src={Logo1} alt="We-Draft.com Logo" className="w-auto object-contain opacity-90" style={{ height:isMobile?"20px":"28px", filter:"brightness(0) invert(1)" }} />
+              <img src={Logo1} alt="We-Draft.com Logo" className="w-auto object-contain opacity-90" style={{ height:isMobile?"20px":"28px", filter:"brightness(0) invert(1)" }} loading="lazy" />
             </div>
 
             {!user ? (
@@ -3380,7 +3406,7 @@ useEffect(() => {
                   <div className="flex items-center justify-between px-3 py-2" style={{ backgroundColor:color1 }}>
                     <div className="flex items-center gap-2">
                       <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"13px":"17px" }}>{ev.username}</span>
-                      {ev.verified && <img src={verifiedBadge} alt="Verified" className="w-4 h-4 inline-block" />}
+                      {ev.verified && <img src={verifiedBadge} alt="Verified" className="w-4 h-4 inline-block" loading="lazy" />}
                     </div>
                     {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
                   </div>
@@ -3395,7 +3421,7 @@ useEffect(() => {
                           {ev.nflFit && (
                             <div className="flex flex-col items-center">
                               <div style={{ fontSize:"8px", fontWeight:800, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"3px" }}>NFL Fit</div>
-                              {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} style={{ width:"36px", height:"36px", objectFit:"contain" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
+                              {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} style={{ width:"36px", height:"36px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
                                 : <div style={{ fontSize:"10px", fontWeight:800, color:color1, textAlign:"center" }}>{ev.nflFit}</div>}
                             </div>
                           )}
@@ -3442,7 +3468,7 @@ useEffect(() => {
                         </div>}
                         {ev.nflFit && <div className="flex flex-col items-center justify-center px-4 py-4" style={{ flex:"0 0 120px", borderRight:ev.evaluation?"1px solid #e5e7eb":"none" }}>
                           <div className="font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
-                          {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} className="object-contain" style={{ width:"52px", height:"52px" }} referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
+                          {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} className="object-contain" style={{ width:"52px", height:"52px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
                             : <div className="font-black uppercase text-center" style={{ fontSize:"13px", color:color1, letterSpacing:"0.04em", lineHeight:1.4 }}>{ev.nflFit}</div>}
                         </div>}
                       </div>

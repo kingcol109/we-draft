@@ -237,7 +237,7 @@ export default function PerformancePage() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
             {logo && (
-              <img src={logo} alt="" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              <img src={logo} alt="" loading="lazy" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
             )}
             <span style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "12px", color: BLUE, lineHeight: 1.25 }}>
               {item.playerName || item.titleShort}
@@ -489,7 +489,7 @@ export default function PerformancePage() {
                         }}>
                           {logo ? (
                             <img
-                              src={logo} alt={p.School || ""} style={{ width: "80%", height: "80%", objectFit: "contain" }}
+                              src={logo} alt={p.School || ""} loading="lazy" style={{ width: "80%", height: "80%", objectFit: "contain" }}
                               referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
                             />
                           ) : (

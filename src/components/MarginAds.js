@@ -250,7 +250,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
           </a>
 
           <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:"1px solid #f3f3f3" }}>
-            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} />
+            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
           </div>
         </div>
       </div>
@@ -349,13 +349,14 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
             <div style={{ padding:"16px 10px", display:"flex", alignItems:"center", justifyContent:"center", background:"#fff", borderTop:`1px solid ${tColor1}22` }}>
               <img
                 src={sanitizeUrl(tLogo)} alt={teamLabel} style={{ height:"64px", objectFit:"contain" }}
+                loading="lazy"
                 referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}}
               />
             </div>
           )}
 
           <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:`1px solid ${tColor1}22` }}>
-            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} />
+            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
           </div>
         </div>
       </div>
