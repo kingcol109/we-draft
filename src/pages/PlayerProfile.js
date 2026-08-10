@@ -2023,6 +2023,40 @@ useEffect(() => {
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`} />
         <meta name="twitter:description" content={metaDescription} />
+        <meta name="robots" content="index, follow" />
+
+        {/* Home → Draft Prospects → Player Name, mirroring TeamPage.js's own
+            Home → College Football → Team breadcrumb pattern. "Draft
+            Prospects" points at /community — the site's actual draft-class
+            rankings hub (App.js's <Route path="/community" ...>, "NFL Draft
+            Community Board" — there's no separate /prospects route). */}
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://we-draft.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Draft Prospects", "item": "https://we-draft.com/community" },
+            { "@type": "ListItem", "position": 3, "name": `${player.First||""} ${player.Last||""}`.trim(), "item": `https://we-draft.com/player/${slug}` },
+          ],
+        })}</script>
+
+        {/* ProfilePage/Person structured data — only populated from fields
+            that actually exist on the player doc (see BLANK_PLAYER_FORM /
+            AdminPanel.js's Player Data form for the full field list). There
+            is no player headshot/photo field anywhere in the data model
+            (players are only ever shown via team/school logos on this
+            site), so "image" is intentionally omitted rather than guessed. */}
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "ProfilePage",
+          "url": `https://we-draft.com/player/${slug}`,
+          "name": `${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`.trim(),
+          "mainEntity": {
+            "@type": "Person",
+            "name": `${player.First||""} ${player.Last||""}`.trim(),
+            "url": `https://we-draft.com/player/${slug}`,
+            ...(player.School ? { "affiliation": { "@type": "SportsTeam", "name": player.School } } : {}),
+            ...(player.Position ? { "jobTitle": player.Position } : {}),
+          },
+        })}</script>
       </Helmet>
 
       <style>{PLAYER_HERO_STYLE}</style>
@@ -2853,8 +2887,16 @@ useEffect(() => {
           <SectionTitle>Community Scouting Report</SectionTitle>
           {isMobile ? (
             <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
-              <div className="flex items-start gap-4 px-3 py-3" style={{ borderBottom:"1px solid #e5e7eb" }}>
-                <div style={{ flex:"0 0 100px" }}>
+              {/* Grade and Class Rank are now matched half-width columns —
+                  same footprint as the Strengths/Weaknesses row below —
+                  instead of Grade eating most of the row next to a cramped
+                  fixed-width NFL Fits column. NFL Fits drops out entirely
+                  when the player has none (no reason to reserve space for
+                  an empty list); when it does exist it gets its own full-
+                  width row below Strengths/Weaknesses instead of squeezing
+                  into row one. */}
+              <div className="flex" style={{ borderBottom:"1px solid #e5e7eb" }}>
+                <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
                   <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Community Grade</h3>
                   {(() => {
                     // No scored evaluations yet -> represent that as a Watchlist
@@ -2877,33 +2919,21 @@ useEffect(() => {
                             <div className="flex justify-between mt-1" style={{ fontSize:"8px", color:"#bbb", fontWeight:700 }}><span>1st</span><span>UDFA</span></div>
                           </div>
                         )}
-                        {(selfIndex >= 0 || classRank) && (
-                          <div className="mt-3">
-                            <div className="text-xs font-black uppercase pb-1 mb-1 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em", fontSize:"9px" }}>Class Rank</div>
-                            <div className="text-center" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
-                              {selfIndex >= 0 && <div>{selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
-                              {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     );
                   })()}
                 </div>
-                <div style={{ flex:1 }}>
-                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
-                  {fitLogos.length > 0 ? (
-                    <div className="flex justify-center gap-2">
-                      {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                <div className="flex-1 px-3 py-3">
+                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
+                  {(selfIndex >= 0 || classRank) ? (
+                    <div className="text-center" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
+                      {selfIndex >= 0 && <div>{selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                      {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                     </div>
-                  ) : community.topFits.length > 0 ? (
-                    <div className="flex flex-col items-center gap-1">
-                      {community.topFits.map((t,i) => <p key={i} className="text-xs font-bold text-gray-600 text-center">{t}</p>)}
-                    </div>
-                  ) : <p className="italic text-gray-400 text-xs text-center">No fits</p>}
+                  ) : <p className="italic text-gray-400 text-xs text-center">Not ranked</p>}
                 </div>
               </div>
-              <div className="flex">
+              <div className="flex" style={{ borderBottom: community.topFits.length > 0 ? "1px solid #e5e7eb" : "none" }}>
                 <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
                   <h3 className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
@@ -2931,6 +2961,20 @@ useEffect(() => {
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
               </div>
+              {community.topFits.length > 0 && (
+                <div className="px-3 py-3">
+                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
+                  {fitLogos.length > 0 ? (
+                    <div className="flex flex-wrap justify-center gap-3">
+                      {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1">
+                      {community.topFits.map((t,i) => <p key={i} className="text-xs font-bold text-gray-600 text-center">{t}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>

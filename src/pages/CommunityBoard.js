@@ -386,6 +386,79 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
   );
 }
 
+// ── Mobile-only "Draft Year" dropdown — the desktop header instead shows the
+// full row of big year pills + the separate Archive dropdown; on mobile that
+// row eats too much vertical space and wraps awkwardly, so this collapses
+// all four years (2027/2028/2029 + the 2026 archive) into one compact
+// button. Defaults to showing "2027" (the bare /community route) and
+// navigates on selection, same as ArchiveDropdown above. ──
+function YearDropdown({ eligibleYear, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const years = [...ACTIVE_YEARS, ...ARCHIVE_YEARS];
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const label = ARCHIVE_YEARS.includes(eligibleYear) ? (eligibleYear + " Archive") : eligibleYear;
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          padding: "8px 16px", fontWeight: 900, fontSize: "13px",
+          textTransform: "uppercase", letterSpacing: "0.05em",
+          color: "#fff", background: BLUE, border: "2px solid " + GOLD,
+          borderRadius: "8px", cursor: "pointer", whiteSpace: "nowrap",
+        }}
+      >
+        Year: {label} ▾
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 8px)", left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 50, minWidth: "200px",
+          background: "#fff", border: "2px solid " + GOLD, borderRadius: "10px",
+          boxShadow: "0 6px 20px rgba(0,0,0,0.14)", overflow: "hidden",
+        }}>
+          <div style={{ background: BLUE, padding: "8px 14px", fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+            Draft Year
+          </div>
+          <div style={{ height: "3px", background: GOLD }} />
+          {years.map((yr) => {
+            const isArchiveYr = ARCHIVE_YEARS.includes(yr);
+            const active = eligibleYear === yr;
+            return (
+              <div
+                key={yr}
+                onClick={() => { onSelect(yr); setOpen(false); }}
+                style={{
+                  padding: "11px 16px", cursor: "pointer", fontWeight: 900,
+                  fontSize: "15px", color: active ? "#fff" : BLUE,
+                  background: active ? BLUE : "#fff",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  borderBottom: "1px solid #f0f0f0",
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "#f0f5ff"; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "#fff"; }}
+              >
+                <span>{isArchiveYr ? (yr + " Archive") : yr}</span>
+                {active && <span style={{ color: GOLD }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyBoards }) {
   return (
     <div ref={dropdownRef} style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
@@ -1146,35 +1219,45 @@ export default function CommunityBoard() {
         <div style={{ height: "4px", background: GOLD }} />
       </div>
 
+      {/* Draft Year — mobile collapses the whole row (3 big pills + a
+          separate Archive dropdown) into one compact dropdown, since that
+          row wraps to multiple lines and eats a lot of vertical space on a
+          narrow screen. Desktop keeps the big pill row unchanged. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-          <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
-          {ACTIVE_YEARS.map((yr) => (
-            <Link
-              key={yr}
-              to={yearPath(yr)}
-              style={{
-                border: "3px solid " + GOLD, borderRadius: "24px",
-                padding: isMobile ? "10px 26px" : "14px 40px",
-                fontWeight: 900, fontSize: isMobile ? "18px" : "22px",
-                background: eligibleYear === yr ? BLUE : "#fff",
-                color: eligibleYear === yr ? "#fff" : BLUE,
-                transition: "background 0.15s, color 0.15s",
-                textDecoration: "none", display: "inline-block",
-              }}
-            >
-              {yr}
-            </Link>
-          ))}
-        </div>
+        {isMobile ? (
+          <YearDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+            <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
+            {ACTIVE_YEARS.map((yr) => (
+              <Link
+                key={yr}
+                to={yearPath(yr)}
+                style={{
+                  border: "3px solid " + GOLD, borderRadius: "24px",
+                  padding: "14px 40px",
+                  fontWeight: 900, fontSize: "22px",
+                  background: eligibleYear === yr ? BLUE : "#fff",
+                  color: eligibleYear === yr ? "#fff" : BLUE,
+                  transition: "background 0.15s, color 0.15s",
+                  textDecoration: "none", display: "inline-block",
+                }}
+              >
+                {yr}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
-      {!is2029Empty && (
-        isMobile ? (
-          <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile />
-        ) : (
-          <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
-        )
+      {/* Desktop-only Position chip row — on mobile, Position joins the rest
+          of the filter buttons in the single grid below instead of getting
+          its own separate centered row (that, plus the old 3-item/2-column
+          grid leaving Comm Grade dangling alone next to an empty cell, plus
+          a mixed dropdown/toggle/search-input/text-link row underneath, was
+          the "all over the place" mobile layout being fixed here). */}
+      {!is2029Empty && !isMobile && (
+        <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
       )}
 
       {is2029Empty ? (
@@ -1197,12 +1280,19 @@ export default function CommunityBoard() {
         <>
           {isMobile ? (
             <div style={{ marginBottom: "12px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "6px" }}>
+              {/* One consistent 2-column grid for every filter button —
+                  Position, School, My Grade, Comm Grade, Board, and (2026
+                  only) Available — instead of splitting them across a
+                  lopsided 3-item grid and a separate mixed row of
+                  dropdown/toggle/search-input/text-link that wrapped
+                  unpredictably. Search and Reset get their own clean rows
+                  below since a growing text input doesn't belong in a
+                  fixed-column button grid. */}
+              <div className="wd-mobile-filter-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "8px" }}>
+                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
-              </div>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center", marginBottom: "6px" }}>
                 <BoardDropdown
                   dropdownRef={boardDropdownRef}
                   open={boardDropdownOpen}
@@ -1215,19 +1305,21 @@ export default function CommunityBoard() {
                   <button
                     onClick={() => setShowAvailableOnly((v) => !v)}
                     style={{
-                      padding: "8px 12px", fontWeight: 900, fontSize: "12px",
+                      padding: "8px 16px", fontWeight: 900, fontSize: "13px",
                       textTransform: "uppercase", letterSpacing: "0.05em",
                       border: "2px solid " + GOLD, borderRadius: "8px", cursor: "pointer",
                       background: showAvailableOnly ? GOLD : "#fff",
-                      color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap", flexShrink: 0,
+                      color: showAvailableOnly ? "#fff" : BLUE, whiteSpace: "nowrap",
                     }}
                   >
                     {showAvailableOnly ? "✓ Available" : "Available"}
                   </button>
                 )}
-                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
-                  style={{ flex: 1, minWidth: "140px", border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none" }} />
-                <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline", flexShrink: 0 }}>Reset</button>
+              </div>
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+                style={{ display: "block", width: "100%", boxSizing: "border-box", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px 14px", fontWeight: 700, fontSize: "14px", color: BLUE, outline: "none", marginBottom: "6px" }} />
+              <div style={{ textAlign: "center" }}>
+                <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset Filters</button>
               </div>
             </div>
           ) : (
@@ -1494,6 +1586,27 @@ export default function CommunityBoard() {
   return (
     <>
       {SeoTags}
+
+      {/* Mobile filter grid — every button (Position/School/My Grade/Comm
+          Grade/Board/Available) is a different shared component with its
+          own naturally content-sized <button>, so left to themselves they
+          render at whatever width their own label needs, producing a
+          ragged, misaligned block instead of a clean grid. This stretches
+          each one to fill its grid cell and centers its label, so the
+          buttons actually line up into even columns instead of "all over
+          the place." Scoped to .wd-mobile-filter-grid — doesn't touch the
+          same components' desktop appearance. */}
+      {isMobile && (
+        <style>{`
+          .wd-mobile-filter-grid button { width: 100%; box-sizing: border-box; text-align: center; }
+          /* When the grid has an odd number of buttons (e.g. no Available
+             toggle outside the 2026 archive), the trailing one lands alone
+             in the left column with an empty gap beside it — span it across
+             both columns instead so it doesn't look orphaned. :last-child +
+             :nth-child(odd) only matches when the total count is odd. */
+          .wd-mobile-filter-grid > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
+        `}</style>
+      )}
 
       {sidebarVideos.length > 0 && (
         <style>{".wd-video-card:hover .wd-video-thumb { transform: scale(1.08); } .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }"}</style>

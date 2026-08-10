@@ -186,6 +186,97 @@ export default function NewsArticle() {
     );
   };
 
+  // ── Players Mentioned + More News — split out of the sidebar column so
+  // mobile can lay them out as their own separately-ordered grid items
+  // (article first, then mentioned players, then other articles) instead
+  // of as one "sidebar" block that used to come before the article on
+  // mobile. Desktop is unaffected — it still stacks both inside a single
+  // sticky sidebar column exactly as before. ──
+  const PlayersMentionedBlock = mentionedPlayers.length > 0 && (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          Players Mentioned
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        {mentionedPlayers.map((p, i) => {
+          const logo = schoolLogos[p.School];
+          return (
+            <Link
+              key={p.id}
+              to={`/player/${p.Slug}`}
+              className="wd-mentioned-player-link"
+              style={{
+                display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
+                textDecoration: "none",
+                borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
+                background: "#fff",
+              }}
+            >
+              <div className="wd-mentioned-player-logo" style={{
+                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                width: "52px", height: "52px", borderRadius: "8px",
+                background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
+              }}>
+                {logo ? (
+                  <img
+                    src={logo} alt={p.School || ""} style={{ width: "80%", height: "80%", objectFit: "contain" }}
+                    referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                ) : (
+                  <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+                <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
+                  {p.First} {p.Last}
+                </span>
+                <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px" }}>
+                  <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{p.Position || "—"}</span>
+                  {p.School && <span> · {p.School}</span>}
+                </span>
+              </div>
+              <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const MoreNewsBlock = (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          More News
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "8px 14px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
+      </div>
+      <div style={{ height: "3px", background: GOLD }} />
+      {sidebarItems.length > 0 ? (
+        sidebarItems.map((item) => (
+          <div key={item.id}>
+            <SidebarItem item={item} />
+          </div>
+        ))
+      ) : (
+        <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontSize: "13px", fontStyle: "italic", background: "#fff" }}>
+          No other articles
+        </div>
+      )}
+    </div>
+    </div>
+  );
+
   return (
     <>
       <Helmet>
@@ -262,8 +353,8 @@ export default function NewsArticle() {
         {/* Main layout */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: isMobile ? "20px" : "32px", alignItems: "start" }}>
 
-          {/* Article */}
-          <div style={{ order: isMobile ? 2 : 1 }}>
+          {/* Article — always first, on both mobile and desktop. */}
+          <div style={{ order: 1 }}>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
 
               {/* Article header bar */}
@@ -342,105 +433,23 @@ export default function NewsArticle() {
             </div>
           </div>
 
-          {/* Sidebar */}
-          <div style={{ position: isMobile ? "static" : "sticky", top: "24px", order: isMobile ? 1 : 2, display: "flex", flexDirection: "column", gap: "24px" }}>
-
-            {/* Players Mentioned — same badge + name + school row style used
-                on PerformancePage.js and the draft-class board list on
-                PlayerProfile.js. Articles only, since news items don't carry
-                a playerIds array. */}
-            {mentionedPlayers.length > 0 && (
-              <div>
-                <div style={{ marginBottom: "14px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                    Players Mentioned
-                  </div>
-                  <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-                  <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-                </div>
-                <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-                  {mentionedPlayers.map((p, i) => {
-                    const logo = schoolLogos[p.School];
-                    return (
-                      <Link
-                        key={p.id}
-                        to={`/player/${p.Slug}`}
-                        className="wd-mentioned-player-link"
-                        style={{
-                          display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
-                          textDecoration: "none",
-                          borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
-                          background: "#fff",
-                        }}
-                      >
-                        <div className="wd-mentioned-player-logo" style={{
-                          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                          width: "52px", height: "52px", borderRadius: "8px",
-                          background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
-                        }}>
-                          {logo ? (
-                            <img
-                              src={logo} alt={p.School || ""} style={{ width: "80%", height: "80%", objectFit: "contain" }}
-                              referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
-                            />
-                          ) : (
-                            <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                          <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
-                            {p.First} {p.Last}
-                          </span>
-                          <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px" }}>
-                            <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{p.Position || "—"}</span>
-                            {p.School && <span> · {p.School}</span>}
-                          </span>
-                        </div>
-                        <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <div style={{ marginBottom: "14px" }}>
-                <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                  More News
-                </div>
-                <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-                <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-              </div>
-
-              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <div style={{ background: BLUE, padding: "8px 14px" }}>
-                <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
-              </div>
-              <div style={{ height: "3px", background: GOLD }} />
-              {sidebarItems.length > 0 ? (
-                isMobile ? (
-                  sidebarItems.map((item) => (
-                    <div key={item.id}>
-                      <SidebarItem item={item} />
-                    </div>
-                  ))
-                ) : (
-                  sidebarItems.map((item) => (
-                    <div key={item.id}>
-                      <SidebarItem item={item} />
-                    </div>
-                  ))
-                )
-              ) : (
-                <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontSize: "13px", fontStyle: "italic", background: "#fff" }}>
-                  No other articles
-                </div>
-              )}
+          {/* Sidebar — on mobile, split into its own separately-ordered grid
+              items (see PlayersMentionedBlock/MoreNewsBlock above) so the
+              stacked single-column layout reads article → mentioned players
+              → other articles, instead of the old single "sidebar" grid item
+              (order 1) landing above the article (order 2) entirely. Desktop
+              is unchanged: one sticky column with both blocks stacked. */}
+          {isMobile ? (
+            <>
+              {PlayersMentionedBlock && <div style={{ order: 2 }}>{PlayersMentionedBlock}</div>}
+              <div style={{ order: 3 }}>{MoreNewsBlock}</div>
+            </>
+          ) : (
+            <div style={{ position: "sticky", top: "24px", order: 2, display: "flex", flexDirection: "column", gap: "24px" }}>
+              {PlayersMentionedBlock}
+              {MoreNewsBlock}
             </div>
-          </div>
-
-        </div>
+          )}
 
         </div>
       </div>

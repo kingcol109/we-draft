@@ -634,31 +634,13 @@ export default function Navbar() {
               position: "relative",
             }}
           >
-            <Link to="/community" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
-              Community Board
-            </Link>
-            {/* My Boards sits right after Community Board here too, matching
-                the desktop nav's order. */}
-            {user && (
-              <>
-                <Link to="/boards" className="mobile-nav-link"
-                  style={{ background: "#fff8e6", borderColor: "#f6a21d" }}
-                  onClick={() => setMenuOpen(false)}>
-                  📋 My Draft Board
-                </Link>
-                <Link to="/whiteboard" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
-                  📝 My Whiteboard
-                </Link>
-                <Link to="/boards/feed" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
-                  🔔 My Feed
-                </Link>
-              </>
-            )}
+            {/* Kept deliberately short — just the primary destinations. The
+                draft-year/position filtering lives on the Community Board
+                page itself now (its own mobile dropdowns), not here. */}
             {[
-              { path: "/community/2028", label: "2028 Board" },
-              { path: "/community/2029", label: "2029 Board" },
-              { path: "/mocks", label: "Mock Drafts" },
+              { path: "/community", label: "Community Board" },
               { path: "/we-pick", label: "We-Pick" },
+              { path: "/mocks", label: "Mock Drafts" },
               { path: "/nfl", label: "NFL Teams" },
               { path: "/cfb", label: "CFB Teams" },
             ].map((l) => (

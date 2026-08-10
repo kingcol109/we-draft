@@ -256,6 +256,154 @@ export default function PerformancePage() {
     );
   };
 
+  // ── Video / Players Mentioned / More Performances — split out of the
+  // sidebar column so mobile can lay them out as their own separately-
+  // ordered grid items (performance first, then mentioned players, then
+  // other performances) instead of the old single "sidebar" block that
+  // rendered entirely above the performance write-up on mobile. Desktop is
+  // unaffected — still one sticky column stacking all three, same order
+  // as before. ──
+  const VideoBlock = videoDisplay && (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          Video
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        <a
+          href={video.Video}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="wd-video-card"
+          style={{ display: "block", position: "relative", textDecoration: "none" }}
+        >
+          <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+            {videoDisplay.thumb ? (
+              <img
+                className="wd-video-thumb"
+                src={videoDisplay.thumb}
+                alt={videoDisplay.title || "Video thumbnail"}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                loading="lazy"
+              />
+            ) : (
+              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
+              </div>
+            )}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+            <div
+              className="wd-video-play"
+              style={{
+                position: "absolute", top: "50%", left: "50%",
+                transform: "translate(-50%, -50%) scale(0.8)",
+                width: "48px", height: "48px", borderRadius: "50%",
+                background: "rgba(255,255,255,0.95)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+              }}
+            >
+              <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
+            </div>
+            {videoDisplay.title && (
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
+                <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, textTransform: "uppercase", color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.3 }}>
+                  {videoDisplay.title}
+                </div>
+              </div>
+            )}
+          </div>
+        </a>
+      </div>
+    </div>
+  );
+
+  const PlayersMentionedBlock = mentionedPlayers.length > 0 && (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          Players Mentioned
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        {mentionedPlayers.map((p, i) => {
+          const logo = schoolLogos[p.School];
+          return (
+            <Link
+              key={p.id}
+              to={`/player/${p.Slug}`}
+              style={{
+                display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
+                textDecoration: "none",
+                borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
+                background: "#fff",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{
+                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                width: "52px", height: "52px", borderRadius: "8px",
+                background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
+              }}>
+                {logo ? (
+                  <img
+                    src={logo} alt={p.School || ""} loading="lazy" style={{ width: "80%", height: "80%", objectFit: "contain" }}
+                    referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                ) : (
+                  <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
+                  {p.First} {p.Last}
+                </span>
+                <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {p.Position || "—"}
+                </span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const MorePerformancesBlock = (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          More Performances
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "8px 14px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
+        </div>
+        <div style={{ height: "3px", background: GOLD }} />
+        {sidebarItems.length > 0 ? (
+          sidebarItems.map((item) => <SidebarItem key={item.id} item={item} />)
+        ) : (
+          <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontSize: "13px", fontStyle: "italic", background: "#fff" }}>
+            No other performances
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <>
       <style>{GRADE_GLOW_STYLE}</style>
@@ -290,8 +438,8 @@ export default function PerformancePage() {
         {/* Main layout */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: isMobile ? "20px" : "32px", alignItems: "start" }}>
 
-          {/* Performance */}
-          <div style={{ order: isMobile ? 2 : 1 }}>
+          {/* Performance — always first, on both mobile and desktop. */}
+          <div style={{ order: 1 }}>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
 
               {/* Header bar */}
@@ -385,156 +533,26 @@ export default function PerformancePage() {
             </div>
           </div>
 
-          {/* Sidebar */}
-          <div style={{ position: isMobile ? "static" : "sticky", top: "24px", order: isMobile ? 1 : 2, display: "flex", flexDirection: "column", gap: "24px" }}>
-
-            {/* Video — same thumbnail-card treatment as the player-page video
-                sidebar (16:9 thumbnail, gradient scrim, centered play button,
-                title overlay), just a single card since a performance only
-                ever has the one attached video. */}
-            {videoDisplay && (
-              <div>
-                <div style={{ marginBottom: "14px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                    Video
-                  </div>
-                  <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-                  <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-                </div>
-                <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-                  <a
-                    href={video.Video}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="wd-video-card"
-                    style={{ display: "block", position: "relative", textDecoration: "none" }}
-                  >
-                    <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
-                      {videoDisplay.thumb ? (
-                        <img
-                          className="wd-video-thumb"
-                          src={videoDisplay.thumb}
-                          alt={videoDisplay.title || "Video thumbnail"}
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
-                          referrerPolicy="no-referrer"
-                          onError={(e) => { e.currentTarget.style.display = "none"; }}
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
-                        </div>
-                      )}
-                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
-                      <div
-                        className="wd-video-play"
-                        style={{
-                          position: "absolute", top: "50%", left: "50%",
-                          transform: "translate(-50%, -50%) scale(0.8)",
-                          width: "48px", height: "48px", borderRadius: "50%",
-                          background: "rgba(255,255,255,0.95)",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
-                          boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
-                        }}
-                      >
-                        <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
-                      </div>
-                      {videoDisplay.title && (
-                        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                          <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, textTransform: "uppercase", color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.3 }}>
-                            {videoDisplay.title}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {/* Players Mentioned — bigger rows than a typical sidebar list,
-                with each player's team logo on the left and their position
-                under their name (school context is already established by
-                the performance itself). */}
-            {mentionedPlayers.length > 0 && (
-              <div>
-                <div style={{ marginBottom: "14px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                    Players Mentioned
-                  </div>
-                  <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-                  <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-                </div>
-                <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-                  {mentionedPlayers.map((p, i) => {
-                    const logo = schoolLogos[p.School];
-                    return (
-                      <Link
-                        key={p.id}
-                        to={`/player/${p.Slug}`}
-                        style={{
-                          display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
-                          textDecoration: "none",
-                          borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
-                          background: "#fff",
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-                      >
-                        <div style={{
-                          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                          width: "52px", height: "52px", borderRadius: "8px",
-                          background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
-                        }}>
-                          {logo ? (
-                            <img
-                              src={logo} alt={p.School || ""} loading="lazy" style={{ width: "80%", height: "80%", objectFit: "contain" }}
-                              referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
-                            />
-                          ) : (
-                            <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                          <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
-                            {p.First} {p.Last}
-                          </span>
-                          <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                            {p.Position || "—"}
-                          </span>
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <div style={{ marginBottom: "14px" }}>
-                <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-                  More Performances
-                </div>
-                <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-                <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-              </div>
-
-              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-                <div style={{ background: BLUE, padding: "8px 14px" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
-                </div>
-                <div style={{ height: "3px", background: GOLD }} />
-                {sidebarItems.length > 0 ? (
-                  sidebarItems.map((item) => <SidebarItem key={item.id} item={item} />)
-                ) : (
-                  <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontSize: "13px", fontStyle: "italic", background: "#fff" }}>
-                    No other performances
-                  </div>
-                )}
-              </div>
+          {/* Sidebar — on mobile, split into its own separately-ordered grid
+              items (see VideoBlock/PlayersMentionedBlock/MorePerformancesBlock
+              above) so the stacked single-column layout reads performance →
+              video → mentioned players → other performances, instead of the
+              old single "sidebar" grid item (order 1) landing above the
+              write-up entirely. Desktop is unchanged: one sticky column with
+              all three stacked in the same order as before. */}
+          {isMobile ? (
+            <>
+              {VideoBlock && <div style={{ order: 2 }}>{VideoBlock}</div>}
+              {PlayersMentionedBlock && <div style={{ order: 3 }}>{PlayersMentionedBlock}</div>}
+              <div style={{ order: 4 }}>{MorePerformancesBlock}</div>
+            </>
+          ) : (
+            <div style={{ position: "sticky", top: "24px", order: 2, display: "flex", flexDirection: "column", gap: "24px" }}>
+              {VideoBlock}
+              {PlayersMentionedBlock}
+              {MorePerformancesBlock}
             </div>
-          </div>
+          )}
 
         </div>
       </div>
