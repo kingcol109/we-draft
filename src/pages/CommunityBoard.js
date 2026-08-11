@@ -735,6 +735,11 @@ export default function CommunityBoard() {
   const [selectedCommGrades, setSelectedCommGrades] = useState([]);
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
+  // "View All" — non-live (admin-hidden) players are excluded by default;
+  // this reveals them for the current view. Small/off-by-default on
+  // purpose, since Live:false is a deliberate admin choice most visitors
+  // shouldn't need to think about.
+  const [showInactive, setShowInactive] = useState(false);
 
   const prevYearRef = useRef(eligibleYear);
   useEffect(() => {
@@ -746,6 +751,7 @@ export default function CommunityBoard() {
       setSelectedCommGrades([]);
       setSelectedMyGrades([]);
       setShowAvailableOnly(false);
+      setShowInactive(false);
       setSortKey("CommunityGrade");
       setSortOrder("asc");
     }
@@ -889,9 +895,13 @@ export default function CommunityBoard() {
     const fetchPlayers = async () => {
       setLoading(true);
       try {
+        // Non-live (Live === false, admin-hidden) players are no longer
+        // dropped here — they're kept in `players` and filtered out later,
+        // client-side, by the `showInactive` toggle below (see "View All").
+        // The query itself was never scoped by Live anyway (there's no
+        // where("Live", ...) clause), so keeping them costs nothing extra.
         const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", eligibleYear)));
         const basePlayers = snap.docs
-          .filter((docSnap) => docSnap.data().Live !== false)
           .map((docSnap) => {
             const p = { id: docSnap.id, ...docSnap.data() };
             const fortyKey = Object.keys(p).find((k) => k.replace(/\s/g, "") === "40Yard");
@@ -991,14 +1001,18 @@ export default function CommunityBoard() {
   const resetFilters = () => {
     setSelectedSchools([]); setSelectedPositions([]);
     setSelectedCommGrades([]); setSelectedMyGrades([]);
-    setSearchQuery(""); setShowAvailableOnly(false);
+    setSearchQuery(""); setShowAvailableOnly(false); setShowInactive(false);
     setSortKey("CommunityGrade"); setSortOrder("asc");
   };
 
   const is2026 = eligibleYear === "2026";
   const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
 
-  const filteredPlayers = players
+  // Every filter except the live/inactive one, applied first — this is what
+  // "View All" needs to count against (how many *additional* players, given
+  // whatever else is currently filtered, are only hidden because they're
+  // non-live), not the raw unfiltered player count.
+  const visibleFilteredPlayers = players
     .filter((p) => !searchQuery.trim() ? true : ((p.First || "") + " " + (p.Last || "")).toLowerCase().includes(searchQuery.trim().toLowerCase()))
     .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
     .filter((p) => selectedSchools.length === 0 ? true : selectedSchools.includes(p.School))
@@ -1009,6 +1023,9 @@ export default function CommunityBoard() {
       return myGrade ? selectedMyGrades.includes(myGrade) : false;
     })
     .filter((p) => showAvailableOnly ? !draftMap[p.Slug] : true);
+
+  const inactiveHiddenCount = visibleFilteredPlayers.filter((p) => p.Live === false).length;
+  const filteredPlayers = visibleFilteredPlayers.filter((p) => showInactive ? true : p.Live !== false);
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
     if (sortKey === "CommunityGrade") {
@@ -1362,8 +1379,28 @@ export default function CommunityBoard() {
                   ? (eligibleYear + " " + (POSITION_LABELS[selectedPositions[0]] || selectedPositions[0]) + " Rankings")
                   : (eligibleYear + " Draft Class")}
               </div>
-              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
-                {sortedPlayers.length} player{sortedPlayers.length !== 1 ? "s" : ""}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
+                  {sortedPlayers.length} player{sortedPlayers.length !== 1 ? "s" : ""}
+                </div>
+                {/* "View All" — small and easy to miss on purpose, since
+                    non-live players are hidden by an admin's own deliberate
+                    choice; this is an opt-in escape hatch, not something
+                    most visitors need front-and-center. Only shows up at all
+                    when there's actually something it would add. */}
+                {(inactiveHiddenCount > 0 || showInactive) && (
+                  <button
+                    onClick={() => setShowInactive((v) => !v)}
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: showInactive ? GOLD : "rgba(255,255,255,0.55)",
+                      fontSize: "10px", fontWeight: 800, textTransform: "uppercase",
+                      letterSpacing: "0.05em", textDecoration: "underline", padding: 0,
+                    }}
+                  >
+                    {showInactive ? "Hide Inactive" : "View All" + (inactiveHiddenCount > 0 ? " (+" + inactiveHiddenCount + ")" : "")}
+                  </button>
+                )}
               </div>
             </div>
             <div style={{ height: "3px", background: GOLD }} />

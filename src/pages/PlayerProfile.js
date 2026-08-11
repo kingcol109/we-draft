@@ -313,6 +313,13 @@ export default function PlayerProfile() {
   const [saving, setSaving] = useState(false);
   const [traits, setTraits] = useState({});
   const [community, setCommunity] = useState({ avgGrade: null, topStrengths: [], topWeaknesses: [], topFits: [] });
+  // Most recent updatedAt across every scouting evaluation on this player
+  // (public or private — a private eval still moves the Community
+  // Grade/Strengths/Weaknesses/Fits percentages shown on the page, so it
+  // counts as "the page changed" even though the eval text itself is never
+  // shown). Computed for free off the same evaluations read the community
+  // stats above already require — no extra fetch. ──
+  const [lastEvalUpdate, setLastEvalUpdate] = useState(null);
   const [publicFeed, setPublicFeed] = useState([]);
   const [visibleCount, setVisibleCount] = useState(3);
   const [fitLogos, setFitLogos] = useState([]);
@@ -459,6 +466,7 @@ export default function PlayerProfile() {
     setBrandingReady(false);
     setReactionCounts({ likes: 0, up: 0, down: 0 });
     setMyReaction({ liked: false, vote: null });
+    setLastEvalUpdate(null);
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [slug]);
 
@@ -892,6 +900,8 @@ useEffect(() => {
           setEvalCount(evalsSnap.size);
           let grades=[], sC={}, wC={}, fC={}, pubEvals=[];
           const pubUids = new Set();
+          const toMsEarly = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
+          let maxEvalMs = 0;
           evalsSnap.forEach((d) => {
             const data = d.data();
             if (data.grade && gradeScale[data.grade]) grades.push(gradeScale[data.grade]);
@@ -902,11 +912,13 @@ useEffect(() => {
               pubEvals.push({ id:d.id, ...data });
               if (data.uid) pubUids.add(data.uid);
             }
+            maxEvalMs = Math.max(maxEvalMs, toMsEarly(data.updatedAt));
           });
+          setLastEvalUpdate(maxEvalMs > 0 ? maxEvalMs : null);
           const userDocs = await Promise.all(Array.from(pubUids).map((uid) => getDoc(doc(db,"users",uid))));
           const uMap = {};
           userDocs.forEach((snap) => { if (snap.exists()) { const u=snap.data(); uMap[snap.id]={name:u.username||"Anonymous User", verified:u.verified||false}; } });
-          const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
+          const toMs = toMsEarly;
           const pubWithNames = pubEvals
             .map((ev) => ({ ...ev, username:uMap[ev.uid]?.name||"Anonymous User", verified:uMap[ev.uid]?.verified||false }))
             .sort((a,b) => { if (a.verified&&!b.verified) return -1; if (!a.verified&&b.verified) return 1; return toMs(b.updatedAt)-toMs(a.updatedAt); });
@@ -923,6 +935,7 @@ useEffect(() => {
         } else {
           setCommunity({ avgGrade:null, topStrengths:[], topWeaknesses:[], topFits:[] });
           setPublicFeed([]);
+          setLastEvalUpdate(null);
         }
       } catch(e) { console.error(e); }
       finally {
@@ -1291,6 +1304,21 @@ useEffect(() => {
     return `${prefix ? prefix + " — " : ""}Read ${name}'s scouting report, including strengths, weaknesses, NFL projection, current draft grade, measurables, and the latest evaluations from We Draft.`;
   };
   const metaDescription = buildMetaDescription();
+
+  // ── "Last updated" stamp — the most recent of: the player record itself
+  // being edited (player.updatedAt), any scouting evaluation on this player
+  // changing (lastEvalUpdate, public or private — even a private eval moves
+  // the Community Grade/Strengths/Weaknesses/Fits percentages shown on the
+  // page), or a news/article/performance mentioning this player being
+  // published (playerNews[].publishedAt). All three are data this page
+  // already fetches for its own content, so this doesn't add any network
+  // calls — just takes the max of timestamps already in hand. ──
+  const toMsForStamp = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : 0;
+  const pageLastUpdatedMs = Math.max(
+    toMsForStamp(player.updatedAt),
+    lastEvalUpdate || 0,
+    ...playerNews.map((n) => toMsForStamp(n.publishedAt)),
+  );
 
   const physicalMeasurements = [
     {val:player.Height,label:"Height"},{val:player.Weight,label:"Weight"},
@@ -2839,10 +2867,23 @@ useEffect(() => {
           <div style={{ height: "4px", background: color2 }} />
 
           {player.Bio && (
-            <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "18px 32px", borderBottom: "1px solid #eee" }}>
-              <p style={{ margin: 0, fontSize: isMobile ? "13px" : "15px", fontWeight: 500, color: "#333", lineHeight: 1.65, textAlign: isMobile ? "left" : "center", maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
-                {player.Bio}
-              </p>
+            <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "20px 32px", borderBottom: "1px solid #eee" }}>
+              <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
+                <h2 style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#666", marginBottom: "8px" }}>
+                  Bio
+                </h2>
+                {/* Same bullet/paragraph renderer as evaluations — a bio
+                    written as several newline-separated paragraphs (or with
+                    a few • bullet lines for career highlights) now actually
+                    renders as such, instead of collapsing into one run-on
+                    paragraph since a plain <p> ignores newlines in its
+                    string content. Left-aligned rather than the old
+                    center-alignment — centered prose reads awkwardly once a
+                    bio is more than a single short line. */}
+                <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 500, color: "#333", lineHeight: 1.65, textAlign: "left" }}>
+                  {renderEvaluationText(player.Bio, "bio")}
+                </div>
+              </div>
             </div>
           )}
 
@@ -2876,6 +2917,22 @@ useEffect(() => {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Last-updated stamp — moved inside the hero card itself (a thin
+              footer strip, same border/background language as the rest of
+              the card) instead of floating as its own element in the gap
+              below the card, so it reads as attached to the player info it
+              describes rather than an orphaned label. See pageLastUpdatedMs
+              above: the most recent of the player record being edited, any
+              evaluation on this player changing, or a news/article/
+              performance mentioning them being published. */}
+          {pageLastUpdatedMs > 0 && (
+            <div className="bg-white" style={{ padding: isMobile ? "6px 16px" : "6px 32px", textAlign: "right", borderTop: "1px solid #eee" }}>
+              <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic" }}>
+                Last updated {new Date(pageLastUpdatedMs).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+              </span>
             </div>
           )}
 

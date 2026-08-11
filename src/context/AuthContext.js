@@ -115,6 +115,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   // ── Save/update display name ──
+  // Currently unused — UserProfile.js's own "Save Display Name" button has
+  // its own local saveProfile with the uniqueness check this one lacks, and
+  // calls that instead of this context method. Fixed anyway (merge:true,
+  // stopped stomping createdAt on every save) so this doesn't become a live
+  // landmine if something starts calling it later.
   const saveProfile = async (username) => {
     if (!user) return;
     const ref = doc(db, "users", user.uid);
@@ -122,9 +127,8 @@ export function AuthProvider({ children }) {
       uid: user.uid,
       email: user.email,
       username,
-      createdAt: new Date().toISOString(),
-    });
-    setProfile({ uid: user.uid, email: user.email, username });
+    }, { merge: true });
+    setProfile((prev) => ({ ...prev, uid: user.uid, email: user.email, username }));
   };
 
   return (

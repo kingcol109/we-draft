@@ -80,6 +80,27 @@ service cloud.firestore {
     match /traits/{doc} { allow read, write: if true; }
     match /config/{doc} { allow read, write: if true; }
     match /playerStats/{doc} { allow read, write: if true; }
+    // Page-view counters — written server-side only, by
+    // scripts/syncGoogleAnalytics.js (via the admin SDK, which isn't
+    // subject to these rules at all); read by AdminPanel.js's Analytics tab.
+    // No rule existed for this collection at all before, so that read was
+    // being silently denied — the tab worked, it just always showed zero.
+    match /analytics/{doc} { allow read: if true; }
+    // "Request a Player" form (UserProfile.js) — same story, no rule
+    // existed, so every submission was failing. Create-only from the
+    // client; nothing in the app currently has an admin review UI for
+    // these, but they're gated to admin-read anyway rather than left
+    // world-readable, since submissions carry the requester's email.
+    match /playerRequests/{doc} {
+      allow read: if isAdmin();
+      allow create: if request.auth != null;
+    }
+    // "Report an Issue" form (UserProfile.js) — same as playerRequests
+    // above: no rule existed, submissions were failing.
+    match /userReports/{doc} {
+      allow read: if isAdmin();
+      allow create: if request.auth != null;
+    }
     match /teamPositionRanks/{doc} { allow read, write: if true; }
     match /rosters/{doc} { allow read, write: if true; }
     match /schedule26/{doc} {
@@ -134,7 +155,29 @@ service cloud.firestore {
     }
     match /users/{uid} {
       allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == uid;
+      // "role" and "verified" are the two fields every trust decision in
+      // these rules (and every verified-badge display in the app) is built
+      // on — neither is ever written by client code (checked: only set
+      // manually, e.g. via the Firebase console), so a blanket "owner can
+      // write their own doc" rule would let a user grant themselves admin
+      // access or a fake verified badge by writing straight to the SDK,
+      // bypassing the app's own UI entirely. create blocks setting either
+      // field at all; update requires them to stay exactly as they already
+      // are, unless the requester is already an admin.
+      allow create: if request.auth != null && request.auth.uid == uid
+                    && !("role" in request.resource.data) && !("verified" in request.resource.data);
+      // .get(field, default) rather than plain dot access — almost every
+      // existing user doc predates this rule and has no `role`/`verified`
+      // field at all, and dot-accessing a missing map key errors out the
+      // whole expression (which Firestore then denies). .get() falls back
+      // to null instead, so someone with no role set can still save their
+      // own username: null == null is true, so the "unchanged" check still
+      // passes; it only actually blocks a *change* to either field.
+      allow update: if isAdmin()
+                    || (request.auth != null && request.auth.uid == uid
+                        && request.resource.data.get("role", null) == resource.data.get("role", null)
+                        && request.resource.data.get("verified", null) == resource.data.get("verified", null));
+      allow delete: if isAdmin();
       match /evaluations/{playerId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }

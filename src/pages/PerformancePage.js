@@ -416,6 +416,49 @@ export default function PerformancePage() {
         <meta property="og:description" content={seoDescription} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:site_name" content="We-Draft" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={performance.titleLong} />
+        <meta name="twitter:description" content={seoDescription} />
+        {/* videoDisplay.thumb is the only reliable existing image tied to a
+            performance — performances have no image field of their own,
+            but this page already fetches and renders this exact thumbnail
+            (see the Video sidebar card below) whenever a video is attached.
+            No video attached -> no twitter:image, rather than guessing. */}
+        {videoDisplay?.thumb && <meta name="twitter:image" content={videoDisplay.thumb} />}
+        <meta name="robots" content="index, follow" />
+
+        {/* Home → Performances → Performance Title, using the existing
+            /performances hub route and this page's own /performance/:slug
+            canonical URL. */}
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://we-draft.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Performances", "item": "https://we-draft.com/performances" },
+            { "@type": "ListItem", "position": 3, "name": performance.titleLong, "item": canonicalUrl },
+          ],
+        })}</script>
+
+        {/* Article (not NewsArticle) — performances are short, rapid-
+            response game write-ups, not long-form journalism, so the
+            lighter-weight "Article" type is the more accurate fit. Dates
+            come from the performance doc's own createdAt/updatedAt (already
+            fetched as part of `performance`, just not previously read by
+            this page — set on every save, see PerformancesManager.js) rather
+            than gameDate, since createdAt is when the write-up itself was
+            actually published. "about" links the Person this performance is
+            about, when the player doc resolved successfully. */}
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "Article",
+          "headline": performance.titleLong, "description": seoDescription, "url": canonicalUrl,
+          "datePublished": performance.createdAt?.toDate?.()?.toISOString() || "",
+          "dateModified": performance.updatedAt?.toDate?.()?.toISOString() || performance.createdAt?.toDate?.()?.toISOString() || "",
+          "author": { "@type": "Person", "name": performance.author || "We-Draft" },
+          "publisher": { "@type": "Organization", "name": "We-Draft", "url": "https://we-draft.com", "logo": { "@type": "ImageObject", "url": "https://we-draft.com/logo512.png" } },
+          "mainEntityOfPage": { "@type": "WebPage", "@id": canonicalUrl },
+          ...(videoDisplay?.thumb ? { "image": videoDisplay.thumb } : {}),
+          ...(player?.Slug ? { "about": { "@type": "Person", "name": `${player.First || ""} ${player.Last || ""}`.trim(), "url": `https://we-draft.com/player/${player.Slug}` } } : {}),
+        })}</script>
       </Helmet>
 
       <div ref={contentRef} style={{ maxWidth: "1200px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>

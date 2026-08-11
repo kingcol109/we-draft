@@ -462,7 +462,33 @@ export default function PerformancesHub() {
     <>
       <style>{GRADE_GLOW_STYLE}</style>
       <Helmet>
-        <title>Performances | We-Draft</title>
+        {/* Static, not week-dependent — this is the canonical public hub;
+            /performances/:week is a filtered/deep-linked view of it, not a
+            distinct page for SEO purposes, so title/description/canonical
+            deliberately don't change with the selected week. */}
+        <title>Live College Football Player Performances | We-Draft.com</title>
+        <meta name="description" content="Track live college football player performances, stats, grades and standout performances from current NFL Draft prospects on We-Draft." />
+        <link rel="canonical" href="https://we-draft.com/performances" />
+        <meta name="robots" content="index, follow" />
+        <meta property="og:title" content="Live College Football Player Performances | We-Draft.com" />
+        <meta property="og:description" content="Track live college football player performances, stats, grades and standout performances from current NFL Draft prospects on We-Draft." />
+        <meta property="og:url" content="https://we-draft.com/performances" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="We-Draft" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="Live College Football Player Performances | We-Draft.com" />
+        <meta name="twitter:description" content="Track live college football player performances, stats, grades and standout performances from current NFL Draft prospects on We-Draft." />
+
+        {/* Home → Performances — this is an index/hub page, so no Article/
+            NewsArticle/performance schema here; individual /performance/:slug
+            pages already carry their own structured data. */}
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://we-draft.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Performances", "item": "https://we-draft.com/performances" },
+          ],
+        })}</script>
       </Helmet>
 
       <div ref={contentRef} style={{ maxWidth: "1000px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>

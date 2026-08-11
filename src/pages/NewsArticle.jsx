@@ -294,6 +294,28 @@ export default function NewsArticle() {
         {article.publishedAt?.toDate && <meta property="article:published_time" content={article.publishedAt.toDate().toISOString()} />}
         {article.updatedAt?.toDate && <meta property="article:modified_time" content={article.updatedAt.toDate().toISOString()} />}
         {article.author && <meta property="article:author" content={article.author} />}
+        <meta name="robots" content="index, follow" />
+
+        {/* Home → News → Article Title, using the existing /news route (no
+            separate "articles" hub exists — news items and long-form
+            articles share this same /news list/detail routing). */}
+        <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://we-draft.com/" },
+            { "@type": "ListItem", "position": 2, "name": "News", "item": "https://we-draft.com/news" },
+            { "@type": "ListItem", "position": 3, "name": article.title, "item": canonicalUrl },
+          ],
+        })}</script>
+
+        {/* NewsArticle structured data — populated from every field this
+            page actually has available (see the article-fetch effect above:
+            title/slug/content/summary/publishedAt/updatedAt/author). There
+            is no dedicated featured-image field on either the "news" or
+            "articles" collection (article images only ever live inline,
+            hand-inserted into the body's HTML via the editor's own +Image
+            tool — see ArticlesManager.js), so "image" is intentionally
+            omitted rather than guessed or parsed out of body HTML. */}
         <script type="application/ld+json">{JSON.stringify({
           "@context": "https://schema.org", "@type": "NewsArticle",
           "headline": article.title, "description": description, "url": canonicalUrl,

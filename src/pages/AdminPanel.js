@@ -753,6 +753,9 @@ function PlayerDataSection() {
                   placeholder="A short public bio — shown on the player's page, below the hero and above measurements."
                   style={{ ...inputStyle, height: "100px", resize: "vertical", fontFamily: "inherit" }}
                 />
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  Tip: press Enter to start a new paragraph, or start a line with • or - for a bullet point — both render on the player page.
+                </div>
               </FieldRow>
               <FieldRow label="Flair">
                 <select value={formState.Flair} onChange={(e) => handleFieldChange("Flair", e.target.value)} style={inputStyle}>
