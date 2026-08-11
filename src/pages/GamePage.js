@@ -10,10 +10,10 @@
 // nothing here restates a full name a second time next to it or spells out
 // which side is which.
 import { useEffect, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
-import { collection, query, where, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
 import { useAuth } from "../context/AuthContext";
@@ -598,6 +598,7 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
 
 export default function GamePage() {
   const { slug } = useParams();
+  const navigate = useNavigate();
   const { user, profile, login } = useAuth();
   const [game, setGame] = useState(null);
   const [awaySchool, setAwaySchool] = useState(null);
@@ -660,6 +661,36 @@ export default function GamePage() {
       try {
         const snap = await getDocs(query(collection(db, "schedule26"), where("Slug", "==", slug)));
         if (snap.empty) {
+          // Every schedule26 doc's Slug now ends in "-{year}" (see
+          // gameSlugFor in AdminPanel.js — every game was backfilled, so
+          // this holds for the whole collection, not just new ones). Old
+          // links/search results out there still point at the pre-year
+          // slug, which no longer exact-matches. Before giving up, try it
+          // as a prefix: if the year is genuinely the only thing missing,
+          // "{slug}-{year}" is a real Slug, and a range query for
+          // Slug >= "{slug}-" and < "{slug}-" (the standard Firestore
+          // "starts with" trick) catches it without needing a composite
+          // index, since every condition is on the same field. Redirects
+          // (replace, not push) to the real slug instead of just rendering
+          // the game under the old URL, so old links/search results
+          // actually get pointed at the canonical one over time.
+          const prefixSnap = await getDocs(query(
+            collection(db, "schedule26"),
+            where("Slug", ">=", slug + "-"),
+            where("Slug", "<", slug + "-"),
+            orderBy("Slug"),
+          ));
+          if (!prefixSnap.empty) {
+            // An annual rivalry played on the same month/day every year
+            // shares this same prefix across seasons — Slug values only
+            // differ by the trailing year token, so a plain string sort
+            // doubles as a numeric one; prefer the most recent.
+            const candidates = prefixSnap.docs.map((d) => d.data().Slug).filter(Boolean).sort().reverse();
+            if (candidates[0]) {
+              navigate(`/game/${candidates[0]}`, { replace: true });
+              return;
+            }
+          }
           setNotFound(true);
           return;
         }
@@ -713,7 +744,7 @@ export default function GamePage() {
       }
     };
     fetch();
-  }, [slug]);
+  }, [slug, navigate]);
 
   // Broadcasting channel's logo — a separate, independent lookup from the
   // main fetch above rather than folded into it, since it only ever
@@ -985,6 +1016,9 @@ export default function GamePage() {
 
   const canonicalUrl = `https://we-draft.com/game/${game.Slug}`;
   const seoTitle = `${game.Away} vs ${game.Home} | Football Game Predictions, Where to Watch, and Key Players`;
+  // The one visible H1 for this page (see the masthead below) — kept as its
+  // own constant since it's also reused for structured data's own "name".
+  const h1Text = `${game.Away} vs ${game.Home} Football${dateStr ? ` — ${dateStr}` : ""}`;
   // Date (+ kickoff time, pregame only — a final game's "at 7:00 PM" reads
   // stale once it's over) always leads, then whatever prediction content
   // actually exists: the community's own aggregate picks if there are any,
@@ -995,7 +1029,36 @@ export default function GamePage() {
   const seoPredictionSummary = pickCount > 0
     ? `The We-Draft community${seoPredictedWinner ? ` favors ${seoPredictedWinner}` : ""}${avgAwayScore != null && avgHomeScore != null ? `, projecting a final score of ${game.Away} ${avgAwayScore}–${game.Home} ${avgHomeScore}` : ""} across ${pickCount} prediction${pickCount === 1 ? "" : "s"}.`
     : "See the community's score predictions for this game, or make your own prediction and share your scouting notes on We-Draft.com.";
-  const seoDescription = `${seoDateTime ? `${seoDateTime}. ` : ""}${seoPredictionSummary}`;
+  // Final games lead with the actual result (real game.AwayScore/HomeScore,
+  // not the community's pre-game projection — that framing goes stale the
+  // moment the game ends) instead of reusing the same "the community
+  // projects..." copy regardless of whether the game has even been played
+  // yet, which is what this used to do.
+  const seoDescription = isFinal
+    ? `Final: ${game.Away} ${game.AwayScore} – ${game.Home} ${game.HomeScore}${dateStr ? ` on ${dateStr}` : ""}. See top performances and how the We-Draft community predicted this game.`
+    : `${seoDateTime ? `${seoDateTime}. ` : ""}${seoPredictionSummary}`;
+
+  // Structured data — SportsEvent, populated only from fields that actually
+  // exist on the game doc (checked AdminPanel.js's CFB Schedule editor:
+  // there's no venue/stadium/attendance field in the data model at all, so
+  // "location" is omitted rather than guessed). startDate prefers the real
+  // kickoff instant (kickoffAtMs, date+ET time combined) when a Time is
+  // set, falling back to a date-only value when it isn't — never invents a
+  // time that wasn't actually entered.
+  const gameStartDateIso = kickoffAtMs != null
+    ? new Date(kickoffAtMs).toISOString()
+    : (gameDateMs ? new Date(gameDateMs).toISOString().slice(0, 10) : null);
+  const gameStructuredData = {
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
+    "name": h1Text,
+    "url": canonicalUrl,
+    "sport": "American Football",
+    ...(gameStartDateIso ? { "startDate": gameStartDateIso } : {}),
+    "homeTeam": { "@type": "SportsTeam", "name": game.Home },
+    "awayTeam": { "@type": "SportsTeam", "name": game.Away },
+    "description": seoDescription,
+  };
 
   return (
     <>
@@ -1009,6 +1072,7 @@ export default function GamePage() {
         <meta property="og:description" content={seoDescription} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:site_name" content="We-Draft" />
+        <script type="application/ld+json">{JSON.stringify(gameStructuredData)}</script>
       </Helmet>
 
       {/* This page only needs to leave room for the margin sidebars
@@ -1027,14 +1091,24 @@ export default function GamePage() {
               in the hero's own status strip, so they're not lost among the
               team colors and stay put regardless of matchup colors. */}
           <div style={{ background: BLUE, padding: isMobile ? "11px 14px" : "14px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-            {dateStr && (
-              <div>
-                <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "16px" : "21px" }}>{dateStr}</div>
-                {timeStr && (
-                  <div style={{ color: GOLD, fontWeight: 800, fontSize: isMobile ? "13px" : "16px", marginTop: "2px" }}>{timeStr}</div>
-                )}
-              </div>
-            )}
+            <div>
+              {/* The page's one H1 — a small uppercase kicker line above the
+                  big date, rather than a separate visual banner, so it fits
+                  the existing masthead instead of adding a new competing
+                  block. States the same matchup+date the surrounding hero
+                  already communicates visually (logos/names/date), which is
+                  fine here — search engines expect an H1 to name the page's
+                  subject even when other elements already convey it. */}
+              <h1 style={{ margin: 0, color: "rgba(255,255,255,0.65)", fontWeight: 800, fontSize: isMobile ? "10px" : "11px", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1.3 }}>
+                {h1Text}
+              </h1>
+              {dateStr && (
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "16px" : "21px", marginTop: "2px" }}>{dateStr}</div>
+              )}
+              {timeStr && (
+                <div style={{ color: GOLD, fontWeight: 800, fontSize: isMobile ? "13px" : "16px", marginTop: "2px" }}>{timeStr}</div>
+              )}
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginLeft: "auto" }}>
               {!isFinal && (
                 <button
@@ -1255,9 +1329,9 @@ export default function GamePage() {
               <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "26px" : "40px", maxWidth: "700px", marginLeft: "auto", marginRight: "auto" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "10px" }}>
                   <span style={{ fontSize: "15px" }}>{isFinal ? "📰" : "🔮"}</span>
-                  <span style={{ color: "#fff", fontSize: isMobile ? "11px" : "13px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 5px rgba(0,0,0,0.4)" }}>
-                    {isFinal ? "The Recap" : "The Preview"}
-                  </span>
+                  <h2 style={{ margin: 0, color: "#fff", fontSize: isMobile ? "11px" : "13px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 5px rgba(0,0,0,0.4)" }}>
+                    {isFinal ? `${game.Away} vs ${game.Home} Game Recap` : `${game.Away} vs ${game.Home} Preview`}
+                  </h2>
                 </div>
                 <div style={{
                   fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 700,
@@ -1281,9 +1355,9 @@ export default function GamePage() {
             {showKeyPlayersSection && (
               <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "18px" : "24px" }}>
                 <div style={{ textAlign: "center", marginBottom: "14px" }}>
-                  <span style={{ color: "#fff", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 6px rgba(0,0,0,0.5)" }}>
-                    {isFinal ? "Top Performances" : "Key Players"}
-                  </span>
+                  <h2 style={{ margin: 0, color: "#fff", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 6px rgba(0,0,0,0.5)" }}>
+                    {isFinal ? `${game.Away} vs ${game.Home} Top Performances` : "Key Players to Watch"}
+                  </h2>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "16px" : "24px" }}>
                   <TeamColumn
@@ -1317,9 +1391,9 @@ export default function GamePage() {
             <div ref={pickFormRef} style={{ marginBottom: "28px" }}>
               <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden", boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}>
                 <div style={{ background: `linear-gradient(90deg, ${BLUE}, #003d82)`, padding: "12px 18px" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                    🔮 Make Your Pick
-                  </div>
+                  <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                    🔮 {game.Away} vs {game.Home} Predictions
+                  </h2>
                 </div>
                 <div style={{ height: "3px", background: GOLD }} />
 
@@ -1539,9 +1613,9 @@ export default function GamePage() {
             <div ref={communityPicksRef} style={{ marginBottom: "28px" }}>
               <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
                 <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                    📊 We-Draft.com Community Picks
-                  </div>
+                  <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    📊 Community Predictions
+                  </h2>
                   <div style={{ color: "#fff", background: "rgba(255,255,255,0.18)", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, padding: "5px 14px", borderRadius: "20px" }}>
                     {pickCount} pick{pickCount !== 1 ? "s" : ""}
                   </div>
