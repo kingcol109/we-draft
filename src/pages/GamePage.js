@@ -1090,7 +1090,7 @@ export default function GamePage() {
               is obviously a game page. Date/time live here now rather than
               in the hero's own status strip, so they're not lost among the
               team colors and stay put regardless of matchup colors. */}
-          <div style={{ background: BLUE, padding: isMobile ? "11px 14px" : "14px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+          <div style={{ background: BLUE, padding: isMobile ? "9px 14px" : "11px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
             <div>
               {/* The page's one H1 — a small uppercase kicker line above the
                   big date, rather than a separate visual banner, so it fits
@@ -1099,14 +1099,14 @@ export default function GamePage() {
                   already communicates visually (logos/names/date), which is
                   fine here — search engines expect an H1 to name the page's
                   subject even when other elements already convey it. */}
-              <h1 style={{ margin: 0, color: "rgba(255,255,255,0.65)", fontWeight: 800, fontSize: isMobile ? "10px" : "11px", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1.3 }}>
+              <h1 style={{ margin: 0, color: "rgba(255,255,255,0.6)", fontWeight: 800, fontSize: isMobile ? "9px" : "10px", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1 }}>
                 {h1Text}
               </h1>
               {dateStr && (
-                <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "16px" : "21px", marginTop: "2px" }}>{dateStr}</div>
+                <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "15px" : "19px", lineHeight: 1.15, marginTop: "1px" }}>{dateStr}</div>
               )}
               {timeStr && (
-                <div style={{ color: GOLD, fontWeight: 800, fontSize: isMobile ? "13px" : "16px", marginTop: "2px" }}>{timeStr}</div>
+                <div style={{ color: GOLD, fontWeight: 800, fontSize: isMobile ? "12px" : "15px", lineHeight: 1.15, marginTop: "1px" }}>{timeStr}</div>
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginLeft: "auto" }}>
