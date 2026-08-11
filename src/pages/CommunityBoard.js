@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from "react";
-import ReactDOM from "react-dom";
 import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -7,35 +6,6 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo2 from "../assets/Logo2.png";
-import EliteFlair from "../assets/elite.png";
-import StarFlair from "../assets/star.png";
-import DiamondFlair from "../assets/dir.png";
-import RadarFlair from "../assets/radar.png";
-import SecondFlair from "../assets/second.png";
-import AlienFlair from "../assets/alien.png";
-import FutureStarFlair from "../assets/futurestar.png";
-import CurveFlair from "../assets/curve.png";
-import EarlyImpactFlair from "../assets/early impact.png";
-import EarlyContributorFlair from "../assets/early contributor.png";
-import Year2ContributorFlair from "../assets/y2contributor.png";
-import DevelopmentalFlair from "../assets/developmental.png";
-import ProvenFlair from "../assets/proven.png";
-
-const FLAIR_CONFIG = {
-  "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
-  "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
-  "Diamond in the Rough": { img: DiamondFlair,   stroke: "#00d2ff", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
-  "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
-  "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
-  "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
-  "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
-  "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
-  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. High 5-Star.", tag: "Recruit Grade" },
-  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. Low 5-Star/High 4-Star.", tag: "Recruit Grade" },
-  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. 4-Star.", tag: "Recruit Grade" },
-  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. 3-Star.", tag: "Recruit Grade" },
-  "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
-};
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -623,109 +593,6 @@ export default function CommunityBoard() {
 
   const [boardMap, setBoardMap] = useState(new Map());
   const [addingId, setAddingId] = useState(null);
-
-  const [hoveredPlayerId, setHoveredPlayerId] = useState(null);
-  const [hoverCardPos, setHoverCardPos] = useState({ top: 0, left: 0, flip: false });
-  const playerHoverTimerRef = useRef(null);
-  const PREVIEW_CARD_HEIGHT_ESTIMATE = 240;
-
-  const handlePlayerHoverEnter = (id, e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    clearTimeout(playerHoverTimerRef.current);
-    playerHoverTimerRef.current = setTimeout(() => {
-      const flip = window.innerHeight - rect.bottom < PREVIEW_CARD_HEIGHT_ESTIMATE + 16;
-      setHoverCardPos({
-        left: rect.left,
-        top: flip ? rect.top - PREVIEW_CARD_HEIGHT_ESTIMATE - 12 : rect.bottom + 12,
-        flip,
-      });
-      setHoveredPlayerId(id);
-    }, 450);
-  };
-  const handlePlayerHoverLeave = () => {
-    clearTimeout(playerHoverTimerRef.current);
-    setHoveredPlayerId(null);
-  };
-
-  const PlayerPreviewCard = ({ player, pos }) => {
-    const flairConfig = player.Flair ? FLAIR_CONFIG[player.Flair] : null;
-    const accent = flairConfig ? flairConfig.stroke : BLUE;
-    const myGrade = boardMap.get(player.id);
-    return ReactDOM.createPortal(
-      <div
-        style={{
-          position: "fixed", top: pos.top + "px", left: pos.left + "px",
-          width: "250px", background: "#fff", border: "2px solid " + accent,
-          borderRadius: "14px", padding: "14px 16px", boxShadow: "0 18px 40px rgba(0,0,0,0.22)",
-          zIndex: 9999, textAlign: "left", pointerEvents: "none",
-        }}
-      >
-        {pos.flip ? (
-          <div style={{
-            position: "absolute", top: "100%", left: "24px",
-            width: "12px", height: "12px", background: "#fff",
-            border: "2px solid " + accent, borderLeft: "none", borderTop: "none",
-            transform: "rotate(45deg)",
-          }} />
-        ) : (
-          <div style={{
-            position: "absolute", bottom: "100%", left: "24px",
-            width: "12px", height: "12px", background: "#fff",
-            border: "2px solid " + accent, borderRight: "none", borderBottom: "none",
-            transform: "rotate(45deg)",
-          }} />
-        )}
-
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: flairConfig ? "10px" : "12px" }}>
-          {flairConfig && (
-            <img src={flairConfig.img} alt={player.Flair} loading="lazy" style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} />
-          )}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900, fontSize: "17px", color: BLUE, lineHeight: 1.15 }}>
-              {player.First} {player.Last}
-            </div>
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
-              {player.Position || "—"} · {player.School || "—"}
-            </div>
-          </div>
-        </div>
-
-        {flairConfig && (
-          <div style={{ marginBottom: "12px", paddingBottom: "10px", borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
-              <span style={{ fontSize: "10px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.07em", color: accent }}>
-                {player.Flair}
-              </span>
-              {flairConfig.tag && (
-                <span style={{
-                  fontSize: "8px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em",
-                  color: "#fff", background: accent, padding: "2px 6px", borderRadius: "20px",
-                  marginLeft: "2px",
-                }}>
-                  {flairConfig.tag}
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#666", lineHeight: 1.45 }}>
-              {flairConfig.desc}
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: "10px" }}>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: "9px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>My Grade</div>
-            <GradeBadge grade={myGrade} small />
-          </div>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: "9px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>Comm Grade</div>
-            <GradeBadge grade={player.CommunityGrade} small />
-          </div>
-        </div>
-      </div>,
-      document.body
-    );
-  };
 
   const [sortKey, setSortKey] = useState("CommunityGrade");
   const [sortOrder, setSortOrder] = useState("asc");
@@ -1438,12 +1305,11 @@ export default function CommunityBoard() {
                         <Link
                           to={"/player/" + p.Slug}
                           style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2 }}
-                          onMouseEnter={(e) => handlePlayerHoverEnter(p.id, e)}
-                          onMouseLeave={handlePlayerHoverLeave}
+                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
                         >
                           {(p.First || "") + " " + (p.Last || "")}
                         </Link>
-                        {hoveredPlayerId === p.id && <PlayerPreviewCard player={p} pos={hoverCardPos} />}
                         <div style={{ fontSize: "12px", fontWeight: 700, color: "#555", marginTop: "3px" }}>
                           {p.Position || "—"} · {p.School || "—"}
                         </div>
@@ -1561,12 +1427,11 @@ export default function CommunityBoard() {
                         <Link
                           to={"/player/" + p.Slug}
                           style={{ color: BLUE, fontWeight: 900, fontSize: "27px", textDecoration: "none", display: "block", lineHeight: 1.15 }}
-                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; handlePlayerHoverEnter(p.id, e); }}
-                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; handlePlayerHoverLeave(); }}
+                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
                         >
                           {(p.First || "") + " " + (p.Last || "")}
                         </Link>
-                        {hoveredPlayerId === p.id && <PlayerPreviewCard player={p} pos={hoverCardPos} />}
                         {p.School && (
                           <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "3px" }}>
                             {p.School}

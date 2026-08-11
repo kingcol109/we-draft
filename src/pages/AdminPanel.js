@@ -84,7 +84,6 @@ const SECTIONS = [
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
-  { key: "miscbranding", label: "Misc Branding", icon: "📺", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "performances", label: "Performances", icon: "⭐", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
@@ -2202,7 +2201,20 @@ function VideosSection() {
 // Page views aren't part of that toggle since the analytics docs only store
 // four fixed rolling windows (24h/7d/30d/total), not a daily-granularity
 // history, so there's no per-day series to plot. ──
+// Top-level tabs inside the Analytics section — "Overview" is everything
+// that already existed (stat cards, page-view totals, the evals/signups
+// chart, and the Players & Evaluations table); Games/Performances/Articles
+// are new, each backed by ContentAnalyticsTable + CONTENT_ANALYTICS_CONFIG
+// further down this file.
+const CONTENT_TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "game", label: "Games" },
+  { key: "performance", label: "Performances" },
+  { key: "article", label: "Articles" },
+];
+
 function AnalyticsSection() {
+  const [activeTab, setActiveTab] = useState("overview");
   const [rangeDays, setRangeDays] = useState(7);
   const [chartMetric, setChartMetric] = useState("evaluations");
   const [loading, setLoading] = useState(true);
@@ -2264,9 +2276,15 @@ function AnalyticsSection() {
       }
 
       if (analyticsRes.status === "fulfilled") {
-        let last24 = 0, last7 = 0, last30 = 0, total = 0, lastSyncedMs = 0;
+        // Player-only — the analytics collection now also holds game/
+        // performance/article docs (namespaced as "{type}_{slug}", see
+        // syncGoogleAnalytics.js), each with its own tab below. A doc with
+        // no `type` at all predates that field and is still a player doc.
+        let last24 = 0, last7 = 0, last30 = 0, total = 0, lastSyncedMs = 0, playerCount = 0;
         analyticsRes.value.docs.forEach((d) => {
           const data = d.data();
+          if (data.type && data.type !== "player") return;
+          playerCount++;
           const pv = data.pageViews || {};
           last24 += Number(pv.last24Hours) || 0;
           last7 += Number(pv.last7Days) || 0;
@@ -2275,7 +2293,7 @@ function AnalyticsSection() {
           const ms = toMs(data.updatedAt);
           if (ms > lastSyncedMs) lastSyncedMs = ms;
         });
-        setPageViewTotals({ last24, last7, last30, total, lastSyncedMs, playerCount: analyticsRes.value.docs.length });
+        setPageViewTotals({ last24, last7, last30, total, lastSyncedMs, playerCount });
       } else {
         console.error("Admin analytics page-views fetch error:", analyticsRes.reason);
         setPageViewTotals({ last24: 0, last7: 0, last30: 0, total: 0, lastSyncedMs: 0, playerCount: 0 });
@@ -2333,6 +2351,29 @@ function AnalyticsSection() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {CONTENT_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: "9px 18px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: activeTab === t.key ? BLUE : "#fff",
+              color: activeTab === t.key ? "#fff" : BLUE,
+              transition: "background 0.15s, color 0.15s",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab !== "overview" && <ContentAnalyticsTable type={activeTab} />}
+
+      {activeTab === "overview" && (
+      <>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{
           background: BLUE, padding: "10px 16px",
@@ -2468,6 +2509,8 @@ function AnalyticsSection() {
       </div>
 
       <PlayerEvaluationsTable />
+      </>
+      )}
     </div>
   );
 }
@@ -2857,6 +2900,280 @@ const inputStyle = {
   padding: "8px 10px", fontWeight: 700, fontSize: "13px",
   outline: "none", boxSizing: "border-box", fontFamily: "inherit",
 };
+
+// ── Source-collection readers for the Games/Performances/Articles analytics
+// tabs — each returns a flat { slug, title, subtitle, dateMs } row. Kept
+// separate per type since each source collection has a completely
+// different shape; ContentAnalyticsTable below joins whatever comes back
+// against analytics docs by slug. ──
+async function fetchGameRows() {
+  const snap = await getDocs(collection(db, "schedule26"));
+  return snap.docs
+    .map((d) => d.data())
+    .filter((g) => g.Slug)
+    .map((g) => ({
+      slug: g.Slug,
+      title: `${g.Away || "?"} @ ${g.Home || "?"}`,
+      subtitle: [g.Week, g.Final ? "Final" : null].filter(Boolean).join(" · "),
+      dateMs: toMs(g.Date),
+    }));
+}
+
+async function fetchPerformanceRows() {
+  const snap = await getDocs(collection(db, "performances"));
+  return snap.docs
+    .map((d) => d.data())
+    .filter((p) => p.slug)
+    .map((p) => ({
+      slug: p.slug,
+      title: p.titleShort || p.titleLong || "Untitled performance",
+      subtitle: p.playerName || "",
+      dateMs: toMs(p.createdAt) || toMs(p.gameDate),
+    }));
+}
+
+async function fetchArticleRows() {
+  // Articles and plain news items both serve from the same /news/:slug
+  // route (see NewsArticle.jsx) and both get tracked under the "article"
+  // analytics type (see syncGoogleAnalytics.js), so both source
+  // collections are read and merged here.
+  const [articlesSnap, newsSnap] = await Promise.all([
+    getDocs(collection(db, "articles")),
+    getDocs(collection(db, "news")),
+  ]);
+  const articleRows = articlesSnap.docs
+    .map((d) => d.data())
+    .filter((a) => a.slug)
+    .map((a) => ({
+      slug: a.slug,
+      title: a.title || "Untitled article",
+      subtitle: a.author ? "By " + a.author : "Article",
+      dateMs: toMs(a.publishedAt),
+    }));
+  const newsRows = newsSnap.docs
+    .map((d) => d.data())
+    .filter((n) => n.slug)
+    .map((n) => ({
+      slug: n.slug,
+      title: n.title || "Untitled",
+      subtitle: "News",
+      dateMs: toMs(n.publishedAt),
+    }));
+  return [...articleRows, ...newsRows];
+}
+
+const CONTENT_ANALYTICS_CONFIG = {
+  game: { label: "Games", noun: "game", publicPrefix: "/game/", fetchRows: fetchGameRows },
+  performance: { label: "Performances", noun: "performance", publicPrefix: "/performance/", fetchRows: fetchPerformanceRows },
+  article: { label: "Articles", noun: "article", publicPrefix: "/news/", fetchRows: fetchArticleRows },
+};
+
+// ── Games/Performances/Articles page-view table — one reusable component
+// driven by CONTENT_ANALYTICS_CONFIG, joined against the analytics
+// collection's type-namespaced docs (analytics/{type}_{slug}, see
+// syncGoogleAnalytics.js) by their `slug` field rather than doc id, since
+// the doc id carries the type prefix this query already filtered on. Same
+// range/sort/search conventions as PlayerEvaluationsTable above, minus the
+// player-only filters (school/year/position) that don't apply here. ──
+function ContentAnalyticsTable({ type }) {
+  const config = CONTENT_ANALYTICS_CONFIG[type];
+  const [rows, setRows] = useState([]);
+  const [pageViewsBySlug, setPageViewsBySlug] = useState(new Map());
+  const [loading, setLoading] = useState(true);
+  const [fetchErrors, setFetchErrors] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortKey, setSortKey] = useState("views");
+  const [sortDir, setSortDir] = useState("desc");
+  const [rangeDays, setRangeDays] = useState(null); // null = All Time
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      setLoading(true);
+      setFetchErrors([]);
+      const errors = [];
+      const [rowsRes, analyticsRes] = await Promise.allSettled([
+        config.fetchRows(),
+        getDocs(query(collection(db, "analytics"), where("type", "==", type))),
+      ]);
+
+      if (rowsRes.status === "fulfilled") {
+        setRows(rowsRes.value);
+      } else {
+        console.error(`Admin ${type} analytics rows fetch error:`, rowsRes.reason);
+        setRows([]);
+        errors.push(config.label + ": " + (rowsRes.reason?.message || "read failed."));
+      }
+
+      if (analyticsRes.status === "fulfilled") {
+        const map = new Map();
+        analyticsRes.value.docs.forEach((d) => {
+          const data = d.data();
+          if (data.slug) map.set(data.slug, data.pageViews || {});
+        });
+        setPageViewsBySlug(map);
+      } else {
+        console.error(`Admin ${type} analytics page-views fetch error:`, analyticsRes.reason);
+        setPageViewsBySlug(new Map());
+        errors.push("Page Views: " + (analyticsRes.reason?.message || "read failed."));
+      }
+
+      setFetchErrors(errors);
+      setLoading(false);
+    };
+    fetchAll();
+    // `config` is a stable lookup (CONTENT_ANALYTICS_CONFIG[type]) that only
+    // ever changes when `type` does, so `type` alone is the real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
+
+  const viewField = rangeDays == null ? "total" : VIEW_FIELD_BY_RANGE_DAYS[rangeDays];
+
+  // Undefined (not 0) means this window hasn't synced for this slug yet —
+  // e.g. it's a brand-new page, or predates the sync script tracking this
+  // type at all — so it renders as "—" rather than a misleading zero.
+  const withViews = useMemo(() => {
+    return rows.map((r) => {
+      const pv = pageViewsBySlug.get(r.slug);
+      const viewsRaw = pv ? pv[viewField] : null;
+      return { ...r, views: viewsRaw != null ? (Number(viewsRaw) || 0) : null };
+    });
+  }, [rows, pageViewsBySlug, viewField]);
+
+  const filtered = useMemo(() => {
+    let list = withViews;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((r) =>
+        (r.title || "").toLowerCase().includes(q) ||
+        (r.subtitle || "").toLowerCase().includes(q) ||
+        (r.slug || "").toLowerCase().includes(q)
+      );
+    }
+    return [...list].sort((a, b) => {
+      let av, bv;
+      if (sortKey === "title") { av = a.title || ""; bv = b.title || ""; }
+      else if (sortKey === "date") { av = a.dateMs || 0; bv = b.dateMs || 0; }
+      else { av = a.views ?? -1; bv = b.views ?? -1; }
+      if (typeof av === "string") {
+        const cmp = av.localeCompare(bv);
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+  }, [withViews, searchQuery, sortKey, sortDir]);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const rangeLabel = (TABLE_RANGE_OPTIONS.find((o) => o.days === rangeDays) || {}).label || "All Time";
+
+  const SortHeader = ({ label, sortId, align }) => (
+    <th
+      onClick={() => toggleSort(sortId)}
+      style={{
+        padding: "9px 10px", cursor: "pointer", userSelect: "none",
+        fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase",
+        letterSpacing: "0.06em", textAlign: align || "left", whiteSpace: "nowrap",
+      }}
+    >
+      {label}{sortKey === sortId ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+    </th>
+  );
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          {config.label} — Page Views
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+          {TABLE_RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => setRangeDays(opt.days)}
+              style={{
+                padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                textTransform: "uppercase", letterSpacing: "0.04em",
+                border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+                background: rangeDays === opt.days ? GOLD : "transparent",
+                color: "#fff",
+                whiteSpace: "nowrap", transition: "background 0.15s",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={"Search " + config.noun + "s..."}
+          style={inputStyle}
+        />
+      </div>
+
+      {!loading && fetchErrors.length > 0 && (
+        <div style={{ padding: "10px 16px", background: "#fff3f0", borderBottom: "2px solid #c0392b" }}>
+          {fetchErrors.map((msg, i) => (
+            <div key={i} style={{ fontSize: "12px", fontWeight: 700, color: "#a52a1e" }}>⚠ {msg}</div>
+          ))}
+        </div>
+      )}
+
+      {loading ? (
+        <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+          No {config.noun}s match.
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+            {filtered.length} {config.noun}{filtered.length !== 1 ? "s" : ""}
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: BLUE }}>
+                <SortHeader label="Title" sortId="title" />
+                <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" }}>Details</th>
+                <SortHeader label="Date" sortId="date" align="right" />
+                <SortHeader label={"Views (" + rangeLabel + ")"} sortId="views" align="center" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => (
+                <tr key={type + "-" + r.slug + "-" + i} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "9px 10px", fontWeight: 900, fontSize: "13px" }}>
+                    <a href={config.publicPrefix + r.slug} target="_blank" rel="noopener noreferrer" style={{ color: BLUE, textDecoration: "none" }}>
+                      {r.title}
+                    </a>
+                  </td>
+                  <td style={{ padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666" }}>{r.subtitle || "—"}</td>
+                  <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#999", textAlign: "right", whiteSpace: "nowrap" }}>
+                    {r.dateMs > 0 ? new Date(r.dateMs).toLocaleDateString() : "—"}
+                  </td>
+                  <td style={{ padding: "9px 10px", fontSize: "13px", fontWeight: 900, color: r.views != null && r.views > 0 ? BLUE : "#ccc", textAlign: "center" }}>
+                    {r.views != null ? r.views.toLocaleString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── CFB Schedule — direct editor for the schedule26 collection (each doc is
 // one game: Home, Away, Date, Week, optional Home/AwayScore once played).
@@ -4007,30 +4324,64 @@ function ColorHexField({ label, value, onChange, onCopy, copied }) {
   );
 }
 
+// "Teams" (the existing CFB/NFL logo/color editor) and "Misc" (TV channel
+// logos, formerly its own top-level "Misc Branding" sidebar section — moved
+// here since it's just another flavor of branding asset, not a separate
+// concern) as sibling tabs under one Branding section.
+const BRANDING_TABS = [
+  { key: "teams", label: "Teams" },
+  { key: "misc", label: "Misc" },
+];
+
 function BrandingSection() {
+  const [brandingTab, setBrandingTab] = useState("teams");
   const [league, setLeague] = useState("cfb");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ display: "flex", gap: "8px" }}>
-        {Object.entries(LEAGUE_CONFIG).map(([key, cfg]) => (
+        {BRANDING_TABS.map((t) => (
           <button
-            key={key}
-            onClick={() => setLeague(key)}
+            key={t.key}
+            onClick={() => setBrandingTab(t.key)}
             style={{
               padding: "9px 22px", fontWeight: 900, fontSize: "13px",
               textTransform: "uppercase", letterSpacing: "0.06em",
-              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
-              background: league === key ? BLUE : "#fff",
-              color: league === key ? "#fff" : BLUE,
+              border: "2px solid " + GOLD, borderRadius: "8px", cursor: "pointer",
+              background: brandingTab === t.key ? GOLD : "#fff",
+              color: brandingTab === t.key ? "#fff" : GOLD,
             }}
           >
-            {cfg.label}
+            {t.label}
           </button>
         ))}
       </div>
-      {/* key={league} forces a clean remount on toggle rather than trying to
-          reuse fetch/selection state across two entirely different collections. */}
-      <TeamBrandingPane key={league} league={league} />
+
+      {brandingTab === "teams" && (
+        <>
+          <div style={{ display: "flex", gap: "8px" }}>
+            {Object.entries(LEAGUE_CONFIG).map(([key, cfg]) => (
+              <button
+                key={key}
+                onClick={() => setLeague(key)}
+                style={{
+                  padding: "9px 22px", fontWeight: 900, fontSize: "13px",
+                  textTransform: "uppercase", letterSpacing: "0.06em",
+                  border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+                  background: league === key ? BLUE : "#fff",
+                  color: league === key ? "#fff" : BLUE,
+                }}
+              >
+                {cfg.label}
+              </button>
+            ))}
+          </div>
+          {/* key={league} forces a clean remount on toggle rather than trying to
+              reuse fetch/selection state across two entirely different collections. */}
+          <TeamBrandingPane key={league} league={league} />
+        </>
+      )}
+
+      {brandingTab === "misc" && <MiscBrandingSection />}
     </div>
   );
 }
@@ -5004,7 +5355,6 @@ export default function AdminPanel() {
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "branding" && <BrandingSection />}
-            {activeSection === "miscbranding" && <MiscBrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "performances" && <PerformancesManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
