@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -87,15 +87,17 @@ const SECTIONS = [
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "performances", label: "Performances", icon: "⭐", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
+  { key: "requests", label: "Requests", icon: "📥", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
 ];
 
-function SidebarNav({ active, setActive }) {
+function SidebarNav({ active, setActive, badgeCounts }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
       {SECTIONS.map((s) => {
         const isActive = active === s.key;
+        const badge = badgeCounts?.[s.key] || 0;
         return (
           <button
             key={s.key}
@@ -112,6 +114,20 @@ function SidebarNav({ active, setActive }) {
           >
             <span style={{ fontSize: "16px" }}>{s.icon}</span>
             <span style={{ flex: 1 }}>{s.label}</span>
+            {/* Unread-count sticker — currently only wired up for
+                "requests" (see AdminPanel's unreadRequestCount), but keyed
+                generically off badgeCounts so any other section could grow
+                one later without touching this component. */}
+            {badge > 0 && (
+              <span style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
+                background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900,
+                flexShrink: 0,
+              }}>
+                {badge > 99 ? "99+" : badge}
+              </span>
+            )}
             {!s.ready && (
               <span style={{
                 fontSize: "8px", fontWeight: 900, color: "#aaa",
@@ -295,12 +311,24 @@ function PlayerDataSection() {
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedFlags, setSelectedFlags] = useState([]);
+  // Named groups — a separate layer from Flag (one color per player, quick
+  // visual tag) for arbitrary many-to-many organizing ("Top 100",
+  // "Sleepers", a specific scout's watchlist, etc.). Each playerGroups doc
+  // owns its own member-id array rather than players storing which groups
+  // they're in, so deleting a group is a single doc delete that can never
+  // touch a player doc — see handleDeleteGroup below.
+  const [allGroups, setAllGroups] = useState([]); // [{ id, name, playerIds }]
+  const [selectedGroups, setSelectedGroups] = useState([]); // filter, by group name
+  const [groupError, setGroupError] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [formState, setFormState] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [duplicateMatches, setDuplicateMatches] = useState(null);
+  const [slugCollision, setSlugCollision] = useState(null); // { baseSlug, uniqueSlug } | null
+  const [slugChangePrompt, setSlugChangePrompt] = useState(null); // { newBase, oldSlug } | null — editing an existing player
   const [removing, setRemoving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -316,6 +344,21 @@ function PlayerDataSection() {
       }
     };
     fetchSchools();
+  }, []);
+
+  useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        const snap = await getDocs(collection(db, "playerGroups"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data(), playerIds: d.data().playerIds || [] }));
+        data.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        setAllGroups(data);
+      } catch (e) {
+        console.error("Admin player groups fetch error:", e);
+        setAllGroups([]);
+      }
+    };
+    fetchGroups();
   }, []);
 
   useEffect(() => {
@@ -352,6 +395,22 @@ function PlayerDataSection() {
     });
   }, [allPlayers, selectedYears]);
 
+  // Group membership lives on the group docs (playerIds arrays), not on the
+  // player docs — this reverses that into playerId -> [group names] so the
+  // filter below and the sidebar row tags can look a player up in O(1)
+  // instead of scanning every group per player.
+  const groupNamesByPlayer = useMemo(() => {
+    const map = new Map();
+    allGroups.forEach((g) => {
+      (g.playerIds || []).forEach((pid) => {
+        const arr = map.get(pid) || [];
+        arr.push(g.name);
+        map.set(pid, arr);
+      });
+    });
+    return map;
+  }, [allGroups]);
+
   const filtered = allPlayers.filter((p) => {
     if (selectedYears.length === 0) {
       if (p.Eligible === "2026") return false;
@@ -361,6 +420,10 @@ function PlayerDataSection() {
     if (selectedPositions.length > 0 && !selectedPositions.includes(p.Position)) return false;
     if (selectedSchools.length > 0 && !selectedSchools.includes(p.School)) return false;
     if (selectedFlags.length > 0 && !selectedFlags.includes(p.Flag)) return false;
+    if (selectedGroups.length > 0) {
+      const playerGroupNames = groupNamesByPlayer.get(p.id) || [];
+      if (!selectedGroups.some((n) => playerGroupNames.includes(n))) return false;
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       const matches =
@@ -390,6 +453,7 @@ function PlayerDataSection() {
     });
     setSaveMessage("");
     setDuplicateMatches(null);
+    setSlugChangePrompt(null);
     setConfirmDelete(false);
   };
 
@@ -398,6 +462,8 @@ function PlayerDataSection() {
     setFormState({ ...BLANK_PLAYER_FORM });
     setSaveMessage("");
     setDuplicateMatches(null);
+    setSlugCollision(null);
+    setSlugChangePrompt(null);
     setConfirmDelete(false);
   };
 
@@ -407,6 +473,8 @@ function PlayerDataSection() {
     // check — force it to re-run against the new value on the next save
     // attempt rather than trusting a match found for the old name.
     setDuplicateMatches(null);
+    setSlugCollision(null);
+    setSlugChangePrompt(null);
   };
 
   const previewSlug = useMemo(() => {
@@ -430,7 +498,97 @@ function PlayerDataSection() {
     );
   };
 
-  const handleSave = async (forceDuplicate = false) => {
+  // ── generateSlug() is name+position+year only, so a genuinely different
+  // player who happens to share all three with an existing one (e.g. two
+  // real "Ashton Hampton, DB, 2027"s) collides on the exact same slug.
+  // Rather than blocking that admin outright, findUniqueSlug appends "-1",
+  // "-2", etc. until it lands on one nothing in the already-loaded
+  // `allPlayers` list is using. ──
+  const findUniqueSlug = (baseSlug) => {
+    const existingSlugs = new Set(allPlayers.map((p) => p.Slug).filter(Boolean));
+    let n = 1;
+    let candidate = baseSlug + "-" + n;
+    while (existingSlugs.has(candidate)) {
+      n += 1;
+      candidate = baseSlug + "-" + n;
+    }
+    return candidate;
+  };
+
+  // ── Named groups (playerGroups collection) — create/delete the group
+  // itself, and toggle one player's membership in it. Deliberately separate
+  // from handleSave: a group doc is independent of any player doc, so none
+  // of this touches `players` at all. initialPlayerId lets the "+ New
+  // Group" quick-create inside a player's edit form create the group and
+  // add that player in the same write, instead of two round trips. ──
+  const handleCreateGroup = async (name, initialPlayerId = null) => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const dupe = allGroups.find((g) => (g.name || "").trim().toLowerCase() === trimmed.toLowerCase());
+    if (dupe) {
+      setGroupError("A group named \"" + trimmed + "\" already exists.");
+      return null;
+    }
+    try {
+      const payload = {
+        name: trimmed,
+        playerIds: initialPlayerId ? [initialPlayerId] : [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, "playerGroups"), payload);
+      const newGroup = { id: ref.id, ...payload };
+      setAllGroups((prev) => [...prev, newGroup].sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+      setGroupError("");
+      return newGroup;
+    } catch (e) {
+      console.error("Admin create group error:", e);
+      setGroupError("Failed to create group — check console.");
+      return null;
+    }
+  };
+
+  // Lower-stakes than deleting a player (an org label, not real data), so a
+  // plain window.confirm() matches the rest of the admin panel's
+  // lighter-weight deletes (trends, videos, games, rivalries) rather than
+  // the heavier in-panel confirm card reserved for player records.
+  const handleDeleteGroup = async (group) => {
+    const count = group.playerIds?.length || 0;
+    if (!window.confirm("Delete the group \"" + group.name + "\"? This only removes the group — none of its " + count + " player" + (count !== 1 ? "s" : "") + " will be affected.")) return;
+    try {
+      await deleteDoc(doc(db, "playerGroups", group.id));
+      setAllGroups((prev) => prev.filter((g) => g.id !== group.id));
+      setSelectedGroups((prev) => prev.filter((n) => n !== group.name));
+    } catch (e) {
+      console.error("Admin delete group error:", e);
+      alert("Failed to delete group — check console.");
+    }
+  };
+
+  const handleToggleGroupMembership = async (group, playerId) => {
+    const isMember = (group.playerIds || []).includes(playerId);
+    try {
+      await updateDoc(doc(db, "playerGroups", group.id), {
+        playerIds: isMember ? arrayRemove(playerId) : arrayUnion(playerId),
+        updatedAt: serverTimestamp(),
+      });
+      setAllGroups((prev) => prev.map((g) => g.id === group.id
+        ? { ...g, playerIds: isMember ? (g.playerIds || []).filter((id) => id !== playerId) : [...(g.playerIds || []), playerId] }
+        : g
+      ));
+    } catch (e) {
+      console.error("Admin toggle group membership error:", e);
+      alert("Failed to update group membership — check console.");
+    }
+  };
+
+  // forcedSlug, when set, is a de-duped slug (base + "-1", "-2", ...) the
+  // admin already saw and confirmed via the "Slug Already In Use" card
+  // below — skips straight to writing with that slug instead of
+  // re-deriving/re-checking the base one. skipSlugUpdate is the editing-an-
+  // existing-player equivalent of "no" on the "Slug Would Change" prompt —
+  // keep the stored Slug as-is and just flag it outdated instead.
+  const handleSave = async (forceDuplicate = false, forcedSlug = null, skipSlugUpdate = false) => {
     if (!selectedPlayer || !formState) return;
 
     if (isNew) {
@@ -438,8 +596,8 @@ function PlayerDataSection() {
         setSaveMessage("First, Last, School, Position, and Eligible are required.");
         return;
       }
-      const slug = generateSlug(formState.First, formState.Last, formState.Position, formState.Eligible);
-      if (!slug || slug === "-") {
+      const baseSlug = generateSlug(formState.First, formState.Last, formState.Position, formState.Eligible);
+      if (!baseSlug || baseSlug === "-") {
         setSaveMessage("Couldn't generate a valid slug from these fields.");
         return;
       }
@@ -454,13 +612,21 @@ function PlayerDataSection() {
       }
       setDuplicateMatches(null);
 
+      const slug = forcedSlug || baseSlug;
+
       setSaving(true);
       setSaveMessage("");
       try {
         const dupSnap = await getDocs(query(collection(db, "players"), where("Slug", "==", slug)));
         if (!dupSnap.empty) {
-          setSaveMessage("Slug \"" + slug + "\" is already in use — adjust name/position/year to make it unique.");
+          // Same name/position/year as an existing player produces the same
+          // slug. The admin already confirmed above (via "Yes, Create
+          // Anyway") that this is a genuinely different, intentional entry
+          // and not a mis-click, so rather than blocking outright, surface
+          // the de-duped slug it'll actually be saved under and let them
+          // confirm that too before anything gets written.
           setSaving(false);
+          setSlugCollision({ baseSlug, uniqueSlug: findUniqueSlug(baseSlug) });
           return;
         }
 
@@ -470,7 +636,12 @@ function PlayerDataSection() {
 
         setAllPlayers((prev) => [...prev, newPlayer].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")));
         setSelectedPlayer(newPlayer);
-        setSaveMessage("Player created — slug \"" + slug + "\".");
+        setSlugCollision(null);
+        setSaveMessage(
+          forcedSlug
+            ? "Player created — \"" + baseSlug + "\" was already taken, so this one was saved as \"" + slug + "\"."
+            : "Player created — slug \"" + slug + "\"."
+        );
       } catch (e) {
         console.error("Admin player create error:", e);
         setSaveMessage("Failed to create — check console.");
@@ -480,18 +651,70 @@ function PlayerDataSection() {
       return;
     }
 
+    // Editing First/Last/Position/Eligible changes what generateSlug would
+    // produce, but the stored Slug is never silently rewritten out from
+    // under a live page/shared link — a previously de-duped slug ("...-1")
+    // still counts as "matching" its base so re-saving unrelated fields on
+    // a player who once collided doesn't re-trigger this every time.
+    const newBase = generateSlug(formState.First, formState.Last, formState.Position, formState.Eligible);
+    const currentSlug = selectedPlayer.Slug || "";
+    const validBase = !!newBase && newBase !== "-";
+    const slugStillMatches = !validBase || currentSlug === newBase || currentSlug.startsWith(newBase + "-");
+
+    if (!slugStillMatches && !skipSlugUpdate && !forcedSlug) {
+      setSlugChangePrompt({ newBase, oldSlug: currentSlug });
+      setSaveMessage("");
+      return;
+    }
+
     setSaving(true);
     setSaveMessage("");
     try {
+      const fields = { ...formState };
+      if (skipSlugUpdate) {
+        // Admin chose to keep the old slug — leave Slug itself untouched,
+        // just flag that it no longer matches this player's current info
+        // (see the "SLUG" badge in the player list / this field's note).
+        fields.SlugOutdated = true;
+      } else if (!slugStillMatches) {
+        const slugToWrite = forcedSlug || newBase;
+        const dupSnap = await getDocs(query(collection(db, "players"), where("Slug", "==", slugToWrite)));
+        if (!dupSnap.empty && slugToWrite !== currentSlug) {
+          // The new slug collides with a different existing player — same
+          // "offer a de-duped alternative" flow as creating a new player.
+          setSaving(false);
+          setSlugCollision({ baseSlug: newBase, uniqueSlug: findUniqueSlug(newBase) });
+          return;
+        }
+        fields.Slug = slugToWrite;
+        fields.SlugOutdated = false;
+      } else if (selectedPlayer.SlugOutdated) {
+        // The edit brought the slug back in line with the current fields
+        // (e.g. a typo revert) — clear a stale flag rather than leave it on.
+        fields.SlugOutdated = false;
+      }
+
       // updatedAt drives the player page's sitemap <lastmod> (see
       // generate-sitemap.js) — without it every player showed the same
       // sitemap-generation date regardless of when they were actually
       // last edited.
-      await updateDoc(doc(db, "players", selectedPlayer.id), { ...formState, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, "players", selectedPlayer.id), { ...fields, updatedAt: serverTimestamp() });
       setAllPlayers((prev) =>
-        prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...formState } : p))
+        prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...fields } : p))
       );
-      setSaveMessage("Saved.");
+      // Kept in sync (not just allPlayers) since this form's own slug
+      // display and the next save's slugStillMatches check both read
+      // straight off selectedPlayer — leaving it stale would compare
+      // against the pre-update slug on a second edit in the same sitting.
+      setSelectedPlayer((prev) => ({ ...prev, ...fields }));
+      setSlugChangePrompt(null);
+      setSaveMessage(
+        fields.Slug && fields.Slug !== currentSlug
+          ? "Saved — slug updated to \"" + fields.Slug + "\"."
+          : skipSlugUpdate
+            ? "Saved — kept the existing slug, flagged as outdated."
+            : "Saved."
+      );
     } catch (e) {
       console.error("Admin player save error:", e);
       setSaveMessage("Failed to save — check console.");
@@ -611,6 +834,79 @@ function PlayerDataSection() {
               })}
             </div>
           </div>
+
+          {/* Named groups — separate from Flag above (one color per player)
+              since a player can belong to any number of these. Filtering
+              happens here; creating/deleting a group and adding/removing
+              this-or-that player from one both happen in the edit form
+              below (see the "Groups" FieldRow), except deleting a group can
+              also be done right here so it's not buried inside some
+              player's form. */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Groups
+              </div>
+              {allGroups.length > 0 && (
+                <DropdownChecklist title="Filter" options={allGroups.map((g) => g.name)} selected={selectedGroups} setSelected={setSelectedGroups} />
+              )}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+              <input
+                type="text"
+                value={newGroupName}
+                onChange={(e) => { setNewGroupName(e.target.value); setGroupError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && newGroupName.trim()) { handleCreateGroup(newGroupName); setNewGroupName(""); } }}
+                placeholder="New group name..."
+                style={{ flex: "1 1 160px", minWidth: "140px", border: "2px solid #ddd", borderRadius: "6px", padding: "6px 10px", fontWeight: 700, fontSize: "12px", outline: "none", boxSizing: "border-box" }}
+              />
+              <button
+                onClick={() => { if (newGroupName.trim()) { handleCreateGroup(newGroupName); setNewGroupName(""); } }}
+                disabled={!newGroupName.trim()}
+                style={{
+                  padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                  border: "2px solid " + BLUE, borderRadius: "6px",
+                  background: BLUE, color: "#fff",
+                  cursor: newGroupName.trim() ? "pointer" : "default",
+                  opacity: newGroupName.trim() ? 1 : 0.5,
+                }}
+              >
+                + Group
+              </button>
+            </div>
+            {groupError && (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b", marginTop: "4px" }}>{groupError}</div>
+            )}
+            {allGroups.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                {allGroups.map((g) => (
+                  <span
+                    key={g.id}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "6px",
+                      border: "2px solid #ddd", borderRadius: "20px",
+                      padding: "4px 6px 4px 12px", fontSize: "11px", fontWeight: 800, color: "#555",
+                    }}
+                  >
+                    {g.name} <span style={{ color: "#aaa", fontWeight: 700 }}>({(g.playerIds || []).length})</span>
+                    <button
+                      onClick={() => handleDeleteGroup(g)}
+                      title={"Delete \"" + g.name + "\" — players are unaffected"}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        width: "18px", height: "18px", borderRadius: "50%",
+                        border: "none", background: "#eee", color: "#888",
+                        fontSize: "11px", fontWeight: 900, cursor: "pointer", lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -655,10 +951,23 @@ function PlayerDataSection() {
                           HIDDEN
                         </span>
                       )}
+                      {p.SlugOutdated && (
+                        <span
+                          title="Slug no longer matches this player's current name/position/year — see the Slug field below."
+                          style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 900, color: "#8a6300", border: "1px solid #e0a300", borderRadius: "10px", padding: "1px 6px" }}
+                        >
+                          SLUG
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: "12px", fontWeight: 700, color: "#888" }}>
                       {p.Position || "—"} · {p.School || "—"} · {p.Eligible || "—"}
                     </div>
+                    {(groupNamesByPlayer.get(p.id) || []).length > 0 && (
+                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#7a5c00", marginTop: "2px" }}>
+                        🏷 {(groupNamesByPlayer.get(p.id) || []).join(", ")}
+                      </div>
+                    )}
                   </div>
                   {p.Slug && (
                     <a
@@ -804,6 +1113,41 @@ function PlayerDataSection() {
                   )}
                 </div>
               </FieldRow>
+              {/* New players don't have a Firestore doc id yet to attach
+                  memberships to — save the player first, then this appears
+                  on re-opening it. Creating a brand-new group from here
+                  (rather than the list above) adds this player to it
+                  immediately, in the same write. */}
+              {!isNew && (
+                <FieldRow label="Groups">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {allGroups.map((g) => {
+                      const active = (g.playerIds || []).includes(selectedPlayer.id);
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => handleToggleGroupMembership(g, selectedPlayer.id)}
+                          style={{
+                            padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                            border: "2px solid " + BLUE, borderRadius: "20px", cursor: "pointer",
+                            background: active ? BLUE : "#fff",
+                            color: active ? "#fff" : BLUE,
+                          }}
+                        >
+                          {active ? "✓ " : "+ "}{g.name}
+                        </button>
+                      );
+                    })}
+                    {allGroups.length === 0 && (
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#999" }}>
+                        No groups yet — create one above the player list.
+                      </div>
+                    )}
+                  </div>
+                </FieldRow>
+              )}
               <FieldRow label="Admin Notes (internal only)">
                 <textarea
                   value={formState.AdminNotes}
@@ -815,13 +1159,22 @@ function PlayerDataSection() {
 
               <FieldRow label={isNew ? "Slug (auto-generated preview)" : "Slug"}>
                 <div style={{
-                  width: "100%", border: "2px solid #eee", borderRadius: "6px",
-                  padding: "8px 10px", fontWeight: 700, fontSize: "13px",
+                  width: "100%", border: "2px solid " + (!isNew && selectedPlayer.SlugOutdated ? "#e0a300" : "#eee"),
+                  borderRadius: "6px", padding: "8px 10px", fontWeight: 700, fontSize: "13px",
                   background: "#fafafa", color: "#666", boxSizing: "border-box",
                   wordBreak: "break-all",
                 }}>
                   {isNew ? (previewSlug || "—") : (selectedPlayer.Slug || "—")}
                 </div>
+                {/* Set when the admin picked "Keep Old Slug" on a Slug Would
+                    Change prompt below — cleared automatically the next time
+                    an edit brings the slug back in line, or the admin
+                    updates it from here. */}
+                {!isNew && selectedPlayer.SlugOutdated && (
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a6300", marginTop: "5px" }}>
+                    ⚠ Outdated — no longer matches this player's current name/position/year.
+                  </div>
+                )}
               </FieldRow>
             </FieldGroup>
 
@@ -867,6 +1220,73 @@ function PlayerDataSection() {
                     }}
                   >
                     {saving ? "Creating..." : "Yes, Create Anyway"}
+                  </button>
+                </div>
+              </div>
+            ) : slugCollision ? (
+              <div style={{ marginTop: "16px", border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                  ⚠ Slug Already In Use
+                </div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                  "{slugCollision.baseSlug}" is already taken — same name, position, and year as an existing player. {isNew ? "Creating" : "Saving"} this player will save it as "{slugCollision.uniqueSlug}" instead.
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => setSlugCollision(null)}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSave(true, slugCollision.uniqueSlug)}
+                    disabled={saving}
+                    style={{
+                      flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                      opacity: saving ? 0.6 : 1,
+                    }}
+                  >
+                    {saving ? "Saving..." : "Yes, Save As \"" + slugCollision.uniqueSlug + "\""}
+                  </button>
+                </div>
+              </div>
+            ) : slugChangePrompt ? (
+              <div style={{ marginTop: "16px", border: "2px solid #e0a300", borderRadius: "8px", padding: "12px", background: "#fffaf0" }}>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#8a6300", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                  ⚠ Slug Would Change
+                </div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                  These edits change the name, position, or year the slug is built from — it would go from "{slugChangePrompt.oldSlug}" to "{slugChangePrompt.newBase}". Update it now (old links/bookmarks to this page break), or keep the current slug and just flag it as outdated?
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => handleSave(false, null, true)}
+                    disabled={saving}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                    }}
+                  >
+                    {saving ? "Saving..." : "Keep Old Slug"}
+                  </button>
+                  <button
+                    onClick={() => handleSave(false, slugChangePrompt.newBase)}
+                    disabled={saving}
+                    style={{
+                      flex: 1, background: "#e0a300", color: "#fff", border: "2px solid #a57a00",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                      opacity: saving ? 0.6 : 1,
+                    }}
+                  >
+                    {saving ? "Saving..." : "Update Slug"}
                   </button>
                 </div>
               </div>
@@ -2175,6 +2595,234 @@ function VideosSection() {
     </div>
   );
 }
+
+const REQUEST_TABS = [
+  { key: "playerRequests", label: "Player Requests" },
+  { key: "issueReports", label: "Issue Reports" },
+];
+
+// ── Requests section — surfaces the two "Request a Player" / "Report an
+// Issue" forms on UserProfile.js, which previously wrote to Firestore
+// (playerRequests / userReports) with no admin-facing UI at all — every
+// submission landed invisibly. Read-only list + delete (once handled,
+// clear it out — there's no "resolved" status field, just presence in the
+// collection, matching how lightweight this was designed to be on the
+// submit side too). ──
+function RequestsSection() {
+  const [activeTab, setActiveTab] = useState("playerRequests");
+  const [playerRequests, setPlayerRequests] = useState([]);
+  const [issueReports, setIssueReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchErrors, setFetchErrors] = useState([]);
+  const [removingId, setRemovingId] = useState(null);
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      setLoading(true);
+      setFetchErrors([]);
+      const errors = [];
+      const [prRes, urRes] = await Promise.allSettled([
+        getDocs(collection(db, "playerRequests")),
+        getDocs(collection(db, "userReports")),
+      ]);
+
+      let prRows = [];
+      if (prRes.status === "fulfilled") {
+        prRows = prRes.value.docs.map((d) => ({ id: d.id, ...d.data() }));
+        prRows.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+        setPlayerRequests(prRows);
+      } else {
+        console.error("Admin player requests fetch error:", prRes.reason);
+        setPlayerRequests([]);
+        errors.push("Player Requests: " + (prRes.reason?.message || "read failed."));
+      }
+
+      let urRows = [];
+      if (urRes.status === "fulfilled") {
+        urRows = urRes.value.docs.map((d) => ({ id: d.id, ...d.data() }));
+        urRows.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+        setIssueReports(urRows);
+      } else {
+        console.error("Admin issue reports fetch error:", urRes.reason);
+        setIssueReports([]);
+        errors.push("Issue Reports: " + (urRes.reason?.message || "read failed."));
+      }
+
+      setFetchErrors(errors);
+      setLoading(false);
+
+      // Mark everything just shown as read — a doc with no `read` field at
+      // all (every one submitted before this existed) counts as unread too.
+      // This is what clears the sidebar's sticker: AdminPanel's own count
+      // effect refetches on every activeSection change, so simply writing
+      // `read: true` here is enough, no direct call back up to it needed.
+      // Fire-and-forget after the list is already showing — a failure here
+      // shouldn't block viewing/using the requests that just loaded fine.
+      const unreadPr = prRows.filter((r) => r.read !== true);
+      const unreadUr = urRows.filter((r) => r.read !== true);
+      if (unreadPr.length > 0 || unreadUr.length > 0) {
+        try {
+          await Promise.all([
+            ...unreadPr.map((r) => updateDoc(doc(db, "playerRequests", r.id), { read: true })),
+            ...unreadUr.map((r) => updateDoc(doc(db, "userReports", r.id), { read: true })),
+          ]);
+          if (unreadPr.length > 0) setPlayerRequests((prev) => prev.map((r) => ({ ...r, read: true })));
+          if (unreadUr.length > 0) setIssueReports((prev) => prev.map((r) => ({ ...r, read: true })));
+        } catch (e) {
+          console.error("Admin mark-requests-read error:", e);
+        }
+      }
+    };
+    fetchAll();
+  }, []);
+
+  const handleDelete = async (collectionName, id, setList, label) => {
+    if (!window.confirm("Delete this " + label + "? This cannot be undone.")) return;
+    setRemovingId(id);
+    try {
+      await deleteDoc(doc(db, collectionName, id));
+      setList((prev) => prev.filter((r) => r.id !== id));
+    } catch (e) {
+      console.error("Admin delete " + collectionName + " error:", e);
+      alert("Failed to delete — check console.");
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const activeRows = activeTab === "playerRequests" ? playerRequests : issueReports;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", gap: "8px" }}>
+        {REQUEST_TABS.map((t) => {
+          const count = t.key === "playerRequests" ? playerRequests.length : issueReports.length;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              style={{
+                padding: "9px 18px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.05em",
+                border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+                background: activeTab === t.key ? BLUE : "#fff",
+                color: activeTab === t.key ? "#fff" : BLUE,
+              }}
+            >
+              {t.label}{count > 0 ? " (" + count + ")" : ""}
+            </button>
+          );
+        })}
+      </div>
+
+      {!loading && fetchErrors.length > 0 && (
+        <div style={{ padding: "10px 16px", background: "#fff3f0", border: "2px solid #c0392b", borderRadius: "8px" }}>
+          {fetchErrors.map((msg, i) => (
+            <div key={i} style={{ fontSize: "12px", fontWeight: 700, color: "#a52a1e" }}>⚠ {msg}</div>
+          ))}
+        </div>
+      )}
+
+      {loading ? (
+        <LoadingSpinner label="Loading requests" size={28} minHeight="100px" />
+      ) : activeRows.length === 0 ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+          {activeTab === "playerRequests" ? "No player requests." : "No issue reports."}
+        </div>
+      ) : (
+        <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: BLUE }}>
+                  {activeTab === "playerRequests" ? (
+                    <>
+                      <th style={thStyle}>Player</th>
+                      <th style={thStyle}>School</th>
+                      <th style={thStyle}>Position</th>
+                      <th style={thStyle}>Requested By</th>
+                      <th style={thStyle}>Date</th>
+                    </>
+                  ) : (
+                    <>
+                      <th style={thStyle}>Message</th>
+                      <th style={thStyle}>Submitted By</th>
+                      <th style={thStyle}>Date</th>
+                    </>
+                  )}
+                  <th style={{ ...thStyle, textAlign: "right" }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeRows.map((r, i) => {
+                  const dateMs = toMs(r.createdAt);
+                  const collectionName = activeTab === "playerRequests" ? "playerRequests" : "userReports";
+                  const setList = activeTab === "playerRequests" ? setPlayerRequests : setIssueReports;
+                  const label = activeTab === "playerRequests" ? "player request" : "report";
+                  // Reflects local state (already flipped to true right after
+                  // fetch's mark-as-read call succeeds, see the effect above)
+                  // rather than re-checking Firestore, so this tag disappears
+                  // for the whole batch the instant that write resolves.
+                  const isUnread = r.read !== true;
+                  const newTag = isUnread && (
+                    <span style={{
+                      display: "inline-block", marginLeft: "8px", fontSize: "9px", fontWeight: 900,
+                      color: "#fff", background: "#c0392b", borderRadius: "10px", padding: "2px 6px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", verticalAlign: "middle",
+                    }}>
+                      New
+                    </span>
+                  );
+                  return (
+                    <tr key={r.id} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
+                      {activeTab === "playerRequests" ? (
+                        <>
+                          <td style={tdStyle}>{r.playerName || "—"}{newTag}</td>
+                          <td style={tdStyle}>{r.school || "—"}</td>
+                          <td style={tdStyle}>{r.position || "—"}</td>
+                          <td style={tdStyle}>{r.email || "—"}</td>
+                          <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ ...tdStyle, maxWidth: "420px", whiteSpace: "pre-wrap" }}>{r.message || "—"}{newTag}</td>
+                          <td style={tdStyle}>{r.email || "—"}</td>
+                          <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                        </>
+                      )}
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                        <button
+                          onClick={() => handleDelete(collectionName, r.id, setList, label)}
+                          disabled={removingId === r.id}
+                          style={{
+                            background: "none", border: "2px solid #ddd", borderRadius: "6px",
+                            color: "#999", cursor: removingId === r.id ? "default" : "pointer",
+                            fontSize: "11px", fontWeight: 800, padding: "5px 10px",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                          }}
+                        >
+                          {removingId === r.id ? "…" : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const thStyle = {
+  padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff",
+  textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap",
+};
+const tdStyle = {
+  padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666",
+};
 
 // ── Analytics section — read-only dashboard pulling real numbers from
 // Firestore. Evaluations live in a players/{playerId}/evaluations/{uid}
@@ -5326,6 +5974,29 @@ function TvChannelsManager() {
 export default function AdminPanel() {
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState("players");
+  const [unreadRequestCount, setUnreadRequestCount] = useState(0);
+
+  // ── Sidebar badge for the Requests section — lives up here (not inside
+  // RequestsSection itself) so the count is visible without ever having to
+  // open that section. Refetches on every activeSection change rather than
+  // just once on mount: that's what catches the count dropping back to 0
+  // right after a visit to Requests, since RequestsSection marks everything
+  // it just loaded as read (see its own effect) the moment it's viewed. ──
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const [prSnap, urSnap] = await Promise.all([
+          getDocs(collection(db, "playerRequests")),
+          getDocs(collection(db, "userReports")),
+        ]);
+        const unread = [...prSnap.docs, ...urSnap.docs].filter((d) => d.data().read !== true).length;
+        setUnreadRequestCount(unread);
+      } catch (e) {
+        console.error("Admin unread-requests count error:", e);
+      }
+    };
+    fetchUnread();
+  }, [activeSection]);
 
   return (
     <>
@@ -5346,7 +6017,7 @@ export default function AdminPanel() {
 
         <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: "20px", alignItems: "start" }}>
           <div style={{ position: "sticky", top: "20px" }}>
-            <SidebarNav active={activeSection} setActive={setActiveSection} />
+            <SidebarNav active={activeSection} setActive={setActiveSection} badgeCounts={{ requests: unreadRequestCount }} />
           </div>
 
           <div>
@@ -5358,6 +6029,7 @@ export default function AdminPanel() {
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "performances" && <PerformancesManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
+            {activeSection === "requests" && <RequestsSection />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
           </div>

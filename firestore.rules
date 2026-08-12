@@ -62,6 +62,15 @@ service cloud.firestore {
 
     match /schools/{school} { allow read, write: if true; }
     match /nfl/{team} { allow read, write: if true; }
+    // Admin-defined named player groups (AdminPanel.js's Player Data
+    // section) — each doc owns its own playerIds array, so deleting a group
+    // is a single doc delete that never touches a players/{id} doc. Public
+    // read (harmless, and simpler than gating a feature with no signed-out
+    // UI yet), write locked to admin like tvChannels below.
+    match /playerGroups/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // TV channel logos — Misc Branding (AdminPanel.js's MiscBrandingSection)
     // manages these; CFB Schedule's "TV Channel" field and GamePage.js's own
     // channel-logo display both read them by Name. Public read like
@@ -86,20 +95,23 @@ service cloud.firestore {
     // No rule existed for this collection at all before, so that read was
     // being silently denied — the tab worked, it just always showed zero.
     match /analytics/{doc} { allow read: if true; }
-    // "Request a Player" form (UserProfile.js) — same story, no rule
-    // existed, so every submission was failing. Create-only from the
-    // client; nothing in the app currently has an admin review UI for
-    // these, but they're gated to admin-read anyway rather than left
-    // world-readable, since submissions carry the requester's email.
+    // "Request a Player" form (UserProfile.js), reviewed in AdminPanel.js's
+    // Requests section — create-only from the submitting client; update
+    // (marking read) and delete (clearing a handled one) are admin-only,
+    // since a submitter has no reason to touch their own request again
+    // after sending it. Read gated to admin since submissions carry the
+    // requester's email.
     match /playerRequests/{doc} {
       allow read: if isAdmin();
       allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
     }
-    // "Report an Issue" form (UserProfile.js) — same as playerRequests
-    // above: no rule existed, submissions were failing.
+    // "Report an Issue" form (UserProfile.js) — same shape as
+    // playerRequests above.
     match /userReports/{doc} {
       allow read: if isAdmin();
       allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
     }
     match /teamPositionRanks/{doc} { allow read, write: if true; }
     match /rosters/{doc} { allow read, write: if true; }

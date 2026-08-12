@@ -467,6 +467,15 @@ export default function PlayerProfile() {
     setReactionCounts({ likes: 0, up: 0, down: 0 });
     setMyReaction({ liked: false, vote: null });
     setLastEvalUpdate(null);
+    // draftedBy/draftInfo used to survive a slug change untouched — the
+    // draftOrder lookup below only ever *sets* them, never clears them, so
+    // navigating from a drafted player to a not-yet-drafted (or
+    // differently-drafted) one kept showing the previous player's NFL team
+    // colors/logo until (if ever) a new draftOrder match happened to
+    // overwrite it. Clearing here means every player page starts from the
+    // same "not drafted" baseline regardless of what the last one showed.
+    setDraftedBy(null);
+    setDraftInfo(null);
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [slug]);
 
@@ -583,6 +592,13 @@ export default function PlayerProfile() {
           const d = snap.docs[0].data();
           setDraftedBy(d.Team);
           setDraftInfo({ round:d.Round, pick:d.Pick });
+        } else {
+          // Explicit, not just relying on the slug-change reset effect above
+          // — keeps this effect correct on its own if it's ever re-run
+          // without an intervening slug change (e.g. a draftOrder write
+          // landing between two renders).
+          setDraftedBy(null);
+          setDraftInfo(null);
         }
       } catch(e) { console.error(e); }
     };
@@ -745,8 +761,12 @@ export default function PlayerProfile() {
           // Dark variant preferred — this now feeds a full-opacity
           // background layer in the drafted-player hero (see heroCollegeLogo
           // below), not a small box on a light card, so it needs the same
-          // dark-background-friendly mark as the NFL logo beside it.
-          cfbLogoRef.current = b.LogoDark || b.Logo2 || b.Logo1 || "";
+          // dark-background-friendly mark as the NFL logo beside it. Falls
+          // straight back to Logo1 (not Logo2, which isn't guaranteed to be
+          // dark-background-friendly either) when no LogoDark is set —
+          // matches the LogoDark-then-Logo1 fallback every other logo spot
+          // in the app already uses (see AdminPanel.js's team preview).
+          cfbLogoRef.current = b.LogoDark || b.Logo1 || "";
           schoolSlugRef.current = b.Slug || "";
           setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logoDark:b.LogoDark||"", wordmark:b.Wordmark||"", wordmarkDark:b.WordmarkDark||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
         } else { setBranding(null); }
@@ -2032,10 +2052,10 @@ useEffect(() => {
   // Drafted players only: the college logo used to sit in the right-side
   // box, but now joins the NFL logo as a second full-opacity background
   // layer instead (branding.cfbLogo already prefers LogoDark — see the
-  // school-fetch effect above). Dropped entirely for players with no
-  // flair — without a badge of their own up front, a second background
-  // logo just reads as clutter.
-  const heroCollegeLogo = draftedBy && flairInfo ? (branding?.cfbLogo || "") : "";
+  // school-fetch effect above). Shown regardless of flair — the drafted
+  // hero has no flair badge box to fall back on, so this is the only
+  // college branding on the page at that point.
+  const heroCollegeLogo = draftedBy ? (branding?.cfbLogo || "") : "";
 
   return (
     <>
@@ -2384,7 +2404,11 @@ useEffect(() => {
               >
                 {following ? "✓ Following" : "+ Follow"}
               </button>
-              {player.Link && String(player.Eligible) === "2026" && (
+              {/* Drops once the player has an actual NFL draft result
+                  (draftedBy) — the hero already carries their landing team
+                  and pick info at that point, so a "Film" link back to
+                  pre-draft tape reads as stale clutter next to it. */}
+              {player.Link && String(player.Eligible) === "2026" && !draftedBy && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
                   className="text-white font-extrabold rounded-full transition hover:opacity-80"
                   style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}>
@@ -2866,29 +2890,11 @@ useEffect(() => {
           </div>
           <div style={{ height: "4px", background: color2 }} />
 
-          {player.Bio && (
-            <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "20px 32px", borderBottom: "1px solid #eee" }}>
-              <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
-                <h2 style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#666", marginBottom: "8px" }}>
-                  Bio
-                </h2>
-                {/* Same bullet/paragraph renderer as evaluations — a bio
-                    written as several newline-separated paragraphs (or with
-                    a few • bullet lines for career highlights) now actually
-                    renders as such, instead of collapsing into one run-on
-                    paragraph since a plain <p> ignores newlines in its
-                    string content. Left-aligned rather than the old
-                    center-alignment — centered prose reads awkwardly once a
-                    bio is more than a single short line. */}
-                <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 500, color: "#333", lineHeight: 1.65, textAlign: "left" }}>
-                  {renderEvaluationText(player.Bio, "bio")}
-                </div>
-              </div>
-            </div>
-          )}
-
+          {/* Physical/Athletic Testing now leads Bio — the numbers read as
+              quick-reference stats a visitor scans first, with the prose
+              bio underneath for whoever wants the fuller writeup. */}
           {physicalMeasurements.length > 0 && (
-            <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px" }}>
+            <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px", borderBottom: player.Bio ? "1px solid #eee" : undefined }}>
               {isMobile ? (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
                   <h2 style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginBottom:"4px" }}>Physical</h2>
@@ -2917,6 +2923,27 @@ useEffect(() => {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {player.Bio && (
+            <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "20px 32px" }}>
+              <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
+                <h2 style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#666", marginBottom: "8px" }}>
+                  Bio
+                </h2>
+                {/* Same bullet/paragraph renderer as evaluations — a bio
+                    written as several newline-separated paragraphs (or with
+                    a few • bullet lines for career highlights) now actually
+                    renders as such, instead of collapsing into one run-on
+                    paragraph since a plain <p> ignores newlines in its
+                    string content. Left-aligned rather than the old
+                    center-alignment — centered prose reads awkwardly once a
+                    bio is more than a single short line. */}
+                <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 500, color: "#333", lineHeight: 1.65, textAlign: "left" }}>
+                  {renderEvaluationText(player.Bio, "bio")}
+                </div>
+              </div>
             </div>
           )}
 
