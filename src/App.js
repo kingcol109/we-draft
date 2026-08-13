@@ -166,6 +166,9 @@ function MainLayout() {
             {/* My Stats — same page component, third tab (see WePickHub.js's
                 own activeTab handling). */}
             <Route path="/we-pick/stats" element={<WePickHub />} />
+            {/* Friends — fourth tab: friend code, add-by-code, requests,
+                friend list (see WePickHub.js's own activeTab handling). */}
+            <Route path="/we-pick/friends" element={<WePickHub />} />
             <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
           </Routes>
         </Suspense>

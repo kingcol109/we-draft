@@ -16,7 +16,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import { db } from "../firebase";
-import { collection, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch, query, where, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useAuth } from "../context/AuthContext";
 
@@ -45,6 +45,40 @@ const STANDINGS_LIMITS = {
   season: { default: 10, max: 100 },
   week: { default: 10, max: 25 },
 };
+
+// ── Friend codes — a short, easy-to-read/say/type stand-in for a uid, so
+// "add me" can be "share this code" instead of "share your raw Firebase
+// uid". Excludes 0/O and 1/I/L, the pairs people most often misread when a
+// code's read aloud or handwritten. 6 chars from this 31-char alphabet is
+// ~887M combinations — collisions are checked for anyway (see
+// FriendsSection's generateUniqueFriendCode) but should be exceedingly
+// rare in practice. ──
+const FRIEND_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function generateFriendCode() {
+  let code = "";
+  for (let i = 0; i < 6; i++) code += FRIEND_CODE_CHARS[Math.floor(Math.random() * FRIEND_CODE_CHARS.length)];
+  return code;
+}
+
+// ── Batch-fetches users/{uid}.username for a list of uids, returning a
+// plain {uid: name} map — same "look up the live current value, don't
+// trust anything denormalized" reasoning GamePage.js's namesByUid map
+// uses for picks/comments (display names go stale the moment someone
+// changes theirs if they're ever stored anywhere else). Shared here since
+// both FriendsSection and StandingsSection's friends scope need it. ──
+async function fetchNamesByUid(uids) {
+  const unique = [...new Set(uids)].filter(Boolean);
+  if (unique.length === 0) return {};
+  const snaps = await Promise.all(unique.map((uid) => getDoc(doc(db, "users", uid))));
+  const map = {};
+  snaps.forEach((s, i) => {
+    if (s.exists()) {
+      const uname = s.data().username?.trim();
+      if (uname) map[unique[i]] = uname;
+    }
+  });
+  return map;
+}
 
 // ── Ranked Standings scoring — locked-in spec, not computed anywhere yet ──
 // Per graded pick, once its game has gone Final:
@@ -311,9 +345,11 @@ export default function WePickHub() {
     ? "standings"
     : location.pathname.startsWith("/we-pick/stats")
     ? "stats"
+    : location.pathname.startsWith("/we-pick/friends")
+    ? "friends"
     : "picks";
 
-  const TAB_TITLES = { standings: "Ranked Standings", stats: "My Stats" };
+  const TAB_TITLES = { standings: "Ranked Standings", stats: "My Stats", friends: "Friends" };
   const pageTitle = TAB_TITLES[activeTab]
     ? `${TAB_TITLES[activeTab]} | We-Pick | We-Draft`
     : "We-Pick | Predict College Football Scores & Build Your Ranked 6";
@@ -359,6 +395,7 @@ export default function WePickHub() {
             { key: "picks", label: "My Picks", to: "/we-pick" },
             { key: "standings", label: "🏆 Ranked Standings", to: "/we-pick/standings" },
             { key: "stats", label: "📊 My Stats", to: "/we-pick/stats" },
+            { key: "friends", label: "👥 Friends", to: "/we-pick/friends" },
           ].map((tab) => (
             <Link
               key={tab.key}
@@ -375,7 +412,10 @@ export default function WePickHub() {
           ))}
         </div>
 
-        {activeTab === "standings" ? <StandingsSection /> : activeTab === "stats" ? <MyStatsSection /> : <MyPicksSection />}
+        {activeTab === "standings" ? <StandingsSection />
+          : activeTab === "stats" ? <MyStatsSection />
+          : activeTab === "friends" ? <FriendsSection />
+          : <MyPicksSection />}
       </div>
     </div>
   );
@@ -1376,6 +1416,18 @@ function StandingsSection() {
   // STANDINGS_LIMITS) so a season board doesn't dump 100 rows on load.
   const [expanded, setExpanded] = useState(false);
   const limits = STANDINGS_LIMITS[view];
+  // Community (everyone) vs Friends (see FriendsSection) — orthogonal to
+  // the season/week toggle above, so all four combinations work. Friend
+  // uids are only fetched once scope actually switches to "friends" (not
+  // preloaded for everyone who never touches it), and namesByUid overrides
+  // each entry's stored displayName with its owner's live current one for
+  // the same reason GamePage.js's picks/comments do — a name baked into a
+  // standings entry at scoring time would otherwise go stale exactly like
+  // those did.
+  const [scope, setScope] = useState("community"); // "community" | "friends"
+  const [friendUids, setFriendUids] = useState(null); // null = not fetched yet
+  const [friendNamesByUid, setFriendNamesByUid] = useState({});
+  const [friendsLoading, setFriendsLoading] = useState(false);
 
   // Week list comes from the schedule, same as My Picks' own dropdown —
   // fetched once, independent of which board is currently showing.
@@ -1420,10 +1472,45 @@ function StandingsSection() {
     return () => { cancelled = true; };
   }, [view, selectedWeek]);
 
-  const sortedEntries = useMemo(
-    () => [...entries].sort(compareStandingsEntries),
-    [entries]
-  );
+  // Friend uids + their live names — fetched once, the first time scope
+  // actually switches to "friends" (friendUids starts null so this only
+  // ever runs once per sign-in, not once per view/week change too).
+  useEffect(() => {
+    if (scope !== "friends" || !user || friendUids !== null) return;
+    let cancelled = false;
+    setFriendsLoading(true);
+    getDocs(query(collection(db, "friendships"), where("uids", "array-contains", user.uid)))
+      .then(async (snap) => {
+        if (cancelled) return;
+        const uids = snap.docs
+          .map((d) => (d.data().uids || []).find((u) => u !== user.uid))
+          .filter(Boolean);
+        const nameMap = await fetchNamesByUid(uids);
+        if (cancelled) return;
+        setFriendUids(new Set(uids));
+        setFriendNamesByUid(nameMap);
+      })
+      .catch((e) => {
+        console.error("Standings friend-list fetch error:", e);
+        if (!cancelled) setFriendUids(new Set());
+      })
+      .finally(() => { if (!cancelled) setFriendsLoading(false); });
+    return () => { cancelled = true; };
+  }, [scope, user, friendUids]);
+
+  const sortedEntries = useMemo(() => {
+    const base = scope === "friends" && user && friendUids
+      ? entries.filter((e) => e.uid === user.uid || friendUids.has(e.uid))
+      : entries;
+    // Live current name wins over whatever was baked into the entry at
+    // scoring time — only meaningful in friends scope, where we actually
+    // have a live name to offer (community scope has no reason to batch-
+    // fetch a name for every entry on a season-wide board).
+    const named = scope === "friends"
+      ? base.map((e) => (friendNamesByUid[e.uid] ? { ...e, displayName: friendNamesByUid[e.uid] } : e))
+      : base;
+    return [...named].sort(compareStandingsEntries);
+  }, [entries, scope, user, friendUids, friendNamesByUid]);
 
   const visibleCount = expanded ? limits.max : limits.default;
   const visibleEntries = sortedEntries.slice(0, visibleCount);
@@ -1465,6 +1552,14 @@ function StandingsSection() {
         </ul>
       </div>
 
+      {/* Community (everyone) vs Friends (see FriendsSection) — a separate
+          row from season/week below since it's a different axis entirely
+          (whose scores show up, not which period). */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "10px", flexWrap: "wrap" }}>
+        <StandingsSubTab active={scope === "community"} label="🌐 Community" onClick={() => setScope("community")} />
+        <StandingsSubTab active={scope === "friends"} label="👥 Friends" onClick={() => setScope("friends")} />
+      </div>
+
       <div style={{ display: "flex", gap: "8px", marginBottom: "18px", flexWrap: "wrap" }}>
         <StandingsSubTab active={view === "season"} label="2026 Season" onClick={goSeason} />
         <StandingsSubTab active={view === "week"} label="By Week" onClick={() => goWeek(selectedWeek)} />
@@ -1482,11 +1577,28 @@ function StandingsSection() {
       <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
         <div style={{ background: GOLD, padding: "10px 16px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            🏆 {view === "season" ? "2026 Season Standings" : `${selectedWeek || "Weekly"} Standings`}
+            🏆 {scope === "friends" ? "Friend " : ""}{view === "season" ? "2026 Season Standings" : `${selectedWeek || "Weekly"} Standings`}
           </div>
         </div>
         <div style={{ background: "rgba(0,0,0,0.25)" }}>
-          {loading ? (
+          {scope === "friends" && !user ? (
+            <div style={{ padding: "36px 20px", textAlign: "center" }}>
+              <div style={{ fontSize: "26px", marginBottom: "8px" }}>👥</div>
+              <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
+                Sign in to see how you stack up against your friends.
+              </div>
+            </div>
+          ) : scope === "friends" && friendUids && friendUids.size === 0 ? (
+            <div style={{ padding: "36px 20px", textAlign: "center" }}>
+              <div style={{ fontSize: "26px", marginBottom: "8px" }}>👥</div>
+              <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
+                You haven't added any friends yet.
+              </div>
+              <Link to="/we-pick/friends" style={{ display: "inline-block", marginTop: "10px", fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
+                Add Friends →
+              </Link>
+            </div>
+          ) : loading || (scope === "friends" && friendsLoading) ? (
             <LoadingSpinner label="Loading" size={36} minHeight="160px" />
           ) : sortedEntries.length === 0 ? (
             <div style={{ padding: "36px 20px", textAlign: "center" }}>
@@ -1497,7 +1609,9 @@ function StandingsSection() {
                   : selectedWeek ? `No standings yet for ${selectedWeek}.` : "No weeks on the schedule yet."}
               </div>
               <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginTop: "6px" }}>
-                Rankings will fill in from everyone's Ranked 6 picks once games are graded — check back soon.
+                {scope === "friends"
+                  ? "None of your friends have qualified yet — check back once games are graded."
+                  : "Rankings will fill in from everyone's Ranked 6 picks once games are graded — check back soon."}
               </div>
             </div>
           ) : (
@@ -1537,7 +1651,7 @@ function StandingsSection() {
             </div>
           )}
         </div>
-        {!loading && sortedEntries.length > limits.default && (
+        {!loading && !(scope === "friends" && friendsLoading) && sortedEntries.length > limits.default && (
           <div style={{ background: "rgba(0,0,0,0.25)", borderTop: "1px solid rgba(255,255,255,0.1)", padding: "10px 16px", textAlign: "center" }}>
             <button
               onClick={() => setExpanded((v) => !v)}
@@ -1591,6 +1705,375 @@ function StandingsSubTab({ active, label, onClick }) {
     >
       {label}
     </button>
+  );
+}
+
+// ── Friends — friend code (own + add-by-code), pending requests (incoming
+// need a response, outgoing are just shown as "sent"), and the resulting
+// friend list. Requires sign-in, same wall as My Picks/My Stats — there's
+// no such thing as a signed-out friends list. See firestore.rules for the
+// friendRequests/friendships shape this all reads and writes: a request is
+// a pending invitation from one uid to another; accepting one deletes the
+// request and creates a friendships doc (auto-id, {uids: [a, b]}) instead
+// of flipping a status field, so there's nothing left to clean up
+// afterward either way. ──
+function FriendsSection() {
+  const { user, login } = useAuth();
+  const [friendCode, setFriendCode] = useState("");
+  const [codeLoading, setCodeLoading] = useState(true);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const [inputCode, setInputCode] = useState("");
+  const [addSaving, setAddSaving] = useState(false);
+  const [addMessage, setAddMessage] = useState("");
+
+  const [incoming, setIncoming] = useState([]);
+  const [outgoing, setOutgoing] = useState([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [respondingId, setRespondingId] = useState(null);
+
+  const [friends, setFriends] = useState([]);
+  const [friendsLoading, setFriendsLoading] = useState(true);
+  const [removingUid, setRemovingUid] = useState(null);
+
+  // Own friend code — generated once and saved to users/{uid} the first
+  // time this tab is visited without one on file yet. Retries (up to 8x,
+  // vanishingly unlikely to ever need more than one) on the rare chance a
+  // freshly generated code collides with one that's already taken.
+  useEffect(() => {
+    if (!user) { setCodeLoading(false); return; }
+    let cancelled = false;
+    const ensureCode = async () => {
+      setCodeLoading(true);
+      try {
+        const ownSnap = await getDoc(doc(db, "users", user.uid));
+        const existing = ownSnap.exists() ? ownSnap.data().friendCode : null;
+        if (existing) {
+          if (!cancelled) setFriendCode(existing);
+          return;
+        }
+        let candidate = "";
+        for (let attempt = 0; attempt < 8; attempt++) {
+          candidate = generateFriendCode();
+          const dupeSnap = await getDocs(query(collection(db, "users"), where("friendCode", "==", candidate)));
+          if (dupeSnap.empty) break;
+        }
+        await setDoc(doc(db, "users", user.uid), { friendCode: candidate }, { merge: true });
+        if (!cancelled) setFriendCode(candidate);
+      } catch (e) {
+        console.error("Friend code fetch/generate error:", e);
+      } finally {
+        if (!cancelled) setCodeLoading(false);
+      }
+    };
+    ensureCode();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Requests + friends — one effect, re-run any time `user` changes
+  // (sign-in/out) since none of this makes sense signed out.
+  useEffect(() => {
+    if (!user) {
+      setIncoming([]); setOutgoing([]); setFriends([]);
+      setRequestsLoading(false); setFriendsLoading(false);
+      return;
+    }
+    let cancelled = false;
+
+    const loadRequests = async () => {
+      setRequestsLoading(true);
+      try {
+        const [inSnap, outSnap] = await Promise.all([
+          getDocs(query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending"))),
+          getDocs(query(collection(db, "friendRequests"), where("fromUid", "==", user.uid), where("status", "==", "pending"))),
+        ]);
+        const inRows = inSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const outRows = outSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const nameMap = await fetchNamesByUid([...inRows.map((r) => r.fromUid), ...outRows.map((r) => r.toUid)]);
+        if (cancelled) return;
+        setIncoming(inRows.map((r) => ({ ...r, name: nameMap[r.fromUid] || "Anonymous Fan" })));
+        setOutgoing(outRows.map((r) => ({ ...r, name: nameMap[r.toUid] || "Anonymous Fan" })));
+      } catch (e) {
+        console.error("Friend requests fetch error:", e);
+        if (!cancelled) { setIncoming([]); setOutgoing([]); }
+      } finally {
+        if (!cancelled) setRequestsLoading(false);
+      }
+    };
+
+    const loadFriends = async () => {
+      setFriendsLoading(true);
+      try {
+        const snap = await getDocs(query(collection(db, "friendships"), where("uids", "array-contains", user.uid)));
+        const rows = snap.docs
+          .map((d) => ({ id: d.id, uid: (d.data().uids || []).find((u) => u !== user.uid) }))
+          .filter((r) => r.uid);
+        const nameMap = await fetchNamesByUid(rows.map((r) => r.uid));
+        if (cancelled) return;
+        setFriends(rows.map((r) => ({ ...r, name: nameMap[r.uid] || "Anonymous Fan" })).sort((a, b) => a.name.localeCompare(b.name)));
+      } catch (e) {
+        console.error("Friends fetch error:", e);
+        if (!cancelled) setFriends([]);
+      } finally {
+        if (!cancelled) setFriendsLoading(false);
+      }
+    };
+
+    loadRequests();
+    loadFriends();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const handleSendRequest = async () => {
+    if (!user) { login(); return; }
+    const code = inputCode.trim().toUpperCase();
+    if (!code) { setAddMessage("Enter a friend code first."); return; }
+    setAddSaving(true);
+    setAddMessage("");
+    try {
+      const targetSnap = await getDocs(query(collection(db, "users"), where("friendCode", "==", code)));
+      if (targetSnap.empty) { setAddMessage("No one has that code — double check it."); return; }
+      const targetDoc = targetSnap.docs[0];
+      const targetUid = targetDoc.id;
+      if (targetUid === user.uid) { setAddMessage("That's your own code."); return; }
+      if (friends.some((f) => f.uid === targetUid)) { setAddMessage("You're already friends."); return; }
+      if (outgoing.some((r) => r.toUid === targetUid)) { setAddMessage("Request already sent — waiting on them."); return; }
+      if (incoming.some((r) => r.fromUid === targetUid)) { setAddMessage("They already sent you a request — accept it below instead."); return; }
+      const payload = { fromUid: user.uid, toUid: targetUid, status: "pending", createdAt: serverTimestamp() };
+      const ref = await addDoc(collection(db, "friendRequests"), payload);
+      const targetName = targetDoc.data().username?.trim() || "Anonymous Fan";
+      setOutgoing((prev) => [...prev, { id: ref.id, ...payload, name: targetName }]);
+      setInputCode("");
+      setAddMessage(`Request sent to ${targetName}.`);
+    } catch (e) {
+      console.error("Send friend request error:", e);
+      setAddMessage("Failed to send — try again.");
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  // Shared by both "Decline" (on an incoming request) and "Cancel" (on an
+  // outgoing one) — deleting is allowed for either side of a request, so
+  // it's the same call either direction, just against a different local
+  // list + setter.
+  const handleRemoveRequest = async (requestId, setList) => {
+    try {
+      await deleteDoc(doc(db, "friendRequests", requestId));
+      setList((prev) => prev.filter((r) => r.id !== requestId));
+    } catch (e) {
+      console.error("Cancel/decline request error:", e);
+      alert("Failed to update — check console.");
+    }
+  };
+
+  const handleAcceptRequest = async (request) => {
+    if (!user) return;
+    setRespondingId(request.id);
+    try {
+      const friendshipRef = doc(collection(db, "friendships"));
+      const batch = writeBatch(db);
+      batch.set(friendshipRef, { uids: [request.fromUid, user.uid], requestId: request.id, createdAt: serverTimestamp() });
+      batch.delete(doc(db, "friendRequests", request.id));
+      await batch.commit();
+      setIncoming((prev) => prev.filter((r) => r.id !== request.id));
+      setFriends((prev) => [...prev, { id: friendshipRef.id, uid: request.fromUid, name: request.name }].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (e) {
+      console.error("Accept friend request error:", e);
+      alert("Failed to accept — check console.");
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  const handleRemoveFriend = async (friend) => {
+    if (!window.confirm(`Remove ${friend.name} from your friends?`)) return;
+    setRemovingUid(friend.uid);
+    try {
+      await deleteDoc(doc(db, "friendships", friend.id));
+      setFriends((prev) => prev.filter((f) => f.uid !== friend.uid));
+    } catch (e) {
+      console.error("Remove friend error:", e);
+      alert("Failed to remove — check console.");
+    } finally {
+      setRemovingUid(null);
+    }
+  };
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(friendCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 1500);
+    } catch (e) {
+      console.error("Copy friend code error:", e);
+    }
+  };
+
+  if (!user) {
+    return (
+      <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", padding: "40px 20px", textAlign: "center" }}>
+        <div style={{ fontSize: "26px", marginBottom: "10px" }}>👥</div>
+        <div style={{ fontSize: "15px", fontWeight: 800, color: "#fff", marginBottom: "14px" }}>
+          Sign in to add friends and see how you stack up against them.
+        </div>
+        <button
+          onClick={login}
+          style={{ background: GOLD, color: "#06162c", border: "none", borderRadius: "8px", padding: "10px 24px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
+        >
+          Sign In
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+      {/* Your Friend Code */}
+      <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", padding: "16px 20px", textAlign: "center" }}>
+        <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+          Your Friend Code
+        </div>
+        {codeLoading ? (
+          <LoadingSpinner label="Loading" size={22} minHeight="40px" />
+        ) : (
+          <>
+            <div style={{ fontSize: "30px", fontWeight: 900, color: GOLD, letterSpacing: "0.12em", fontFamily: "'Courier New', monospace" }}>
+              {friendCode}
+            </div>
+            <button
+              onClick={handleCopyCode}
+              style={{ marginTop: "8px", background: "none", border: `2px solid ${GOLD}`, borderRadius: "8px", color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 16px", cursor: "pointer" }}
+            >
+              {codeCopied ? "Copied!" : "Copy Code"}
+            </button>
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginTop: "8px" }}>
+              Share this with a friend so they can add you.
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Add a Friend */}
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", padding: "16px 20px" }}>
+        <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>
+          Add A Friend
+        </div>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <input
+            value={inputCode}
+            onChange={(e) => { setInputCode(e.target.value.toUpperCase()); setAddMessage(""); }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSendRequest(); }}
+            placeholder="Enter friend code..."
+            maxLength={6}
+            style={{ flex: "1 1 160px", border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "10px 12px", fontWeight: 900, fontSize: "16px", letterSpacing: "0.1em", fontFamily: "'Courier New', monospace", textTransform: "uppercase", background: "rgba(0,0,0,0.25)", color: "#fff", outline: "none" }}
+          />
+          <button
+            onClick={handleSendRequest}
+            disabled={addSaving || !inputCode.trim()}
+            style={{
+              background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
+              padding: "10px 22px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.04em",
+              cursor: addSaving || !inputCode.trim() ? "default" : "pointer", opacity: addSaving || !inputCode.trim() ? 0.6 : 1,
+            }}
+          >
+            {addSaving ? "Sending..." : "Send Request"}
+          </button>
+        </div>
+        {addMessage && (
+          <div style={{ fontSize: "12px", fontWeight: 700, color: addMessage.startsWith("Request sent") ? "#4ade80" : "#ff8a8a", marginTop: "8px" }}>
+            {addMessage}
+          </div>
+        )}
+      </div>
+
+      {/* Requests — incoming needs a response, outgoing is just "sent". */}
+      {!requestsLoading && (incoming.length > 0 || outgoing.length > 0) && (
+        <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
+          <div style={{ background: GOLD, padding: "10px 16px" }}>
+            <div style={{ color: "#06162c", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              📥 Friend Requests
+            </div>
+          </div>
+          <div style={{ background: "rgba(0,0,0,0.25)" }}>
+            {incoming.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{r.name}</div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => handleAcceptRequest(r)}
+                    disabled={respondingId === r.id}
+                    style={{ background: "#2e7d32", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: respondingId === r.id ? "default" : "pointer" }}
+                  >
+                    {respondingId === r.id ? "…" : "Accept"}
+                  </button>
+                  <button
+                    onClick={() => handleRemoveRequest(r.id, setIncoming)}
+                    style={{ background: "none", border: "2px solid rgba(255,255,255,0.3)", color: "rgba(255,255,255,0.7)", borderRadius: "6px", padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+            {outgoing.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.7)" }}>
+                  {r.name} <span style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase" }}>· Pending</span>
+                </div>
+                <button
+                  onClick={() => handleRemoveRequest(r.id, setOutgoing)}
+                  style={{ background: "none", border: "2px solid rgba(255,255,255,0.3)", color: "rgba(255,255,255,0.7)", borderRadius: "6px", padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Friends list */}
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            👥 Your Friends
+          </div>
+          <div style={{ color: "#fff", background: "rgba(255,255,255,0.18)", fontSize: "13px", fontWeight: 900, padding: "4px 12px", borderRadius: "20px" }}>
+            {friends.length}
+          </div>
+        </div>
+        <div style={{ background: "rgba(0,0,0,0.25)" }}>
+          {friendsLoading ? (
+            <LoadingSpinner label="Loading" size={24} minHeight="80px" />
+          ) : friends.length === 0 ? (
+            <div style={{ padding: "26px 20px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>
+              No friends added yet — share your code or enter theirs above.
+            </div>
+          ) : (
+            friends.map((f, i) => (
+              <div key={f.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: i < friends.length - 1 ? "1px solid rgba(255,255,255,0.1)" : "none" }}>
+                <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{f.name}</div>
+                <button
+                  onClick={() => handleRemoveFriend(f)}
+                  disabled={removingUid === f.uid}
+                  style={{ background: "none", border: "none", color: "#ff8a8a", cursor: removingUid === f.uid ? "default" : "pointer", fontSize: "11px", fontWeight: 800, textDecoration: "underline", padding: 0 }}
+                >
+                  {removingUid === f.uid ? "…" : "Remove"}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+        {friends.length > 0 && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}>
+            <Link to="/we-pick/standings" style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
+              🏆 See Friend Standings →
+            </Link>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

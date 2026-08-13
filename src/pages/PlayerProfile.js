@@ -1,6 +1,7 @@
 // src/pages/PlayerProfile.js
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
+import ReactDOM from "react-dom";
 import Logo1 from "../assets/Logo1.png";
 import HomageLogo from "../assets/homagelogo.png";
 import {
@@ -200,6 +201,101 @@ function SidebarCard({ title, color1, color2, children }) {
   );
 }
 
+// ── Trend pill (Trending Up / Breakout / On Fire) + its hover/click
+// tooltip — shared by all three since they're identical except for
+// color/icon/copy. The tooltip is portaled to document.body instead of
+// rendering inline: the hero card it lives in has overflow:hidden (twice
+// over, actually — the card itself and the gradient background layer
+// inside it both clip), needed so the hero's rounded corners and drifting
+// background texture don't bleed past their own edges. A tooltip that pops
+// open *below* a tag sitting near the bottom of that hero was getting
+// silently clipped by that same overflow:hidden no matter how high its own
+// z-index went — z-index can't escape an ancestor's clipping box, only a
+// portal can. Position is computed from the trigger's own
+// getBoundingClientRect() on open (not tracked on scroll — same "good
+// enough for a transient hover tooltip" tradeoff the rest of this codebase
+// already makes for similar popups). ──
+function TrendTag({
+  icon, iconClassName, label, tagClassName, tagGradient, tagBorder, tagColor,
+  tooltipGradient, tooltipBorder, tooltipGlow, tooltipDivider, tooltipTextColor,
+  headerIcon, headerText, notes, notesColor, isMobile,
+}) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef(null);
+
+  const updatePos = () => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPos({ top: rect.bottom + 14, left: rect.left + rect.width / 2 });
+  };
+
+  const open = () => { updatePos(); setShow(true); };
+  const close = () => setShow(false);
+  const toggle = () => { if (show) { close(); } else { open(); } };
+
+  return (
+    <div
+      ref={triggerRef}
+      style={{ position: "relative", display: "inline-block", pointerEvents: "auto" }}
+      onMouseEnter={open}
+      onMouseLeave={close}
+      onClick={toggle}
+    >
+      <span
+        className={`font-extrabold rounded-full ${tagClassName}`}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: "5px",
+          backgroundImage: tagGradient,
+          border: `1px solid ${tagBorder}`,
+          color: tagColor,
+          letterSpacing: "0.06em",
+          fontSize: isMobile ? "11px" : "16px",
+          padding: isMobile ? "2px 10px" : "3px 15px",
+          textTransform: "uppercase",
+          cursor: "pointer",
+        }}
+      >
+        <span className={iconClassName}>{icon}</span> {label}
+      </span>
+      {show && ReactDOM.createPortal(
+        <div
+          style={{
+            position: "fixed", top: pos.top + "px", left: pos.left + "px", transform: "translateX(-50%)",
+            width: isMobile ? "220px" : "264px",
+            backgroundImage: tooltipGradient,
+            border: `1px solid ${tooltipBorder}`,
+            borderRadius: "14px",
+            padding: "14px 16px",
+            boxShadow: `0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px ${tooltipGlow}`,
+            zIndex: 9999,
+            textAlign: "left",
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "7px" }}>
+            <span style={{ fontSize: "12px" }}>{headerIcon}</span>
+            <div style={{ fontSize: isMobile ? "11px" : "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: tooltipTextColor }}>
+              {headerText}
+            </div>
+          </div>
+          <div style={{ height: "1px", background: `linear-gradient(90deg, ${tooltipDivider}, transparent)`, marginBottom: "8px" }} />
+          {notes.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+              {notes.map((s, i) => (
+                <div key={i} style={{ fontSize: isMobile ? "11px" : "12px", fontWeight: 600, color: notesColor, lineHeight: 1.4 }}>
+                  {s}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 // ── Renders evaluation text with lines starting in •, -, or * grouped into
 // real bullet lists; everything else renders as normal paragraphs. Used
 // anywhere a saved evaluation is displayed (Scout's Take, public feed,
@@ -343,9 +439,10 @@ export default function PlayerProfile() {
   // hero instead of a foreground box, so it has no hover state of its own.
   const [showRightBoxTip, setShowRightBoxTip] = useState(false);
   const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
-  const [showBreakoutTip, setShowBreakoutTip] = useState(false);
-  const [showTrendUpTip, setShowTrendUpTip] = useState(false);
-  const [showOnFireTip, setShowOnFireTip] = useState(false);
+  // Trending Up / Breakout / On Fire tag tooltips each manage their own
+  // show/hide + position state internally now (see TrendTag) — they used
+  // to live here as three separate booleans this component threaded
+  // through onMouseEnter/onMouseLeave/onClick by hand.
 
   // ── Sponsored margin ads (Homage) — desktop-only, wide-viewport-only.
   // Layout (width + per-side offset) is measured from the actual rendered
@@ -372,7 +469,6 @@ export default function PlayerProfile() {
   // currently being viewed, so this only needs to fetch once. ──
   const [trendingTop5, setTrendingTop5] = useState([]);
   const [trendingLoaded, setTrendingLoaded] = useState(false);
-  const [hoveredTrendSlug, setHoveredTrendSlug] = useState(null);
 
   // ── Measures the real left/right gutter around the content grid (the
   // space actually left over, not an estimate) and derives the ad card's
@@ -1782,25 +1878,28 @@ useEffect(() => {
     </details>
   );
 
-  // ── Top 5 Trending sidebar — mirrors the Draft Class positional-rankings
-  // card above it (same row layout: badged square + name + school). The
-  // trend's animation lives on the row's own box (a soft ambient glow, see
-  // wd-*-box-soft) rather than on the name text. Hovering a row grows it in
-  // place to reveal that player's trend Notes — same "the hovered box turns
-  // into the popup" pattern as the flair/logo hero boxes above, rather than
-  // a floating tooltip. ──
+  // ── Top 5 Trending sidebar — same badged-square + name + school row
+  // shape as the Draft Class card above it, but the name runs bigger here
+  // and the school line fades out on hover (see wd-trend-school) to free
+  // up room for the trend Notes reveal, instead of squeezing the note in
+  // underneath both lines. That reveal uses the same fixed-height slide-
+  // up/fade-in as GamePage.js's Key Players rows (see that file's own
+  // wd-keyplayer-* comment) instead of a JS-driven state that grew the row
+  // in place — that in-flow reveal pushed neighboring rows down and could
+  // shove the hovered row out from under the cursor. Mobile has no hover,
+  // so wd-trend-note-forced (set via isMobile) just renders every row
+  // already revealed. ──
   const TrendingListContent = (
     <>
       {trendingTop5.map((t) => {
         const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
         if (!style) return null;
         const isSelf = t.slug === player.Slug;
-        const isHovered = hoveredTrendSlug === t.slug;
         const notesList = (t.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
 
         const rowContent = (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ position: "relative", height: "50px" }}>
+            <div className="wd-trend-name-anim" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <div
                 style={{
                   flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -1813,53 +1912,41 @@ useEffect(() => {
                 {style.icon}
               </div>
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "14px", lineHeight: 1.2 }}>
+                <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "17px", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {t.First} {t.Last}
                 </span>
-                <span style={{ color: "#777", fontWeight: 700, fontSize: "12px", marginTop: "2px" }}>
+                <span className="wd-trend-school" style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "2px" }}>
                   {t.School || "—"}
                 </span>
               </div>
             </div>
-            {isHovered && (
-              <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: `1px solid ${style.boxBorder}` }}>
-                {notesList.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    {notesList.map((s, i) => (
-                      <div key={i} style={{ fontSize: "11px", fontWeight: 600, color: "#666", lineHeight: 1.4 }}>{s}</div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: "11px", fontWeight: 600, color: "#aaa", fontStyle: "italic" }}>No notes yet.</div>
-                )}
-              </div>
-            )}
-          </>
+            <div className="wd-trend-note-wrap">
+              {notesList.length > 0 ? (
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#666", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {notesList.join(" · ")}
+                </div>
+              ) : (
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#aaa", fontStyle: "italic" }}>No notes yet.</div>
+              )}
+            </div>
+          </div>
         );
 
-        // The reserve wrapper keeps a stable min-height in normal flow so
-        // neighboring rows don't jump when this one's box grows on hover.
         const rowBoxStyle = {
-          display: "flex", flexDirection: "column", justifyContent: "center",
-          padding: isHovered ? "10px 14px 12px" : "10px 14px",
-          textDecoration: "none",
-          background: isSelf ? "#fff8e6" : (isHovered ? "#fbfbfe" : "#fff"),
+          display: "block", padding: "10px 14px", textDecoration: "none",
+          background: isSelf ? "#fff8e6" : "#fff",
           borderLeft: `4px solid ${isSelf ? SITE_GOLD : style.badgeBorder}`,
           borderBottom: "1px solid #f0f0f0",
-          position: "relative", zIndex: isHovered ? 5 : 1,
         };
 
-        const handlers = {
-          onMouseEnter: () => setHoveredTrendSlug(t.slug),
-          onMouseLeave: () => setHoveredTrendSlug(null),
-        };
+        const rowClassName = "wd-trend-row" + (isSelf ? " wd-trend-row-self" : "") + " " + style.softClass + (isMobile ? " wd-trend-note-forced" : "");
 
         return (
-          <div key={t.slug} style={{ minHeight: "54px" }}>
+          <div key={t.slug}>
             {isSelf ? (
-              <div className={style.softClass} style={rowBoxStyle} {...handlers}>{rowContent}</div>
+              <div className={rowClassName} style={rowBoxStyle}>{rowContent}</div>
             ) : (
-              <Link to={`/player/${t.slug}`} className={style.softClass} style={rowBoxStyle} {...handlers}>
+              <Link to={`/player/${t.slug}`} className={rowClassName} style={rowBoxStyle}>
                 {rowContent}
               </Link>
             )}
@@ -2223,6 +2310,32 @@ useEffect(() => {
         .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
         .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
 
+        /* Top 5 Trending sidebar rows — same fixed-height slide-up/fade-in
+           reveal as GamePage.js's Key Players rows: a constant-height box
+           so hovering to reveal a player's trend Notes never reflows
+           neighboring rows. The school line also fades out on hover (it'd
+           otherwise sit directly above the note with nothing separating
+           them), freeing that space for the note instead. wd-trend-note-
+           forced (mobile, no hover) just renders every row already
+           revealed, school included. Rows are stacked directly against
+           each other (no gap) and each one is its own opaque box, so a
+           hovered row needs position:relative plus a z-index bump above
+           its neighbors — otherwise the next row down (later in paint
+           order) covers/hides even a 1-2px overflow of the revealed note
+           past this row's own bounds. */
+        .wd-trend-row { position: relative; z-index: 1; }
+        .wd-trend-row:hover, .wd-trend-row.wd-trend-note-forced { z-index: 2; }
+        .wd-trend-name-anim { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); transition: top 0.2s ease, transform 0.2s ease; }
+        .wd-trend-row:hover .wd-trend-name-anim { top: 0; transform: translateY(0); }
+        .wd-trend-school { transition: opacity 0.15s ease; }
+        .wd-trend-row:hover .wd-trend-school { opacity: 0; }
+        .wd-trend-note-wrap { position: absolute; left: 38px; right: 0; top: 24px; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+        .wd-trend-row:hover .wd-trend-note-wrap { opacity: 1; }
+        .wd-trend-note-forced .wd-trend-name-anim { top: 0; transform: translateY(0); }
+        .wd-trend-note-forced .wd-trend-school { opacity: 0; }
+        .wd-trend-note-forced .wd-trend-note-wrap { opacity: 1; }
+        .wd-trend-row:hover:not(.wd-trend-row-self) { background: #fbfbfe; }
+
         /* Hero's background team logo — still a live link to the team page,
            so it gets its own hover reaction (grow + brighten) to read as
            clickable despite sitting in the background layer, not a card. */
@@ -2551,214 +2664,46 @@ useEffect(() => {
                 {isTrendingUp && (
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
-                    <div
-                      style={{ position:"relative", display:"inline-block", pointerEvents:"auto" }}
-                      onMouseEnter={() => setShowTrendUpTip(true)}
-                      onMouseLeave={() => setShowTrendUpTip(false)}
-                      onClick={() => setShowTrendUpTip((v) => !v)}
-                    >
-                      <span
-                        className="font-extrabold rounded-full wd-trendup-tag"
-                        style={{
-                          display:"inline-flex", alignItems:"center", gap:"5px",
-                          backgroundImage:"linear-gradient(135deg, #14532d, #16a34a)",
-                          border:"1px solid #4ade80",
-                          color:"#eafff0",
-                          letterSpacing:"0.06em",
-                          fontSize:isMobile?"11px":"16px",
-                          padding:isMobile?"2px 10px":"3px 15px",
-                          textTransform:"uppercase",
-                          cursor:"pointer",
-                        }}
-                      >
-                        ▲ Trending Up
-                      </span>
-                      {showTrendUpTip && (
-                        <div
-                          style={{
-                            position:"absolute",
-                            top:"calc(100% + 14px)",
-                            left:"50%",
-                            transform:"translateX(-50%)",
-                            width:isMobile?"220px":"264px",
-                            backgroundImage:"linear-gradient(135deg, #0f2b1a, #1e4028)",
-                            border:"1px solid rgba(74,222,128,0.55)",
-                            borderRadius:"14px",
-                            padding:"14px 16px",
-                            boxShadow:"0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(74,222,128,0.08)",
-                            zIndex:60,
-                            textAlign:"left",
-                            pointerEvents:"none",
-                          }}
-                        >
-                          <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"13px", height:"13px", background:"#1e4028", border:"1px solid rgba(74,222,128,0.55)", borderRadius:"2px" }} />
-                          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"7px" }}>
-                            <span style={{ fontSize:"12px" }}>▲</span>
-                            <div style={{
-                              fontSize:isMobile?"11px":"12px",
-                              fontWeight:900,
-                              textTransform:"uppercase",
-                              letterSpacing:"0.06em",
-                              color:"#eafff0",
-                            }}>
-                              {`${player.First||""} ${player.Last||""}`.trim()} Trending Up
-                            </div>
-                          </div>
-                          <div style={{ height:"1px", background:"linear-gradient(90deg, rgba(74,222,128,0.6), transparent)", marginBottom:"8px" }} />
-                          {trendNotesList.length > 0 && (
-                            <div style={{ display:"flex", flexDirection:"column", gap:"5px" }}>
-                              {trendNotesList.map((s, i) => (
-                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#d4f5df", lineHeight:1.4 }}>
-                                  {s}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <TrendTag
+                      icon="▲" label="Trending Up"
+                      tagClassName="wd-trendup-tag"
+                      tagGradient="linear-gradient(135deg, #14532d, #16a34a)" tagBorder="#4ade80" tagColor="#eafff0"
+                      tooltipGradient="linear-gradient(135deg, #0f2b1a, #1e4028)" tooltipBorder="rgba(74,222,128,0.55)"
+                      tooltipGlow="rgba(74,222,128,0.08)" tooltipDivider="rgba(74,222,128,0.6)"
+                      tooltipTextColor="#eafff0" headerIcon="▲"
+                      headerText={((player.First||"") + " " + (player.Last||"")).trim() + " Trending Up"}
+                      notes={trendNotesList} notesColor="#d4f5df" isMobile={isMobile}
+                    />
                   </>
                 )}
                 {isBreakoutTrend && (
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
-                    <div
-                      style={{ position:"relative", display:"inline-block", pointerEvents:"auto" }}
-                      onMouseEnter={() => setShowBreakoutTip(true)}
-                      onMouseLeave={() => setShowBreakoutTip(false)}
-                      onClick={() => setShowBreakoutTip((v) => !v)}
-                    >
-                      <span
-                        className="font-extrabold rounded-full wd-breakout-tag"
-                        style={{
-                          display:"inline-flex", alignItems:"center", gap:"5px",
-                          backgroundImage:"linear-gradient(135deg, #2c333b, #4a535e)",
-                          border:"1px solid #8fd8ff",
-                          color:"#eaf6ff",
-                          letterSpacing:"0.06em",
-                          fontSize:isMobile?"11px":"16px",
-                          padding:isMobile?"2px 10px":"3px 15px",
-                          textTransform:"uppercase",
-                          cursor:"pointer",
-                        }}
-                      >
-                        ⚡ Breakout
-                      </span>
-                      {showBreakoutTip && (
-                        <div
-                          style={{
-                            position:"absolute",
-                            top:"calc(100% + 14px)",
-                            left:"50%",
-                            transform:"translateX(-50%)",
-                            width:isMobile?"220px":"264px",
-                            backgroundImage:"linear-gradient(135deg, #1c2128, #2f3742)",
-                            border:"1px solid rgba(143,216,255,0.55)",
-                            borderRadius:"14px",
-                            padding:"14px 16px",
-                            boxShadow:"0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(143,216,255,0.08)",
-                            zIndex:60,
-                            textAlign:"left",
-                            pointerEvents:"none",
-                          }}
-                        >
-                          <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"13px", height:"13px", background:"#2f3742", border:"1px solid rgba(143,216,255,0.55)", borderRadius:"2px" }} />
-                          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"7px" }}>
-                            <span style={{ fontSize:"12px" }}>⚡</span>
-                            <div style={{
-                              fontSize:isMobile?"11px":"12px",
-                              fontWeight:900,
-                              textTransform:"uppercase",
-                              letterSpacing:"0.06em",
-                              color:"#eaf6ff",
-                            }}>
-                              {`${player.First||""} ${player.Last||""}`.trim()} Breakout Performance
-                            </div>
-                          </div>
-                          <div style={{ height:"1px", background:"linear-gradient(90deg, rgba(143,216,255,0.6), transparent)", marginBottom:"8px" }} />
-                          {breakoutStats.length > 0 && (
-                            <div style={{ display:"flex", flexDirection:"column", gap:"5px" }}>
-                              {breakoutStats.map((s, i) => (
-                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#cfe9ff", lineHeight:1.4 }}>
-                                  {s}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <TrendTag
+                      icon="⚡" label="Breakout"
+                      tagClassName="wd-breakout-tag"
+                      tagGradient="linear-gradient(135deg, #2c333b, #4a535e)" tagBorder="#8fd8ff" tagColor="#eaf6ff"
+                      tooltipGradient="linear-gradient(135deg, #1c2128, #2f3742)" tooltipBorder="rgba(143,216,255,0.55)"
+                      tooltipGlow="rgba(143,216,255,0.08)" tooltipDivider="rgba(143,216,255,0.6)"
+                      tooltipTextColor="#eaf6ff" headerIcon="⚡"
+                      headerText={((player.First||"") + " " + (player.Last||"")).trim() + " Breakout Performance"}
+                      notes={breakoutStats} notesColor="#cfe9ff" isMobile={isMobile}
+                    />
                   </>
                 )}
                 {isOnFireTrend && (
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
-                    <div
-                      style={{ position:"relative", display:"inline-block", pointerEvents:"auto" }}
-                      onMouseEnter={() => setShowOnFireTip(true)}
-                      onMouseLeave={() => setShowOnFireTip(false)}
-                      onClick={() => setShowOnFireTip((v) => !v)}
-                    >
-                      <span
-                        className="font-extrabold rounded-full wd-onfire-tag"
-                        style={{
-                          display:"inline-flex", alignItems:"center", gap:"5px",
-                          backgroundImage:"linear-gradient(135deg, #7a1f00, #ff6a00)",
-                          border:"1px solid #ffb347",
-                          color:"#fff3e6",
-                          letterSpacing:"0.06em",
-                          fontSize:isMobile?"11px":"16px",
-                          padding:isMobile?"2px 10px":"3px 15px",
-                          textTransform:"uppercase",
-                          cursor:"pointer",
-                        }}
-                      >
-                        <span className="wd-onfire-icon">🔥</span> On Fire
-                      </span>
-                      {showOnFireTip && (
-                        <div
-                          style={{
-                            position:"absolute",
-                            top:"calc(100% + 14px)",
-                            left:"50%",
-                            transform:"translateX(-50%)",
-                            width:isMobile?"220px":"264px",
-                            backgroundImage:"linear-gradient(135deg, #3a1400, #6b2800)",
-                            border:"1px solid rgba(255,179,71,0.55)",
-                            borderRadius:"14px",
-                            padding:"14px 16px",
-                            boxShadow:"0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,179,71,0.08)",
-                            zIndex:60,
-                            textAlign:"left",
-                            pointerEvents:"none",
-                          }}
-                        >
-                          <div style={{ position:"absolute", bottom:"100%", left:"50%", transform:"translateX(-50%) rotate(45deg)", width:"13px", height:"13px", background:"#6b2800", border:"1px solid rgba(255,179,71,0.55)", borderRadius:"2px" }} />
-                          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"7px" }}>
-                            <span style={{ fontSize:"12px" }}>🔥</span>
-                            <div style={{
-                              fontSize:isMobile?"11px":"12px",
-                              fontWeight:900,
-                              textTransform:"uppercase",
-                              letterSpacing:"0.06em",
-                              color:"#fff3e6",
-                            }}>
-                              {`${player.First||""} ${player.Last||""}`.trim()} On Fire
-                            </div>
-                          </div>
-                          <div style={{ height:"1px", background:"linear-gradient(90deg, rgba(255,179,71,0.6), transparent)", marginBottom:"8px" }} />
-                          {trendNotesList.length > 0 && (
-                            <div style={{ display:"flex", flexDirection:"column", gap:"5px" }}>
-                              {trendNotesList.map((s, i) => (
-                                <div key={i} style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#ffe0c2", lineHeight:1.4 }}>
-                                  {s}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <TrendTag
+                      icon="🔥" iconClassName="wd-onfire-icon" label="On Fire"
+                      tagClassName="wd-onfire-tag"
+                      tagGradient="linear-gradient(135deg, #7a1f00, #ff6a00)" tagBorder="#ffb347" tagColor="#fff3e6"
+                      tooltipGradient="linear-gradient(135deg, #3a1400, #6b2800)" tooltipBorder="rgba(255,179,71,0.55)"
+                      tooltipGlow="rgba(255,179,71,0.08)" tooltipDivider="rgba(255,179,71,0.6)"
+                      tooltipTextColor="#fff3e6" headerIcon="🔥"
+                      headerText={((player.First||"") + " " + (player.Last||"")).trim() + " On Fire"}
+                      notes={trendNotesList} notesColor="#ffe0c2" isMobile={isMobile}
+                    />
                   </>
                 )}
               </div>

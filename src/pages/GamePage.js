@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
-import { collection, query, where, orderBy, getDocs, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, orderBy, getDocs, doc, getDoc, addDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
 import { useAuth } from "../context/AuthContext";
@@ -125,10 +125,11 @@ const GRADE_GLOW_STYLE = `
     50%      { opacity: 1; }
   }
 
-  /* Key Player hover note — the name+note stack sits in a fixed-height
-     box (sized up front to fit both states) so revealing the note never
-     changes the row's own height. Instead, hovering slides the name up
-     to the top of that box and fades the note in underneath it, all
+  /* Key Player hover note (and, post-game, Top Performances' stat line —
+     same classes, reused as-is) — the name+note stack sits in a fixed-
+     height box (sized up front to fit both states) so revealing the note
+     never changes the row's own height. Instead, hovering slides the name
+     up to the top of that box and fades the note in underneath it, all
      within space that was already reserved — nothing below the row
      shifts, unlike an in-flow max-height reveal (which used to push
      every row down the moment the mouse landed, occasionally shoving
@@ -485,30 +486,42 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
           />
         )
       ) : isFinalMode ? (
-        // Just the player and their stat line — the title/grade text lives
-        // on the performance's own page; the grade still shows up here as
-        // the row's glow (see gradeGlowClass), not as text.
+        // Player name + stat line — the title/grade text lives on the
+        // performance's own page; the grade still shows up here as the
+        // row's glow (see gradeGlowClass), not as text. Same fixed-height
+        // slide-up/fade-in reveal as the Key Players rows below (see the
+        // wd-keyplayer-* comment in GRADE_GLOW_STYLE): the name sits where
+        // it always did, and hovering slides it up to make room for the
+        // stat line fading in underneath, all within space already
+        // reserved — nothing shifts. Rows with no statLine just render the
+        // name with no reveal box at all, same as Key Players' no-note case.
         performances.map((perf, i) => (
           <Link
             key={perf.id}
             to={`/performance/${perf.slug}`}
-            className={`wd-perf-row-link ${gradeGlowClass(perf.grade)}`}
+            className={`wd-perf-row-link ${gradeGlowClass(perf.grade)}${isMobile ? " wd-keyplayer-note-forced" : ""}`}
             style={{
               display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "12px 16px", textDecoration: "none",
               borderBottom: i < performances.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
               borderLeft: `4px solid ${accent2}`,
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ color: "#fff", fontWeight: 900, fontSize: "16px", lineHeight: 1.3, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>
+            {perf.statLine ? (
+              <div style={{ position: "relative", height: "36px", flex: 1, minWidth: 0 }}>
+                <div className="wd-keyplayer-name-anim" style={{ color: "#fff", fontWeight: 900, fontSize: "16px", lineHeight: 1.3, textShadow: "0 1px 3px rgba(0,0,0,0.4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {perf.playerName || perf.titleShort}
+                </div>
+                <div className="wd-keyplayer-note-wrap" style={{ top: "19px" }}>
+                  <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {perf.statLine}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ minWidth: 0, color: "#fff", fontWeight: 900, fontSize: "16px", lineHeight: 1.3, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>
                 {perf.playerName || perf.titleShort}
               </div>
-              {perf.statLine && (
-                <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", marginTop: "3px" }}>
-                  {perf.statLine}
-                </div>
-              )}
-            </div>
+            )}
             <span className="wd-perf-row-chevron" style={{ color: GOLD, fontSize: "18px", fontWeight: 900, flexShrink: 0 }}>›</span>
           </Link>
         ))
@@ -616,6 +629,16 @@ export default function GamePage() {
   const [performancesHome, setPerformancesHome] = useState([]);
   const [picks, setPicks] = useState([]);
   const [verifiedByUid, setVerifiedByUid] = useState({});
+  // Live current username per uid, fetched in the same users/{uid} batch
+  // reads as verifiedByUid above (no extra reads) — picks/comments/replies
+  // each store their author's name at write time (displayName/authorName),
+  // but that goes stale the moment someone changes their display name
+  // afterward. Preferring this live map over the stored field at render
+  // time means every past pick/comment always shows whoever's CURRENT
+  // name, the same way the evaluations feed (PlayerProfile.js) already
+  // works — that one never had this bug because it was never denormalized
+  // in the first place.
+  const [namesByUid, setNamesByUid] = useState({});
   const [pickMode, setPickMode] = useState("score"); // "score" | "winner"
   const [pickAway, setPickAway] = useState("");
   const [pickHome, setPickHome] = useState("");
@@ -629,6 +652,33 @@ export default function GamePage() {
   const [hypeUids, setHypeUids] = useState(new Set());
   const [hypeToggling, setHypeToggling] = useState(false);
   const [picksExpanded, setPicksExpanded] = useState(false);
+  // Comments — open the whole lifetime of the game, positioned above or
+  // below Community Predictions depending on isFinal (see gameCommentsCard
+  // below), but fetched/reset the same way as everything else on this page
+  // so a slug change doesn't leave a previous game's comments briefly
+  // visible under the new one. Each entry in gameComments carries its own
+  // likedUids/replies (see the comments-fetch effect) rather than those
+  // living as separate parallel maps.
+  const [gameComments, setGameComments] = useState([]);
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentText, setCommentText] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentMessage, setCommentMessage] = useState("");
+  const [deletingCommentId, setDeletingCommentId] = useState(null);
+  const [likingCommentId, setLikingCommentId] = useState(null);
+  const [likingReplyId, setLikingReplyId] = useState(null);
+  // Which comment's inline reply box is open — only one at a time, closing
+  // whichever was open before, so the thread doesn't accumulate multiple
+  // half-written reply boxes scattered through it.
+  const [replyingToId, setReplyingToId] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [replySaving, setReplySaving] = useState(false);
+  const [replyMessage, setReplyMessage] = useState("");
+  const [deletingReplyId, setDeletingReplyId] = useState(null);
+  // Which comments' reply lists are expanded — collapsed by default so a
+  // heavily-replied-to comment doesn't push everything below it down the
+  // page; a comment with zero replies never shows the toggle at all.
+  const [expandedReplies, setExpandedReplies] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
@@ -652,12 +702,25 @@ export default function GamePage() {
     setPerformancesHome([]);
     setPicks([]);
     setVerifiedByUid({});
+    setNamesByUid({});
     setHypeUids(new Set());
     setPicksExpanded(false);
+    setGameComments([]);
+    setCommentsLoading(true);
+    setCommentText("");
+    setCommentMessage("");
+    setReplyingToId(null);
+    setReplyText("");
+    setReplyMessage("");
+    setExpandedReplies(new Set());
     setNotFound(false);
     setLoading(true);
 
     const fetch = async () => {
+      // Declared outside the try block (not `const g` inside it) so the
+      // separate comments fetch below — deliberately outside that same
+      // try/catch, see its own comment — can still reach it.
+      let g = null;
       try {
         const snap = await getDocs(query(collection(db, "schedule26"), where("Slug", "==", slug)));
         if (snap.empty) {
@@ -694,7 +757,7 @@ export default function GamePage() {
           setNotFound(true);
           return;
         }
-        const g = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        g = { id: snap.docs[0].id, ...snap.docs[0].data() };
         setGame(g);
 
         const isFinal = g.Final && g.HomeScore != null && g.AwayScore != null;
@@ -719,15 +782,27 @@ export default function GamePage() {
         setPicks(loadedPicks);
         setHypeUids(new Set(hypeSnap.docs.map((d) => d.id)));
 
-        // Batch-fetch each picker's users/{uid} doc for the "verified" badge,
-        // same pattern PlayerProfile.js uses for community evaluations —
-        // build a plain {uid: bool} map rather than storing whole profiles.
+        // Batch-fetch each picker's users/{uid} doc for the "verified" badge
+        // (same pattern PlayerProfile.js uses for community evaluations)
+        // and their live current username — picks store a displayName
+        // snapshot at save time (see handleSavePick), but a picker who
+        // renames themselves afterward should still show their new name
+        // here, not whatever it was when they picked. Both maps merged in
+        // (not replaced) since the separate comments fetch below populates
+        // the same two maps for comment/reply authors — whichever of the
+        // two finishes last shouldn't wipe out the other's entries.
         const pickUids = [...new Set(loadedPicks.map((p) => p.id))];
         if (pickUids.length) {
           const userSnaps = await Promise.all(pickUids.map((uid) => getDoc(doc(db, "users", uid))));
           const vMap = {};
-          userSnaps.forEach((s, idx) => { vMap[pickUids[idx]] = !!(s.exists() && s.data().verified); });
-          setVerifiedByUid(vMap);
+          const nMap = {};
+          userSnaps.forEach((s, idx) => {
+            vMap[pickUids[idx]] = !!(s.exists() && s.data().verified);
+            const uname = s.exists() ? s.data().username?.trim() : "";
+            if (uname) nMap[pickUids[idx]] = uname;
+          });
+          setVerifiedByUid((prev) => ({ ...prev, ...vMap }));
+          setNamesByUid((prev) => ({ ...prev, ...nMap }));
         }
 
         if (perfSnap) {
@@ -741,6 +816,90 @@ export default function GamePage() {
         setNotFound(true);
       } finally {
         setLoading(false);
+      }
+
+      // Fetched separately from everything above, on purpose: comments are
+      // open the whole lifetime of the game (pregame, live, and after —
+      // see gameCommentsCard below, which just moves position relative to
+      // Community Predictions depending on isFinal), but its Firestore
+      // rule can lag behind a deploy independently of every other
+      // collection this page depends on. Isolating it means a permission
+      // error here shows up as an empty comments list, never as "Game not
+      // found" for the whole page.
+      if (g) {
+        try {
+          const commentsSnap = await getDocs(query(collection(db, "schedule26", g.id, "comments"), orderBy("createdAt", "desc")));
+          const baseComments = commentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+          // Likes and replies both live one level deeper per comment (see
+          // firestore.rules) — fetched eagerly for every comment here
+          // (rather than lazily per-comment on demand) so a reply count is
+          // known up front for the collapsed "N replies" toggle without a
+          // second round trip once someone clicks it. Comment volume on a
+          // single game is small enough that this stays cheap.
+          const [likesSnaps, repliesSnaps] = await Promise.all([
+            Promise.all(baseComments.map((c) => getDocs(collection(db, "schedule26", g.id, "comments", c.id, "likes")))),
+            Promise.all(baseComments.map((c) => getDocs(query(collection(db, "schedule26", g.id, "comments", c.id, "replies"), orderBy("createdAt", "asc"))))),
+          ]);
+
+          // Replies are likeable too — a second wave, once reply ids (and
+          // which comment each belongs to) are actually known from the
+          // fetch just above.
+          const baseRepliesPerComment = repliesSnaps.map((snap, i) =>
+            snap.docs.map((d) => ({ id: d.id, commentId: baseComments[i].id, ...d.data() }))
+          );
+          const allReplies = baseRepliesPerComment.flat();
+          const replyLikesSnaps = await Promise.all(
+            allReplies.map((r) => getDocs(collection(db, "schedule26", g.id, "comments", r.commentId, "replies", r.id, "likes")))
+          );
+          const replyLikedUidsById = new Map(
+            allReplies.map((r, i) => [r.id, new Set(replyLikesSnaps[i].docs.map((d) => d.id))])
+          );
+
+          // likedUids (not a pre-computed likedByMe boolean) so "did I like
+          // this" is derived at render time from the current `user` — same
+          // reasoning as hypeUids/iHyped above: reacts correctly to a
+          // sign-in/out that happens without the slug (and so this fetch)
+          // changing, instead of freezing whatever `user` was in scope
+          // when this effect last ran. Same for replies' own likedUids.
+          const enriched = baseComments.map((c, i) => ({
+            ...c,
+            likedUids: new Set(likesSnaps[i].docs.map((d) => d.id)),
+            replies: baseRepliesPerComment[i].map((r) => ({ ...r, likedUids: replyLikedUidsById.get(r.id) || new Set() })),
+          }));
+          setGameComments(enriched);
+
+          // Verified badges + live current usernames for comment + reply
+          // authors — merged into the same verifiedByUid/namesByUid maps
+          // the picks fetch above uses, not second parallel ones. Same
+          // staleness reasoning as picks: authorName is a snapshot taken
+          // when the comment/reply was posted (see handlePostComment/
+          // handlePostReply), and namesByUid is what keeps it from going
+          // stale after a display-name change.
+          const commentUids = [...new Set([
+            ...enriched.map((c) => c.uid),
+            ...enriched.flatMap((c) => c.replies.map((r) => r.uid)),
+          ].filter(Boolean))];
+          if (commentUids.length) {
+            const userSnaps = await Promise.all(commentUids.map((uid) => getDoc(doc(db, "users", uid))));
+            const vMap = {};
+            const nMap = {};
+            userSnaps.forEach((s, idx) => {
+              vMap[commentUids[idx]] = !!(s.exists() && s.data().verified);
+              const uname = s.exists() ? s.data().username?.trim() : "";
+              if (uname) nMap[commentUids[idx]] = uname;
+            });
+            setVerifiedByUid((prev) => ({ ...prev, ...vMap }));
+            setNamesByUid((prev) => ({ ...prev, ...nMap }));
+          }
+        } catch (e) {
+          console.error("Game comments fetch error:", e);
+          setGameComments([]);
+        } finally {
+          setCommentsLoading(false);
+        }
+      } else {
+        setCommentsLoading(false);
       }
     };
     fetch();
@@ -936,6 +1095,204 @@ export default function GamePage() {
     }
   };
 
+  // ── Simple client-side profanity gate — same word list/approach
+  // PlayerProfile.js and UserProfile.js already use for public text
+  // (public evaluations, issue reports); duplicated here rather than
+  // imported cross-page, matching this file's own convention for small
+  // shared constants (see FLAIR_CONFIG above). ──
+  const bannedWords = ["faggot", "nigger", "monkey", "nigga", "fuck"];
+  const containsProfanity = (text) => bannedWords.some((w) => text.toLowerCase().includes(w));
+
+  const handlePostComment = async () => {
+    if (!user) { login(); return; }
+    const text = commentText.trim();
+    if (!text) { setCommentMessage("Write something first."); return; }
+    if (containsProfanity(text)) { setCommentMessage("Comment contains inappropriate language."); return; }
+    setCommentSaving(true);
+    setCommentMessage("");
+    try {
+      const payload = {
+        uid: user.uid,
+        authorName: profile?.username?.trim() || "Anonymous Fan",
+        text,
+        createdAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, "schedule26", game.id, "comments"), payload);
+      // Optimistic local prepend — serverTimestamp() doesn't resolve to a
+      // real value until Firestore round-trips it back, so a plain Date
+      // stands in until then (same trick PlayerProfile.js's archive flow
+      // uses: something with a .toDate() shape so render code never has to
+      // special-case "just posted" vs "loaded from Firestore"). Brand new,
+      // so no likes and no replies yet either.
+      const now = new Date();
+      setGameComments((prev) => [{ id: ref.id, ...payload, createdAt: { toDate: () => now }, likedUids: new Set(), replies: [] }, ...prev]);
+      setCommentText("");
+    } catch (e) {
+      console.error("Post comment error:", e);
+      setCommentMessage("Failed to post — try again.");
+    } finally {
+      setCommentSaving(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    if (!game || !window.confirm("Delete this comment? Its likes and replies go with it.")) return;
+    setDeletingCommentId(commentId);
+    try {
+      const [likesSnap, repliesSnap] = await Promise.all([
+        getDocs(collection(db, "schedule26", game.id, "comments", commentId, "likes")),
+        getDocs(collection(db, "schedule26", game.id, "comments", commentId, "replies")),
+      ]);
+      // Each reply can have its own likes too — one more level to clear
+      // before the replies themselves.
+      const replyLikesSnaps = await Promise.all(
+        repliesSnap.docs.map((d) => getDocs(collection(db, "schedule26", game.id, "comments", commentId, "replies", d.id, "likes")))
+      );
+      // Best-effort, not required to succeed: a non-admin author can only
+      // delete their own like/reply docs (see firestore.rules), so someone
+      // else's likes/replies on a comment they're deleting are left behind
+      // as harmless orphans rather than blocking the comment delete below.
+      // Promise.allSettled (not Promise.all) so those denials don't reject
+      // the whole cleanup. Admins clear everything, since isAdmin() passes
+      // every one of those checks too.
+      await Promise.allSettled([
+        ...likesSnap.docs.map((d) => deleteDoc(d.ref)),
+        ...replyLikesSnaps.flatMap((snap) => snap.docs.map((d) => deleteDoc(d.ref))),
+        ...repliesSnap.docs.map((d) => deleteDoc(d.ref)),
+      ]);
+      await deleteDoc(doc(db, "schedule26", game.id, "comments", commentId));
+      setGameComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch (e) {
+      console.error("Delete comment error:", e);
+      alert("Failed to delete — check console.");
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+
+  const handleToggleCommentLike = async (comment) => {
+    if (!user) { login(); return; }
+    if (!game) return;
+    const alreadyLiked = comment.likedUids.has(user.uid);
+    setLikingCommentId(comment.id);
+    const likeRef = doc(db, "schedule26", game.id, "comments", comment.id, "likes", user.uid);
+    try {
+      if (alreadyLiked) {
+        await deleteDoc(likeRef);
+      } else {
+        await setDoc(likeRef, { uid: user.uid, createdAt: serverTimestamp() });
+      }
+      setGameComments((prev) => prev.map((c) => {
+        if (c.id !== comment.id) return c;
+        const nextLiked = new Set(c.likedUids);
+        if (alreadyLiked) nextLiked.delete(user.uid); else nextLiked.add(user.uid);
+        return { ...c, likedUids: nextLiked };
+      }));
+    } catch (e) {
+      console.error("Toggle comment like error:", e);
+    } finally {
+      setLikingCommentId(null);
+    }
+  };
+
+  const handlePostReply = async (commentId) => {
+    if (!user) { login(); return; }
+    if (!game) return;
+    const text = replyText.trim();
+    if (!text) { setReplyMessage("Write something first."); return; }
+    if (containsProfanity(text)) { setReplyMessage("Reply contains inappropriate language."); return; }
+    setReplySaving(true);
+    setReplyMessage("");
+    try {
+      const payload = {
+        uid: user.uid,
+        authorName: profile?.username?.trim() || "Anonymous Fan",
+        text,
+        createdAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, "schedule26", game.id, "comments", commentId, "replies"), payload);
+      const now = new Date();
+      const newReply = { id: ref.id, commentId, ...payload, createdAt: { toDate: () => now }, likedUids: new Set() };
+      setGameComments((prev) => prev.map((c) => c.id === commentId ? { ...c, replies: [...c.replies, newReply] } : c));
+      // Opening the reply box already implied interest in this thread —
+      // auto-expanding it means the reply someone just posted doesn't
+      // vanish behind a still-collapsed "N replies" toggle.
+      setExpandedReplies((prev) => new Set(prev).add(commentId));
+      setReplyText("");
+      setReplyingToId(null);
+    } catch (e) {
+      console.error("Post reply error:", e);
+      setReplyMessage("Failed to post — try again.");
+    } finally {
+      setReplySaving(false);
+    }
+  };
+
+  const handleDeleteReply = async (commentId, replyId) => {
+    if (!game || !window.confirm("Delete this reply?")) return;
+    setDeletingReplyId(replyId);
+    try {
+      // Best-effort cleanup of the reply's own likes first — same
+      // reasoning as handleDeleteComment above (a non-admin author can
+      // only delete their own like docs; whatever's left behind is a
+      // harmless orphan once the reply itself is gone).
+      const replyLikesSnap = await getDocs(collection(db, "schedule26", game.id, "comments", commentId, "replies", replyId, "likes"));
+      await Promise.allSettled(replyLikesSnap.docs.map((d) => deleteDoc(d.ref)));
+      await deleteDoc(doc(db, "schedule26", game.id, "comments", commentId, "replies", replyId));
+      setGameComments((prev) => prev.map((c) => c.id === commentId ? { ...c, replies: c.replies.filter((r) => r.id !== replyId) } : c));
+    } catch (e) {
+      console.error("Delete reply error:", e);
+      alert("Failed to delete — check console.");
+    } finally {
+      setDeletingReplyId(null);
+    }
+  };
+
+  const handleToggleReplyLike = async (commentId, reply) => {
+    if (!user) { login(); return; }
+    if (!game) return;
+    const alreadyLiked = reply.likedUids.has(user.uid);
+    setLikingReplyId(reply.id);
+    const likeRef = doc(db, "schedule26", game.id, "comments", commentId, "replies", reply.id, "likes", user.uid);
+    try {
+      if (alreadyLiked) {
+        await deleteDoc(likeRef);
+      } else {
+        await setDoc(likeRef, { uid: user.uid, createdAt: serverTimestamp() });
+      }
+      setGameComments((prev) => prev.map((c) => {
+        if (c.id !== commentId) return c;
+        return {
+          ...c,
+          replies: c.replies.map((r) => {
+            if (r.id !== reply.id) return r;
+            const nextLiked = new Set(r.likedUids);
+            if (alreadyLiked) nextLiked.delete(user.uid); else nextLiked.add(user.uid);
+            return { ...r, likedUids: nextLiked };
+          }),
+        };
+      }));
+    } catch (e) {
+      console.error("Toggle reply like error:", e);
+    } finally {
+      setLikingReplyId(null);
+    }
+  };
+
+  const toggleReplyBox = (commentId) => {
+    setReplyMessage("");
+    setReplyText("");
+    setReplyingToId((prev) => (prev === commentId ? null : commentId));
+  };
+
+  const toggleRepliesExpanded = (commentId) => {
+    setExpandedReplies((prev) => {
+      const next = new Set(prev);
+      if (next.has(commentId)) next.delete(commentId); else next.add(commentId);
+      return next;
+    });
+  };
+
   if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (notFound || !game) {
@@ -1019,6 +1376,19 @@ export default function GamePage() {
   // The one visible H1 for this page (see the masthead below) — kept as its
   // own constant since it's also reused for structured data's own "name".
   const h1Text = `${game.Away} vs ${game.Home} Football${dateStr ? ` — ${dateStr}` : ""}`;
+  // A long matchup name + full date ("New Mexico State vs Florida State
+  // Football — Saturday, August 29, 2026") at a fixed font size was
+  // wrapping onto a second line in the masthead's kicker slot, which grew
+  // the whole masthead bar taller to fit it — the H1 is meant to be a
+  // quiet accent above the real headline (the big date below it), not
+  // something that pushes layout around. Scaling the size down as the
+  // string gets longer keeps it a single line at every length instead;
+  // whiteSpace:nowrap + ellipsis on the element itself (see the masthead
+  // below) is the hard backstop for whatever's still too long even at the
+  // smallest tier.
+  const h1FontSize = isMobile
+    ? (h1Text.length > 46 ? "7px" : h1Text.length > 34 ? "8px" : "9px")
+    : (h1Text.length > 60 ? "8px" : h1Text.length > 46 ? "9px" : "10px");
   // Date (+ kickoff time, pregame only — a final game's "at 7:00 PM" reads
   // stale once it's over) always leads, then whatever prediction content
   // actually exists: the community's own aggregate picks if there are any,
@@ -1060,6 +1430,263 @@ export default function GamePage() {
     "description": seoDescription,
   };
 
+  // ── Game Comments card — built once here so it can be dropped in at
+  // either of two positions below (isFinal ? above Community Predictions
+  // : below it) without duplicating the markup. Open the whole lifetime of
+  // the game, not just once final — pregame/live it just renders further
+  // down the page. ──
+  const gameCommentsCard = (
+    <div style={{ marginBottom: "28px" }}>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            💬 Game Comments
+          </h2>
+          <div style={{ color: "#fff", background: "rgba(255,255,255,0.18)", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, padding: "5px 14px", borderRadius: "20px" }}>
+            {gameComments.length} comment{gameComments.length !== 1 ? "s" : ""}
+          </div>
+        </div>
+        <div style={{ height: "3px", background: GOLD }} />
+        <div style={{ padding: isMobile ? "16px" : "20px 24px" }}>
+          {user ? (
+            <div style={{ marginBottom: "18px" }}>
+              <textarea
+                value={commentText}
+                onChange={(e) => { setCommentText(e.target.value); setCommentMessage(""); }}
+                placeholder="Share your take on this game..."
+                rows={3}
+                style={{ width: "100%", border: "2px solid #ddd", borderRadius: "8px", padding: "10px 12px", fontSize: "14px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box", outline: "none" }}
+              />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: "8px", gap: "12px", flexWrap: "wrap" }}>
+                {commentMessage && (
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#c0392b" }}>{commentMessage}</div>
+                )}
+                <button
+                  onClick={handlePostComment}
+                  disabled={commentSaving || !commentText.trim()}
+                  style={{
+                    background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                    borderRadius: "8px", padding: "9px 20px", fontWeight: 900, fontSize: "13px",
+                    textTransform: "uppercase", letterSpacing: "0.04em",
+                    cursor: commentSaving || !commentText.trim() ? "default" : "pointer",
+                    opacity: commentSaving || !commentText.trim() ? 0.6 : 1,
+                  }}
+                >
+                  {commentSaving ? "Posting..." : "Post Comment"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={login}
+              style={{
+                width: "100%", marginBottom: "18px", background: "#fff", color: BLUE, border: `2px solid ${BLUE}`,
+                borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+              }}
+            >
+              Sign In To Comment
+            </button>
+          )}
+
+          {commentsLoading ? (
+            <LoadingSpinner label="Loading comments" size={24} minHeight="60px" />
+          ) : gameComments.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
+              No comments yet — be the first to weigh in.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {gameComments.map((c, i) => {
+                const canDelete = user && (user.uid === c.uid || profile?.role === "admin");
+                const commentMs = toMs(c.createdAt);
+                const iLiked = user ? c.likedUids.has(user.uid) : false;
+                const isReplying = replyingToId === c.id;
+                const repliesShown = expandedReplies.has(c.id);
+                // Live current name if we have it, falling back to the
+                // snapshot stored on the comment itself (see namesByUid
+                // above) — never a stale name once the author's real one
+                // is known.
+                const commentAuthorName = namesByUid[c.uid] || c.authorName || "Anonymous Fan";
+                return (
+                  <div key={c.id} style={{ borderBottom: i < gameComments.length - 1 ? "1px solid #eee" : "none", paddingBottom: "14px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                        <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{commentAuthorName}</span>
+                        {verifiedByUid[c.uid] && (
+                          <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "14px", height: "14px" }} />
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+                          {commentMs > 0 ? new Date(commentMs).toLocaleString() : ""}
+                        </div>
+                        {canDelete && (
+                          <button
+                            onClick={() => handleDeleteComment(c.id)}
+                            disabled={deletingCommentId === c.id}
+                            style={{ background: "none", border: "none", color: "#c0392b", cursor: deletingCommentId === c.id ? "default" : "pointer", fontSize: "11px", fontWeight: 800, textDecoration: "underline", padding: 0 }}
+                          >
+                            {deletingCommentId === c.id ? "…" : "Delete"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#333", lineHeight: 1.5, marginTop: "5px", whiteSpace: "pre-wrap" }}>
+                      {c.text}
+                    </div>
+
+                    {/* Like / Reply / replies-toggle row — every action a
+                        comment supports lives in one place, in that order,
+                        so it reads left-to-right the same way on every
+                        comment instead of moving around. */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "16px", marginTop: "8px" }}>
+                      <button
+                        onClick={() => handleToggleCommentLike(c)}
+                        disabled={likingCommentId === c.id}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "5px",
+                          background: "none", border: "none", padding: 0,
+                          color: iLiked ? GOLD : "#999", fontWeight: 800, fontSize: "12px",
+                          cursor: likingCommentId === c.id ? "default" : "pointer",
+                        }}
+                      >
+                        <span>👍</span>
+                        {c.likedUids.size > 0 ? c.likedUids.size : "Like"}
+                      </button>
+                      <button
+                        onClick={() => toggleReplyBox(c.id)}
+                        style={{ background: "none", border: "none", padding: 0, color: "#999", fontWeight: 800, fontSize: "12px", cursor: "pointer" }}
+                      >
+                        {isReplying ? "Cancel" : "Reply"}
+                      </button>
+                      {c.replies.length > 0 && (
+                        <button
+                          onClick={() => toggleRepliesExpanded(c.id)}
+                          style={{ background: "none", border: "none", padding: 0, color: BLUE, fontWeight: 800, fontSize: "12px", cursor: "pointer" }}
+                        >
+                          {repliesShown ? "▲ Hide" : "▼ View"} {c.replies.length} repl{c.replies.length !== 1 ? "ies" : "y"}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Inline reply box — only one open across the whole
+                        thread at a time (toggleReplyBox closes any other
+                        that was open), directly under the comment it's
+                        replying to so there's no ambiguity about which
+                        comment a reply targets. */}
+                    {isReplying && (
+                      <div style={{ marginTop: "10px", marginLeft: isMobile ? "0" : "24px" }}>
+                        {user ? (
+                          <>
+                            <textarea
+                              value={replyText}
+                              onChange={(e) => { setReplyText(e.target.value); setReplyMessage(""); }}
+                              placeholder={`Reply to ${commentAuthorName}...`}
+                              rows={2}
+                              autoFocus
+                              style={{ width: "100%", border: "2px solid #ddd", borderRadius: "8px", padding: "8px 10px", fontSize: "13px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box", outline: "none" }}
+                            />
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: "6px", gap: "10px", flexWrap: "wrap" }}>
+                              {replyMessage && (
+                                <div style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b" }}>{replyMessage}</div>
+                              )}
+                              <button
+                                onClick={() => handlePostReply(c.id)}
+                                disabled={replySaving || !replyText.trim()}
+                                style={{
+                                  background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                                  borderRadius: "6px", padding: "6px 16px", fontWeight: 900, fontSize: "11px",
+                                  textTransform: "uppercase", letterSpacing: "0.04em",
+                                  cursor: replySaving || !replyText.trim() ? "default" : "pointer",
+                                  opacity: replySaving || !replyText.trim() ? 0.6 : 1,
+                                }}
+                              >
+                                {replySaving ? "Posting..." : "Post Reply"}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <button
+                            onClick={login}
+                            style={{
+                              background: "#fff", color: BLUE, border: `2px solid ${BLUE}`,
+                              borderRadius: "6px", padding: "7px 14px", fontWeight: 900, fontSize: "11px",
+                              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                            }}
+                          >
+                            Sign In To Reply
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Replies — indented under their parent, single level
+                        only (a reply can't itself be replied to), each a
+                        lighter-weight echo of a top-level comment's own
+                        author/verified/timestamp/delete layout. */}
+                    {repliesShown && c.replies.length > 0 && (
+                      <div style={{ marginTop: "10px", marginLeft: isMobile ? "12px" : "24px", display: "flex", flexDirection: "column", gap: "10px", borderLeft: "2px solid #eee", paddingLeft: "12px" }}>
+                        {c.replies.map((r) => {
+                          const canDeleteReply = user && (user.uid === r.uid || profile?.role === "admin");
+                          const replyMs = toMs(r.createdAt);
+                          const iLikedReply = user ? r.likedUids.has(user.uid) : false;
+                          const replyAuthorName = namesByUid[r.uid] || r.authorName || "Anonymous Fan";
+                          return (
+                            <div key={r.id}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                                  <span style={{ fontWeight: 900, fontSize: "12px", color: BLUE }}>{replyAuthorName}</span>
+                                  {verifiedByUid[r.uid] && (
+                                    <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "12px", height: "12px" }} />
+                                  )}
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa" }}>
+                                    {replyMs > 0 ? new Date(replyMs).toLocaleString() : ""}
+                                  </div>
+                                  {canDeleteReply && (
+                                    <button
+                                      onClick={() => handleDeleteReply(c.id, r.id)}
+                                      disabled={deletingReplyId === r.id}
+                                      style={{ background: "none", border: "none", color: "#c0392b", cursor: deletingReplyId === r.id ? "default" : "pointer", fontSize: "10px", fontWeight: 800, textDecoration: "underline", padding: 0 }}
+                                    >
+                                      {deletingReplyId === r.id ? "…" : "Delete"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              <div style={{ fontSize: "13px", color: "#333", lineHeight: 1.45, marginTop: "3px", whiteSpace: "pre-wrap" }}>
+                                {r.text}
+                              </div>
+                              <button
+                                onClick={() => handleToggleReplyLike(c.id, r)}
+                                disabled={likingReplyId === r.id}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: "5px", marginTop: "5px",
+                                  background: "none", border: "none", padding: 0,
+                                  color: iLikedReply ? GOLD : "#999", fontWeight: 800, fontSize: "11px",
+                                  cursor: likingReplyId === r.id ? "default" : "pointer",
+                                }}
+                              >
+                                <span>👍</span>
+                                {r.likedUids.size > 0 ? r.likedUids.size : "Like"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <style>{GRADE_GLOW_STYLE}</style>
@@ -1099,7 +1726,12 @@ export default function GamePage() {
                   already communicates visually (logos/names/date), which is
                   fine here — search engines expect an H1 to name the page's
                   subject even when other elements already convey it. */}
-              <h1 style={{ margin: 0, color: "rgba(255,255,255,0.6)", fontWeight: 800, fontSize: isMobile ? "9px" : "10px", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1 }}>
+              <h1 style={{
+                margin: 0, color: "rgba(255,255,255,0.6)", fontWeight: 800, fontSize: h1FontSize,
+                textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                maxWidth: isMobile ? "220px" : "480px",
+              }}>
                 {h1Text}
               </h1>
               {dateStr && (
@@ -1607,6 +2239,14 @@ export default function GamePage() {
               </div>
             </div>
 
+            {/* Game Comments — open the whole lifetime of the game, but
+                repositions around Community Predictions depending on
+                isFinal (see gameCommentsCard above): once the game's over,
+                the discussion is the more relevant of the two and leads;
+                pregame/live, predictions are still the main event and
+                comments trail below them. */}
+            {isFinal && gameCommentsCard}
+
             {/* Community Picks — aggregate score/win-split stats across
                 everyone's picks (private ones included in the numbers),
                 plus a feed of the public ones' names and notes. */}
@@ -1714,7 +2354,7 @@ export default function GamePage() {
                                 )}
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <span style={{ display: "flex", alignItems: "center", gap: "5px", fontWeight: 900, fontSize: "13px", color: BLUE }}>
-                                    {p.displayName || "Anonymous Fan"}
+                                    {namesByUid[p.id] || p.displayName || "Anonymous Fan"}
                                     {verifiedByUid[p.id] && (
                                       <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "14px", height: "14px" }} />
                                     )}
@@ -1746,6 +2386,9 @@ export default function GamePage() {
               </div>
             </div>
 
+            {/* Pregame/live: comments trail below predictions instead of
+                leading them — see the isFinal placement above. */}
+            {!isFinal && gameCommentsCard}
 
             {/* Footer */}
             <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: "2px solid #eee", display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: "10px" }}>
