@@ -300,6 +300,29 @@ const weekNumber = (w) => {
   return m ? Number(m[1]) : 999;
 };
 
+// ── Picks the week containing right now (by its own games' dates, Monday-
+// Sunday via mondayOfWeekUtc), falling back to the nearest upcoming week,
+// then the earliest week on file — "the current week" as a default,
+// instead of always defaulting to whichever week sorts first. Shared by
+// MyPicksSection and StandingsSection so both land on the same week by
+// default rather than each guessing independently. `weeks` must already be
+// sorted ascending (weekNumber). ──
+function pickCurrentWeek(games, weeks) {
+  const nowMs = Date.now();
+  let bestWeek = weeks[0] || "";
+  let bestFuture = Infinity;
+  for (const w of weeks) {
+    const weekGames = games.filter((g) => g.Week === w && toMs(g.Date));
+    if (weekGames.length === 0) continue;
+    const minDate = Math.min(...weekGames.map((g) => toMs(g.Date)));
+    const monday = mondayOfWeekUtc(minDate);
+    const sunday = monday + 7 * 24 * 60 * 60 * 1000 - 1;
+    if (nowMs >= monday && nowMs <= sunday) return w;
+    if (minDate >= nowMs && minDate < bestFuture) { bestFuture = minDate; bestWeek = w; }
+  }
+  return bestWeek;
+}
+
 // Default sort tier — Game of the Week first, then Featured, then every
 // other still-qualified game, then disqualified ones last. Date/time is
 // the tiebreaker within each tier.
@@ -337,6 +360,7 @@ function rankedStatus(rankedGames, week) {
 }
 
 export default function WePickHub() {
+  const { user } = useAuth();
   const location = useLocation();
   // Path-based, same convention as PerformancesHub.jsx's activeTab — lets
   // /we-pick/standings (and /we-pick/standings/:week) or /we-pick/stats
@@ -348,6 +372,23 @@ export default function WePickHub() {
     : location.pathname.startsWith("/we-pick/friends")
     ? "friends"
     : "picks";
+
+  // Pending incoming friend request count — shown as a sticker on the
+  // Friends tab below. Lives up here (not inside FriendsSection itself) so
+  // it's visible without ever having to open that tab, same reasoning as
+  // AdminPanel.js's Requests sidebar badge. Refetches on every activeTab
+  // change rather than just once on mount: that's what catches the count
+  // dropping after a visit to Friends, where accepting/declining a
+  // request there changes what's actually still pending.
+  const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
+  useEffect(() => {
+    if (!user) { setPendingFriendRequests(0); return; }
+    let cancelled = false;
+    getDocs(query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending")))
+      .then((snap) => { if (!cancelled) setPendingFriendRequests(snap.size); })
+      .catch((e) => { console.error("We-Pick pending-requests count error:", e); if (!cancelled) setPendingFriendRequests(0); });
+    return () => { cancelled = true; };
+  }, [user, activeTab]);
 
   const TAB_TITLES = { standings: "Ranked Standings", stats: "My Stats", friends: "Friends" };
   const pageTitle = TAB_TITLES[activeTab]
@@ -395,12 +436,13 @@ export default function WePickHub() {
             { key: "picks", label: "My Picks", to: "/we-pick" },
             { key: "standings", label: "🏆 Ranked Standings", to: "/we-pick/standings" },
             { key: "stats", label: "📊 My Stats", to: "/we-pick/stats" },
-            { key: "friends", label: "👥 Friends", to: "/we-pick/friends" },
+            { key: "friends", label: "👥 Friends", to: "/we-pick/friends", badge: pendingFriendRequests },
           ].map((tab) => (
             <Link
               key={tab.key}
               to={tab.to}
               style={{
+                display: "flex", alignItems: "center", gap: "6px",
                 padding: "10px 20px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
                 color: activeTab === tab.key ? "#fff" : "rgba(255,255,255,0.55)",
                 borderBottom: activeTab === tab.key ? `3px solid ${GOLD}` : "3px solid transparent",
@@ -408,6 +450,15 @@ export default function WePickHub() {
               }}
             >
               {tab.label}
+              {!!tab.badge && (
+                <span style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
+                  background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900,
+                }}>
+                  {tab.badge > 99 ? "99+" : tab.badge}
+                </span>
+              )}
             </Link>
           ))}
         </div>
@@ -528,23 +579,9 @@ function MyPicksSection() {
 
         setMyPicks(mirrorSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-        // Default to the week containing right now (by its games' own
-        // dates), falling back to the nearest upcoming week, then the
-        // earliest week on file.
+        // Default to the current week (see pickCurrentWeek above).
         const weeks = Array.from(new Set(games.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
-        const nowMs = Date.now();
-        let bestWeek = weeks[0] || "";
-        let bestFuture = Infinity;
-        for (const w of weeks) {
-          const weekGames = games.filter((g) => g.Week === w && toMs(g.Date));
-          if (weekGames.length === 0) continue;
-          const minDate = Math.min(...weekGames.map((g) => toMs(g.Date)));
-          const monday = mondayOfWeekUtc(minDate);
-          const sunday = monday + 7 * 24 * 60 * 60 * 1000 - 1;
-          if (nowMs >= monday && nowMs <= sunday) { bestWeek = w; break; }
-          if (minDate >= nowMs && minDate < bestFuture) { bestFuture = minDate; bestWeek = w; }
-        }
-        setSelectedWeek(bestWeek);
+        setSelectedWeek(pickCurrentWeek(games, weeks));
       } catch (e) {
         console.error("We-Pick fetch error:", e);
       } finally {
@@ -1401,7 +1438,7 @@ function MyPicksSection() {
 // visitors too (it's a public leaderboard, not a personal list), so it
 // does its own schedule26 fetch rather than relying on MyPicksSection's.
 function StandingsSection() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { week: weekParam } = useParams();
   const navigate = useNavigate();
   // Defaults to "week" regardless of whether a :week param is on the URL —
@@ -1428,17 +1465,32 @@ function StandingsSection() {
   const [friendUids, setFriendUids] = useState(null); // null = not fetched yet
   const [friendNamesByUid, setFriendNamesByUid] = useState({});
   const [friendsLoading, setFriendsLoading] = useState(false);
+  // Real points-based standings don't exist yet (scoring's still TBD — see
+  // STANDINGS_COLLECTION's own comment), so a week's board is always
+  // empty right now. Rather than just an empty state, that gap is filled
+  // with something that's actually live today: who's already submitted
+  // their Ranked 6 for this week (SUBMISSIONS_COLLECTION) — a roster in
+  // Friends scope, a bare count in Community scope. Fetched whenever the
+  // week changes (not gated on entries being empty) so it's ready the
+  // instant it's needed, and naturally stops being shown once real
+  // entries exist for a week. Season view has no such fallback —
+  // "submitted for the season" isn't a real action, only per-week is.
+  const [weekSubmissions, setWeekSubmissions] = useState(null); // null = not fetched yet
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
 
   // Week list comes from the schedule, same as My Picks' own dropdown —
-  // fetched once, independent of which board is currently showing.
+  // fetched once, independent of which board is currently showing. Needs
+  // each game's own data (not just its Week label) to default to the
+  // current week via pickCurrentWeek, same as My Picks does.
   useEffect(() => {
     const loadWeeks = async () => {
       try {
         const snap = await getDocs(collection(db, "schedule26"));
-        const weeks = Array.from(new Set(snap.docs.map((d) => d.data().Week).filter(Boolean)))
+        const games = snap.docs.map((d) => d.data());
+        const weeks = Array.from(new Set(games.map((g) => g.Week).filter(Boolean)))
           .sort((a, b) => weekNumber(a) - weekNumber(b));
         setWeekOptions(weeks);
-        setSelectedWeek((prev) => prev || weeks[0] || "");
+        setSelectedWeek((prev) => prev || pickCurrentWeek(games, weeks));
       } catch (e) {
         console.error("We-Pick standings week-list error:", e);
       }
@@ -1469,6 +1521,25 @@ function StandingsSection() {
         if (!cancelled) setEntries([]);
       })
       .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [view, selectedWeek]);
+
+  // Who's already submitted this week — see weekSubmissions' own comment
+  // above for why. Only meaningful for a specific week, not season.
+  useEffect(() => {
+    if (view !== "week" || !selectedWeek) { setWeekSubmissions(null); return; }
+    let cancelled = false;
+    setSubmissionsLoading(true);
+    getDocs(collection(db, SUBMISSIONS_COLLECTION, selectedWeek, "entries"))
+      .then((snap) => {
+        if (cancelled) return;
+        setWeekSubmissions(snap.docs.map((d) => ({ uid: d.id, ...d.data() })));
+      })
+      .catch((e) => {
+        console.error("We-Pick week-submissions fetch error:", e);
+        if (!cancelled) setWeekSubmissions([]);
+      })
+      .finally(() => { if (!cancelled) setSubmissionsLoading(false); });
     return () => { cancelled = true; };
   }, [view, selectedWeek]);
 
@@ -1511,6 +1582,29 @@ function StandingsSection() {
       : base;
     return [...named].sort(compareStandingsEntries);
   }, [entries, scope, user, friendUids, friendNamesByUid]);
+
+  // Friends who've submitted their Ranked 6 for the selected week — the
+  // pregame/no-real-standings-yet fallback shown in Friends scope (see
+  // weekSubmissions' own comment above).
+  const submittedFriends = useMemo(() => {
+    if (!weekSubmissions || !friendUids) return [];
+    return weekSubmissions
+      .filter((s) => friendUids.has(s.uid))
+      .map((s) => ({ uid: s.uid, name: friendNamesByUid[s.uid] || s.displayName || "Anonymous Fan" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [weekSubmissions, friendUids, friendNamesByUid]);
+
+  // The Friends-scope fallback roster always includes the viewer
+  // themselves (pinned first, own submitted/not status included honestly)
+  // on top of submittedFriends above — so "how the board would look" is
+  // visible even before any friend has submitted anything, instead of a
+  // board that only ever renders once someone else shows up in it.
+  const friendsRoster = useMemo(() => {
+    if (!user) return submittedFriends.map((f) => ({ ...f, isMe: false, submitted: true }));
+    const iSubmitted = (weekSubmissions || []).some((s) => s.uid === user.uid);
+    const me = { uid: user.uid, name: (profile?.username?.trim() || "You") + " (You)", isMe: true, submitted: iSubmitted };
+    return [me, ...submittedFriends.map((f) => ({ ...f, isMe: false, submitted: true }))];
+  }, [user, profile, weekSubmissions, submittedFriends]);
 
   const visibleCount = expanded ? limits.max : limits.default;
   const visibleEntries = sortedEntries.slice(0, visibleCount);
@@ -1588,25 +1682,107 @@ function StandingsSection() {
                 Sign in to see how you stack up against your friends.
               </div>
             </div>
-          ) : scope === "friends" && friendUids && friendUids.size === 0 ? (
-            <div style={{ padding: "36px 20px", textAlign: "center" }}>
-              <div style={{ fontSize: "26px", marginBottom: "8px" }}>👥</div>
-              <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
-                You haven't added any friends yet.
-              </div>
-              <Link to="/we-pick/friends" style={{ display: "inline-block", marginTop: "10px", fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
-                Add Friends →
-              </Link>
-            </div>
           ) : loading || (scope === "friends" && friendsLoading) ? (
             <LoadingSpinner label="Loading" size={36} minHeight="160px" />
+          ) : sortedEntries.length === 0 && view === "week" && selectedWeek ? (
+            // No real points-based standings for this week yet (scoring's
+            // still TBD — see STANDINGS_COLLECTION's own comment), so this
+            // fills the gap with something that's actually live right now:
+            // who's submitted their Ranked 6 (see weekSubmissions above).
+            <div>
+              {/* Your own status leads, above either scope's content below
+                  (not folded into the Friends roster specifically) — it's
+                  relevant regardless of which scope you're looking at, and
+                  a signed-in visitor who hasn't submitted yet gets a direct
+                  prompt to go do it instead of just finding out passively. */}
+              {user && !submissionsLoading && (
+                (weekSubmissions || []).some((s) => s.uid === user.uid) ? (
+                  <div style={{ padding: "12px 16px", background: "rgba(74,222,128,0.12)", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 800, color: "#4ade80" }}>
+                      ✓ You've submitted your picks for {selectedWeek}.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: "12px 16px", background: "rgba(246,162,29,0.14)", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 800, color: GOLD }}>
+                      You haven't submitted your picks for {selectedWeek} yet.
+                    </div>
+                    <Link
+                      to="/we-pick"
+                      style={{ background: GOLD, color: "#06162c", border: "none", borderRadius: "6px", padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none", whiteSpace: "nowrap" }}
+                    >
+                      Submit Now →
+                    </Link>
+                  </div>
+                )
+              )}
+              {submissionsLoading ? (
+                <LoadingSpinner label="Loading" size={30} minHeight="120px" />
+              ) : scope === "friends" ? (
+                // Always the roster (never actually empty when signed in —
+                // friendsRoster pins "you" first regardless of whether any
+                // friend has submitted yet), so this reads as "here's how
+                // the board looks" instead of an all-or-nothing empty
+                // state. The add-friends nudge (or "none yet" note) sits
+                // below it rather than replacing it.
+                <div>
+                  <div style={{ padding: "10px 16px", fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.6)" }}>
+                    {submittedFriends.length > 0
+                      ? `${submittedFriends.length} friend${submittedFriends.length !== 1 ? "s" : ""} submitted for ${selectedWeek} — full standings fill in once graded.`
+                      : `Here's how ${selectedWeek} looks so far — full standings fill in once graded.`}
+                  </div>
+                  {friendsRoster.map((f) => (
+                    <div
+                      key={f.uid}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px",
+                        padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,0.1)",
+                        background: f.isMe ? "rgba(246,162,29,0.14)" : "transparent",
+                        boxShadow: f.isMe ? `inset 3px 0 0 ${GOLD}` : "none",
+                      }}
+                    >
+                      <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{f.name}</div>
+                      {f.submitted ? (
+                        <span style={{ fontSize: "10px", fontWeight: 900, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.05em" }}>✓ Submitted</span>
+                      ) : (
+                        <span style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Not yet</span>
+                      )}
+                    </div>
+                  ))}
+                  {friendUids && friendUids.size === 0 ? (
+                    <div style={{ padding: "14px 16px", borderTop: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginBottom: "6px" }}>
+                        Add friends to see their picks here too.
+                      </div>
+                      <Link to="/we-pick/friends" style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
+                        Add Friends →
+                      </Link>
+                    </div>
+                  ) : submittedFriends.length === 0 && (
+                    <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.1)", textAlign: "center", fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>
+                      None of your friends have submitted picks for {selectedWeek} yet.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ padding: "36px 20px", textAlign: "center" }}>
+                  <div style={{ fontSize: "26px", marginBottom: "8px" }}>📥</div>
+                  <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
+                    {(weekSubmissions?.length || 0)} player{(weekSubmissions?.length || 0) !== 1 ? "s" : ""} submitted picks for {selectedWeek}.
+                  </div>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginTop: "6px" }}>
+                    Full standings will fill in once these games are graded.
+                  </div>
+                </div>
+              )}
+            </div>
           ) : sortedEntries.length === 0 ? (
             <div style={{ padding: "36px 20px", textAlign: "center" }}>
               <div style={{ fontSize: "26px", marginBottom: "8px" }}>🏈</div>
               <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.85)" }}>
                 {view === "season"
                   ? "Season standings haven't started yet."
-                  : selectedWeek ? `No standings yet for ${selectedWeek}.` : "No weeks on the schedule yet."}
+                  : "No weeks on the schedule yet."}
               </div>
               <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginTop: "6px" }}>
                 {scope === "friends"

@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useEffect, useState } from "react";
 import Logo2 from "../assets/Logo2.png";
@@ -36,6 +36,7 @@ const COMMUNITY_YEARS = [
 
 export default function Navbar() {
   const { user, login } = useAuth();
+  const location = useLocation();
 
   const [show, setShow] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -52,6 +53,14 @@ export default function Navbar() {
   const [communityTimeout, setCommunityTimeout] = useState(null);
   const [boardsOpen, setBoardsOpen] = useState(false);
   const [boardsTimeout, setBoardsTimeout] = useState(null);
+  // Pending incoming friend request count — shown as a sticker on the
+  // Profile link (see We-Pick's own Friends-tab badge for the same idea).
+  // Refetches on every route change rather than just once on sign-in:
+  // Navbar stays mounted across the whole app, so a page change is the
+  // closest thing it has to AdminPanel's "refetch on section change"
+  // pattern — it's what catches the count dropping after accepting/
+  // declining a request on the Profile or We-Pick Friends page.
+  const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
 
   /* ======================
      MOBILE DETECTION
@@ -169,6 +178,18 @@ export default function Navbar() {
     }
     fetchNFLTeams();
   }, []);
+
+  /* ======================
+     PENDING FRIEND REQUESTS (Profile badge)
+  ====================== */
+  useEffect(() => {
+    if (!user) { setPendingFriendRequests(0); return; }
+    let cancelled = false;
+    getDocs(query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending")))
+      .then((snap) => { if (!cancelled) setPendingFriendRequests(snap.size); })
+      .catch((err) => { console.error("Navbar pending-requests count error:", err); if (!cancelled) setPendingFriendRequests(0); });
+    return () => { cancelled = true; };
+  }, [user, location.pathname]);
 
   const grouped = conferenceOrder.reduce((acc, conf) => {
     acc[conf] = schools.filter((s) => s.Conference === conf);
@@ -601,7 +622,18 @@ export default function Navbar() {
             </div>
 
             {user ? (
-              <Link to="/profile" style={baseStyle}>Profile</Link>
+              <Link to="/profile" style={baseStyle}>
+                Profile
+                {pendingFriendRequests > 0 && (
+                  <span style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    minWidth: "16px", height: "16px", borderRadius: "8px", padding: "0 4px",
+                    marginLeft: "6px", background: "#c0392b", color: "#fff", fontSize: "9px", fontWeight: 900,
+                  }}>
+                    {pendingFriendRequests > 99 ? "99+" : pendingFriendRequests}
+                  </span>
+                )}
+              </Link>
             ) : (
               <button onClick={login} style={baseStyle}>Sign In</button>
             )}
@@ -650,7 +682,18 @@ export default function Navbar() {
             ))}
 
             {user ? (
-              <Link to="/profile" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>Profile</Link>
+              <Link to="/profile" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
+                Profile
+                {pendingFriendRequests > 0 && (
+                  <span style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    minWidth: "16px", height: "16px", borderRadius: "8px", padding: "0 4px",
+                    marginLeft: "6px", background: "#c0392b", color: "#fff", fontSize: "9px", fontWeight: 900,
+                  }}>
+                    {pendingFriendRequests > 99 ? "99+" : pendingFriendRequests}
+                  </span>
+                )}
+              </Link>
             ) : (
               <button onClick={() => { login(); setMenuOpen(false); }} className="mobile-nav-link"
                 style={{ border: "2px solid #f6a21d", cursor: "pointer" }}>
