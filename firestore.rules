@@ -71,6 +71,26 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // High school recruits (AdminPanel.js's Player Data → Recruits tab) —
+    // purely internal admin data with no public page of their own (unlike
+    // players/schools), so no public read at all, just isAdmin() both ways.
+    match /recruits/{doc} {
+      allow read, write: if isAdmin();
+    }
+    // High schools — auto-seeded by the Recruits tab's High School field
+    // (see RecruitsSection's handleSave) the first time each name is typed,
+    // purely to power its own autocomplete. Same admin-only-both-ways
+    // treatment as recruits above.
+    match /highSchools/{doc} {
+      allow read, write: if isAdmin();
+    }
+    // Named recruit groups — same shape as playerGroups above (own
+    // recruitIds array, so deleting a group never touches a recruit doc),
+    // but admin-only-both-ways like recruits itself rather than public
+    // read, since these organize still-unlaunched prospects.
+    match /recruitGroups/{doc} {
+      allow read, write: if isAdmin();
+    }
     // TV channel logos — Misc Branding (AdminPanel.js's MiscBrandingSection)
     // manages these; CFB Schedule's "TV Channel" field and GamePage.js's own
     // channel-logo display both read them by Name. Public read like

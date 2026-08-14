@@ -68,6 +68,71 @@ const BLANK_PLAYER_FORM = {
   Height: "", Weight: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
 };
 
+// ── Recruits (high school players, no public page yet) ──
+// Recruit Class is the class the player is committed as a high schooler;
+// Draft Class = Recruit Class + 3, mirroring the real 3-years-removed-from-
+// high-school NFL draft eligibility rule. Only 2026 recruits currently have
+// a Draft Class (2029) inside the site's supported ACTIVE_YEARS, so only
+// they can be promoted to a real player page for now.
+const RECRUIT_CLASSES = ["2026", "2027", "2028", "2029"];
+const PROMOTABLE_RECRUIT_CLASS = "2026";
+// Best to worst — doubles as both the select's option order and the sort
+// rank for the recruit list (see recruitFlairRank below), so "descending"
+// visually means best grade first.
+const RECRUIT_FLAIR_OPTIONS = ["", "Early Impact", "Early Contributor", "Year 2 Contributor", "Developmental"];
+const RECRUIT_GRADE_COLORS = {
+  "Early Impact": { bg: "#3B6D11", border: "#27500A" },
+  "Early Contributor": { bg: "#0F6E56", border: "#085041" },
+  "Year 2 Contributor": { bg: "#BA7517", border: "#854F0B" },
+  "Developmental": { bg: "#5F5E5A", border: "#444441" },
+};
+// No flair sorts after every real grade (Infinity), not before — an
+// un-graded recruit isn't "worse than Developmental", it just has no grade
+// yet, but it still needs to land somewhere in a descending sort.
+function recruitFlairRank(flair) {
+  const i = RECRUIT_FLAIR_OPTIONS.indexOf(flair);
+  return i > 0 ? i : Infinity;
+}
+
+const BLANK_RECRUIT_FORM = {
+  First: "", Last: "", HighSchool: "", State: "", Commitment: "", Position: "", RecruitClass: "",
+  Height: "", Weight: "", Flair: "", Film: "", AdminNotes: "", Flag: "",
+};
+
+const US_STATES = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
+  "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois",
+  "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts",
+  "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+  "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
+  "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+  "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+  "West Virginia", "Wisconsin", "Wyoming",
+];
+
+// Full state name -> 2-letter code, purely for the "(LA)" suffix shown
+// next to each saved high school in the autocomplete dropdown below —
+// the State field itself still stores the full name from US_STATES.
+const STATE_ABBR = {
+  "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
+  "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "District of Columbia": "DC",
+  "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL",
+  "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA",
+  "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN",
+  "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+  "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+  "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR",
+  "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD",
+  "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
+  "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
+};
+
+function draftClassForRecruitClass(recruitClass) {
+  const y = parseInt(recruitClass, 10);
+  if (!y) return "";
+  return String(y + 3);
+}
+
 function generateSlug(first, last, position, eligible) {
   const raw = (first || "") + "-" + (last || "") + "-" + (eligible || "") + "-" + (position || "");
   let s = raw.replace(/['\u2019`.]/g, "");
@@ -161,7 +226,7 @@ function ComingSoonPane({ label }) {
   );
 }
 
-function SchoolCombobox({ value, onChange, options }) {
+function SchoolCombobox({ value, onChange, options, getLabel }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -200,7 +265,7 @@ function SchoolCombobox({ value, onChange, options }) {
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
-              {school}
+              {getLabel ? getLabel(school) : school}
             </div>
           ))}
         </div>
@@ -331,6 +396,7 @@ function PlayerDataSection() {
   const [slugChangePrompt, setSlugChangePrompt] = useState(null); // { newBase, oldSlug } | null — editing an existing player
   const [removing, setRemoving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [playerDataTab, setPlayerDataTab] = useState("players");
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -754,6 +820,30 @@ function PlayerDataSection() {
   };
 
   return (
+    <div>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        {[
+          { key: "players", label: "Players" },
+          { key: "recruits", label: "Recruits" },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setPlayerDataTab(t.key)}
+            style={{
+              padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: playerDataTab === t.key ? BLUE : "#fff",
+              color: playerDataTab === t.key ? "#fff" : BLUE,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {playerDataTab === "recruits" ? (
+        <RecruitsSection />
+      ) : (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1357,6 +1447,886 @@ function PlayerDataSection() {
                     }}
                   >
                     Delete Player
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+      )}
+    </div>
+  );
+}
+
+// ── High school recruits — same data model as players but stored in their
+// own `recruits` collection with no public page by default (Commitment is
+// FBS-only, Eligible becomes Recruit Class capped at 2026-2029, no Bio, and
+// Flair is restricted to the four "Recruit Grade" tags). "Add to We-Draft"
+// promotes a recruit into a real players/{id} doc + slug — gated to 2026
+// recruits, since Draft Class = Recruit Class + 3 and 2029 is the only
+// result currently inside ACTIVE_YEARS. The recruit doc is marked with
+// promotedPlayerId/Slug/At rather than deleted, so promoting twice is a
+// no-op and the origin record stays intact. ──
+function RecruitsSection() {
+  const [allRecruits, setAllRecruits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedClasses, setSelectedClasses] = useState([]);
+  const [selectedPositions, setSelectedPositions] = useState([]);
+  const [selectedStates, setSelectedStates] = useState([]);
+  const [selectedCommitments, setSelectedCommitments] = useState([]);
+  const [selectedGrades, setSelectedGrades] = useState([]);
+  // Named recruit groups — same shape/purpose as PlayerDataSection's own
+  // playerGroups (own recruitIds array, so deleting a group never touches
+  // a recruit doc), just against the separate recruitGroups collection so
+  // recruit and player group namespaces never mix.
+  const [allGroups, setAllGroups] = useState([]); // [{ id, name, recruitIds }]
+  const [selectedGroups, setSelectedGroups] = useState([]); // filter, by group name
+  const [groupError, setGroupError] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [selectedRecruit, setSelectedRecruit] = useState(null);
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [fbsSchoolOptions, setFbsSchoolOptions] = useState([]);
+  const [highSchoolOptions, setHighSchoolOptions] = useState([]);
+  const [removing, setRemoving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+
+  useEffect(() => {
+    const fetchSchools = async () => {
+      try {
+        const snap = await getDocs(collection(db, "schools"));
+        const names = snap.docs
+          .map((d) => d.data())
+          .filter((s) => !s.FCS)
+          .map((s) => s.School)
+          .filter(Boolean)
+          .sort();
+        setFbsSchoolOptions(names);
+      } catch (e) {
+        console.error("Admin FBS schools fetch error:", e);
+        setFbsSchoolOptions([]);
+      }
+    };
+    fetchSchools();
+  }, []);
+
+  useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        const snap = await getDocs(collection(db, "recruitGroups"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data(), recruitIds: d.data().recruitIds || [] }));
+        data.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        setAllGroups(data);
+      } catch (e) {
+        console.error("Admin recruit groups fetch error:", e);
+        setAllGroups([]);
+      }
+    };
+    fetchGroups();
+  }, []);
+
+  // ── High schools are their own small collection, seeded lazily: typing a
+  // new one into the High School field (see handleSave below) creates it
+  // here with a unique doc id the first time, so every admin after that
+  // gets it as an autocomplete suggestion via SchoolCombobox instead of
+  // retyping it from scratch. Kept as {Name, State} objects (not just
+  // names) so picking one from the dropdown can auto-fill State and the
+  // suggestion list can show "Name (ST)" to disambiguate same-named
+  // schools in different states. ──
+  useEffect(() => {
+    const fetchHighSchools = async () => {
+      try {
+        const snap = await getDocs(collection(db, "highSchools"));
+        const data = snap.docs
+          .map((d) => d.data())
+          .filter((h) => h.Name)
+          .sort((a, b) => a.Name.localeCompare(b.Name));
+        setHighSchoolOptions(data);
+      } catch (e) {
+        console.error("Admin high schools fetch error:", e);
+        setHighSchoolOptions([]);
+      }
+    };
+    fetchHighSchools();
+  }, []);
+
+  useEffect(() => {
+    const fetchRecruits = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "recruits"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
+        setAllRecruits(data);
+      } catch (e) {
+        console.error("Admin recruits fetch error:", e);
+        setAllRecruits([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRecruits();
+  }, []);
+
+  const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
+  const highSchoolLabel = (name) => {
+    const match = highSchoolOptions.find((h) => h.Name === name);
+    return match && match.State ? name + " (" + (STATE_ABBR[match.State] || match.State) + ")" : name;
+  };
+
+  const allPositions = useMemo(() => {
+    const set = [...new Set(allRecruits.map((r) => r.Position).filter(Boolean))];
+    return set.sort((a, b) => {
+      const ai = POSITION_ORDER.indexOf(a);
+      const bi = POSITION_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [allRecruits]);
+
+  // Group membership lives on the group docs (recruitIds arrays), not on
+  // the recruit docs — reversed here into recruitId -> [group names] so
+  // the filter below and the list row's tags can look a recruit up in
+  // O(1) instead of scanning every group per recruit.
+  const groupNamesByRecruit = useMemo(() => {
+    const map = new Map();
+    allGroups.forEach((g) => {
+      (g.recruitIds || []).forEach((rid) => {
+        const arr = map.get(rid) || [];
+        arr.push(g.name);
+        map.set(rid, arr);
+      });
+    });
+    return map;
+  }, [allGroups]);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const rows = allRecruits.filter((r) => {
+      if (selectedClasses.length > 0 && !selectedClasses.includes(r.RecruitClass)) return false;
+      if (selectedPositions.length > 0 && !selectedPositions.includes(r.Position)) return false;
+      if (selectedStates.length > 0 && !selectedStates.includes(r.State)) return false;
+      if (selectedCommitments.length > 0 && !selectedCommitments.includes(r.Commitment)) return false;
+      if (selectedGrades.length > 0 && !selectedGrades.includes(r.Flair)) return false;
+      if (selectedGroups.length > 0) {
+        const recruitGroupNames = groupNamesByRecruit.get(r.id) || [];
+        if (!selectedGroups.some((n) => recruitGroupNames.includes(n))) return false;
+      }
+      if (q) {
+        const hay = ((r.First || "") + " " + (r.Last || "") + " " + (r.Commitment || "")).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    // Best grade first (see recruitFlairRank), last name alphabetical as
+    // the tiebreak within a tier.
+    return rows.sort((a, b) => {
+      const ra = recruitFlairRank(a.Flair);
+      const rb = recruitFlairRank(b.Flair);
+      if (ra !== rb) return ra - rb;
+      return (a.Last || "").localeCompare(b.Last || "");
+    });
+  }, [allRecruits, searchQuery, selectedClasses, selectedPositions, selectedStates, selectedCommitments, selectedGrades, selectedGroups, groupNamesByRecruit]);
+
+  const isNew = selectedRecruit?.isNew === true;
+
+  const startNewRecruit = () => {
+    setSelectedRecruit({ isNew: true });
+    setFormState({ ...BLANK_RECRUIT_FORM });
+    setSaveMessage("");
+    setConfirmDelete(false);
+  };
+
+  const selectRecruit = (r) => {
+    setSelectedRecruit(r);
+    setFormState({ ...r });
+    setSaveMessage("");
+    setConfirmDelete(false);
+  };
+
+  const handleFieldChange = (field, value) => {
+    setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // ── Picking (or typing the exact name of) a saved high school also fills
+  // in State from that record, so the admin doesn't have to set both. Fires
+  // on every keystroke, not just a dropdown click, but only actually
+  // changes State once the typed text exactly matches a saved name — a
+  // partial match while still typing leaves whatever State is already set
+  // alone. ──
+  const handleHighSchoolChange = (name) => {
+    setFormState((prev) => {
+      const match = highSchoolOptions.find((h) => h.Name.toLowerCase() === name.trim().toLowerCase());
+      return { ...prev, HighSchool: name, State: match ? match.State || prev.State : prev.State };
+    });
+  };
+
+  const handleCreateGroup = async (name, initialRecruitId = null) => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const dupe = allGroups.find((g) => (g.name || "").trim().toLowerCase() === trimmed.toLowerCase());
+    if (dupe) {
+      setGroupError("A group named \"" + trimmed + "\" already exists.");
+      return null;
+    }
+    try {
+      const payload = {
+        name: trimmed,
+        recruitIds: initialRecruitId ? [initialRecruitId] : [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, "recruitGroups"), payload);
+      const newGroup = { id: ref.id, ...payload };
+      setAllGroups((prev) => [...prev, newGroup].sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+      setGroupError("");
+      return newGroup;
+    } catch (e) {
+      console.error("Admin create recruit group error:", e);
+      setGroupError("Failed to create group — check console.");
+      return null;
+    }
+  };
+
+  // Lower-stakes than deleting a recruit (an org label, not real data), so
+  // a plain window.confirm() matches PlayerDataSection's own group delete
+  // rather than the heavier in-panel confirm card reserved for records.
+  const handleDeleteGroup = async (group) => {
+    const count = group.recruitIds?.length || 0;
+    if (!window.confirm("Delete the group \"" + group.name + "\"? This only removes the group — none of its " + count + " recruit" + (count !== 1 ? "s" : "") + " will be affected.")) return;
+    try {
+      await deleteDoc(doc(db, "recruitGroups", group.id));
+      setAllGroups((prev) => prev.filter((g) => g.id !== group.id));
+      setSelectedGroups((prev) => prev.filter((n) => n !== group.name));
+    } catch (e) {
+      console.error("Admin delete recruit group error:", e);
+      alert("Failed to delete group — check console.");
+    }
+  };
+
+  const handleToggleGroupMembership = async (group, recruitId) => {
+    const isMember = (group.recruitIds || []).includes(recruitId);
+    try {
+      await updateDoc(doc(db, "recruitGroups", group.id), {
+        recruitIds: isMember ? arrayRemove(recruitId) : arrayUnion(recruitId),
+        updatedAt: serverTimestamp(),
+      });
+      setAllGroups((prev) => prev.map((g) => g.id === group.id
+        ? { ...g, recruitIds: isMember ? (g.recruitIds || []).filter((id) => id !== recruitId) : [...(g.recruitIds || []), recruitId] }
+        : g
+      ));
+    } catch (e) {
+      console.error("Admin toggle recruit group membership error:", e);
+      alert("Failed to update group membership — check console.");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!formState.First.trim() || !formState.Last.trim()) {
+      setSaveMessage("First and last name are required.");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      // ── Seed the highSchools collection the first time this exact name
+      // (case-insensitive) is entered, so it becomes an autocomplete
+      // suggestion for every recruit after this one. Runs on every save
+      // rather than on blur, so a recruit that's never actually saved
+      // never creates an orphan high school doc. ──
+      const hsName = (formState.HighSchool || "").trim();
+      if (hsName && !highSchoolOptions.some((h) => h.Name.toLowerCase() === hsName.toLowerCase())) {
+        const newHighSchool = { Name: hsName, State: formState.State || "", createdAt: serverTimestamp() };
+        await addDoc(collection(db, "highSchools"), newHighSchool);
+        setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
+      }
+
+      if (isNew) {
+        const payload = { ...formState, updatedAt: serverTimestamp() };
+        delete payload.isNew;
+        const newDocRef = await addDoc(collection(db, "recruits"), payload);
+        const newRecruit = { id: newDocRef.id, ...payload };
+        setAllRecruits((prev) => [...prev, newRecruit].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")));
+        setSelectedRecruit(newRecruit);
+        setFormState(newRecruit);
+        setSaveMessage("Recruit created.");
+      } else {
+        const payload = { ...formState, updatedAt: serverTimestamp() };
+        delete payload.id;
+        await updateDoc(doc(db, "recruits", selectedRecruit.id), payload);
+        const updated = { ...selectedRecruit, ...formState };
+        setAllRecruits((prev) => prev.map((r) => (r.id === updated.id ? updated : r)).sort((a, b) => (a.Last || "").localeCompare(b.Last || "")));
+        setSelectedRecruit(updated);
+        setSaveMessage("Changes saved.");
+      }
+    } catch (e) {
+      console.error("Admin recruit save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedRecruit || isNew) return;
+    setRemoving(true);
+    try {
+      await deleteDoc(doc(db, "recruits", selectedRecruit.id));
+      setAllRecruits((prev) => prev.filter((r) => r.id !== selectedRecruit.id));
+      setSelectedRecruit(null);
+      setFormState(null);
+      setConfirmDelete(false);
+      setSaveMessage("");
+    } catch (e) {
+      console.error("Admin recruit delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const handlePromote = async () => {
+    if (!selectedRecruit || isNew || !formState) return;
+    if (formState.RecruitClass !== PROMOTABLE_RECRUIT_CLASS) return;
+    if (selectedRecruit.promotedPlayerId) return;
+    setPromoting(true);
+    setSaveMessage("");
+    try {
+      const draftClass = draftClassForRecruitClass(formState.RecruitClass);
+      const baseSlug = generateSlug(formState.First, formState.Last, formState.Position, draftClass);
+
+      const playersSnap = await getDocs(collection(db, "players"));
+      const existingSlugs = new Set(playersSnap.docs.map((d) => d.data().Slug).filter(Boolean));
+      let slug = baseSlug;
+      let n = 1;
+      while (existingSlugs.has(slug)) {
+        slug = baseSlug + "-" + n;
+        n += 1;
+      }
+
+      const playerPayload = {
+        First: formState.First,
+        Last: formState.Last,
+        School: formState.Commitment,
+        Position: formState.Position,
+        Eligible: draftClass,
+        Height: formState.Height,
+        Weight: formState.Weight,
+        Bio: "",
+        Flair: formState.Flair,
+        Live: true, // recruits no longer track Live themselves — a promoted player goes public immediately
+        AdminNotes: formState.AdminNotes,
+        Flag: formState.Flag,
+        Slug: slug,
+        updatedAt: serverTimestamp(),
+      };
+      const newPlayerRef = await addDoc(collection(db, "players"), playerPayload);
+
+      const promotionFields = { promotedPlayerId: newPlayerRef.id, promotedSlug: slug, promotedAt: serverTimestamp() };
+      await updateDoc(doc(db, "recruits", selectedRecruit.id), promotionFields);
+
+      const updated = { ...selectedRecruit, ...formState, ...promotionFields };
+      setAllRecruits((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      setSelectedRecruit(updated);
+      setFormState(updated);
+      setSaveMessage("Added to We-Draft — slug \"" + slug + "\".");
+    } catch (e) {
+      console.error("Admin recruit promote error:", e);
+      setSaveMessage("Failed to add to We-Draft — check console.");
+    } finally {
+      setPromoting(false);
+    }
+  };
+
+  const canPromote = formState && formState.RecruitClass === PROMOTABLE_RECRUIT_CLASS;
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Recruits
+          </div>
+          <button
+            onClick={startNewRecruit}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + Add Recruit
+          </button>
+        </div>
+
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search name or commitment..."
+            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+          />
+          <FilterBar label="Recruit Class" options={RECRUIT_CLASSES} selected={selectedClasses} setSelected={setSelectedClasses} />
+          <FilterBar label="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+          <FilterBar label="Recruit Grade" options={RECRUIT_FLAIR_OPTIONS.filter(Boolean)} selected={selectedGrades} setSelected={setSelectedGrades} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start" }}>
+            <DropdownChecklist title="State" options={US_STATES} selected={selectedStates} setSelected={setSelectedStates} />
+            <DropdownChecklist title="Commitment" options={fbsSchoolOptions} selected={selectedCommitments} setSelected={setSelectedCommitments} />
+          </div>
+
+          {/* Named groups — separate from Flag/Recruit Grade above (a
+              recruit can belong to any number of these). Filtering happens
+              here; creating/deleting a group and adding/removing this-or-
+              that recruit from one both happen in the edit form below (see
+              the "Groups" FieldRow), except deleting a group can also be
+              done right here so it's not buried inside some recruit's
+              form. */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Groups
+              </div>
+              {allGroups.length > 0 && (
+                <DropdownChecklist title="Filter" options={allGroups.map((g) => g.name)} selected={selectedGroups} setSelected={setSelectedGroups} />
+              )}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+              <input
+                type="text"
+                value={newGroupName}
+                onChange={(e) => { setNewGroupName(e.target.value); setGroupError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && newGroupName.trim()) { handleCreateGroup(newGroupName); setNewGroupName(""); } }}
+                placeholder="New group name..."
+                style={{ flex: "1 1 160px", minWidth: "140px", border: "2px solid #ddd", borderRadius: "6px", padding: "6px 10px", fontWeight: 700, fontSize: "12px", outline: "none", boxSizing: "border-box" }}
+              />
+              <button
+                onClick={() => { if (newGroupName.trim()) { handleCreateGroup(newGroupName); setNewGroupName(""); } }}
+                disabled={!newGroupName.trim()}
+                style={{
+                  padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                  border: "2px solid " + BLUE, borderRadius: "6px",
+                  background: BLUE, color: "#fff",
+                  cursor: newGroupName.trim() ? "pointer" : "default",
+                  opacity: newGroupName.trim() ? 1 : 0.5,
+                }}
+              >
+                + Group
+              </button>
+            </div>
+            {groupError && (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b", marginTop: "4px" }}>{groupError}</div>
+            )}
+            {allGroups.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                {allGroups.map((g) => (
+                  <span
+                    key={g.id}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "6px",
+                      border: "2px solid #ddd", borderRadius: "20px",
+                      padding: "4px 6px 4px 12px", fontSize: "11px", fontWeight: 800, color: "#555",
+                    }}
+                  >
+                    {g.name} <span style={{ color: "#aaa", fontWeight: 700 }}>({(g.recruitIds || []).length})</span>
+                    <button
+                      onClick={() => handleDeleteGroup(g)}
+                      title={"Delete \"" + g.name + "\" — recruits are unaffected"}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        width: "18px", height: "18px", borderRadius: "50%",
+                        border: "none", background: "#eee", color: "#888",
+                        fontSize: "11px", fontWeight: 900, cursor: "pointer", lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <LoadingSpinner label="Loading recruits" size={28} minHeight="100px" />
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No recruits match.</div>
+        ) : (
+          <div style={{ maxHeight: "600px", overflowY: "auto" }}>
+            <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+              {filtered.length} recruit{filtered.length !== 1 ? "s" : ""}
+            </div>
+            {filtered.map((r) => {
+              const isSelected = selectedRecruit?.id === r.id;
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => selectRecruit(r)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "10px",
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE }}>
+                      {r.Flag && (
+                        <span
+                          title={r.Flag + " flag"}
+                          style={{
+                            display: "inline-block", width: "9px", height: "9px", borderRadius: "50%",
+                            marginRight: "7px", background: (FLAG_COLORS.find((f) => f.key === r.Flag) || {}).hex || "#999",
+                          }}
+                        />
+                      )}
+                      {(r.First || "") + " " + (r.Last || "")}
+                      {r.Flair && (
+                        <span
+                          title={r.Flair}
+                          style={{
+                            marginLeft: "8px", fontSize: "9px", fontWeight: 900, color: "#fff",
+                            background: (RECRUIT_GRADE_COLORS[r.Flair] || {}).bg || "#5F5E5A",
+                            border: "1px solid " + ((RECRUIT_GRADE_COLORS[r.Flair] || {}).border || "#444441"),
+                            borderRadius: "10px", padding: "1px 6px",
+                          }}
+                        >
+                          {r.Flair}
+                        </span>
+                      )}
+                      {r.promotedPlayerId && (
+                        <span style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 900, color: "#2e7d32", border: "1px solid #2e7d32", borderRadius: "10px", padding: "1px 6px" }}>
+                          ADDED
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#888" }}>
+                      {r.Position || "—"} · {r.Commitment || "—"} · Class of {r.RecruitClass || "—"}
+                    </div>
+                    {(groupNamesByRecruit.get(r.id) || []).length > 0 && (
+                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#7a5c00", marginTop: "2px" }}>
+                        🏷 {(groupNamesByRecruit.get(r.id) || []).join(", ")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {isNew ? "New Recruit" : selectedRecruit ? "Edit Recruit" : "Select a Recruit"}
+          </div>
+          {!isNew && selectedRecruit?.promotedSlug && (
+            <a
+              href={"/player/" + selectedRecruit.promotedSlug}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "flex", alignItems: "center", gap: "5px",
+                background: "#fff", color: GOLD, border: "none",
+                borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px",
+                textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              View Page ↗
+            </a>
+          )}
+        </div>
+
+        {!selectedRecruit || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a recruit from the list to edit their record, or "+ Add Recruit" to create one.
+          </div>
+        ) : (
+          <div style={{ padding: "16px" }}>
+            <FieldGroup>
+              <FieldRow label="First">
+                <input value={formState.First} onChange={(e) => handleFieldChange("First", e.target.value)} style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Last">
+                <input value={formState.Last} onChange={(e) => handleFieldChange("Last", e.target.value)} style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="High School">
+                <SchoolCombobox
+                  value={formState.HighSchool}
+                  onChange={handleHighSchoolChange}
+                  options={highSchoolNames}
+                  getLabel={highSchoolLabel}
+                />
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  Type to search saved high schools — picking one fills in State too. A new name is saved automatically the first time you save this recruit.
+                </div>
+              </FieldRow>
+              <FieldRow label="State">
+                <select value={formState.State} onChange={(e) => handleFieldChange("State", e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Commitment (FBS only)">
+                <select value={formState.Commitment} onChange={(e) => handleFieldChange("Commitment", e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  {fbsSchoolOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Position">
+                <select value={formState.Position} onChange={(e) => handleFieldChange("Position", e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  {POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Recruit Class">
+                <select value={formState.RecruitClass} onChange={(e) => handleFieldChange("RecruitClass", e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  {RECRUIT_CLASSES.map((yr) => <option key={yr} value={yr}>{yr}</option>)}
+                </select>
+                {formState.RecruitClass && (
+                  <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                    Draft Class: {draftClassForRecruitClass(formState.RecruitClass)}
+                    {formState.RecruitClass !== PROMOTABLE_RECRUIT_CLASS && " — not yet promotable (only " + PROMOTABLE_RECRUIT_CLASS + " recruits can be added to We-Draft today)."}
+                  </div>
+                )}
+              </FieldRow>
+              <FieldRow label="Height">
+                <input value={formState.Height} onChange={(e) => handleFieldChange("Height", e.target.value)} placeholder="e.g. 6'2&quot;" style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Weight">
+                <input value={formState.Weight} onChange={(e) => handleFieldChange("Weight", e.target.value)} placeholder="e.g. 215" style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Flair (recruit grade)">
+                <select value={formState.Flair} onChange={(e) => handleFieldChange("Flair", e.target.value)} style={inputStyle}>
+                  {RECRUIT_FLAIR_OPTIONS.map((f) => <option key={f} value={f}>{f || "None"}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Film">
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    value={formState.Film}
+                    onChange={(e) => handleFieldChange("Film", e.target.value)}
+                    placeholder="https://..."
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {formState.Film ? (
+                    <a
+                      href={formState.Film}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        flexShrink: 0, display: "flex", alignItems: "center", gap: "5px",
+                        background: BLUE, color: "#fff", border: "none",
+                        borderRadius: "6px", padding: "0 12px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      🎥 Film ↗
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      style={{
+                        flexShrink: 0, background: "#eee", color: "#999", border: "none",
+                        borderRadius: "6px", padding: "0 12px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: "default",
+                      }}
+                    >
+                      🎥 Film
+                    </button>
+                  )}
+                </div>
+              </FieldRow>
+              <FieldRow label="Flag">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {FLAG_COLORS.map((f) => {
+                    const active = formState.Flag === f.key;
+                    return (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => handleFieldChange("Flag", active ? "" : f.key)}
+                        title={f.key + " flag"}
+                        style={{
+                          width: "28px", height: "28px", borderRadius: "50%", cursor: "pointer",
+                          background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
+                          boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                        }}
+                      />
+                    );
+                  })}
+                  {formState.Flag && (
+                    <button
+                      type="button"
+                      onClick={() => handleFieldChange("Flag", "")}
+                      style={{
+                        background: "none", border: "none", color: "#999", cursor: "pointer",
+                        fontWeight: 700, fontSize: "12px", textDecoration: "underline",
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </FieldRow>
+              {/* New recruits don't have a Firestore doc id yet to attach
+                  memberships to — save the recruit first, then this appears
+                  on re-opening it. Creating a brand-new group from here
+                  (rather than the filter bar above) adds this recruit to it
+                  immediately, in the same write. */}
+              {!isNew && (
+                <FieldRow label="Groups">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {allGroups.map((g) => {
+                      const active = (g.recruitIds || []).includes(selectedRecruit.id);
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => handleToggleGroupMembership(g, selectedRecruit.id)}
+                          style={{
+                            padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                            border: "2px solid " + BLUE, borderRadius: "20px", cursor: "pointer",
+                            background: active ? BLUE : "#fff",
+                            color: active ? "#fff" : BLUE,
+                          }}
+                        >
+                          {active ? "✓ " : "+ "}{g.name}
+                        </button>
+                      );
+                    })}
+                    {allGroups.length === 0 && (
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#999" }}>
+                        No groups yet — create one above the recruit list.
+                      </div>
+                    )}
+                  </div>
+                </FieldRow>
+              )}
+              <FieldRow label="Admin Notes (internal only)">
+                <textarea
+                  value={formState.AdminNotes}
+                  onChange={(e) => handleFieldChange("AdminNotes", e.target.value)}
+                  placeholder="Internal notes — not shown anywhere public"
+                  style={{ ...inputStyle, height: "80px", resize: "vertical", fontFamily: "inherit" }}
+                />
+              </FieldRow>
+            </FieldGroup>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%", marginTop: "16px",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : isNew ? "Create Recruit" : "Save Changes"}
+            </button>
+
+            {!isNew && (
+              <div style={{ marginTop: "10px" }}>
+                {selectedRecruit.promotedPlayerId ? (
+                  <div style={{
+                    width: "100%", textAlign: "center", background: "#eafaf0", color: "#2e7d32",
+                    border: "2px solid #2e7d32", borderRadius: "8px", padding: "10px",
+                    fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+                  }}>
+                    ✅ Added — <a href={"/player/" + selectedRecruit.promotedSlug} target="_blank" rel="noopener noreferrer" style={{ color: "#2e7d32" }}>View Page ↗</a>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handlePromote}
+                    disabled={!canPromote || promoting}
+                    title={canPromote ? "" : "Only " + PROMOTABLE_RECRUIT_CLASS + " recruits can be added to We-Draft today."}
+                    style={{
+                      width: "100%", background: canPromote ? GOLD : "#eee", color: canPromote ? "#fff" : "#999",
+                      border: "2px solid " + (canPromote ? BLUE : "#ddd"),
+                      borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                      cursor: canPromote && !promoting ? "pointer" : "default",
+                      opacity: promoting ? 0.6 : 1,
+                    }}
+                  >
+                    {promoting ? "Adding..." : "Add to We-Draft"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") || saveMessage.includes("required") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+
+            {!isNew && (
+              <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+                {confirmDelete ? (
+                  <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                    <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                      ⚠ Permanently delete {(selectedRecruit.First || "") + " " + (selectedRecruit.Last || "")}?
+                    </div>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                      This removes the recruit record{selectedRecruit.promotedPlayerId ? " (their promoted player page is unaffected)" : ""} and cannot be undone.
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        onClick={() => setConfirmDelete(false)}
+                        disabled={removing}
+                        style={{
+                          flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        disabled={removing}
+                        style={{
+                          flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                          borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                          opacity: removing ? 0.6 : 1,
+                        }}
+                      >
+                        {removing ? "Deleting..." : "Yes, Delete Permanently"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    style={{
+                      width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    Delete Recruit
                   </button>
                 )}
               </div>
