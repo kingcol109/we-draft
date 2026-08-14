@@ -140,6 +140,19 @@ const TREND_STYLE = {
   },
 };
 
+// ── Game Notes tag scale — a separate, coarser 5-tier scale from the
+// site's Performance grades (Dominant/Great/Good/Productive/Average/Bad),
+// specific to this per-game evaluator note: how this one game looked for
+// this player, not a formal performance grade. ──
+const GAME_NOTE_TAGS = [
+  { key: "Great", color: "#16a34a" },
+  { key: "Good", color: "#0f6e56" },
+  { key: "Average", color: "#888888" },
+  { key: "Bad", color: "#c17a1f" },
+  { key: "Awful", color: "#c0392b" },
+];
+const GAME_NOTE_MAX_WORDS = 50;
+
 const toTeamSlug = (school) => {
   if (!school) return "";
   return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
@@ -405,6 +418,19 @@ export default function PlayerProfile() {
   const [nflFit, setNflFit] = useState("");
   const [evaluation, setEvaluation] = useState("");
   const [visibility, setVisibility] = useState("public");
+  // Per-game notes on this player's evaluation — one tag+note per final
+  // game they played in (see the "Game Notes" panel below the evaluation
+  // textarea). Stored as part of the same evaluation doc, not a separate
+  // collection — {gameId, opponent, dateMs, tag, note} per entry, with
+  // opponent/dateMs captured at add time so displaying an already-added
+  // note never needs to re-fetch or re-hold onto the full games list.
+  const [gameNotes, setGameNotes] = useState([]);
+  const [showGameNotes, setShowGameNotes] = useState(false);
+  const [availableGames, setAvailableGames] = useState(null); // null = not fetched yet
+  const [gamesLoading, setGamesLoading] = useState(false);
+  const [selectedGameId, setSelectedGameId] = useState("");
+  const [noteTag, setNoteTag] = useState("");
+  const [noteText, setNoteText] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [saving, setSaving] = useState(false);
   const [traits, setTraits] = useState({});
@@ -917,6 +943,7 @@ useEffect(() => {
     // Always reset first so switching to an unevaluated player clears the form
     setGrade(""); setStrengths([]); setWeaknesses([]);
     setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+    setGameNotes([]); setShowGameNotes(false); setSelectedGameId(""); setNoteTag(""); setNoteText("");
     try {
       const snap = await getDoc(doc(db,"users",user.uid,"evaluations",player.id));
       if (snap.exists()) {
@@ -924,6 +951,7 @@ useEffect(() => {
         setGrade(d.grade||""); setStrengths(d.strengths||[]); setWeaknesses(d.weaknesses||[]);
         setNflFit(d.nflFit||""); setEvaluation(d.evaluation||"");
         setVisibility(d.visibility||"public"); setLastUpdated(d.updatedAt||null);
+        setGameNotes(Array.isArray(d.gameNotes) ? d.gameNotes : []);
       }
     } catch(e) { console.error(e); }
   };
@@ -1322,7 +1350,78 @@ useEffect(() => {
     });
   };
 
-  const handleSaveEvaluation = async () => {
+  // ── Game Notes — lazily fetched the first time the panel opens (not on
+  // every player-page load, since most visitors never touch it): every
+  // schedule26 game that's gone Final with this player's School on either
+  // side, so "available" naturally includes both teams in a matchup the
+  // moment it's final, for anyone evaluating a player from either side.
+  // Fetches the whole schedule26 collection and filters client-side rather
+  // than composing an OR query (Home==School || Away==School) — same
+  // "just fetch and filter" approach StandingsSection already uses for
+  // this same collection. ──
+  const handleToggleGameNotes = async () => {
+    const opening = !showGameNotes;
+    setShowGameNotes(opening);
+    if (opening && availableGames === null && player?.School) {
+      setGamesLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "schedule26"));
+        const games = snap.docs
+          .map((d) => d.data())
+          .filter((g) => g.Final && g.HomeScore != null && g.AwayScore != null && (g.Home === player.School || g.Away === player.School))
+          .map((g) => ({
+            id: g.Slug,
+            opponent: g.Home === player.School ? g.Away : g.Home,
+            dateMs: g.Date?.toDate ? g.Date.toDate().getTime() : (g.Date ? new Date(g.Date).getTime() : 0),
+          }))
+          .filter((g) => g.id)
+          .sort((a, b) => b.dateMs - a.dateMs);
+        setAvailableGames(games);
+      } catch (e) {
+        console.error("Game Notes fetch error:", e);
+        setAvailableGames([]);
+      } finally {
+        setGamesLoading(false);
+      }
+    }
+  };
+
+  // Games already noted don't show up again in the picker — one note per
+  // game, matching one evaluation per player.
+  const notedGameIds = new Set(gameNotes.map((n) => n.gameId));
+  const pickableGames = (availableGames || []).filter((g) => !notedGameIds.has(g.id));
+
+  // Adding/removing a note immediately triggers a full evaluation save
+  // (not just a "gameNotes" field patch) — the note itself only lives in
+  // Firestore once handleSaveEvaluation actually writes the doc, so
+  // leaving it purely local until some *later* manual save would mean it's
+  // silently unsaved (and lost on navigating away) the moment it's added.
+  // `overrideGameNotes` is how the just-computed array reaches that save
+  // without waiting on setGameNotes' own state update to land first.
+  const handleAddGameNote = async () => {
+    const game = (availableGames || []).find((g) => g.id === selectedGameId);
+    if (!game) return;
+    if (!noteTag) { alert("Pick a tag for this game first."); return; }
+    const text = noteText.trim();
+    if (!text) { alert("Write a note first."); return; }
+    if (text.split(/\s+/).filter(Boolean).length > GAME_NOTE_MAX_WORDS) {
+      alert(`Keep the note to ${GAME_NOTE_MAX_WORDS} words or fewer.`);
+      return;
+    }
+    if (containsProfanity(text)) { alert("❌ That note contains inappropriate language."); return; }
+    const updated = [...gameNotes, { gameId: game.id, opponent: game.opponent, dateMs: game.dateMs, tag: noteTag, note: text }];
+    setGameNotes(updated);
+    setSelectedGameId(""); setNoteTag(""); setNoteText("");
+    await handleSaveEvaluation(updated);
+  };
+
+  const handleRemoveGameNote = async (gameId) => {
+    const updated = gameNotes.filter((n) => n.gameId !== gameId);
+    setGameNotes(updated);
+    await handleSaveEvaluation(updated);
+  };
+
+  const handleSaveEvaluation = async (overrideGameNotes) => {
     if (!user||!player?.id) return alert("You must sign in first.");
     if (visibility==="public"&&containsProfanity(evaluation)) return alert("❌ Your evaluation contains inappropriate language.");
     const gradeLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
@@ -1337,6 +1436,7 @@ useEffect(() => {
         uid:user.uid, email:user.email, playerId:player.id,
         playerName:`${player.First||""} ${player.Last||""}`.trim(),
         grade: savedGrade, strengths, weaknesses, nflFit, evaluation, visibility,
+        gameNotes: overrideGameNotes ?? gameNotes,
         updatedAt:serverTimestamp(),
       };
       await setDoc(doc(db,"players",player.id,"evaluations",user.uid), evalData);
@@ -1354,6 +1454,7 @@ useEffect(() => {
       const { deleteDoc, doc:fDoc } = await import("firebase/firestore");
       await Promise.all([deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)), deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id))]);
       setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+      setGameNotes([]);
       alert("🗑️ Evaluation removed from your board.");
     } catch(e) { alert("❌ Failed to remove evaluation. Try again."); }
   }
@@ -1376,6 +1477,7 @@ useEffect(() => {
       await Promise.all([deleteDoc(fDoc(db,"players",player.id,"evaluations",user.uid)), deleteDoc(fDoc(db,"users",user.uid,"evaluations",player.id))]);
       setArchivedEval({ ...archiveData, archivedAt: { toDate: () => now } });
       setGrade(""); setStrengths([]); setWeaknesses([]); setNflFit(""); setEvaluation(""); setVisibility("public"); setLastUpdated(null);
+      setGameNotes([]);
       alert("📦 Evaluation archived and current eval cleared. You can now start a fresh evaluation.");
     } catch(e) { console.error(e); alert("❌ Failed to archive evaluation. Try again."); }
     finally { setArchiving(false); }
@@ -3351,8 +3453,137 @@ useEffect(() => {
                   </div>
                 </div>
 
+                {/* Game Notes — one tag+note per final game this player's
+                    team has played (see handleToggleGameNotes above; the
+                    same final game is offered to anyone evaluating a
+                    player on either team). Starts collapsed behind a
+                    button; games already noted drop out of the picker. */}
+                <div className="mb-4">
+                  <button
+                    type="button"
+                    onClick={handleToggleGameNotes}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                      background: showGameNotes ? color1 : "#fff", color: showGameNotes ? "#fff" : color1,
+                      border: `2px solid ${color1}`, borderRadius: showGameNotes ? "6px 6px 0 0" : "6px", padding: "10px 14px",
+                      fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    <span>🏈 Game Notes{gameNotes.length > 0 ? ` (${gameNotes.length})` : ""}</span>
+                    <span>{showGameNotes ? "▲" : "▼"}</span>
+                  </button>
+
+                  {showGameNotes && (
+                    <div style={{ border: `2px solid ${color1}`, borderTop: "none", borderRadius: "0 0 6px 6px", padding: "12px 14px" }}>
+                      {gameNotes.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "14px" }}>
+                          {[...gameNotes].sort((a, b) => b.dateMs - a.dateMs).map((n) => {
+                            const tagInfo = GAME_NOTE_TAGS.find((t) => t.key === n.tag);
+                            return (
+                              <div key={n.gameId} style={{ border: "1px solid #eee", borderRadius: "6px", padding: "8px 10px" }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                                  <div style={{ fontSize: "12px", fontWeight: 900, color: "#333" }}>
+                                    vs {n.opponent}{n.dateMs ? ` (${new Date(n.dateMs).toLocaleDateString("en-US", { timeZone: "UTC" })})` : ""}
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", background: tagInfo?.color || "#999", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+                                      {n.tag}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveGameNote(n.gameId)}
+                                      disabled={saving}
+                                      style={{ background: "none", border: "none", color: "#c0392b", fontSize: "11px", fontWeight: 800, textDecoration: "underline", cursor: saving ? "default" : "pointer", padding: 0, opacity: saving ? 0.5 : 1 }}
+                                    >
+                                      {saving ? "…" : "Remove"}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: "12.5px", color: "#555", marginTop: "4px", lineHeight: 1.4 }}>{n.note}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {gamesLoading ? (
+                        <LoadingSpinner label="Loading games" size={20} minHeight="40px" />
+                      ) : pickableGames.length === 0 ? (
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#999", fontStyle: "italic" }}>
+                          {availableGames && availableGames.length === 0
+                            ? "No final games for this player's team yet."
+                            : "No more games available to note — every final game already has one."}
+                        </div>
+                      ) : (
+                        <div>
+                          <select
+                            value={selectedGameId}
+                            onChange={(e) => { setSelectedGameId(e.target.value); setNoteTag(""); setNoteText(""); }}
+                            className="w-full rounded px-3 py-2 border-2 font-bold"
+                            style={{ borderColor: color1, marginBottom: "8px" }}
+                          >
+                            <option value="">Select a game...</option>
+                            {pickableGames.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                vs {g.opponent}{g.dateMs ? ` (${new Date(g.dateMs).toLocaleDateString("en-US", { timeZone: "UTC" })})` : ""}
+                              </option>
+                            ))}
+                          </select>
+
+                          {selectedGameId && (() => {
+                            const noteWordCount = noteText.trim() ? noteText.trim().split(/\s+/).filter(Boolean).length : 0;
+                            const overLimit = noteWordCount > GAME_NOTE_MAX_WORDS;
+                            return (
+                              <>
+                                <select
+                                  value={noteTag}
+                                  onChange={(e) => setNoteTag(e.target.value)}
+                                  className="w-full rounded px-3 py-2 border-2 font-bold"
+                                  style={{ borderColor: color1, marginBottom: "8px" }}
+                                >
+                                  <option value="">Tag this game...</option>
+                                  {GAME_NOTE_TAGS.map((t) => <option key={t.key} value={t.key}>{t.key}</option>)}
+                                </select>
+                                <textarea
+                                  value={noteText}
+                                  onChange={(e) => setNoteText(e.target.value)}
+                                  placeholder={`A short note on this game (up to ${GAME_NOTE_MAX_WORDS} words)...`}
+                                  className="w-full rounded px-3 py-2 border-2 font-medium"
+                                  style={{ borderColor: overLimit ? "#c0392b" : color1, height: "70px" }}
+                                />
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "4px" }}>
+                                  <span style={{ fontSize: "11px", fontWeight: 700, color: overLimit ? "#c0392b" : "#999" }}>
+                                    {noteWordCount}/{GAME_NOTE_MAX_WORDS} words
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddGameNote()}
+                                    disabled={!noteTag || !noteText.trim() || overLimit || saving}
+                                    style={{
+                                      background: color1, color: "#fff", border: `2px solid ${color2}`, borderRadius: "6px",
+                                      padding: "7px 16px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+                                      cursor: (!noteTag || !noteText.trim() || overLimit || saving) ? "default" : "pointer",
+                                      opacity: (!noteTag || !noteText.trim() || overLimit || saving) ? 0.5 : 1,
+                                    }}
+                                  >
+                                    {saving ? "Saving..." : "Add Note"}
+                                  </button>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex flex-col gap-2">
-                  <button onClick={handleSaveEvaluation} disabled={saving} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:color1, border:`2px solid ${color2}`, color:"#fff", letterSpacing:"0.08em" }}>
+                  {/* () => handleSaveEvaluation() — not onClick={handleSaveEvaluation}
+                      directly, which would pass the click event itself as
+                      overrideGameNotes (now that handleSaveEvaluation takes
+                      that param for the add/remove-note auto-save above). */}
+                  <button onClick={() => handleSaveEvaluation()} disabled={saving} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:color1, border:`2px solid ${color2}`, color:"#fff", letterSpacing:"0.08em" }}>
                     {saving?"Saving...":"Save Evaluation"}
                   </button>
                   <button onClick={handleShareEvaluation} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${color1}`, color:color1, letterSpacing:"0.08em" }}>
