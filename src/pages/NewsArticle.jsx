@@ -55,7 +55,7 @@ export default function NewsArticle() {
       .article-body h3 { font-size: 14px; }
       .article-body strong { font-weight: 700; }
       .article-body em { font-style: italic; }
-      .article-body a { color: ${GOLD}; font-weight: 600; text-decoration: underline; word-break: break-all; }
+      .article-body a { color: ${GOLD}; font-weight: 600; text-decoration: underline; overflow-wrap: break-word; }
       .article-body a:hover { color: #c98a10; }
       .article-body ul, .article-body ol { margin: 0 0 1.2em 1.5em; }
       .article-body li { margin-bottom: 0.4em; }

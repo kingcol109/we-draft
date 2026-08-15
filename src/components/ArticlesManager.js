@@ -10,7 +10,7 @@
 // The component itself adapts to whichever of those two roles is viewing it
 // — admins see every article, writers see only their own — rather than the
 // two mount points needing to pass down any scoping props.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
   collection,
@@ -67,19 +67,35 @@ const FontSize = Extension.create({
 
 const createSlug = (text) => text.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-");
 
-// Slug = short-form title + the published date — same deterministic,
-// no-manual-override-needed formula PerformancesManager.js uses (short
-// titles alone collide easily across articles). Only spent when the Slug
-// field itself is left blank — see handleSave — so a manually-set slug on
-// an existing article is never silently overwritten.
+// Slug = short-form title + the published date — same deterministic
+// formula PerformancesManager.js uses (short titles alone collide easily
+// across articles). Fully automatic now — there's no admin-facing Slug
+// input to override it with (see the read-only preview in the form below)
+// — computed fresh at create time and then left untouched by every later
+// edit (handleSave never rewrites slug on an existing article), so a
+// published article's URL never silently changes out from under it.
 const slugFor = (titleShort, publishedAtDate) => {
   const d = publishedAtDate instanceof Date ? publishedAtDate : (publishedAtDate ? new Date(publishedAtDate) : null);
   const dateStr = d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : "";
   return [createSlug(titleShort || ""), dateStr].filter(Boolean).join("-");
 };
 
+// formState.publishedAt is a plain "YYYY-MM-DD" <input type="date"> value —
+// shared by handleSave and the live slug preview so both build the exact
+// same Date (and therefore the exact same slug) from it.
+const parsePublishedAt = (dateStr) => {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split("-");
+  return new Date(+y, +m - 1, +d);
+};
+
+// "Away vs Home (M/D/YYYY)" — same UTC-anchored numeric date format
+// PlayerProfile.js's Game Notes picker already uses, so a game reads
+// identically wherever it's tagged.
+const gameLabel = (g) => `${g.away} vs ${g.home}${g.dateMs ? ` (${new Date(g.dateMs).toLocaleDateString("en-US", { timeZone: "UTC" })})` : ""}`;
+
 const BLANK_FORM = {
-  title: "", titleShort: "", slug: "", author: "", publishedAt: "",
+  title: "", titleShort: "", author: "", publishedAt: "",
   status: "draft", priority: 2, videoUrl: "", seoDescription: "",
 };
 
@@ -110,10 +126,16 @@ export default function ArticlesManager() {
   const [loading, setLoading] = useState(true);
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [games, setGames] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
 
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [formState, setFormState] = useState(null);
+  // Staged replacement slug for an *existing* article — only set when the
+  // admin explicitly clicks "Regenerate" below (never automatically), and
+  // only actually written on the next Save. null means "leave the stored
+  // slug alone", same as before Regenerate existed.
+  const [regeneratedSlug, setRegeneratedSlug] = useState(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -123,11 +145,13 @@ export default function ArticlesManager() {
 
   const [showPlayerPicker, setShowPlayerPicker] = useState(false);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
+  const [showGamePicker, setShowGamePicker] = useState(false);
   const [showImageInput, setShowImageInput] = useState(false);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [showVideoInput, setShowVideoInput] = useState(false);
   const [playerSearch, setPlayerSearch] = useState("");
   const [teamSearch, setTeamSearch] = useState("");
+  const [gameSearch, setGameSearch] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
@@ -176,10 +200,11 @@ export default function ArticlesManager() {
         const articlesQuery = isAdmin
           ? collection(db, "articles")
           : query(collection(db, "articles"), where("authorId", "==", user.uid));
-        const [articleSnap, playerSnap, teamSnap] = await Promise.all([
+        const [articleSnap, playerSnap, teamSnap, gameSnap] = await Promise.all([
           getDocs(articlesQuery),
           getDocs(collection(db, "players")),
           getDocs(collection(db, "schools")),
+          getDocs(collection(db, "schedule26")),
         ]);
 
         setArticles(articleSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -193,6 +218,18 @@ export default function ArticlesManager() {
           const name = d.data().School;
           return { name, slug: name.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-") };
         }));
+
+        // Most recent first — a game just played (or about to be) is far
+        // more likely to be what an article being written right now is
+        // tagging than one from months ago.
+        setGames(gameSnap.docs
+          .map((docSnap) => {
+            const d = docSnap.data();
+            const dateMs = d.Date?.toDate ? d.Date.toDate().getTime() : (d.Date ? new Date(d.Date).getTime() : 0);
+            return { id: docSnap.id, slug: d.Slug, away: d.Away, home: d.Home, dateMs };
+          })
+          .filter((g) => g.slug && g.away && g.home)
+          .sort((a, b) => b.dateMs - a.dateMs));
       } catch (e) {
         console.error("Articles fetch error:", e);
         setArticles([]);
@@ -206,6 +243,7 @@ export default function ArticlesManager() {
   const resetPickers = () => {
     setShowPlayerPicker(false);
     setShowTeamPicker(false);
+    setShowGamePicker(false);
     setShowImageInput(false);
     setShowLinkInput(false);
     setShowVideoInput(false);
@@ -216,7 +254,6 @@ export default function ArticlesManager() {
     setFormState({
       title: a.title || "",
       titleShort: a.titleShort || "",
-      slug: a.slug || "",
       author: a.author || "",
       publishedAt: a.publishedAt?.toDate ? a.publishedAt.toDate().toISOString().split("T")[0] : "",
       status: a.status || "draft",
@@ -227,6 +264,7 @@ export default function ArticlesManager() {
     editor?.commands.setContent(a.content || "");
     resetPickers();
     setSaveMessage("");
+    setRegeneratedSlug(null);
   };
 
   const startNewArticle = () => {
@@ -235,9 +273,15 @@ export default function ArticlesManager() {
     editor?.commands.setContent("<p>Start writing your article...</p>");
     resetPickers();
     setSaveMessage("");
+    setRegeneratedSlug(null);
   };
 
   const isNew = selectedArticle?.isNew === true;
+
+  const previewSlug = useMemo(() => {
+    if (!formState) return "";
+    return slugFor(formState.titleShort.trim(), parsePublishedAt(formState.publishedAt));
+  }, [formState]);
 
   const insertPlayer = (player) => {
     if (!editor) return;
@@ -249,6 +293,12 @@ export default function ArticlesManager() {
     if (!editor) return;
     editor.chain().focus().insertContent(`<a href="/team/${team.slug}">${team.name}</a> `).run();
     setShowTeamPicker(false);
+  };
+
+  const insertGame = (game) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent(`<a href="/game/${game.slug}" data-game-id="${game.id}">${gameLabel(game)}</a> `).run();
+    setShowGamePicker(false);
   };
 
   const insertImage = () => {
@@ -275,10 +325,11 @@ export default function ArticlesManager() {
     setShowVideoInput(false);
   };
 
-  // Player links are the join key for "related articles" on a player's
-  // page. Prefer the data-player-id baked in by insertPlayer; fall back to
-  // resolving the href's slug against the loaded players list for links
-  // that predate this attribute.
+  // Player/game links are the join key for "related articles" on a
+  // player's or game's own page. Prefer the data-player-id/data-game-id
+  // baked in by insertPlayer/insertGame; fall back to resolving the href's
+  // slug against the loaded players/games list for links that predate
+  // those attributes.
   const extractLinkedIds = (html) => {
     const div = document.createElement("div");
     div.innerHTML = html;
@@ -293,7 +344,13 @@ export default function ArticlesManager() {
       const linkSlug = link.getAttribute("href").split("/team/")[1];
       if (linkSlug) teamSet.add(linkSlug);
     });
-    return { playerIds: Array.from(playerIdSet), teamSlugs: Array.from(teamSet) };
+    const slugToGameId = new Map(games.map((g) => [g.slug, g.id]));
+    const gameIdSet = new Set();
+    div.querySelectorAll("a[href^='/game/']").forEach((link) => {
+      const gid = link.getAttribute("data-game-id") || slugToGameId.get(link.getAttribute("href").split("/game/")[1]);
+      if (gid) gameIdSet.add(gid);
+    });
+    return { playerIds: Array.from(playerIdSet), teamSlugs: Array.from(teamSet), gameIds: Array.from(gameIdSet) };
   };
 
   const handleSave = async () => {
@@ -306,10 +363,8 @@ export default function ArticlesManager() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const { playerIds, teamSlugs } = extractLinkedIds(html);
-      const publishedAtDate = formState.publishedAt
-        ? (() => { const [y, m, d] = formState.publishedAt.split("-"); return new Date(+y, +m - 1, +d); })()
-        : null;
+      const { playerIds, teamSlugs, gameIds } = extractLinkedIds(html);
+      const publishedAtDate = parsePublishedAt(formState.publishedAt);
 
       // Team-page article association: which school(s) TeamPage.js's own
       // automatic "articles about our players" feed should show this under
@@ -333,13 +388,13 @@ export default function ArticlesManager() {
         const payload = {
           title: formState.title,
           titleShort: formState.titleShort.trim(),
-          slug: formState.slug.trim() ? formState.slug.trim() : slugFor(formState.titleShort.trim(), publishedAtDate),
+          slug: slugFor(formState.titleShort.trim(), publishedAtDate),
           content: html,
           status: formState.status,
           priority: formState.priority,
           author: formState.author,
           publishedAt: publishedAtDate,
-          playerIds, teamSlugs, schools,
+          playerIds, teamSlugs, schools, gameIds,
           videoUrl: formState.videoUrl || "",
           seoDescription: formState.seoDescription.trim(),
           authorId: user.uid,
@@ -351,22 +406,29 @@ export default function ArticlesManager() {
         setSelectedArticle(newArticle);
         setSaveMessage("Article created.");
       } else {
+        // slug intentionally omitted unless the admin explicitly staged a
+        // replacement via the "Regenerate" button — see the comment above
+        // slugFor(). Otherwise it's never rewritten by an edit, so a
+        // published article's URL stays stable even if the title or date
+        // changes later.
         const payload = {
           title: formState.title,
           titleShort: formState.titleShort.trim(),
-          slug: formState.slug,
           content: html,
           status: formState.status,
           priority: formState.priority,
           author: formState.author,
           publishedAt: publishedAtDate,
-          playerIds, teamSlugs, schools,
+          playerIds, teamSlugs, schools, gameIds,
           videoUrl: formState.videoUrl || "",
           seoDescription: formState.seoDescription.trim(),
           updatedAt: serverTimestamp(),
         };
+        if (regeneratedSlug) payload.slug = regeneratedSlug;
         await updateDoc(doc(db, "articles", selectedArticle.id), payload);
         setArticles((prev) => prev.map((a) => (a.id === selectedArticle.id ? { ...a, ...payload } : a)));
+        setSelectedArticle((prev) => ({ ...prev, ...payload }));
+        setRegeneratedSlug(null);
         setSaveMessage("Saved.");
       }
     } catch (e) {
@@ -445,6 +507,7 @@ export default function ArticlesManager() {
 
   const filteredPlayers = players.filter((p) => p.name.toLowerCase().includes(playerSearch.toLowerCase()));
   const filteredTeams = teams.filter((t) => t.name.toLowerCase().includes(teamSearch.toLowerCase()));
+  const filteredGames = games.filter((g) => `${g.away} ${g.home}`.toLowerCase().includes(gameSearch.toLowerCase()));
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "18px", alignItems: "start" }}>
@@ -557,8 +620,49 @@ export default function ArticlesManager() {
                 <input value={formState.titleShort} onChange={(e) => setFormState((p) => ({ ...p, titleShort: e.target.value }))} placeholder="used in the slug, e.g. with the date" style={inputStyle} />
               </div>
               <div>
-                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Slug (optional)</div>
-                <input value={formState.slug} onChange={(e) => setFormState((p) => ({ ...p, slug: e.target.value }))} placeholder="auto-generated from short title + date" style={inputStyle} />
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                  {isNew ? "Slug (auto-generated preview)" : "Slug"}
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <div style={{
+                    flex: 1, border: "2px solid #eee", borderRadius: "6px",
+                    padding: "8px 10px", fontWeight: 700, fontSize: "13px",
+                    background: "#fafafa", color: "#666", boxSizing: "border-box",
+                    wordBreak: "break-all",
+                  }}>
+                    {isNew ? (previewSlug || "—") : (regeneratedSlug || selectedArticle?.slug || "—")}
+                  </div>
+                  {/* New articles already live-preview from the current
+                      title/date on every keystroke, so there's nothing to
+                      regenerate — this only matters once a slug exists and
+                      is otherwise frozen (see the comment above slugFor()). */}
+                  {!isNew && (
+                    <button
+                      type="button"
+                      onClick={() => setRegeneratedSlug(slugFor(formState.titleShort.trim(), parsePublishedAt(formState.publishedAt)))}
+                      title="Recompute the slug from the current short title + date"
+                      style={{
+                        flexShrink: 0, background: "#fff", color: BLUE, border: "2px solid " + BLUE,
+                        borderRadius: "6px", padding: "0 12px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                      }}
+                    >
+                      ↻ Regenerate
+                    </button>
+                  )}
+                </div>
+                {!isNew && regeneratedSlug && regeneratedSlug !== selectedArticle?.slug && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", fontWeight: 700, color: "#8a6300", marginTop: "5px" }}>
+                    ⚠ Will replace the current slug on next Save — existing links/bookmarks to the old one break.
+                    <button
+                      type="button"
+                      onClick={() => setRegeneratedSlug(null)}
+                      style={{ background: "none", border: "none", color: "#8a6300", cursor: "pointer", fontWeight: 900, textDecoration: "underline", fontSize: "11px" }}
+                    >
+                      Undo
+                    </button>
+                  </div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Author</div>
@@ -617,6 +721,7 @@ export default function ArticlesManager() {
               >A+</button>
               <button style={toolbarBtnStyle(showPlayerPicker)} onClick={() => { const v = !showPlayerPicker; resetPickers(); setShowPlayerPicker(v); }}>+ Player</button>
               <button style={toolbarBtnStyle(showTeamPicker)} onClick={() => { const v = !showTeamPicker; resetPickers(); setShowTeamPicker(v); }}>+ Team</button>
+              <button style={toolbarBtnStyle(showGamePicker)} onClick={() => { const v = !showGamePicker; resetPickers(); setShowGamePicker(v); }}>+ Game</button>
               <button style={toolbarBtnStyle(showImageInput)} onClick={() => { const v = !showImageInput; resetPickers(); setShowImageInput(v); }}>+ Image</button>
               <button style={toolbarBtnStyle(showLinkInput)} onClick={() => { const v = !showLinkInput; resetPickers(); setShowLinkInput(v); }}>+ Link</button>
               <button style={{ ...toolbarBtnStyle(showVideoInput), borderColor: "#b45309", color: showVideoInput ? "#fff" : "#b45309", background: showVideoInput ? "#b45309" : "#fff" }} onClick={() => { const v = !showVideoInput; resetPickers(); setShowVideoInput(v); }}>▶ Video</button>
@@ -640,6 +745,19 @@ export default function ArticlesManager() {
                     {t.name}
                   </div>
                 ))}
+              </div>
+            )}
+            {showGamePicker && (
+              <div style={{ border: "2px solid " + BLUE, borderRadius: "8px", padding: "10px", marginBottom: "8px", maxHeight: "200px", overflowY: "auto", background: "#f8faff" }}>
+                <input placeholder="Search game (either team)..." value={gameSearch} onChange={(e) => setGameSearch(e.target.value)} style={{ ...inputStyle, marginBottom: "8px" }} />
+                {filteredGames.map((g) => (
+                  <div key={g.id} onClick={() => insertGame(g)} style={{ padding: "6px 4px", borderBottom: "1px solid #eee", cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "#333" }}>
+                    {gameLabel(g)}
+                  </div>
+                ))}
+                {filteredGames.length === 0 && (
+                  <div style={{ padding: "6px 4px", fontSize: "12px", color: "#999" }}>No games match.</div>
+                )}
               </div>
             )}
             {showImageInput && (

@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
-import { collection, query, where, orderBy, getDocs, doc, getDoc, addDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, addDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
 import { useAuth } from "../context/AuthContext";
@@ -623,6 +623,7 @@ export default function GamePage() {
   // means this stays null forever, which the hero already treats as
   // "nothing to show" the same way it does for a missing school logo.
   const [channelLogo, setChannelLogo] = useState(null);
+  const [relatedArticles, setRelatedArticles] = useState([]);
   const [keyPlayersAway, setKeyPlayersAway] = useState([]);
   const [keyPlayersHome, setKeyPlayersHome] = useState([]);
   const [performancesAway, setPerformancesAway] = useState([]);
@@ -926,6 +927,34 @@ export default function GamePage() {
     loadChannel();
     return () => { cancelled = true; };
   }, [game?.Channel]);
+
+  // Articles tagged to this game — same "separate, independent lookup"
+  // shape as channelLogo above, keyed on game.id (ArticlesManager.js's own
+  // "+ Game" picker stores the real schedule26 doc id in an article's
+  // gameIds array, the same way playerIds/schools already work for
+  // PlayerProfile.js/TeamPage.js).
+  useEffect(() => {
+    if (!game?.id) { setRelatedArticles([]); return; }
+    let cancelled = false;
+    const loadArticles = async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, "articles"),
+          where("status", "==", "published"),
+          where("gameIds", "array-contains", game.id),
+          orderBy("publishedAt", "desc"),
+          limit(6),
+        ));
+        if (cancelled) return;
+        setRelatedArticles(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("Related articles fetch error:", e);
+        if (!cancelled) setRelatedArticles([]);
+      }
+    };
+    loadArticles();
+    return () => { cancelled = true; };
+  }, [game?.id]);
 
   // Seeds the pick form from the signed-in user's own existing pick (if
   // any) once both are known — user/profile resolve from AuthContext on
@@ -2389,6 +2418,42 @@ export default function GamePage() {
             {/* Pregame/live: comments trail below predictions instead of
                 leading them — see the isFinal placement above. */}
             {!isFinal && gameCommentsCard}
+
+            {/* Articles tagged to this game via ArticlesManager.js's "+
+                Game" picker — see the relatedArticles fetch above. Absent
+                entirely (not an empty-state card) when nothing's tagged,
+                same as how Community Predictions only differs from this by
+                always rendering its own empty state instead. */}
+            {relatedArticles.length > 0 && (
+              <div style={{ marginBottom: "28px" }}>
+                <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
+                  <div style={{ background: BLUE, padding: "10px 16px" }}>
+                    <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                      📰 Related Articles
+                    </h2>
+                  </div>
+                  <div style={{ height: "3px", background: GOLD }} />
+                  <div style={{ padding: isMobile ? "12px" : "16px 20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {relatedArticles.map((a) => (
+                      <Link
+                        key={a.id}
+                        to={`/news/${a.slug}`}
+                        style={{ display: "block", padding: "10px 12px", border: "1px solid #eee", borderRadius: "8px", textDecoration: "none", color: "#222" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = GOLD; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#eee"; }}
+                      >
+                        <div style={{ fontWeight: 900, fontSize: "14px" }}>{a.titleShort || a.title}</div>
+                        {a.publishedAt?.toDate && (
+                          <div style={{ fontSize: "12px", color: "#888", marginTop: "2px" }}>
+                            {a.publishedAt.toDate().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                          </div>
+                        )}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Footer */}
             <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: "2px solid #eee", display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: "10px" }}>
