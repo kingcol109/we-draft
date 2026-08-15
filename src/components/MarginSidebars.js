@@ -260,8 +260,11 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
           const articleItems = articleSnap.docs
             .map((d) => ({ id: d.id, ...d.data(), _kind: "article" }))
             .filter((a) => [1, 2].includes(a.priority));
+          // Published date only, never last-updated — an old article
+          // getting a small edit (which bumps updatedAt) must not jump back
+          // to the top of this feed.
           const combined = [...newsItems, ...articleItems]
-            .sort((a, b) => toMs(b.publishedAt || b.updatedAt) - toMs(a.publishedAt || a.updatedAt))
+            .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt))
             .slice(0, 6);
           setFeedItems(combined);
         }

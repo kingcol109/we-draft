@@ -332,7 +332,7 @@ export default function Home() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("updatedAt", "desc"), limit(6)));
+        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)));
         setArticles(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })));
       } catch (err) { console.error("Error fetching articles:", err); }
     };
@@ -386,8 +386,12 @@ export default function Home() {
     fetch();
   }, []);
 
+  // Published date only, never last-updated — an old article getting a
+  // typo fix (which bumps updatedAt) must not jump back to the top of the
+  // feed. An article with no publishedAt set sorts to the bottom (0)
+  // instead of jumping around based on unrelated edits.
   const combinedNews = [...news, ...articles]
-    .sort((a, b) => ((b.publishedAt?.seconds || b.updatedAt?.seconds || 0) - (a.publishedAt?.seconds || a.updatedAt?.seconds || 0)))
+    .sort((a, b) => ((b.publishedAt?.seconds || 0) - (a.publishedAt?.seconds || 0)))
     .slice(0, 6);
 
   const SectionTitle = ({ children, linkTo, linkLabel }) => (
@@ -725,7 +729,7 @@ export default function Home() {
               </div>
               <div style={{ height: "3px", background: GOLD }} />
               {combinedNews.length > 0 ? combinedNews.map((n, i) => {
-                const ts = n.publishedAt || n.updatedAt;
+                const ts = n.publishedAt;
                 const dateStr = ts?.toDate?.().toLocaleDateString(undefined, { month: "short", day: "numeric" });
                 const [mon, day] = dateStr ? dateStr.split(" ") : [null, null];
                 return (

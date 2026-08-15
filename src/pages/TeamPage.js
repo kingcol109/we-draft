@@ -43,6 +43,10 @@ const FLAIR_CONFIG = {
 const PROSPECT_YEARS = ["2027", "2028", "2029"];
 const ARCHIVE_YEAR = "2026";
 const NEWS_LIMIT = 8;
+// Starting visible count for the News sidebar's "3 most recent, then
+// expand" behavior — same idea as VIDEO_INITIAL_COUNT, capped at whatever
+// NEWS_LIMIT already fetched.
+const NEWS_INITIAL_COUNT = 3;
 
 // Mirrors PerformancesManager.js / PerformancePage.js's grade badge colors.
 const gradeStylesPerf = {
@@ -959,6 +963,7 @@ export default function TeamPage() {
   const [schoolsMap, setSchoolsMap] = useState({});
   const [teamVideos, setTeamVideos] = useState([]);
   const [visibleVideoCount, setVisibleVideoCount] = useState(VIDEO_INITIAL_COUNT);
+  const [visibleNewsCount, setVisibleNewsCount] = useState(NEWS_INITIAL_COUNT);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -1681,51 +1686,72 @@ export default function TeamPage() {
     </SidebarCard>
   );
 
+  // Starts at 3, expandable up to NEWS_LIMIT (everything already fetched) —
+  // same "Show More" idiom as VideosSidebar above.
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
       {teamNews.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No recent news.</div>
       ) : (
-        teamNews.map((n, i) => (
-          <Link
-            key={n.id}
-            to={`/news/${n.slug}`}
-            style={{
-              display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
-              textDecoration: "none", background: "#fff",
-              borderBottom: i < teamNews.length - 1 ? "1px solid #f0f0f0" : "none",
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-          >
-            <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
-              <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
-                <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                  {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
+        <>
+          {teamNews.slice(0, visibleNewsCount).map((n, i, arr) => (
+            <Link
+              key={n.id}
+              to={`/news/${n.slug}`}
+              style={{
+                display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
+                textDecoration: "none", background: "#fff",
+                borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
+                  <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
+                  </span>
+                </div>
+                <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
+                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+                    {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
+                  </span>
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{
+                  backgroundColor: n.type === "article" ? GOLD : BLUE,
+                  color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
+                  padding: "2px 5px", display: "inline-block", marginBottom: "3px", borderRadius: "2px",
+                  fontWeight: 900, textTransform: "uppercase",
+                }}>
+                  {n.type === "article" ? "Article" : "News"}
                 </span>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
+                  {n.titleShort || n.title}
+                </div>
               </div>
-              <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
-                <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
-                  {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
-                </span>
-              </div>
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{
-                backgroundColor: n.type === "article" ? GOLD : BLUE,
-                color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
-                padding: "2px 5px", display: "inline-block", marginBottom: "3px", borderRadius: "2px",
-                fontWeight: 900, textTransform: "uppercase",
-              }}>
-                {n.type === "article" ? "Article" : "News"}
-              </span>
-              <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
-                {n.titleShort || n.title}
-              </div>
-            </div>
-          </Link>
-        ))
+            </Link>
+          ))}
+          {visibleNewsCount < Math.min(teamNews.length, NEWS_LIMIT) && (
+            <button
+              onClick={() => setVisibleNewsCount((c) => Math.min(c + 3, NEWS_LIMIT))}
+              style={{
+                display: "block", width: "100%",
+                padding: "10px 14px",
+                background: BLUE, color: GOLD,
+                border: "none", cursor: "pointer",
+                fontWeight: 900, fontSize: "12px",
+                textTransform: "uppercase", letterSpacing: "0.1em",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+            >
+              Show More News ▾
+            </button>
+          )}
+        </>
       )}
     </SidebarCard>
   );
@@ -1905,10 +1931,10 @@ export default function TeamPage() {
                     })}
                   </div>
                 </details>
-                {ScheduleSidebar}
                 {teamVideos.length > 0 && VideosSidebar}
-                {teamPerformances.length > 0 && PerformancesSidebar}
                 {NewsSidebar}
+                {ScheduleSidebar}
+                {teamPerformances.length > 0 && PerformancesSidebar}
               </>
             )}
           </div>
@@ -1944,10 +1970,10 @@ export default function TeamPage() {
             <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "20px" }}>
               {!loading && (
                 <>
-                  {ScheduleSidebar}
                   {teamVideos.length > 0 && VideosSidebar}
-                  {teamPerformances.length > 0 && PerformancesSidebar}
                   {NewsSidebar}
+                  {ScheduleSidebar}
+                  {teamPerformances.length > 0 && PerformancesSidebar}
                 </>
               )}
             </div>

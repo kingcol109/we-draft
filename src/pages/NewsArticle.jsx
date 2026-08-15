@@ -8,16 +8,26 @@ import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
+import EngagementSection from "../components/EngagementSection";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
+
+// Same fallback PlayerProfile.js/generate-sitemap.js use for a school with
+// no manually-set Slug field — TeamPage.js's own lookup prefers a doc's
+// stored Slug and only falls back to this derived form.
+const toTeamSlug = (school) => {
+  if (!school) return "";
+  return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
+};
 
 export default function NewsArticle() {
   const { id } = useParams();
   const [article, setArticle] = useState(null);
   const [sidebarItems, setSidebarItems] = useState([]);
   const [mentionedPlayers, setMentionedPlayers] = useState([]);
-  const [schoolLogos, setSchoolLogos] = useState({});
+  const [mentionedGames, setMentionedGames] = useState([]);
+  const [schoolInfo, setSchoolInfo] = useState({}); // School name -> { logo, slug }
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const contentRef = useRef(null);
@@ -28,16 +38,20 @@ export default function NewsArticle() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // School name → logo, for the "Players Mentioned" row logos. Fetched once
-  // (the schools collection is small) rather than per-player.
+  // School name → { logo, slug }, for the "Players Mentioned" row logos and
+  // the "Teams Mentioned" block (both name and link). Fetched once (the
+  // schools collection is small) rather than per-player/per-team.
   useEffect(() => {
     const fetch = async () => {
       try {
         const snap = await getDocs(collection(db, "schools"));
         const map = {};
-        snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data.Logo1 || ""; });
-        setSchoolLogos(map);
-      } catch (e) { /* logos are non-critical */ }
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.School) map[data.School] = { logo: data.Logo1 || "", slug: data.Slug || toTeamSlug(data.School) };
+        });
+        setSchoolInfo(map);
+      } catch (e) { /* logos/slugs are non-critical */ }
     };
     fetch();
   }, []);
@@ -85,9 +99,11 @@ export default function NewsArticle() {
     fetch();
   }, [id]);
 
-  // Players mentioned — only articles carry a playerIds array (built from
-  // the "+Player" links the editor inserts into the body); news items don't
-  // have this field, so there's nothing to show for those.
+  // Players mentioned — only articles carry a playerIds array (ArticlesManager.js's
+  // own Tagged Players list, ordered by the writer — see its handleSave);
+  // news items don't have this field, so there's nothing to show for those.
+  // Promise.all resolves in the same order as article.playerIds regardless
+  // of which doc actually loads first, so this stays in the writer's order.
   useEffect(() => {
     setMentionedPlayers([]);
     if (article?.type !== "article" || !article.playerIds?.length) return;
@@ -96,6 +112,21 @@ export default function NewsArticle() {
         const snaps = await Promise.all(article.playerIds.map((pid) => getDoc(doc(db, "players", pid))));
         setMentionedPlayers(snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() })));
       } catch (err) { console.error("Error loading mentioned players:", err); }
+    };
+    fetch();
+  }, [article]);
+
+  // Games mentioned — same shape/ordering guarantee as mentionedPlayers
+  // above, sourced from article.gameIds (ArticlesManager.js's Tagged Games
+  // list).
+  useEffect(() => {
+    setMentionedGames([]);
+    if (article?.type !== "article" || !article.gameIds?.length) return;
+    const fetch = async () => {
+      try {
+        const snaps = await Promise.all(article.gameIds.map((gid) => getDoc(doc(db, "schedule26", gid))));
+        setMentionedGames(snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() })));
+      } catch (err) { console.error("Error loading mentioned games:", err); }
     };
     fetch();
   }, [article]);
@@ -113,7 +144,9 @@ export default function NewsArticle() {
           ...articleSnap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })),
         ]
           .filter((item) => item.slug !== id)
-          .sort((a, b) => ((b.publishedAt?.seconds || b.updatedAt?.seconds || 0) - (a.publishedAt?.seconds || a.updatedAt?.seconds || 0)))
+          // Published date only, never last-updated — see Home.js's own
+          // combinedNews sort for why.
+          .sort((a, b) => ((b.publishedAt?.seconds || 0) - (a.publishedAt?.seconds || 0)))
           .slice(0, 8);
         setSidebarItems(items);
       } catch (err) { console.error("Error loading sidebar:", err); }
@@ -152,8 +185,17 @@ export default function NewsArticle() {
   }
   const description = seoParts.length > 0 ? seoParts.join(" — ") : rawText.slice(0, 160);
 
+  // Teams mentioned — article.schools is ArticlesManager.js's own Tagged
+  // Teams list (school Name strings, in the writer's order); resolved
+  // against schoolInfo for a logo + navigable slug. A name with no match
+  // there (schools fetch still in flight, or a since-renamed school) is
+  // dropped rather than shown as a dead link.
+  const mentionedTeams = article.type === "article"
+    ? (article.schools || []).map((name) => ({ name, ...(schoolInfo[name] || {}) })).filter((t) => t.slug)
+    : [];
+
   const SidebarItem = ({ item }) => {
-    const ts = item.publishedAt || item.updatedAt;
+    const ts = item.publishedAt;
     const d = ts?.toDate?.()?.toLocaleDateString(undefined, { month: "short", day: "numeric" });
     return (
       <Link
@@ -203,7 +245,7 @@ export default function NewsArticle() {
       </div>
       <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
         {mentionedPlayers.map((p, i) => {
-          const logo = schoolLogos[p.School];
+          const logo = schoolInfo[p.School]?.logo;
           return (
             <Link
               key={p.id}
@@ -240,6 +282,103 @@ export default function NewsArticle() {
                 </span>
               </div>
               <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  // Same card/row treatment as Players Mentioned above — reuses its hover
+  // CSS classes (.wd-mentioned-player-*, defined once in the <style> block
+  // below) rather than duplicating them.
+  const TeamsMentionedBlock = mentionedTeams.length > 0 && (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          Teams Mentioned
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        {mentionedTeams.map((t, i) => (
+          <Link
+            key={t.slug}
+            to={`/team/${t.slug}`}
+            className="wd-mentioned-player-link"
+            style={{
+              display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
+              textDecoration: "none",
+              borderBottom: i < mentionedTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+              background: "#fff",
+            }}
+          >
+            <div className="wd-mentioned-player-logo" style={{
+              flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+              width: "52px", height: "52px", borderRadius: "8px",
+              background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
+            }}>
+              {t.logo ? (
+                <img
+                  src={t.logo} alt={t.name} style={{ width: "80%", height: "80%", objectFit: "contain" }}
+                  referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              ) : (
+                <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+              <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>{t.name}</span>
+            </div>
+            <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+
+  // Date badge matches SidebarItem's own — a game reads the same way here
+  // as it does in "More News" below.
+  const GamesMentionedBlock = mentionedGames.length > 0 && (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          Games Mentioned
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        {mentionedGames.map((g, i) => {
+          const gd = g.Date?.toDate ? g.Date.toDate() : (g.Date ? new Date(g.Date) : null);
+          const d = gd ? gd.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
+          return (
+            <Link
+              key={g.id}
+              to={`/game/${g.Slug}`}
+              className="wd-mentioned-player-link"
+              style={{
+                display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px",
+                textDecoration: "none",
+                borderBottom: i < mentionedGames.length - 1 ? "1px solid #f0f0f0" : "none",
+                background: "#fff",
+              }}
+            >
+              {d && (
+                <div style={{ flexShrink: 0, width: "42px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "6px", overflow: "hidden" }}>
+                  <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+                    <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{d.split(" ")[0]}</span>
+                  </div>
+                  <div style={{ padding: "4px 0", textAlign: "center" }}>
+                    <span style={{ fontSize: "18px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{d.split(" ")[1]}</span>
+                  </div>
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: "14px", color: "#222" }}>
+                {g.Away} <span style={{ color: "#999", fontWeight: 700 }}>vs</span> {g.Home}
+              </div>
+              <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "20px", fontWeight: 900 }}>›</span>
             </Link>
           );
         })}
@@ -453,22 +592,38 @@ export default function NewsArticle() {
                 </div>
               </div>
             </div>
+
+            {/* Like + Comments — same rules/shape as GamePage.js's own game
+                comments, via the shared EngagementSection component. Only
+                for type:"article" (ArticlesManager.js's long-form, tagged
+                content) — plain "news" items don't get this, same
+                distinction Players/Teams/Games Mentioned above already
+                draw. */}
+            {article.type === "article" && (
+              <EngagementSection docPath={["articles", article.id]} itemLabel="this article" />
+            )}
           </div>
 
           {/* Sidebar — on mobile, split into its own separately-ordered grid
-              items (see PlayersMentionedBlock/MoreNewsBlock above) so the
-              stacked single-column layout reads article → mentioned players
-              → other articles, instead of the old single "sidebar" grid item
-              (order 1) landing above the article (order 2) entirely. Desktop
-              is unchanged: one sticky column with both blocks stacked. */}
+              items (see PlayersMentionedBlock/TeamsMentionedBlock/
+              GamesMentionedBlock/MoreNewsBlock above) so the stacked
+              single-column layout reads article → mentioned players → teams
+              → games → other articles, instead of the old single "sidebar"
+              grid item (order 1) landing above the article (order 2)
+              entirely. Desktop is unchanged: one sticky column with every
+              block stacked in the same order. */}
           {isMobile ? (
             <>
               {PlayersMentionedBlock && <div style={{ order: 2 }}>{PlayersMentionedBlock}</div>}
-              <div style={{ order: 3 }}>{MoreNewsBlock}</div>
+              {TeamsMentionedBlock && <div style={{ order: 3 }}>{TeamsMentionedBlock}</div>}
+              {GamesMentionedBlock && <div style={{ order: 4 }}>{GamesMentionedBlock}</div>}
+              <div style={{ order: 5 }}>{MoreNewsBlock}</div>
             </>
           ) : (
             <div style={{ position: "sticky", top: "24px", order: 2, display: "flex", flexDirection: "column", gap: "24px" }}>
               {PlayersMentionedBlock}
+              {TeamsMentionedBlock}
+              {GamesMentionedBlock}
               {MoreNewsBlock}
             </div>
           )}

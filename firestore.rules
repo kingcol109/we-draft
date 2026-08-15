@@ -260,13 +260,79 @@ service cloud.firestore {
     match /rivalries/{doc} { allow read, write: if true; }
     match /videos/{doc} { allow read, write: if true; }
     match /ads/{doc} { allow read, write: if true; }
+    // Reusable nested rule shape for a likeable, commentable public content
+    // doc — same likes/comments/replies structure as schedule26/{doc}'s own
+    // hype/comments above (see the detailed reasoning there), just under a
+    // path this function doesn't know in advance. Firestore rules aren't
+    // inherited by nested collections, so articles/{doc} and
+    // performances/{doc} below each need their own copy of this rather
+    // than one shared match block — there's no "include" mechanism for
+    // partial rule fragments.
     match /articles/{doc} {
       allow read: if true;
       allow write: if isAdminOrWriter();
+      // Whether a user has liked this article — same public-read/owner-write,
+      // existence-only shape as schedule26/{doc}/hype.
+      match /likes/{uid} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
+      // Comments (EngagementSection.js) — a user can leave more than one, so
+      // auto-id docs rather than one per uid. Public read; create requires
+      // the doc's own uid field to match the signed-in requester; delete
+      // allowed for the comment's author or an admin. No update — a posted
+      // comment is either left as-is or deleted, never silently edited.
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+        allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
+        allow update: if false;
+        match /likes/{uid} {
+          allow read: if true;
+          allow write: if request.auth != null && request.auth.uid == uid;
+        }
+        // Single level of replies only — same create/delete/no-update shape
+        // as comments itself.
+        match /replies/{replyId} {
+          allow read: if true;
+          allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+          allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
+          allow update: if false;
+          match /likes/{uid} {
+            allow read: if true;
+            allow write: if request.auth != null && request.auth.uid == uid;
+          }
+        }
+      }
     }
     match /performances/{doc} {
       allow read: if true;
       allow write: if isAdminOrWriter();
+      // Same likes/comments/replies shape as articles/{doc} above.
+      match /likes/{uid} {
+        allow read: if true;
+        allow write: if request.auth != null && request.auth.uid == uid;
+      }
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+        allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
+        allow update: if false;
+        match /likes/{uid} {
+          allow read: if true;
+          allow write: if request.auth != null && request.auth.uid == uid;
+        }
+        match /replies/{replyId} {
+          allow read: if true;
+          allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+          allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
+          allow update: if false;
+          match /likes/{uid} {
+            allow read: if true;
+            allow write: if request.auth != null && request.auth.uid == uid;
+          }
+        }
+      }
     }
     match /users/{uid} {
       allow read: if true;

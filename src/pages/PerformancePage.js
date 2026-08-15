@@ -16,6 +16,7 @@ import { collection, query, where, getDocs, doc, getDoc } from "firebase/firesto
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
+import EngagementSection from "../components/EngagementSection";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -574,6 +575,10 @@ export default function PerformancePage() {
                 </div>
               </div>
             </div>
+
+            {/* Like + Comments — same rules/shape as GamePage.js's own game
+                comments, via the shared EngagementSection component. */}
+            <EngagementSection docPath={["performances", performance.id]} itemLabel="this performance" />
           </div>
 
           {/* Sidebar — on mobile, split into its own separately-ordered grid

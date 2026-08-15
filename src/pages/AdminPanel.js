@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, collectionGroup, getDocs, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -96,8 +96,64 @@ function recruitFlairRank(flair) {
 
 const BLANK_RECRUIT_FORM = {
   First: "", Last: "", HighSchool: "", State: "", Commitment: "", Position: "", RecruitClass: "",
-  Height: "", Weight: "", Flair: "", Film: "", AdminNotes: "", Flag: "",
+  Height: "", Weight: "", Flair: "", Film: "", AdminNotes: "", Flag: "", Grades: {},
+  Strengths: [], Weaknesses: [],
 };
+
+// ── Scouting grades — a position-specific set of 1-6 attribute grades an
+// admin can enter per recruit (distinct from Flair, which is a single
+// overall projection tag). Attribute keys are shared canonically across
+// position groups (e.g. "frame" and "explosiveness" show up almost
+// everywhere) so a recruit's Grades map doesn't need position-prefixed
+// keys — only one position group's fields are ever shown/editable at once,
+// keyed off gradeGroupForPosition below. ──
+const RECRUIT_GRADE_FIELDS = {
+  QB: ["armStrength", "frame", "release", "athleticism", "touchBallPlacement", "playmaking", "timing"],
+  RB: ["explosiveness", "longSpeed", "frame", "shortAreaQuickness", "instincts"],
+  WR: ["explosiveness", "longSpeed", "frame", "changeOfDirection", "ballSkills"],
+  TE: ["frame", "explosiveness", "changeOfDirection", "ballSkills", "technique"],
+  OL: ["frame", "explosiveness", "agility", "strength", "technique"],
+  DL_EDGE: ["frame", "explosiveness", "bend", "strength", "shortAreaQuickness", "technique"],
+  LB: ["frame", "explosiveness", "sidelineToSidelineSpeed", "fluidity", "technique", "instincts"],
+  DB: ["frame", "explosiveness", "longSpeed", "fluidity", "technique", "instincts"],
+};
+const RECRUIT_GRADE_LABELS = {
+  armStrength: "Arm Strength",
+  frame: "Frame",
+  release: "Release",
+  athleticism: "Athleticism",
+  touchBallPlacement: "Touch / Ball Placement",
+  playmaking: "Playmaking",
+  timing: "Timing",
+  explosiveness: "Explosiveness",
+  longSpeed: "Long Speed",
+  shortAreaQuickness: "Short Area Quickness",
+  instincts: "Instincts",
+  changeOfDirection: "Change of Direction",
+  ballSkills: "Ball Skills",
+  technique: "Technique",
+  agility: "Agility",
+  strength: "Strength",
+  bend: "Bend",
+  sidelineToSidelineSpeed: "Sideline-to-Sideline Speed",
+  fluidity: "Fluidity",
+};
+// K/P/LS (and a blank Position) intentionally return null — no listed
+// rubric fits a specialist, so they skip the Scouting Grades section
+// entirely rather than being forced into an ill-fitting field set.
+function gradeGroupForPosition(position) {
+  switch (position) {
+    case "QB": return "QB";
+    case "RB": return "RB";
+    case "WR": return "WR";
+    case "TE": return "TE";
+    case "OL": case "OT": case "OG": case "C": return "OL";
+    case "EDGE": case "DL": case "DT": case "DE": return "DL_EDGE";
+    case "LB": return "LB";
+    case "DB": case "CB": case "S": return "DB";
+    default: return null;
+  }
+}
 
 const US_STATES = [
   "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
@@ -370,6 +426,7 @@ function FilterBar({ label, options, selected, setSelected }) {
 
 function PlayerDataSection() {
   const [allPlayers, setAllPlayers] = useState([]);
+  const [allRecruits, setAllRecruits] = useState([]); // dup-check only, see fetchAllRecruits below
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedYears, setSelectedYears] = useState([]);
@@ -443,6 +500,22 @@ function PlayerDataSection() {
       }
     };
     fetchAllPlayers();
+  }, []);
+
+  // Loaded solely so a new player's name can be cross-checked against the
+  // recruits collection too (see findNameMatches) — recruits aren't
+  // rendered anywhere in this section.
+  useEffect(() => {
+    const fetchAllRecruits = async () => {
+      try {
+        const snap = await getDocs(collection(db, "recruits"));
+        setAllRecruits(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("Admin recruits fetch error (for dup check):", e);
+        setAllRecruits([]);
+      }
+    };
+    fetchAllRecruits();
   }, []);
 
   const allPositions = useMemo(() => {
@@ -555,13 +628,18 @@ function PlayerDataSection() {
   // different real players can share a name — Slug already disambiguates
   // by position/year, so this is specifically about catching an admin
   // re-adding someone who's already in the system under a different
-  // position/year/school by mistake. ──
+  // position/year/school by mistake. Also checked against `allRecruits`
+  // (loaded separately, purely for this) so promoting/adding a player
+  // doesn't create a stray duplicate of someone still sitting in the
+  // recruits pipeline under the same name. ──
   const findNameMatches = (first, last) => {
     const normFirst = first.trim().toLowerCase();
     const normLast = last.trim().toLowerCase();
-    return allPlayers.filter(
-      (p) => (p.First || "").trim().toLowerCase() === normFirst && (p.Last || "").trim().toLowerCase() === normLast
-    );
+    const sameName = (r) => (r.First || "").trim().toLowerCase() === normFirst && (r.Last || "").trim().toLowerCase() === normLast;
+    return [
+      ...allPlayers.filter(sameName).map((p) => ({ ...p, _type: "player" })),
+      ...allRecruits.filter(sameName).map((r) => ({ ...r, _type: "recruit" })),
+    ];
   };
 
   // ── generateSlug() is name+position+year only, so a genuinely different
@@ -1271,12 +1349,18 @@ function PlayerDataSection() {
             {duplicateMatches && duplicateMatches.length > 0 ? (
               <div style={{ marginTop: "16px", border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
                 <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
-                  ⚠ Possible Duplicate — {duplicateMatches.length} existing player{duplicateMatches.length !== 1 ? "s" : ""} named "{formState.First} {formState.Last}"
+                  ⚠ Possible Duplicate — {duplicateMatches.length} existing record{duplicateMatches.length !== 1 ? "s" : ""} named "{formState.First} {formState.Last}"
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
                   {duplicateMatches.map((m) => (
-                    <div key={m.id} style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
-                      {m.Position || "—"} · {m.School || "—"} · {m.Eligible || "—"}
+                    <div key={m._type + "-" + m.id} style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+                      <span style={{ color: m._type === "recruit" ? "#8a6300" : "#666" }}>
+                        {m._type === "recruit" ? "Recruit" : "Player"}
+                      </span>
+                      {" · "}
+                      {m._type === "recruit"
+                        ? (m.Position || "—") + " · " + (m.HighSchool || "—") + " · Class of " + (m.RecruitClass || "—")
+                        : (m.Position || "—") + " · " + (m.School || "—") + " · " + (m.Eligible || "—")}
                       {m.Slug && (
                         <a
                           href={"/player/" + m.Slug} target="_blank" rel="noopener noreferrer"
@@ -1471,6 +1555,7 @@ function PlayerDataSection() {
 // no-op and the origin record stays intact. ──
 function RecruitsSection() {
   const [allRecruits, setAllRecruits] = useState([]);
+  const [allPlayers, setAllPlayers] = useState([]); // dup-check only, see fetchAllPlayers below
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedClasses, setSelectedClasses] = useState([]);
@@ -1495,6 +1580,13 @@ function RecruitsSection() {
   const [removing, setRemoving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [promoting, setPromoting] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState(null);
+  const [gradesExpanded, setGradesExpanded] = useState(false);
+  // { "Position Specific": [...], "Generic": [...] } for whichever recruit
+  // is currently selected — refetched on Position change, same source
+  // (traits/{Position} + traits/Generic) as the Strengths/Weaknesses picker
+  // on a real player's PlayerProfile evaluation form.
+  const [traitGroups, setTraitGroups] = useState({});
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -1573,6 +1665,50 @@ function RecruitsSection() {
     fetchRecruits();
   }, []);
 
+  // Loaded solely so a new recruit's name can be cross-checked against the
+  // players collection too (see findNameMatches) — players aren't rendered
+  // anywhere in this section.
+  useEffect(() => {
+    const fetchAllPlayers = async () => {
+      try {
+        const snap = await getDocs(collection(db, "players"));
+        setAllPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("Admin players fetch error (for dup check):", e);
+        setAllPlayers([]);
+      }
+    };
+    fetchAllPlayers();
+  }, []);
+
+  // Refetches whenever the form's Position changes (new recruit selected,
+  // or the admin edits Position on the one open) — mirrors PlayerProfile's
+  // own traits fetch exactly, so a recruit and a real player at the same
+  // Position see the identical Strengths/Weaknesses options.
+  useEffect(() => {
+    const position = formState?.Position;
+    if (!position) {
+      setTraitGroups({});
+      return;
+    }
+    const fetchTraits = async () => {
+      try {
+        const [posSnap, genSnap] = await Promise.all([
+          getDoc(doc(db, "traits", position)),
+          getDoc(doc(db, "traits", "Generic")),
+        ]);
+        const g = {};
+        if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
+        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits || []).sort();
+        setTraitGroups(g);
+      } catch (e) {
+        console.error("Admin recruit traits fetch error:", e);
+        setTraitGroups({});
+      }
+    };
+    fetchTraits();
+  }, [formState?.Position]);
+
   const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
   const highSchoolLabel = (name) => {
     const match = highSchoolOptions.find((h) => h.Name === name);
@@ -1641,18 +1777,74 @@ function RecruitsSection() {
     setSelectedRecruit({ isNew: true });
     setFormState({ ...BLANK_RECRUIT_FORM });
     setSaveMessage("");
+    setDuplicateMatches(null);
     setConfirmDelete(false);
+    setGradesExpanded(false);
   };
 
   const selectRecruit = (r) => {
     setSelectedRecruit(r);
     setFormState({ ...r });
     setSaveMessage("");
+    setDuplicateMatches(null);
     setConfirmDelete(false);
+    setGradesExpanded(false);
   };
 
   const handleFieldChange = (field, value) => {
     setFormState((prev) => ({ ...prev, [field]: value }));
+    // Editing the name after a duplicate warning was shown invalidates that
+    // check — force it to re-run against the new value on the next save
+    // attempt rather than trusting a match found for the old name.
+    setDuplicateMatches(null);
+  };
+
+  // Blank (ungraded) removes the key entirely rather than storing an empty
+  // string or 0 — Grades only ever holds real 1-6 values, so anything
+  // reading it can treat "key present" as "graded" without a separate
+  // ungraded sentinel.
+  const handleGradeChange = (key, value) => {
+    setFormState((prev) => {
+      const grades = { ...(prev.Grades || {}) };
+      if (value === "") {
+        delete grades[key];
+      } else {
+        grades[key] = Number(value);
+      }
+      return { ...prev, Grades: grades };
+    });
+  };
+
+  // Mirrors the toggle logic on PlayerProfile's own Strengths/Weaknesses
+  // picker: a trait can't sit in both lists at once (checked there via the
+  // checkbox's `disabled`, guarded again here), and each list caps at 5.
+  const handleToggleTrait = (trait, kind) => {
+    const otherKind = kind === "Strengths" ? "Weaknesses" : "Strengths";
+    setFormState((prev) => {
+      const current = prev[kind] || [];
+      const other = prev[otherKind] || [];
+      if (other.includes(trait)) return prev;
+      if (current.includes(trait)) {
+        return { ...prev, [kind]: current.filter((t) => t !== trait) };
+      }
+      if (current.length >= 5) return prev;
+      return { ...prev, [kind]: [...current, trait] };
+    });
+  };
+
+  // ── Same-name check, mirrored from PlayerDataSection's findNameMatches:
+  // runs against the already-loaded `allRecruits` list plus the separately
+  // loaded `allPlayers` list, so adding a recruit who's already a player
+  // (or already another recruit) under the same name gets caught before
+  // creating a second record for them. ──
+  const findNameMatches = (first, last) => {
+    const normFirst = first.trim().toLowerCase();
+    const normLast = last.trim().toLowerCase();
+    const sameName = (r) => (r.First || "").trim().toLowerCase() === normFirst && (r.Last || "").trim().toLowerCase() === normLast;
+    return [
+      ...allRecruits.filter(sameName).map((r) => ({ ...r, _type: "recruit" })),
+      ...allPlayers.filter(sameName).map((p) => ({ ...p, _type: "player" })),
+    ];
   };
 
   // ── Picking (or typing the exact name of) a saved high school also fills
@@ -1728,11 +1920,22 @@ function RecruitsSection() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (forceDuplicate = false) => {
     if (!formState.First.trim() || !formState.Last.trim()) {
       setSaveMessage("First and last name are required.");
       return;
     }
+
+    if (isNew && !forceDuplicate) {
+      const matches = findNameMatches(formState.First, formState.Last);
+      if (matches.length > 0) {
+        setDuplicateMatches(matches);
+        setSaveMessage("");
+        return;
+      }
+    }
+    setDuplicateMatches(null);
+
     setSaving(true);
     setSaveMessage("");
     try {
@@ -2221,6 +2424,104 @@ function RecruitsSection() {
                   </div>
                 </FieldRow>
               )}
+              {/* Scouting Grades + Strengths/Weaknesses share one collapsible
+                  section (see gradesExpanded, reset collapsed on every
+                  select/new) so the form doesn't open with a dozen extra
+                  fields already in view — the admin opts in per visit.
+                  Grades' field set comes from Position (gradeGroupForPosition);
+                  Strengths/Weaknesses' options come from the traits/{Position}
+                  + traits/Generic docs (traitGroups, fetched above) — same
+                  source and rules (mutually exclusive, capped at 5) as a real
+                  player's picker on PlayerProfile. Either can be empty on its
+                  own (e.g. a position with no traits doc yet still gets
+                  grade fields) — the whole thing only hides when neither
+                  has anything to show. */}
+              {(() => {
+                const gradeGroup = gradeGroupForPosition(formState.Position);
+                const gradeKeys = gradeGroup ? RECRUIT_GRADE_FIELDS[gradeGroup] : null;
+                const hasTraits = Object.keys(traitGroups).length > 0;
+                if (!gradeKeys && !hasTraits) return null;
+                const gradedCount = gradeKeys ? gradeKeys.filter((k) => formState.Grades?.[k] != null).length : 0;
+                return (
+                  <div style={{ borderTop: "1px solid #eee", paddingTop: "12px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setGradesExpanded((v) => !v)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "6px", width: "100%",
+                        background: "none", border: "none", padding: 0, cursor: "pointer",
+                        fontSize: "10px", fontWeight: 900, color: "#888",
+                        textTransform: "uppercase", letterSpacing: "0.08em",
+                      }}
+                    >
+                      <span style={{ display: "inline-block", transform: gradesExpanded ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}>▶</span>
+                      Scouting Grades
+                      {gradeKeys && (
+                        <span style={{ color: "#bbb", fontWeight: 700 }}>({gradedCount}/{gradeKeys.length} graded)</span>
+                      )}
+                    </button>
+                    {gradesExpanded && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px" }}>
+                        {gradeKeys && gradeKeys.map((key) => (
+                          <FieldRow key={key} label={RECRUIT_GRADE_LABELS[key]}>
+                            <select
+                              value={formState.Grades?.[key] ?? ""}
+                              onChange={(e) => handleGradeChange(key, e.target.value)}
+                              style={inputStyle}
+                            >
+                              <option value="">—</option>
+                              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          </FieldRow>
+                        ))}
+                        {hasTraits && [
+                          { label: "Strengths", kind: "Strengths" },
+                          { label: "Weaknesses", kind: "Weaknesses" },
+                        ].map(({ label, kind }) => {
+                          const selected = formState[kind] || [];
+                          return (
+                            <FieldRow key={kind} label={label + " (max 5)"}>
+                              <details style={{ border: "2px solid #ddd", borderRadius: "6px" }}>
+                                <summary style={{
+                                  cursor: "pointer", padding: "8px 10px", fontWeight: 700, fontSize: "13px",
+                                  color: selected.length > 0 ? "#111" : "#999",
+                                }}>
+                                  {selected.length > 0 ? selected.join(", ") : "Select " + label.toLowerCase()}
+                                </summary>
+                                <div style={{ padding: "8px 10px", borderTop: "2px solid #ddd" }}>
+                                  {Object.entries(traitGroups).map(([groupLabel, options]) => (
+                                    <div key={groupLabel} style={{ marginBottom: "8px" }}>
+                                      <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>
+                                        {groupLabel}
+                                      </div>
+                                      {options.map((trait) => {
+                                        const otherKind = kind === "Strengths" ? "Weaknesses" : "Strengths";
+                                        const isOther = (formState[otherKind] || []).includes(trait);
+                                        return (
+                                          <label key={trait} style={{ display: "block", fontSize: "13px", padding: "3px 0", cursor: isOther ? "default" : "pointer", color: isOther ? "#ccc" : "#333" }}>
+                                            <input
+                                              type="checkbox"
+                                              checked={selected.includes(trait)}
+                                              disabled={(!selected.includes(trait) && selected.length >= 5) || isOther}
+                                              onChange={() => handleToggleTrait(trait, kind)}
+                                              style={{ marginRight: "8px" }}
+                                            />
+                                            {trait}
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            </FieldRow>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <FieldRow label="Admin Notes (internal only)">
                 <textarea
                   value={formState.AdminNotes}
@@ -2231,19 +2532,72 @@ function RecruitsSection() {
               </FieldRow>
             </FieldGroup>
 
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={{
-                width: "100%", marginTop: "16px",
-                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
-                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
-                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
-                opacity: saving ? 0.6 : 1,
-              }}
-            >
-              {saving ? "Saving..." : isNew ? "Create Recruit" : "Save Changes"}
-            </button>
+            {duplicateMatches && duplicateMatches.length > 0 ? (
+              <div style={{ marginTop: "16px", border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                  ⚠ Possible Duplicate — {duplicateMatches.length} existing record{duplicateMatches.length !== 1 ? "s" : ""} named "{formState.First} {formState.Last}"
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
+                  {duplicateMatches.map((m) => (
+                    <div key={m._type + "-" + m.id} style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+                      <span style={{ color: m._type === "player" ? "#666" : "#8a6300" }}>
+                        {m._type === "player" ? "Player" : "Recruit"}
+                      </span>
+                      {" · "}
+                      {m._type === "player"
+                        ? (m.Position || "—") + " · " + (m.School || "—") + " · " + (m.Eligible || "—")
+                        : (m.Position || "—") + " · " + (m.HighSchool || "—") + " · Class of " + (m.RecruitClass || "—")}
+                      {m.Slug && (
+                        <a
+                          href={"/player/" + m.Slug} target="_blank" rel="noopener noreferrer"
+                          style={{ marginLeft: "8px", color: BLUE, fontWeight: 900, textDecoration: "none" }}
+                        >
+                          View ↗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={() => setDuplicateMatches(null)}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSave(true)}
+                    disabled={saving}
+                    style={{
+                      flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                      borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                      opacity: saving ? 0.6 : 1,
+                    }}
+                  >
+                    {saving ? "Creating..." : "Yes, Create Anyway"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleSave()}
+                disabled={saving}
+                style={{
+                  width: "100%", marginTop: "16px",
+                  background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                  borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >
+                {saving ? "Saving..." : isNew ? "Create Recruit" : "Save Changes"}
+              </button>
+            )}
 
             {!isNew && (
               <div style={{ marginTop: "10px" }}>

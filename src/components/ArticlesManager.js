@@ -67,6 +67,14 @@ const FontSize = Extension.create({
 
 const createSlug = (text) => text.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-");
 
+// Same fallback PlayerProfile.js/generate-sitemap.js use for a school with
+// no manually-set Slug field: TeamPage.js's own lookup prefers a doc's
+// stored Slug and only falls back to this derived form.
+const toTeamSlug = (school) => {
+  if (!school) return "";
+  return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
+};
+
 // Slug = short-form title + the published date — same deterministic
 // formula PerformancesManager.js uses (short titles alone collide easily
 // across articles). Fully automatic now — there's no admin-facing Slug
@@ -117,6 +125,92 @@ const statusStyles = {
   draft: { background: "#f0f0f0", color: "#666" },
 };
 
+// ── One of the three "Tagged X" lists at the bottom of the article form
+// (Players/Teams/Games) — order here is what NewsArticle.jsx's Mentioned
+// blocks render in, and this list, not whatever links happen to be in the
+// body, is what actually becomes playerIds/schools/gameIds on save (see
+// ArticlesManager's handleSave). `items`/`options` are pre-normalized to
+// {key, label, sub?, raw?} so this component stays generic across all
+// three entity types. ──
+function TaggedList({ title, items, onRemove, onMove, search, onSearchChange, show, onToggleShow, options, onAdd, placeholder }) {
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "8px", overflow: "hidden" }}>
+      <div style={{ background: "#f8faff", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #eee" }}>
+        <div style={{ fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          {title} ({items.length})
+        </div>
+        <button
+          type="button"
+          onClick={onToggleShow}
+          style={{ background: "none", border: "none", color: BLUE, fontWeight: 900, fontSize: "12px", cursor: "pointer", textDecoration: "underline" }}
+        >
+          {show ? "Cancel" : "+ Add"}
+        </button>
+      </div>
+
+      {show && (
+        <div style={{ padding: "10px", borderBottom: "1px solid #eee", background: "#fdfdfd" }}>
+          <input
+            placeholder={placeholder}
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            style={{ ...inputStyle, marginBottom: "8px" }}
+          />
+          <div style={{ maxHeight: "160px", overflowY: "auto" }}>
+            {options.map((o) => (
+              <div
+                key={o.key}
+                onClick={() => onAdd(o)}
+                style={{ padding: "6px 4px", borderBottom: "1px solid #eee", cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "#333" }}
+              >
+                {o.label}
+              </div>
+            ))}
+            {options.length === 0 && (
+              <div style={{ padding: "6px 4px", fontSize: "12px", color: "#999" }}>No matches.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <div style={{ padding: "12px", fontSize: "12px", color: "#999", fontStyle: "italic" }}>None tagged yet.</div>
+      ) : (
+        items.map((it, i) => (
+          <div key={it.key} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderBottom: i < items.length - 1 ? "1px solid #f0f0f0" : "none" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+              <button
+                type="button" disabled={i === 0} onClick={() => onMove(i, -1)}
+                style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#ddd" : BLUE, fontSize: "10px", lineHeight: 1, padding: 0 }}
+              >
+                ▲
+              </button>
+              <button
+                type="button" disabled={i === items.length - 1} onClick={() => onMove(i, 1)}
+                style={{ background: "none", border: "none", cursor: i === items.length - 1 ? "default" : "pointer", color: i === items.length - 1 ? "#ddd" : BLUE, fontSize: "10px", lineHeight: 1, padding: 0 }}
+              >
+                ▼
+              </button>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: "13px", fontWeight: 800, color: "#222", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</div>
+              {it.sub && <div style={{ fontSize: "11px", color: "#999" }}>{it.sub}</div>}
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemove(it.key)}
+              title="Remove tag — doesn't touch any link in the body"
+              style={{ background: "none", border: "none", color: "#c0392b", fontWeight: 900, fontSize: "16px", cursor: "pointer", padding: "0 4px" }}
+            >
+              ×
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 export default function ArticlesManager() {
   const { user, profile } = useAuth();
   const role = profile?.role || "public";
@@ -156,6 +250,24 @@ export default function ArticlesManager() {
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [videoUrlInput, setVideoUrlInput] = useState("");
+
+  // ── Tagged Players/Teams/Games — the actual source of playerIds/schools/
+  // gameIds on save (see handleSave), kept as ordered state independent of
+  // whatever links happen to be in the body. insertPlayer/insertTeam/
+  // insertGame below auto-add here too, so by default everything still
+  // behaves like before (link it, it shows up) — but a tag can be removed
+  // here without touching its link, or added here with no link at all.
+  // Each holds the same shape as its source list (players/teams/games
+  // state above) so a tagged entry can be rendered without a second lookup. ──
+  const [taggedPlayers, setTaggedPlayers] = useState([]);
+  const [taggedTeams, setTaggedTeams] = useState([]);
+  const [taggedGames, setTaggedGames] = useState([]);
+  const [showTagPlayerAdd, setShowTagPlayerAdd] = useState(false);
+  const [showTagTeamAdd, setShowTagTeamAdd] = useState(false);
+  const [showTagGameAdd, setShowTagGameAdd] = useState(false);
+  const [tagPlayerSearch, setTagPlayerSearch] = useState("");
+  const [tagTeamSearch, setTagTeamSearch] = useState("");
+  const [tagGameSearch, setTagGameSearch] = useState("");
 
   const editor = useEditor({
     extensions: [StarterKit, Underline, TiptapLink.configure({ openOnClick: false }), TiptapImage, TextStyle, FontSize],
@@ -215,8 +327,9 @@ export default function ArticlesManager() {
         }));
 
         setTeams(teamSnap.docs.map((d) => {
-          const name = d.data().School;
-          return { name, slug: name.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-") };
+          const data = d.data();
+          const name = data.School;
+          return { name, slug: data.Slug || toTeamSlug(name) };
         }));
 
         // Most recent first — a game just played (or about to be) is far
@@ -247,6 +360,9 @@ export default function ArticlesManager() {
     setShowImageInput(false);
     setShowLinkInput(false);
     setShowVideoInput(false);
+    setShowTagPlayerAdd(false);
+    setShowTagTeamAdd(false);
+    setShowTagGameAdd(false);
   };
 
   const selectArticle = (a) => {
@@ -265,6 +381,19 @@ export default function ArticlesManager() {
     resetPickers();
     setSaveMessage("");
     setRegeneratedSlug(null);
+
+    // Seed the tag lists from the article's own saved arrays — not by
+    // re-parsing the body's links — so order and any past removals (a tag
+    // taken out here even though its link is still in the body) come back
+    // exactly as last saved. An id/name with no match in the currently-
+    // loaded players/teams/games (a deleted player, say) is dropped rather
+    // than kept as a dead reference.
+    const playerById = new Map(players.map((p) => [p.id, p]));
+    setTaggedPlayers((a.playerIds || []).map((id) => playerById.get(id)).filter(Boolean));
+    const teamByName = new Map(teams.map((t) => [t.name, t]));
+    setTaggedTeams((a.schools || []).map((name) => teamByName.get(name)).filter(Boolean));
+    const gameById = new Map(games.map((g) => [g.id, g]));
+    setTaggedGames((a.gameIds || []).map((id) => gameById.get(id)).filter(Boolean));
   };
 
   const startNewArticle = () => {
@@ -274,6 +403,9 @@ export default function ArticlesManager() {
     resetPickers();
     setSaveMessage("");
     setRegeneratedSlug(null);
+    setTaggedPlayers([]);
+    setTaggedTeams([]);
+    setTaggedGames([]);
   };
 
   const isNew = selectedArticle?.isNew === true;
@@ -283,21 +415,54 @@ export default function ArticlesManager() {
     return slugFor(formState.titleShort.trim(), parsePublishedAt(formState.publishedAt));
   }, [formState]);
 
+  const addTaggedTeam = (team) => {
+    setTaggedTeams((prev) => (prev.some((t) => t.slug === team.slug) ? prev : [...prev, team]));
+  };
+  const addTaggedGame = (game) => {
+    setTaggedGames((prev) => (prev.some((g) => g.id === game.id) ? prev : [...prev, game]));
+  };
+  // Tagging a player also tags their current team by default (mirrors the
+  // old auto-school-association this replaces) — it's still just an
+  // ordinary, removable Teams tag afterward, not a permanent snapshot.
+  const addTaggedPlayer = (player) => {
+    setTaggedPlayers((prev) => (prev.some((p) => p.id === player.id) ? prev : [...prev, player]));
+    const team = teams.find((t) => t.name === player.team);
+    if (team) addTaggedTeam(team);
+  };
+  const removeTaggedPlayer = (id) => setTaggedPlayers((prev) => prev.filter((p) => p.id !== id));
+  const removeTaggedTeam = (slug) => setTaggedTeams((prev) => prev.filter((t) => t.slug !== slug));
+  const removeTaggedGame = (id) => setTaggedGames((prev) => prev.filter((g) => g.id !== id));
+  // Swaps an item with its neighbor — shared by all three lists' ▲▼
+  // buttons below. This order is what NewsArticle.jsx's Mentioned blocks
+  // render in, so it's the writer's one control over sidebar order.
+  const moveTagged = (setList, index, dir) => {
+    setList((prev) => {
+      const j = index + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[j]] = [next[j], next[index]];
+      return next;
+    });
+  };
+
   const insertPlayer = (player) => {
     if (!editor) return;
     editor.chain().focus().insertContent(`<a href="/player/${player.slug}" data-player-id="${player.id}">${player.name}</a> `).run();
+    addTaggedPlayer(player);
     setShowPlayerPicker(false);
   };
 
   const insertTeam = (team) => {
     if (!editor) return;
     editor.chain().focus().insertContent(`<a href="/team/${team.slug}">${team.name}</a> `).run();
+    addTaggedTeam(team);
     setShowTeamPicker(false);
   };
 
   const insertGame = (game) => {
     if (!editor) return;
     editor.chain().focus().insertContent(`<a href="/game/${game.slug}" data-game-id="${game.id}">${gameLabel(game)}</a> `).run();
+    addTaggedGame(game);
     setShowGamePicker(false);
   };
 
@@ -325,34 +490,6 @@ export default function ArticlesManager() {
     setShowVideoInput(false);
   };
 
-  // Player/game links are the join key for "related articles" on a
-  // player's or game's own page. Prefer the data-player-id/data-game-id
-  // baked in by insertPlayer/insertGame; fall back to resolving the href's
-  // slug against the loaded players/games list for links that predate
-  // those attributes.
-  const extractLinkedIds = (html) => {
-    const div = document.createElement("div");
-    div.innerHTML = html;
-    const slugToPlayerId = new Map(players.map((p) => [p.slug, p.id]));
-    const playerIdSet = new Set();
-    div.querySelectorAll("a[href^='/player/']").forEach((link) => {
-      const pid = link.getAttribute("data-player-id") || slugToPlayerId.get(link.getAttribute("href").split("/player/")[1]);
-      if (pid) playerIdSet.add(pid);
-    });
-    const teamSet = new Set();
-    div.querySelectorAll("a[href^='/team/']").forEach((link) => {
-      const linkSlug = link.getAttribute("href").split("/team/")[1];
-      if (linkSlug) teamSet.add(linkSlug);
-    });
-    const slugToGameId = new Map(games.map((g) => [g.slug, g.id]));
-    const gameIdSet = new Set();
-    div.querySelectorAll("a[href^='/game/']").forEach((link) => {
-      const gid = link.getAttribute("data-game-id") || slugToGameId.get(link.getAttribute("href").split("/game/")[1]);
-      if (gid) gameIdSet.add(gid);
-    });
-    return { playerIds: Array.from(playerIdSet), teamSlugs: Array.from(teamSet), gameIds: Array.from(gameIdSet) };
-  };
-
   const handleSave = async () => {
     if (!formState) return;
     const html = editor?.getHTML() || "";
@@ -363,26 +500,18 @@ export default function ArticlesManager() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const { playerIds, teamSlugs, gameIds } = extractLinkedIds(html);
+      // playerIds/schools/gameIds now come straight from the Tagged
+      // Players/Teams/Games lists below (in whatever order the writer put
+      // them in) — not from re-parsing the body's links. A link inserted
+      // via +Player/+Team/+Game auto-adds to its list (see insertPlayer/
+      // insertTeam/insertGame above), but from here on the list, not the
+      // link, is what actually drives playerIds/schools/gameIds+the
+      // article's own Mentioned sidebar order.
+      const playerIds = taggedPlayers.map((p) => p.id);
+      const teamSlugs = taggedTeams.map((t) => t.slug);
+      const schools = taggedTeams.map((t) => t.name);
+      const gameIds = taggedGames.map((g) => g.id);
       const publishedAtDate = parsePublishedAt(formState.publishedAt);
-
-      // Team-page article association: which school(s) TeamPage.js's own
-      // automatic "articles about our players" feed should show this under
-      // — replacing the old team-mention-based teamSlugs above, which
-      // nothing actually reads anymore. Snapshotted the first time a player
-      // is linked, not recomputed from their live current school on every
-      // re-save — a player already linked before a transfer keeps whatever
-      // school was captured back then, so a later unrelated edit (fixing a
-      // typo, say) can't silently move the article to their new team. Only
-      // a player newly linked in *this* save contributes their current
-      // school.
-      const existingPlayerIds = new Set(Array.isArray(selectedArticle?.playerIds) ? selectedArticle.playerIds : []);
-      const schoolSet = new Set(Array.isArray(selectedArticle?.schools) ? selectedArticle.schools : []);
-      playerIds.filter((id) => !existingPlayerIds.has(id)).forEach((id) => {
-        const p = players.find((pl) => pl.id === id);
-        if (p?.team) schoolSet.add(p.team);
-      });
-      const schools = Array.from(schoolSet);
 
       if (isNew) {
         const payload = {
@@ -508,6 +637,23 @@ export default function ArticlesManager() {
   const filteredPlayers = players.filter((p) => p.name.toLowerCase().includes(playerSearch.toLowerCase()));
   const filteredTeams = teams.filter((t) => t.name.toLowerCase().includes(teamSearch.toLowerCase()));
   const filteredGames = games.filter((g) => `${g.away} ${g.home}`.toLowerCase().includes(gameSearch.toLowerCase()));
+
+  // Options for the Tagged Players/Teams/Games "+ Add" pickers below —
+  // same search-filter shape as the toolbar pickers above, but also
+  // excluding whatever's already tagged so a match can't be added twice.
+  const tagPlayerOptions = players
+    .filter((p) => !taggedPlayers.some((tp) => tp.id === p.id) && p.name.toLowerCase().includes(tagPlayerSearch.toLowerCase()))
+    .map((p) => ({ key: p.id, label: `${p.name} · ${p.position} · ${p.team}`, raw: p }));
+  const tagTeamOptions = teams
+    .filter((t) => !taggedTeams.some((tt) => tt.slug === t.slug) && t.name.toLowerCase().includes(tagTeamSearch.toLowerCase()))
+    .map((t) => ({ key: t.slug, label: t.name, raw: t }));
+  const tagGameOptions = games
+    .filter((g) => !taggedGames.some((tg) => tg.id === g.id) && `${g.away} ${g.home}`.toLowerCase().includes(tagGameSearch.toLowerCase()))
+    .map((g) => ({ key: g.id, label: gameLabel(g), raw: g }));
+
+  const taggedPlayerItems = taggedPlayers.map((p) => ({ key: p.id, label: p.name, sub: [p.position, p.team].filter(Boolean).join(" · ") }));
+  const taggedTeamItems = taggedTeams.map((t) => ({ key: t.slug, label: t.name }));
+  const taggedGameItems = taggedGames.map((g) => ({ key: g.id, label: gameLabel(g) }));
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "18px", alignItems: "start" }}>
@@ -791,6 +937,46 @@ export default function ArticlesManager() {
 
             <div className="wd-article-editor" style={{ border: "2px solid " + BLUE, borderRadius: "10px", padding: "12px", cursor: "text", background: "#fff" }} onClick={() => editor?.chain().focus().run()}>
               {editor && <EditorContent editor={editor} />}
+            </div>
+
+            <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "2px solid #eee" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>
+                Tagged Players / Teams / Games
+              </div>
+              <div style={{ fontSize: "11px", color: "#999", marginBottom: "10px", lineHeight: 1.5 }}>
+                Controls what shows up on this article's own sidebar and on each tagged player/team/game's page — separate
+                from the +Player/+Team/+Game links above. Linking one auto-adds it here; remove it here without touching
+                the link, or add one here with no link at all. The order here is the order they'll show up in.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <TaggedList
+                  title="Players" items={taggedPlayerItems} onRemove={removeTaggedPlayer}
+                  onMove={(i, dir) => moveTagged(setTaggedPlayers, i, dir)}
+                  search={tagPlayerSearch} onSearchChange={setTagPlayerSearch}
+                  show={showTagPlayerAdd} onToggleShow={() => setShowTagPlayerAdd((v) => !v)}
+                  options={tagPlayerOptions}
+                  onAdd={(o) => { addTaggedPlayer(o.raw); setTagPlayerSearch(""); setShowTagPlayerAdd(false); }}
+                  placeholder="Search player..."
+                />
+                <TaggedList
+                  title="Teams" items={taggedTeamItems} onRemove={removeTaggedTeam}
+                  onMove={(i, dir) => moveTagged(setTaggedTeams, i, dir)}
+                  search={tagTeamSearch} onSearchChange={setTagTeamSearch}
+                  show={showTagTeamAdd} onToggleShow={() => setShowTagTeamAdd((v) => !v)}
+                  options={tagTeamOptions}
+                  onAdd={(o) => { addTaggedTeam(o.raw); setTagTeamSearch(""); setShowTagTeamAdd(false); }}
+                  placeholder="Search team..."
+                />
+                <TaggedList
+                  title="Games" items={taggedGameItems} onRemove={removeTaggedGame}
+                  onMove={(i, dir) => moveTagged(setTaggedGames, i, dir)}
+                  search={tagGameSearch} onSearchChange={setTagGameSearch}
+                  show={showTagGameAdd} onToggleShow={() => setShowTagGameAdd((v) => !v)}
+                  options={tagGameOptions}
+                  onAdd={(o) => { addTaggedGame(o.raw); setTagGameSearch(""); setShowTagGameAdd(false); }}
+                  placeholder="Search game..."
+                />
+              </div>
             </div>
 
             <button

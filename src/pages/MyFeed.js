@@ -107,8 +107,11 @@ export default function MyFeed() {
         const articleItems = articleSnap.docs
           .map((d) => ({ id: d.id, ...d.data(), _kind: "article" }))
           .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)));
+        // Performances sort by their own gameDate; articles by publishedAt
+        // only, never last-updated — an old article getting a small edit
+        // (which bumps updatedAt) must not jump back to the top of this feed.
         const combined = [...perfItems, ...articleItems]
-          .sort((a, b) => toMs(b.gameDate || b.publishedAt || b.updatedAt) - toMs(a.gameDate || a.publishedAt || a.updatedAt));
+          .sort((a, b) => toMs(b.gameDate || b.publishedAt) - toMs(a.gameDate || a.publishedAt));
         setFeedItems(combined);
       } catch (e) { console.error(e); setFeedItems([]); }
     };
