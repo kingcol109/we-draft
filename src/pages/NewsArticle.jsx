@@ -8,7 +8,9 @@ import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
-import EngagementSection from "../components/EngagementSection";
+import EngagementSection, { useEngagement, LikeButton } from "../components/EngagementSection";
+import PlayersMentionedList from "../components/PlayersMentionedList";
+import TeamsMentionedList from "../components/TeamsMentionedList";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -27,7 +29,7 @@ export default function NewsArticle() {
   const [sidebarItems, setSidebarItems] = useState([]);
   const [mentionedPlayers, setMentionedPlayers] = useState([]);
   const [mentionedGames, setMentionedGames] = useState([]);
-  const [schoolInfo, setSchoolInfo] = useState({}); // School name -> { logo, slug }
+  const [schoolInfo, setSchoolInfo] = useState({}); // School name -> { logo, logoDark, wordmark, wordmarkDark, slug, color1, color2 }
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const contentRef = useRef(null);
@@ -38,9 +40,14 @@ export default function NewsArticle() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // School name → { logo, slug }, for the "Players Mentioned" row logos and
-  // the "Teams Mentioned" block (both name and link). Fetched once (the
-  // schools collection is small) rather than per-player/per-team.
+  // School name → { logo, logoDark, wordmark, wordmarkDark, slug, color1,
+  // color2 } — for the "Players Mentioned" chips (PlayersMentionedList.js,
+  // shared with PerformancePage.js) and the "Teams Mentioned" chips
+  // (TeamsMentionedList.js). LogoDark/WordmarkDark/Color1/Color2 are the
+  // same fields TeamPage.js's own hero uses for art that needs to read
+  // against a saturated team-color fill, not the plain full-color Logo1.
+  // Fetched once (the schools collection is small) rather than per-player/
+  // per-team.
   useEffect(() => {
     const fetch = async () => {
       try {
@@ -48,7 +55,17 @@ export default function NewsArticle() {
         const map = {};
         snap.docs.forEach((d) => {
           const data = d.data();
-          if (data.School) map[data.School] = { logo: data.Logo1 || "", slug: data.Slug || toTeamSlug(data.School) };
+          if (data.School) {
+            map[data.School] = {
+              logo: data.Logo1 || "",
+              logoDark: data.LogoDark || "",
+              wordmark: data.Wordmark || "",
+              wordmarkDark: data.WordmarkDark || "",
+              slug: data.Slug || toTeamSlug(data.School),
+              color1: data.Color1 || "",
+              color2: data.Color2 || "",
+            };
+          }
         });
         setSchoolInfo(map);
       } catch (e) { /* logos/slugs are non-critical */ }
@@ -154,6 +171,16 @@ export default function NewsArticle() {
     fetch();
   }, [id]);
 
+  // Called unconditionally (hooks can't follow the early returns below) —
+  // useEngagement's own `ready` check treats an empty/incomplete docPath as
+  // inert, which covers both "article not loaded yet" and "this is a plain
+  // news item, not type:article" (a news doc's id would otherwise resolve
+  // to a same-id, wrong-collection articles/{id} doc that likely doesn't
+  // exist). Built once here, not inside EngagementSection below, so the
+  // header bar's own LikeButton shares this exact instance instead of
+  // triggering a second parallel fetch for the same doc.
+  const engagement = useEngagement(article?.type === "article" && article?.id ? ["articles", article.id] : []);
+
   if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (!article) return (
@@ -206,20 +233,15 @@ export default function NewsArticle() {
       >
         {d && (
         <div style={{ flexShrink: 0, width: "42px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "6px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+            <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{d.split(" ")[0]}</span>
             </div>
-            <div style={{ padding: "4px 0 4px", textAlign: "center" }}>
-              <span style={{ fontSize: "20px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{d.split(" ")[1]}</span>
+            <div style={{ padding: "4px 0 4px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: "20px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>{d.split(" ")[1]}</span>
             </div>
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ marginBottom: "3px" }}>
-            <span style={{ background: item.type === "article" ? GOLD : BLUE, color: "#fff", fontSize: "7px", fontWeight: 900, padding: "1px 5px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {item.type === "article" ? "Article" : "News"}
-            </span>
-          </div>
           <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "11px", color: "#222", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.3 }}>
             {item.title}
           </div>
@@ -234,108 +256,16 @@ export default function NewsArticle() {
   // of as one "sidebar" block that used to come before the article on
   // mobile. Desktop is unaffected — it still stacks both inside a single
   // sticky sidebar column exactly as before. ──
+  // Team-colored chips, shared with PerformancePage.js — see
+  // PlayersMentionedList.js for the styling/hover behavior itself.
   const PlayersMentionedBlock = mentionedPlayers.length > 0 && (
-    <div>
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-          Players Mentioned
-        </div>
-        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-      </div>
-      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-        {mentionedPlayers.map((p, i) => {
-          const logo = schoolInfo[p.School]?.logo;
-          return (
-            <Link
-              key={p.id}
-              to={`/player/${p.Slug}`}
-              className="wd-mentioned-player-link"
-              style={{
-                display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
-                textDecoration: "none",
-                borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
-                background: "#fff",
-              }}
-            >
-              <div className="wd-mentioned-player-logo" style={{
-                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                width: "52px", height: "52px", borderRadius: "8px",
-                background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
-              }}>
-                {logo ? (
-                  <img
-                    src={logo} alt={p.School || ""} style={{ width: "80%", height: "80%", objectFit: "contain" }}
-                    referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
-                  />
-                ) : (
-                  <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-                <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
-                  {p.First} {p.Last}
-                </span>
-                <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px" }}>
-                  <span style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{p.Position || "—"}</span>
-                  {p.School && <span> · {p.School}</span>}
-                </span>
-              </div>
-              <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
+    <PlayersMentionedList players={mentionedPlayers} schoolInfo={schoolInfo} />
   );
 
-  // Same card/row treatment as Players Mentioned above — reuses its hover
-  // CSS classes (.wd-mentioned-player-*, defined once in the <style> block
-  // below) rather than duplicating them.
+  // Team-colored chips, same pre-hover look as Players Mentioned — see
+  // TeamsMentionedList.js for the wordmark-on-hover behavior itself.
   const TeamsMentionedBlock = mentionedTeams.length > 0 && (
-    <div>
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-          Teams Mentioned
-        </div>
-        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-      </div>
-      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-        {mentionedTeams.map((t, i) => (
-          <Link
-            key={t.slug}
-            to={`/team/${t.slug}`}
-            className="wd-mentioned-player-link"
-            style={{
-              display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
-              textDecoration: "none",
-              borderBottom: i < mentionedTeams.length - 1 ? "1px solid #f0f0f0" : "none",
-              background: "#fff",
-            }}
-          >
-            <div className="wd-mentioned-player-logo" style={{
-              flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-              width: "52px", height: "52px", borderRadius: "8px",
-              background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
-            }}>
-              {t.logo ? (
-                <img
-                  src={t.logo} alt={t.name} style={{ width: "80%", height: "80%", objectFit: "contain" }}
-                  referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
-                />
-              ) : (
-                <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
-              )}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-              <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>{t.name}</span>
-            </div>
-            <span className="wd-mentioned-player-chevron" style={{ flexShrink: 0, color: GOLD, fontSize: "22px", fontWeight: 900 }}>›</span>
-          </Link>
-        ))}
-      </div>
-    </div>
+    <TeamsMentionedList teams={mentionedTeams} />
   );
 
   // Date badge matches SidebarItem's own — a game reads the same way here
@@ -366,12 +296,12 @@ export default function NewsArticle() {
               }}
             >
               {d && (
-                <div style={{ flexShrink: 0, width: "42px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "6px", overflow: "hidden" }}>
-                  <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+                <div style={{ flexShrink: 0, width: "42px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "6px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                  <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{d.split(" ")[0]}</span>
                   </div>
-                  <div style={{ padding: "4px 0", textAlign: "center" }}>
-                    <span style={{ fontSize: "18px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{d.split(" ")[1]}</span>
+                  <div style={{ padding: "4px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ fontSize: "18px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>{d.split(" ")[1]}</span>
                   </div>
                 </div>
               )}
@@ -518,19 +448,23 @@ export default function NewsArticle() {
           <div style={{ order: 1 }}>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
 
-              {/* Article header bar */}
-              <div style={{ background: BLUE, padding: isMobile ? "10px 14px" : "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ background: GOLD, color: "#fff", fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                    {article.type === "article" ? "Article" : "News"}
-                  </span>
-                  {dateStr && (
-                    <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", fontWeight: 700 }}>{dateStr}</span>
+              {/* Article header bar — Like button lives here now, same as
+                  PlayerProfile.js's own hero-bar Like (heart pill, grouped
+                  with whatever else sits on the right), instead of down in
+                  the Comments card below. Article/News badge dropped; date
+                  sized up to fill the space it left. */}
+              <div style={{ background: BLUE, padding: isMobile ? "10px 14px" : "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                {dateStr && (
+                  <span style={{ color: "#fff", fontSize: isMobile ? "14px" : "16px", fontWeight: 900 }}>{dateStr}</span>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {article.author && (
+                    <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", fontWeight: 700 }}>By {article.author}</span>
+                  )}
+                  {article.type === "article" && (
+                    <LikeButton engagement={engagement} itemLabel="this article" />
                   )}
                 </div>
-                {article.author && (
-                  <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", fontWeight: 700 }}>By {article.author}</span>
-                )}
               </div>
               <div style={{ height: "3px", background: GOLD }} />
 
@@ -593,14 +527,17 @@ export default function NewsArticle() {
               </div>
             </div>
 
-            {/* Like + Comments — same rules/shape as GamePage.js's own game
-                comments, via the shared EngagementSection component. Only
-                for type:"article" (ArticlesManager.js's long-form, tagged
+            {/* Comments — same rules/shape as GamePage.js's own game
+                comments, via the shared EngagementSection component. Its
+                own Like row is hidden (showLikeRow=false): the header bar
+                above already has one, sharing this same `engagement`
+                instance rather than fetching a second time. Only for
+                type:"article" (ArticlesManager.js's long-form, tagged
                 content) — plain "news" items don't get this, same
                 distinction Players/Teams/Games Mentioned above already
                 draw. */}
             {article.type === "article" && (
-              <EngagementSection docPath={["articles", article.id]} itemLabel="this article" />
+              <EngagementSection engagement={engagement} itemLabel="this article" showLikeRow={false} />
             )}
           </div>
 

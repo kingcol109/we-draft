@@ -257,6 +257,13 @@ service cloud.firestore {
       allow update: if false;
     }
     match /trends/{doc} { allow read, write: if true; }
+    // Weekly AP-style Top 25 — one doc per week (doc id is the schedule26
+    // Week string, e.g. "Week 1"), each holding an ordered Top25 array of
+    // {Rank, School}. Week 0 has no doc of its own — everything reading
+    // rankings treats "Week 0" as an alias for "Week 1"'s doc (see
+    // rankingsWeekKey() in src/utils/rankings.js), so there's exactly one
+    // source of truth for both instead of two docs that could drift apart.
+    match /rankings/{doc} { allow read, write: if true; }
     match /rivalries/{doc} { allow read, write: if true; }
     match /videos/{doc} { allow read, write: if true; }
     match /ads/{doc} { allow read, write: if true; }

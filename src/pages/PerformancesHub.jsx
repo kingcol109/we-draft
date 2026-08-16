@@ -3,9 +3,10 @@
 // Public "browse all performances" page. Defaults to the current CFB week —
 // computed from schedule26's game dates, not just picked arbitrarily — with
 // a dropdown to browse past weeks, and a grade checklist to filter what
-// shows (defaults to Dominant/Great/Good, the three tiers with a glow
-// effect). If a week has no performances entered yet, falls back to showing
-// that week's schedule so the page never looks broken/empty.
+// shows (defaults to Dominant/Great/Good, the three tiers whose stat line
+// gets a pop via statLineGlow.js). If a week has no performances entered
+// yet, falls back to showing that week's schedule so the page never looks
+// broken/empty.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
@@ -14,6 +15,12 @@ import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginSidebars from "../components/MarginSidebars";
+import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
+// Breakout/On Fire trend icons — same custom images MarginSidebars.js's
+// and PlayerProfile.js's own Trending widgets use now instead of the ⚡/🔥
+// emoji glyphs (Up keeps its ▲ triangle text).
+import BreakoutIcon from "../assets/breakout1.png";
+import OnFireIcon from "../assets/onfire.png";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -39,15 +46,15 @@ const gradeStyles = {
 // duplicated rather than shared since that widget's version is entangled
 // with its own gutter-measurement code.
 const TREND_STYLE = {
-  up: { icon: "▲", label: "Trending Up", badgeBg: "#16a34a", badgeBorder: "#0f6e33" },
-  breakout: { icon: "⚡", label: "Breakout", badgeBg: "#4a535e", badgeBorder: "#2c333b" },
-  "on fire": { icon: "🔥", label: "On Fire", badgeBg: "#ffcc00", badgeBorder: "#b38600" },
+  up: { icon: "▲", label: "Trending Up", badgeBg: "#16a34a", badgeBorder: "#0f6e33", iconClass: "wd-hub-trendup-icon" },
+  breakout: { icon: "⚡", iconImg: BreakoutIcon, label: "Breakout", badgeBg: "#4a535e", badgeBorder: "#2c333b", iconClass: "wd-hub-breakout-icon" },
+  "on fire": { icon: "🔥", iconImg: OnFireIcon, label: "On Fire", badgeBg: "#ff0000", badgeBorder: "#a30000", iconClass: "wd-hub-onfire-icon" },
 };
 // Brighter versions of the same three trend colors (same hues as the
 // margin widget's soft-glow effect) for use as text/accents against the
 // terminal's near-black background, where TREND_STYLE's own badgeBg
 // ("breakout" especially) would be too close to the background to read.
-const TREND_ACCENT = { up: "#4ade80", breakout: "#8fd8ff", "on fire": "#ffd23d" };
+const TREND_ACCENT = { up: "#4ade80", breakout: "#8fd8ff", "on fire": "#ff4d4d" };
 
 // Terminal-panel palette — a dark data readout distinct from the rest of
 // the site's light chrome, so the performance list itself feels like a
@@ -69,25 +76,8 @@ const TERMINAL_GRADE_COLOR_FALLBACK = "#8b98a8";
 const TERMINAL_BG = "#0a1420";
 const TERMINAL_MONO = "'Courier New', Courier, monospace";
 
-const gradeGlowClass = (grade) => {
-  if (grade === "Dominant") return "wd-perf-glow-dominant";
-  if (grade === "Great") return "wd-perf-glow-great";
-  if (grade === "Good") return "wd-perf-glow-good";
-  return "";
-};
-
 const GRADE_GLOW_STYLE = `
-  @keyframes wdPerfGlowDominant {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
-  }
-  .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; }
-  @keyframes wdPerfGlowGreat {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
-  }
-  .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; }
-  .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); }
+  ${STAT_LINE_GLOW_STYLE}
   @keyframes wdLiveDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .wd-live-dot { animation: wdLiveDot 1.1s ease-in-out infinite; }
   @keyframes wdFeaturedRowGlow {
@@ -105,6 +95,35 @@ const GRADE_GLOW_STYLE = `
   .wd-schedule-row-gotw { animation: wdGotwRowGlow 3.4s ease-in-out infinite; }
   .wd-terminal-row { transition: background 0.15s ease; }
   .wd-terminal-row:hover { background: rgba(255,255,255,0.05) !important; }
+  /* Same per-trend icon animations as MarginSidebars.js/PlayerProfile.js's
+     own Trending widgets — Up a steady bounce, Breakout an electric
+     wobble, On Fire a flicker. */
+  @keyframes wdHubTrendUpIconZoom {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(74,222,128,0.7)); }
+    50%      { transform: scale(1.25); filter: drop-shadow(0 0 4px rgba(74,222,128,1)); }
+  }
+  .wd-hub-trendup-icon { display:inline-block; transform-origin: center; animation: wdHubTrendUpIconZoom 4s ease-in-out infinite; }
+  @keyframes wdHubBreakoutIconTwitch {
+    0%   { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 2px rgba(143,216,255,0.8)); }
+    8%   { transform: scale(1.1) rotate(-9deg) translateX(-1px); filter: drop-shadow(0 0 4px rgba(143,216,255,1)); }
+    16%  { transform: scale(0.95) rotate(7deg) translateX(1px); filter: drop-shadow(0 0 2px rgba(143,216,255,0.7)); }
+    24%  { transform: scale(1.08) rotate(-5deg); filter: drop-shadow(0 0 3px rgba(143,216,255,1)); }
+    32%  { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 2px rgba(143,216,255,0.8)); }
+    40%  { transform: scale(1.06) rotate(8deg) translateY(-1px); filter: drop-shadow(0 0 3px rgba(143,216,255,0.9)); }
+    48%  { transform: scale(0.94) rotate(-6deg); filter: drop-shadow(0 0 2px rgba(143,216,255,0.7)); }
+    56%  { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 2px rgba(143,216,255,0.8)); }
+    64%  { transform: scale(1.1) rotate(-7deg) translateX(1px); filter: drop-shadow(0 0 4px rgba(143,216,255,1)); }
+    72%  { transform: scale(0.96) rotate(5deg); filter: drop-shadow(0 0 2px rgba(143,216,255,0.7)); }
+    100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 2px rgba(143,216,255,0.8)); }
+  }
+  .wd-hub-breakout-icon { display:inline-block; animation: wdHubBreakoutIconTwitch 0.7s steps(1, jump-end) infinite; }
+  @keyframes wdHubOnFireIconFlicker {
+    0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 2px rgba(255,0,0,0.9)); }
+    25%      { transform: scale(1.1) rotate(-3deg); filter: drop-shadow(0 0 4px rgba(255,0,0,1)); }
+    50%      { transform: scale(0.94) rotate(2deg); filter: drop-shadow(0 0 3px rgba(255,0,0,0.85)); }
+    75%      { transform: scale(1.08) rotate(-2deg); filter: drop-shadow(0 0 5px rgba(255,0,0,1)); }
+  }
+  .wd-hub-onfire-icon { display:inline-block; animation: wdHubOnFireIconFlicker 0.9s ease-in-out infinite; }
 `;
 
 const weekNumber = (w) => {
@@ -247,7 +266,15 @@ function TrendsTab({ trends, loading }) {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "13px" }}>{style ? style.icon : "•"}</span>
+                  {style ? (
+                    <span className={style.iconClass}>
+                      {style.iconImg ? (
+                        <img src={style.iconImg} alt={style.label} style={{ width: "13px", height: "13px", objectFit: "contain" }} />
+                      ) : style.icon}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: "13px" }}>•</span>
+                  )}
                   <span style={{ fontFamily: TERMINAL_MONO, color: accent, fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                     {style ? style.label : (t.Trend || "Trending")}
                   </span>
@@ -763,7 +790,7 @@ export default function PerformancesHub() {
                         <Link
                           key={p.id}
                           to={`/performance/${p.slug || p.id}`}
-                          className={`wd-terminal-row ${gradeGlowClass(p.grade)}`}
+                          className="wd-terminal-row"
                           style={{
                             display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px",
                             textDecoration: "none", borderBottom: i < filteredItems.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none",
@@ -780,7 +807,7 @@ export default function PerformancesHub() {
                               {p.playerName || p.titleShort}
                             </div>
                             {p.statLine && (
-                              <div style={{ fontFamily: TERMINAL_MONO, fontSize: "11.5px", fontWeight: 700, color: tickColor, marginTop: "2px" }}>
+                              <div className={gradeStatLineClass(p.grade)} style={{ fontFamily: TERMINAL_MONO, fontSize: "11.5px", fontWeight: 700, color: tickColor, marginTop: "2px" }}>
                                 {p.statLine}
                               </div>
                             )}

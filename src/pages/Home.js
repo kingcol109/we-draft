@@ -740,23 +740,18 @@ export default function Home() {
                   >
                     {mon && day && (
                       <div style={{ flexShrink: 0, width: "36px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                        <div style={{ background: GOLD, lineHeight: 1, padding: "2px 0", textAlign: "center" }}>
+                        <div style={{ background: GOLD, lineHeight: 1, padding: "2px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                           <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{mon}</span>
                         </div>
-                        <div style={{ padding: "3px 0", textAlign: "center" }}>
-                          <span style={{ fontSize: "16px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{day}</span>
+                        <div style={{ padding: "3px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ fontSize: "16px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>{day}</span>
                         </div>
                       </div>
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ marginBottom: "2px" }}>
-                        <span style={{ background: n.type === "article" ? GOLD : BLUE, color: "#fff", fontSize: "7px", fontWeight: 900, padding: "1px 5px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                          {n.type === "article" ? "Article" : "News"}
-                        </span>
-                      </div>
                       <div style={{ fontWeight: 900, fontSize: "11px", color: "#222", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{n.title}</div>
                     </div>
-                    <div style={{ flexShrink: 0, fontWeight: 900, fontSize: "12px", color: BLUE }}>→</div>
+                    <div style={{ flexShrink: 0, fontWeight: 900, fontSize: "16px", color: BLUE }}>›</div>
                   </Link>
                 );
               }) : (

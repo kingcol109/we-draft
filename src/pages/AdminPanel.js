@@ -10,6 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import ArticlesManager from "../components/ArticlesManager";
 import PerformancesManager from "../components/PerformancesManager";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -5336,6 +5337,111 @@ function KeyPlayersCombobox({ school, excludeIds, players, onAdd }) {
   );
 }
 
+// ── Top 25 Rankings — one doc per week (rankings/{Week}), edited here
+// directly below the Schedule editor for whichever week is selected there,
+// so the two obviously stay in sync (same week, same screen) rather than
+// living in their own separate tab. Week 0 has no doc of its own — every
+// lookup sitewide treats it as an alias for Week 1's doc (see
+// rankingsWeekKey in src/utils/rankings.js, the same helper this panel
+// itself uses), since there's only one poll published before the season
+// opens and it covers both. Editing while Week 0 is selected transparently
+// reads/writes that same Week 1 doc rather than blocking outright — just
+// flags it with a note so it's not surprising the header says "Week 1". ──
+function Top25RankingsPanel({ week, schoolNames }) {
+  const key = rankingsWeekKey(week);
+  const [ranks, setRanks] = useState(() => Array(RANKINGS_LIMIT).fill(""));
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    if (!key) { setRanks(Array(RANKINGS_LIMIT).fill("")); setLoading(false); return; }
+    let alive = true;
+    setLoading(true);
+    setSaveMessage("");
+    fetchWeekRankMap(key).then((map) => {
+      if (!alive) return;
+      // fetchWeekRankMap returns { School: Rank } — invert it back into the
+      // 25 fixed slots this form edits.
+      const next = Array(RANKINGS_LIMIT).fill("");
+      Object.entries(map).forEach(([school, rank]) => {
+        if (rank >= 1 && rank <= RANKINGS_LIMIT) next[rank - 1] = school;
+      });
+      setRanks(next);
+      setLoading(false);
+    });
+    return () => { alive = false; };
+  }, [key]);
+
+  const handleSave = async () => {
+    if (!key) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const Top25 = ranks
+        .map((school, i) => (school ? { Rank: i + 1, School: school } : null))
+        .filter(Boolean);
+      await setDoc(doc(db, "rankings", key), { Top25, updatedAt: serverTimestamp() });
+      setSaveMessage("Rankings saved.");
+    } catch (e) {
+      console.error("Rankings save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!week) return null;
+
+  return (
+    <div style={{ marginTop: "18px", border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🏆 Top 25 — {key}
+        </div>
+        {key !== week && (
+          <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "11px", fontWeight: 700 }}>
+            ({week} uses this same poll)
+          </span>
+        )}
+        <button
+          onClick={handleSave}
+          disabled={saving || loading}
+          style={{
+            marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+            borderRadius: "6px", padding: "6px 16px", fontWeight: 900, fontSize: "12px",
+            textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? "Saving..." : "Save Rankings"}
+        </button>
+      </div>
+      {loading ? (
+        <LoadingSpinner label="Loading" size={22} minHeight="80px" />
+      ) : (
+        <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "8px" }}>
+          {ranks.map((school, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ flexShrink: 0, width: "26px", textAlign: "right", fontWeight: 900, fontSize: "13px", color: BLUE }}>#{i + 1}</div>
+              <SchoolCombobox
+                value={school}
+                onChange={(v) => setRanks((prev) => { const next = [...prev]; next[i] = v; return next; })}
+                options={schoolNames}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      {saveMessage && (
+        <div style={{ padding: "0 16px 14px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+          {saveMessage}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CFBScheduleSection() {
   const [cfbTab, setCfbTab] = useState("schedule");
   const [games, setGames] = useState([]);
@@ -5452,6 +5558,17 @@ function CFBScheduleSection() {
         PicksForceOpen: formState.PicksForceOpen,
         RankedDisqualified: formState.RankedDisqualified,
         Final: formState.Final && canMarkFinal,
+        // Top 25 rank snapshot — only written/refreshed while the game is
+        // actually Final, from that week's *current* rankings at save time.
+        // GamePage.js (and anywhere else showing this specific game) prefers
+        // these frozen fields over a live rankings lookup once set, so the
+        // numbers on a finished game's page don't drift if that week's poll
+        // gets corrected later. Cleared back off (not just left stale) the
+        // moment a game is un-marked Final, so an in-progress/upcoming game
+        // always falls back to a live lookup instead of showing a leftover
+        // number from whenever it was last marked Final.
+        HomeRank: null,
+        AwayRank: null,
         Notes: formState.Notes || "",
         KeyPlayersHome: formState.KeyPlayersHome,
         KeyPlayersAway: formState.KeyPlayersAway,
@@ -5498,6 +5615,14 @@ function CFBScheduleSection() {
       } else if (!isNew) {
         payload.AwayScore = deleteField();
         awayScoreCleared = true;
+      }
+
+      // Snapshot this week's ranks onto the game the moment it's saved
+      // Final — see the HomeRank/AwayRank comment above.
+      if (payload.Final) {
+        const weekRanks = await fetchWeekRankMap(payload.Week);
+        payload.HomeRank = weekRanks[payload.Home] ?? null;
+        payload.AwayRank = weekRanks[payload.Away] ?? null;
       }
 
       if (isNew) {
@@ -5575,6 +5700,7 @@ function CFBScheduleSection() {
       {cfbTab === "rivalries" ? (
         <RivalriesSection schoolNames={schoolNames} />
       ) : (
+      <>
       <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -5862,6 +5988,9 @@ function CFBScheduleSection() {
         )}
       </div>
     </div>
+
+    <Top25RankingsPanel week={selectedWeek} schoolNames={schoolNames} />
+      </>
       )}
     </div>
   );

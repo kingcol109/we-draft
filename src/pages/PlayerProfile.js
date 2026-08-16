@@ -21,6 +21,7 @@ import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
@@ -39,6 +40,11 @@ import EarlyContributorFlair from "../assets/early contributor.png";
 import Year2ContributorFlair from "../assets/y2contributor.png";
 import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
+
+// ── Trend icons — Breakout/On Fire use these custom images sitewide now
+// instead of the ⚡/🔥 emoji glyphs (Up keeps its ▲ triangle text). ──
+import BreakoutIcon from "../assets/breakout1.png";
+import OnFireIcon from "../assets/onfire.png";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -110,33 +116,48 @@ const FLAIR_CONFIG = {
   "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
 };
 
-// ── Trend → visual treatment. badgeBg/badgeBorder color the small icon
-// square in both the Top 5 Trending sidebar and match the header trend
-// badges (see the "On Fire" / "Breakout" / "Trending Up" tags further down)
-// so a player's trend reads consistently everywhere it shows up. softClass
-// is the sidebar-only muted glow applied to each row's own box (see the
-// wd-*-box-soft keyframes) — deliberately separate from the header tags'
-// bolder wd-*-tag animations, which are unchanged. ──
+// ── Trend → visual treatment. badgeBg/badgeBorder are the trend's own
+// colors — badgeBg fills the Top 5 Trending sidebar chip on hover (and
+// the small inline icon before the name), badgeBorder strokes the chip's
+// logo box — matching the header trend badges (see the "On Fire" /
+// "Breakout" / "Trending Up" tags further down) so a player's trend reads
+// consistently everywhere it shows up. Breakout/On Fire use the custom
+// iconImg assets (see the imports above) instead of an emoji glyph — Up
+// keeps its ▲ triangle text, no iconImg. On Fire's whole palette is red
+// (#ff0000-based) now, not its old orange/yellow. ──
 const TREND_STYLE = {
   up: {
     icon: "▲", label: "Up",
     badgeBg: "#16a34a", badgeBorder: "#0f6e33",
     boxBorder: "#bdf0cf",
-    softClass: "wd-trendup-box-soft",
+    // Top 5 Trending sidebar chip's own ambient glow — a quieter, slower
+    // version of this same trend's header-tag glow (wd-trendup-tag etc.
+    // further down), so a chip reads as "trending up" even before you
+    // hover it.
+    glowClass: "wd-trend2-glow-up",
+    // A steady little bounce (not a flicker — "up" reads as a smooth
+    // climb, not chaos), same idea as On Fire's icon jitter below.
+    iconClass: "wd-trendup-icon",
   },
   breakout: {
-    icon: "⚡", label: "Breakout",
+    icon: "⚡", iconImg: BreakoutIcon, label: "Breakout",
     badgeBg: "#4a535e", badgeBorder: "#2c333b",
     boxBorder: "#bfe6fb",
-    softClass: "wd-breakout-box-soft",
+    glowClass: "wd-trend2-glow-breakout",
+    // A quick electric wobble, same idea as On Fire's flicker below.
+    iconClass: "wd-breakout-icon",
   },
   "on fire": {
-    // Yellow (not orange) background so the 🔥 glyph itself has contrast to
-    // pop against, instead of blending into a same-toned orange square.
-    icon: "🔥", label: "On Fire",
-    badgeBg: "#ffcc00", badgeBorder: "#b38600",
-    boxBorder: "#ffd7ae",
-    softClass: "wd-onfire-box-soft",
+    icon: "🔥", iconImg: OnFireIcon, label: "On Fire",
+    badgeBg: "#ff0000", badgeBorder: "#a30000",
+    boxBorder: "#ffb3b3",
+    // On Fire gets the flickery version (see wdTrend2GlowOnFire) instead
+    // of a smooth pulse, plus its own icon jitter (wd-onfire-icon, defined
+    // further down) — Up/Breakout get their own themed icon animations too
+    // (wd-trendup-icon/wd-breakout-icon), just calmer/quicker respectively
+    // instead of a flicker.
+    glowClass: "wd-trend2-glow-onfire",
+    iconClass: "wd-onfire-icon",
   },
 };
 
@@ -229,9 +250,9 @@ function SidebarCard({ title, color1, color2, children }) {
 // enough for a transient hover tooltip" tradeoff the rest of this codebase
 // already makes for similar popups). ──
 function TrendTag({
-  icon, iconClassName, label, tagClassName, tagGradient, tagBorder, tagColor,
+  icon, iconImg, iconClassName, label, tagClassName, tagGradient, tagBorder, tagColor,
   tooltipGradient, tooltipBorder, tooltipGlow, tooltipDivider, tooltipTextColor,
-  headerIcon, headerText, notes, notesColor, isMobile,
+  headerIcon, headerIconImg, headerText, notes, notesColor, isMobile,
 }) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -269,7 +290,11 @@ function TrendTag({
           cursor: "pointer",
         }}
       >
-        <span className={iconClassName}>{icon}</span> {label}
+        <span className={iconClassName}>
+          {iconImg ? (
+            <img src={iconImg} alt="" style={{ width: "1em", height: "1em", objectFit: "contain", verticalAlign: "middle" }} />
+          ) : icon}
+        </span> {label}
       </span>
       {show && ReactDOM.createPortal(
         <div
@@ -287,7 +312,11 @@ function TrendTag({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "7px" }}>
-            <span style={{ fontSize: "12px" }}>{headerIcon}</span>
+            {headerIconImg ? (
+              <img src={headerIconImg} alt="" style={{ width: "14px", height: "14px", objectFit: "contain" }} />
+            ) : (
+              <span style={{ fontSize: "12px" }}>{headerIcon}</span>
+            )}
             <div style={{ fontSize: isMobile ? "11px" : "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: tooltipTextColor }}>
               {headerText}
             </div>
@@ -1980,82 +2009,72 @@ useEffect(() => {
     </details>
   );
 
-  // ── Top 5 Trending sidebar — same badged-square + name + school row
-  // shape as the Draft Class card above it, but the name runs bigger here
-  // and the school line fades out on hover (see wd-trend-school) to free
-  // up room for the trend Notes reveal, instead of squeezing the note in
-  // underneath both lines. That reveal uses the same fixed-height slide-
-  // up/fade-in as GamePage.js's Key Players rows (see that file's own
-  // wd-keyplayer-* comment) instead of a JS-driven state that grew the row
-  // in place — that in-flow reveal pushed neighboring rows down and could
-  // shove the hovered row out from under the cursor. Mobile has no hover,
-  // so wd-trend-note-forced (set via isMobile) just renders every row
-  // already revealed. ──
+  // ── Top 5 Trending sidebar — same team-colored chip pattern as
+  // PlayersMentionedList.js/MorePerformancesList.js (whole chip fills
+  // solid on hover, name flips white, chevron slides in, "logo" grows
+  // dramatically from center), except the fill is the trend's own color
+  // (Up/Breakout/On Fire — see TREND_STYLE), not a school color, and the
+  // logo box holds the trend's own icon (▲/⚡/🔥) rather than a team logo —
+  // there's no real logo to show for a trend, so the icon just stands in
+  // for one, on the left same as everywhere else this chip shape is used.
+  // The subtitle is the trend's Notes blurb shown immediately, not hidden
+  // behind a hover reveal like this row used to do. The logo box's own
+  // un-hover timing (a beat of delay, then a fade, so it reappears as the
+  // icon finishes shrinking back down rather than snapping back under it)
+  // is copied verbatim from PlayersMentionedList.js's own tuning. ──
   const TrendingListContent = (
-    <>
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "10px" }}>
       {trendingTop5.map((t) => {
         const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
         if (!style) return null;
         const isSelf = t.slug === player.Slug;
         const notesList = (t.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+        // iconImg (Breakout/On Fire) renders as a real image now; Up still
+        // falls back to its ▲ text glyph.
+        const iconNode = style.iconImg ? (
+          <img src={style.iconImg} alt={style.label} style={{ width: "22px", height: "22px", objectFit: "contain", display: "block" }} />
+        ) : style.icon;
 
         const rowContent = (
-          <div style={{ position: "relative", height: "50px" }}>
-            <div className="wd-trend-name-anim" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div
-                style={{
-                  flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                  width: "28px", height: "28px", borderRadius: "5px",
-                  backgroundColor: style.badgeBg, border: `2px solid ${style.badgeBorder}`,
-                  color: "#fff", fontSize: "12px", fontWeight: 900,
-                }}
-                title={style.label}
-              >
-                {style.icon}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "17px", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {t.First} {t.Last}
-                </span>
-                <span className="wd-trend-school" style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "2px" }}>
-                  {t.School || "—"}
-                </span>
-              </div>
+          <>
+            <div className="wd-trend2-logobox" title={style.label}>
+              {/* iconClass (On Fire only) is nested inside, not applied
+                  directly to wd-trend2-logo-icon — that element already
+                  carries the hover-triggered grow transform, and the
+                  flicker keyframe below also animates transform (jitter/
+                  scale). Two things driving the same property on one
+                  element fight; nesting them keeps the flicker running
+                  on its own inner element while the outer one still grows
+                  independently on hover. */}
+              <span className="wd-trend2-logo-icon">
+                {style.iconClass ? <span className={style.iconClass}>{iconNode}</span> : iconNode}
+              </span>
             </div>
-            <div className="wd-trend-note-wrap">
-              {notesList.length > 0 ? (
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#666", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {notesList.join(" · ")}
-                </div>
-              ) : (
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#aaa", fontStyle: "italic" }}>No notes yet.</div>
-              )}
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+              <span className="wd-trend2-name">
+                <span>{t.First}</span>
+                <span>{t.Last}</span>
+              </span>
+              <span className="wd-trend2-sub">
+                {notesList.length > 0 ? notesList.join(" · ") : "No notes yet."}
+              </span>
             </div>
-          </div>
+            <span className="wd-trend2-chevron">›</span>
+          </>
         );
 
-        const rowBoxStyle = {
-          display: "block", padding: "10px 14px", textDecoration: "none",
-          background: isSelf ? "#fff8e6" : "#fff",
-          borderLeft: `4px solid ${isSelf ? SITE_GOLD : style.badgeBorder}`,
-          borderBottom: "1px solid #f0f0f0",
-        };
+        const chipClassName = "wd-trend2-chip" + (isSelf ? " wd-trend2-chip-self" : "") + " " + style.glowClass;
+        const chipStyle = { "--c1": style.badgeBg, "--c2": style.badgeBorder };
 
-        const rowClassName = "wd-trend-row" + (isSelf ? " wd-trend-row-self" : "") + " " + style.softClass + (isMobile ? " wd-trend-note-forced" : "");
-
-        return (
-          <div key={t.slug}>
-            {isSelf ? (
-              <div className={rowClassName} style={rowBoxStyle}>{rowContent}</div>
-            ) : (
-              <Link to={`/player/${t.slug}`} className={rowClassName} style={rowBoxStyle}>
-                {rowContent}
-              </Link>
-            )}
-          </div>
+        return isSelf ? (
+          <div key={t.slug} className={chipClassName} style={chipStyle}>{rowContent}</div>
+        ) : (
+          <Link key={t.slug} to={`/player/${t.slug}`} className={chipClassName} style={chipStyle}>
+            {rowContent}
+          </Link>
         );
       })}
-    </>
+    </div>
   );
 
   const showTrendingSidebar = trendingLoaded && trendingTop5.length > 0;
@@ -2173,15 +2192,6 @@ useEffect(() => {
     </SidebarCard>
   );
 
-  // Grade → sidebar-row "pop" effect for performance items — see the
-  // wd-perf-glow-* keyframes injected below.
-  const gradeGlowClass = (grade) => {
-    if (grade === "Dominant") return "wd-perf-glow-dominant";
-    if (grade === "Great") return "wd-perf-glow-great";
-    if (grade === "Good") return "wd-perf-glow-good";
-    return "";
-  };
-
   // ── In The News sidebar ──
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={SITE_BLUE} color2={SITE_GOLD}>
@@ -2190,30 +2200,26 @@ useEffect(() => {
       ) : (
         playerNews.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
           <Link key={n.slug || n.id} to={n.type === "performance" ? `/performance/${n.slug}` : `/news/${n.slug}`}
-            className={n.type === "performance" ? gradeGlowClass(n.grade) : ""}
             style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
             <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: `2px solid ${SITE_BLUE}`, background: "#fff", display: "flex", flexDirection: "column" }}>
-              <div style={{ background: SITE_GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+              <div style={{ background: SITE_GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                   {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
                 </span>
               </div>
-              <div style={{ padding: "3px 0 2px", textAlign: "center" }}>
-                <span style={{ fontSize: "15px", fontWeight: 900, color: SITE_BLUE, lineHeight: 1, display: "block" }}>
+              <div style={{ padding: "3px 0 2px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: "15px", fontWeight: 900, color: SITE_BLUE, lineHeight: 1 }}>
                   {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
                 </span>
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "performance" ? "#7c3aed" : n.type === "article" ? SITE_GOLD : SITE_BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
-                {n.type === "performance" ? "Performance" : n.type === "article" ? "Article" : "News"}
-              </span>
               <h3 className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</h3>
               {n.type === "performance" && n.statLine && (
-                <div style={{ fontFamily: "'Courier New', monospace", fontWeight: 700, fontSize: "10.5px", color: "#666", marginTop: "3px" }}>
+                <div className={gradeStatLineClass(n.grade)} style={{ fontFamily: "'Courier New', monospace", fontWeight: 700, fontSize: "10.5px", color: "#666", marginTop: "3px" }}>
                   {n.statLine}
                 </div>
               )}
@@ -2339,13 +2345,14 @@ useEffect(() => {
         `}</style>
       )}
 
-      {/* Trend glow/flicker keyframes — rendered unconditionally (not gated on
-          this page's own trend) since the Top 5 Trending sidebar can show any
-          of these three trend types regardless of which player's page you're
-          on. On Fire uses faster, irregular keyframe stops (vs. the other
-          tags' smooth 0/50/100 pulse) so it reads as a flicker rather than a
-          heartbeat, plus its own icon jitter/scale animation on top so the
-          🔥 itself reads as an actual flickering flame. */}
+      {/* Trend glow/icon-animation keyframes — rendered unconditionally (not
+          gated on this page's own trend) since the Top 5 Trending sidebar
+          can show any of these three trend types regardless of which player
+          page you're on. Each trend's chip/tag glow AND its own icon (see
+          wd-trendup-icon/wd-breakout-icon/wd-onfire-icon) are themed to its
+          own personality — Up a steady climbing bounce, Breakout a quick
+          electric wobble, On Fire an irregular flicker — rather than one
+          shared animation reused across all three. */}
       <style>{`
         @keyframes wdBreakoutTagGlow {
           0%, 100% { box-shadow: 0 0 6px 1px rgba(143,216,255,0.45); }
@@ -2359,84 +2366,145 @@ useEffect(() => {
         }
         .wd-trendup-tag { animation: wdTrendUpTagGlow 2.4s ease-in-out infinite; }
 
+        /* Up's own icon animation — just a slow, steady zoom in and back
+           out, no bounce or rotation, so it reads as calm/deliberate
+           rather than jittery like the other two. */
+        @keyframes wdTrendUpIconZoom {
+          0%, 100% { transform: scale(1); filter: drop-shadow(0 0 3px rgba(74,222,128,0.7)); }
+          50%      { transform: scale(1.25); filter: drop-shadow(0 0 6px rgba(74,222,128,1)); }
+        }
+        .wd-trendup-icon { display:inline-block; transform-origin: center; animation: wdTrendUpIconZoom 4s ease-in-out infinite; }
+
+        /* Breakout's own icon animation — a genuine twitch, not a smooth
+           wobble: steps() timing means each stop snaps instantly to the
+           next instead of easing between them, in Breakout's own blue
+           rather than red/green. */
+        @keyframes wdBreakoutIconTwitch {
+          0%   { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.8)); }
+          8%   { transform: scale(1.1) rotate(-9deg) translateX(-1px); filter: drop-shadow(0 0 6px rgba(143,216,255,1)); }
+          16%  { transform: scale(0.95) rotate(7deg) translateX(1px); filter: drop-shadow(0 0 3px rgba(143,216,255,0.7)); }
+          24%  { transform: scale(1.08) rotate(-5deg); filter: drop-shadow(0 0 5px rgba(143,216,255,1)); }
+          32%  { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.8)); }
+          40%  { transform: scale(1.06) rotate(8deg) translateY(-1px); filter: drop-shadow(0 0 5px rgba(143,216,255,0.9)); }
+          48%  { transform: scale(0.94) rotate(-6deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.7)); }
+          56%  { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.8)); }
+          64%  { transform: scale(1.1) rotate(-7deg) translateX(1px); filter: drop-shadow(0 0 6px rgba(143,216,255,1)); }
+          72%  { transform: scale(0.96) rotate(5deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.7)); }
+          100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(143,216,255,0.8)); }
+        }
+        .wd-breakout-icon { display:inline-block; animation: wdBreakoutIconTwitch 0.7s steps(1, jump-end) infinite; }
+
         @keyframes wdOnFireTagGlow {
-          0%   { box-shadow: 0 0 6px 1px rgba(255,120,0,0.5), 0 0 16px 4px rgba(255,60,0,0.25); }
-          20%  { box-shadow: 0 0 10px 3px rgba(255,180,0,0.65), 0 0 20px 6px rgba(255,80,0,0.35); }
-          40%  { box-shadow: 0 0 7px 2px rgba(255,100,0,0.55), 0 0 14px 3px rgba(255,50,0,0.3); }
-          60%  { box-shadow: 0 0 13px 4px rgba(255,150,0,0.75), 0 0 22px 7px rgba(255,70,0,0.4); }
-          80%  { box-shadow: 0 0 8px 2px rgba(255,110,0,0.5), 0 0 16px 4px rgba(255,60,0,0.3); }
-          100% { box-shadow: 0 0 6px 1px rgba(255,120,0,0.5), 0 0 16px 4px rgba(255,60,0,0.25); }
+          0%   { box-shadow: 0 0 6px 1px rgba(255,0,0,0.5), 0 0 16px 4px rgba(255,0,0,0.25); }
+          20%  { box-shadow: 0 0 10px 3px rgba(255,0,0,0.65), 0 0 20px 6px rgba(255,0,0,0.35); }
+          40%  { box-shadow: 0 0 7px 2px rgba(255,0,0,0.55), 0 0 14px 3px rgba(255,0,0,0.3); }
+          60%  { box-shadow: 0 0 13px 4px rgba(255,0,0,0.75), 0 0 22px 7px rgba(255,0,0,0.4); }
+          80%  { box-shadow: 0 0 8px 2px rgba(255,0,0,0.5), 0 0 16px 4px rgba(255,0,0,0.3); }
+          100% { box-shadow: 0 0 6px 1px rgba(255,0,0,0.5), 0 0 16px 4px rgba(255,0,0,0.25); }
         }
         .wd-onfire-tag { animation: wdOnFireTagGlow 1.4s ease-in-out infinite; }
         @keyframes wdOnFireIconFlicker {
-          0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(255,140,0,0.9)); }
-          25%      { transform: scale(1.08) rotate(-3deg); filter: drop-shadow(0 0 6px rgba(255,90,0,1)); }
-          50%      { transform: scale(0.96) rotate(2deg); filter: drop-shadow(0 0 4px rgba(255,180,0,0.85)); }
-          75%      { transform: scale(1.05) rotate(-2deg); filter: drop-shadow(0 0 7px rgba(255,60,0,1)); }
+          0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 3px rgba(255,0,0,0.9)); }
+          25%      { transform: scale(1.08) rotate(-3deg); filter: drop-shadow(0 0 6px rgba(255,0,0,1)); }
+          50%      { transform: scale(0.96) rotate(2deg); filter: drop-shadow(0 0 4px rgba(255,0,0,0.85)); }
+          75%      { transform: scale(1.05) rotate(-2deg); filter: drop-shadow(0 0 7px rgba(255,0,0,1)); }
         }
         .wd-onfire-icon { display:inline-block; animation: wdOnFireIconFlicker 0.9s ease-in-out infinite; }
 
-        /* Top 5 Trending sidebar — same three trends, much quieter: a slow,
-           smooth pulse (no flicker, no icon jitter) on each row's own box
-           rather than the header tags' bolder glow. */
-        @keyframes wdTrendUpBoxSoft {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(74,222,128,0.16), 0 0 4px 1px rgba(74,222,128,0.16); }
-          50%      { box-shadow: 0 0 0 1px rgba(74,222,128,0.28), 0 0 7px 2px rgba(74,222,128,0.3); }
-        }
-        .wd-trendup-box-soft { animation: wdTrendUpBoxSoft 3.2s ease-in-out infinite; }
-        @keyframes wdBreakoutBoxSoft {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(143,216,255,0.16), 0 0 4px 1px rgba(143,216,255,0.16); }
-          50%      { box-shadow: 0 0 0 1px rgba(143,216,255,0.28), 0 0 7px 2px rgba(143,216,255,0.3); }
-        }
-        .wd-breakout-box-soft { animation: wdBreakoutBoxSoft 3.2s ease-in-out infinite; }
-        @keyframes wdOnFireBoxSoft {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(255,140,0,0.16), 0 0 4px 1px rgba(255,90,0,0.16); }
-          50%      { box-shadow: 0 0 0 1px rgba(255,140,0,0.3), 0 0 8px 2px rgba(255,90,0,0.32); }
-        }
-        .wd-onfire-box-soft { animation: wdOnFireBoxSoft 3.2s ease-in-out infinite; }
+        /* Performance stat lines — "pop" scaled to how good the grade was,
+           via statLineGlow.js (shared with MyFeed.js/TeamPage.js/GamePage.js/
+           PerformancesHub.jsx/the MarginSidebars family) instead of a
+           whole-row glow. */
+        ${STAT_LINE_GLOW_STYLE}
 
-        /* Performance sidebar rows — "pop" scaled to how good the grade
-           was. Dominant really pops, Great is quieter, Good is a static
-           hint, Productive/Average/Bad get nothing. Same tiered-glow
-           language as the trend rows above, just gold instead of trend
-           colors since it's the site's own grade signal, not a trend type. */
-        @keyframes wdPerfGlowDominant {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
+        /* Top 5 Trending sidebar chips — same mechanics as
+           PlayersMentionedList.js's chips (whole chip fills solid on hover,
+           name flips white, chevron slides in, logo box grows dramatically
+           from center), except --c1/--c2 are the trend's own colors
+           (TREND_STYLE.badgeBg/badgeBorder) rather than a school color, and
+           the "logo" in the logo box is the trend's own icon (▲/⚡/🔥) —
+           there's no real team logo to show here, the icon just plays that
+           role: sits on the left, grows out of its box on hover the same
+           way a team logo would. The logo box's un-hover is deliberately
+           asymmetric, copied from PlayersMentionedList.js's own tuning:
+           entering hover is an instant 0.18s fade, but returning to rest
+           waits 0.1s (so the still-oversized icon gets a head start
+           shrinking back down) before fading back in over 0.35s — without
+           that gap the box reappears while the icon is still visibly
+           larger than it. */
+        /* Ambient per-trend glow on the chip itself — quieter, slower
+           versions of this same trend's header-tag glow further down
+           (wd-trendup-tag/wd-breakout-tag share those rgba families; On
+           Fire also gets that tag's flicker cadence instead of a smooth
+           pulse, since a steady glow reads as "up", not "on fire"). Runs
+           continuously regardless of hover. */
+        @keyframes wdTrend2GlowUp {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(74,222,128,0.18), 0 0 6px 2px rgba(74,222,128,0.18); }
+          50%      { box-shadow: 0 0 0 1px rgba(74,222,128,0.32), 0 0 10px 3px rgba(74,222,128,0.35); }
         }
-        .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-        @keyframes wdPerfGlowGreat {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
+        .wd-trend2-glow-up { animation: wdTrend2GlowUp 3.2s ease-in-out infinite; }
+        @keyframes wdTrend2GlowBreakout {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(143,216,255,0.18), 0 0 6px 2px rgba(143,216,255,0.18); }
+          50%      { box-shadow: 0 0 0 1px rgba(143,216,255,0.32), 0 0 10px 3px rgba(143,216,255,0.35); }
         }
-        .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-        .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
+        .wd-trend2-glow-breakout { animation: wdTrend2GlowBreakout 3.2s ease-in-out infinite; }
+        @keyframes wdTrend2GlowOnFire {
+          0%   { box-shadow: 0 0 6px 1px rgba(255,0,0,0.45), 0 0 14px 3px rgba(255,0,0,0.22); }
+          20%  { box-shadow: 0 0 9px 2px rgba(255,0,0,0.55), 0 0 18px 5px rgba(255,0,0,0.3); }
+          40%  { box-shadow: 0 0 7px 2px rgba(255,0,0,0.45), 0 0 12px 3px rgba(255,0,0,0.25); }
+          60%  { box-shadow: 0 0 11px 3px rgba(255,0,0,0.6), 0 0 20px 6px rgba(255,0,0,0.32); }
+          80%  { box-shadow: 0 0 8px 2px rgba(255,0,0,0.45), 0 0 14px 3px rgba(255,0,0,0.25); }
+          100% { box-shadow: 0 0 6px 1px rgba(255,0,0,0.45), 0 0 14px 3px rgba(255,0,0,0.22); }
+        }
+        .wd-trend2-glow-onfire { animation: wdTrend2GlowOnFire 1.4s ease-in-out infinite; }
 
-        /* Top 5 Trending sidebar rows — same fixed-height slide-up/fade-in
-           reveal as GamePage.js's Key Players rows: a constant-height box
-           so hovering to reveal a player's trend Notes never reflows
-           neighboring rows. The school line also fades out on hover (it'd
-           otherwise sit directly above the note with nothing separating
-           them), freeing that space for the note instead. wd-trend-note-
-           forced (mobile, no hover) just renders every row already
-           revealed, school included. Rows are stacked directly against
-           each other (no gap) and each one is its own opaque box, so a
-           hovered row needs position:relative plus a z-index bump above
-           its neighbors — otherwise the next row down (later in paint
-           order) covers/hides even a 1-2px overflow of the revealed note
-           past this row's own bounds. */
-        .wd-trend-row { position: relative; z-index: 1; }
-        .wd-trend-row:hover, .wd-trend-row.wd-trend-note-forced { z-index: 2; }
-        .wd-trend-name-anim { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); transition: top 0.2s ease, transform 0.2s ease; }
-        .wd-trend-row:hover .wd-trend-name-anim { top: 0; transform: translateY(0); }
-        .wd-trend-school { transition: opacity 0.15s ease; }
-        .wd-trend-row:hover .wd-trend-school { opacity: 0; }
-        .wd-trend-note-wrap { position: absolute; left: 38px; right: 0; top: 24px; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
-        .wd-trend-row:hover .wd-trend-note-wrap { opacity: 1; }
-        .wd-trend-note-forced .wd-trend-name-anim { top: 0; transform: translateY(0); }
-        .wd-trend-note-forced .wd-trend-school { opacity: 0; }
-        .wd-trend-note-forced .wd-trend-note-wrap { opacity: 1; }
-        .wd-trend-row:hover:not(.wd-trend-row-self) { background: #fbfbfe; }
+        .wd-trend2-chip {
+          display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+          text-decoration: none; border-radius: 10px; background: #fff;
+          border: 2px solid var(--c1);
+          transition: background 0.18s ease;
+        }
+        .wd-trend2-chip:hover { background: var(--c1); }
+        .wd-trend2-chip-self { background: #fff8e6; border-color: ${SITE_GOLD}; }
+        /* First/Last always stack on their own line each (a flex column of
+           two spans), not a single text run. */
+        .wd-trend2-name {
+          display: flex; flex-direction: column;
+          color: ${SITE_BLUE}; font-weight: 900; font-size: 17px; line-height: 1.2;
+          word-break: break-word;
+          transition: color 0.18s ease;
+        }
+        .wd-trend2-chip:hover .wd-trend2-name { color: #fff; }
+        .wd-trend2-sub {
+          color: #777; font-weight: 700; font-size: 13px; margin-top: 3px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          transition: color 0.18s ease;
+        }
+        .wd-trend2-chip:hover .wd-trend2-sub { color: #fff; }
+        .wd-trend2-logobox {
+          flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+          width: 40px; height: 40px; border-radius: 8px; overflow: visible;
+          background: var(--c1); border: 2px solid var(--c2);
+          transition: background 0.35s ease 0.1s, border-color 0.35s ease 0.1s;
+        }
+        .wd-trend2-chip:hover .wd-trend2-logobox {
+          background: transparent; border-color: transparent;
+          transition: background 0.18s ease, border-color 0.18s ease;
+        }
+        .wd-trend2-logo-icon {
+          display: inline-block; font-size: 18px; line-height: 1; color: #fff;
+          transform-origin: center;
+          transition: transform 0.22s ease;
+        }
+        .wd-trend2-chip:hover .wd-trend2-logo-icon { transform: scale(1.7); }
+        .wd-trend2-chevron {
+          flex-shrink: 0; color: var(--c1); font-size: 20px; font-weight: 900;
+          opacity: 0; transform: translateX(-6px);
+          transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease;
+        }
+        .wd-trend2-chip:hover .wd-trend2-chevron {
+          opacity: 1; transform: translateX(0); color: #fff;
+        }
 
         /* Hero's background team logo — still a live link to the team page,
            so it gets its own hover reaction (grow + brighten) to read as
@@ -2767,7 +2835,7 @@ useEffect(() => {
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
-                      icon="▲" label="Trending Up"
+                      icon="▲" iconClassName="wd-trendup-icon" label="Trending Up"
                       tagClassName="wd-trendup-tag"
                       tagGradient="linear-gradient(135deg, #14532d, #16a34a)" tagBorder="#4ade80" tagColor="#eafff0"
                       tooltipGradient="linear-gradient(135deg, #0f2b1a, #1e4028)" tooltipBorder="rgba(74,222,128,0.55)"
@@ -2782,12 +2850,12 @@ useEffect(() => {
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
-                      icon="⚡" label="Breakout"
+                      iconImg={BreakoutIcon} iconClassName="wd-breakout-icon" headerIconImg={BreakoutIcon} label="Breakout"
                       tagClassName="wd-breakout-tag"
                       tagGradient="linear-gradient(135deg, #2c333b, #4a535e)" tagBorder="#8fd8ff" tagColor="#eaf6ff"
                       tooltipGradient="linear-gradient(135deg, #1c2128, #2f3742)" tooltipBorder="rgba(143,216,255,0.55)"
                       tooltipGlow="rgba(143,216,255,0.08)" tooltipDivider="rgba(143,216,255,0.6)"
-                      tooltipTextColor="#eaf6ff" headerIcon="⚡"
+                      tooltipTextColor="#eaf6ff"
                       headerText={((player.First||"") + " " + (player.Last||"")).trim() + " Breakout Performance"}
                       notes={breakoutStats} notesColor="#cfe9ff" isMobile={isMobile}
                     />
@@ -2797,14 +2865,14 @@ useEffect(() => {
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
-                      icon="🔥" iconClassName="wd-onfire-icon" label="On Fire"
+                      iconImg={OnFireIcon} iconClassName="wd-onfire-icon" headerIconImg={OnFireIcon} label="On Fire"
                       tagClassName="wd-onfire-tag"
-                      tagGradient="linear-gradient(135deg, #7a1f00, #ff6a00)" tagBorder="#ffb347" tagColor="#fff3e6"
-                      tooltipGradient="linear-gradient(135deg, #3a1400, #6b2800)" tooltipBorder="rgba(255,179,71,0.55)"
-                      tooltipGlow="rgba(255,179,71,0.08)" tooltipDivider="rgba(255,179,71,0.6)"
-                      tooltipTextColor="#fff3e6" headerIcon="🔥"
+                      tagGradient="linear-gradient(135deg, #4d0000, #ff0000)" tagBorder="#ff6666" tagColor="#ffe6e6"
+                      tooltipGradient="linear-gradient(135deg, #2b0000, #5c0000)" tooltipBorder="rgba(255,102,102,0.55)"
+                      tooltipGlow="rgba(255,0,0,0.08)" tooltipDivider="rgba(255,102,102,0.6)"
+                      tooltipTextColor="#ffe6e6"
                       headerText={((player.First||"") + " " + (player.Last||"")).trim() + " On Fire"}
-                      notes={trendNotesList} notesColor="#ffe0c2" isMobile={isMobile}
+                      notes={trendNotesList} notesColor="#ffcccc" isMobile={isMobile}
                     />
                   </>
                 )}

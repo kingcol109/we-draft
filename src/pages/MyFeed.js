@@ -14,18 +14,10 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-
-// Same tiered "pop" effect used everywhere else performances show up
-// (MarginSidebars.js, GameMarginSidebars.js, PerformancesHub.jsx).
-const gradeGlowClass = (grade) => {
-  if (grade === "Dominant") return "wd-perf-glow-dominant";
-  if (grade === "Great") return "wd-perf-glow-great";
-  if (grade === "Good") return "wd-perf-glow-good";
-  return "";
-};
 
 const toMs = (ts) => {
   if (!ts) return 0;
@@ -196,17 +188,7 @@ export default function MyFeed() {
     <>
       <Helmet><title>{feedTitle} | We-Draft</title></Helmet>
       <style>{`
-        @keyframes wdPerfGlowDominant {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
-        }
-        .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; }
-        @keyframes wdPerfGlowGreat {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
-        }
-        .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; }
-        .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; }
+        ${STAT_LINE_GLOW_STYLE}
         .wd-feed-item:hover { background: #f3f8ff; }
         .wd-following-pill:hover .wd-unfollow-x { opacity: 1; }
       `}</style>
@@ -301,7 +283,7 @@ export default function MyFeed() {
                   <Link
                     key={item.id}
                     to={href}
-                    className={`wd-feed-item ${isPerf ? gradeGlowClass(item.grade) : ""}`}
+                    className="wd-feed-item"
                     style={{
                       display: "flex", alignItems: "center", gap: "14px", padding: "14px 18px", textDecoration: "none",
                       borderBottom: i < filteredFeed.length - 1 ? "1px solid #eee" : "none", background: "#fff",
@@ -321,7 +303,7 @@ export default function MyFeed() {
                         {isPerf ? (item.playerName || item.titleShort) : item.title}
                       </div>
                       {isPerf && item.statLine && (
-                        <div style={{ fontFamily: "'Courier New', monospace", fontSize: "12px", fontWeight: 700, color: "#666", marginTop: "3px" }}>
+                        <div className={gradeStatLineClass(item.grade)} style={{ fontFamily: "'Courier New', monospace", fontSize: "12px", fontWeight: 700, color: "#666", marginTop: "3px" }}>
                           {item.statLine}
                         </div>
                       )}
@@ -329,9 +311,6 @@ export default function MyFeed() {
                         <div style={{ fontSize: "12px", fontWeight: 600, color: "#888", marginTop: "3px", lineHeight: 1.4 }}>{item.excerpt}</div>
                       )}
                     </div>
-                    <span style={{ fontSize: "10px", fontWeight: 800, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>
-                      {isPerf ? "Performance" : "News"}
-                    </span>
                   </Link>
                 );
               })}

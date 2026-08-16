@@ -977,21 +977,18 @@ export default function CommunityBoard() {
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
             <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: "2px solid " + BLUE, background: "#fff", display: "flex", flexDirection: "column" }}>
-              <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
+              <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                   {n.publishedAt && n.publishedAt.toDate ? n.publishedAt.toDate().toLocaleDateString(undefined, { month: "short" }) : ""}
                 </span>
               </div>
-              <div style={{ padding: "3px 0 2px", textAlign: "center" }}>
-                <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+              <div style={{ padding: "3px 0 2px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>
                   {n.publishedAt && n.publishedAt.toDate ? n.publishedAt.toDate().toLocaleDateString(undefined, { day: "numeric" }) : ""}
                 </span>
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <span className="font-black uppercase rounded flex-shrink-0" style={{ backgroundColor: n.type === "article" ? GOLD : BLUE, color: "#fff", letterSpacing: "0.06em", fontSize: "7px", padding: "2px 5px", display: "inline-block", marginBottom: "3px" }}>
-                {n.type === "article" ? "Article" : "News"}
-              </span>
               <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
             </div>
           </Link>

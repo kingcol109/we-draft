@@ -19,6 +19,8 @@ import GameMarginSidebars from "../components/GameMarginSidebars";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
 import confetti from "canvas-confetti";
+import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
+import { useWeekRanks, ranksForGame, withRank } from "../utils/rankings";
 
 // Same flair badge assets/config as PlayerProfile.js's hero (duplicated
 // rather than imported cross-page, matching this codebase's own convention
@@ -63,28 +65,8 @@ const FLAIR_CONFIG = {
 const GRADE_PRIORITY = { Dominant: 0, Great: 1, Good: 2, Productive: 3, Average: 4, Bad: 5 };
 const gradePriority = (grade) => (grade in GRADE_PRIORITY ? GRADE_PRIORITY[grade] : 6);
 
-// Same tiered "pop" effect as PerformancePage.js's sidebar rows — Dominant
-// really pops, Great a little less, Good just a hint, Productive/Average/
-// Bad get nothing.
-const gradeGlowClass = (grade) => {
-  if (grade === "Dominant") return "wd-perf-glow-dominant";
-  if (grade === "Great") return "wd-perf-glow-great";
-  if (grade === "Good") return "wd-perf-glow-good";
-  return "";
-};
-
-const GRADE_GLOW_STYLE = `
-  @keyframes wdPerfGlowDominant {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
-  }
-  .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-  @keyframes wdPerfGlowGreat {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
-  }
-  .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-  .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
+const PAGE_STYLE = `
+  ${STAT_LINE_GLOW_STYLE}
   .wd-perf-row-link { transition: background 0.15s ease, padding-left 0.15s ease; }
   .wd-perf-row-link:hover { background: rgba(255,255,255,0.14); padding-left: 20px; }
   .wd-perf-row-chevron { opacity: 0; transform: translateX(-6px); transition: opacity 0.15s ease, transform 0.15s ease; }
@@ -340,7 +322,7 @@ const pickedSideOf = (p) => {
 // render at very different heights for the same width, and centering keeps
 // that difference from pushing some schools' text further off the bottom
 // of the hero than others.
-function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
+function TeamHeroSide({ school, schoolData, isMobile, dimmed, rank }) {
   const [logoFailed, setLogoFailed] = useState(false);
   const [wordmarkFailed, setWordmarkFailed] = useState(false);
   const [wordmarkDarkFailed, setWordmarkDarkFailed] = useState(false);
@@ -426,6 +408,9 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed }) {
           textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.15,
           textShadow: "0 2px 6px rgba(0,0,0,0.5)",
         }}>
+          {/* Rank prefix — its own span (not baked into `school`) so it can
+              carry a distinct color from the name itself. */}
+          {rank && <span style={{ color: "rgba(255,255,255,0.65)" }}>#{rank} </span>}
           {school}
         </div>
         {schoolData?.Mascot && (
@@ -486,20 +471,21 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
           />
         )
       ) : isFinalMode ? (
-        // Player name + stat line — the title/grade text lives on the
-        // performance's own page; the grade still shows up here as the
-        // row's glow (see gradeGlowClass), not as text. Same fixed-height
-        // slide-up/fade-in reveal as the Key Players rows below (see the
-        // wd-keyplayer-* comment in GRADE_GLOW_STYLE): the name sits where
-        // it always did, and hovering slides it up to make room for the
-        // stat line fading in underneath, all within space already
-        // reserved — nothing shifts. Rows with no statLine just render the
-        // name with no reveal box at all, same as Key Players' no-note case.
+        // Player name + stat line — the title lives on the performance's
+        // own page; the grade shows up as a pop on the stat line itself
+        // (see gradeStatLineClass) once it's revealed, not as text or a
+        // row-wide glow. Same fixed-height slide-up/fade-in reveal as the
+        // Key Players rows below (see the wd-keyplayer-* comment in
+        // PAGE_STYLE): the name sits where it always did, and hovering
+        // slides it up to make room for the stat line fading in
+        // underneath, all within space already reserved — nothing shifts.
+        // Rows with no statLine just render the name with no reveal box at
+        // all, same as Key Players' no-note case.
         performances.map((perf, i) => (
           <Link
             key={perf.id}
             to={`/performance/${perf.slug}`}
-            className={`wd-perf-row-link ${gradeGlowClass(perf.grade)}${isMobile ? " wd-keyplayer-note-forced" : ""}`}
+            className={`wd-perf-row-link${isMobile ? " wd-keyplayer-note-forced" : ""}`}
             style={{
               display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "12px 16px", textDecoration: "none",
               borderBottom: i < performances.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
@@ -512,7 +498,7 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
                   {perf.playerName || perf.titleShort}
                 </div>
                 <div className="wd-keyplayer-note-wrap" style={{ top: "19px" }}>
-                  <div style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div className={gradeStatLineClass(perf.grade)} style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {perf.statLine}
                   </div>
                 </div>
@@ -616,6 +602,11 @@ export default function GamePage() {
   const [game, setGame] = useState(null);
   const [awaySchool, setAwaySchool] = useState(null);
   const [homeSchool, setHomeSchool] = useState(null);
+  // Top 25 for this game's own week — ranksForGame below prefers the
+  // frozen HomeRank/AwayRank snapshot (see AdminPanel.js's CFBScheduleSection
+  // handleSave) once the game is Final, so this live lookup is really only
+  // ever the source of truth pregame/in-progress.
+  const weekRankMap = useWeekRanks(game?.Week);
   // The broadcasting channel's logo (looked up by Name — see
   // CFBScheduleSection's own "TV Channel" field in AdminPanel.js), shown
   // under the at/vs button in the hero. null until game.Channel resolves
@@ -1333,6 +1324,7 @@ export default function GamePage() {
   }
 
   const isFinal = game.Final && game.HomeScore != null && game.AwayScore != null;
+  const { homeRank, awayRank } = ranksForGame(game, weekRankMap);
   const gameDateMs = game.Date?.toDate ? game.Date.toDate().getTime() : (game.Date ? new Date(game.Date).getTime() : 0);
   // Date-only field is stored as UTC midnight — format in UTC too, or a
   // viewer west of it sees the game roll back a calendar day.
@@ -1718,7 +1710,7 @@ export default function GamePage() {
 
   return (
     <>
-      <style>{GRADE_GLOW_STYLE}</style>
+      <style>{PAGE_STYLE}</style>
       <Helmet>
         <title>{seoTitle}</title>
         <meta name="description" content={seoDescription} />
@@ -1885,7 +1877,7 @@ export default function GamePage() {
                 stacks from the top via its paddingTop, unaffected by
                 being stretched taller. */}
             <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "stretch", justifyContent: "center", gap: isMobile ? "12px" : "36px" }}>
-              <TeamHeroSide key={`${game.id}-away`} school={game.Away} schoolData={awaySchool} isMobile={isMobile} dimmed={isFinal && homeWon} />
+              <TeamHeroSide key={`${game.id}-away`} school={game.Away} schoolData={awaySchool} isMobile={isMobile} dimmed={isFinal && homeWon} rank={awayRank} />
 
               <div style={{ textAlign: "center", flexShrink: 0, paddingTop: isMobile ? "26px" : "58px" }}>
                 {isFinal ? (
@@ -1978,7 +1970,7 @@ export default function GamePage() {
                 )}
               </div>
 
-              <TeamHeroSide key={`${game.id}-home`} school={game.Home} schoolData={homeSchool} isMobile={isMobile} dimmed={isFinal && awayWon} />
+              <TeamHeroSide key={`${game.id}-home`} school={game.Home} schoolData={homeSchool} isMobile={isMobile} dimmed={isFinal && awayWon} rank={homeRank} />
             </div>
 
             {/* The admin-written Preview/Recap (game.Notes) — used to live
@@ -1991,7 +1983,9 @@ export default function GamePage() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "10px" }}>
                   <span style={{ fontSize: "15px" }}>{isFinal ? "📰" : "🔮"}</span>
                   <h2 style={{ margin: 0, color: "#fff", fontSize: isMobile ? "11px" : "13px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 5px rgba(0,0,0,0.4)" }}>
-                    {isFinal ? `${game.Away} vs ${game.Home} Game Recap` : `${game.Away} vs ${game.Home} Preview`}
+                    {isFinal
+                      ? `${withRank(game.Away, awayRank)} vs ${withRank(game.Home, homeRank)} Game Recap`
+                      : `${withRank(game.Away, awayRank)} vs ${withRank(game.Home, homeRank)} Preview`}
                   </h2>
                 </div>
                 <div style={{
@@ -2017,7 +2011,7 @@ export default function GamePage() {
               <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "18px" : "24px" }}>
                 <div style={{ textAlign: "center", marginBottom: "14px" }}>
                   <h2 style={{ margin: 0, color: "#fff", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 6px rgba(0,0,0,0.5)" }}>
-                    {isFinal ? `${game.Away} vs ${game.Home} Top Performances` : "Key Players to Watch"}
+                    {isFinal ? `${withRank(game.Away, awayRank)} vs ${withRank(game.Home, homeRank)} Top Performances` : "Key Players to Watch"}
                   </h2>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "16px" : "24px" }}>
@@ -2053,7 +2047,7 @@ export default function GamePage() {
               <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden", boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}>
                 <div style={{ background: `linear-gradient(90deg, ${BLUE}, #003d82)`, padding: "12px 18px" }}>
                   <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                    🔮 {game.Away} vs {game.Home} Predictions
+                    🔮 {withRank(game.Away, awayRank)} vs {withRank(game.Home, homeRank)} Predictions
                   </h2>
                 </div>
                 <div style={{ height: "3px", background: GOLD }} />

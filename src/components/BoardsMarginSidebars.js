@@ -13,17 +13,10 @@ import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
+import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "./statLineGlow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-
-// Same tiered "pop" effect used everywhere else performances show up.
-const gradeGlowClass = (grade) => {
-  if (grade === "Dominant") return "wd-perf-glow-dominant";
-  if (grade === "Great") return "wd-perf-glow-great";
-  if (grade === "Good") return "wd-perf-glow-good";
-  return "";
-};
 
 // Brand-appropriate button color per platform — same set as MarginSidebars.js.
 const SOCIAL_LINKS = [
@@ -176,17 +169,7 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
       <style>{`
         .wd-margin-social-link:hover { filter: brightness(1.12); }
         .wd-margin-feed-item:hover { background: #f0f5ff; }
-        @keyframes wdPerfGlowDominant {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
-        }
-        .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-        @keyframes wdPerfGlowGreat {
-          0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-          50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
-        }
-        .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-        .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
+        ${STAT_LINE_GLOW_STYLE}
       `}</style>
 
       {/* ===== Left: Following feed preview — never just empty, even with
@@ -221,7 +204,7 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
                 <Link
                   key={item.id}
                   to={href}
-                  className={`wd-margin-feed-item ${isPerf ? gradeGlowClass(item.grade) : ""}`}
+                  className="wd-margin-feed-item"
                   style={{
                     display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none",
                     borderBottom: i < feedItems.length - 1 ? "1px solid #f0f0f0" : "none",
@@ -241,7 +224,7 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
                       {isPerf ? (item.playerName || item.titleShort) : item.title}
                     </div>
                     {isPerf && item.statLine && (
-                      <div style={{ fontFamily: "'Courier New', monospace", fontSize: "10px", fontWeight: 700, color: "#666", marginTop: "2px" }}>
+                      <div className={gradeStatLineClass(item.grade)} style={{ fontFamily: "'Courier New', monospace", fontSize: "10px", fontWeight: 700, color: "#666", marginTop: "2px" }}>
                         {item.statLine}
                       </div>
                     )}

@@ -1,12 +1,23 @@
 // src/components/EngagementSection.js
 //
-// Drop-in "Like + Comments" block, extracted from GamePage.js's own game
-// comments (see its handlePostComment/handleToggleHype/etc. — this is the
-// same rules/shape, generalized to any parent doc instead of being wired
-// specifically to schedule26/{gameId}). First reused by PerformancePage.js
-// and NewsArticle.jsx so a performance or article can be liked/commented on
-// the same way a game can, without duplicating this ~500 lines of
-// state/handlers/markup a second and third time.
+// Like + Comments, extracted from GamePage.js's own game comments (see its
+// handlePostComment/handleToggleHype/etc. — this is the same rules/shape,
+// generalized to any parent doc instead of being wired specifically to
+// schedule26/{gameId}). Reused by PerformancePage.js and NewsArticle.jsx so
+// a performance or article can be liked/commented on the same way a game
+// can, without duplicating this ~500 lines of state/handlers/markup.
+//
+// Three exports, all built on the same state:
+//   - useEngagement(docPath): the hook — all state/handlers, no markup.
+//     Call it once per page (before any early return, same as any hook) so
+//     a page that wants the Like button somewhere other than the comments
+//     card (e.g. up in its own header bar, like NewsArticle.jsx) can share
+//     one fetch/state instance between both.
+//   - LikeButton: just the pill button, reused as-is by both the header-bar
+//     placement and EngagementSection's own default placement below.
+//   - EngagementSection (default): the comments card. Pass either `docPath`
+//     (it calls useEngagement itself) or an already-built `engagement` (to
+//     share one instance with a LikeButton rendered elsewhere) — not both.
 //
 // `docPath` is the parent doc's path as segments, e.g. ["performances", id]
 // or ["articles", id] — passed straight through to collection()/doc() to
@@ -40,10 +51,13 @@ const toMs = (ts) => {
 const bannedWords = ["faggot", "nigger", "monkey", "nigga", "fuck"];
 const containsProfanity = (text) => bannedWords.some((w) => text.toLowerCase().includes(w));
 
-export default function EngagementSection({ docPath, itemLabel = "this", commentsTitle = "💬 Comments" }) {
+export function useEngagement(docPath) {
   const { user, profile, login } = useAuth();
   const pathKey = docPath.join("/");
-  const ready = docPath.every(Boolean);
+  // .every(Boolean) on an empty array is vacuously true — the length check
+  // stops a caller passing [] (e.g. "no doc yet") from being read as ready
+  // and hitting collection(db, "comments") at the database root.
+  const ready = docPath.length > 0 && docPath.every(Boolean);
 
   const [likeUids, setLikeUids] = useState(new Set());
   const [liking, setLiking] = useState(false);
@@ -146,7 +160,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathKey, ready]);
 
-  const handleToggleLike = async () => {
+  const toggleLike = async () => {
     if (!user) { login(); return; }
     if (!ready) return;
     setLiking(true);
@@ -167,7 +181,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     }
   };
 
-  const handlePostComment = async () => {
+  const postComment = async () => {
     if (!user) { login(); return; }
     if (!ready) return;
     const text = commentText.trim();
@@ -197,7 +211,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     }
   };
 
-  const handleDeleteComment = async (commentId) => {
+  const deleteComment = async (commentId) => {
     if (!window.confirm("Delete this comment? Its likes and replies go with it.")) return;
     setDeletingCommentId(commentId);
     try {
@@ -227,7 +241,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     }
   };
 
-  const handleToggleCommentLike = async (comment) => {
+  const toggleCommentLike = async (comment) => {
     if (!user) { login(); return; }
     const alreadyLiked = comment.likedUids.has(user.uid);
     setLikingCommentId(comment.id);
@@ -251,7 +265,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     }
   };
 
-  const handlePostReply = async (commentId) => {
+  const postReply = async (commentId) => {
     if (!user) { login(); return; }
     const text = replyText.trim();
     if (!text) { setReplyMessage("Write something first."); return; }
@@ -283,7 +297,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     }
   };
 
-  const handleDeleteReply = async (commentId, replyId) => {
+  const deleteReply = async (commentId, replyId) => {
     if (!window.confirm("Delete this reply?")) return;
     setDeletingReplyId(replyId);
     try {
@@ -299,7 +313,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     }
   };
 
-  const handleToggleReplyLike = async (commentId, reply) => {
+  const toggleReplyLike = async (commentId, reply) => {
     if (!user) { login(); return; }
     const alreadyLiked = reply.likedUids.has(user.uid);
     setLikingReplyId(reply.id);
@@ -343,8 +357,78 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
     });
   };
 
+  return {
+    user, profile, login,
+    likeUids, liking, toggleLike,
+    comments, commentsLoading,
+    commentText, setCommentText, commentSaving, commentMessage, setCommentMessage, postComment,
+    deleteComment, deletingCommentId,
+    toggleCommentLike, likingCommentId,
+    replyingToId, replyText, setReplyText, replySaving, replyMessage, setReplyMessage, postReply,
+    deleteReply, deletingReplyId,
+    toggleReplyLike, likingReplyId,
+    expandedReplies, toggleReplyBox, toggleRepliesExpanded,
+    verifiedByUid, namesByUid,
+  };
+}
+
+// Same pill shape/colors as PlayerProfile.js's own hero-bar Like button
+// (heart icon, white border, solid white fill once liked) — meant to sit
+// in a page's own header/masthead bar, but works anywhere a `background`
+// prop is passed matching whatever it's sitting on (defaults to the
+// article/performance header's BLUE). "md" (the header-bar size, used by
+// NewsArticle.jsx/PerformancePage.js) sized to actually read as a real
+// button next to the date/author text there, not shrink into an icon;
+// "sm" stays compact for EngagementSection's own comments-card header,
+// tucked beside the comment-count pill.
+export function LikeButton({ engagement, itemLabel = "this", size = "md" }) {
+  const { user, likeUids, liking, toggleLike } = engagement;
   const iLiked = user ? likeUids.has(user.uid) : false;
   const likeCount = likeUids.size;
+  const isSmall = size === "sm";
+  return (
+    <button
+      onClick={toggleLike}
+      disabled={liking}
+      title={user ? (iLiked ? `Remove your like from ${itemLabel}` : `Like ${itemLabel}`) : `Sign in to like ${itemLabel}`}
+      style={{
+        display: "flex", alignItems: "center", gap: "8px",
+        border: "2px solid #fff",
+        background: iLiked ? "#fff" : "rgba(255,255,255,0.12)",
+        color: iLiked ? "#ff4d6d" : "#fff",
+        borderRadius: "999px", fontWeight: 900,
+        fontSize: isSmall ? "12px" : "16px",
+        padding: isSmall ? "5px 12px" : "9px 20px",
+        cursor: liking ? "default" : "pointer",
+        opacity: liking ? 0.7 : 1,
+      }}
+    >
+      <span style={{ fontSize: isSmall ? "13px" : "19px", lineHeight: 1 }}>♥</span>
+      {likeCount}
+    </button>
+  );
+}
+
+export default function EngagementSection({ docPath, engagement: externalEngagement, itemLabel = "this", commentsTitle = "💬 Comments", showLikeRow = true }) {
+  // Only actually fetches when no externally-shared engagement was passed
+  // in (docPath defaults to [] there, which useEngagement's own ready
+  // check treats as inert) — avoids a second parallel fetch/state instance
+  // for the same doc when a page already built one to feed its own
+  // header-bar LikeButton.
+  const ownEngagement = useEngagement(externalEngagement ? [] : (docPath || []));
+  const engagement = externalEngagement || ownEngagement;
+  const {
+    comments, commentsLoading,
+    commentText, setCommentText, commentSaving, commentMessage, setCommentMessage, postComment,
+    deleteComment, deletingCommentId,
+    toggleCommentLike, likingCommentId,
+    replyingToId, replyText, setReplyText, replySaving, replyMessage, setReplyMessage, postReply,
+    deleteReply, deletingReplyId,
+    toggleReplyLike, likingReplyId,
+    expandedReplies, toggleReplyBox, toggleRepliesExpanded,
+    verifiedByUid, namesByUid,
+    user, profile, login,
+  } = engagement;
 
   return (
     <div style={{ marginTop: "28px" }}>
@@ -353,36 +437,15 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
           <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: "16px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
             {commentsTitle}
           </h2>
-          <div style={{ color: "#fff", background: "rgba(255,255,255,0.18)", fontSize: "13px", fontWeight: 900, padding: "5px 14px", borderRadius: "20px" }}>
-            {comments.length} comment{comments.length !== 1 ? "s" : ""}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {showLikeRow && <LikeButton engagement={engagement} itemLabel={itemLabel} size="sm" />}
+            <div style={{ color: "#fff", background: "rgba(255,255,255,0.18)", fontSize: "13px", fontWeight: 900, padding: "5px 14px", borderRadius: "20px" }}>
+              {comments.length} comment{comments.length !== 1 ? "s" : ""}
+            </div>
           </div>
         </div>
         <div style={{ height: "3px", background: GOLD }} />
         <div style={{ padding: "18px 20px" }}>
-
-          {/* Like row — separate from the comment box below rather than
-              folded into it, since liking and commenting are two
-              independent actions (a reader can do either, both, or
-              neither). */}
-          <div style={{ display: "flex", alignItems: "center", marginBottom: "16px", paddingBottom: "16px", borderBottom: "1px solid #eee" }}>
-            <button
-              onClick={handleToggleLike}
-              disabled={liking}
-              title={user ? (iLiked ? `Remove your like from ${itemLabel}` : `Like ${itemLabel}`) : `Sign in to like ${itemLabel}`}
-              style={{
-                display: "flex", alignItems: "center", gap: "8px",
-                background: iLiked ? GOLD : "#fff", color: iLiked ? "#fff" : BLUE,
-                border: `2px solid ${iLiked ? GOLD : BLUE}`,
-                borderRadius: "20px", padding: "8px 18px", fontWeight: 900, fontSize: "13px",
-                textTransform: "uppercase", letterSpacing: "0.04em",
-                cursor: liking ? "default" : "pointer", opacity: liking ? 0.6 : 1,
-              }}
-            >
-              <span>👍</span>
-              <span>{iLiked ? "Liked" : "Like"}</span>
-              {likeCount > 0 && <span>{likeCount}</span>}
-            </button>
-          </div>
 
           {user ? (
             <div style={{ marginBottom: "18px" }}>
@@ -398,7 +461,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#c0392b" }}>{commentMessage}</div>
                 )}
                 <button
-                  onClick={handlePostComment}
+                  onClick={postComment}
                   disabled={commentSaving || !commentText.trim()}
                   style={{
                     background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
@@ -455,7 +518,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
                         </div>
                         {canDelete && (
                           <button
-                            onClick={() => handleDeleteComment(c.id)}
+                            onClick={() => deleteComment(c.id)}
                             disabled={deletingCommentId === c.id}
                             style={{ background: "none", border: "none", color: "#c0392b", cursor: deletingCommentId === c.id ? "default" : "pointer", fontSize: "11px", fontWeight: 800, textDecoration: "underline", padding: 0 }}
                           >
@@ -470,7 +533,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
 
                     <div style={{ display: "flex", alignItems: "center", gap: "16px", marginTop: "8px" }}>
                       <button
-                        onClick={() => handleToggleCommentLike(c)}
+                        onClick={() => toggleCommentLike(c)}
                         disabled={likingCommentId === c.id}
                         style={{
                           display: "flex", alignItems: "center", gap: "5px",
@@ -515,7 +578,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
                                 <div style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b" }}>{replyMessage}</div>
                               )}
                               <button
-                                onClick={() => handlePostReply(c.id)}
+                                onClick={() => postReply(c.id)}
                                 disabled={replySaving || !replyText.trim()}
                                 style={{
                                   background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
@@ -566,7 +629,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
                                   </div>
                                   {canDeleteReply && (
                                     <button
-                                      onClick={() => handleDeleteReply(c.id, r.id)}
+                                      onClick={() => deleteReply(c.id, r.id)}
                                       disabled={deletingReplyId === r.id}
                                       style={{ background: "none", border: "none", color: "#c0392b", cursor: deletingReplyId === r.id ? "default" : "pointer", fontSize: "10px", fontWeight: 800, textDecoration: "underline", padding: 0 }}
                                     >
@@ -579,7 +642,7 @@ export default function EngagementSection({ docPath, itemLabel = "this", comment
                                 {r.text}
                               </div>
                               <button
-                                onClick={() => handleToggleReplyLike(c.id, r)}
+                                onClick={() => toggleReplyLike(c.id, r)}
                                 disabled={likingReplyId === r.id}
                                 style={{
                                   display: "flex", alignItems: "center", gap: "5px", marginTop: "5px",

@@ -18,6 +18,7 @@ import EarlyContributorFlair from "../assets/early contributor.png";
 import Year2ContributorFlair from "../assets/y2contributor.png";
 import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
+import { fetchAllRankMaps, ranksForGame, rankingsWeekKey } from "../utils/rankings";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -58,29 +59,6 @@ const gradeStylesPerf = {
   Bad: { background: "#fdeaea", color: "#c0392b" },
 };
 
-// Grade → sidebar-row "pop" effect — same tiered glow as PerformancePage.js's
-// "More Performances" sidebar. Dominant really pops, Great is quieter, Good
-// is a static hint, Productive/Average/Bad get nothing.
-const gradeGlowClass = (grade) => {
-  if (grade === "Dominant") return "wd-perf-glow-dominant";
-  if (grade === "Great") return "wd-perf-glow-great";
-  if (grade === "Good") return "wd-perf-glow-good";
-  return "";
-};
-
-const GRADE_GLOW_STYLE = `
-  @keyframes wdPerfGlowDominant {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
-  }
-  .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-  @keyframes wdPerfGlowGreat {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
-  }
-  .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-  .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
-`;
 
 // Hero "energy" overlays — same drifting yard-line texture + breathing
 // spotlight recipe as GamePage.js's own matchup hero (wdFieldDrift/
@@ -961,6 +939,10 @@ export default function TeamPage() {
   const [teamPerformances, setTeamPerformances] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [schoolsMap, setSchoolsMap] = useState({});
+  // Top 25 rankings, keyed by week — the schedule spans a whole season's
+  // worth of different weeks, so this fetches every week's poll once
+  // (fetchAllRankMaps) rather than one round trip per schedule row.
+  const [rankingsByWeek, setRankingsByWeek] = useState({});
   const [teamVideos, setTeamVideos] = useState([]);
   const [visibleVideoCount, setVisibleVideoCount] = useState(VIDEO_INITIAL_COUNT);
   const [visibleNewsCount, setVisibleNewsCount] = useState(NEWS_INITIAL_COUNT);
@@ -1093,6 +1075,9 @@ export default function TeamPage() {
             } catch {
               setSchoolsMap({});
             }
+          })(),
+          (async () => {
+            setRankingsByWeek(await fetchAllRankMaps());
           })(),
           (async () => {
             const draftSnap = await getDocs(collection(db, "draftOrder"));
@@ -1487,6 +1472,8 @@ export default function TeamPage() {
           const opponentName = isHome ? g.Away : g.Home;
           const opponentData = schoolsMap[opponentName];
           const isClickable = !!(opponentData && opponentData.Conference);
+          const { homeRank, awayRank } = ranksForGame(g, rankingsByWeek[rankingsWeekKey(g.Week)]);
+          const opponentRank = isHome ? awayRank : homeRank;
 
           const hasScore = g.AwayScore !== undefined && g.AwayScore !== null
             && g.HomeScore !== undefined && g.HomeScore !== null;
@@ -1558,6 +1545,7 @@ export default function TeamPage() {
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
                   <span style={{ color: "#888", fontWeight: 700 }}>{(isHome || g.Neutral) ? "vs " : "@ "}</span>
+                  {opponentRank && <span style={{ color: "#999" }}>#{opponentRank} </span>}
                   <span style={{ color: (hasGamePage || isClickable) ? BLUE : "#444" }}>
                     {(opponentData?.Short || opponentName).toUpperCase()}
                   </span>
@@ -1707,27 +1695,19 @@ export default function TeamPage() {
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
-              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
+              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <div style={{ background: GOLD, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                     {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
                   </span>
                 </div>
-                <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
-                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+                <div style={{ padding: "2px 0", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>
                     {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
                   </span>
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{
-                  backgroundColor: n.type === "article" ? GOLD : BLUE,
-                  color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
-                  padding: "2px 5px", display: "inline-block", marginBottom: "3px", borderRadius: "2px",
-                  fontWeight: 900, textTransform: "uppercase",
-                }}>
-                  {n.type === "article" ? "Article" : "News"}
-                </span>
                 <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
                   {n.titleShort || n.title}
                 </div>
@@ -1768,7 +1748,6 @@ export default function TeamPage() {
             <Link
               key={p.id}
               to={`/performance/${p.slug}`}
-              className={gradeGlowClass(p.grade)}
               style={{
                 display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
                 textDecoration: "none", background: "#fff",
@@ -1778,14 +1757,14 @@ export default function TeamPage() {
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
-              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{ background: GOLD, padding: "1px 0", textAlign: "center" }}>
+              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <div style={{ background: GOLD, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                     {d?.toLocaleDateString(undefined, { month: "short" })}
                   </span>
                 </div>
-                <div style={{ padding: "2px 0", textAlign: "center", background: "#fff" }}>
-                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>
+                <div style={{ padding: "2px 0", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>
                     {d?.toLocaleDateString(undefined, { day: "numeric" })}
                   </span>
                 </div>
@@ -1822,7 +1801,6 @@ export default function TeamPage() {
 
   return (
     <>
-      <style>{GRADE_GLOW_STYLE}</style>
       <style>{HERO_STYLE}</style>
       <Helmet>
         <title>{pageTitle}</title>

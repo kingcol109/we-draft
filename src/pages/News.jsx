@@ -124,18 +124,11 @@ export default function News() {
 
                   const body = (
                     <div style={{ padding: "16px 18px" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "10px" }}>
-                        <span style={{
-                          background: n.type === "article" ? GOLD : BLUE, color: "#fff",
-                          fontSize: "10px", fontWeight: 900, padding: "3px 10px", borderRadius: "20px",
-                          textTransform: "uppercase", letterSpacing: "0.04em",
-                        }}>
-                          {n.type === "article" ? "Article" : "News"}
-                        </span>
-                        {dayStr && (
+                      {dayStr && (
+                        <div style={{ marginBottom: "10px" }}>
                           <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>{dayStr}</span>
-                        )}
-                      </div>
+                        </div>
+                      )}
 
                       <div style={{ color: BLUE, fontWeight: 900, fontSize: "16px", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.3, marginBottom: n.summary ? "6px" : 0 }}>
                         {n.title}

@@ -19,6 +19,7 @@ import { db } from "../firebase";
 import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch, query, where, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useAuth } from "../context/AuthContext";
+import { fetchAllRankMaps, ranksForGame, rankingsWeekKey } from "../utils/rankings";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -477,6 +478,10 @@ function MyPicksSection() {
   const [loading, setLoading] = useState(true);
   const [allGames, setAllGames] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
+  // Top 25, keyed by week — Pick History alone can span a whole season's
+  // worth of different weeks, so this fetches every week's poll once
+  // (fetchAllRankMaps) rather than one round trip per game row.
+  const [rankingsByWeek, setRankingsByWeek] = useState({});
   const [myPicks, setMyPicks] = useState([]); // [{id: gameId, ...pickFields}]
   const [selectedWeek, setSelectedWeek] = useState("");
   const [savingId, setSavingId] = useState("");
@@ -564,10 +569,11 @@ function MyPicksSection() {
     const fetchAll = async () => {
       setLoading(true);
       try {
-        const [gamesSnap, schoolsSnap, mirrorSnap] = await Promise.all([
+        const [gamesSnap, schoolsSnap, mirrorSnap, rankMaps] = await Promise.all([
           getDocs(collection(db, "schedule26")),
           getDocs(collection(db, "schools")),
           getDocs(collection(db, "users", user.uid, "picks")),
+          fetchAllRankMaps(),
         ]);
 
         const games = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -576,6 +582,7 @@ function MyPicksSection() {
         const schoolMap = {};
         schoolsSnap.docs.forEach((d) => { const data = d.data(); if (data.School) schoolMap[data.School] = data; });
         setSchoolsByName(schoolMap);
+        setRankingsByWeek(rankMaps);
 
         setMyPicks(mirrorSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
@@ -1179,6 +1186,7 @@ function MyPicksSection() {
                 key={g.id}
                 game={g}
                 schoolsByName={schoolsByName}
+                rankingsByWeek={rankingsByWeek}
                 pick={myPicksById[g.id] || null}
                 onSaveScore={handleSaveScore}
                 onPickWinner={handlePickWinner}
@@ -1201,6 +1209,7 @@ function MyPicksSection() {
                 key={g.id}
                 game={g}
                 schoolsByName={schoolsByName}
+                rankingsByWeek={rankingsByWeek}
                 pick={myPicksById[g.id] || null}
                 onSaveScore={handleSaveScore}
                 onPickWinner={handlePickWinner}
@@ -1226,6 +1235,7 @@ function MyPicksSection() {
                 key={g.id}
                 game={g}
                 schoolsByName={schoolsByName}
+                rankingsByWeek={rankingsByWeek}
                 pick={myPicksById[g.id] || null}
                 onSaveScore={handleSaveScore}
                 onPickWinner={handlePickWinner}
@@ -1255,6 +1265,7 @@ function MyPicksSection() {
                 key={game.id}
                 game={game}
                 schoolsByName={schoolsByName}
+                rankingsByWeek={rankingsByWeek}
                 pick={pick}
                 onRemove={() => handleRemove(game.id)}
                 removing={removingId === game.id}
@@ -2532,7 +2543,7 @@ function CompositionChip({ label, value, ok }) {
 // implied to win — gold + a check, computed from the (possibly
 // still-unsaved) score boxes if both are filled, else from a saved
 // winner-only pick's side.
-function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemove, onToggleRanked, saving, removing }) {
+function GameRow({ game, schoolsByName, rankingsByWeek, pick, onSaveScore, onPickWinner, onRemove, onToggleRanked, saving, removing }) {
   const [awayVal, setAwayVal] = useState(pick?.awayScore != null ? String(pick.awayScore) : "");
   const [homeVal, setHomeVal] = useState(pick?.homeScore != null ? String(pick.homeScore) : "");
   const [visibility, setVisibility] = useState(pick?.visibility || "public");
@@ -2551,6 +2562,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
 
   const awaySchool = schoolsByName?.[game.Away];
   const homeSchool = schoolsByName?.[game.Home];
+  const { homeRank, awayRank } = ranksForGame(game, rankingsByWeek?.[rankingsWeekKey(game.Week)]);
 
   const final = isGameFinal(game);
   const locked = !final && !isPickable(game);
@@ -2614,7 +2626,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
   // that isn't enough room, wrapping drops the trailing group to its own
   // line instead of the alternative — squeezing the name past legibility
   // or clipping the buttons outright.
-  const teamRow = (name, schoolData, actualScore, scoreVal, setScoreVal, won, { picked, onPick, trailing } = {}) => (
+  const teamRow = (name, schoolData, actualScore, scoreVal, setScoreVal, won, { picked, onPick, trailing, rank } = {}) => (
     <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", rowGap: "6px" }}>
       {final ? (
         <span style={{
@@ -2652,6 +2664,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
           cursor: onPick ? "pointer" : "default", pointerEvents: onPick ? "auto" : "inherit",
         }}
       >
+        {rank && <span style={{ opacity: 0.65 }}>#{rank} </span>}
         {name}
         {picked && <span style={{ marginLeft: "4px", fontSize: "11px" }}>✓</span>}
       </span>
@@ -2772,6 +2785,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
             {teamRow(game.Away, awaySchool, game.AwayScore, awayVal, setAwayVal, final ? game.AwayScore > game.HomeScore : null, {
               picked: impliedWinner === "away",
               onPick: canPickWinner ? () => onPickWinner(game.id, "away") : undefined,
+              rank: awayRank,
             })}
           </div>
           <div style={{ gridColumn: "2", gridRow: "2", minWidth: 0 }}>
@@ -2779,6 +2793,7 @@ function GameRow({ game, schoolsByName, pick, onSaveScore, onPickWinner, onRemov
               picked: impliedWinner === "home",
               onPick: canPickWinner ? () => onPickWinner(game.id, "home") : undefined,
               trailing: actionButtons,
+              rank: homeRank,
             })}
           </div>
         </div>

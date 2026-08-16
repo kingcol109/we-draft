@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useWeekRanks, ranksForGame } from "../utils/rankings";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -54,6 +55,9 @@ export default function CFBPage() {
   const [schoolsByName, setSchoolsByName] = useState({});
   const [games, setGames] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState("");
+  // Top 25 for whichever week is selected — the schedule list only ever
+  // shows one week at a time, so a single-week lookup is enough here.
+  const weekRankMap = useWeekRanks(selectedWeek);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
@@ -505,8 +509,9 @@ export default function CFBPage() {
 
                     const awayColor = away?.Color1 || "#ccc";
                     const homeColor = home?.Color1 || "#ccc";
+                    const { homeRank, awayRank } = ranksForGame(g, weekRankMap);
 
-                    const TeamRow = ({ school, data, score, won }) => (
+                    const TeamRow = ({ school, data, score, won, rank }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                         {data?.Logo1 ? (
                           <img src={data.Logo1} alt="" style={{ width: "36px", height: "36px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -516,6 +521,7 @@ export default function CFBPage() {
                           </div>
                         )}
                         <span style={{ fontWeight: 900, fontSize: "15px", color: played ? (won ? "#222" : "#999") : "#222" }}>
+                          {rank && <span style={{ color: "#aaa" }}>#{rank} </span>}
                           {school}
                         </span>
                         {played && (
@@ -543,8 +549,8 @@ export default function CFBPage() {
                         }}
                       >
                         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
-                          <TeamRow school={g.Away} data={away} score={g.AwayScore} won={awayWon} />
-                          <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} />
+                          <TeamRow school={g.Away} data={away} score={g.AwayScore} won={awayWon} rank={awayRank} />
+                          <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} rank={homeRank} />
                         </div>
                         <div style={{ fontSize: "12px", fontWeight: 700, color: "#aaa", flexShrink: 0, textAlign: "right" }}>
                           {g.GameOfWeek ? (

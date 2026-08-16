@@ -16,56 +16,37 @@ import { collection, query, where, getDocs, doc, getDoc } from "firebase/firesto
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
-import EngagementSection from "../components/EngagementSection";
+import EngagementSection, { useEngagement, LikeButton } from "../components/EngagementSection";
+import PlayersMentionedList from "../components/PlayersMentionedList";
+import MorePerformancesList, { timeAgo } from "../components/MorePerformancesList";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
-const gradeStyles = {
-  Dominant: { background: "#e6f4ea", color: "#1a7f37" },
-  Great: { background: "#eaf6ec", color: "#2e7d32" },
-  Good: { background: "#eaf1ff", color: BLUE },
-  Productive: { background: "#fff8e1", color: "#9c7a00" },
-  Average: { background: "#f0f0f0", color: "#666" },
-  Bad: { background: "#fdeaea", color: "#c0392b" },
-};
-
 // "More Performances" sidebar ordering — Dominant first, then Great, then
-// Good (the three tiers with their own glow effect), then whatever's left,
-// ungraded last.
+// Good, then whatever's left, ungraded last. (The tiered glow this used to
+// justify is gone — that list now uses the same team-colored chip
+// treatment as Players Mentioned, see MorePerformancesList.js — but the
+// tier ranking itself is still a reasonable "best stuff first" ordering.)
 const GRADE_PRIORITY = { Dominant: 0, Great: 1, Good: 2, Productive: 3, Average: 4, Bad: 5 };
 const gradePriority = (grade) => (grade in GRADE_PRIORITY ? GRADE_PRIORITY[grade] : 6);
 
-// Grade → sidebar-row "pop" effect. Dominant really pops (fast, wide,
-// animated glow), Great is a quieter version of the same, Good is a static
-// hint of it, and Productive/Average/Bad get nothing — same tiered-glow
-// pattern as the "On Fire"/"Breakout"/"Trending Up" sidebar rows on
-// PlayerProfile.js, just scaled to grade instead of trend type.
-const gradeGlowClass = (grade) => {
-  if (grade === "Dominant") return "wd-perf-glow-dominant";
-  if (grade === "Great") return "wd-perf-glow-great";
-  if (grade === "Good") return "wd-perf-glow-good";
-  return "";
-};
-
-const GRADE_GLOW_STYLE = `
-  @keyframes wdPerfGlowDominant {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.45), 0 0 10px 3px rgba(246,162,29,0.55); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.7), 0 0 20px 7px rgba(246,162,29,0.9); }
-  }
-  .wd-perf-glow-dominant { animation: wdPerfGlowDominant 1.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-  @keyframes wdPerfGlowGreat {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(246,162,29,0.2), 0 0 5px 1px rgba(246,162,29,0.22); }
-    50%      { box-shadow: 0 0 0 1px rgba(246,162,29,0.32), 0 0 9px 2px rgba(246,162,29,0.38); }
-  }
-  .wd-perf-glow-great { animation: wdPerfGlowGreat 2.6s ease-in-out infinite; border-radius: 8px; margin: 3px 4px; }
-  .wd-perf-glow-good { box-shadow: 0 0 0 1px rgba(246,162,29,0.18); border-radius: 8px; margin: 3px 4px; }
+// video-card hover (VideoBlock), the header bar's own game-link chevron
+// (see wd-perf-header-* below, next to the header bar's own JSX), and the
+// "N minutes ago" dot under the title — same live-pulse keyframe as its
+// own copy of this dot on each row in MorePerformancesList.js.
+const PAGE_STYLE = `
   .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
   .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  .wd-perf-result-link { transition: background 0.15s ease; }
-  .wd-perf-result-link:hover { background: #d5e4ff !important; }
-  .wd-perf-result-chevron { display: inline-block; transition: transform 0.15s ease; }
-  .wd-perf-result-link:hover .wd-perf-result-chevron { transform: translateX(3px); }
+  .wd-perf-header-link { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; transition: opacity 0.15s ease; }
+  .wd-perf-header-link:hover { opacity: 0.8; }
+  .wd-perf-header-chevron { display: inline-block; transition: transform 0.15s ease; }
+  .wd-perf-header-link:hover .wd-perf-header-chevron { transform: translateX(3px); }
+  .wd-perf-created-dot { animation: wdFreshDotPulse 1.4s ease-in-out infinite; }
+  @keyframes wdFreshDotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
 `;
 
 export default function PerformancePage() {
@@ -75,7 +56,7 @@ export default function PerformancePage() {
   const [video, setVideo] = useState(null);
   const [game, setGame] = useState(null);
   const [mentionedPlayers, setMentionedPlayers] = useState([]);
-  const [schoolLogos, setSchoolLogos] = useState({});
+  const [schoolInfo, setSchoolInfo] = useState({}); // School name -> { logo, logoDark, color1, color2 }
   const [sidebarItems, setSidebarItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -88,15 +69,27 @@ export default function PerformancePage() {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // School name → logo, for the "Players Mentioned" row logos. Fetched once
-  // (the schools collection is small) rather than per-player.
+  // School name → { logo, logoDark, color1, color2 } — same shape
+  // NewsArticle.jsx builds, for the "More Performances" sidebar icons and
+  // the team-colored "Players Mentioned" chips (PlayersMentionedList.js).
+  // Fetched once (the schools collection is small) rather than per-player.
   useEffect(() => {
     const fetch = async () => {
       try {
         const snap = await getDocs(collection(db, "schools"));
         const map = {};
-        snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data.Logo1 || ""; });
-        setSchoolLogos(map);
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.School) {
+            map[data.School] = {
+              logo: data.Logo1 || "",
+              logoDark: data.LogoDark || "",
+              color1: data.Color1 || "",
+              color2: data.Color2 || "",
+            };
+          }
+        });
+        setSchoolInfo(map);
       } catch (e) { /* logos are non-critical */ }
     };
     fetch();
@@ -182,6 +175,14 @@ export default function PerformancePage() {
     fetch();
   }, [performance]);
 
+  // Called unconditionally (hooks can't follow the early returns below) —
+  // useEngagement's own `ready` check treats an empty/incomplete docPath as
+  // inert, which covers "performance not loaded yet". Built once here, not
+  // inside EngagementSection below, so the header bar's own LikeButton
+  // shares this exact instance instead of triggering a second parallel
+  // fetch for the same doc.
+  const engagement = useEngagement(performance?.id ? ["performances", performance.id] : []);
+
   if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
 
   if (notFound || !performance) {
@@ -192,11 +193,14 @@ export default function PerformancePage() {
     );
   }
 
-  const grade = gradeStyles[performance.grade];
   const gameDate = performance.gameDate?.toDate ? performance.gameDate.toDate() : null;
   // Date-only field is stored as UTC midnight — format in UTC too, or a
   // viewer west of it sees the game roll back a calendar day.
   const dateStr = gameDate?.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  // "School vs Opponent" — the pre-game form of the header bar's own game
+  // label (see gameLabel below, which prefers the final score once there
+  // is one).
+  const matchupText = performance.opponent ? `${performance.school} vs ${performance.opponent}` : (performance.school || "");
   // Same per-player title/thumb override resolution as PlayerProfile.js's
   // video cards — prefer the item tagged to this performance's subject,
   // fall back to the first item, then the video's generic title/thumb.
@@ -208,54 +212,23 @@ export default function PerformancePage() {
     thumb: videoMatched?.thumb || videoFirst?.thumb || video.GenThumb || "",
   } : null;
   const played = game?.HomeScore != null && game?.AwayScore != null;
+  // The header bar's own text — this used to be a separate "Game meta
+  // line" in the body (a Final: X-Y badge once the game's over, or the
+  // plain matchup + week before that), now folded into the header bar
+  // itself (see the header JSX below) since showing the same information
+  // twice on the page was redundant.
+  const gameLabel = played
+    ? `${game.Home} ${game.HomeScore} – ${game.AwayScore} ${game.Away}`
+    : matchupText + (performance.week ? ` · ${performance.week}` : "");
   const canonicalUrl = `https://we-draft.com/performance/${performance.slug}`;
   // SEO: title is the long-form headline, description is an excerpt of the
   // write-up itself (collapsed whitespace, ~160 chars — the practical cutoff
   // before Google truncates a meta description anyway).
   const seoDescription = (performance.body || "").replace(/\s+/g, " ").trim().slice(0, 160);
-
-  const SidebarItem = ({ item }) => {
-    const d = item.gameDate?.toDate?.()?.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-    const logo = schoolLogos[item.school];
-    return (
-      <Link
-        to={`/performance/${item.slug}`}
-        className={gradeGlowClass(item.grade)}
-        style={{ display: "flex", gap: "10px", alignItems: "flex-start", padding: "12px 14px", textDecoration: "none", background: "#fff", borderBottom: "1px solid #f0f0f0" }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-      >
-        {d && (
-          <div style={{ flexShrink: 0, width: "42px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "6px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", textAlign: "center" }}>
-              <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{d.split(" ")[0]}</span>
-            </div>
-            <div style={{ padding: "4px 0 4px", textAlign: "center" }}>
-              <span style={{ fontSize: "20px", fontWeight: 900, color: BLUE, lineHeight: 1, display: "block" }}>{d.split(" ")[1]}</span>
-            </div>
-          </div>
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
-            {logo && (
-              <img src={logo} alt="" loading="lazy" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-            )}
-            <span style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "12px", color: BLUE, lineHeight: 1.25 }}>
-              {item.playerName || item.titleShort}
-            </span>
-          </div>
-          {item.statLine && (
-            <div style={{ fontFamily: "'Courier New', monospace", fontSize: "11px", fontWeight: 700, color: "#555", marginBottom: "3px" }}>
-              {item.statLine}
-            </div>
-          )}
-          <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 700, fontSize: "9.5px", color: "#999", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.3 }}>
-            {item.titleShort}
-          </div>
-        </div>
-      </Link>
-    );
-  };
+  // Same red "N minutes ago" tag as this performance's own row in
+  // MorePerformancesList.js, shown here below the title instead of inside
+  // a chip.
+  const createdLabel = timeAgo(performance.createdAt);
 
   // ── Video / Players Mentioned / More Performances — split out of the
   // sidebar column so mobile can lay them out as their own separately-
@@ -325,89 +298,25 @@ export default function PerformancePage() {
     </div>
   );
 
+  // Team-colored chips, shared with NewsArticle.jsx — see
+  // PlayersMentionedList.js for the styling/hover behavior itself.
   const PlayersMentionedBlock = mentionedPlayers.length > 0 && (
-    <div>
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-          Players Mentioned
-        </div>
-        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-      </div>
-      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-        {mentionedPlayers.map((p, i) => {
-          const logo = schoolLogos[p.School];
-          return (
-            <Link
-              key={p.id}
-              to={`/player/${p.Slug}`}
-              style={{
-                display: "flex", alignItems: "center", gap: "14px", padding: "16px 18px",
-                textDecoration: "none",
-                borderBottom: i < mentionedPlayers.length - 1 ? "1px solid #f0f0f0" : "none",
-                background: "#fff",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-            >
-              <div style={{
-                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                width: "52px", height: "52px", borderRadius: "8px",
-                background: "#f8f8f8", border: `2px solid ${GOLD}`, overflow: "hidden",
-              }}>
-                {logo ? (
-                  <img
-                    src={logo} alt={p.School || ""} loading="lazy" style={{ width: "80%", height: "80%", objectFit: "contain" }}
-                    referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }}
-                  />
-                ) : (
-                  <span style={{ color: "#ccc", fontSize: "22px", fontWeight: 900 }}>?</span>
-                )}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ color: BLUE, fontWeight: 900, fontSize: "18px", lineHeight: 1.25 }}>
-                  {p.First} {p.Last}
-                </span>
-                <span style={{ color: "#777", fontWeight: 700, fontSize: "13px", marginTop: "3px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  {p.Position || "—"}
-                </span>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
+    <PlayersMentionedList players={mentionedPlayers} schoolInfo={schoolInfo} />
   );
 
-  const MorePerformancesBlock = (
-    <div>
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
-          More Performances
-        </div>
-        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-      </div>
-
-      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-        <div style={{ background: BLUE, padding: "8px 14px" }}>
-          <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
-        </div>
-        <div style={{ height: "3px", background: GOLD }} />
-        {sidebarItems.length > 0 ? (
-          sidebarItems.map((item) => <SidebarItem key={item.id} item={item} />)
-        ) : (
-          <div style={{ padding: "20px", textAlign: "center", color: "#bbb", fontSize: "13px", fontStyle: "italic", background: "#fff" }}>
-            No other performances
-          </div>
-        )}
-      </div>
-    </div>
+  // Team-colored chips, same look as Players Mentioned — see
+  // MorePerformancesList.js for the statLine-subtitle/white-hover details.
+  // Hidden entirely rather than an empty-state card when there's nothing
+  // else this week, matching VideoBlock/PlayersMentionedBlock's own
+  // && guards below (this used to always render, with its own "No other
+  // performances" message).
+  const MorePerformancesBlock = sidebarItems.length > 0 && (
+    <MorePerformancesList performances={sidebarItems} schoolInfo={schoolInfo} />
   );
 
   return (
     <>
-      <style>{GRADE_GLOW_STYLE}</style>
+      <style>{PAGE_STYLE}</style>
       <Helmet>
         <title>{performance.titleLong} | We-Draft</title>
         <meta name="description" content={seoDescription} />
@@ -486,24 +395,36 @@ export default function PerformancePage() {
           <div style={{ order: 1 }}>
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
 
-              {/* Header bar */}
-              <div style={{ background: BLUE, padding: isMobile ? "10px 14px" : "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <span style={{ background: "#7c3aed", color: "#fff", fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                    Performance
-                  </span>
-                  {grade && (
-                    <span style={{ background: grade.background, color: grade.color, fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                      {performance.grade}
+              {/* Header bar — Like button lives here now, same place/style as
+                  NewsArticle.jsx's own header-bar Like. "Performance" badge
+                  and the grade badge (Dominant/Great/...) are dropped. The
+                  game label (matchup pre-game, final score once there is
+                  one — see gameLabel above) replaced the old body-only
+                  "Game meta line" entirely rather than duplicating it — the
+                  label itself is now the click-through to the game's own
+                  page, with a chevron marking it as clickable, instead of a
+                  separate link further down the page. */}
+              <div style={{ background: BLUE, padding: isMobile ? "10px 14px" : "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                {(gameLabel || dateStr) && (
+                  game?.Slug ? (
+                    <Link to={`/game/${game.Slug}`} className="wd-perf-header-link">
+                      <span style={{ color: "#fff", fontSize: isMobile ? "14px" : "16px", fontWeight: 900 }}>
+                        {gameLabel}{gameLabel && dateStr ? " · " : ""}{dateStr}
+                      </span>
+                      <span className="wd-perf-header-chevron" style={{ color: "#fff", fontSize: "18px", fontWeight: 900 }}>›</span>
+                    </Link>
+                  ) : (
+                    <span style={{ color: "#fff", fontSize: isMobile ? "14px" : "16px", fontWeight: 900 }}>
+                      {gameLabel}{gameLabel && dateStr ? " · " : ""}{dateStr}
                     </span>
-                  )}
-                  {dateStr && (
-                    <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", fontWeight: 700 }}>{dateStr}</span>
-                  )}
-                </div>
-                {performance.author && (
-                  <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", fontWeight: 700 }}>By {performance.author}</span>
+                  )
                 )}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {performance.author && (
+                    <span style={{ color: "rgba(255,255,255,0.75)", fontSize: "12px", fontWeight: 700 }}>By {performance.author}</span>
+                  )}
+                  <LikeButton engagement={engagement} itemLabel="this performance" />
+                </div>
               </div>
               <div style={{ height: "3px", background: GOLD }} />
 
@@ -518,40 +439,20 @@ export default function PerformancePage() {
                 )}
 
                 {/* Title */}
-                <h1 style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontSize: isMobile ? "22px" : "32px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: "10px", marginTop: 0 }}>
+                <h1 style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontSize: isMobile ? "22px" : "32px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2, marginBottom: createdLabel ? "8px" : "20px", marginTop: 0 }}>
                   {performance.titleLong}
                 </h1>
 
-                {/* Game meta line — just the result once there is one (the
-                    matchup itself is implicit in "Final: X – Y"), rather than
-                    repeating school/opponent/week right above it. Clicks
-                    through to the game's own page either way. */}
-                <div style={{ marginBottom: "20px" }}>
-                  {played && game?.Slug ? (
-                    <Link
-                      to={`/game/${game.Slug}`}
-                      className="wd-perf-result-link"
-                      style={{
-                        display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none",
-                        fontSize: "11px", fontWeight: 900, padding: "5px 12px", borderRadius: "20px",
-                        background: "#eaf1ff", color: BLUE, textTransform: "uppercase", letterSpacing: "0.03em",
-                      }}
-                    >
-                      Final: {game.Home} {game.HomeScore} – {game.AwayScore} {game.Away}
-                      <span className="wd-perf-result-chevron">›</span>
-                    </Link>
-                  ) : (() => {
-                    const matchupText = `${performance.school}${performance.opponent ? ` vs ${performance.opponent}` : ""}${performance.week ? ` · ${performance.week}` : ""}`;
-                    return game?.Slug ? (
-                      <Link to={`/game/${game.Slug}`} className="wd-perf-result-link" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 700, color: BLUE, textDecoration: "none", borderRadius: "6px", padding: "4px 8px" }}>
-                        {matchupText}
-                        <span className="wd-perf-result-chevron">›</span>
-                      </Link>
-                    ) : (
-                      <span style={{ fontSize: "13px", fontWeight: 700, color: "#888" }}>{matchupText}</span>
-                    );
-                  })()}
-                </div>
+                {/* Same red "N minutes ago" freshness tag as this
+                    performance's own chip in MorePerformancesList.js. */}
+                {createdLabel && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "20px" }}>
+                    <span className="wd-perf-created-dot" style={{ flexShrink: 0, width: "6px", height: "6px", borderRadius: "50%", background: "#c0392b" }} />
+                    <span style={{ color: "#c0392b", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      {createdLabel}
+                    </span>
+                  </div>
+                )}
 
                 {/* Divider */}
                 <div style={{ height: "2px", background: GOLD, borderRadius: "1px", marginBottom: "24px" }} />
@@ -576,9 +477,12 @@ export default function PerformancePage() {
               </div>
             </div>
 
-            {/* Like + Comments — same rules/shape as GamePage.js's own game
-                comments, via the shared EngagementSection component. */}
-            <EngagementSection docPath={["performances", performance.id]} itemLabel="this performance" />
+            {/* Comments — same rules/shape as GamePage.js's own game
+                comments, via the shared EngagementSection component. Its own
+                Like row is hidden (showLikeRow=false): the header bar above
+                already has one, sharing this same `engagement` instance
+                rather than fetching a second time. */}
+            <EngagementSection engagement={engagement} itemLabel="this performance" showLikeRow={false} />
           </div>
 
           {/* Sidebar — on mobile, split into its own separately-ordered grid
@@ -592,7 +496,7 @@ export default function PerformancePage() {
             <>
               {VideoBlock && <div style={{ order: 2 }}>{VideoBlock}</div>}
               {PlayersMentionedBlock && <div style={{ order: 3 }}>{PlayersMentionedBlock}</div>}
-              <div style={{ order: 4 }}>{MorePerformancesBlock}</div>
+              {MorePerformancesBlock && <div style={{ order: 4 }}>{MorePerformancesBlock}</div>}
             </>
           ) : (
             <div style={{ position: "sticky", top: "24px", order: 2, display: "flex", flexDirection: "column", gap: "24px" }}>

@@ -10,7 +10,7 @@
 // anyway, so team selection here is always random — pass a contentRef to
 // whatever element the ads should center themselves around and this handles
 // the rest (fetch, layout measurement, resize, hover states).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { db } from "../firebase";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import HomageLogo from "../assets/homagelogo.png";
@@ -78,6 +78,16 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
   const [adTeamBranding, setAdTeamBranding] = useState(null);
   const [adLayout, setAdLayout] = useState({ width: 140, leftGutter: 0, rightGutter: 0 });
   const [showMarginAds, setShowMarginAds] = useState(false);
+  // Measured card heights, clamped into the viewport (see clampAdTop below)
+  // — null until the first measurement lands, during which
+  // marginAdPositionStyle falls back to the old blind top:50%/translateY
+  // centering. That gap is invisible in practice: the card stays at
+  // opacity:0 (see adVisible) until well after mount, and a ResizeObserver
+  // reports the real height on the very first layout pass.
+  const [leftAdTop, setLeftAdTop] = useState(null);
+  const [rightAdTop, setRightAdTop] = useState(null);
+  const leftAdRef = useRef(null);
+  const rightAdRef = useRef(null);
 
   const recomputeAdLayout = () => {
     if (isMobile || !contentRef.current) { setShowMarginAds(false); return; }
@@ -105,6 +115,34 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     return () => { window.removeEventListener("resize", handler); clearTimeout(t1); clearTimeout(t2); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
+
+  // Keeps each card's top edge inside the viewport — centering it when it
+  // fits (same math top:50%/translateY(-50%) produces), otherwise pinning
+  // it AD_VIEWPORT_MARGIN below the top instead of letting it center past
+  // the top edge, which is what was cutting the taller right card off. Runs
+  // off a ResizeObserver (not just window resize) since the two cards
+  // aren't the same height and that height changes with which ad/gallery
+  // is showing (see MarginAdTeamCard's 1-vs-2-image layout) — a plain
+  // resize listener would miss a height change from switching teams.
+  useEffect(() => {
+    if (!showMarginAds) { setLeftAdTop(null); setRightAdTop(null); return; }
+    const AD_VIEWPORT_MARGIN = 20;
+    const clampTop = (height) => {
+      if (!height) return null;
+      const centered = (window.innerHeight - height) / 2;
+      return Math.max(AD_VIEWPORT_MARGIN, Math.min(centered, window.innerHeight - height - AD_VIEWPORT_MARGIN));
+    };
+    const measure = () => {
+      if (leftAdRef.current) setLeftAdTop(clampTop(leftAdRef.current.getBoundingClientRect().height));
+      if (rightAdRef.current) setRightAdTop(clampTop(rightAdRef.current.getBoundingClientRect().height));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (leftAdRef.current) ro.observe(leftAdRef.current);
+    if (rightAdRef.current) ro.observe(rightAdRef.current);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [showMarginAds, adData, adTeamBranding]);
 
   // Fetch ads and pick one at random — no drafted/affiliate priority here,
   // these pages have no single "this team" to prioritize.
@@ -144,14 +182,17 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     return () => { cancelled = true; };
   }, [adData?.Team]);
 
-  const marginAdPositionStyle = (side) => {
+  const marginAdPositionStyle = (side, topPx) => {
     const gutter = side === "left" ? adLayout.leftGutter : adLayout.rightGutter;
     const offset = Math.max(8, (gutter - adLayout.width) / 2);
     return {
       position: "fixed",
-      top: "50%",
+      // A measured, clamped pixel top (see the ResizeObserver effect above)
+      // once it's available; the old blind top:50%/translateY(-50%)
+      // centering only as a brief fallback before that first measurement.
+      top: topPx != null ? `${topPx}px` : "50%",
       [side]: `${offset}px`,
-      transform: "translateY(-50%)",
+      transform: topPx != null ? "none" : "translateY(-50%)",
       width: `${adLayout.width}px`,
       display: "flex",
       flexDirection: "column",
@@ -166,7 +207,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     if (!adData) return null;
     const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
     return (
-      <div className="wd-margin-ad" style={marginAdPositionStyle(side)}>
+      <div className="wd-margin-ad" ref={leftAdRef} style={marginAdPositionStyle(side, leftAdTop)}>
         <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
         </div>
@@ -267,7 +308,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     const displayImages = gallery.length > 0 ? gallery : (adData.Image1 ? [adData.Image1] : []);
 
     return (
-      <div className="wd-margin-ad" style={marginAdPositionStyle(side)}>
+      <div className="wd-margin-ad" ref={rightAdRef} style={marginAdPositionStyle(side, rightAdTop)}>
         <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
         </div>
