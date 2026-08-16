@@ -300,9 +300,43 @@ for (const doc of allTeams) {
   ];
 
   /* =========================
+     COMMUNITY BOARD — year + position variants
+     (/community/:year and /community/:year/:position, e.g.
+     /community/2027/qb — CommunityBoard.js's own route). These were never
+     enumerated here before, so Google had no sitemap entry — and no real
+     <a>/<Link> anywhere on the site points at a position variant either,
+     they're only reachable by clicking a filter chip that does a
+     client-side navigate() — so they had no crawlable path to them at all.
+     ACTIVE_YEARS/ARCHIVE_YEARS/POSITION_LABELS below must be kept in sync
+     with the same constants in src/pages/CommunityBoard.js by hand — this
+     plain Node script can't import that file (it drags in React/JSX this
+     script isn't set up to run).
+  ========================= */
+  const COMMUNITY_ARCHIVE_YEARS = ["2026"];
+  const COMMUNITY_ACTIVE_YEARS = ["2027", "2028", "2029"];
+  const COMMUNITY_POSITIONS = [
+    "QB", "RB", "WR", "TE", "OL", "OT", "OG", "C",
+    "EDGE", "DL", "DT", "DE", "LB", "DB", "CB", "S", "K", "P", "LS",
+  ];
+  const communityYears = [...COMMUNITY_ACTIVE_YEARS, ...COMMUNITY_ARCHIVE_YEARS];
+
+  const communityBoardPages = [];
+  for (const yr of communityYears) {
+    // CommunityBoard.js's own yearPath() collapses the no-position 2027
+    // URL down to the bare "/community" (already in staticPages above) —
+    // every other year still gets its own year-only page.
+    if (yr !== "2027") {
+      communityBoardPages.push({ path: `/community/${yr}`, priority: 0.7, lastmod: today });
+    }
+    for (const pos of COMMUNITY_POSITIONS) {
+      communityBoardPages.push({ path: `/community/${yr}/${pos.toLowerCase()}`, priority: 0.55, lastmod: today });
+    }
+  }
+
+  /* =========================
      BUILD XML
   ========================= */
-const urls = [...staticPages, ...teamPages, ...playerPages, ...newsPages, ...performancePages, ...gamePages]
+const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...performancePages, ...gamePages]
     .map(
       (u) => `
   <url>
@@ -323,7 +357,7 @@ ${urls}
   ========================= */
 // Split into chunks of 1000
   const chunkSize = 1000;
-  const allUrls = [...staticPages, ...teamPages, ...playerPages, ...newsPages, ...performancePages, ...gamePages];
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...performancePages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {
@@ -358,6 +392,7 @@ ${chunks.map((_, idx) => `
 console.log(
   `✅ sitemap.xml generated
   - ${staticPages.length} static pages
+  - ${communityBoardPages.length} community board pages
   - ${teamPages.length} team pages
   - ${playerPages.length} player pages
   - ${newsPages.length} news articles

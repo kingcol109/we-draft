@@ -263,7 +263,16 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
   );
 }
 
-function PositionFilterBar({ options, selected, setSelected, isMobile }) {
+// Real <Link>s (not <button>s) — before, these were plain buttons whose
+// click handler drove a client-side navigate() once exactly one position
+// was selected, so a URL like /community/2027/qb existed but was never
+// backed by a real href anywhere on the site: nothing for Google to crawl
+// or discover it from. Rendering an actual <a href> here (one per
+// position, for the currently-viewed year) fixes that while leaving the
+// multi-select toggle click behavior for real users completely unchanged —
+// the click handler still preventDefaults and runs the same toggle()
+// instead of letting the browser navigate normally.
+function PositionFilterBar({ options, selected, setSelected, isMobile, eligibleYear }) {
   const toggle = (pos) => setSelected((prev) => prev.includes(pos) ? prev.filter((x) => x !== pos) : [...prev, pos]);
 
   return (
@@ -271,9 +280,10 @@ function PositionFilterBar({ options, selected, setSelected, isMobile }) {
       {options.map((pos) => {
         const active = selected.includes(pos);
         return (
-          <button
+          <Link
             key={pos}
-            onClick={() => toggle(pos)}
+            to={`/community/${eligibleYear}/${pos.toLowerCase()}`}
+            onClick={(e) => { e.preventDefault(); toggle(pos); }}
             style={{
               padding: isMobile ? "10px 20px" : "14px 32px",
               fontWeight: 900, fontSize: isMobile ? "16px" : "19px",
@@ -282,10 +292,11 @@ function PositionFilterBar({ options, selected, setSelected, isMobile }) {
               background: active ? BLUE : "#fff",
               color: active ? "#fff" : BLUE,
               whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+              textDecoration: "none", display: "inline-block",
             }}
           >
             {pos}
-          </button>
+          </Link>
         );
       })}
     </div>
@@ -1138,7 +1149,7 @@ export default function CommunityBoard() {
           a mixed dropdown/toggle/search-input/text-link row underneath, was
           the "all over the place" mobile layout being fixed here). */}
       {!is2029Empty && !isMobile && (
-        <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+        <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
       )}
 
       {is2029Empty ? (
