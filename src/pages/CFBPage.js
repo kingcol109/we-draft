@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { useWeekRanks, ranksForGame } from "../utils/rankings";
+import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -55,9 +55,11 @@ export default function CFBPage() {
   const [schoolsByName, setSchoolsByName] = useState({});
   const [games, setGames] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState("");
-  // Top 25 for whichever week is selected — the schedule list only ever
-  // shows one week at a time, so a single-week lookup is enough here.
-  const weekRankMap = useWeekRanks(selectedWeek);
+  // Current (latest-published) Top 25 — ranksForGame prefers each game's
+  // own frozen HomeRank/AwayRank once it's Final, so this is only ever the
+  // source of truth for a not-yet-played game, regardless of which week
+  // it's actually in.
+  const currentRankMap = useCurrentRankMap();
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
@@ -509,7 +511,7 @@ export default function CFBPage() {
 
                     const awayColor = away?.Color1 || "#ccc";
                     const homeColor = home?.Color1 || "#ccc";
-                    const { homeRank, awayRank } = ranksForGame(g, weekRankMap);
+                    const { homeRank, awayRank } = ranksForGame(g, currentRankMap);
 
                     const TeamRow = ({ school, data, score, won, rank }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

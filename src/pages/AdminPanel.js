@@ -904,6 +904,8 @@ function PlayerDataSection() {
         {[
           { key: "players", label: "Players" },
           { key: "recruits", label: "Recruits" },
+          { key: "historical", label: "Historical" },
+          { key: "traits", label: "Traits" },
         ].map((t) => (
           <button
             key={t.key}
@@ -922,6 +924,10 @@ function PlayerDataSection() {
       </div>
       {playerDataTab === "recruits" ? (
         <RecruitsSection />
+      ) : playerDataTab === "historical" ? (
+        <HistoricalSection />
+      ) : playerDataTab === "traits" ? (
+        <TraitsSection />
       ) : (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
@@ -1541,6 +1547,1202 @@ function PlayerDataSection() {
       </div>
     </div>
       )}
+    </div>
+  );
+}
+
+// ── Historical draft picks — the `historical` collection (bulk-imported
+// from a spreadsheet, ~6,600 rows spanning 2000-2025), read by TeamPage.js
+// to fill out a school's pre-2026 draft history (its own query filters
+// Year <= 2025 and dedupes by year+pick/year+name — sheet imports can carry
+// duplicate rows). This had no admin UI of any kind before this tab — the
+// only way to fix a row was editing Firestore directly. Deliberately a much
+// simpler list+form than Players/Recruits above: these are flat draft-log
+// entries (who/where/when/to which NFL team), not full scouting profiles —
+// no evaluations, no grades, no groups. Given the volume, the list below is
+// capped at RESULT_LIMIT rendered rows regardless of how many match a
+// search/year filter, both for render performance and because scrolling
+// through hundreds of exact-same-shape rows isn't how anyone would actually
+// use this — narrowing the search is. ──
+const RESULT_LIMIT = 200;
+
+// Combine measurements — added to the historical collection after the
+// initial import (1,873 of 6,643 rows have any of these so far; older
+// classes are thinner). "40 Yard" is stored on the doc with a literal
+// trailing space — "40 Yard " — an artifact of the source spreadsheet's own
+// column header, confirmed consistent across every row that has it, so
+// saves here write it back the same way rather than creating a second,
+// competing key. formKey is this form's own state key (no stray spaces to
+// fumble in JS); dataKey is the literal Firestore field name.
+// min/max are generous plausibility bounds (a real value should never land
+// outside these, not "typical" bounds) — used by historicalFlagsFor below
+// to red-flag data that doesn't make sense, same idea as the "4.56 inch
+// Hand Size" outliers found while washing the eighths-rounding bug (see
+// scripts/fix-historical-combine-decimals.js's own comment) — those never
+// got auto-corrected since there was nothing to deterministically fix them
+// to, but they should still be visibly flagged for a human to look at.
+// eighths: true marks the three measurements actually taken in eighths of
+// an inch (Height/Arm Length/Hand Size) — Vertical/Broad aren't, they're
+// whole or half inches, so they don't get that particular check.
+// inputType distinguishes the three fields whose edit form uses a feet/
+// inches/eighths (or inches/eighths) picker instead of a plain text box —
+// see the Height/ArmLength/HandSize rendering below, and
+// decomposeHeight/decomposeInches further down for the conversion math.
+// Typing a raw decimal is exactly how the .375 -> .38 rounding bug (see
+// scripts/fix-historical-combine-decimals.js) happened in the first place;
+// picking whole numbers from a dropdown can't produce that class of error.
+const HISTORICAL_PHYSICAL_FIELDS = [
+  { formKey: "Height", dataKey: "Height", label: "Height", min: 60, max: 90, eighths: true, inputType: "height" },
+  { formKey: "Weight", dataKey: "Weight", label: "Weight", min: 140, max: 400, inputType: "text" },
+  { formKey: "ArmLength", dataKey: "Arm Length", label: "Arm Length", min: 26, max: 38, eighths: true, inputType: "inches" },
+  { formKey: "HandSize", dataKey: "Hand Size", label: "Hand Size", min: 7.5, max: 11.5, eighths: true, inputType: "inches" },
+];
+const HISTORICAL_ATHLETIC_FIELDS = [
+  { formKey: "FortyYard", dataKey: "40 Yard ", label: "40 Yard", min: 4.0, max: 6.0, inputType: "text" },
+  { formKey: "Vertical", dataKey: "Vertical", label: "Vertical", min: 18, max: 48, inputType: "text" },
+  // Broad Jump is stored the same way Height always has been — total
+  // inches on the doc (unchanged, no data migration needed) — just entered
+  // and displayed as feet'inches ("9'10"") instead of a bare number, same
+  // idea as decomposeHeight/recomposeHeight but without the eighths
+  // dimension (broad jump is measured to the nearest whole inch, not 1/8").
+  { formKey: "Broad", dataKey: "Broad", label: "Broad Jump", min: 80, max: 140, inputType: "broad" },
+  { formKey: "Bench", dataKey: "Bench", label: "Bench", min: 0, max: 50, inputType: "text" },
+  { formKey: "ThreeCone", dataKey: "3-Cone", label: "3-Cone", min: 6.0, max: 9.0, inputType: "text" },
+  { formKey: "Shuttle", dataKey: "Shuttle", label: "Shuttle", min: 3.7, max: 5.0, inputType: "text" },
+];
+const HISTORICAL_COMBINE_FIELDS = [...HISTORICAL_PHYSICAL_FIELDS, ...HISTORICAL_ATHLETIC_FIELDS];
+
+const EIGHTHS_GRID = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
+const EIGHTHS_TOLERANCE = 0.006;
+
+// ── Fraction display/entry for Height/Arm Length/Hand Size. Storage is
+// unchanged — still a plain decimal-inches string on the doc (e.g.
+// "74.375") — this is purely a friendlier way to arrive at that same
+// string than typing it by hand, plus a display formatter for showing it
+// back as "6'2 3/8"" / "9 3/8"" once entered. eighths is always rounded to
+// the nearest 1/8 on the way in (nearestDiff can be nonzero for one of the
+// still-unwashed non-eighths outliers — see historicalFlagsFor — which is
+// fine, this only runs when the admin actually opens that field to edit
+// it, not as a silent background rewrite).
+const EIGHTHS_FRACTION_LABEL = { 0: "", 1: "1/8", 2: "1/4", 3: "3/8", 4: "1/2", 5: "5/8", 6: "3/4", 7: "7/8" };
+
+function decomposeHeight(decimalStr) {
+  const num = parseFloat(decimalStr);
+  if (isNaN(num)) return { feet: "", inches: "", eighths: 0 };
+  const totalWhole = Math.floor(num);
+  let eighths = Math.round((num - totalWhole) * 8);
+  let wholeAdj = totalWhole;
+  if (eighths === 8) { eighths = 0; wholeAdj += 1; }
+  return { feet: Math.floor(wholeAdj / 12), inches: wholeAdj % 12, eighths };
+}
+function recomposeHeight({ feet, inches, eighths }) {
+  const feetBlank = feet === "" || feet == null;
+  const inchesBlank = inches === "" || inches == null;
+  // Only stay blank if *neither* has been touched yet — requiring both
+  // before writing anything meant picking just Feet on a blank cell wrote
+  // nothing, so the select reverted to blank on the next render (the bug
+  // this fixes: it looked like the click didn't register). Once either is
+  // picked, the other defaults to 0 rather than blocking the write.
+  if (feetBlank && inchesBlank) return "";
+  const f = feetBlank ? 0 : Number(feet);
+  const i = inchesBlank ? 0 : Number(inches);
+  return (f * 12 + i + Number(eighths || 0) / 8).toString();
+}
+function formatHeightDisplay(decimalStr) {
+  const { feet, inches, eighths } = decomposeHeight(decimalStr);
+  if (feet === "") return "";
+  const frac = EIGHTHS_FRACTION_LABEL[eighths];
+  return `${feet}'${inches}${frac ? " " + frac : ""}"`;
+}
+
+function decomposeInches(decimalStr) {
+  const num = parseFloat(decimalStr);
+  if (isNaN(num)) return { whole: "", eighths: 0 };
+  const whole = Math.floor(num);
+  let eighths = Math.round((num - whole) * 8);
+  let wholeAdj = whole;
+  if (eighths === 8) { eighths = 0; wholeAdj += 1; }
+  return { whole: wholeAdj, eighths };
+}
+function recomposeInches({ whole, eighths }) {
+  if (whole === "" || whole == null) return "";
+  return (Number(whole) + Number(eighths || 0) / 8).toString();
+}
+function formatInchesDisplay(decimalStr) {
+  const { whole, eighths } = decomposeInches(decimalStr);
+  if (whole === "") return "";
+  const frac = EIGHTHS_FRACTION_LABEL[eighths];
+  return `${whole}${frac ? " " + frac : ""}"`;
+}
+
+// Broad Jump — feet + whole inches, no eighths (measured to the nearest
+// inch, not 1/8"). Same feet/inches persistence fix as recomposeHeight:
+// stays blank only if *neither* part has been touched yet, so picking just
+// Feet on a blank cell commits instead of reverting on the next render.
+function decomposeFeetInches(decimalStr) {
+  const num = parseFloat(decimalStr);
+  if (isNaN(num)) return { feet: "", inches: "" };
+  const totalWhole = Math.round(num);
+  return { feet: Math.floor(totalWhole / 12), inches: totalWhole % 12 };
+}
+function recomposeFeetInches({ feet, inches }) {
+  const feetBlank = feet === "" || feet == null;
+  const inchesBlank = inches === "" || inches == null;
+  if (feetBlank && inchesBlank) return "";
+  const f = feetBlank ? 0 : Number(feet);
+  const i = inchesBlank ? 0 : Number(inches);
+  return (f * 12 + i).toString();
+}
+function formatFeetInchesDisplay(decimalStr) {
+  const { feet, inches } = decomposeFeetInches(decimalStr);
+  if (feet === "") return "";
+  return `${feet}'${inches}"`;
+}
+
+// Flags for one historical record — a value that's unparseable, malformed
+// (e.g. a stray second decimal point), outside a plausible range for that
+// measurement, or (for Height/Arm Length/Hand Size specifically) not on the
+// eighths grid at all. Returns [] for a clean record. Used both for the
+// list's own per-row ⚠ badge and the edit form's per-field highlighting.
+function historicalFlagsFor(record) {
+  const flags = [];
+  HISTORICAL_COMBINE_FIELDS.forEach(({ dataKey, label, min, max, eighths }) => {
+    const raw = record[dataKey];
+    if (raw == null || raw === "") return;
+    const str = String(raw).trim();
+    if (!/^-?\d+(\.\d+)?$/.test(str)) {
+      flags.push({ dataKey, label, message: `${label}: "${raw}" isn't a valid number` });
+      return;
+    }
+    const num = parseFloat(str);
+    if (num < min || num > max) {
+      flags.push({ dataKey, label, message: `${label}: ${raw} is outside a plausible range (${min}-${max})` });
+    }
+    if (eighths) {
+      const whole = Math.floor(num);
+      const dec = num - whole;
+      const nearest = EIGHTHS_GRID.reduce((best, e) => (Math.abs(dec - e) < Math.abs(dec - best) ? e : best), 0);
+      if (Math.abs(dec - nearest) > EIGHTHS_TOLERANCE) {
+        flags.push({ dataKey, label, message: `${label}: ${raw} isn't measured in eighths of an inch` });
+      }
+    }
+  });
+  return flags;
+}
+
+function HistoricalSection() {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedYear, setSelectedYear] = useState("");
+  const [selected, setSelected] = useState(null); // { id, isNew } | full record
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [removing, setRemoving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Retro Grade — a round grade + Strengths/Weaknesses added after the
+  // fact by the admin (these old picks were never actually evaluated at
+  // the time), same idea and same trait source as Recruits' own Scouting
+  // Grades section. Expanded by default — unlike Recruits' version, this
+  // is the actual point of working through the Historical tab (retro-
+  // grading old picks), not an occasional extra.
+  const [gradesExpanded, setGradesExpanded] = useState(true);
+  // { "Position Specific": [...], "Generic": [...] } for whichever record
+  // is currently selected — refetched on Position change, same source
+  // (traits/{Position} + traits/Generic) as every other Strengths/
+  // Weaknesses picker in this app.
+  const [traitGroups, setTraitGroups] = useState({});
+
+  useEffect(() => {
+    const fetchRecords = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "historical"));
+        setRecords(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("Admin historical fetch error:", e);
+        setRecords([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRecords();
+  }, []);
+
+  useEffect(() => {
+    const position = formState?.Position;
+    if (!position) { setTraitGroups({}); return; }
+    const fetchTraits = async () => {
+      try {
+        const [posSnap, genSnap] = await Promise.all([
+          getDoc(doc(db, "traits", position)),
+          getDoc(doc(db, "traits", "Generic")),
+        ]);
+        const g = {};
+        if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
+        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits || []).sort();
+        setTraitGroups(g);
+      } catch (e) {
+        console.error("Admin historical traits fetch error:", e);
+        setTraitGroups({});
+      }
+    };
+    fetchTraits();
+  }, [formState?.Position]);
+
+  // Mirrors RecruitsSection's own handleToggleTrait: a trait can't sit in
+  // both Strengths and Weaknesses at once, and each list caps at 5.
+  const handleToggleTrait = (trait, kind) => {
+    const otherKind = kind === "Strengths" ? "Weaknesses" : "Strengths";
+    setFormState((prev) => {
+      const current = prev[kind] || [];
+      const other = prev[otherKind] || [];
+      if (other.includes(trait)) return prev;
+      if (current.includes(trait)) return { ...prev, [kind]: current.filter((t) => t !== trait) };
+      if (current.length >= 5) return prev;
+      return { ...prev, [kind]: [...current, trait] };
+    });
+  };
+
+  // feet/inches/eighths picker for Height — see decomposeHeight/
+  // recomposeHeight (module scope) for the actual conversion.
+  const setHeightPart = (part, value) => {
+    setFormState((p) => {
+      const cur = decomposeHeight(p.Height);
+      const next = { ...cur, [part]: value === "" ? "" : Number(value) };
+      return { ...p, Height: recomposeHeight(next) };
+    });
+  };
+  // inches/eighths picker for Arm Length/Hand Size — formKey-parameterized
+  // since both fields use the exact same picker shape.
+  const setInchesPart = (formKey, part, value) => {
+    setFormState((p) => {
+      const cur = decomposeInches(p[formKey]);
+      const next = { ...cur, [part]: value === "" ? "" : Number(value) };
+      return { ...p, [formKey]: recomposeInches(next) };
+    });
+  };
+  // feet/inches picker for Broad Jump — same shape as setHeightPart, no
+  // eighths dimension.
+  const setBroadPart = (part, value) => {
+    setFormState((p) => {
+      const cur = decomposeFeetInches(p.Broad);
+      const next = { ...cur, [part]: value === "" ? "" : Number(value) };
+      return { ...p, Broad: recomposeFeetInches(next) };
+    });
+  };
+
+  const years = useMemo(
+    () => Array.from(new Set(records.map((r) => r.Year).filter(Boolean))).sort((a, b) => Number(b) - Number(a)),
+    [records]
+  );
+
+  // Flags computed once per record here (not inline per-row on every
+  // render) — historicalFlagsFor is a handful of regex/range checks across
+  // 10 fields, cheap alone but not free times 6,643 rows on every keystroke
+  // in the search box.
+  const flagsById = useMemo(() => {
+    const map = {};
+    records.forEach((r) => { map[r.id] = historicalFlagsFor(r); });
+    return map;
+  }, [records]);
+
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return records
+      .filter((r) => !selectedYear || r.Year === selectedYear)
+      .filter((r) => !flaggedOnly || (flagsById[r.id]?.length > 0))
+      .filter((r) => {
+        if (!q) return true;
+        return (r.Player || "").toLowerCase().includes(q)
+          || (r.School || "").toLowerCase().includes(q)
+          || (r["NFL Team"] || "").toLowerCase().includes(q);
+      })
+      .sort((a, b) => {
+        const yearDiff = (Number(b.Year) || 0) - (Number(a.Year) || 0);
+        if (yearDiff !== 0) return yearDiff;
+        return (Number(a.Pick) || 9999) - (Number(b.Pick) || 9999);
+      });
+  }, [records, searchQuery, selectedYear, flaggedOnly, flagsById]);
+
+  // Selecting a specific draft class should show that *entire* class, not
+  // a truncated slice of it — the RESULT_LIMIT cap only makes sense as a
+  // render-performance guard for an open-ended browse/search across all
+  // 6,643 records. A single class tops out around 260 picks either way,
+  // trivially renderable in full.
+  const shown = selectedYear ? filtered : filtered.slice(0, RESULT_LIMIT);
+  const isNew = selected?.isNew;
+
+  const selectRecord = (r) => {
+    setSelected(r);
+    const combine = {};
+    HISTORICAL_COMBINE_FIELDS.forEach(({ formKey, dataKey }) => { combine[formKey] = r[dataKey] || ""; });
+    // Falls back to splitting the legacy Player string on the fly for any
+    // record scripts/split-historical-names.js hasn't reached yet — First
+    // is the first word, Last is everything else (see that script's own
+    // comment for why this simple a rule, and for "T. J."-style names).
+    const legacySplit = !r.First && r.Player ? (() => {
+      const parts = r.Player.trim().split(/\s+/);
+      return { first: parts[0] || "", last: parts.slice(1).join(" ") };
+    })() : null;
+    setFormState({
+      First: r.First || legacySplit?.first || "", Last: r.Last || legacySplit?.last || "",
+      School: r.School || "", Position: r.Position || "",
+      Year: r.Year || "", Round: r.Round || "", Pick: r.Pick || "", NFLTeam: r["NFL Team"] || "",
+      RoundGrade: r.RoundGrade || "", Strengths: r.Strengths || [], Weaknesses: r.Weaknesses || [],
+      ...combine,
+    });
+    setSaveMessage("");
+    setConfirmDelete(false);
+    setGradesExpanded(true);
+  };
+
+  const startNew = () => {
+    setSelected({ isNew: true });
+    const combine = {};
+    HISTORICAL_COMBINE_FIELDS.forEach(({ formKey }) => { combine[formKey] = ""; });
+    setFormState({
+      First: "", Last: "", School: "", Position: "", Year: selectedYear || "", Round: "", Pick: "", NFLTeam: "",
+      RoundGrade: "", Strengths: [], Weaknesses: [],
+      ...combine,
+    });
+    setSaveMessage("");
+    setConfirmDelete(false);
+    setGradesExpanded(true);
+  };
+
+  const handleSave = async () => {
+    if (!formState.First.trim() || !formState.School.trim() || !formState.Year.trim()) {
+      setSaveMessage("Failed: First name, School, and Year are required.");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        First: formState.First.trim(),
+        Last: formState.Last.trim(),
+        // Player stays in sync, auto-derived from First/Last on every
+        // save — kept (not dropped) because TeamPage.js's own historical-
+        // picks row still reads Player directly, not First/Last.
+        Player: `${formState.First.trim()} ${formState.Last.trim()}`.trim(),
+        School: formState.School.trim(),
+        Position: formState.Position.trim(),
+        Year: formState.Year.trim(),
+        Round: formState.Round.trim(),
+        Pick: formState.Pick.trim(),
+        "NFL Team": formState.NFLTeam.trim(),
+        RoundGrade: formState.RoundGrade || "",
+        Strengths: formState.Strengths || [],
+        Weaknesses: formState.Weaknesses || [],
+        updatedAt: serverTimestamp(),
+      };
+      // Combine fields. A blank one on a brand-new doc is simply omitted —
+      // nothing to clear yet. On an *existing* doc, though, omitting the
+      // key isn't the same as clearing it (updateDoc only touches fields
+      // present in the payload) — same distinction CFBScheduleSection's
+      // own Time/Channel/score handling makes, so blanking a combine
+      // number out here has to explicitly deleteField() it, or it'd just
+      // keep showing the old value forever. dataKey (not formKey) is the
+      // literal Firestore field name — see HISTORICAL_COMBINE_FIELDS's own
+      // comment for the "40 Yard " trailing-space quirk this preserves.
+      HISTORICAL_COMBINE_FIELDS.forEach(({ formKey, dataKey }) => {
+        const v = (formState[formKey] || "").trim();
+        if (v) payload[dataKey] = v;
+        else if (!isNew) payload[dataKey] = deleteField();
+      });
+      if (isNew) {
+        const newRef = await addDoc(collection(db, "historical"), payload);
+        const newRecord = { id: newRef.id, ...payload };
+        setRecords((prev) => [...prev, newRecord]);
+        setSelected(newRecord);
+        setSaveMessage("Record created.");
+      } else {
+        await updateDoc(doc(db, "historical", selected.id), payload);
+        setRecords((prev) => prev.map((r) => {
+          if (r.id !== selected.id) return r;
+          // deleteField() sentinels aren't real values — mirror the
+          // deletion in local state instead of spreading the sentinel in.
+          const merged = { ...r, ...payload };
+          HISTORICAL_COMBINE_FIELDS.forEach(({ dataKey }) => {
+            if (payload[dataKey] && typeof payload[dataKey] === "object") delete merged[dataKey];
+          });
+          return merged;
+        }));
+        setSaveMessage("Saved.");
+      }
+    } catch (e) {
+      console.error("Historical save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selected || isNew) return;
+    setRemoving(true);
+    try {
+      await deleteDoc(doc(db, "historical", selected.id));
+      setRecords((prev) => prev.filter((r) => r.id !== selected.id));
+      setSelected(null);
+      setFormState(null);
+    } catch (e) {
+      console.error("Historical delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
+      setConfirmDelete(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+
+  // Live off the current form input, not selected's original saved
+  // value — a field's flag clears the instant an edit actually fixes it,
+  // rather than waiting on a save+refetch round trip.
+  const formRecord = {};
+  if (formState) HISTORICAL_COMBINE_FIELDS.forEach(({ formKey, dataKey }) => { formRecord[dataKey] = formState[formKey]; });
+  const liveFlags = formState ? historicalFlagsFor(formRecord) : [];
+  const liveFlaggedKeys = new Set(liveFlags.map((f) => f.dataKey));
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Historical Draft Picks
+          </div>
+          <div style={{ color: "rgba(255,255,255,0.6)", fontSize: "11px", fontWeight: 700 }}>
+            {records.length.toLocaleString()} total
+          </div>
+          <button
+            onClick={startNew}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + New
+          </button>
+        </div>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search player, school, or NFL team..."
+            style={{ ...inputStyle, flex: 1, minWidth: "160px" }}
+          />
+          <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} style={{ ...inputStyle, width: "110px" }}>
+            <option value="">All Years</option>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          {/* Combine data doesn't make sense for every field (see
+              historicalFlagsFor) — flagged, not auto-corrected, since a
+              human needs to decide the true value. This is the only way to
+              actually find them across 6,643 rows rather than stumbling
+              into one by chance. */}
+          <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 800, color: "#c0392b", cursor: "pointer", flexShrink: 0 }}>
+            <input type="checkbox" checked={flaggedOnly} onChange={(e) => setFlaggedOnly(e.target.checked)} />
+            🚩 Flagged only
+          </label>
+        </div>
+
+        {shown.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            No records match.
+          </div>
+        ) : (
+          <div style={{ maxHeight: "700px", overflowY: "auto" }}>
+            {shown.map((r) => {
+              const isSelected = selected?.id === r.id;
+              const flagged = flagsById[r.id]?.length > 0;
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => selectRecord(r)}
+                  style={{
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : flagged ? "4px solid #c0392b" : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+                      {flagged && <span title="Data looks off — see the edit panel for details" style={{ flexShrink: 0, fontSize: "12px" }}>🚩</span>}
+                      <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{(r.First || r.Last) ? `${r.First || ""} ${r.Last || ""}`.trim() : (r.Player || "(no name)")}</div>
+                    </div>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#999", flexShrink: 0 }}>
+                      {r.Year}{r.Round ? ` · Rd ${r.Round}` : ""}{r.Pick ? `, Pick ${r.Pick}` : ""}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
+                    {r.School || "—"}{r.Position ? ` · ${r.Position}` : ""}{r["NFL Team"] ? ` → ${r["NFL Team"]}` : ""}
+                    {r.RoundGrade && <span style={{ color: "#2e7d32" }}> · Retro: {r.RoundGrade}</span>}
+                  </div>
+                </div>
+              );
+            })}
+            {!selectedYear && filtered.length > RESULT_LIMIT && (
+              <div style={{ padding: "12px", textAlign: "center", color: "#999", fontSize: "11px", fontStyle: "italic" }}>
+                Showing first {RESULT_LIMIT} of {filtered.length.toLocaleString()} matches — refine your search or pick a year to see the rest.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {isNew ? "New Record" : selected ? "Edit Record" : "Select a Record"}
+          </div>
+        </div>
+
+        {!selected || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a record from the list to edit it, or "+ New" to add one.
+          </div>
+        ) : (
+          <div style={{ padding: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>First</div>
+                <input value={formState.First} onChange={(e) => setFormState((p) => ({ ...p, First: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Last</div>
+                <input value={formState.Last} onChange={(e) => setFormState((p) => ({ ...p, Last: e.target.value }))} style={inputStyle} />
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>School</div>
+                <input value={formState.School} onChange={(e) => setFormState((p) => ({ ...p, School: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Position</div>
+                <input value={formState.Position} onChange={(e) => setFormState((p) => ({ ...p, Position: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Year</div>
+                <input value={formState.Year} onChange={(e) => setFormState((p) => ({ ...p, Year: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Round</div>
+                <input value={formState.Round} onChange={(e) => setFormState((p) => ({ ...p, Round: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Pick</div>
+                <input value={formState.Pick} onChange={(e) => setFormState((p) => ({ ...p, Pick: e.target.value }))} style={inputStyle} />
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>NFL Team</div>
+                <input value={formState.NFLTeam} onChange={(e) => setFormState((p) => ({ ...p, NFLTeam: e.target.value }))} style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Combine — physical/athletic measurements, added to this
+                collection after the initial import (see
+                HISTORICAL_COMBINE_FIELDS's own comment). Blank on most
+                older classes; that's expected, not an error. Flags recompute
+                live off the current form input (not the original saved
+                value), via liveFlaggedKeys below, so a field's border
+                clears the moment a fix actually resolves it. */}
+            <div style={{ fontSize: "10px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "14px", marginBottom: "8px" }}>
+              Physical
+            </div>
+            {/* Single column, not the usual 1fr 1fr grid — Height/Arm
+                Length/Hand Size each need room for 2-3 selects side by
+                side, so a 2-column grid would leave an awkward gap next to
+                Weight (the one field that doesn't need the extra width). */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "14px" }}>
+              {HISTORICAL_PHYSICAL_FIELDS.map(({ formKey, dataKey, label, inputType }) => {
+                const flagged = liveFlaggedKeys.has(dataKey);
+                const selectStyle = { ...inputStyle, flex: 1, ...(flagged ? { border: "2px solid #c0392b" } : {}) };
+
+                let control;
+                if (inputType === "height") {
+                  const { feet, inches, eighths } = decomposeHeight(formState.Height);
+                  control = (
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <select value={feet} onChange={(e) => setHeightPart("feet", e.target.value)} style={selectStyle}>
+                        <option value="">Ft</option>
+                        {[4, 5, 6, 7].map((f) => <option key={f} value={f}>{f}'</option>)}
+                      </select>
+                      <select value={inches} onChange={(e) => setHeightPart("inches", e.target.value)} style={selectStyle}>
+                        <option value="">In</option>
+                        {Array.from({ length: 12 }, (_, i) => i).map((i) => <option key={i} value={i}>{i}"</option>)}
+                      </select>
+                      <select value={eighths} onChange={(e) => setHeightPart("eighths", e.target.value)} style={selectStyle}>
+                        {[0, 1, 2, 3, 4, 5, 6, 7].map((e2) => <option key={e2} value={e2}>{EIGHTHS_FRACTION_LABEL[e2] || "0"}</option>)}
+                      </select>
+                    </div>
+                  );
+                } else if (inputType === "inches") {
+                  const { whole, eighths } = decomposeInches(formState[formKey]);
+                  // Arm Length runs longer than Hand Size — a shared 6-40"
+                  // range covers both without needing a third range config.
+                  control = (
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <select value={whole} onChange={(e) => setInchesPart(formKey, "whole", e.target.value)} style={selectStyle}>
+                        <option value="">In</option>
+                        {Array.from({ length: 35 }, (_, i) => i + 6).map((i) => <option key={i} value={i}>{i}"</option>)}
+                      </select>
+                      <select value={eighths} onChange={(e) => setInchesPart(formKey, "eighths", e.target.value)} style={selectStyle}>
+                        {[0, 1, 2, 3, 4, 5, 6, 7].map((e2) => <option key={e2} value={e2}>{EIGHTHS_FRACTION_LABEL[e2] || "0"}</option>)}
+                      </select>
+                    </div>
+                  );
+                } else {
+                  control = (
+                    <input
+                      value={formState[formKey]}
+                      onChange={(e) => setFormState((p) => ({ ...p, [formKey]: e.target.value }))}
+                      style={flagged ? { ...inputStyle, border: "2px solid #c0392b" } : inputStyle}
+                    />
+                  );
+                }
+
+                const display = inputType === "height" ? formatHeightDisplay(formState.Height)
+                  : inputType === "inches" ? formatInchesDisplay(formState[formKey])
+                  : "";
+
+                return (
+                  <div key={formKey}>
+                    <div style={{ fontSize: "10px", fontWeight: 900, color: flagged ? "#c0392b" : "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                      {flagged && "🚩 "}{label}
+                      {display && <span style={{ color: "#999", fontWeight: 700, textTransform: "none", letterSpacing: "normal" }}> ({display})</span>}
+                    </div>
+                    {control}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: "10px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+              Athletic
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+              {HISTORICAL_ATHLETIC_FIELDS.map(({ formKey, dataKey, label, inputType }) => {
+                const flagged = liveFlaggedKeys.has(dataKey);
+
+                if (inputType === "broad") {
+                  const { feet, inches } = decomposeFeetInches(formState.Broad);
+                  const display = formatFeetInchesDisplay(formState.Broad);
+                  const selectStyle = { ...inputStyle, flex: 1, ...(flagged ? { border: "2px solid #c0392b" } : {}) };
+                  return (
+                    <div key={formKey} style={{ gridColumn: "1 / -1" }}>
+                      <div style={{ fontSize: "10px", fontWeight: 900, color: flagged ? "#c0392b" : "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                        {flagged && "🚩 "}{label}
+                        {display && <span style={{ color: "#999", fontWeight: 700, textTransform: "none", letterSpacing: "normal" }}> ({display})</span>}
+                      </div>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <select value={feet} onChange={(e) => setBroadPart("feet", e.target.value)} style={selectStyle}>
+                          <option value="">Ft</option>
+                          {Array.from({ length: 8 }, (_, i) => i + 6).map((f) => <option key={f} value={f}>{f}'</option>)}
+                        </select>
+                        <select value={inches} onChange={(e) => setBroadPart("inches", e.target.value)} style={selectStyle}>
+                          <option value="">In</option>
+                          {Array.from({ length: 12 }, (_, i) => i).map((i) => <option key={i} value={i}>{i}"</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={formKey}>
+                    <div style={{ fontSize: "10px", fontWeight: 900, color: flagged ? "#c0392b" : "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                      {flagged && "🚩 "}{label}
+                    </div>
+                    <input
+                      value={formState[formKey]}
+                      onChange={(e) => setFormState((p) => ({ ...p, [formKey]: e.target.value }))}
+                      style={flagged ? { ...inputStyle, border: "2px solid #c0392b" } : inputStyle}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Retro Grade — these old picks were never actually evaluated
+                at the time, so this is entirely admin-entered after the
+                fact: a round grade (same scale as a real player's community
+                grade — gradeLabels, defined at module scope) plus
+                Strengths/Weaknesses from the same traits/{Position} +
+                traits/Generic source every other picker in this app uses.
+                Collapsed by default (see gradesExpanded) so the form
+                doesn't open with a trait checklist already sprawled out. */}
+            <div style={{ borderTop: "1px solid #eee", paddingTop: "12px", marginBottom: "12px" }}>
+              <button
+                type="button"
+                onClick={() => setGradesExpanded((v) => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: "6px", width: "100%",
+                  background: "none", border: "none", padding: 0, cursor: "pointer",
+                  fontSize: "10px", fontWeight: 900, color: "#888",
+                  textTransform: "uppercase", letterSpacing: "0.08em",
+                }}
+              >
+                <span style={{ display: "inline-block", transform: gradesExpanded ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}>▶</span>
+                Retro Grade
+                {formState.RoundGrade && <span style={{ color: "#bbb", fontWeight: 700 }}>({formState.RoundGrade})</span>}
+              </button>
+              {gradesExpanded && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px" }}>
+                  <div>
+                    <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Round Grade</div>
+                    <select
+                      value={formState.RoundGrade}
+                      onChange={(e) => setFormState((p) => ({ ...p, RoundGrade: e.target.value }))}
+                      style={inputStyle}
+                    >
+                      <option value="">—</option>
+                      {Object.keys(gradeScale).map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+                  {Object.keys(traitGroups).length === 0 ? (
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#999", fontStyle: "italic" }}>
+                      Set a Position above to pick Strengths/Weaknesses.
+                    </div>
+                  ) : [
+                    { label: "Strengths", kind: "Strengths" },
+                    { label: "Weaknesses", kind: "Weaknesses" },
+                  ].map(({ label, kind }) => {
+                    const sel = formState[kind] || [];
+                    return (
+                      <div key={kind}>
+                        <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>{label} (max 5)</div>
+                        <details style={{ border: "2px solid #ddd", borderRadius: "6px" }}>
+                          <summary style={{
+                            cursor: "pointer", padding: "8px 10px", fontWeight: 700, fontSize: "13px",
+                            color: sel.length > 0 ? "#111" : "#999",
+                          }}>
+                            {sel.length > 0 ? sel.join(", ") : "Select " + label.toLowerCase()}
+                          </summary>
+                          <div style={{ padding: "8px 10px", borderTop: "2px solid #ddd" }}>
+                            {Object.entries(traitGroups).map(([groupLabel, options]) => (
+                              <div key={groupLabel} style={{ marginBottom: "8px" }}>
+                                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>
+                                  {groupLabel}
+                                </div>
+                                {options.map((trait) => {
+                                  const otherKind = kind === "Strengths" ? "Weaknesses" : "Strengths";
+                                  const isOther = (formState[otherKind] || []).includes(trait);
+                                  return (
+                                    <label key={trait} style={{ display: "block", fontSize: "13px", padding: "3px 0", cursor: isOther ? "default" : "pointer", color: isOther ? "#ccc" : "#333" }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={sel.includes(trait)}
+                                        disabled={(!sel.includes(trait) && sel.length >= 5) || isOther}
+                                        onChange={() => handleToggleTrait(trait, kind)}
+                                        style={{ marginRight: "8px" }}
+                                      />
+                                      {trait}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {liveFlags.length > 0 && (
+              <div style={{ background: "#fdecea", border: "2px solid #c0392b", borderRadius: "8px", padding: "10px 12px", marginBottom: "12px" }}>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#c0392b", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "5px" }}>
+                  🚩 Looks off
+                </div>
+                {liveFlags.map((f, i) => (
+                  <div key={i} style={{ fontSize: "11px", fontWeight: 700, color: "#912a20" }}>{f.message}</div>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : isNew ? "Create Record" : "Save Changes"}
+            </button>
+
+            {!isNew && (
+              confirmDelete ? (
+                <div style={{ marginTop: "10px", display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={handleDelete}
+                    disabled={removing}
+                    style={{
+                      flex: 1, background: "#c0392b", color: "#fff", border: "none",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: removing ? "default" : "pointer",
+                    }}
+                  >
+                    {removing ? "Deleting..." : "Confirm Delete"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    width: "100%", marginTop: "8px",
+                    background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                    borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                    textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                  }}
+                >
+                  Delete Record
+                </button>
+              )
+            )}
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Traits — the actual `traits/{Position}` + `traits/Generic` docs every
+// Strengths/Weaknesses picker in this app reads from (PlayerProfile's real
+// evaluation form, RecruitsSection's Scouting Grades, HistoricalSection's
+// Retro Grade above). This is the one place those trait *options* — the
+// checkbox list itself — get authored; everywhere else only *selects from*
+// what's defined here. Doc id is the position group (DB, DL, EDGE, LB, OL,
+// QB, RB, TE, WR — matching every existing fetch's plain
+// `doc(db, "traits", position)`, no gradeGroupForPosition-style mapping —
+// plus "Generic", which every position's picker shows alongside its own
+// position-specific group). Each doc is just `{ position, traits: [...] }`
+// — a flat string array, kept sorted for a predictable list. ──
+function TraitsSection() {
+  const [groups, setGroups] = useState([]); // [{ id, traits: [] }]
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null); // { id, isNew } | { id }
+  const [formTraits, setFormTraits] = useState([]);
+  const [newGroupId, setNewGroupId] = useState("");
+  const [newTraitInput, setNewTraitInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [removing, setRemoving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    const fetchGroups = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "traits"));
+        const data = snap.docs.map((d) => ({ id: d.id, traits: (d.data().traits || []).slice().sort() }));
+        data.sort((a, b) => a.id.localeCompare(b.id));
+        setGroups(data);
+      } catch (e) {
+        console.error("Admin traits fetch error:", e);
+        setGroups([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchGroups();
+  }, []);
+
+  const isNew = selected?.isNew;
+
+  const selectGroup = (g) => {
+    setSelected(g);
+    setFormTraits([...g.traits]);
+    setNewTraitInput("");
+    setSaveMessage("");
+    setConfirmDelete(false);
+  };
+
+  const startNewGroup = () => {
+    setSelected({ isNew: true });
+    setFormTraits([]);
+    setNewGroupId("");
+    setNewTraitInput("");
+    setSaveMessage("");
+    setConfirmDelete(false);
+  };
+
+  const addTrait = () => {
+    const t = newTraitInput.trim();
+    if (!t) return;
+    if (formTraits.some((x) => x.toLowerCase() === t.toLowerCase())) { setNewTraitInput(""); return; }
+    setFormTraits((prev) => [...prev, t].sort());
+    setNewTraitInput("");
+  };
+  const removeTrait = (t) => setFormTraits((prev) => prev.filter((x) => x !== t));
+
+  const handleSave = async () => {
+    const docId = (isNew ? newGroupId : selected?.id || "").trim();
+    if (!docId) {
+      setSaveMessage("Failed: enter a position (e.g. \"QB\") or \"Generic\".");
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      await setDoc(doc(db, "traits", docId), { position: docId, traits: formTraits });
+      const nextGroup = { id: docId, traits: formTraits };
+      setGroups((prev) => {
+        const next = prev.filter((g) => g.id !== docId);
+        next.push(nextGroup);
+        next.sort((a, b) => a.id.localeCompare(b.id));
+        return next;
+      });
+      setSelected(nextGroup);
+      setSaveMessage(isNew ? "Group created." : "Saved.");
+    } catch (e) {
+      console.error("Admin traits save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selected || isNew) return;
+    setRemoving(true);
+    try {
+      await deleteDoc(doc(db, "traits", selected.id));
+      setGroups((prev) => prev.filter((g) => g.id !== selected.id));
+      setSelected(null);
+      setFormTraits([]);
+    } catch (e) {
+      console.error("Admin traits delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
+      setConfirmDelete(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Traits
+          </div>
+          <button
+            onClick={startNewGroup}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + New
+          </button>
+        </div>
+        {groups.length === 0 ? (
+          <div style={{ padding: "30px 16px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            No trait groups yet.
+          </div>
+        ) : (
+          <div>
+            {groups.map((g) => {
+              const isSelected = !isNew && selected?.id === g.id;
+              return (
+                <div
+                  key={g.id}
+                  onClick={() => selectGroup(g)}
+                  style={{
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{g.id}</span>
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#999", flexShrink: 0 }}>{g.traits.length}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {isNew ? "New Group" : selected ? selected.id : "Select a Group"}
+          </div>
+        </div>
+
+        {!selected ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a group from the list to edit its traits, or "+ New" to add a position that doesn't have one yet.
+          </div>
+        ) : (
+          <div style={{ padding: "16px" }}>
+            {isNew && (
+              <div style={{ marginBottom: "14px" }}>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                  Position (or "Generic")
+                </div>
+                <input
+                  value={newGroupId}
+                  onChange={(e) => setNewGroupId(e.target.value)}
+                  placeholder="e.g. QB"
+                  style={inputStyle}
+                />
+              </div>
+            )}
+
+            <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
+              Traits ({formTraits.length})
+            </div>
+            {formTraits.length === 0 ? (
+              <div style={{ padding: "16px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px", border: "2px dashed #eee", borderRadius: "8px", marginBottom: "14px" }}>
+                No traits yet — add one below.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "14px" }}>
+                {formTraits.map((t) => (
+                  <span
+                    key={t}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "6px",
+                      background: "#eef2f7", border: "1px solid #ddd", borderRadius: "14px",
+                      padding: "5px 6px 5px 12px", fontSize: "12px", fontWeight: 700, color: "#333",
+                    }}
+                  >
+                    {t}
+                    <button
+                      onClick={() => removeTrait(t)}
+                      title={`Remove "${t}"`}
+                      style={{
+                        background: "#ccc", color: "#fff", border: "none", borderRadius: "50%",
+                        width: "16px", height: "16px", fontSize: "11px", lineHeight: 1, fontWeight: 900,
+                        cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+              <input
+                value={newTraitInput}
+                onChange={(e) => setNewTraitInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTrait(); } }}
+                placeholder="Add a trait..."
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button
+                onClick={addTrait}
+                style={{
+                  background: BLUE, color: "#fff", border: "none", borderRadius: "8px",
+                  padding: "0 16px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase",
+                  letterSpacing: "0.04em", cursor: "pointer",
+                }}
+              >
+                Add
+              </button>
+            </div>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : isNew ? "Create Group" : "Save Changes"}
+            </button>
+
+            {!isNew && (
+              confirmDelete ? (
+                <div style={{ marginTop: "10px", display: "flex", gap: "8px" }}>
+                  <button
+                    onClick={handleDelete}
+                    disabled={removing}
+                    style={{
+                      flex: 1, background: "#c0392b", color: "#fff", border: "none",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: removing ? "default" : "pointer",
+                    }}
+                  >
+                    {removing ? "Deleting..." : "Confirm Delete"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    style={{
+                      flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                      borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    width: "100%", marginTop: "8px",
+                    background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                    borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                    textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                  }}
+                >
+                  Delete Group
+                </button>
+              )
+            )}
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -7097,18 +8299,107 @@ function FieldRow({ label, children }) {
   );
 }
 
-// ── Misc Branding — a home for branding assets that aren't a school or NFL
-// team. TV channels are the first (only) resident: CFBScheduleSection's own
+// ── Misc — a home for branding assets (and now small site-wide settings)
+// that don't fit a school or NFL team. TV channels: CFBScheduleSection's own
 // "TV Channel" dropdown references a channel by this same Name, and
 // GamePage.js looks up that channel's LogoDark to show under the at/vs
 // button. Deliberately its own simple manager rather than another
 // LEAGUE_CONFIG entry in TeamBrandingPane — a channel has no conference,
 // short name, or NFL association, just a name and two logos, so the
-// team-shaped machinery there would be mostly unused ceremony here. ──
+// team-shaped machinery there would be mostly unused ceremony here.
+// HomePageModeToggle: which Home.js design (src/pages/HomeOffSeason.js vs
+// HomeInSeason.js) is currently live — not a branding asset either, but
+// this is the closest thing to a "site settings" home this admin panel has,
+// and one small toggle doesn't earn its own top-level sidebar section. ──
 function MiscBrandingSection() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <HomePageModeToggle />
       <TvChannelsManager />
+    </div>
+  );
+}
+
+// config/home.mode ("offseason" | "inseason") — read by Home.js on every
+// page load to decide which of the two actual designs to render. Flipping
+// this here is instant and fully reversible; it never requires a code
+// deploy in either direction.
+function HomePageModeToggle() {
+  const [mode, setMode] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    const fetchMode = async () => {
+      try {
+        const snap = await getDoc(doc(db, "config", "home"));
+        setMode(snap.exists() && snap.data().mode === "inseason" ? "inseason" : "offseason");
+      } catch (e) {
+        console.error("Home mode fetch error:", e);
+        setMode("offseason");
+      }
+    };
+    fetchMode();
+  }, []);
+
+  const handleSet = async (next) => {
+    if (next === mode || saving) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      await setDoc(doc(db, "config", "home"), { mode: next, updatedAt: serverTimestamp() });
+      setMode(next);
+      setSaveMessage(next === "inseason" ? "In-Season Home is now live." : "Off-Season Home is now live.");
+    } catch (e) {
+      console.error("Home mode save error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🏠 Home Page
+        </div>
+      </div>
+      <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        {mode === null ? (
+          <LoadingSpinner label="Loading" size={20} minHeight="50px" />
+        ) : (
+          <>
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+              Which Home page design visitors currently see.
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {[["offseason", "Off-Season"], ["inseason", "In-Season"]].map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => handleSet(key)}
+                  disabled={saving}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: "8px",
+                    border: "2px solid " + BLUE,
+                    background: mode === key ? BLUE : "#fff",
+                    color: mode === key ? "#fff" : BLUE,
+                    fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                    cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {mode === key ? "✓ " : ""}{label}
+                </button>
+              ))}
+            </div>
+            {saveMessage && (
+              <div style={{ fontSize: "11px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

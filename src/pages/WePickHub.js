@@ -19,7 +19,7 @@ import { db } from "../firebase";
 import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch, query, where, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useAuth } from "../context/AuthContext";
-import { fetchAllRankMaps, ranksForGame, rankingsWeekKey } from "../utils/rankings";
+import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -870,6 +870,12 @@ function MyPicksSection() {
 
   if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="40vh" />;
 
+  // Current (latest-published) Top 25 — every GameRow below shows each
+  // team's current standing, not what they were ranked back in that game's
+  // own week, *except* a game that's already Final, which keeps its own
+  // frozen snapshot regardless (see ranksForGame).
+  const currentTop25 = currentRankMap(rankingsByWeek);
+
   // Three buckets, purely off pick state: no prediction at all → "Games";
   // a prediction exists but isn't starred to count (or can't, because the
   // game's disqualified) → "Unranked"; a starred score prediction on a
@@ -1186,7 +1192,7 @@ function MyPicksSection() {
                 key={g.id}
                 game={g}
                 schoolsByName={schoolsByName}
-                rankingsByWeek={rankingsByWeek}
+                currentRankMap={currentTop25}
                 pick={myPicksById[g.id] || null}
                 onSaveScore={handleSaveScore}
                 onPickWinner={handlePickWinner}
@@ -1209,7 +1215,7 @@ function MyPicksSection() {
                 key={g.id}
                 game={g}
                 schoolsByName={schoolsByName}
-                rankingsByWeek={rankingsByWeek}
+                currentRankMap={currentTop25}
                 pick={myPicksById[g.id] || null}
                 onSaveScore={handleSaveScore}
                 onPickWinner={handlePickWinner}
@@ -1235,7 +1241,7 @@ function MyPicksSection() {
                 key={g.id}
                 game={g}
                 schoolsByName={schoolsByName}
-                rankingsByWeek={rankingsByWeek}
+                currentRankMap={currentTop25}
                 pick={myPicksById[g.id] || null}
                 onSaveScore={handleSaveScore}
                 onPickWinner={handlePickWinner}
@@ -1265,7 +1271,7 @@ function MyPicksSection() {
                 key={game.id}
                 game={game}
                 schoolsByName={schoolsByName}
-                rankingsByWeek={rankingsByWeek}
+                currentRankMap={currentTop25}
                 pick={pick}
                 onRemove={() => handleRemove(game.id)}
                 removing={removingId === game.id}
@@ -2543,7 +2549,7 @@ function CompositionChip({ label, value, ok }) {
 // implied to win — gold + a check, computed from the (possibly
 // still-unsaved) score boxes if both are filled, else from a saved
 // winner-only pick's side.
-function GameRow({ game, schoolsByName, rankingsByWeek, pick, onSaveScore, onPickWinner, onRemove, onToggleRanked, saving, removing }) {
+function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSaveScore, onPickWinner, onRemove, onToggleRanked, saving, removing }) {
   const [awayVal, setAwayVal] = useState(pick?.awayScore != null ? String(pick.awayScore) : "");
   const [homeVal, setHomeVal] = useState(pick?.homeScore != null ? String(pick.homeScore) : "");
   const [visibility, setVisibility] = useState(pick?.visibility || "public");
@@ -2562,7 +2568,7 @@ function GameRow({ game, schoolsByName, rankingsByWeek, pick, onSaveScore, onPic
 
   const awaySchool = schoolsByName?.[game.Away];
   const homeSchool = schoolsByName?.[game.Home];
-  const { homeRank, awayRank } = ranksForGame(game, rankingsByWeek?.[rankingsWeekKey(game.Week)]);
+  const { homeRank, awayRank } = ranksForGame(game, currentTop25);
 
   const final = isGameFinal(game);
   const locked = !final && !isPickable(game);

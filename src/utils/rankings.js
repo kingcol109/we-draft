@@ -66,16 +66,67 @@ export async function fetchAllRankMaps() {
   }
 }
 
-// Ranks for one game. weekRankMap is a flat { School: Rank } map already
-// resolved to *that game's* week (fetchWeekRankMap(game.Week), or
-// byWeek[rankingsWeekKey(game.Week)] when starting from fetchAllRankMaps).
-// Prefers the frozen HomeRank/AwayRank snapshot once the game is Final.
-export function ranksForGame(game, weekRankMap) {
+// Same digit-extraction weekNumber() every page already has its own copy
+// of (AdminPanel.js, GamePage.js, CFBPage.js, ...) — needed here just to
+// pick out the *highest* week among a byWeek map's keys.
+function weekNumberOf(w) {
+  const m = /(\d+)/.exec(w || "");
+  return m ? Number(m[1]) : -1;
+}
+
+// The "current" rank map — whichever week in a byWeek map (fetchAllRankMaps())
+// has the highest week number AND actually has entries. "Current" means the
+// most recently *published* poll, not anything tied to today's calendar date
+// or any specific game's own Week — a team's rank should read the same
+// (its latest) whether you're looking at an already-past week's schedule row
+// or a week that hasn't happened yet.
+export function currentRankMap(byWeek) {
+  let bestKey = null;
+  let bestNum = -1;
+  Object.entries(byWeek || {}).forEach(([key, map]) => {
+    if (!map || Object.keys(map).length === 0) return;
+    const n = weekNumberOf(key);
+    if (n > bestNum) { bestNum = n; bestKey = key; }
+  });
+  return bestKey ? byWeek[bestKey] : {};
+}
+
+// fetchAllRankMaps() + currentRankMap() in one call — for pages that don't
+// otherwise need per-week granularity (GamePage.js, CFBPage.js). Pages that
+// already fetch fetchAllRankMaps() for other reasons (a full season
+// schedule) should call currentRankMap() directly on what they already
+// have instead of fetching twice.
+export async function fetchCurrentRankMap() {
+  return currentRankMap(await fetchAllRankMaps());
+}
+
+// React hook version of fetchCurrentRankMap() — fetches once on mount.
+export function useCurrentRankMap() {
+  const [map, setMap] = useState({});
+  useEffect(() => {
+    let alive = true;
+    fetchCurrentRankMap().then((m) => { if (alive) setMap(m); });
+    return () => { alive = false; };
+  }, []);
+  return map;
+}
+
+// Ranks for one game. currentMap is the *current* (latest-published) rank
+// map — currentRankMap(byWeek), fetchCurrentRankMap(), or useCurrentRankMap().
+// Once a game is Final, its own frozen HomeRank/AwayRank snapshot (captured
+// at that week's poll, see AdminPanel.js's CFBScheduleSection) always wins
+// over currentMap — a past/finished game's numbers stay exactly what they
+// were then, never drifting to a later week's poll. Every other game —
+// upcoming or in progress, regardless of which week it's actually in —
+// shows each team's current standing instead of that specific week's poll,
+// so e.g. a Week 1 game viewed from a Week 6 schedule still shows Week 6's
+// numbers, not stale Week 1 ones.
+export function ranksForGame(game, currentMap) {
   if (!game) return { homeRank: null, awayRank: null };
   if (game.Final && (game.HomeRank != null || game.AwayRank != null)) {
     return { homeRank: game.HomeRank ?? null, awayRank: game.AwayRank ?? null };
   }
-  const map = weekRankMap || {};
+  const map = currentMap || {};
   return { homeRank: map[game.Home] ?? null, awayRank: map[game.Away] ?? null };
 }
 
@@ -83,18 +134,4 @@ export function ranksForGame(game, weekRankMap) {
 // team's name; returns the plain name (no leading space) when unranked.
 export function withRank(name, rank) {
   return rank ? `#${rank} ${name || ""}`.trim() : (name || "");
-}
-
-// React hook — fetches one week's rank map on mount / week change. For a
-// page anchored to a single week/game (GamePage.js). Pages spanning many
-// weeks (a season schedule) should call fetchAllRankMaps() directly instead
-// of mounting one of these per game.
-export function useWeekRanks(week) {
-  const [map, setMap] = useState({});
-  useEffect(() => {
-    let alive = true;
-    fetchWeekRankMap(week).then((m) => { if (alive) setMap(m); });
-    return () => { alive = false; };
-  }, [week]);
-  return map;
 }

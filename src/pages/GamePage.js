@@ -20,7 +20,7 @@ import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
 import confetti from "canvas-confetti";
 import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
-import { useWeekRanks, ranksForGame, withRank } from "../utils/rankings";
+import { useCurrentRankMap, ranksForGame, withRank } from "../utils/rankings";
 
 // Same flair badge assets/config as PlayerProfile.js's hero (duplicated
 // rather than imported cross-page, matching this codebase's own convention
@@ -602,11 +602,11 @@ export default function GamePage() {
   const [game, setGame] = useState(null);
   const [awaySchool, setAwaySchool] = useState(null);
   const [homeSchool, setHomeSchool] = useState(null);
-  // Top 25 for this game's own week — ranksForGame below prefers the
+  // Current (latest-published) Top 25 — ranksForGame below prefers the
   // frozen HomeRank/AwayRank snapshot (see AdminPanel.js's CFBScheduleSection
-  // handleSave) once the game is Final, so this live lookup is really only
-  // ever the source of truth pregame/in-progress.
-  const weekRankMap = useWeekRanks(game?.Week);
+  // handleSave) once the game is Final, so this live "current" lookup is
+  // really only ever the source of truth pregame/in-progress.
+  const currentRankMap = useCurrentRankMap();
   // The broadcasting channel's logo (looked up by Name — see
   // CFBScheduleSection's own "TV Channel" field in AdminPanel.js), shown
   // under the at/vs button in the hero. null until game.Channel resolves
@@ -1324,7 +1324,7 @@ export default function GamePage() {
   }
 
   const isFinal = game.Final && game.HomeScore != null && game.AwayScore != null;
-  const { homeRank, awayRank } = ranksForGame(game, weekRankMap);
+  const { homeRank, awayRank } = ranksForGame(game, currentRankMap);
   const gameDateMs = game.Date?.toDate ? game.Date.toDate().getTime() : (game.Date ? new Date(game.Date).getTime() : 0);
   // Date-only field is stored as UTC midnight — format in UTC too, or a
   // viewer west of it sees the game roll back a calendar day.

@@ -18,7 +18,7 @@ import EarlyContributorFlair from "../assets/early contributor.png";
 import Year2ContributorFlair from "../assets/y2contributor.png";
 import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
-import { fetchAllRankMaps, ranksForGame, rankingsWeekKey } from "../utils/rankings";
+import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -1449,6 +1449,14 @@ export default function TeamPage() {
     ? `${scheduleWins}-${scheduleLosses}-${scheduleTies}`
     : `${scheduleWins}-${scheduleLosses}`;
 
+  // Current (latest-published) Top 25 — every row below shows each
+  // opponent's current standing, not what they were ranked back in that
+  // game's own week, *except* a game that's already Final, which keeps its
+  // own frozen snapshot regardless (see ranksForGame). Same map also badges
+  // this team's own name in the hero further down.
+  const currentTop25 = currentRankMap(rankingsByWeek);
+  const ownCurrentRank = currentTop25[canonicalSchool] ?? null;
+
   const ScheduleSidebar = (
     <SidebarCard title={`${ARCHIVE_YEAR} Schedule`} color1={BLUE} color2={GOLD}>
       {hasAnyScores && (
@@ -1472,7 +1480,7 @@ export default function TeamPage() {
           const opponentName = isHome ? g.Away : g.Home;
           const opponentData = schoolsMap[opponentName];
           const isClickable = !!(opponentData && opponentData.Conference);
-          const { homeRank, awayRank } = ranksForGame(g, rankingsByWeek[rankingsWeekKey(g.Week)]);
+          const { homeRank, awayRank } = ranksForGame(g, currentTop25);
           const opponentRank = isHome ? awayRank : homeRank;
 
           const hasScore = g.AwayScore !== undefined && g.AwayScore !== null
@@ -1856,7 +1864,7 @@ export default function TeamPage() {
                 rather than holding the whole page hostage to it. */}
             <HeroCard
               school={school} branding={branding} canonicalSchool={canonicalSchool}
-              color1={color1} color2={color2} isMobile={isMobile}
+              color1={color1} color2={color2} isMobile={isMobile} ownCurrentRank={ownCurrentRank}
             />
             {loading ? (
               <LoadingSpinner label="Loading roster, schedule & more" size={36} minHeight="200px" />
@@ -1929,7 +1937,7 @@ export default function TeamPage() {
             <div>
               <HeroCard
                 school={school} branding={branding} canonicalSchool={canonicalSchool}
-                color1={color1} color2={color2} isMobile={isMobile}
+                color1={color1} color2={color2} isMobile={isMobile} ownCurrentRank={ownCurrentRank}
               />
               {loading ? (
                 <LoadingSpinner label="Loading roster, schedule & more" size={36} minHeight="280px" />
@@ -1974,7 +1982,7 @@ export default function TeamPage() {
 // stacked as two bold lines ("CLEMSON" / "TIGERS") — no separate
 // foreground wordmark image and no conference label competing with it;
 // the wordmark's only appearance is the big background watermark.
-function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile }) {
+function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile, ownCurrentRank }) {
   const heroLogo = school?.LogoDark || branding?.logo1 || "";
   // Oversized and faded — no logo fallback, since a wordmark is what's
   // meant to read as a soft background graphic; without one, the hero
@@ -2034,6 +2042,9 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile 
             lineHeight: 1.05, letterSpacing: "0.02em",
             textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
           }}>
+            {/* Current Top 25 standing — its own dimmer color so it reads
+                as a badge, not part of the school's own name. */}
+            {ownCurrentRank && <span style={{ color: "rgba(255,255,255,0.6)" }}>#{ownCurrentRank} </span>}
             {canonicalSchool}
           </div>
           {school?.Mascot && (
