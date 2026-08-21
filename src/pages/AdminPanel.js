@@ -65,7 +65,7 @@ const gradeDisplayMap = {
 const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", border: "#444441" };
 
 const BLANK_PLAYER_FORM = {
-  First: "", Last: "", School: "", Position: "", Eligible: "",
+  First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Eligible: "",
   Height: "", Weight: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
 };
 
@@ -449,6 +449,7 @@ function PlayerDataSection() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [schoolOptions, setSchoolOptions] = useState([]);
+  const [highSchoolOptions, setHighSchoolOptions] = useState([]);
   const [duplicateMatches, setDuplicateMatches] = useState(null);
   const [slugCollision, setSlugCollision] = useState(null); // { baseSlug, uniqueSlug } | null
   const [slugChangePrompt, setSlugChangePrompt] = useState(null); // { newBase, oldSlug } | null — editing an existing player
@@ -468,6 +469,27 @@ function PlayerDataSection() {
       }
     };
     fetchSchools();
+  }, []);
+
+  // High schools — same shared, lazily-seeded collection RecruitsSection
+  // reads/writes (see that section's own comment on the highSchools fetch
+  // for why {Name, State} objects rather than plain names). A player who
+  // was never a tracked recruit can still pick or create one here.
+  useEffect(() => {
+    const fetchHighSchools = async () => {
+      try {
+        const snap = await getDocs(collection(db, "highSchools"));
+        const data = snap.docs
+          .map((d) => d.data())
+          .filter((h) => h.Name)
+          .sort((a, b) => a.Name.localeCompare(b.Name));
+        setHighSchoolOptions(data);
+      } catch (e) {
+        console.error("Admin high schools fetch error:", e);
+        setHighSchoolOptions([]);
+      }
+    };
+    fetchHighSchools();
   }, []);
 
   useEffect(() => {
@@ -575,11 +597,29 @@ function PlayerDataSection() {
     return true;
   });
 
+  const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
+  const highSchoolLabel = (name) => {
+    const match = highSchoolOptions.find((h) => h.Name === name);
+    return match && match.State ? name + " (" + (STATE_ABBR[match.State] || match.State) + ")" : name;
+  };
+  // Mirrors RecruitsSection's own handleHighSchoolChange: picking (or
+  // exactly typing) a saved high school also fills in State from that
+  // record, but only once the typed text is an exact match — a partial
+  // match mid-keystroke leaves whatever State is already set alone.
+  const handleHighSchoolChange = (name) => {
+    setFormState((prev) => {
+      const match = highSchoolOptions.find((h) => h.Name.toLowerCase() === name.trim().toLowerCase());
+      return { ...prev, HighSchool: name, State: match ? match.State || prev.State : prev.State };
+    });
+  };
+
   const selectPlayer = (p) => {
     setSelectedPlayer(p);
     setFormState({
       First: p.First || "",
       Last: p.Last || "",
+      HighSchool: p.HighSchool || "",
+      State: p.State || "",
       School: p.School || "",
       Position: p.Position || "",
       Eligible: p.Eligible || "",
@@ -727,6 +767,20 @@ function PlayerDataSection() {
     }
   };
 
+  // Seeds the shared highSchools collection the first time this exact name
+  // (case-insensitive) is entered, same lazy find-or-create as
+  // RecruitsSection's own handleSave — called from both write paths below
+  // so it fires whether this is a brand-new player or an edit to an
+  // existing one.
+  const seedHighSchoolIfNew = async () => {
+    const hsName = (formState.HighSchool || "").trim();
+    if (hsName && !highSchoolOptions.some((h) => h.Name.toLowerCase() === hsName.toLowerCase())) {
+      const newHighSchool = { Name: hsName, State: formState.State || "", createdAt: serverTimestamp() };
+      await addDoc(collection(db, "highSchools"), newHighSchool);
+      setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
+    }
+  };
+
   // forcedSlug, when set, is a de-duped slug (base + "-1", "-2", ...) the
   // admin already saw and confirmed via the "Slug Already In Use" card
   // below — skips straight to writing with that slug instead of
@@ -762,6 +816,7 @@ function PlayerDataSection() {
       setSaving(true);
       setSaveMessage("");
       try {
+        await seedHighSchoolIfNew();
         const dupSnap = await getDocs(query(collection(db, "players"), where("Slug", "==", slug)));
         if (!dupSnap.empty) {
           // Same name/position/year as an existing player produces the same
@@ -815,6 +870,7 @@ function PlayerDataSection() {
     setSaving(true);
     setSaveMessage("");
     try {
+      await seedHighSchoolIfNew();
       const fields = { ...formState };
       if (skipSlugUpdate) {
         // Admin chose to keep the old slug — leave Slug itself untouched,
@@ -1203,6 +1259,23 @@ function PlayerDataSection() {
               </FieldRow>
               <FieldRow label="Last">
                 <input value={formState.Last} onChange={(e) => handleFieldChange("Last", e.target.value)} style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="High School">
+                <SchoolCombobox
+                  value={formState.HighSchool}
+                  onChange={handleHighSchoolChange}
+                  options={highSchoolNames}
+                  getLabel={highSchoolLabel}
+                />
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  Type to search saved high schools — picking one fills in State too. A new name is saved automatically the first time you save this player.
+                </div>
+              </FieldRow>
+              <FieldRow label="High School State">
+                <select value={formState.State} onChange={(e) => handleFieldChange("State", e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
               </FieldRow>
               <FieldRow label="School">
                 <SchoolCombobox
@@ -1741,6 +1814,7 @@ function HistoricalSection() {
   const [saveMessage, setSaveMessage] = useState("");
   const [removing, setRemoving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [highSchoolOptions, setHighSchoolOptions] = useState([]);
   // Retro Grade — a round grade + Strengths/Weaknesses added after the
   // fact by the admin (these old picks were never actually evaluated at
   // the time), same idea and same trait source as Recruits' own Scouting
@@ -1768,6 +1842,26 @@ function HistoricalSection() {
       }
     };
     fetchRecords();
+  }, []);
+
+  // Same shared, lazily-seeded highSchools collection RecruitsSection and
+  // PlayerDataSection read/write — an old draft pick's high school (when
+  // known) becomes an autocomplete suggestion for every section after this.
+  useEffect(() => {
+    const fetchHighSchools = async () => {
+      try {
+        const snap = await getDocs(collection(db, "highSchools"));
+        const data = snap.docs
+          .map((d) => d.data())
+          .filter((h) => h.Name)
+          .sort((a, b) => a.Name.localeCompare(b.Name));
+        setHighSchoolOptions(data);
+      } catch (e) {
+        console.error("Admin high schools fetch error:", e);
+        setHighSchoolOptions([]);
+      }
+    };
+    fetchHighSchools();
   }, []);
 
   useEffect(() => {
@@ -1838,6 +1932,19 @@ function HistoricalSection() {
     [records]
   );
 
+  const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
+  const highSchoolLabel = (name) => {
+    const match = highSchoolOptions.find((h) => h.Name === name);
+    return match && match.State ? name + " (" + (STATE_ABBR[match.State] || match.State) + ")" : name;
+  };
+  // Mirrors RecruitsSection/PlayerDataSection's own handleHighSchoolChange.
+  const handleHighSchoolChange = (name) => {
+    setFormState((prev) => {
+      const match = highSchoolOptions.find((h) => h.Name.toLowerCase() === name.trim().toLowerCase());
+      return { ...prev, HighSchool: name, State: match ? match.State || prev.State : prev.State };
+    });
+  };
+
   // Flags computed once per record here (not inline per-row on every
   // render) — historicalFlagsFor is a handful of regex/range checks across
   // 10 fields, cheap alone but not free times 6,643 rows on every keystroke
@@ -1890,6 +1997,7 @@ function HistoricalSection() {
     })() : null;
     setFormState({
       First: r.First || legacySplit?.first || "", Last: r.Last || legacySplit?.last || "",
+      HighSchool: r.HighSchool || "", State: r.State || "",
       School: r.School || "", Position: r.Position || "",
       Year: r.Year || "", Round: r.Round || "", Pick: r.Pick || "", NFLTeam: r["NFL Team"] || "",
       RoundGrade: r.RoundGrade || "", Strengths: r.Strengths || [], Weaknesses: r.Weaknesses || [],
@@ -1905,7 +2013,7 @@ function HistoricalSection() {
     const combine = {};
     HISTORICAL_COMBINE_FIELDS.forEach(({ formKey }) => { combine[formKey] = ""; });
     setFormState({
-      First: "", Last: "", School: "", Position: "", Year: selectedYear || "", Round: "", Pick: "", NFLTeam: "",
+      First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Year: selectedYear || "", Round: "", Pick: "", NFLTeam: "",
       RoundGrade: "", Strengths: [], Weaknesses: [],
       ...combine,
     });
@@ -1922,6 +2030,16 @@ function HistoricalSection() {
     setSaving(true);
     setSaveMessage("");
     try {
+      // Seeds the shared highSchools collection the first time this exact
+      // name (case-insensitive) is entered — same lazy find-or-create as
+      // RecruitsSection/PlayerDataSection.
+      const hsName = (formState.HighSchool || "").trim();
+      if (hsName && !highSchoolOptions.some((h) => h.Name.toLowerCase() === hsName.toLowerCase())) {
+        const newHighSchool = { Name: hsName, State: formState.State || "", createdAt: serverTimestamp() };
+        await addDoc(collection(db, "highSchools"), newHighSchool);
+        setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
+      }
+
       const payload = {
         First: formState.First.trim(),
         Last: formState.Last.trim(),
@@ -1929,6 +2047,8 @@ function HistoricalSection() {
         // save — kept (not dropped) because TeamPage.js's own historical-
         // picks row still reads Player directly, not First/Last.
         Player: `${formState.First.trim()} ${formState.Last.trim()}`.trim(),
+        HighSchool: (formState.HighSchool || "").trim(),
+        State: formState.State || "",
         School: formState.School.trim(),
         Position: formState.Position.trim(),
         Year: formState.Year.trim(),
@@ -2120,6 +2240,25 @@ function HistoricalSection() {
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Last</div>
                 <input value={formState.Last} onChange={(e) => setFormState((p) => ({ ...p, Last: e.target.value }))} style={inputStyle} />
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>High School</div>
+                <SchoolCombobox
+                  value={formState.HighSchool}
+                  onChange={handleHighSchoolChange}
+                  options={highSchoolNames}
+                  getLabel={highSchoolLabel}
+                />
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  Type to search saved high schools — picking one fills in State too. A new name is saved automatically the first time you save this record.
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>HS State</div>
+                <select value={formState.State} onChange={(e) => setFormState((p) => ({ ...p, State: e.target.value }))} style={inputStyle}>
+                  <option value="">—</option>
+                  {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>School</div>
@@ -7636,6 +7775,18 @@ const BRANDING_TABS = [
   { key: "misc", label: "Misc" },
 ];
 
+// "High School" sits alongside CFB/NFL in the same league toggle, but isn't
+// backed by LEAGUE_CONFIG/TeamBrandingPane — its field shape genuinely
+// differs (City/State/Mascot instead of a conference+colors+wordmark set,
+// no NFL association, no FCS flag), so it gets its own pane. It reads/
+// writes the same `highSchools` collection RecruitsSection/PlayerDataSection/
+// HistoricalSection already lazily seed with {Name, State} — this is just
+// the place to fill in the rest (City, Mascot, logos) or add one by hand.
+const BRANDING_LEAGUE_TABS = [
+  ...Object.entries(LEAGUE_CONFIG).map(([key, cfg]) => ({ key, label: cfg.label })),
+  { key: "highschool", label: "High School" },
+];
+
 function BrandingSection() {
   const [brandingTab, setBrandingTab] = useState("teams");
   const [league, setLeague] = useState("cfb");
@@ -7662,7 +7813,7 @@ function BrandingSection() {
       {brandingTab === "teams" && (
         <>
           <div style={{ display: "flex", gap: "8px" }}>
-            {Object.entries(LEAGUE_CONFIG).map(([key, cfg]) => (
+            {BRANDING_LEAGUE_TABS.map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setLeague(key)}
@@ -7674,13 +7825,17 @@ function BrandingSection() {
                   color: league === key ? "#fff" : BLUE,
                 }}
               >
-                {cfg.label}
+                {label}
               </button>
             ))}
           </div>
           {/* key={league} forces a clean remount on toggle rather than trying to
-              reuse fetch/selection state across two entirely different collections. */}
-          <TeamBrandingPane key={league} league={league} />
+              reuse fetch/selection state across different collections. */}
+          {league === "highschool" ? (
+            <HighSchoolBrandingPane key="highschool" />
+          ) : (
+            <TeamBrandingPane key={league} league={league} />
+          )}
         </>
       )}
 
@@ -8273,6 +8428,410 @@ function TeamBrandingPane({ league }) {
                   }}
                 >
                   Delete Team
+                </button>
+              )}
+            </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── High school branding — a full editor over the same `highSchools`
+// collection RecruitsSection/PlayerDataSection/HistoricalSection lazily
+// seed with just {Name, State} the first time an admin types a new one into
+// a player/recruit/historical record. This pane is where the rest gets
+// filled in (City, Mascot, logos), or where a school can be added by hand
+// ahead of time instead of waiting for one of those sections to create it.
+// Deliberately its own component rather than squeezed into TeamBrandingPane
+// via LEAGUE_CONFIG — high schools have no conference/division, no NFL
+// association, and only two logo slots (no wordmark, no secondary/black
+// variants, no brand colors), so forcing that shared shape would mean more
+// conditional branches in TeamBrandingPane than it'd actually save here. ──
+function HighSchoolBrandingPane() {
+  const [schools, setSchools] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedStates, setSelectedStates] = useState([]);
+  const [selectedSchool, setSelectedSchool] = useState(null);
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [logoCopyStatus, setLogoCopyStatus] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  useEffect(() => {
+    const fetchSchools = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "highSchools"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
+        setSchools(data);
+      } catch (e) {
+        console.error("Admin high school branding fetch error:", e);
+        setSchools([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSchools();
+  }, []);
+
+  const stateOptions = useMemo(() => {
+    const set = [...new Set(schools.map((h) => h.State).filter(Boolean))];
+    return set.sort();
+  }, [schools]);
+
+  const filtered = useMemo(() => {
+    return schools.filter((h) => {
+      if (selectedStates.length > 0 && !selectedStates.includes(h.State)) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const matches =
+          (h.Name || "").toLowerCase().includes(q) ||
+          (h.City || "").toLowerCase().includes(q) ||
+          (h.Mascot || "").toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [schools, selectedStates, searchQuery]);
+
+  const selectSchool = (h) => {
+    setSelectedSchool(h);
+    setFormState({
+      Name: h.Name || "", City: h.City || "", State: h.State || "",
+      Mascot: h.Mascot || "", Logo1: h.Logo1 || "", LogoDark: h.LogoDark || "",
+    });
+    setSaveMessage("");
+    setLogoCopyStatus({});
+    setConfirmDelete(false);
+  };
+
+  // Name only ever gets set here at creation, same reasoning as
+  // TeamBrandingPane's startNewTeam — players/recruits/historical records
+  // reference a high school by this exact string, so renaming an existing
+  // one here wouldn't cascade and would just orphan those references.
+  const startNewSchool = () => {
+    setSelectedSchool({ id: null, isNew: true });
+    setFormState({ Name: "", City: "", State: "", Mascot: "", Logo1: "", LogoDark: "" });
+    setSaveMessage("");
+    setLogoCopyStatus({});
+    setConfirmDelete(false);
+  };
+
+  const isNewSchool = selectedSchool?.isNew === true;
+
+  const handleFieldChange = (field, value) => {
+    setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Same clipboard-image-copy approach as TeamBrandingPane's own
+  // handleCopyImage — see loadImageAsPngBlob's comment for why the
+  // clipboard write starts synchronously rather than after an awaited fetch.
+  const handleCopyImage = (field, url) => {
+    if (!url) return;
+    setLogoCopyStatus((prev) => ({ ...prev, [field]: "copying" }));
+    let clipboardPromise;
+    try {
+      clipboardPromise = navigator.clipboard.write([
+        new window.ClipboardItem({ "image/png": loadImageAsPngBlob(url) }),
+      ]);
+    } catch (e) {
+      clipboardPromise = Promise.reject(e);
+    }
+    clipboardPromise
+      .then(() => setLogoCopyStatus((prev) => ({ ...prev, [field]: "copied" })))
+      .catch((e) => {
+        console.error("Copy image to clipboard failed:", e);
+        setLogoCopyStatus((prev) => ({ ...prev, [field]: "failed" }));
+      })
+      .finally(() => {
+        setTimeout(() => {
+          setLogoCopyStatus((prev) => (prev[field] === "copying" ? prev : { ...prev, [field]: "idle" }));
+        }, 2400);
+      });
+  };
+
+  const handleSave = async () => {
+    if (!selectedSchool || !formState) return;
+    if (isNewSchool) {
+      if (!formState.Name.trim()) {
+        setSaveMessage("Failed: high school name is required.");
+        return;
+      }
+      const dupe = schools.find((h) => (h.Name || "").trim().toLowerCase() === formState.Name.trim().toLowerCase());
+      if (dupe) {
+        setSaveMessage(`"${formState.Name.trim()}" already exists — select it from the list to edit instead.`);
+        return;
+      }
+    }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        ...(isNewSchool ? { Name: formState.Name.trim() } : {}),
+        City: formState.City.trim(),
+        State: formState.State || "",
+        Mascot: formState.Mascot.trim(),
+        Logo1: formState.Logo1.trim(),
+        LogoDark: formState.LogoDark.trim(),
+        updatedAt: serverTimestamp(),
+      };
+      if (isNewSchool) {
+        const ref = await addDoc(collection(db, "highSchools"), { ...payload, createdAt: serverTimestamp() });
+        const newSchool = { id: ref.id, ...payload };
+        setSchools((prev) => [...prev, newSchool].sort((a, b) => (a.Name || "").localeCompare(b.Name || "")));
+        setSelectedSchool(newSchool);
+        setSaveMessage("High school created.");
+      } else {
+        await updateDoc(doc(db, "highSchools", selectedSchool.id), payload);
+        setSchools((prev) => prev.map((h) => (h.id === selectedSchool.id ? { ...h, ...payload } : h)));
+        setSelectedSchool((prev) => (prev ? { ...prev, ...payload } : prev));
+        setSaveMessage("Saved.");
+      }
+    } catch (e) {
+      console.error("Admin high school branding save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Same two-step in-panel confirm as TeamBrandingPane's handleDeleteTeam —
+  // players/recruits/historical records that still reference this school by
+  // name aren't cleaned up here.
+  const handleDeleteSchool = async () => {
+    if (!selectedSchool || isNewSchool) return;
+    setRemoving(true);
+    setSaveMessage("");
+    try {
+      await deleteDoc(doc(db, "highSchools", selectedSchool.id));
+      setSchools((prev) => prev.filter((h) => h.id !== selectedSchool.id));
+      setSelectedSchool(null);
+      setFormState(null);
+      setConfirmDelete(false);
+    } catch (e) {
+      console.error("Admin high school branding delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            High Schools
+          </div>
+          <button
+            onClick={startNewSchool}
+            style={{
+              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            + New High School
+          </button>
+        </div>
+
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search school, city, or mascot..."
+            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+          />
+          <DropdownChecklist title="State" options={stateOptions} selected={selectedStates} setSelected={setSelectedStates} />
+        </div>
+
+        {loading ? (
+          <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No high schools match.</div>
+        ) : (
+          <div style={{ maxHeight: "640px", overflowY: "auto" }}>
+            <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+              {filtered.length} school{filtered.length !== 1 ? "s" : ""}
+            </div>
+            {filtered.map((h) => {
+              const isSelected = selectedSchool?.id === h.id;
+              return (
+                <div
+                  key={h.id}
+                  onClick={() => selectSchool(h)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "12px",
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{
+                    flexShrink: 0, width: "40px", height: "40px", borderRadius: "8px",
+                    background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                  }}>
+                    {(h.LogoDark || h.Logo1) ? (
+                      <img src={h.LogoDark || h.Logo1} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ color: "#fff", fontWeight: 900, fontSize: "14px" }}>{(h.Name || "?").charAt(0)}</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {h.Name || "Untitled"}
+                    </div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {[h.City, h.State ? (STATE_ABBR[h.State] || h.State) : "", h.Mascot].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {isNewSchool ? (formState?.Name || "New High School") : (selectedSchool ? (selectedSchool.Name || "Edit High School") : "Select a High School")}
+          </div>
+        </div>
+
+        {!selectedSchool || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a high school from the list to view and edit it, or "+ New High School" to add one.
+          </div>
+        ) : (
+          <div style={{ padding: "16px", maxHeight: "760px", overflowY: "auto" }}>
+            <FieldGroup>
+              {isNewSchool && (
+                <FieldRow label="School Name">
+                  <input
+                    value={formState.Name}
+                    onChange={(e) => handleFieldChange("Name", e.target.value)}
+                    placeholder="High School Name"
+                    style={inputStyle}
+                  />
+                </FieldRow>
+              )}
+              <FieldRow label="City">
+                <input
+                  value={formState.City}
+                  onChange={(e) => handleFieldChange("City", e.target.value)}
+                  placeholder="City"
+                  style={inputStyle}
+                />
+              </FieldRow>
+              <FieldRow label="State">
+                <select value={formState.State} onChange={(e) => handleFieldChange("State", e.target.value)} style={inputStyle}>
+                  <option value="">—</option>
+                  {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </FieldRow>
+              <FieldRow label="Mascot">
+                <input
+                  value={formState.Mascot}
+                  onChange={(e) => handleFieldChange("Mascot", e.target.value)}
+                  placeholder="Mascot"
+                  style={inputStyle}
+                />
+              </FieldRow>
+              <LogoUrlField
+                label="Logo 1"
+                value={formState.Logo1}
+                onChange={(v) => handleFieldChange("Logo1", v)}
+                onCopy={() => handleCopyImage("Logo1", formState.Logo1)}
+                copyStatus={logoCopyStatus.Logo1 || "idle"}
+              />
+              <LogoUrlField
+                label="Logo (Dark)"
+                value={formState.LogoDark}
+                onChange={(v) => handleFieldChange("LogoDark", v)}
+                onCopy={() => handleCopyImage("LogoDark", formState.LogoDark)}
+                copyStatus={logoCopyStatus.LogoDark || "idle"}
+              />
+            </FieldGroup>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%", marginTop: "18px",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : isNewSchool ? "Create High School" : "Save Changes"}
+            </button>
+
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+
+            {!isNewSchool && (
+            <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+              {confirmDelete ? (
+                <div style={{ border: "2px solid #c0392b", borderRadius: "8px", padding: "12px", background: "#fff3f0" }}>
+                  <div style={{ fontWeight: 900, fontSize: "12px", color: "#a52a1e", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "8px" }}>
+                    ⚠ Permanently delete {selectedSchool.Name || "this high school"}?
+                  </div>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
+                    This removes the high school record and cannot be undone. Players, recruits, and historical
+                    picks that still reference "{selectedSchool.Name}" by name won't be cleaned up automatically.
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      disabled={removing}
+                      style={{
+                        flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd",
+                        borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteSchool}
+                      disabled={removing}
+                      style={{
+                        flex: 1, background: "#c0392b", color: "#fff", border: "2px solid #a52a1e",
+                        borderRadius: "6px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: removing ? "default" : "pointer",
+                        opacity: removing ? 0.6 : 1,
+                      }}
+                    >
+                      {removing ? "Deleting..." : "Yes, Delete Permanently"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b",
+                    borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px",
+                    textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                  }}
+                >
+                  Delete High School
                 </button>
               )}
             </div>
