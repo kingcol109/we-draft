@@ -962,6 +962,7 @@ function PlayerDataSection() {
           { key: "recruits", label: "Recruits" },
           { key: "historical", label: "Historical" },
           { key: "traits", label: "Traits" },
+          { key: "dummy", label: "Dummy Content" },
         ].map((t) => (
           <button
             key={t.key}
@@ -984,6 +985,8 @@ function PlayerDataSection() {
         <HistoricalSection />
       ) : playerDataTab === "traits" ? (
         <TraitsSection />
+      ) : playerDataTab === "dummy" ? (
+        <DummySection />
       ) : (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
@@ -2877,6 +2880,830 @@ function TraitsSection() {
             {saveMessage && (
               <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
                 {saveMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Dummy Content — admin-authored evaluations and We-Pick predictions
+// that are written into the exact same collections/fields a real user's
+// would be, so every read path (Public Evaluations feed, Community Grade
+// average, GamePage.js's public picks feed) treats them identically to
+// real content. The only things that differ from a real user's own: the
+// admin picks the display username by hand instead of it coming from a
+// real account, and admin can delete one at any time with no lock/timing
+// rule in the way. Each dummy gets its own client-generated Firestore id
+// standing in for a real Firebase Auth uid (via an empty doc(collection())
+// call, which mints a random id with no network round trip) — nothing else
+// in the app can tell the difference. Every dummy doc is tagged
+// `isDummy: true`, purely so this admin UI can find its own dummies again
+// without touching real users' records — nothing else reads that field. ──
+const NFL_TEAM_NAMES = [
+  "Arizona Cardinals","Atlanta Falcons","Baltimore Ravens","Buffalo Bills","Carolina Panthers","Chicago Bears",
+  "Cincinnati Bengals","Cleveland Browns","Dallas Cowboys","Denver Broncos","Detroit Lions","Green Bay Packers",
+  "Houston Texans","Indianapolis Colts","Jacksonville Jaguars","Kansas City Chiefs","Las Vegas Raiders",
+  "Los Angeles Chargers","Los Angeles Rams","Miami Dolphins","Minnesota Vikings","New England Patriots",
+  "New Orleans Saints","New York Giants","New York Jets","Philadelphia Eagles","Pittsburgh Steelers",
+  "San Francisco 49ers","Seattle Seahawks","Tampa Bay Buccaneers","Tennessee Titans","Washington Commanders",
+];
+const EVAL_GRADE_OPTIONS = ["Watchlist", ...Object.keys(gradeScale)];
+
+const DUMMY_TABS = [
+  { key: "evaluations", label: "Evaluations" },
+  { key: "predictions", label: "Predictions" },
+];
+
+function DummySection() {
+  const [tab, setTab] = useState("evaluations");
+  return (
+    <div>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        {DUMMY_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: tab === t.key ? BLUE : "#fff",
+              color: tab === t.key ? "#fff" : BLUE,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "evaluations" ? <DummyEvaluationsSection /> : <DummyPredictionsSection />}
+    </div>
+  );
+}
+
+const BLANK_DUMMY_EVAL_FORM = { username: "", grade: "", visibility: "public", strengths: [], weaknesses: [], nflFit: "", evaluation: "" };
+
+function DummyEvaluationsSection() {
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  // Same player-picker filters (and same defaults — 2026 hidden unless
+  // explicitly selected) as PlayerDataSection's own player list, so finding
+  // who to add a dummy evaluation for works identically to finding who to
+  // edit there.
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [selectedSchools, setSelectedSchools] = useState([]);
+  const [selectedYears, setSelectedYears] = useState([]);
+  const [selectedPositions, setSelectedPositions] = useState([]);
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [dummyEvals, setDummyEvals] = useState([]);
+  const [evalsLoading, setEvalsLoading] = useState(false);
+  const [traitGroups, setTraitGroups] = useState({});
+  const [editingId, setEditingId] = useState(null); // null while browsing, "" for a brand-new one, or the dummy's id
+  const [formState, setFormState] = useState(BLANK_DUMMY_EVAL_FORM);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [removingId, setRemovingId] = useState("");
+
+  useEffect(() => {
+    const fetchPlayers = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "players"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
+        setAllPlayers(data);
+      } catch (e) {
+        console.error("Admin dummy evals players fetch error:", e);
+        setAllPlayers([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPlayers();
+  }, []);
+
+  useEffect(() => {
+    const fetchSchools = async () => {
+      try {
+        const snap = await getDocs(collection(db, "schools"));
+        setSchoolOptions(snap.docs.map((d) => d.data().School).filter(Boolean).sort());
+      } catch (e) {
+        console.error("Admin dummy evals schools fetch error:", e);
+        setSchoolOptions([]);
+      }
+    };
+    fetchSchools();
+  }, []);
+
+  // Same traits/{Position} + traits/Generic source every real Strengths/
+  // Weaknesses picker in this app reads from (PlayerProfile.js's own eval
+  // form included), so a dummy eval offers the identical option set a real
+  // scout would see for this player's Position.
+  useEffect(() => {
+    const position = selectedPlayer?.Position;
+    if (!position) { setTraitGroups({}); return; }
+    const fetchTraits = async () => {
+      try {
+        const [posSnap, genSnap] = await Promise.all([
+          getDoc(doc(db, "traits", position)),
+          getDoc(doc(db, "traits", "Generic")),
+        ]);
+        const g = {};
+        if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
+        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits || []).sort();
+        setTraitGroups(g);
+      } catch (e) {
+        console.error("Admin dummy evals traits fetch error:", e);
+        setTraitGroups({});
+      }
+    };
+    fetchTraits();
+  }, [selectedPlayer?.Position]);
+
+  // Same Position-filter pool logic as PlayerDataSection's own
+  // allPositions — 2026 excluded from the pool unless it's explicitly one
+  // of the selected years, so the option list matches whichever years are
+  // actually in view.
+  const allPositions = useMemo(() => {
+    const pool = allPlayers.filter((p) => selectedYears.length === 0 ? p.Eligible !== "2026" : selectedYears.includes(p.Eligible));
+    const set = [...new Set(pool.map((p) => p.Position).filter(Boolean))];
+    return set.sort((a, b) => {
+      const ai = POSITION_ORDER.indexOf(a);
+      const bi = POSITION_ORDER.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [allPlayers, selectedYears]);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return allPlayers.filter((p) => {
+      if (selectedYears.length === 0) {
+        if (p.Eligible === "2026") return false;
+      } else if (!selectedYears.includes(p.Eligible)) return false;
+      if (selectedSchools.length > 0 && !selectedSchools.includes(p.School)) return false;
+      if (selectedPositions.length > 0 && !selectedPositions.includes(p.Position)) return false;
+      if (q) {
+        const matches = ((p.First || "") + " " + (p.Last || "")).toLowerCase().includes(q) || (p.School || "").toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [allPlayers, searchQuery, selectedSchools, selectedYears, selectedPositions]);
+
+  const fetchDummyEvals = async (playerId) => {
+    setEvalsLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "players", playerId, "evaluations"));
+      const dummies = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((e) => e.isDummy);
+      // Username lives on the companion users/{dummyUid} doc, same place
+      // PlayerProfile.js's own public-feed username lookup reads it from —
+      // batch-fetched here purely so this list can show it without a
+      // second round trip per row later.
+      const userDocs = await Promise.all(dummies.map((e) => getDoc(doc(db, "users", e.id))));
+      const withNames = dummies.map((e, i) => ({ ...e, _username: userDocs[i].exists() ? (userDocs[i].data().username || "") : "" }));
+      withNames.sort((a, b) => (a._username || "").localeCompare(b._username || ""));
+      setDummyEvals(withNames);
+    } catch (e) {
+      console.error("Admin dummy evals fetch error:", e);
+      setDummyEvals([]);
+    } finally {
+      setEvalsLoading(false);
+    }
+  };
+
+  const selectPlayer = (p) => {
+    setSelectedPlayer(p);
+    setEditingId(null);
+    setFormState(BLANK_DUMMY_EVAL_FORM);
+    setSaveMessage("");
+    fetchDummyEvals(p.id);
+  };
+
+  const startNew = () => {
+    setEditingId("");
+    setFormState(BLANK_DUMMY_EVAL_FORM);
+    setSaveMessage("");
+  };
+
+  const startEdit = (ev) => {
+    setEditingId(ev.id);
+    setFormState({
+      username: ev._username || "",
+      grade: ev.grade || "",
+      visibility: ev.visibility || "public",
+      strengths: ev.strengths || [],
+      weaknesses: ev.weaknesses || [],
+      nflFit: ev.nflFit || "",
+      evaluation: ev.evaluation || "",
+    });
+    setSaveMessage("");
+  };
+
+  const handleFieldChange = (field, value) => setFormState((prev) => ({ ...prev, [field]: value }));
+
+  const handleToggleTrait = (trait, kind) => {
+    const otherKind = kind === "strengths" ? "weaknesses" : "strengths";
+    setFormState((prev) => {
+      const current = prev[kind] || [];
+      const other = prev[otherKind] || [];
+      if (other.includes(trait)) return prev;
+      if (current.includes(trait)) return { ...prev, [kind]: current.filter((t) => t !== trait) };
+      if (current.length >= 5) return prev;
+      return { ...prev, [kind]: [...current, trait] };
+    });
+  };
+
+  const handleSave = async () => {
+    if (!selectedPlayer) return;
+    if (!formState.username.trim()) { setSaveMessage("Failed: a display username is required."); return; }
+    if (!formState.grade) { setSaveMessage("Failed: a grade is required."); return; }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      // A brand-new dummy mints its own id the same way Firestore's own
+      // addDoc would, but synchronously and without writing anything yet —
+      // this becomes the dummy's stand-in "uid" everywhere below.
+      const dummyUid = editingId || doc(collection(db, "players", selectedPlayer.id, "evaluations")).id;
+      const evalData = {
+        uid: dummyUid, email: "", playerId: selectedPlayer.id,
+        playerName: `${selectedPlayer.First || ""} ${selectedPlayer.Last || ""}`.trim(),
+        grade: formState.grade, strengths: formState.strengths, weaknesses: formState.weaknesses,
+        nflFit: formState.nflFit, evaluation: formState.evaluation, visibility: formState.visibility,
+        gameNotes: [], isDummy: true, updatedAt: serverTimestamp(),
+      };
+      await Promise.all([
+        setDoc(doc(db, "users", dummyUid), { username: formState.username.trim(), verified: false, isDummy: true, updatedAt: serverTimestamp() }, { merge: true }),
+        setDoc(doc(db, "players", selectedPlayer.id, "evaluations", dummyUid), evalData),
+        setDoc(doc(db, "users", dummyUid, "evaluations", selectedPlayer.id), evalData),
+      ]);
+      setEditingId(null);
+      setFormState(BLANK_DUMMY_EVAL_FORM);
+      setSaveMessage("Saved.");
+      fetchDummyEvals(selectedPlayer.id);
+    } catch (e) {
+      console.error("Admin dummy eval save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // No lock/timing rule to route around here (that's the whole point) —
+  // one confirm, then all three docs (the eval itself, its users/ mirror,
+  // and the synthetic users/{dummyUid} doc that only ever existed for this
+  // dummy's username) go together.
+  const handleDelete = async (dummyUid) => {
+    if (!selectedPlayer) return;
+    if (!window.confirm("Delete this dummy evaluation? This cannot be undone.")) return;
+    setRemovingId(dummyUid);
+    try {
+      await Promise.all([
+        deleteDoc(doc(db, "players", selectedPlayer.id, "evaluations", dummyUid)),
+        deleteDoc(doc(db, "users", dummyUid, "evaluations", selectedPlayer.id)),
+        deleteDoc(doc(db, "users", dummyUid)),
+      ]);
+      setDummyEvals((prev) => prev.filter((e) => e.id !== dummyUid));
+      if (editingId === dummyUid) { setEditingId(null); setFormState(BLANK_DUMMY_EVAL_FORM); }
+    } catch (e) {
+      console.error("Admin dummy eval delete error:", e);
+      alert("Failed to delete — check console.");
+    } finally {
+      setRemovingId("");
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Pick a Player
+          </div>
+        </div>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search player or school..."
+            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+          />
+          <DropdownChecklist title="School" options={schoolOptions} selected={selectedSchools} setSelected={setSelectedSchools} />
+          <div>
+            <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "5px" }}>
+              Eligible Year
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              {[...ACTIVE_YEARS, "2026"].map((yr) => {
+                const isArchive = yr === "2026";
+                const active = selectedYears.includes(yr);
+                return (
+                  <button
+                    key={yr}
+                    onClick={() => setSelectedYears((prev) => prev.includes(yr) ? prev.filter((y) => y !== yr) : [...prev, yr])}
+                    title={isArchive ? "2026 — completed draft class, not shown by default" : undefined}
+                    style={{
+                      padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                      textTransform: "uppercase", letterSpacing: "0.04em",
+                      border: "2px solid " + (isArchive ? "#7a5c00" : GOLD), borderRadius: "20px", cursor: "pointer",
+                      background: active ? (isArchive ? "#7a5c00" : BLUE) : "#fff",
+                      color: active ? "#fff" : (isArchive ? "#7a5c00" : BLUE),
+                      whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
+                    }}
+                  >
+                    {isArchive ? "📦 2026" : yr}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <FilterBar label="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+        </div>
+        {loading ? (
+          <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players match.</div>
+        ) : (
+          <div style={{ maxHeight: "600px", overflowY: "auto" }}>
+            <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+              {filtered.length} player{filtered.length !== 1 ? "s" : ""}
+            </div>
+            {filtered.map((p) => {
+              const isSelected = selectedPlayer?.id === p.id;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => selectPlayer(p)}
+                  style={{
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{p.First} {p.Last}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>{p.Position || "—"} · {p.School || "—"}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {selectedPlayer ? `${selectedPlayer.First} ${selectedPlayer.Last}` : "Select a Player"}
+          </div>
+        </div>
+
+        {!selectedPlayer ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a player to view or add their dummy evaluations.
+          </div>
+        ) : (
+          <div style={{ padding: "16px", maxHeight: "760px", overflowY: "auto" }}>
+            {evalsLoading ? (
+              <LoadingSpinner label="Loading" size={24} minHeight="60px" />
+            ) : dummyEvals.length > 0 && (
+              <div style={{ marginBottom: "16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                {dummyEvals.map((ev) => {
+                  const gd = gradeBadgeInfo(ev.grade);
+                  return (
+                    <div key={ev.id} style={{ border: "2px solid #eee", borderRadius: "8px", padding: "8px 10px", display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div style={{ flexShrink: 0, width: "34px", height: "28px", borderRadius: "5px", background: gd.bg, border: `2px solid ${gd.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: "11px", fontWeight: 900 }}>
+                        {gd.short}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 900, fontSize: "13px", color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {ev._username || "(no username)"}
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#999", fontWeight: 700 }}>{ev.visibility === "public" ? "🌍 Public" : "🔒 Private"}</div>
+                      </div>
+                      <button onClick={() => startEdit(ev)} style={{ background: "#fff", border: "2px solid " + BLUE, color: BLUE, borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>Edit</button>
+                      <button
+                        onClick={() => handleDelete(ev.id)}
+                        disabled={removingId === ev.id}
+                        style={{ background: "#fff", border: "2px solid #c0392b", color: "#c0392b", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", cursor: removingId === ev.id ? "default" : "pointer", opacity: removingId === ev.id ? 0.6 : 1 }}
+                      >
+                        {removingId === ev.id ? "..." : "Delete"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {editingId === null ? (
+              <button
+                onClick={startNew}
+                style={{ width: "100%", background: BLUE, color: "#fff", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer" }}
+              >
+                + Add Dummy Evaluation
+              </button>
+            ) : (
+              <div style={{ borderTop: "2px solid #eee", paddingTop: "14px" }}>
+                <FieldGroup>
+                  <FieldRow label="Display Username">
+                    <input value={formState.username} onChange={(e) => handleFieldChange("username", e.target.value)} placeholder="Shown wherever this eval appears" style={inputStyle} />
+                  </FieldRow>
+                  <FieldRow label="Grade">
+                    <select value={formState.grade} onChange={(e) => handleFieldChange("grade", e.target.value)} style={inputStyle}>
+                      <option value="">Select a grade</option>
+                      {EVAL_GRADE_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </FieldRow>
+                  <FieldRow label="Visibility">
+                    <select value={formState.visibility} onChange={(e) => handleFieldChange("visibility", e.target.value)} style={inputStyle}>
+                      <option value="public">🌍 Public</option>
+                      <option value="private">🔒 Private</option>
+                    </select>
+                  </FieldRow>
+                  {!selectedPlayer.Position ? (
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#999", fontStyle: "italic" }}>This player has no Position set, so Strengths/Weaknesses have no options.</div>
+                  ) : [
+                    { label: "Strengths", kind: "strengths" },
+                    { label: "Weaknesses", kind: "weaknesses" },
+                  ].map(({ label, kind }) => {
+                    const sel = formState[kind] || [];
+                    return (
+                      <div key={kind}>
+                        <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>{label} (max 5)</div>
+                        <details style={{ border: "2px solid #ddd", borderRadius: "6px" }}>
+                          <summary style={{ cursor: "pointer", padding: "8px 10px", fontWeight: 700, fontSize: "13px", color: sel.length > 0 ? "#111" : "#999" }}>
+                            {sel.length > 0 ? sel.join(", ") : "Select " + label.toLowerCase()}
+                          </summary>
+                          <div style={{ padding: "8px 10px", borderTop: "2px solid #ddd" }}>
+                            {Object.entries(traitGroups).map(([groupLabel, options]) => (
+                              <div key={groupLabel} style={{ marginBottom: "8px" }}>
+                                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>{groupLabel}</div>
+                                {options.map((trait) => {
+                                  const otherKind = kind === "strengths" ? "weaknesses" : "strengths";
+                                  const isOther = (formState[otherKind] || []).includes(trait);
+                                  return (
+                                    <label key={trait} style={{ display: "block", fontSize: "13px", padding: "3px 0", cursor: isOther ? "default" : "pointer", color: isOther ? "#ccc" : "#333" }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={sel.includes(trait)}
+                                        disabled={(!sel.includes(trait) && sel.length >= 5) || isOther}
+                                        onChange={() => handleToggleTrait(trait, kind)}
+                                        style={{ marginRight: "8px" }}
+                                      />
+                                      {trait}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </div>
+                    );
+                  })}
+                  <FieldRow label="NFL Fit">
+                    <select value={formState.nflFit} onChange={(e) => handleFieldChange("nflFit", e.target.value)} style={inputStyle}>
+                      <option value="">Select an NFL team</option>
+                      {NFL_TEAM_NAMES.map((team) => <option key={team} value={team}>{team}</option>)}
+                    </select>
+                  </FieldRow>
+                  <FieldRow label="Evaluation">
+                    <textarea
+                      value={formState.evaluation}
+                      onChange={(e) => handleFieldChange("evaluation", e.target.value)}
+                      placeholder="Scouting take — only shown in the Public Evaluations feed when Visibility is Public and this isn't blank."
+                      style={{ ...inputStyle, height: "90px", resize: "vertical", fontFamily: "inherit" }}
+                    />
+                  </FieldRow>
+                </FieldGroup>
+                <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
+                  <button
+                    onClick={() => { setEditingId(null); setFormState(BLANK_DUMMY_EVAL_FORM); setSaveMessage(""); }}
+                    style={{ flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd", borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={{ flex: 2, background: BLUE, color: "#fff", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}
+                  >
+                    {saving ? "Saving..." : editingId ? "Save Changes" : "Create Evaluation"}
+                  </button>
+                </div>
+                {saveMessage && (
+                  <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                    {saveMessage}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const BLANK_DUMMY_PICK_FORM = { username: "", awayScore: "", homeScore: "", prediction: "", ranked: false, visibility: "public" };
+
+function DummyPredictionsSection() {
+  const [allGames, setAllGames] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedWeek, setSelectedWeek] = useState("");
+  const [selectedGame, setSelectedGame] = useState(null);
+  const [dummyPicks, setDummyPicks] = useState([]);
+  const [picksLoading, setPicksLoading] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [formState, setFormState] = useState(BLANK_DUMMY_PICK_FORM);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [removingId, setRemovingId] = useState("");
+
+  useEffect(() => {
+    const fetchGames = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "schedule26"));
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setAllGames(data);
+        const weeks = Array.from(new Set(data.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
+        if (weeks.length > 0) setSelectedWeek(weeks[0]);
+      } catch (e) {
+        console.error("Admin dummy picks games fetch error:", e);
+        setAllGames([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchGames();
+  }, []);
+
+  const weekOptions = useMemo(
+    () => Array.from(new Set(allGames.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b)),
+    [allGames]
+  );
+
+  const gamesForWeek = useMemo(
+    () => allGames.filter((g) => g.Week === selectedWeek).sort((a, b) => (gameSortMs(a) - gameSortMs(b)) || (a.Home || "").localeCompare(b.Home || "")),
+    [allGames, selectedWeek]
+  );
+
+  const fetchDummyPicks = async (gameId) => {
+    setPicksLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "schedule26", gameId, "picks"));
+      const dummies = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => p.isDummy);
+      dummies.sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""));
+      setDummyPicks(dummies);
+    } catch (e) {
+      console.error("Admin dummy picks fetch error:", e);
+      setDummyPicks([]);
+    } finally {
+      setPicksLoading(false);
+    }
+  };
+
+  const selectGame = (g) => {
+    setSelectedGame(g);
+    setEditingId(null);
+    setFormState(BLANK_DUMMY_PICK_FORM);
+    setSaveMessage("");
+    fetchDummyPicks(g.id);
+  };
+
+  const startNew = () => {
+    setEditingId("");
+    setFormState(BLANK_DUMMY_PICK_FORM);
+    setSaveMessage("");
+  };
+
+  const startEdit = (p) => {
+    setEditingId(p.id);
+    setFormState({
+      username: p.displayName || "",
+      awayScore: p.awayScore != null ? String(p.awayScore) : "",
+      homeScore: p.homeScore != null ? String(p.homeScore) : "",
+      prediction: p.prediction || "",
+      ranked: !!p.ranked,
+      visibility: p.visibility || "public",
+    });
+    setSaveMessage("");
+  };
+
+  const handleFieldChange = (field, value) => setFormState((prev) => ({ ...prev, [field]: value }));
+
+  const handleSave = async () => {
+    if (!selectedGame) return;
+    if (!formState.username.trim()) { setSaveMessage("Failed: a display username is required."); return; }
+    const a = Math.max(0, Math.min(99, Math.round(Number(formState.awayScore))));
+    const h = Math.max(0, Math.min(99, Math.round(Number(formState.homeScore))));
+    if (formState.awayScore === "" || formState.homeScore === "" || isNaN(a) || isNaN(h)) {
+      setSaveMessage("Failed: enter both scores.");
+      return;
+    }
+    if (a === h) { setSaveMessage("Failed: scores can't tie — every game has a winner."); return; }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      // No companion users/{dummyUid} doc needed here the way evaluations
+      // need one — GamePage.js's public picks feed already falls back to
+      // this payload's own displayName whenever a pick's uid has no real
+      // live users/ doc, which a synthetic dummy uid never will.
+      const dummyUid = editingId || doc(collection(db, "schedule26", selectedGame.id, "picks")).id;
+      const payload = {
+        uid: dummyUid, displayName: formState.username.trim(), pickType: "score",
+        pickedTeam: a > h ? "away" : "home", awayScore: a, homeScore: h,
+        prediction: formState.prediction.trim(), ranked: formState.ranked, visibility: formState.visibility,
+        isDummy: true, updatedAt: serverTimestamp(),
+      };
+      await Promise.all([
+        setDoc(doc(db, "schedule26", selectedGame.id, "picks", dummyUid), payload),
+        setDoc(doc(db, "users", dummyUid, "picks", selectedGame.id), payload),
+      ]);
+      setEditingId(null);
+      setFormState(BLANK_DUMMY_PICK_FORM);
+      setSaveMessage("Saved.");
+      fetchDummyPicks(selectedGame.id);
+    } catch (e) {
+      console.error("Admin dummy pick save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (dummyUid) => {
+    if (!selectedGame) return;
+    if (!window.confirm("Delete this dummy prediction? This cannot be undone.")) return;
+    setRemovingId(dummyUid);
+    try {
+      await Promise.all([
+        deleteDoc(doc(db, "schedule26", selectedGame.id, "picks", dummyUid)),
+        deleteDoc(doc(db, "users", dummyUid, "picks", selectedGame.id)),
+      ]);
+      setDummyPicks((prev) => prev.filter((p) => p.id !== dummyUid));
+      if (editingId === dummyUid) { setEditingId(null); setFormState(BLANK_DUMMY_PICK_FORM); }
+    } catch (e) {
+      console.error("Admin dummy pick delete error:", e);
+      alert("Failed to delete — check console.");
+    } finally {
+      setRemovingId("");
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Pick a Game
+          </div>
+        </div>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+          <select value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)} style={inputStyle}>
+            {weekOptions.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </div>
+        {loading ? (
+          <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+        ) : gamesForWeek.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No games this week.</div>
+        ) : (
+          <div style={{ maxHeight: "600px", overflowY: "auto" }}>
+            {gamesForWeek.map((g) => {
+              const isSelected = selectedGame?.id === g.id;
+              return (
+                <div
+                  key={g.id}
+                  onClick={() => selectGame(g)}
+                  style={{
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{g.Away} @ {g.Home}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>{formatTime12h(g.Time) || "TBD"}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {selectedGame ? `${selectedGame.Away} @ ${selectedGame.Home}` : "Select a Game"}
+          </div>
+        </div>
+
+        {!selectedGame ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a game to view or add its dummy predictions.
+          </div>
+        ) : (
+          <div style={{ padding: "16px", maxHeight: "760px", overflowY: "auto" }}>
+            {picksLoading ? (
+              <LoadingSpinner label="Loading" size={24} minHeight="60px" />
+            ) : dummyPicks.length > 0 && (
+              <div style={{ marginBottom: "16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                {dummyPicks.map((p) => (
+                  <div key={p.id} style={{ border: "2px solid #eee", borderRadius: "8px", padding: "8px 10px", display: "flex", alignItems: "center", gap: "10px" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, fontSize: "13px", color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.displayName || "(no username)"}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#999", fontWeight: 700 }}>
+                        {p.awayScore}–{p.homeScore}{p.ranked ? " · ⭐ Ranked" : ""}
+                      </div>
+                    </div>
+                    <button onClick={() => startEdit(p)} style={{ background: "#fff", border: "2px solid " + BLUE, color: BLUE, borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>Edit</button>
+                    <button
+                      onClick={() => handleDelete(p.id)}
+                      disabled={removingId === p.id}
+                      style={{ background: "#fff", border: "2px solid #c0392b", color: "#c0392b", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", cursor: removingId === p.id ? "default" : "pointer", opacity: removingId === p.id ? 0.6 : 1 }}
+                    >
+                      {removingId === p.id ? "..." : "Delete"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {editingId === null ? (
+              <button
+                onClick={startNew}
+                style={{ width: "100%", background: BLUE, color: "#fff", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer" }}
+              >
+                + Add Dummy Prediction
+              </button>
+            ) : (
+              <div style={{ borderTop: "2px solid #eee", paddingTop: "14px" }}>
+                <FieldGroup>
+                  <FieldRow label="Display Username">
+                    <input value={formState.username} onChange={(e) => handleFieldChange("username", e.target.value)} placeholder="Shown wherever this pick appears" style={inputStyle} />
+                  </FieldRow>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <FieldRow label={`${selectedGame.Away} (Away) Score`}>
+                      <input type="number" min="0" max="99" value={formState.awayScore} onChange={(e) => handleFieldChange("awayScore", e.target.value)} style={inputStyle} />
+                    </FieldRow>
+                    <FieldRow label={`${selectedGame.Home} (Home) Score`}>
+                      <input type="number" min="0" max="99" value={formState.homeScore} onChange={(e) => handleFieldChange("homeScore", e.target.value)} style={inputStyle} />
+                    </FieldRow>
+                  </div>
+                  <FieldRow label="Visibility">
+                    <select value={formState.visibility} onChange={(e) => handleFieldChange("visibility", e.target.value)} style={inputStyle}>
+                      <option value="public">🌍 Public</option>
+                      <option value="private">🔒 Private</option>
+                    </select>
+                  </FieldRow>
+                  <FieldRow label="Ranked (counts toward this week's Ranked 6)">
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>
+                      <input type="checkbox" checked={formState.ranked} onChange={(e) => handleFieldChange("ranked", e.target.checked)} style={{ width: "16px", height: "16px", accentColor: BLUE }} />
+                      Counts toward Ranked
+                    </label>
+                  </FieldRow>
+                  <FieldRow label="Prediction Note (optional)">
+                    <textarea
+                      value={formState.prediction}
+                      onChange={(e) => handleFieldChange("prediction", e.target.value)}
+                      placeholder="A short note to go with this pick..."
+                      style={{ ...inputStyle, height: "70px", resize: "vertical", fontFamily: "inherit" }}
+                    />
+                  </FieldRow>
+                </FieldGroup>
+                <div style={{ display: "flex", gap: "8px", marginTop: "14px" }}>
+                  <button
+                    onClick={() => { setEditingId(null); setFormState(BLANK_DUMMY_PICK_FORM); setSaveMessage(""); }}
+                    style={{ flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd", borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={{ flex: 2, background: BLUE, color: "#fff", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}
+                  >
+                    {saving ? "Saving..." : editingId ? "Save Changes" : "Create Prediction"}
+                  </button>
+                </div>
+                {saveMessage && (
+                  <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                    {saveMessage}
+                  </div>
+                )}
               </div>
             )}
           </div>

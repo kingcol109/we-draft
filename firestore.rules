@@ -24,7 +24,12 @@ service cloud.firestore {
       allow write: if isAdmin();
       match /evaluations/{uid} {
         allow read: if true;
-        allow write: if request.auth != null && request.auth.uid == uid;
+        // isAdmin() bypass: AdminPanel.js's Dummy Content tab writes an
+        // evaluation under a synthetic uid standing in for a real Firebase
+        // Auth account (see that file's own DummyEvaluationsSection
+        // comment) — request.auth.uid can never equal that synthetic id,
+        // so without this the admin-authored write would be denied outright.
+        allow write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       }
       match /reactions/{uid} {
         allow read: if true;
@@ -144,7 +149,10 @@ service cloud.firestore {
       // own owner, same as evaluations/reactions elsewhere.
       match /picks/{uid} {
         allow read: if true;
-        allow write: if request.auth != null && request.auth.uid == uid;
+        // isAdmin() bypass — same reasoning as players/{id}/evaluations/{uid}
+        // above: AdminPanel.js's Dummy Content tab writes a prediction under
+        // a synthetic uid, which never matches request.auth.uid.
+        allow write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       }
       // Whether a user has "hyped" this game — same public-read/owner-write
       // shape as picks, existence of the doc is the only signal needed.
@@ -352,8 +360,16 @@ service cloud.firestore {
       // bypassing the app's own UI entirely. create blocks setting either
       // field at all; update requires them to stay exactly as they already
       // are, unless the requester is already an admin.
-      allow create: if request.auth != null && request.auth.uid == uid
-                    && !("role" in request.resource.data) && !("verified" in request.resource.data);
+      // isAdmin() bypass added for AdminPanel.js's Dummy Content tab, which
+      // creates a companion users/{dummyUid} doc (username only, never
+      // role/verified) purely so a dummy evaluation's admin-chosen name
+      // resolves through the exact same users/{uid}.username lookup a real
+      // evaluation's does — request.auth.uid (the admin's real uid) can
+      // never equal the synthetic dummyUid, so the owner-only branch alone
+      // would deny this create.
+      allow create: if isAdmin()
+                    || (request.auth != null && request.auth.uid == uid
+                        && !("role" in request.resource.data) && !("verified" in request.resource.data));
       // .get(field, default) rather than plain dot access — almost every
       // existing user doc predates this rule and has no `role`/`verified`
       // field at all, and dot-accessing a missing map key errors out the
@@ -367,7 +383,10 @@ service cloud.firestore {
                         && request.resource.data.get("verified", null) == resource.data.get("verified", null));
       allow delete: if isAdmin();
       match /evaluations/{playerId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
+        // isAdmin() bypass — same Dummy Content reasoning as
+        // players/{id}/evaluations/{uid} above; this is that same write's
+        // private mirror.
+        allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       }
       match /archivedEvaluations/{playerId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
@@ -387,7 +406,10 @@ service cloud.firestore {
       // query across every game. Owner-only; the canonical copy already
       // covers public reads for aggregation.
       match /picks/{gameId} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
+        // isAdmin() bypass — same Dummy Content reasoning as
+        // schedule26/{gameId}/picks/{uid} above; this is that same write's
+        // private mirror.
+        allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       }
       // We-Pick's My Stats tab (WePickHub.js) — the one stat that can't be
       // computed client-side from a user's own picks (Highest Leaderboard

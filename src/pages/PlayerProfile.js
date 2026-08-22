@@ -3106,9 +3106,14 @@ useEffect(() => {
                     const { short, bg, border } = gradeDisplay(label);
                     return (
                       <div>
-                        <div className="rounded text-center" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px" }}>
-                          <div style={{ fontSize:"28px", fontWeight:900, color:"#fff", lineHeight:1 }}>{short}</div>
-                          <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", marginTop:"2px" }}>{label}</div>
+                        {/* Big number left, written label stacked to its
+                            right (wraps across lines as needed) instead of
+                            the number sitting on top of the label — same
+                            box footprint (padding unchanged), just the
+                            internal arrangement and text sizing. */}
+                        <div className="rounded" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", display:"flex", alignItems:"center", gap:"8px" }}>
+                          <div style={{ fontSize:"32px", fontWeight:900, color:"#fff", lineHeight:1, flexShrink:0 }}>{short}</div>
+                          <div style={{ flex:1, fontSize:"9px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", lineHeight:1.3, textAlign:"left" }}>{label}</div>
                         </div>
                         {hasGrade && (
                           <div className="mt-2">
@@ -3786,9 +3791,14 @@ useEffect(() => {
                     <div>
                       {ev.grade && (() => { const { short, bg, border } = gradeDisplay(ev.grade); return (
                         <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom:"1px solid #e5e7eb" }}>
-                          <div className="rounded text-center flex-shrink-0" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", minWidth:"60px" }}>
-                            <div style={{ fontSize:"24px", fontWeight:900, color:"#fff", lineHeight:1 }}>{short}</div>
-                            <div style={{ fontSize:"7px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", marginTop:"2px" }}>{ev.grade}</div>
+                          {/* Same left-number/right-label reformat as the
+                              Community Grade box above — same footprint
+                              (padding + minWidth unchanged), number bigger
+                              and on the left instead of stacked above the
+                              written grade. */}
+                          <div className="rounded flex-shrink-0" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", minWidth:"60px", display:"flex", alignItems:"center", gap:"6px" }}>
+                            <div style={{ fontSize:"28px", fontWeight:900, color:"#fff", lineHeight:1, flexShrink:0 }}>{short}</div>
+                            <div style={{ fontSize:"7px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", lineHeight:1.3 }}>{ev.grade}</div>
                           </div>
                           {ev.nflFit && (
                             <div className="flex flex-col items-center">

@@ -53,6 +53,11 @@ export default function CFBPage() {
   const activeTab = location.pathname.startsWith("/cfb/schedule") ? "schedule" : "teams";
   const [schools, setSchools] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
+  // Channel name (schedule26's own game.Channel, set via CFB Schedule's "TV
+  // Channel" field in AdminPanel.js) → its tvChannels doc, so a schedule row
+  // can show the short form ("ACCN") instead of the full "ACC Network" —
+  // same map shape/source as GameMarginSidebars.js's own channelsByName.
+  const [channelsByName, setChannelsByName] = useState({});
   const [games, setGames] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState("");
   // Current (latest-published) Top 25 — ranksForGame prefers each game's
@@ -88,9 +93,10 @@ export default function CFBPage() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [schoolsSnap, gamesSnap] = await Promise.all([
+        const [schoolsSnap, gamesSnap, channelsSnap] = await Promise.all([
           getDocs(collection(db, "schools")),
           getDocs(collection(db, "schedule26")),
+          getDocs(collection(db, "tvChannels")),
         ]);
         const data = schoolsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         const filtered = data.filter((school) =>
@@ -104,6 +110,10 @@ export default function CFBPage() {
         const nameMap = {};
         data.forEach((s) => { if (s.School) nameMap[s.School] = s; });
         setSchoolsByName(nameMap);
+
+        const channelMap = {};
+        channelsSnap.docs.forEach((d) => { const c = d.data(); if (c.Name) channelMap[c.Name] = c; });
+        setChannelsByName(channelMap);
 
         const gameDocs = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setGames(gameDocs);
@@ -144,10 +154,23 @@ export default function CFBPage() {
     [games]
   );
 
+  // Home-team tiebreak matches AdminPanel.js's CFBScheduleSection sort —
+  // plenty of games this far out have no kickoff Time yet (TV hasn't set
+  // it), so without a stable tiebreak every same-date TBD game would sort
+  // in whatever arbitrary order Firestore happened to return them in.
   const gamesForWeek = useMemo(
-    () => games.filter((g) => g.Week === selectedWeek).sort((a, b) => gameSortMs(a) - gameSortMs(b)),
+    () => games.filter((g) => g.Week === selectedWeek).sort((a, b) => (gameSortMs(a) - gameSortMs(b)) || (a.Home || "").localeCompare(b.Home || "")),
     [games, selectedWeek]
   );
+
+  const [rankedOnly, setRankedOnly] = useState(false);
+  const visibleGames = useMemo(() => {
+    if (!rankedOnly) return gamesForWeek;
+    return gamesForWeek.filter((g) => {
+      const { homeRank, awayRank } = ranksForGame(g, currentRankMap);
+      return !!(homeRank || awayRank);
+    });
+  }, [gamesForWeek, rankedOnly, currentRankMap]);
 
   const grouped = conferenceOrder.reduce((acc, conf) => {
     acc[conf] = schools
@@ -471,7 +494,7 @@ export default function CFBPage() {
             </div>
           ) : (
             <>
-              <div style={{ marginBottom: "16px", maxWidth: "260px" }}>
+              <div style={{ marginBottom: "16px", display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
                 <select
                   value={selectedWeek}
                   onChange={(e) => {
@@ -479,28 +502,41 @@ export default function CFBPage() {
                     navigate(`/cfb/schedule/${encodeURIComponent(e.target.value)}`, { replace: true });
                   }}
                   style={{
-                    width: "100%", border: `2px solid ${SITE_BLUE}`, borderRadius: "8px",
+                    width: "100%", maxWidth: "260px", border: `2px solid ${SITE_BLUE}`, borderRadius: "8px",
                     padding: "10px 12px", fontWeight: 900, fontSize: "14px", color: SITE_BLUE,
                     outline: "none", background: "#fff",
                   }}
                 >
                   {weekOptions.map((w) => <option key={w} value={w}>{w}</option>)}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => setRankedOnly((v) => !v)}
+                  style={{
+                    padding: "10px 16px", fontWeight: 900, fontSize: "13px",
+                    border: `2px solid ${SITE_BLUE}`, borderRadius: "8px", cursor: "pointer",
+                    background: rankedOnly ? SITE_BLUE : "#fff",
+                    color: rankedOnly ? "#fff" : SITE_BLUE,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🏆 Ranked Teams Only
+                </button>
               </div>
 
-              {gamesForWeek.length === 0 ? (
+              {visibleGames.length === 0 ? (
                 <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>
-                  No games found for {selectedWeek}.
+                  {rankedOnly ? `No ranked-team games found for ${selectedWeek}.` : `No games found for ${selectedWeek}.`}
                 </div>
               ) : (
                 <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
                   <div style={{ background: SITE_BLUE, padding: "10px 16px" }}>
                     <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                      {selectedWeek} · {gamesForWeek.length} Games
+                      {selectedWeek} · {visibleGames.length} Game{visibleGames.length !== 1 ? "s" : ""}{rankedOnly ? " (Ranked)" : ""}
                     </div>
                   </div>
                   <div style={{ height: "3px", background: SITE_GOLD }} />
-                  {gamesForWeek.map((g, i) => {
+                  {visibleGames.map((g, i) => {
                     const d = g.Date?.toDate?.();
                     const timeStr = formatTime12h(g.Time);
                     const played = g.Final && g.HomeScore != null && g.AwayScore != null;
@@ -512,6 +548,7 @@ export default function CFBPage() {
                     const awayColor = away?.Color1 || "#ccc";
                     const homeColor = home?.Color1 || "#ccc";
                     const { homeRank, awayRank } = ranksForGame(g, currentRankMap);
+                    const channelShort = g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : "";
 
                     const TeamRow = ({ school, data, score, won, rank }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -546,7 +583,7 @@ export default function CFBPage() {
                           // just compressed down to a 4px accent instead of a
                           // full banner.
                           background: `linear-gradient(to bottom, ${awayColor} 50%, ${homeColor} 50%) left / 4px 100% no-repeat, #fff`,
-                          borderBottom: i < gamesForWeek.length - 1 ? "1px solid #f0f0f0" : "none",
+                          borderBottom: i < visibleGames.length - 1 ? "1px solid #f0f0f0" : "none",
                           pointerEvents: g.Slug ? "auto" : "none",
                         }}
                       >
@@ -574,10 +611,15 @@ export default function CFBPage() {
                               ⭐ Featured
                             </span>
                           )}
-                          <div>
+                          <div style={{ fontSize: "16px", fontWeight: 900, color: "#555", lineHeight: 1.25 }}>
                             {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD"}
                             {timeStr && <div>{timeStr}</div>}
                           </div>
+                          {channelShort && (
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb", marginTop: "3px" }}>
+                              📺 {channelShort}
+                            </div>
+                          )}
                         </div>
                       </Link>
                     );
