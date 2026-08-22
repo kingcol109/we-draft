@@ -493,7 +493,12 @@ export default function HomeInSeason() {
         const results = await Promise.all(evalPromises);
         const allEvals = results.flat();
         const publicEvals = allEvals
-          .filter((e) => e.visibility === "public" && e.evaluation?.trim())
+          // Dummy evaluations (AdminPanel.js's Dummy Content tab) count
+          // toward everything else an eval touches on purpose — Community
+          // Grade, the Public Evaluations feed — but this homepage "Recent
+          // Evals" feed is meant to surface genuine community activity, so
+          // it's the one place they're deliberately excluded.
+          .filter((e) => e.visibility === "public" && e.evaluation?.trim() && !e.isDummy)
           .sort((a, b) => (b.updatedAt?.toDate?.()?.getTime?.() || 0) - (a.updatedAt?.toDate?.()?.getTime?.() || 0))
           .slice(0, 6);
 
