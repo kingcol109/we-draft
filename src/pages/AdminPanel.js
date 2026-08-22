@@ -9266,6 +9266,41 @@ function TeamBrandingPane({ league }) {
   );
 }
 
+// "Schools" (per-school logos, the original High School pane) and "States"
+// (one silhouette image per US state, see StateSilhouettesPane below) as
+// sibling sub-tabs — same nested-tab shape BrandingSection itself already
+// uses for Teams/Misc, one level deeper.
+const HIGH_SCHOOL_TABS = [
+  { key: "schools", label: "Schools" },
+  { key: "states", label: "States" },
+];
+
+function HighSchoolBrandingPane() {
+  const [tab, setTab] = useState("schools");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", gap: "8px" }}>
+        {HIGH_SCHOOL_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: tab === t.key ? BLUE : "#fff",
+              color: tab === t.key ? "#fff" : BLUE,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "schools" ? <HighSchoolSchoolsPane /> : <StateSilhouettesPane />}
+    </div>
+  );
+}
+
 // ── High school branding — a full editor over the same `highSchools`
 // collection RecruitsSection/PlayerDataSection/HistoricalSection lazily
 // seed with just {Name, State} the first time an admin types a new one into
@@ -9277,7 +9312,7 @@ function TeamBrandingPane({ league }) {
 // association, and only two logo slots (no wordmark, no secondary/black
 // variants, no brand colors), so forcing that shared shape would mean more
 // conditional branches in TeamBrandingPane than it'd actually save here. ──
-function HighSchoolBrandingPane() {
+function HighSchoolSchoolsPane() {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -9662,6 +9697,195 @@ function HighSchoolBrandingPane() {
                 </button>
               )}
             </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── State silhouettes — one image per US state, stored at
+// stateSilhouettes/{StateName} (doc id is the state's own name — no
+// separate id needed since the list of 50 states is fixed, unlike schools/
+// teams which grow over time). Deliberately no "+ Add" or delete here:
+// every state already "exists" the moment this pane loads (from the same
+// US_STATES list Recruits/Players/Historical's own State dropdowns use),
+// so there's nothing to create or remove — just click one and set (or
+// clear) its silhouette. ──
+function StateSilhouettesPane() {
+  const [silhouettesByState, setSilhouettesByState] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedState, setSelectedState] = useState("");
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [copyStatus, setCopyStatus] = useState("idle");
+
+  useEffect(() => {
+    const fetchSilhouettes = async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "stateSilhouettes"));
+        const map = {};
+        snap.docs.forEach((d) => { map[d.id] = d.data(); });
+        setSilhouettesByState(map);
+      } catch (e) {
+        console.error("Admin state silhouettes fetch error:", e);
+        setSilhouettesByState({});
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSilhouettes();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return US_STATES;
+    return US_STATES.filter((s) => s.toLowerCase().includes(q));
+  }, [searchQuery]);
+
+  const selectState = (name) => {
+    setSelectedState(name);
+    setFormState({ Silhouette: silhouettesByState[name]?.Silhouette || "" });
+    setSaveMessage("");
+    setCopyStatus("idle");
+  };
+
+  const handleCopyImage = (url) => {
+    if (!url) return;
+    setCopyStatus("copying");
+    let clipboardPromise;
+    try {
+      clipboardPromise = navigator.clipboard.write([
+        new window.ClipboardItem({ "image/png": loadImageAsPngBlob(url) }),
+      ]);
+    } catch (e) {
+      clipboardPromise = Promise.reject(e);
+    }
+    clipboardPromise
+      .then(() => setCopyStatus("copied"))
+      .catch((e) => { console.error("Copy image to clipboard failed:", e); setCopyStatus("failed"); })
+      .finally(() => {
+        setTimeout(() => setCopyStatus((s) => (s === "copying" ? s : "idle")), 2400);
+      });
+  };
+
+  const handleSave = async () => {
+    if (!selectedState || !formState) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = { Name: selectedState, Silhouette: formState.Silhouette.trim(), updatedAt: serverTimestamp() };
+      await setDoc(doc(db, "stateSilhouettes", selectedState), payload, { merge: true });
+      setSilhouettesByState((prev) => ({ ...prev, [selectedState]: { ...prev[selectedState], ...payload } }));
+      setSaveMessage("Saved.");
+    } catch (e) {
+      console.error("Admin state silhouette save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            States
+          </div>
+        </div>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search state..."
+            style={{ width: "100%", border: "2px solid #ddd", borderRadius: "6px", padding: "8px 12px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box" }}
+          />
+        </div>
+        {loading ? (
+          <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No states match.</div>
+        ) : (
+          <div style={{ maxHeight: "640px", overflowY: "auto" }}>
+            {filtered.map((name) => {
+              const isSelected = selectedState === name;
+              const silhouette = silhouettesByState[name]?.Silhouette;
+              return (
+                <div
+                  key={name}
+                  onClick={() => selectState(name)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "12px",
+                    padding: "10px 14px", cursor: "pointer",
+                    background: isSelected ? "#eaf1ff" : "#fff",
+                    borderLeft: isSelected ? "4px solid " + BLUE : "4px solid transparent",
+                    borderBottom: "1px solid #f0f0f0",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
+                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                >
+                  <div style={{
+                    flexShrink: 0, width: "36px", height: "36px", borderRadius: "6px",
+                    display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", ...CHECKER_BG,
+                  }}>
+                    {silhouette ? (
+                      <img src={silhouette} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    ) : (
+                      <span style={{ color: "#ccc", fontWeight: 900, fontSize: "12px" }}>{name.charAt(0)}</span>
+                    )}
+                  </div>
+                  <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{name}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            {selectedState || "Select a State"}
+          </div>
+        </div>
+        {!selectedState || !formState ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Click a state from the list to set its silhouette.
+          </div>
+        ) : (
+          <div style={{ padding: "16px" }}>
+            <FieldGroup>
+              <LogoUrlField
+                label="Silhouette"
+                value={formState.Silhouette}
+                onChange={(v) => setFormState({ Silhouette: v })}
+                onCopy={() => handleCopyImage(formState.Silhouette)}
+                copyStatus={copyStatus}
+              />
+            </FieldGroup>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                width: "100%", marginTop: "18px",
+                background: BLUE, color: "#fff", border: "2px solid " + GOLD,
+                borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+            {saveMessage && (
+              <div style={{ marginTop: "10px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
             )}
           </div>
         )}

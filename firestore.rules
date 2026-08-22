@@ -106,6 +106,14 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // State silhouette images — AdminPanel.js's Branding → Teams → High
+    // School → States tab. Doc id is the state's own name (fixed 50-state
+    // list, nothing to create/delete, just set per state). Same public-
+    // read/admin-write shape as tvChannels above.
+    match /stateSilhouettes/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /draftOrder/{pick} { allow read, write: if true; }
     match /draftOrder2027/{pick} { allow read, write: if true; }
     match /draftOrder2028/{pick} { allow read, write: if true; }
