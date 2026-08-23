@@ -75,13 +75,22 @@ function sanitizeUrl(url) {
 
 const toMs = (ts) => (ts && ts.toDate ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0);
 
+// Only ever called with a video's Date (see VideosSidebar below) — a
+// date-only value entered via AdminPanel.js's <input type="date">, which
+// JS parses as UTC midnight with no real time-of-day meaning. Bucketing by
+// *local* calendar day (the previous version) shifted it a day early for
+// anyone west of UTC — "8/22" in Firestore reading as "Yesterday" the
+// moment it's actually still 8/22 in UTC but already the evening of 8/21
+// locally. UTC getters on both sides keep this consistent with how the
+// date was entered and stored, not with whichever timezone happens to be
+// reading the page.
 function formatRelativeTime(input) {
   if (!input) return "";
   const d = input && input.toDate ? input.toDate() : typeof input === "number" ? new Date(input) : new Date(input);
   if (isNaN(d.getTime())) return "";
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const startOfDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const diffDays = Math.round((startOfToday - startOfDate) / 86400000);
 
   if (diffDays <= 0) return "Today";
@@ -726,9 +735,14 @@ export default function CommunityBoard() {
               date: data.Date || null,
               title: data.GenTitle || (first && first.title) || "",
               thumb: data.GenThumb || (first && first.thumb) || "",
+              tags: Array.isArray(data.Tags) ? data.Tags : [],
             };
           })
-          .filter(function (v) { return !!v.video; })
+          // Recruiting-tagged videos don't belong on the (draft-class-
+          // focused) Community Board sidebar — an untagged video (nothing
+          // set yet in AdminPanel.js's Videos tab) is never excluded here,
+          // only an explicit Recruiting tag is.
+          .filter(function (v) { return !!v.video && !v.tags.includes("Recruiting"); })
           .sort(function (a, b) { return toMs(b.date) - toMs(a.date); })
           .slice(0, SIDEBAR_VIDEO_LIMIT);
         setSidebarVideos(vids);
@@ -1010,6 +1024,25 @@ export default function CommunityBoard() {
 
   const VideosSidebar = (
     <SidebarCard title="Videos" color1={BLUE} color2={GOLD}>
+      {/* Above the video list itself (below the card's own "Videos" title)
+          rather than after it, community-board-only placement — links to
+          the full site-wide feed, not more of this fixed
+          SIDEBAR_VIDEO_LIMIT list. */}
+      <Link
+        to="/videos"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+          padding: "10px 14px", textDecoration: "none",
+          background: BLUE, color: GOLD,
+          fontWeight: 900, fontSize: "12px",
+          textTransform: "uppercase", letterSpacing: "0.1em",
+          borderBottom: "1px solid rgba(255,255,255,0.15)",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+      >
+        View More Videos →
+      </Link>
       {sidebarVideos.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No videos yet.</div>
       ) : (

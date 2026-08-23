@@ -51,6 +51,7 @@ const NFLPage = lazy(() => import("./pages/NFLPage"));
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
 const PerformancePage = lazy(() => import("./pages/PerformancePage"));
 const PerformancesHub = lazy(() => import("./pages/PerformancesHub"));
+const VideosPage = lazy(() => import("./pages/VideosPage"));
 const GamePage = lazy(() => import("./pages/GamePage"));
 const MyFeed = lazy(() => import("./pages/MyFeed"));
 
@@ -156,6 +157,7 @@ function MainLayout() {
                 back-navigation, which points here rather than the bare hub). */}
             <Route path="/performances/:week" element={<PerformancesHub />} />
             <Route path="/performance/:slug" element={<PerformancePage />} />
+            <Route path="/videos" element={<VideosPage />} />
             <Route path="/game/:slug" element={<GamePage />} />
             <Route path="/we-pick" element={<WePickHub />} />
             {/* Standings — same page component, tab + optional week param

@@ -2193,6 +2193,23 @@ useEffect(() => {
           Show More Videos ▾
         </button>
       )}
+      {/* Always shown (not just once this player's own list is exhausted) —
+          the site-wide video feed, not more of this player's own videos. */}
+      <Link
+        to="/videos"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+          padding: "10px 14px", textDecoration: "none",
+          background: SITE_BLUE, color: SITE_GOLD,
+          fontWeight: 900, fontSize: "12px",
+          textTransform: "uppercase", letterSpacing: "0.1em",
+          borderTop: "1px solid rgba(255,255,255,0.15)",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
+      >
+        View More Videos →
+      </Link>
     </SidebarCard>
   );
 

@@ -5636,6 +5636,12 @@ function PlayerLookupCombobox({ playerId, onChange, players }) {
 
 const BLANK_VIDEO_ITEM = { playerId: "", title: "", thumb: "" };
 
+// A video with no Tags at all (every video created before this field
+// existed) is treated as CFB by VideosPage.js's own filter and never
+// excluded from CommunityBoard.js's sidebar — see each file's own comment
+// on this — so untagged content doesn't just vanish once tagging exists.
+const VIDEO_TAGS = ["Draft", "Recruiting", "CFB"];
+
 function VideosSection() {
   const [videos, setVideos] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
@@ -5703,6 +5709,7 @@ function VideosSection() {
     setFormState({
       Video: v.Video || "",
       Date: toDateInputValue(v.Date) || toDateInputValue(new Date()),
+      Tags: v.Tags || [],
       GenTitle: v.GenTitle || "",
       GenThumb: v.GenThumb || "",
       items: [0, 1, 2].map((i) => ({
@@ -5719,6 +5726,7 @@ function VideosSection() {
     setFormState({
       Video: "",
       Date: toDateInputValue(new Date()),
+      Tags: [],
       GenTitle: "",
       GenThumb: "",
       items: [{ ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
@@ -5735,6 +5743,13 @@ function VideosSection() {
       const items = [...prev.items];
       items[index] = { ...items[index], [field]: value };
       return { ...prev, items };
+    });
+  };
+
+  const handleToggleTag = (tag) => {
+    setFormState((prev) => {
+      const tags = prev.Tags || [];
+      return { ...prev, Tags: tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag] };
     });
   };
 
@@ -5756,6 +5771,7 @@ function VideosSection() {
       const payload = {
         Video: formState.Video.trim(),
         Date: formState.Date ? new Date(formState.Date) : new Date(),
+        Tags: formState.Tags || [],
         GenTitle: formState.GenTitle.trim(),
         GenThumb: formState.GenThumb.trim(),
         items: cleanedItems,
@@ -5947,7 +5963,13 @@ function VideosSection() {
                       {displayTitle}
                     </div>
                     <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
-                      {v.Date ? new Date(toMs(v.Date)).toLocaleDateString() : "No date"}
+                      {/* timeZone: "UTC" — Date is a date-only value from
+                          the <input type="date"> below, stored as UTC
+                          midnight; formatting it in the browser's local
+                          zone instead shifted it a day early for anyone
+                          west of UTC. */}
+                      {v.Date ? new Date(toMs(v.Date)).toLocaleDateString(undefined, { timeZone: "UTC" }) : "No date"}
+                      {(v.Tags || []).length > 0 && " · " + v.Tags.join(", ")}
                     </div>
                     {items.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
@@ -6000,6 +6022,32 @@ function VideosSection() {
               </FieldRow>
               <FieldRow label="Date">
                 <input type="date" value={formState.Date} onChange={(e) => handleFieldChange("Date", e.target.value)} style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Tags">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                  {VIDEO_TAGS.map((tag) => {
+                    const active = (formState.Tags || []).includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => handleToggleTag(tag)}
+                        style={{
+                          padding: "6px 14px", fontWeight: 900, fontSize: "12px",
+                          textTransform: "uppercase", letterSpacing: "0.04em",
+                          border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+                          background: active ? BLUE : "#fff",
+                          color: active ? "#fff" : BLUE,
+                        }}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  Recruiting-tagged videos are excluded from the Community Board sidebar. An untagged video is treated as CFB everywhere.
+                </div>
               </FieldRow>
               <FieldRow label="Generic Title (fallback if no player match)">
                 <input value={formState.GenTitle} onChange={(e) => handleFieldChange("GenTitle", e.target.value)} placeholder="e.g. 2026 Impact Freshman RBs" style={inputStyle} />
