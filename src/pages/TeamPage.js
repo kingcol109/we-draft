@@ -1294,8 +1294,13 @@ export default function TeamPage() {
                   id: d.id,
                   video: data.Video || "",
                   date: data.Date || null,
-                  title: matched?.title || first?.title || "",
-                  thumb: matched?.thumb || first?.thumb || "",
+                  // GenTitle/GenThumb (AdminPanel.js VideosSection) are the
+                  // video's own fallback, set once per video rather than per
+                  // player — last resort once neither a roster player's own
+                  // tag nor the first item on the video has an override set.
+                  // Same fix as PlayerProfile.js's own video fetch.
+                  title: matched?.title || first?.title || data.GenTitle || "",
+                  thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
                 });
               });
             });
