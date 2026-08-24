@@ -18,6 +18,8 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
 import { useAuth } from "../context/AuthContext";
 import verifiedBadge from "../assets/verified.png";
+import GameOfWeekBadge from "../assets/weekgame.png";
+import FeaturedGameBadge from "../assets/featgame.png";
 import confetti from "canvas-confetti";
 import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { useCurrentRankMap, ranksForGame, withRank } from "../utils/rankings";
@@ -1850,22 +1852,28 @@ export default function GamePage() {
                 wd-gotw-badge/wd-featured-badge below is plenty of "this one
                 matters" without being distracting. */}
             {(game.GameOfWeek || game.Featured) && (
-              <div style={{ position: "relative", zIndex: 1, textAlign: "center", marginBottom: isMobile ? "18px" : "26px" }}>
-                <span
+              <div style={{ position: "relative", zIndex: 1, textAlign: "center", marginBottom: isMobile ? "22px" : "34px" }}>
+                {/* Own badge graphic (src/assets/weekgame.png, featgame.png,
+                    both a 1780x659 rounded-rectangle badge) instead of a
+                    text pill — already has its own background/border baked
+                    in, so the box-shadow glow below hugs the image's own
+                    corners directly rather than needing a separate
+                    background/border here. Sized to actually read as the
+                    hero's own headline element, not a small tag bolted on
+                    top of it. */}
+                <img
+                  src={game.GameOfWeek ? GameOfWeekBadge : FeaturedGameBadge}
+                  alt={game.GameOfWeek ? "We-Draft.com's Game of the Week" : "We-Draft.com's Featured Game"}
                   className={game.GameOfWeek ? "wd-gotw-badge" : "wd-featured-badge"}
                   style={{
                     display: "inline-block",
-                    background: game.GameOfWeek ? `linear-gradient(90deg, #003d82, ${BLUE}, #003d82)` : `linear-gradient(90deg, ${GOLD}, #ffe08a)`,
-                    color: game.GameOfWeek ? GOLD : "#3a2900",
-                    fontWeight: 900, fontSize: isMobile ? "11px" : "14px",
-                    padding: isMobile ? "6px 16px" : "8px 22px", borderRadius: "20px",
-                    textTransform: "uppercase", letterSpacing: "0.14em",
-                    border: `2px solid ${game.GameOfWeek ? GOLD : "rgba(255,255,255,0.4)"}`,
-                    textShadow: game.GameOfWeek ? "0 1px 2px rgba(0,0,0,0.4)" : "0 1px 2px rgba(255,255,255,0.35)",
+                    height: isMobile ? "84px" : "140px",
+                    width: "auto",
+                    maxWidth: "90%",
+                    objectFit: "contain",
+                    borderRadius: "14px",
                   }}
-                >
-                  {game.GameOfWeek ? "🏈 We-Draft.com's Game of the Week 🏈" : "🏈 We-Draft.com's Featured Game"}
-                </span>
+                />
               </div>
             )}
 

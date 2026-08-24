@@ -5562,7 +5562,7 @@ function toDateInputValue(d) {
 // or recognize) — it holds its own search text, shows the selected player's
 // name when idle, and only ever calls onChange with a player's doc ID,
 // picked from the dropdown. No free-text fallback. ──
-function PlayerLookupCombobox({ playerId, onChange, players }) {
+function PlayerLookupCombobox({ playerId, onChange, players, placeholder = "Search player by name...", getSubtitle }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -5589,7 +5589,7 @@ function PlayerLookupCombobox({ playerId, onChange, players }) {
           value={displayValue}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => { setQuery(""); setOpen(true); }}
-          placeholder="Search player by name..."
+          placeholder={placeholder}
           autoComplete="off"
           style={{ ...inputStyle, flex: 1 }}
         />
@@ -5624,7 +5624,7 @@ function PlayerLookupCombobox({ playerId, onChange, players }) {
             >
               <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{p.First} {p.Last}</div>
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
-                {p.Position || "—"} · {p.School || "—"}
+                {getSubtitle ? getSubtitle(p) : `${p.Position || "—"} · ${p.School || "—"}`}
               </div>
             </div>
           ))}
@@ -5634,7 +5634,14 @@ function PlayerLookupCombobox({ playerId, onChange, players }) {
   );
 }
 
-const BLANK_VIDEO_ITEM = { playerId: "", title: "", thumb: "" };
+// commitment is a snapshot of the recruit's Commitment at the moment
+// they're tagged (see VideosSection's recruit-select handler) — TeamPage.js
+// matches against this frozen value, not a live lookup, so tagging a
+// recruit never needs public read access to the recruits collection. Goes
+// stale if the recruit's real Commitment changes after tagging; the admin
+// form flags that and offers a one-click refresh (see the "commitment
+// changed" note below).
+const BLANK_VIDEO_ITEM = { type: "player", playerId: "", recruitId: "", commitment: "", title: "", thumb: "" };
 
 // A video with no Tags at all (every video created before this field
 // existed) is treated as CFB by VideosPage.js's own filter and never
@@ -5645,6 +5652,11 @@ const VIDEO_TAGS = ["Draft", "Recruiting", "CFB"];
 function VideosSection() {
   const [videos, setVideos] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
+  // Recruits (high schoolers with no player page yet) are taggable too —
+  // a recruit-tagged video surfaces on their committed school's team page
+  // instead of a player page, since they don't have one (see TeamPage.js's
+  // own video-fetch effect).
+  const [allRecruits, setAllRecruits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedVideo, setSelectedVideo] = useState(null);
@@ -5659,9 +5671,10 @@ function VideosSection() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [videosSnap, playersSnap] = await Promise.all([
+        const [videosSnap, playersSnap, recruitsSnap] = await Promise.all([
           getDocs(collection(db, "videos")),
           getDocs(collection(db, "players")),
+          getDocs(collection(db, "recruits")),
         ]);
         const vids = videosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         vids.sort((a, b) => toMs(b.Date) - toMs(a.Date));
@@ -5672,10 +5685,15 @@ function VideosSection() {
           .filter((p) => p.Slug);
         players.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
         setAllPlayers(players);
+
+        const recruits = recruitsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        recruits.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
+        setAllRecruits(recruits);
       } catch (e) {
         console.error("Admin videos fetch error:", e);
         setVideos([]);
         setAllPlayers([]);
+        setAllRecruits([]);
       } finally {
         setLoading(false);
       }
@@ -5689,6 +5707,12 @@ function VideosSection() {
     return map;
   }, [allPlayers]);
 
+  const recruitsById = useMemo(() => {
+    const map = new Map();
+    allRecruits.forEach((r) => map.set(r.id, r));
+    return map;
+  }, [allRecruits]);
+
   const filtered = videos.filter((v) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.trim().toLowerCase();
@@ -5697,8 +5721,8 @@ function VideosSection() {
       (v.GenTitle || "").toLowerCase().includes(q) ||
       (v.Video || "").toLowerCase().includes(q) ||
       items.some((it) => {
-        const p = playersById.get(it.playerId);
-        return (p && (p.First + " " + p.Last).toLowerCase().includes(q)) || (it.title || "").toLowerCase().includes(q);
+        const tagged = it.type === "recruit" ? recruitsById.get(it.recruitId) : playersById.get(it.playerId);
+        return (tagged && (tagged.First + " " + tagged.Last).toLowerCase().includes(q)) || (it.title || "").toLowerCase().includes(q);
       })
     );
   });
@@ -5712,8 +5736,14 @@ function VideosSection() {
       Tags: v.Tags || [],
       GenTitle: v.GenTitle || "",
       GenThumb: v.GenThumb || "",
+      // Every item saved before recruit-tagging existed has no `type` at
+      // all — treated as "player" here, same as everywhere else this
+      // field is read.
       items: [0, 1, 2].map((i) => ({
+        type: items[i]?.type === "recruit" ? "recruit" : "player",
         playerId: items[i]?.playerId || "",
+        recruitId: items[i]?.recruitId || "",
+        commitment: items[i]?.commitment || "",
         title: items[i]?.title || "",
         thumb: items[i]?.thumb || "",
       })),
@@ -5746,6 +5776,39 @@ function VideosSection() {
     });
   };
 
+  // Switching a slot between Player/Recruit clears whichever id belonged
+  // to the old type — a slot is one or the other, never both at once.
+  const handleItemTypeChange = (index, type) => {
+    setFormState((prev) => {
+      const items = [...prev.items];
+      items[index] = { ...items[index], type, playerId: "", recruitId: "", commitment: "" };
+      return { ...prev, items };
+    });
+  };
+
+  // Snapshots the recruit's current Commitment onto the item the moment
+  // they're picked (see BLANK_VIDEO_ITEM's own comment on why) — a plain
+  // handleItemChange("recruitId", ...) alone wouldn't capture it.
+  const handleRecruitSelect = (index, recruitId) => {
+    const r = recruitsById.get(recruitId);
+    setFormState((prev) => {
+      const items = [...prev.items];
+      items[index] = { ...items[index], recruitId, commitment: r?.Commitment || "" };
+      return { ...prev, items };
+    });
+  };
+
+  // Re-snapshots commitment from the recruit's current, live Commitment —
+  // offered inline whenever the stored value has drifted from it.
+  const handleRefreshCommitment = (index) => {
+    setFormState((prev) => {
+      const items = [...prev.items];
+      const r = recruitsById.get(items[index].recruitId);
+      items[index] = { ...items[index], commitment: r?.Commitment || "" };
+      return { ...prev, items };
+    });
+  };
+
   const handleToggleTag = (tag) => {
     setFormState((prev) => {
       const tags = prev.Tags || [];
@@ -5765,8 +5828,11 @@ function VideosSection() {
     setSaveMessage("");
     try {
       const cleanedItems = formState.items
-        .filter((it) => it.playerId)
-        .map((it) => ({ playerId: it.playerId, title: it.title.trim(), thumb: it.thumb.trim() }));
+        .filter((it) => (it.type === "recruit" ? it.recruitId : it.playerId))
+        .map((it) => it.type === "recruit"
+          ? { type: "recruit", recruitId: it.recruitId, commitment: it.commitment || "", title: it.title.trim(), thumb: it.thumb.trim() }
+          : { type: "player", playerId: it.playerId, title: it.title.trim(), thumb: it.thumb.trim() }
+        );
 
       const payload = {
         Video: formState.Video.trim(),
@@ -5775,7 +5841,16 @@ function VideosSection() {
         GenTitle: formState.GenTitle.trim(),
         GenThumb: formState.GenThumb.trim(),
         items: cleanedItems,
-        playerIds: cleanedItems.map((it) => it.playerId),
+        playerIds: cleanedItems.filter((it) => it.type === "player").map((it) => it.playerId),
+        // recruitIds is admin-side bookkeeping only (which recruits are
+        // tagged, for this panel's own search/list). recruitSchools is
+        // what TeamPage.js actually queries against — each tagged
+        // recruit's *snapshotted* Commitment (see BLANK_VIDEO_ITEM's own
+        // comment), deliberately not a live lookup, so surfacing a
+        // recruit's video on their team page never needs public read
+        // access to the recruits collection.
+        recruitIds: cleanedItems.filter((it) => it.type === "recruit").map((it) => it.recruitId),
+        recruitSchools: [...new Set(cleanedItems.filter((it) => it.type === "recruit" && it.commitment).map((it) => it.commitment))],
         updatedAt: serverTimestamp(),
       };
 
@@ -5974,6 +6049,14 @@ function VideosSection() {
                     {items.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
                         {items.map((it, i) => {
+                          if (it.type === "recruit") {
+                            const r = recruitsById.get(it.recruitId);
+                            return (
+                              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "10px", fontWeight: 700, color: "#8a5a00", background: "#fff3d9", borderRadius: "8px", padding: "1px 7px" }}>
+                                {r ? r.First + " " + r.Last + " (Recruit)" : "Unmigrated recruit"}
+                              </span>
+                            );
+                          }
                           const p = playersById.get(it.playerId);
                           return (
                             <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "10px", fontWeight: 700, color: "#666", background: "#f0f0f0", borderRadius: "8px", padding: "1px 7px" }}>
@@ -6059,20 +6142,83 @@ function VideosSection() {
 
             <div style={{ height: "1px", background: "#eee", margin: "16px 0" }} />
 
-            {[0, 1, 2].map((i) => (
+            {[0, 1, 2].map((i) => {
+              const item = formState.items[i];
+              const isRecruit = item.type === "recruit";
+              return (
               <div key={i} style={{ marginBottom: i < 2 ? "18px" : 0 }}>
-                <div style={{ fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
-                  Player {i + 1}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    Tag {i + 1}
+                  </div>
+                  <div style={{ display: "flex", gap: "4px" }}>
+                    {["player", "recruit"].map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => handleItemTypeChange(i, t)}
+                        style={{
+                          padding: "3px 10px", fontWeight: 900, fontSize: "10px",
+                          textTransform: "uppercase", letterSpacing: "0.04em",
+                          border: "2px solid " + GOLD, borderRadius: "14px", cursor: "pointer",
+                          background: (t === "recruit") === isRecruit ? BLUE : "#fff",
+                          color: (t === "recruit") === isRecruit ? "#fff" : BLUE,
+                        }}
+                      >
+                        {t === "player" ? "Player" : "Recruit"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <FieldGroup>
-                  <FieldRow label="Player">
-                    <PlayerLookupCombobox
-                      playerId={formState.items[i].playerId}
-                      onChange={(v) => handleItemChange(i, "playerId", v)}
-                      players={allPlayers}
-                    />
+                  <FieldRow label={isRecruit ? "Recruit" : "Player"}>
+                    {isRecruit ? (
+                      <PlayerLookupCombobox
+                        playerId={item.recruitId}
+                        onChange={(v) => handleRecruitSelect(i, v)}
+                        players={allRecruits}
+                        placeholder="Search recruit by name..."
+                        getSubtitle={(r) => `${r.Position || "—"} · ${r.Commitment || "Uncommitted"}`}
+                      />
+                    ) : (
+                      <PlayerLookupCombobox
+                        playerId={item.playerId}
+                        onChange={(v) => handleItemChange(i, "playerId", v)}
+                        players={allPlayers}
+                      />
+                    )}
                     {(() => {
-                      const p = playersById.get(formState.items[i].playerId);
+                      if (isRecruit) {
+                        const r = recruitsById.get(item.recruitId);
+                        if (!r) return null;
+                        // commitment on the item is a snapshot (see
+                        // BLANK_VIDEO_ITEM's own comment) — flag it here
+                        // and offer a one-click refresh whenever it's
+                        // drifted from the recruit's actual, current
+                        // Commitment, so this doesn't just go silently
+                        // stale forever.
+                        const stale = item.commitment && r.Commitment && item.commitment !== r.Commitment;
+                        return (
+                          <div style={{ marginTop: "6px" }}>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
+                              No player page yet — shows on {item.commitment || "their committed school"}'s team page instead.
+                            </div>
+                            {stale && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px", fontSize: "11px", fontWeight: 800, color: "#a5720a" }}>
+                                ⚠ Now committed to {r.Commitment} — this tag still points at {item.commitment}.
+                                <button
+                                  type="button"
+                                  onClick={() => handleRefreshCommitment(i)}
+                                  style={{ border: "none", background: "none", color: BLUE, fontWeight: 900, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+                                >
+                                  Refresh
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      const p = playersById.get(item.playerId);
                       return p?.Slug ? (
                         <a
                           href={"/player/" + p.Slug}
@@ -6086,14 +6232,15 @@ function VideosSection() {
                     })()}
                   </FieldRow>
                   <FieldRow label="Title override">
-                    <input value={formState.items[i].title} onChange={(e) => handleItemChange(i, "title", e.target.value)} placeholder="Shown on this player's page" style={inputStyle} />
+                    <input value={item.title} onChange={(e) => handleItemChange(i, "title", e.target.value)} placeholder="Shown wherever this video appears for them" style={inputStyle} />
                   </FieldRow>
                   <FieldRow label="Thumbnail URL">
-                    <input value={formState.items[i].thumb} onChange={(e) => handleItemChange(i, "thumb", e.target.value)} placeholder="https://..." style={inputStyle} />
+                    <input value={item.thumb} onChange={(e) => handleItemChange(i, "thumb", e.target.value)} placeholder="https://..." style={inputStyle} />
                   </FieldRow>
                 </FieldGroup>
               </div>
-            ))}
+              );
+            })}
 
             <button
               onClick={handleSave}

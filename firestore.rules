@@ -79,6 +79,11 @@ service cloud.firestore {
     // High school recruits (AdminPanel.js's Player Data → Recruits tab) —
     // purely internal admin data with no public page of their own (unlike
     // players/schools), so no public read at all, just isAdmin() both ways.
+    // A recruit tagged on a video (AdminPanel.js VideosSection) still
+    // surfaces on their committed school's team page for every visitor —
+    // that reads the video's own denormalized recruitSchools field
+    // (snapshotted at tag time), not this collection, specifically so
+    // TeamPage.js never needs public read access here.
     match /recruits/{doc} {
       allow read, write: if isAdmin();
     }

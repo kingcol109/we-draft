@@ -1263,20 +1263,33 @@ export default function TeamPage() {
         // values per query, so chunk the roster into groups of 10 and merge results.
         // Runs after Stage 2 (not folded into it) since it needs both
         // prospectResults and archivePlrs fully resolved first.
+        //
+        // Recruits (high schoolers with no player page of their own) can be
+        // tagged on a video too (AdminPanel.js VideosSection) — since they
+        // have no page to show up on, their tagged videos surface here
+        // instead, on their committed school's team page. Matched against
+        // the video's own recruitSchools field — each tagged recruit's
+        // Commitment, *snapshotted at tag time* rather than looked up live
+        // — specifically so this never needs public read access to the
+        // (deliberately admin-only) recruits collection. array-contains
+        // (not -any) is enough here since there's only ever one value to
+        // check against: this team's own name.
         try {
           const rosterIds = new Set();
           Object.values(prospectResults).forEach((arr) => arr.forEach((p) => { if (p.id) rosterIds.add(p.id); }));
           archivePlrs.forEach((p) => { if (p.id) rosterIds.add(p.id); });
 
           const idArray = Array.from(rosterIds);
-          if (idArray.length > 0) {
-            const chunks = [];
-            for (let i = 0; i < idArray.length; i += 10) chunks.push(idArray.slice(i, i + 10));
+          const chunks = [];
+          for (let i = 0; i < idArray.length; i += 10) chunks.push(idArray.slice(i, i + 10));
 
-            const chunkSnaps = await Promise.all(
-              chunks.map((chunk) => getDocs(query(collection(db, "videos"), where("playerIds", "array-contains-any", chunk))))
-            );
+          const [playerChunkSnaps, recruitSnap] = await Promise.all([
+            Promise.all(chunks.map((chunk) => getDocs(query(collection(db, "videos"), where("playerIds", "array-contains-any", chunk))))),
+            getDocs(query(collection(db, "videos"), where("recruitSchools", "array-contains", resolvedSchool))),
+          ]);
+          const chunkSnaps = [...playerChunkSnaps, recruitSnap];
 
+          if (chunks.length > 0 || !recruitSnap.empty) {
             const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
             const seenVideoIds = new Set();
             const vids = [];
@@ -1286,9 +1299,10 @@ export default function TeamPage() {
                 seenVideoIds.add(d.id);
                 const data = d.data();
                 const items = Array.isArray(data.items) ? data.items : [];
-                // Prefer whichever item belongs to a player on this roster; fall
-                // back to items[0] per-field, same pattern as the player page.
-                const matched = items.find((it) => rosterIds.has(it.playerId)) || null;
+                // Prefer whichever item belongs to a player on this roster
+                // or a recruit committed here; fall back to items[0]
+                // per-field, same pattern as the player page.
+                const matched = items.find((it) => it.type === "recruit" ? it.commitment === resolvedSchool : rosterIds.has(it.playerId)) || null;
                 const first = items[0] || null;
                 vids.push({
                   id: d.id,

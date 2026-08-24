@@ -79,6 +79,56 @@ function sanitizeUrl(url) {
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
+// ── Measurement display formatting — mirrors AdminPanel.js's own
+// decompose*/format*Display helpers (EIGHTHS_FRACTION_LABEL included) for
+// the same feet/inches/eighths math, duplicated here since this page never
+// imported that admin-only module. Height is usually already stored as a
+// clean "F'I\"" string (AdminPanel.js's own picker writes it that way), but
+// a handful of bulk-imported records — mostly 2026's — have a leftover
+// decimal in the inches slot instead (6'2.5" instead of 6'2 1/2"); Arm
+// Length/Hand Size/Wingspan/Broad are stored as plain decimal inches with
+// no formatting applied at all yet. Each formatter below only touches the
+// shape it's meant to fix — an already-clean value (whole inches, or
+// anything already containing a "/" or '"') passes through untouched. ──
+const EIGHTHS_FRACTION_LABEL = { 0: "", 1: "1/8", 2: "1/4", 3: "3/8", 4: "1/2", 5: "5/8", 6: "3/4", 7: "7/8" };
+function decimalToEighths(num) {
+  const whole = Math.floor(num);
+  let eighths = Math.round((num - whole) * 8);
+  let wholeAdj = whole;
+  if (eighths === 8) { eighths = 0; wholeAdj += 1; }
+  return { whole: wholeAdj, eighths };
+}
+function formatHeightForDisplay(raw) {
+  if (!raw) return raw;
+  const s = String(raw).trim();
+  const m = s.match(/^(\d+)'(\d+(?:\.\d+)?)"?$/);
+  if (!m) return s; // not the expected "F'I"" shape — show as-is rather than guess
+  const inchesNum = parseFloat(m[2]);
+  if (Number.isInteger(inchesNum)) return s; // already whole inches, nothing to fix
+  const { whole, eighths } = decimalToEighths(inchesNum);
+  const frac = EIGHTHS_FRACTION_LABEL[eighths];
+  return `${m[1]}'${whole}${frac ? " " + frac : ""}"`;
+}
+function formatInchesForDisplay(raw) {
+  if (!raw) return raw;
+  const s = String(raw).trim();
+  if (s.includes('"') || s.includes("/")) return s; // already formatted
+  const num = parseFloat(s);
+  if (isNaN(num)) return s;
+  const { whole, eighths } = decimalToEighths(num);
+  const frac = EIGHTHS_FRACTION_LABEL[eighths];
+  return `${whole}${frac ? " " + frac : ""}"`;
+}
+function formatFeetInchesForDisplay(raw) {
+  if (!raw) return raw;
+  const s = String(raw).trim();
+  if (s.includes('"') || s.includes("'")) return s; // already formatted
+  const num = parseFloat(s);
+  if (isNaN(num)) return s;
+  const total = Math.round(num);
+  return `${Math.floor(total / 12)}'${total % 12}"`;
+}
+
 // Same drift/spotlight treatment as TeamPage.js's and GamePage.js's own
 // heroes (each page injects its own copy since CSS-in-JS here is scoped
 // per-component, not shared) — gives the player hero panel below the same
@@ -1572,12 +1622,12 @@ useEffect(() => {
   );
 
   const physicalMeasurements = [
-    {val:player.Height,label:"Height"},{val:player.Weight,label:"Weight"},
-    {val:player.Wingspan,label:"Wing"},{val:player["Arm Length"],label:"Arm"},{val:player["Hand Size"],label:"Hand"},
+    {val:formatHeightForDisplay(player.Height),label:"Height"},{val:player.Weight,label:"Weight"},
+    {val:formatInchesForDisplay(player.Wingspan),label:"Wing"},{val:formatInchesForDisplay(player["Arm Length"]),label:"Arm"},{val:formatInchesForDisplay(player["Hand Size"]),label:"Hand"},
   ].filter((m)=>m.val);
 
   const athleticMeasurements = [
-    {val:player["40 Yard"],label:"40 Yd"},{val:player.Vertical,label:"Vert"},{val:player.Broad,label:"Broad"},
+    {val:player["40 Yard"],label:"40 Yd"},{val:player.Vertical,label:"Vert"},{val:formatFeetInchesForDisplay(player.Broad),label:"Broad"},
     {val:player["3-Cone"],label:"3-Cone"},{val:player.Shuttle,label:"Shutt"},{val:player.Bench,label:"Bench"},
   ].filter((m)=>m.val);
 
@@ -1588,14 +1638,6 @@ useEffect(() => {
       <span style={{ fontSize:isMobile?"13px":"18px", fontWeight:900, color:color1, lineHeight:1.1 }}>{val}</span>
       <span style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color:"#888", letterSpacing:"0.08em", marginTop:"3px", textTransform:"uppercase" }}>{label}</span>
     </div>
-  );
-
-  // Physical/Athletic Testing group labels — the only visible headings for
-  // the Measurables section (there's no separate umbrella title above
-  // them), so each one is its own <h2> rather than an <h3> with no <h2>
-  // parent in between the page's <h1> and here.
-  const GroupLabel = ({ children }) => (
-    <h2 style={{ fontSize:"12px", fontWeight:900, letterSpacing:"0.12em", textTransform:"uppercase", color:"#666", marginBottom:"8px", textAlign:"center" }}>{children}</h2>
   );
 
   // ── Shared fixed-position placement for both margin ad cards, derived from
@@ -3033,25 +3075,19 @@ useEffect(() => {
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px", borderBottom: player.Bio ? "1px solid #eee" : undefined }}>
               {isMobile ? (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
-                  <h2 style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginBottom:"4px" }}>Physical</h2>
                   {physicalMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
-                  {hasAthletic && <>
-                    <h2 style={{ width:"100%", fontSize:"12px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase", color:"#666", textAlign:"center", marginTop:"8px", marginBottom:"4px" }}>Athletic Testing</h2>
-                    {athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
-                  </>}
+                  {hasAthletic && athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                 </div>
               ) : (
                 <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", gap:0 }}>
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                    <GroupLabel>Physical</GroupLabel>
                     <div style={{ display:"flex", gap:"7px", flexWrap:"wrap", justifyContent:"center" }}>
                       {physicalMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                     </div>
                   </div>
-                  {hasAthletic && <div style={{ width:"1px", background:"#e0e0e0", alignSelf:"stretch", margin:"18px 20px 0", flexShrink:0 }} />}
+                  {hasAthletic && <div style={{ width:"1px", background:"#e0e0e0", alignSelf:"stretch", margin:"0", flexShrink:0 }} />}
                   {hasAthletic && (
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                      <GroupLabel>Athletic Testing</GroupLabel>
                       <div style={{ display:"flex", gap:"7px", flexWrap:"wrap", justifyContent:"center" }}>
                         {athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
                       </div>
@@ -3065,19 +3101,25 @@ useEffect(() => {
           {player.Bio && (
             <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "20px 32px" }}>
               <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
-                <h2 style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#666", marginBottom: "8px" }}>
-                  Bio
-                </h2>
-                {/* Same bullet/paragraph renderer as evaluations — a bio
-                    written as several newline-separated paragraphs (or with
-                    a few • bullet lines for career highlights) now actually
-                    renders as such, instead of collapsing into one run-on
-                    paragraph since a plain <p> ignores newlines in its
-                    string content. Left-aligned rather than the old
-                    center-alignment — centered prose reads awkwardly once a
-                    bio is more than a single short line. */}
-                <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 500, color: "#333", lineHeight: 1.65, textAlign: "left" }}>
-                  {renderEvaluationText(player.Bio, "bio")}
+                {/* Same bold branded header the rest of the page uses
+                    (Community Scouting Report, etc.) instead of a small
+                    gray label — a plain gray-on-white block was reading as
+                    an afterthought next to everything else on this page. */}
+                <SectionTitle>Bio</SectionTitle>
+                {/* Same colored pull-quote treatment "Scout's Take" uses in
+                    evaluations — a team-color accent border + tinted card
+                    gives the bio some visual weight instead of just
+                    floating as plain paragraph text. */}
+                <div style={{ borderLeft: `4px solid ${color1}`, background: "#fafafa", borderRadius: "0 8px 8px 0", padding: isMobile ? "14px 16px" : "18px 22px" }}>
+                  {/* Same bullet/paragraph renderer as evaluations — a bio
+                      written as several newline-separated paragraphs (or with
+                      a few • bullet lines for career highlights) now actually
+                      renders as such, instead of collapsing into one run-on
+                      paragraph since a plain <p> ignores newlines in its
+                      string content. */}
+                  <div style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 600, color: "#1a1a1a", lineHeight: 1.7, textAlign: "left" }}>
+                    {renderEvaluationText(player.Bio, "bio")}
+                  </div>
                 </div>
               </div>
             </div>
@@ -3551,7 +3593,13 @@ useEffect(() => {
                     team has played (see handleToggleGameNotes above; the
                     same final game is offered to anyone evaluating a
                     player on either team). Starts collapsed behind a
-                    button; games already noted drop out of the picker. */}
+                    button; games already noted drop out of the picker.
+                    2026 is the completed/archived draft class (same class
+                    Grade gets locked for, see gradeIsLocked) — there's no
+                    ongoing season to take game-by-game notes on, so the
+                    whole feature drops out rather than showing an empty,
+                    permanently-unusable picker. */}
+                {player.Eligible !== "2026" && (
                 <div className="mb-4">
                   <button
                     type="button"
@@ -3671,6 +3719,7 @@ useEffect(() => {
                     </div>
                   )}
                 </div>
+                )}
 
                 <div className="flex flex-col gap-2">
                   {/* () => handleSaveEvaluation() — not onClick={handleSaveEvaluation}
