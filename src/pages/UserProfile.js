@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
 import {
@@ -60,7 +60,15 @@ async function fetchNamesByUid(uids) {
 }
 
 export default function UserProfile() {
-  const { user, logout } = useAuth();
+  // saveProfile aliased to syncAuthProfile — AuthContext's own version (not
+  // this page's local one below, which does the actual write plus the
+  // uniqueness check that one lacks) is what keeps the shared `profile`
+  // object other pages read (e.g. WePickHub.js's own display name on a
+  // submitted pick) in sync. Without calling it too, a rename here would
+  // write correctly to Firestore but the rest of the app would keep
+  // showing the old name until a full reload — the app has no other way
+  // to know its own cached profile just changed.
+  const { user, logout, saveProfile: syncAuthProfile } = useAuth();
   const [username, setUsername] = useState("");
   const [displayedUsername, setDisplayedUsername] = useState("");
   const [verified, setVerified] = useState(false);
@@ -80,6 +88,22 @@ export default function UserProfile() {
   const [showRequest, setShowRequest] = useState(false);
   const [showIssue, setShowIssue] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
+
+  // Pending incoming friend requests — fetched independently of FriendsPanel
+  // (which only mounts once the section is expanded) so the "👥 Friends"
+  // section header itself can show a badge before it's ever opened, same
+  // idea as Navbar.js's own Profile-link badge and We-Pick's Friends-tab
+  // badge. Re-fetches whenever the section is toggled closed, catching a
+  // count drop from accepting/declining a request while it was open.
+  const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
+  useEffect(() => {
+    if (!user) { setPendingFriendRequests(0); return; }
+    let cancelled = false;
+    getDocs(query(collection(db, "friendRequests"), where("toUid", "==", user.uid), where("status", "==", "pending")))
+      .then((snap) => { if (!cancelled) setPendingFriendRequests(snap.size); })
+      .catch((e) => { console.error("Profile pending-requests count error:", e); if (!cancelled) setPendingFriendRequests(0); });
+    return () => { cancelled = true; };
+  }, [user, showFriends]);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -122,6 +146,12 @@ export default function UserProfile() {
       username: rawUsername, usernameLower: lowerUsername,
     }, { merge: true });
     setDisplayedUsername(rawUsername);
+    // Keeps the shared AuthContext profile (and everywhere else in the app
+    // that reads it) in sync with the rename — see this file's own comment
+    // on syncAuthProfile above for why this can't just be skipped. A
+    // second small write to the same doc/fields, effectively a no-op on
+    // top of the one just above.
+    await syncAuthProfile(rawUsername);
     setError("");
     alert("Profile updated!");
   };
@@ -158,7 +188,7 @@ export default function UserProfile() {
   if (!user) return <p style={{ textAlign: "center", color: "red", marginTop: "40px" }}>Please sign in first.</p>;
   if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="60vh" />;
 
-  const SectionHeader = ({ label, open, onToggle }) => (
+  const SectionHeader = ({ label, open, onToggle, badge }) => (
     <button
       onClick={onToggle}
       style={{
@@ -167,11 +197,25 @@ export default function UserProfile() {
         marginBottom: "4px",
       }}
     >
-      <div style={{ textAlign: "left" }}>
-        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
-          {label}
+      <div style={{ textAlign: "left", display: "flex", alignItems: "center", gap: "8px" }}>
+        <div>
+          <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+            {label}
+          </div>
+          <div style={{ height: "3px", backgroundColor: BLUE, borderRadius: "2px", marginTop: "4px" }} />
         </div>
-        <div style={{ height: "3px", backgroundColor: BLUE, borderRadius: "2px", marginTop: "4px" }} />
+        {/* Same red-pill badge as Navbar.js's Profile-link sticker and
+            We-Pick's own Friends-tab badge — this section can carry the
+            same kind of notification even while collapsed. */}
+        {!!badge && (
+          <span style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
+            background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900, flexShrink: 0,
+          }}>
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
       </div>
       <span style={{ color: BLUE, fontWeight: 900, fontSize: "14px", marginLeft: "12px", flexShrink: 0 }}>
         {open ? "▲" : "▼"}
@@ -280,7 +324,7 @@ export default function UserProfile() {
               functionality as We-Pick's own Friends tab (WePickHub.js),
               see FriendsPanel below. */}
           <div style={{ marginBottom: "18px" }}>
-            <SectionHeader label="👥 Friends" open={showFriends} onToggle={() => setShowFriends((p) => !p)} />
+            <SectionHeader label="👥 Friends" open={showFriends} onToggle={() => setShowFriends((p) => !p)} badge={pendingFriendRequests} />
             {showFriends && <FriendsPanel isMobile={isMobile} />}
           </div>
 
@@ -356,6 +400,17 @@ function FriendsPanel({ isMobile }) {
   const [friends, setFriends] = useState([]);
   const [friendsLoading, setFriendsLoading] = useState(true);
   const [removingUid, setRemovingUid] = useState(null);
+
+  // Recommendations — same logic as We-Pick's own Friends tab
+  // (WePickHub.js's FriendsSection): people who share at least one mutual
+  // friend but aren't a friend or pending request yet, ranked by mutual
+  // count. rawRecommendations only re-fetches when your own friend list
+  // changes; the outgoing/incoming exclusion is cheap reactive filtering on
+  // top of it.
+  const [rawRecommendations, setRawRecommendations] = useState([]);
+  const [recsLoading, setRecsLoading] = useState(false);
+  const [visibleRecsCount, setVisibleRecsCount] = useState(3);
+  const [sendingRecUid, setSendingRecUid] = useState(null);
 
   // Own friend code — generated once and saved the first time this panel
   // is opened without one on file yet. Retries (up to 8x, vanishingly
@@ -438,6 +493,68 @@ function FriendsPanel({ isMobile }) {
     loadFriends();
     return () => { cancelled = true; };
   }, [user]);
+
+  // Friend-of-friend recommendations — for each of your friends, read
+  // *their* friendships (any signed-in user can now read any friendship
+  // doc — see firestore.rules' own comment) and tally how many of your
+  // friends also have each third person as a friend.
+  useEffect(() => {
+    if (!user || friends.length === 0) { setRawRecommendations([]); return; }
+    let cancelled = false;
+    const computeRecommendations = async () => {
+      setRecsLoading(true);
+      try {
+        const friendUids = friends.map((f) => f.uid);
+        const friendUidSet = new Set(friendUids);
+        const snaps = await Promise.all(
+          friendUids.map((fid) => getDocs(query(collection(db, "friendships"), where("uids", "array-contains", fid))))
+        );
+        const mutualCounts = new Map(); // candidateUid -> count
+        snaps.forEach((snap, i) => {
+          const fid = friendUids[i];
+          snap.docs.forEach((d) => {
+            const pair = d.data().uids || [];
+            const other = pair.find((u) => u !== fid);
+            if (!other || other === user.uid || friendUidSet.has(other)) return;
+            mutualCounts.set(other, (mutualCounts.get(other) || 0) + 1);
+          });
+        });
+        const candidateUids = [...mutualCounts.keys()];
+        if (candidateUids.length === 0) { if (!cancelled) setRawRecommendations([]); return; }
+        const nameMap = await fetchNamesByUid(candidateUids);
+        const list = candidateUids
+          .map((uid) => ({ uid, mutualCount: mutualCounts.get(uid), name: nameMap[uid] || "Anonymous Fan" }))
+          .sort((a, b) => b.mutualCount - a.mutualCount || a.name.localeCompare(b.name));
+        if (!cancelled) setRawRecommendations(list);
+      } catch (e) {
+        console.error("Friend recommendations fetch error:", e);
+        if (!cancelled) setRawRecommendations([]);
+      } finally {
+        if (!cancelled) setRecsLoading(false);
+      }
+    };
+    computeRecommendations();
+    return () => { cancelled = true; };
+  }, [user, friends]);
+
+  const recommendations = useMemo(
+    () => rawRecommendations.filter((r) => !outgoing.some((o) => o.toUid === r.uid) && !incoming.some((i) => i.fromUid === r.uid)),
+    [rawRecommendations, outgoing, incoming]
+  );
+
+  const handleSendRequestToRecommendation = async (targetUid, targetName) => {
+    setSendingRecUid(targetUid);
+    try {
+      const payload = { fromUid: user.uid, toUid: targetUid, status: "pending", createdAt: serverTimestamp() };
+      const ref = await addDoc(collection(db, "friendRequests"), payload);
+      setOutgoing((prev) => [...prev, { id: ref.id, ...payload, name: targetName }]);
+    } catch (e) {
+      console.error("Send request (from recommendation) error:", e);
+      alert("Failed to send request — try again.");
+    } finally {
+      setSendingRecUid(null);
+    }
+  };
 
   const handleSendRequest = async () => {
     const code = inputCode.trim().toUpperCase();
@@ -626,6 +743,51 @@ function FriendsPanel({ isMobile }) {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* People You May Know — same feature as We-Pick's own Friends tab,
+          reskinned light. 3 at a time, "View More" reveals the rest. */}
+      {!recsLoading && recommendations.length > 0 && (
+        <div>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>
+            🤝 People You May Know
+          </div>
+          <div style={{ border: "2px solid #eee", borderRadius: "8px", overflow: "hidden" }}>
+            {recommendations.slice(0, visibleRecsCount).map((r) => (
+              <div key={r.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 14px", borderBottom: "1px solid #f0f0f0" }}>
+                <div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "#333" }}>{r.name}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#999" }}>
+                    {r.mutualCount} mutual friend{r.mutualCount !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleSendRequestToRecommendation(r.uid, r.name)}
+                  disabled={sendingRecUid === r.uid}
+                  style={{
+                    background: BLUE, color: "#fff", border: "2px solid " + GOLD, borderRadius: "5px",
+                    padding: "5px 12px", fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.04em",
+                    cursor: sendingRecUid === r.uid ? "default" : "pointer", opacity: sendingRecUid === r.uid ? 0.6 : 1,
+                  }}
+                >
+                  {sendingRecUid === r.uid ? "…" : "Add"}
+                </button>
+              </div>
+            ))}
+            {visibleRecsCount < recommendations.length && (
+              <button
+                onClick={() => setVisibleRecsCount((c) => c + 3)}
+                style={{
+                  display: "block", width: "100%", padding: "9px 14px",
+                  background: "#fafafa", border: "none", borderTop: "1px solid #f0f0f0",
+                  color: BLUE, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                }}
+              >
+                View More ▾
+              </button>
+            )}
           </div>
         </div>
       )}

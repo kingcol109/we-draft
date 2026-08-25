@@ -1929,6 +1929,17 @@ function FriendsSection() {
   const [friendsLoading, setFriendsLoading] = useState(true);
   const [removingUid, setRemovingUid] = useState(null);
 
+  // Recommendations — people who share at least one mutual friend with you
+  // but aren't a friend (or pending request) yet, ranked by mutual count.
+  // rawRecommendations is the expensive part (re-fetched only when your own
+  // friend list changes); the outgoing/incoming exclusion below is cheap
+  // reactive filtering on top of it, so sending a request from this list
+  // makes that person disappear immediately without a re-fetch.
+  const [rawRecommendations, setRawRecommendations] = useState([]);
+  const [recsLoading, setRecsLoading] = useState(false);
+  const [visibleRecsCount, setVisibleRecsCount] = useState(3);
+  const [sendingRecUid, setSendingRecUid] = useState(null);
+
   // Own friend code — generated once and saved to users/{uid} the first
   // time this tab is visited without one on file yet. Retries (up to 8x,
   // vanishingly unlikely to ever need more than one) on the rare chance a
@@ -2016,6 +2027,75 @@ function FriendsSection() {
     loadFriends();
     return () => { cancelled = true; };
   }, [user]);
+
+  // Friend-of-friend recommendations — for each of your friends, read
+  // *their* friendships (allowed for any signed-in user, not just the two
+  // people in each one — see firestore.rules' own comment on why) and tally
+  // how many of your friends also have each third person as a friend. A
+  // mutual count of 0 never happens here since every candidate came from
+  // being someone's friend-of-a-friend in the first place. Re-runs only
+  // when your own friend list changes, not on every request sent/received.
+  useEffect(() => {
+    if (!user || friends.length === 0) { setRawRecommendations([]); return; }
+    let cancelled = false;
+    const computeRecommendations = async () => {
+      setRecsLoading(true);
+      try {
+        const friendUids = friends.map((f) => f.uid);
+        const friendUidSet = new Set(friendUids);
+        const snaps = await Promise.all(
+          friendUids.map((fid) => getDocs(query(collection(db, "friendships"), where("uids", "array-contains", fid))))
+        );
+        const mutualCounts = new Map(); // candidateUid -> count
+        snaps.forEach((snap, i) => {
+          const fid = friendUids[i];
+          snap.docs.forEach((d) => {
+            const pair = d.data().uids || [];
+            const other = pair.find((u) => u !== fid);
+            if (!other || other === user.uid || friendUidSet.has(other)) return; // me, or already my own friend
+            mutualCounts.set(other, (mutualCounts.get(other) || 0) + 1);
+          });
+        });
+        const candidateUids = [...mutualCounts.keys()];
+        if (candidateUids.length === 0) { if (!cancelled) setRawRecommendations([]); return; }
+        const nameMap = await fetchNamesByUid(candidateUids);
+        const list = candidateUids
+          .map((uid) => ({ uid, mutualCount: mutualCounts.get(uid), name: nameMap[uid] || "Anonymous Fan" }))
+          .sort((a, b) => b.mutualCount - a.mutualCount || a.name.localeCompare(b.name));
+        if (!cancelled) setRawRecommendations(list);
+      } catch (e) {
+        console.error("Friend recommendations fetch error:", e);
+        if (!cancelled) setRawRecommendations([]);
+      } finally {
+        if (!cancelled) setRecsLoading(false);
+      }
+    };
+    computeRecommendations();
+    return () => { cancelled = true; };
+  }, [user, friends]);
+
+  // Cheap reactive filter on top of the expensive fetch above — a
+  // recommendation drops off the list the instant a request is sent (or if
+  // they'd already sent you one), no re-fetch needed.
+  const recommendations = useMemo(
+    () => rawRecommendations.filter((r) => !outgoing.some((o) => o.toUid === r.uid) && !incoming.some((i) => i.fromUid === r.uid)),
+    [rawRecommendations, outgoing, incoming]
+  );
+
+  const handleSendRequestToRecommendation = async (targetUid, targetName) => {
+    if (!user) { login(); return; }
+    setSendingRecUid(targetUid);
+    try {
+      const payload = { fromUid: user.uid, toUid: targetUid, status: "pending", createdAt: serverTimestamp() };
+      const ref = await addDoc(collection(db, "friendRequests"), payload);
+      setOutgoing((prev) => [...prev, { id: ref.id, ...payload, name: targetName }]);
+    } catch (e) {
+      console.error("Send request (from recommendation) error:", e);
+      alert("Failed to send request — try again.");
+    } finally {
+      setSendingRecUid(null);
+    }
+  };
 
   const handleSendRequest = async () => {
     if (!user) { login(); return; }
@@ -2222,6 +2302,56 @@ function FriendsSection() {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* People You May Know — friend-of-friend recommendations, ranked by
+          mutual count. Only ever shows once you have at least one friend
+          (nothing to compute mutuals from otherwise) and at least one real
+          candidate survives the pending-request filter. 3 at a time, "View
+          More" reveals the rest in the same +3 batches. */}
+      {!recsLoading && recommendations.length > 0 && (
+        <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
+          <div style={{ background: GOLD, padding: "10px 16px" }}>
+            <div style={{ color: "#06162c", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              🤝 People You May Know
+            </div>
+          </div>
+          <div style={{ background: "rgba(0,0,0,0.25)" }}>
+            {recommendations.slice(0, visibleRecsCount).map((r) => (
+              <div key={r.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                <div>
+                  <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{r.name}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)" }}>
+                    {r.mutualCount} mutual friend{r.mutualCount !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleSendRequestToRecommendation(r.uid, r.name)}
+                  disabled={sendingRecUid === r.uid}
+                  style={{
+                    background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "6px",
+                    padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
+                    cursor: sendingRecUid === r.uid ? "default" : "pointer", opacity: sendingRecUid === r.uid ? 0.6 : 1,
+                  }}
+                >
+                  {sendingRecUid === r.uid ? "…" : "Add Friend"}
+                </button>
+              </div>
+            ))}
+            {visibleRecsCount < recommendations.length && (
+              <button
+                onClick={() => setVisibleRecsCount((c) => c + 3)}
+                style={{
+                  display: "block", width: "100%", padding: "10px 14px",
+                  background: "none", border: "none", borderTop: "1px solid rgba(255,255,255,0.1)",
+                  color: GOLD, fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                }}
+              >
+                View More ▾
+              </button>
+            )}
           </div>
         </div>
       )}
