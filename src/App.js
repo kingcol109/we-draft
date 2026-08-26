@@ -30,6 +30,10 @@ const CFBPage = lazy(() => import("./pages/CFBPage"));
 // Teams
 const TeamPage = lazy(() => import("./pages/TeamPage"));
 const NFLTeamPage = lazy(() => import("./pages/NFLTeamPage"));
+// High school team pages — in development, deliberately unlisted (see that
+// file's own top comment): noindexed and never linked from anywhere else
+// on the site, reachable only via a direct URL.
+const HighSchoolTeamPage = lazy(() => import("./pages/HighSchoolTeamPage"));
 
 // Mock Draft
 const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
@@ -129,6 +133,7 @@ function MainLayout() {
             {/* Redirect old /player2 URLs to canonical /player URLs */}
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />
+            <Route path="/hs/:slug" element={<HighSchoolTeamPage />} />
             <Route path="/nfl/:teamId" element={<NFLTeamPage />} />
             <Route path="/boards" element={<UserBoards />} />
             <Route path="/boards/feed" element={<MyFeed />} />

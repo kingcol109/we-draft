@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -183,6 +183,24 @@ const STATE_ABBR = {
   "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
   "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
 };
+
+// High school team page slugs (/hs/buford-ga) — deterministic from Name +
+// State rather than a stored field, so a rename (see
+// HighSchoolSchoolsPane's cascadeRenameHighSchool) never leaves a stale
+// slug behind; the page always computes the same URL a school's current
+// Name/State would produce. Same cleanup approach as generateSlug below,
+// applied to "Name State-abbreviation" instead of a player's name parts.
+function toHsSlug(name, state) {
+  const abbr = STATE_ABBR[state] || state || "";
+  const raw = `${name || ""} ${abbr}`;
+  return raw
+    .replace(/['’`.]/g, "")
+    .replace(/[^a-zA-Z0-9\- ]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .toLowerCase()
+    .replace(/-+/g, "-");
+}
 
 function draftClassForRecruitClass(recruitClass) {
   const y = parseInt(recruitClass, 10);
@@ -600,7 +618,12 @@ function PlayerDataSection() {
   const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
   const highSchoolLabel = (name) => {
     const match = highSchoolOptions.find((h) => h.Name === name);
-    return match && match.State ? name + " (" + (STATE_ABBR[match.State] || match.State) + ")" : name;
+    if (!match) return name;
+    // City only ever comes from the highSchools doc itself (set via
+    // Branding > Teams > High School > Schools), never from this lazy-seed
+    // path, so this is the one place it can show up at all.
+    const cityState = [match.City, match.State ? (STATE_ABBR[match.State] || match.State) : ""].filter(Boolean).join(", ");
+    return cityState ? `${name} (${cityState})` : name;
   };
   // Mirrors RecruitsSection's own handleHighSchoolChange: picking (or
   // exactly typing) a saved high school also fills in State from that
@@ -1938,7 +1961,12 @@ function HistoricalSection() {
   const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
   const highSchoolLabel = (name) => {
     const match = highSchoolOptions.find((h) => h.Name === name);
-    return match && match.State ? name + " (" + (STATE_ABBR[match.State] || match.State) + ")" : name;
+    if (!match) return name;
+    // City only ever comes from the highSchools doc itself (set via
+    // Branding > Teams > High School > Schools), never from this lazy-seed
+    // path, so this is the one place it can show up at all.
+    const cityState = [match.City, match.State ? (STATE_ABBR[match.State] || match.State) : ""].filter(Boolean).join(", ");
+    return cityState ? `${name} (${cityState})` : name;
   };
   // Mirrors RecruitsSection/PlayerDataSection's own handleHighSchoolChange.
   const handleHighSchoolChange = (name) => {
@@ -3881,7 +3909,12 @@ function RecruitsSection() {
   const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
   const highSchoolLabel = (name) => {
     const match = highSchoolOptions.find((h) => h.Name === name);
-    return match && match.State ? name + " (" + (STATE_ABBR[match.State] || match.State) + ")" : name;
+    if (!match) return name;
+    // City only ever comes from the highSchools doc itself (set via
+    // Branding > Teams > High School > Schools), never from this lazy-seed
+    // path, so this is the one place it can show up at all.
+    const cityState = [match.City, match.State ? (STATE_ABBR[match.State] || match.State) : ""].filter(Boolean).join(", ");
+    return cityState ? `${name} (${cityState})` : name;
   };
 
   const allPositions = useMemo(() => {
@@ -9500,13 +9533,14 @@ function HighSchoolBrandingPane() {
 // collection RecruitsSection/PlayerDataSection/HistoricalSection lazily
 // seed with just {Name, State} the first time an admin types a new one into
 // a player/recruit/historical record. This pane is where the rest gets
-// filled in (City, Mascot, logos), or where a school can be added by hand
-// ahead of time instead of waiting for one of those sections to create it.
-// Deliberately its own component rather than squeezed into TeamBrandingPane
-// via LEAGUE_CONFIG — high schools have no conference/division, no NFL
-// association, and only two logo slots (no wordmark, no secondary/black
-// variants, no brand colors), so forcing that shared shape would mean more
-// conditional branches in TeamBrandingPane than it'd actually save here. ──
+// filled in (City, Mascot, logos, colors), or where a school can be added
+// by hand ahead of time instead of waiting for one of those sections to
+// create it. Deliberately its own component rather than squeezed into
+// TeamBrandingPane via LEAGUE_CONFIG — high schools have no conference/
+// division and no NFL association, so forcing that shared shape would mean
+// more conditional branches in TeamBrandingPane than it'd actually save
+// here, even though the brand-asset fields themselves (logo/wordmark/
+// color/short name) now mirror it closely. ──
 function HighSchoolSchoolsPane() {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9517,6 +9551,7 @@ function HighSchoolSchoolsPane() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [logoCopyStatus, setLogoCopyStatus] = useState({});
+  const [copiedField, setCopiedField] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [removing, setRemoving] = useState(false);
 
@@ -9562,22 +9597,35 @@ function HighSchoolSchoolsPane() {
     setSelectedSchool(h);
     setFormState({
       Name: h.Name || "", City: h.City || "", State: h.State || "",
-      Mascot: h.Mascot || "", Logo1: h.Logo1 || "", LogoDark: h.LogoDark || "",
+      Mascot: h.Mascot || "", Short: h.Short || "",
+      // Ranking has no doc-level default — a school saved before this field
+      // existed just has no value at all, so it's defaulted to 1 here at
+      // read time rather than needing a backfill migration.
+      Ranking: h.Ranking || 1,
+      Logo1: h.Logo1 || "", LogoDark: h.LogoDark || "",
+      Wordmark: h.Wordmark || "", WordmarkDark: h.WordmarkDark || "",
+      Color1: h.Color1 || BLUE, Color2: h.Color2 || GOLD,
     });
     setSaveMessage("");
     setLogoCopyStatus({});
+    setCopiedField("");
     setConfirmDelete(false);
   };
 
-  // Name only ever gets set here at creation, same reasoning as
-  // TeamBrandingPane's startNewTeam — players/recruits/historical records
-  // reference a high school by this exact string, so renaming an existing
-  // one here wouldn't cascade and would just orphan those references.
+  // Unlike TeamBrandingPane's team name (immutable after creation, since
+  // nothing there cascade-updates a rename), a high school's Name can be
+  // edited anytime — handleSave's own cascadeRenameHighSchool below
+  // rewrites every players/recruits/historical record already tagged with
+  // the old name so nothing orphans.
   const startNewSchool = () => {
     setSelectedSchool({ id: null, isNew: true });
-    setFormState({ Name: "", City: "", State: "", Mascot: "", Logo1: "", LogoDark: "" });
+    setFormState({
+      Name: "", City: "", State: "", Mascot: "", Short: "", Ranking: 1,
+      Logo1: "", LogoDark: "", Wordmark: "", WordmarkDark: "", Color1: BLUE, Color2: GOLD,
+    });
     setSaveMessage("");
     setLogoCopyStatus({});
+    setCopiedField("");
     setConfirmDelete(false);
   };
 
@@ -9614,16 +9662,56 @@ function HighSchoolSchoolsPane() {
       });
   };
 
+  // Text-copy for the color hex fields — same as TeamBrandingPane's own
+  // handleCopy.
+  const handleCopy = async (field, value) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField((f) => (f === field ? "" : f)), 1500);
+    } catch (e) {
+      console.error("Clipboard copy failed:", e);
+    }
+  };
+
+  // Renaming an existing school has to update every players/recruits/
+  // historical doc that references it by this exact string too, or they'd
+  // silently orphan (still showing the old name, no longer matching the
+  // renamed highSchools doc at all). Queries each collection for an exact
+  // match on the old name and rewrites HighSchool on every hit — chunked
+  // into batches of 450 (Firestore's own cap is 500 writes/batch) even
+  // though a single high school realistically never has enough tagged
+  // records to need more than one.
+  const cascadeRenameHighSchool = async (oldName, newName) => {
+    const collections = ["players", "recruits", "historical"];
+    const snaps = await Promise.all(
+      collections.map((c) => getDocs(query(collection(db, c), where("HighSchool", "==", oldName))))
+    );
+    const refs = [];
+    snaps.forEach((snap, i) => {
+      snap.docs.forEach((d) => refs.push(doc(db, collections[i], d.id)));
+    });
+    for (let i = 0; i < refs.length; i += 450) {
+      const batch = writeBatch(db);
+      refs.slice(i, i + 450).forEach((ref) => batch.update(ref, { HighSchool: newName }));
+      await batch.commit();
+    }
+    return refs.length;
+  };
+
   const handleSave = async () => {
     if (!selectedSchool || !formState) return;
-    if (isNewSchool) {
-      if (!formState.Name.trim()) {
-        setSaveMessage("Failed: high school name is required.");
-        return;
-      }
-      const dupe = schools.find((h) => (h.Name || "").trim().toLowerCase() === formState.Name.trim().toLowerCase());
+    const trimmedName = formState.Name.trim();
+    if (!trimmedName) {
+      setSaveMessage("Failed: high school name is required.");
+      return;
+    }
+    const renaming = !isNewSchool && trimmedName !== selectedSchool.Name;
+    if (isNewSchool || renaming) {
+      const dupe = schools.find((h) => h.id !== selectedSchool.id && (h.Name || "").trim().toLowerCase() === trimmedName.toLowerCase());
       if (dupe) {
-        setSaveMessage(`"${formState.Name.trim()}" already exists — select it from the list to edit instead.`);
+        setSaveMessage(`"${trimmedName}" already exists — select it from the list to edit instead.`);
         return;
       }
     }
@@ -9631,12 +9719,18 @@ function HighSchoolSchoolsPane() {
     setSaveMessage("");
     try {
       const payload = {
-        ...(isNewSchool ? { Name: formState.Name.trim() } : {}),
+        Name: trimmedName,
         City: formState.City.trim(),
         State: formState.State || "",
         Mascot: formState.Mascot.trim(),
+        Short: formState.Short.trim(),
+        Ranking: Number(formState.Ranking) || 1,
         Logo1: formState.Logo1.trim(),
         LogoDark: formState.LogoDark.trim(),
+        Wordmark: formState.Wordmark.trim(),
+        WordmarkDark: formState.WordmarkDark.trim(),
+        Color1: formState.Color1.trim(),
+        Color2: formState.Color2.trim(),
         updatedAt: serverTimestamp(),
       };
       if (isNewSchool) {
@@ -9646,10 +9740,12 @@ function HighSchoolSchoolsPane() {
         setSelectedSchool(newSchool);
         setSaveMessage("High school created.");
       } else {
+        let renamedCount = 0;
+        if (renaming) renamedCount = await cascadeRenameHighSchool(selectedSchool.Name, trimmedName);
         await updateDoc(doc(db, "highSchools", selectedSchool.id), payload);
-        setSchools((prev) => prev.map((h) => (h.id === selectedSchool.id ? { ...h, ...payload } : h)));
+        setSchools((prev) => prev.map((h) => (h.id === selectedSchool.id ? { ...h, ...payload } : h)).sort((a, b) => (a.Name || "").localeCompare(b.Name || "")));
         setSelectedSchool((prev) => (prev ? { ...prev, ...payload } : prev));
-        setSaveMessage("Saved.");
+        setSaveMessage(renaming ? `Saved — renamed on ${renamedCount} record${renamedCount !== 1 ? "s" : ""}.` : "Saved.");
       }
     } catch (e) {
       console.error("Admin high school branding save error:", e);
@@ -9721,6 +9817,8 @@ function HighSchoolSchoolsPane() {
             </div>
             {filtered.map((h) => {
               const isSelected = selectedSchool?.id === h.id;
+              const c1 = h.Color1 || "#ccc";
+              const c2 = h.Color2 || "#eee";
               return (
                 <div
                   key={h.id}
@@ -9737,7 +9835,7 @@ function HighSchoolSchoolsPane() {
                 >
                   <div style={{
                     flexShrink: 0, width: "40px", height: "40px", borderRadius: "8px",
-                    background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                    background: c1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
                   }}>
                     {(h.LogoDark || h.Logo1) ? (
                       <img src={h.LogoDark || h.Logo1} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -9753,6 +9851,13 @@ function HighSchoolSchoolsPane() {
                       {[h.City, h.State ? (STATE_ABBR[h.State] || h.State) : "", h.Mascot].filter(Boolean).join(" · ") || "—"}
                     </div>
                   </div>
+                  {/* Same little color-dot pair TeamBrandingPane's own team
+                      list rows show — a quick visual of a school's saved
+                      Color1/Color2 without opening it. */}
+                  <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                    <div title={"Color 1: " + c1} style={{ width: "16px", height: "16px", borderRadius: "50%", background: c1, border: "1px solid rgba(0,0,0,0.15)" }} />
+                    <div title={"Color 2: " + c2} style={{ width: "16px", height: "16px", borderRadius: "50%", background: c2, border: "1px solid rgba(0,0,0,0.15)" }} />
+                  </div>
                 </div>
               );
             })}
@@ -9761,10 +9866,25 @@ function HighSchoolSchoolsPane() {
       </div>
 
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
-        <div style={{ background: GOLD, padding: "10px 16px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             {isNewSchool ? (formState?.Name || "New High School") : (selectedSchool ? (selectedSchool.Name || "Edit High School") : "Select a High School")}
           </div>
+          {/* Only a Ranking-3 school actually has a page — see
+              HighSchoolTeamPage.js's own "not available" gate for
+              everything else. Not linked from anywhere public; this is
+              purely an admin convenience, same as the "View player page ↗"
+              link elsewhere in this panel. */}
+          {!isNewSchool && formState?.Ranking === 3 && formState?.Name && (
+            <a
+              href={`/hs/${toHsSlug(formState.Name, formState.State)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ marginLeft: "auto", flexShrink: 0, background: "rgba(255,255,255,0.2)", color: "#fff", border: "2px solid #fff", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none", whiteSpace: "nowrap" }}
+            >
+              View Page ↗
+            </a>
+          )}
         </div>
 
         {!selectedSchool || !formState ? (
@@ -9774,16 +9894,19 @@ function HighSchoolSchoolsPane() {
         ) : (
           <div style={{ padding: "16px", maxHeight: "760px", overflowY: "auto" }}>
             <FieldGroup>
-              {isNewSchool && (
-                <FieldRow label="School Name">
-                  <input
-                    value={formState.Name}
-                    onChange={(e) => handleFieldChange("Name", e.target.value)}
-                    placeholder="High School Name"
-                    style={inputStyle}
-                  />
-                </FieldRow>
-              )}
+              <FieldRow label="School Name">
+                <input
+                  value={formState.Name}
+                  onChange={(e) => handleFieldChange("Name", e.target.value)}
+                  placeholder="High School Name"
+                  style={inputStyle}
+                />
+                {!isNewSchool && (
+                  <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                    Renaming updates every player, recruit, and historical record already tagged with this school.
+                  </div>
+                )}
+              </FieldRow>
               <FieldRow label="City">
                 <input
                   value={formState.City}
@@ -9806,6 +9929,37 @@ function HighSchoolSchoolsPane() {
                   style={inputStyle}
                 />
               </FieldRow>
+              <FieldRow label="Short Name">
+                <input
+                  value={formState.Short}
+                  onChange={(e) => handleFieldChange("Short", e.target.value)}
+                  placeholder="e.g. IMG"
+                  style={inputStyle}
+                />
+              </FieldRow>
+              {/* No display logic reads this yet — just admin-set for now,
+                  defaults to 1 for every school (including ones saved
+                  before this field existed, via selectSchool/startNewSchool
+                  above) until an admin changes it. */}
+              <FieldRow label="Ranking">
+                <div style={{ display: "flex", gap: "6px" }}>
+                  {[1, 2, 3].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => handleFieldChange("Ranking", n)}
+                      style={{
+                        flex: 1, padding: "8px", fontWeight: 900, fontSize: "13px",
+                        border: "2px solid " + GOLD, borderRadius: "6px", cursor: "pointer",
+                        background: formState.Ranking === n ? BLUE : "#fff",
+                        color: formState.Ranking === n ? "#fff" : BLUE,
+                      }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </FieldRow>
               <LogoUrlField
                 label="Logo 1"
                 value={formState.Logo1}
@@ -9819,6 +9973,34 @@ function HighSchoolSchoolsPane() {
                 onChange={(v) => handleFieldChange("LogoDark", v)}
                 onCopy={() => handleCopyImage("LogoDark", formState.LogoDark)}
                 copyStatus={logoCopyStatus.LogoDark || "idle"}
+              />
+              <LogoUrlField
+                label="Wordmark"
+                value={formState.Wordmark}
+                onChange={(v) => handleFieldChange("Wordmark", v)}
+                onCopy={() => handleCopyImage("Wordmark", formState.Wordmark)}
+                copyStatus={logoCopyStatus.Wordmark || "idle"}
+              />
+              <LogoUrlField
+                label="Wordmark (Dark)"
+                value={formState.WordmarkDark}
+                onChange={(v) => handleFieldChange("WordmarkDark", v)}
+                onCopy={() => handleCopyImage("WordmarkDark", formState.WordmarkDark)}
+                copyStatus={logoCopyStatus.WordmarkDark || "idle"}
+              />
+              <ColorHexField
+                label="Color 1 (Primary)"
+                value={formState.Color1}
+                onChange={(v) => handleFieldChange("Color1", v)}
+                onCopy={() => handleCopy("Color1", formState.Color1)}
+                copied={copiedField === "Color1"}
+              />
+              <ColorHexField
+                label="Color 2 (Secondary)"
+                value={formState.Color2}
+                onChange={(v) => handleFieldChange("Color2", v)}
+                onCopy={() => handleCopy("Color2", formState.Color2)}
+                copied={copiedField === "Color2"}
               />
             </FieldGroup>
 
