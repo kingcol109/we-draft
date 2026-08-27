@@ -27,6 +27,7 @@ export default function NewsArticle() {
   const { id } = useParams();
   const [article, setArticle] = useState(null);
   const [sidebarItems, setSidebarItems] = useState([]);
+  const [video, setVideo] = useState(null);
   const [mentionedPlayers, setMentionedPlayers] = useState([]);
   const [mentionedGames, setMentionedGames] = useState([]);
   const [schoolInfo, setSchoolInfo] = useState({}); // School name -> { logo, logoDark, wordmark, wordmarkDark, slug, color1, color2 }
@@ -133,6 +134,24 @@ export default function NewsArticle() {
     fetch();
   }, [article]);
 
+  // Tagged video — article.videoId is ArticlesManager.js's own video-
+  // collection picker (mirrors PerformancePage.js's videoId/video handling).
+  // A legacy article saved before this field existed only has the old
+  // article.videoUrl string, in which case there's no video doc to fetch
+  // and the below-title "Watch Video" button (see videoLinks below) is
+  // still what renders for it.
+  useEffect(() => {
+    setVideo(null);
+    if (article?.type !== "article" || !article.videoId) return;
+    const fetch = async () => {
+      try {
+        const snap = await getDoc(doc(db, "videos", article.videoId));
+        if (snap.exists()) setVideo({ id: snap.id, ...snap.data() });
+      } catch (err) { console.error("Error loading article video:", err); }
+    };
+    fetch();
+  }, [article]);
+
   // Games mentioned — same shape/ordering guarantee as mentionedPlayers
   // above, sourced from article.gameIds (ArticlesManager.js's Tagged Games
   // list).
@@ -191,7 +210,22 @@ export default function NewsArticle() {
 
   const rawHtml = article.content || article.long || "";
   const cleanHtml = rawHtml;
-  const videoLinks = article.videoUrl ? [{ href: article.videoUrl, label: "Watch Video" }] : [];
+  // Same per-player title/thumb override resolution as PerformancePage.js's
+  // own videoDisplay — prefer the item tagged to this article's first
+  // mentioned player, fall back to the first item, then the video's generic
+  // title/thumb.
+  const videoItems = Array.isArray(video?.items) ? video.items : [];
+  const firstMentionedId = article.playerIds?.[0];
+  const videoMatched = videoItems.find((it) => it.playerId === firstMentionedId) || null;
+  const videoFirst = videoItems[0] || null;
+  const videoDisplay = video ? {
+    title: videoMatched?.title || videoFirst?.title || video.GenTitle || "",
+    thumb: videoMatched?.thumb || videoFirst?.thumb || video.GenThumb || "",
+  } : null;
+  // Legacy fallback only — an article saved before the videoId picker
+  // existed still just has a raw pasted URL, with no video doc to build a
+  // sidebar card from.
+  const videoLinks = !videoDisplay && article.videoUrl ? [{ href: article.videoUrl, label: "Watch Video" }] : [];
 
   const rawText = article.summary || rawHtml.replace(/<[^>]+>/g, "");
   const canonicalUrl = `https://we-draft.com/news/${article.slug}`;
@@ -250,12 +284,75 @@ export default function NewsArticle() {
     );
   };
 
-  // ── Players Mentioned + More News — split out of the sidebar column so
-  // mobile can lay them out as their own separately-ordered grid items
-  // (article first, then mentioned players, then other articles) instead
-  // of as one "sidebar" block that used to come before the article on
-  // mobile. Desktop is unaffected — it still stacks both inside a single
-  // sticky sidebar column exactly as before. ──
+  // ── Video + Players Mentioned + More News — split out of the sidebar
+  // column so mobile can lay them out as their own separately-ordered grid
+  // items (article first, then video, then mentioned players, then other
+  // articles) instead of as one "sidebar" block that used to come before
+  // the article on mobile. Desktop is unaffected — it still stacks all of
+  // them inside a single sticky sidebar column exactly as before. ──
+  // Video card, shared look with PerformancePage.js's own VideoBlock — see
+  // its comments for why the title/thumb resolve the way they do above.
+  const VideoBlock = videoDisplay && (
+    <div>
+      <div style={{ marginBottom: "14px" }}>
+        <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, marginBottom: "5px" }}>
+          Video
+        </div>
+        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      </div>
+      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        <a
+          href={video.Video}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="wd-video-card"
+          style={{ display: "block", position: "relative", textDecoration: "none" }}
+        >
+          <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+            {videoDisplay.thumb ? (
+              <img
+                className="wd-video-thumb"
+                src={videoDisplay.thumb}
+                alt={videoDisplay.title || "Video thumbnail"}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                loading="lazy"
+              />
+            ) : (
+              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "#fff", fontSize: "32px" }}>▶</span>
+              </div>
+            )}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+            <div
+              className="wd-video-play"
+              style={{
+                position: "absolute", top: "50%", left: "50%",
+                transform: "translate(-50%, -50%) scale(0.8)",
+                width: "48px", height: "48px", borderRadius: "50%",
+                background: "rgba(255,255,255,0.95)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+              }}
+            >
+              <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
+            </div>
+            {videoDisplay.title && (
+              <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
+                <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, textTransform: "uppercase", color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.3 }}>
+                  {videoDisplay.title}
+                </div>
+              </div>
+            )}
+          </div>
+        </a>
+      </div>
+    </div>
+  );
+
   // Team-colored chips, shared with PerformancePage.js — see
   // PlayersMentionedList.js for the styling/hover behavior itself.
   const PlayersMentionedBlock = mentionedPlayers.length > 0 && (
@@ -342,6 +439,19 @@ export default function NewsArticle() {
           No other articles
         </div>
       )}
+      <Link
+        to="/news"
+        className="wd-mentioned-player-link"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+          padding: "12px 14px", background: "#fff", borderTop: "1px solid #f0f0f0",
+          fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: "12px",
+          color: BLUE, textTransform: "uppercase", letterSpacing: "0.05em",
+        }}
+      >
+        View All News
+        <span className="wd-mentioned-player-chevron" style={{ color: GOLD, fontSize: "16px", fontWeight: 900 }}>›</span>
+      </Link>
     </div>
     </div>
   );
@@ -400,6 +510,8 @@ export default function NewsArticle() {
           logo, plus a chevron that slides in, instead of just a flat
           background swap. */}
       <style>{`
+        .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
+        .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         .wd-mentioned-player-link {
           transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
         }
@@ -542,22 +654,24 @@ export default function NewsArticle() {
           </div>
 
           {/* Sidebar — on mobile, split into its own separately-ordered grid
-              items (see PlayersMentionedBlock/TeamsMentionedBlock/
+              items (see VideoBlock/PlayersMentionedBlock/TeamsMentionedBlock/
               GamesMentionedBlock/MoreNewsBlock above) so the stacked
-              single-column layout reads article → mentioned players → teams
-              → games → other articles, instead of the old single "sidebar"
-              grid item (order 1) landing above the article (order 2)
-              entirely. Desktop is unchanged: one sticky column with every
-              block stacked in the same order. */}
+              single-column layout reads article → video → mentioned players
+              → teams → games → other articles, instead of the old single
+              "sidebar" grid item (order 1) landing above the article
+              (order 2) entirely. Desktop is unchanged: one sticky column
+              with every block stacked in the same order. */}
           {isMobile ? (
             <>
-              {PlayersMentionedBlock && <div style={{ order: 2 }}>{PlayersMentionedBlock}</div>}
-              {TeamsMentionedBlock && <div style={{ order: 3 }}>{TeamsMentionedBlock}</div>}
-              {GamesMentionedBlock && <div style={{ order: 4 }}>{GamesMentionedBlock}</div>}
-              <div style={{ order: 5 }}>{MoreNewsBlock}</div>
+              {VideoBlock && <div style={{ order: 2 }}>{VideoBlock}</div>}
+              {PlayersMentionedBlock && <div style={{ order: 3 }}>{PlayersMentionedBlock}</div>}
+              {TeamsMentionedBlock && <div style={{ order: 4 }}>{TeamsMentionedBlock}</div>}
+              {GamesMentionedBlock && <div style={{ order: 5 }}>{GamesMentionedBlock}</div>}
+              <div style={{ order: 6 }}>{MoreNewsBlock}</div>
             </>
           ) : (
             <div style={{ position: "sticky", top: "24px", order: 2, display: "flex", flexDirection: "column", gap: "24px" }}>
+              {VideoBlock}
               {PlayersMentionedBlock}
               {TeamsMentionedBlock}
               {GamesMentionedBlock}

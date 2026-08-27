@@ -1,0 +1,33 @@
+name: Grade We-Pick Week
+
+# Runs Sunday mornings at 11:00 UTC (6am ET / 7am EDT — see
+# sync-analytics.yml's own comment: GitHub Actions schedules always run in
+# UTC, adjust below for a different local time). Idempotent — grades
+# whichever schedule26 weeks have gone fully Final and haven't already been
+# graded (see scripts/gradeWePickWeek.js), so a missed Sunday just gets
+# caught up on the next run instead of needing a manual rerun. Also
+# runnable on-demand via workflow_dispatch, same as the analytics sync.
+on:
+  schedule:
+    - cron: "0 11 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Grade We-Pick week(s)
+        run: node scripts/gradeWePickWeek.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

@@ -20,6 +20,7 @@ import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useAuth } from "../context/AuthContext";
 import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
+import verifiedBadgeIcon from "../assets/verified.png";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -79,6 +80,37 @@ async function fetchNamesByUid(uids) {
     }
   });
   return map;
+}
+
+// ── Batch-fetches users/{uid}.verified for a list of uids, returning a
+// {uid: true} map (unverified/missing uids are simply absent, so a lookup
+// like `verifiedByUid[uid]` reads cleanly as a boolean). Kept as its own
+// single-purpose read rather than folded into fetchNamesByUid above — most
+// callers of that one only ever wanted a name, and this keeps each helper
+// doing one thing. Same admin-set-only field AdminPanel.js's Users section
+// now edits and UserProfile.js's own badge already reads. ──
+async function fetchVerifiedByUid(uids) {
+  const unique = [...new Set(uids)].filter(Boolean);
+  if (unique.length === 0) return {};
+  const snaps = await Promise.all(unique.map((uid) => getDoc(doc(db, "users", uid))));
+  const map = {};
+  snaps.forEach((s, i) => {
+    if (s.exists() && s.data().verified) map[unique[i]] = true;
+  });
+  return map;
+}
+
+// Small inline checkmark badge, matching UserProfile.js's own verified-badge
+// treatment — used anywhere a friend/standings name is rendered here.
+function VerifiedBadge({ size = 13 }) {
+  return (
+    <img
+      src={verifiedBadgeIcon}
+      alt="Verified"
+      title="Verified"
+      style={{ width: size, height: size, verticalAlign: "middle", marginLeft: "5px", flexShrink: 0 }}
+    />
+  );
 }
 
 // ── Ranked Standings scoring — locked-in spec, not computed anywhere yet ──
@@ -185,14 +217,20 @@ const hasScorePick = (p) => !!p && p.awayScore != null && p.homeScore != null;
 // story — it's the Ranked Standings scoring formula (see the spec further
 // up) applied to this user's own graded Ranked 6 picks, maxed across
 // weeks — also live-computed, no storage needed. "Highest Leaderboard
-// Ranking" is the one exception: knowing where you stood requires
-// everyone else's results too, which nothing computes yet (see
-// STANDINGS_COLLECTION) — so it's read from a small per-user doc instead,
-// admin-write-only same as standings itself, since a user shouldn't be
-// able to just write themselves a #1 finish. Missing/placeholder either
-// way, everything here falls back to sample data (flagged, never silently
-// passed off as real) so this tab has something to look at before anyone
-// has graded history yet.
+// Ranking" and the four badge counters below are the exception: knowing
+// where you stood (or whether you had the week's best score) requires
+// everyone else's results too, which nothing computes client-side — so
+// they're read from a small per-user doc instead, admin-write-only same as
+// standings itself (populated by scripts/gradeWePickWeek.js's weekly Sunday
+// run, never client-writable), since a user shouldn't be able to just write
+// themselves a #1 finish or a free badge.
+//   - sweepCount      — Ranked 6 went 6-0 on the winner in a qualified week.
+//   - snipeCount      — any single graded pick matched the final score
+//                       exactly; can increment more than once per week.
+//   - topDogCount     — tied or outright highest qualified Ranked score in
+//                       the community that week.
+//   - immaculateCount — every one of the Ranked 6 matched its final score
+//                       exactly (implies sweepCount too — both count).
 const MYSTATS_COLLECTION = "wePickStats"; // users/{uid}/wePickStats/{season}
 const MYSTATS_SEASON_DOC = "season2026";
 
@@ -1004,6 +1042,28 @@ function MyPicksSection() {
         .wd-wepick-no-spinner { -moz-appearance: textfield; }
       `}</style>
 
+      {/* Same "How Ranked Works" explainer StandingsSection opens with —
+          copied verbatim so the rules are visible right where picks are
+          actually made, not just on the board that grades them. */}
+      <div style={{ border: "2px dashed rgba(246,162,29,0.5)", borderRadius: "12px", padding: "14px 16px", marginBottom: "18px", background: "rgba(246,162,29,0.08)" }}>
+        <div style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
+          🏆 How Ranked Works
+        </div>
+        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "7px" }}>
+          {[
+            ["⭐", "Star 6 picks", " each week to build your Ranked 6 — the Game of the Week plus at least 2 Featured games (Week 0: any 6, no restrictions)."],
+            ["🎯", "Call the winner", " — bank 100 points for the right team, 0 for the wrong one, no matter how close the final score was."],
+            ["🔟", "Nail the score", " — once you've got the winner, earn up to 100 more points per side, losing 10 for every point you're off."],
+            ["🔒", "Submit before kickoff", " to lock in your Ranked 6 — your season score is the sum of every week you qualify."],
+          ].map(([icon, lead, rest], i) => (
+            <li key={i} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>{icon}</span>
+              <span><span style={{ color: "#fff", fontWeight: 900 }}>{lead}</span>{rest}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       {weekOptions.length > 0 && (
         <div style={{ marginBottom: "18px" }}>
           <select
@@ -1634,6 +1694,29 @@ function StandingsSection() {
   const myEntry = myIndex >= 0 ? sortedEntries[myIndex] : null;
   const myRowVisible = myIndex >= 0 && myIndex < visibleCount;
 
+  // Verified badges for whoever's actually on screen — bounded to the
+  // visible rows (Top 10 default, up to each view's own max) plus the
+  // pinned own-row and, in Friends scope, the fallback pre-scoring roster
+  // (friendUids + self), rather than every entry on a season-wide board.
+  // visibleUidsKey collapses the row list to a plain string so this effect
+  // only re-fires when who's actually showing changes, not on every render
+  // (visibleEntries itself is a fresh array each render).
+  const visibleUidsKey = visibleEntries.map((e) => e.uid).filter(Boolean).join(",");
+  const [verifiedByUid, setVerifiedByUid] = useState({});
+  useEffect(() => {
+    const uids = new Set(visibleUidsKey ? visibleUidsKey.split(",") : []);
+    if (myEntry?.uid) uids.add(myEntry.uid);
+    if (scope === "friends") {
+      if (user) uids.add(user.uid);
+      if (friendUids) friendUids.forEach((u) => uids.add(u));
+    }
+    const list = [...uids];
+    if (list.length === 0) { setVerifiedByUid({}); return; }
+    let cancelled = false;
+    fetchVerifiedByUid(list).then((map) => { if (!cancelled) setVerifiedByUid(map); });
+    return () => { cancelled = true; };
+  }, [visibleUidsKey, myEntry, scope, friendUids, user]);
+
   const goSeason = () => { setView("season"); navigate("/we-pick/standings"); };
   const goWeek = (w) => { setView("week"); setSelectedWeek(w); navigate(w ? `/we-pick/standings/${w}` : "/we-pick/standings"); };
 
@@ -1758,7 +1841,10 @@ function StandingsSection() {
                         boxShadow: f.isMe ? `inset 3px 0 0 ${GOLD}` : "none",
                       }}
                     >
-                      <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{f.name}</div>
+                      <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff", display: "flex", alignItems: "center" }}>
+                        {f.name}
+                        {verifiedByUid[f.uid] && <VerifiedBadge />}
+                      </div>
                       {f.submitted ? (
                         <span style={{ fontSize: "10px", fontWeight: 900, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.05em" }}>✓ Submitted</span>
                       ) : (
@@ -1826,7 +1912,7 @@ function StandingsSection() {
                 </thead>
                 <tbody>
                   {visibleEntries.map((e, i) => (
-                    <StandingsRow key={e.uid || i} entry={e} rank={i + 1} isMe={!!user && e.uid === user.uid} showAvg={view === "season"} />
+                    <StandingsRow key={e.uid || i} entry={e} rank={i + 1} isMe={!!user && e.uid === user.uid} showAvg={view === "season"} verified={!!verifiedByUid[e.uid]} />
                   ))}
                   {/* Pinned own row — shown only when signed in, on the
                       board, and ranked below the current cutoff, so being
@@ -1836,7 +1922,7 @@ function StandingsSection() {
                       <tr>
                         <td colSpan={view === "season" ? 5 : 4} style={{ padding: "4px 14px", textAlign: "center", color: "rgba(255,255,255,0.35)", fontSize: "12px", fontWeight: 900 }}>⋯</td>
                       </tr>
-                      <StandingsRow entry={myEntry} rank={myIndex + 1} isMe showAvg={view === "season"} />
+                      <StandingsRow entry={myEntry} rank={myIndex + 1} isMe showAvg={view === "season"} verified={!!verifiedByUid[myEntry.uid]} />
                     </>
                   )}
                 </tbody>
@@ -1862,13 +1948,14 @@ function StandingsSection() {
 // One standings row — highlighted (gold left border + tinted background)
 // when it belongs to the signed-in viewer, so finding yourself on a
 // hundred-row season board doesn't mean scanning every name.
-function StandingsRow({ entry, rank, isMe, showAvg }) {
+function StandingsRow({ entry, rank, isMe, showAvg, verified }) {
   const avg = entry.weeksPlayed ? (entry.points ?? 0) / entry.weeksPlayed : null;
   return (
     <tr style={{ borderTop: "1px solid rgba(255,255,255,0.1)", background: isMe ? "rgba(246,162,29,0.18)" : "transparent", boxShadow: isMe ? `inset 3px 0 0 ${GOLD}` : "none" }}>
       <td style={standingsTdStyle}>{rank}</td>
       <td style={{ ...standingsTdStyle, textAlign: "left" }}>
         {entry.displayName || "Anonymous Fan"}
+        {verified && <VerifiedBadge />}
         {isMe && <span style={{ marginLeft: "6px", color: GOLD, fontSize: "11px", fontWeight: 900 }}>(You)</span>}
       </td>
       <td style={standingsTdStyle}>{entry.correct ?? 0}-{(entry.total ?? 0) - (entry.correct ?? 0)}</td>
@@ -2012,9 +2099,12 @@ function FriendsSection() {
         const rows = snap.docs
           .map((d) => ({ id: d.id, uid: (d.data().uids || []).find((u) => u !== user.uid) }))
           .filter((r) => r.uid);
-        const nameMap = await fetchNamesByUid(rows.map((r) => r.uid));
+        const [nameMap, verMap] = await Promise.all([
+          fetchNamesByUid(rows.map((r) => r.uid)),
+          fetchVerifiedByUid(rows.map((r) => r.uid)),
+        ]);
         if (cancelled) return;
-        setFriends(rows.map((r) => ({ ...r, name: nameMap[r.uid] || "Anonymous Fan" })).sort((a, b) => a.name.localeCompare(b.name)));
+        setFriends(rows.map((r) => ({ ...r, name: nameMap[r.uid] || "Anonymous Fan", verified: !!verMap[r.uid] })).sort((a, b) => a.name.localeCompare(b.name)));
       } catch (e) {
         console.error("Friends fetch error:", e);
         if (!cancelled) setFriends([]);
@@ -2376,7 +2466,10 @@ function FriendsSection() {
           ) : (
             friends.map((f, i) => (
               <div key={f.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: i < friends.length - 1 ? "1px solid rgba(255,255,255,0.1)" : "none" }}>
-                <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{f.name}</div>
+                <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff", display: "flex", alignItems: "center" }}>
+                  {f.name}
+                  {f.verified && <VerifiedBadge />}
+                </div>
                 <button
                   onClick={() => handleRemoveFriend(f)}
                   disabled={removingUid === f.uid}
@@ -2514,9 +2607,17 @@ function MyStatsSection() {
         <AccuracyDonut label="Unranked Accuracy" correct={realUnrankedAccuracy.correct} incorrect={realUnrankedAccuracy.incorrect} />
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "14px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", marginBottom: "26px" }}>
         <StatTile icon="🏆" label="Best Ranked Score" value={realBestRankedScore?.points} sub={realBestRankedScore ? realBestRankedScore.week : "No qualified week graded yet"} />
         <StatTile icon="📈" label="Highest Leaderboard Rank" value={highestRank ? `#${highestRank.rank}` : undefined} sub={highestRank ? highestRank.label : "Not tracked yet"} />
+      </div>
+
+      <SectionHeader label="🎖️ Badges" />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "14px" }}>
+        <BadgeTile icon="🧹" label="Sweep" description="Went 6-0 on the winner in a qualified Ranked week." count={personalDoc?.sweepCount || 0} />
+        <BadgeTile icon="🎯" label="Snipe" description="Called a game's final score exactly right." count={personalDoc?.snipeCount || 0} />
+        <BadgeTile icon="🐕" label="Top Dog" description="Posted the community's highest Ranked score in a week." count={personalDoc?.topDogCount || 0} />
+        <BadgeTile icon="💎" label="Immaculate" description="Nailed every score in a qualified Ranked week." count={personalDoc?.immaculateCount || 0} />
       </div>
     </>
   );
@@ -2618,6 +2719,36 @@ function StatTile({ icon, label, value, sub }) {
         {value != null ? value : "—"}
       </div>
       {sub && <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginTop: "4px" }}>{sub}</div>}
+    </div>
+  );
+}
+
+// A collectible-badge tile, distinct from StatTile's plain numbers — grayed
+// out and desaturated at 0 (never earned yet) vs. lit up gold once count>0,
+// so the row reads as a collection to fill in rather than another stat
+// line. count comes straight off users/{uid}/wePickStats/season2026 (see
+// that doc's own comment above) — real, script-written totals, not
+// client-computed, so there's nothing to derive here.
+function BadgeTile({ icon, label, description, count }) {
+  const earned = count > 0;
+  return (
+    <div style={{
+      flex: "1 1 150px", textAlign: "center",
+      border: `2px solid ${earned ? GOLD : "rgba(255,255,255,0.15)"}`, borderRadius: "12px",
+      padding: "18px 14px", background: earned ? "rgba(246,162,29,0.1)" : "rgba(0,0,0,0.2)",
+    }}>
+      <div style={{ fontSize: "34px", marginBottom: "8px", filter: earned ? "none" : "grayscale(1)", opacity: earned ? 1 : 0.35 }}>
+        {icon}
+      </div>
+      <div style={{ fontSize: "13px", fontWeight: 900, color: earned ? "#fff" : "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: "20px", fontWeight: 900, color: earned ? GOLD : "rgba(255,255,255,0.35)", marginBottom: "6px" }}>
+        ×{count}
+      </div>
+      <div style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>
+        {description}
+      </div>
     </div>
   );
 }

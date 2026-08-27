@@ -10,7 +10,7 @@
 // The component itself adapts to whichever of those two roles is viewing it
 // — admins see every article, writers see only their own — rather than the
 // two mount points needing to pass down any scoping props.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
   collection,
@@ -104,7 +104,7 @@ const gameLabel = (g) => `${g.away} vs ${g.home}${g.dateMs ? ` (${new Date(g.dat
 
 const BLANK_FORM = {
   title: "", titleShort: "", author: "", publishedAt: "",
-  status: "draft", priority: 2, videoUrl: "", seoDescription: "",
+  status: "draft", priority: 2, videoId: "", seoDescription: "",
 };
 
 const inputStyle = {
@@ -124,6 +124,85 @@ const statusStyles = {
   pending: { background: "#fff4e5", color: "#b35c00" },
   draft: { background: "#f0f0f0", color: "#666" },
 };
+
+// Same search-input + dropdown-of-matches pattern as
+// PerformancesManager.js's own VideoLookupCombobox — picks an existing
+// video doc (from the "videos" collection, the same one PerformancesManager
+// draws from) instead of a hand-pasted URL, so tagging a video here works
+// identically to tagging one on a performance.
+function VideoLookupCombobox({ videoId, onChange, videos }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const labelFor = (v) => v?.GenTitle || v?.items?.find((it) => it.title)?.title || v?.Video || "Untitled Video";
+
+  const selected = videos.find((v) => v.id === videoId) || null;
+  const displayValue = open ? query : (selected ? labelFor(selected) : "");
+
+  const q = query.trim().toLowerCase();
+  const filtered = (q
+    ? videos.filter((v) => labelFor(v).toLowerCase().includes(q))
+    : videos
+  ).slice(0, 8);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <input
+          value={displayValue}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
+          placeholder="Search videos..."
+          autoComplete="off"
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        {selected && !open && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            title="Clear"
+            style={{
+              flexShrink: 0, width: "26px", height: "26px", borderRadius: "6px",
+              border: "2px solid #ddd", background: "#fff", color: "#999",
+              fontWeight: 900, fontSize: "13px", cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+          background: "#fff", border: "2px solid #ddd", borderRadius: "6px",
+          maxHeight: "220px", overflowY: "auto", boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+        }}>
+          {filtered.map((v) => (
+            <div
+              key={v.id}
+              onClick={() => { onChange(v.id); setQuery(""); setOpen(false); }}
+              style={{ padding: "8px 10px", cursor: "pointer" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{labelFor(v)}</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {v.Video || "—"}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── One of the three "Tagged X" lists at the bottom of the article form
 // (Players/Teams/Games) — order here is what NewsArticle.jsx's Mentioned
@@ -221,6 +300,7 @@ export default function ArticlesManager() {
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [games, setGames] = useState([]);
+  const [videos, setVideos] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
 
   const [selectedArticle, setSelectedArticle] = useState(null);
@@ -249,7 +329,6 @@ export default function ArticlesManager() {
   const [imageUrl, setImageUrl] = useState("");
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
-  const [videoUrlInput, setVideoUrlInput] = useState("");
 
   // ── Tagged Players/Teams/Games — the actual source of playerIds/schools/
   // gameIds on save (see handleSave), kept as ordered state independent of
@@ -312,11 +391,12 @@ export default function ArticlesManager() {
         const articlesQuery = isAdmin
           ? collection(db, "articles")
           : query(collection(db, "articles"), where("authorId", "==", user.uid));
-        const [articleSnap, playerSnap, teamSnap, gameSnap] = await Promise.all([
+        const [articleSnap, playerSnap, teamSnap, gameSnap, videoSnap] = await Promise.all([
           getDocs(articlesQuery),
           getDocs(collection(db, "players")),
           getDocs(collection(db, "schools")),
           getDocs(collection(db, "schedule26")),
+          getDocs(collection(db, "videos")),
         ]);
 
         setArticles(articleSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -343,6 +423,8 @@ export default function ArticlesManager() {
           })
           .filter((g) => g.slug && g.away && g.home)
           .sort((a, b) => b.dateMs - a.dateMs));
+
+        setVideos(videoSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       } catch (e) {
         console.error("Articles fetch error:", e);
         setArticles([]);
@@ -374,7 +456,7 @@ export default function ArticlesManager() {
       publishedAt: a.publishedAt?.toDate ? a.publishedAt.toDate().toISOString().split("T")[0] : "",
       status: a.status || "draft",
       priority: a.priority || 2,
-      videoUrl: a.videoUrl || "",
+      videoId: a.videoId || "",
       seoDescription: a.seoDescription || "",
     });
     editor?.commands.setContent(a.content || "");
@@ -482,14 +564,6 @@ export default function ArticlesManager() {
     setShowLinkInput(false);
   };
 
-  const insertVideo = () => {
-    if (!videoUrlInput.trim()) return;
-    const href = /^https?:\/\//i.test(videoUrlInput.trim()) ? videoUrlInput.trim() : `https://${videoUrlInput.trim()}`;
-    setFormState((prev) => ({ ...prev, videoUrl: href }));
-    setVideoUrlInput("");
-    setShowVideoInput(false);
-  };
-
   const handleSave = async () => {
     if (!formState) return;
     const html = editor?.getHTML() || "";
@@ -524,7 +598,7 @@ export default function ArticlesManager() {
           author: formState.author,
           publishedAt: publishedAtDate,
           playerIds, teamSlugs, schools, gameIds,
-          videoUrl: formState.videoUrl || "",
+          videoId: formState.videoId || "",
           seoDescription: formState.seoDescription.trim(),
           authorId: user.uid,
           createdAt: serverTimestamp(),
@@ -549,7 +623,7 @@ export default function ArticlesManager() {
           author: formState.author,
           publishedAt: publishedAtDate,
           playerIds, teamSlugs, schools, gameIds,
-          videoUrl: formState.videoUrl || "",
+          videoId: formState.videoId || "",
           seoDescription: formState.seoDescription.trim(),
           updatedAt: serverTimestamp(),
         };
@@ -921,17 +995,8 @@ export default function ArticlesManager() {
             )}
             {showVideoInput && (
               <div style={{ border: "2px solid #b45309", borderRadius: "8px", padding: "10px", marginBottom: "8px", background: "#fff8f0" }}>
-                {formState.videoUrl && (
-                  <div style={{ marginBottom: "8px", padding: "6px 10px", background: "#fff", borderRadius: "6px", fontSize: "12px", fontWeight: 700, color: "#b45309", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>Current: {formState.videoUrl}</span>
-                    <button onClick={() => setFormState((p) => ({ ...p, videoUrl: "" }))} style={{ background: "#b91c1c", color: "#fff", border: "none", borderRadius: "4px", padding: "2px 8px", cursor: "pointer", fontSize: "11px", fontWeight: 900 }}>Remove</button>
-                  </div>
-                )}
-                <input placeholder="Video URL (YouTube, Twitter, etc.)" value={videoUrlInput} onChange={(e) => setVideoUrlInput(e.target.value)} style={{ ...inputStyle, marginBottom: "8px" }} />
-                <div style={{ fontSize: "11px", color: "#888", marginBottom: "8px" }}>A ▶ Watch Video button appears below the article title — not in the body.</div>
-                <button onClick={insertVideo} disabled={!videoUrlInput.trim()} style={{ ...toolbarBtnStyle(false), borderColor: "#b45309", color: "#b45309", opacity: !videoUrlInput.trim() ? 0.5 : 1 }}>
-                  {formState.videoUrl ? "Update Video Link" : "Set Video Link"}
-                </button>
+                <VideoLookupCombobox videoId={formState.videoId} onChange={(id) => setFormState((p) => ({ ...p, videoId: id }))} videos={videos} />
+                <div style={{ fontSize: "11px", color: "#888", marginTop: "8px" }}>Shows up on the side of the article, above Players Mentioned — not in the body.</div>
               </div>
             )}
 

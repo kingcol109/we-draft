@@ -11,6 +11,7 @@ import ArticlesManager from "../components/ArticlesManager";
 import PerformancesManager from "../components/PerformancesManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
+import verifiedBadge from "../assets/verified.png";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -228,6 +229,7 @@ const SECTIONS = [
   { key: "performances", label: "Performances", icon: "⭐", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
   { key: "requests", label: "Requests", icon: "📥", ready: true },
+  { key: "users", label: "Users", icon: "👤", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
 ];
@@ -6545,6 +6547,158 @@ const tdStyle = {
   padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666",
 };
 
+// ── Users section — full users collection read once, client-side search
+// (username/email/friend code) since even a large user base is small
+// relative to what other admin sections already fetch whole (Player Data
+// pulls 1000+ docs the same way). "Verify" writes `verified` on the target
+// user's own users/{uid} doc — firestore.rules already lets isAdmin() write
+// role/verified on ANY user (that bypass existed before this UI did, for
+// the Dummy Content feature; verified/role were previously only ever set by
+// hand in the Firebase console). Dummy accounts (isDummy: true) are
+// filtered out — they're synthetic evaluation authors, not real people to
+// manage here. ──
+function UsersSection() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [savingUid, setSavingUid] = useState(null);
+  const [fetchError, setFetchError] = useState("");
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      setLoading(true);
+      setFetchError("");
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const rows = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((u) => !u.isDummy);
+        rows.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+        setUsers(rows);
+      } catch (e) {
+        console.error("Admin users fetch error:", e);
+        setFetchError(e?.message || "Failed to load users.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUsers();
+  }, []);
+
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = q
+    ? users.filter((u) =>
+        (u.username || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q) ||
+        (u.friendCode || "").toLowerCase().includes(q)
+      )
+    : users;
+
+  const handleToggleVerified = async (u) => {
+    setSavingUid(u.id);
+    const next = !u.verified;
+    try {
+      await updateDoc(doc(db, "users", u.id), { verified: next });
+      setUsers((prev) => prev.map((row) => (row.id === u.id ? { ...row, verified: next } : row)));
+    } catch (e) {
+      console.error("Admin toggle verified error:", e);
+      alert("Failed to update — check console.");
+    } finally {
+      setSavingUid(null);
+    }
+  };
+
+  const verifiedCount = users.filter((u) => u.verified).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search by username, email, or friend code..."
+          style={{ ...inputStyle, maxWidth: "360px" }}
+        />
+        <div style={{ fontSize: "12px", fontWeight: 800, color: "#999" }}>
+          {loading ? "Loading…" : `${users.length} user${users.length === 1 ? "" : "s"} · ${verifiedCount} verified`}
+        </div>
+      </div>
+
+      {fetchError && (
+        <div style={{ padding: "10px 16px", background: "#fff3f0", border: "2px solid #c0392b", borderRadius: "8px" }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, color: "#a52a1e" }}>⚠ {fetchError}</div>
+        </div>
+      )}
+
+      {loading ? (
+        <LoadingSpinner label="Loading users" size={28} minHeight="100px" />
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+          {q ? "No users match that search." : "No users found."}
+        </div>
+      ) : (
+        <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: BLUE }}>
+                  <th style={thStyle}>User</th>
+                  <th style={thStyle}>Email</th>
+                  <th style={thStyle}>Friend Code</th>
+                  <th style={thStyle}>Joined</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Verified</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((u, i) => {
+                  const dateMs = toMs(u.createdAt);
+                  return (
+                    <tr key={u.id} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
+                      <td style={tdStyle}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontWeight: 900, color: "#222" }}>{u.username || "(no username)"}</span>
+                          {u.verified && <img src={verifiedBadge} alt="Verified" style={{ width: "14px", height: "14px" }} />}
+                          {u.role === "admin" && (
+                            <span style={{
+                              fontSize: "9px", fontWeight: 900, color: "#fff", background: BLUE,
+                              borderRadius: "8px", padding: "1px 6px", textTransform: "uppercase", letterSpacing: "0.03em",
+                            }}>
+                              Admin
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={tdStyle}>{u.email || "—"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace" }}>{u.friendCode || "—"}</td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                        <button
+                          onClick={() => handleToggleVerified(u)}
+                          disabled={savingUid === u.id}
+                          style={{
+                            padding: "6px 14px", fontWeight: 900, fontSize: "11px", minWidth: "92px",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                            border: "2px solid " + (u.verified ? "#2e7d32" : "#ddd"), borderRadius: "20px",
+                            cursor: savingUid === u.id ? "default" : "pointer",
+                            background: u.verified ? "#2e7d32" : "#fff",
+                            color: u.verified ? "#fff" : "#999",
+                          }}
+                        >
+                          {savingUid === u.id ? "…" : u.verified ? "Verified ✓" : "Verify"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Analytics section — read-only dashboard pulling real numbers from
 // Firestore. Evaluations live in a players/{playerId}/evaluations/{uid}
 // subcollection (see PlayerProfile.js), so this reads via
@@ -10761,6 +10915,7 @@ export default function AdminPanel() {
             {activeSection === "performances" && <PerformancesManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
             {activeSection === "requests" && <RequestsSection />}
+            {activeSection === "users" && <UsersSection />}
             {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
           </div>

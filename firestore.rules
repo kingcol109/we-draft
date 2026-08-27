@@ -224,10 +224,12 @@ service cloud.firestore {
     // We-Pick's ranked standings — one doc per leaderboard ("season", or a
     // week label like "Week 1") holding a denormalized `entries` array, so
     // the Standings tab (WePickHub.js) reads one doc instead of scanning
-    // every user's picks client-side. Nobody computes/writes this yet
-    // (scoring logic is still TBD) — public read now so the page's empty
-    // state works for signed-out visitors too, write locked to admin since
-    // this will end up populated by a trusted process, never by a user
+    // every user's picks client-side. Populated by
+    // scripts/gradeWePickWeek.js (a weekly GitHub Actions cron via the
+    // Admin SDK, which bypasses these rules entirely) once every game in a
+    // week has gone Final — public read so the page's state works for
+    // signed-out visitors too, write locked to admin since this is only
+    // ever meant to be populated by that trusted process, never by a user
     // writing their own standing.
     match /wePickStandings2026/{doc} {
       allow read: if true;
@@ -380,8 +382,10 @@ service cloud.firestore {
       allow read: if true;
       // "role" and "verified" are the two fields every trust decision in
       // these rules (and every verified-badge display in the app) is built
-      // on — neither is ever written by client code (checked: only set
-      // manually, e.g. via the Firebase console), so a blanket "owner can
+      // on — a regular user never writes either (role is still only ever
+      // set by hand, e.g. via the Firebase console; verified is now also
+      // settable through AdminPanel.js's Users section, but only by an
+      // admin, via the isAdmin() bypass below), so a blanket "owner can
       // write their own doc" rule would let a user grant themselves admin
       // access or a fake verified badge by writing straight to the SDK,
       // bypassing the app's own UI entirely. create blocks setting either
@@ -438,10 +442,12 @@ service cloud.firestore {
         // private mirror.
         allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       }
-      // We-Pick's My Stats tab (WePickHub.js) — the one stat that can't be
-      // computed client-side from a user's own picks (Highest Leaderboard
-      // Rank needs everyone else's results too). Owner-read only, same as
-      // picks above; write locked to admin like wePickStandings2026, since
+      // We-Pick's My Stats tab (WePickHub.js) — stats that can't be computed
+      // client-side from a user's own picks alone: Highest Leaderboard Rank
+      // (needs everyone else's results too) and the four badge counters
+      // (sweepCount/snipeCount/topDogCount/immaculateCount), all written by
+      // scripts/gradeWePickWeek.js alongside wePickStandings2026 above.
+      // Owner-read only, same as picks above; write locked to admin since
       // this shouldn't be something a user can just write themselves a
       // flattering number into.
       match /wePickStats/{season} {

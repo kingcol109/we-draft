@@ -6,9 +6,11 @@
 // standalone here rather than imported (since PlayerProfile.js's version is
 // entangled with that page's own hover/self-highlight state) and sized for
 // more entries — this sidebar has the vertical room a player page doesn't.
-// Right margin: a "follow us" social card stacked above a compact feed of
-// the *other* content type (performances on the News page, news/articles on
-// the Performances page) ending in a link to that page.
+// Right margin: a "follow us" social card, then a Videos feed card (same
+// "videos" collection/thumbnail-card treatment as CommunityBoard.js's own
+// Videos sidebar), then a compact feed of the *other* content type
+// (performances on the News page, news/articles on the Performances page)
+// ending in a link to that page.
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
@@ -62,6 +64,48 @@ const toMs = (ts) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
+// Same input-URL cleanup + "how long ago" bucketing as CommunityBoard.js's
+// own Videos sidebar — duplicated here rather than shared, matching this
+// codebase's per-file convention for small helpers like this.
+const sanitizeUrl = (url) => {
+  if (!url) return "";
+  const u = url.trim();
+  if (!/^https?:\/\//i.test(u)) return `https://${u}`;
+  return u;
+};
+
+// Only ever called with a video's Date (a date-only value, parsed as UTC
+// midnight) — UTC getters on both sides so this reads the same regardless
+// of the viewer's own timezone. See CommunityBoard.js's own copy of this
+// for the full reasoning.
+function formatRelativeTime(input) {
+  if (!input) return "";
+  const d = input?.toDate ? input.toDate() : typeof input === "number" ? new Date(input) : new Date(input);
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const startOfDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const diffDays = Math.round((startOfToday - startOfDate) / 86400000);
+
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays <= 7) return "This Week";
+  if (diffDays <= 30) {
+    const weeks = Math.max(1, Math.floor(diffDays / 7));
+    return weeks === 1 ? "Last Week" : weeks + " Weeks Ago";
+  }
+  if (diffDays <= 60) return "Last Month";
+  if (diffDays <= 365) {
+    const months = Math.max(1, Math.floor(diffDays / 30));
+    return months + " Month" + (months > 1 ? "s" : "") + " Ago";
+  }
+  return "Last Year";
+}
+
+// Sidebar column here is narrower than CommunityBoard.js's own Videos card,
+// so this stays shorter — same idea, fewer thumbnails.
+const SIDEBAR_VIDEO_LIMIT = 4;
+
 // A visibly solid card (site-standard 2px blue border) with a light,
 // grounded shadow rather than a heavy "floating" one — paired with
 // anchoring the whole sidebar to scroll with the page (see positionStyle).
@@ -86,6 +130,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
   const [trending, setTrending] = useState([]);
   const [topProspects, setTopProspects] = useState([]);
   const [feedItems, setFeedItems] = useState([]);
+  const [sidebarVideos, setSidebarVideos] = useState([]);
   const [schoolInfo, setSchoolInfo] = useState({});
   // This component renders after (below, in DOM order) the main content it
   // measures — anchorRef marks *this* component's own position so the
@@ -272,6 +317,37 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     fetch();
   }, [isMobile, otherStream]);
 
+  // Videos card — same "videos" collection + Recruiting-tag exclusion as
+  // CommunityBoard.js's own Videos sidebar, so this reads as the exact same
+  // feed rather than a differently-curated one.
+  useEffect(() => {
+    if (isMobile) return;
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "videos"));
+        const vids = snap.docs
+          .map((d) => {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const first = items[0] || null;
+            return {
+              id: d.id,
+              video: data.Video || "",
+              date: data.Date || null,
+              title: data.GenTitle || first?.title || "",
+              thumb: data.GenThumb || first?.thumb || "",
+              tags: Array.isArray(data.Tags) ? data.Tags : [],
+            };
+          })
+          .filter((v) => !!v.video && !v.tags.includes("Recruiting"))
+          .sort((a, b) => toMs(b.date) - toMs(a.date))
+          .slice(0, SIDEBAR_VIDEO_LIMIT);
+        setSidebarVideos(vids);
+      } catch (e) { setSidebarVideos([]); }
+    };
+    fetch();
+  }, [isMobile]);
+
   // Anchored to a point just below where the main content starts, in
   // document coordinates — scrolls along with the page like everything
   // else instead of hovering fixed in the viewport regardless of scroll.
@@ -370,8 +446,17 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
           transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease;
         }
         .wd-margin-trend-chip:hover .wd-margin-trend-chip-chevron { opacity: 1; transform: translateX(0); color: #fff; }
-        .wd-margin-social-link:hover { filter: brightness(1.12); }
+        .wd-margin-social-circle {
+          width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center;
+          color: #fff; text-decoration: none;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        .wd-margin-social-circle:hover { transform: translateY(-3px) scale(1.1); box-shadow: 0 8px 16px rgba(0,0,0,0.32); }
         .wd-margin-feed-item:hover { background: #f0f5ff; }
+        .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
+        .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         ${STAT_LINE_GLOW_STYLE}
       `}</style>
 
@@ -473,31 +558,115 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
             </div>
           </div>
           <div style={{ height: "3px", background: GOLD }} />
-          <div style={{ padding: "10px 14px 12px" }}>
-            <p style={{ fontSize: "11px", fontWeight: 600, color: "#666", lineHeight: 1.4, textAlign: "center", margin: "0 0 10px" }}>
+          <div style={{ padding: "14px 14px 16px" }}>
+            <p style={{ fontSize: "11px", fontWeight: 600, color: "#666", lineHeight: 1.4, textAlign: "center", margin: "0 0 12px" }}>
               Get live updates on draft prospects and college football players!
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+            {/* A row of brand-colored circular icon buttons, each lifting
+                and growing slightly on hover — reads as a much more
+                polished "follow us" treatment than the old stacked
+                full-width bars. */}
+            <div style={{ display: "flex", justifyContent: "center", gap: "12px" }}>
               {SOCIAL_LINKS.map((s) => (
                 <a
                   key={s.label}
                   href={s.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="wd-margin-social-link"
-                  style={{
-                    display: "flex", alignItems: "center", gap: "8px",
-                    background: s.bg, borderRadius: "8px", padding: "7px 10px",
-                    textDecoration: "none", color: "#fff", fontWeight: 900, fontSize: "11px",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)", transition: "filter 0.15s ease",
-                  }}
+                  title={s.label}
+                  className="wd-margin-social-circle"
+                  style={{ background: s.bg }}
                 >
-                  <span style={{ fontSize: "13px" }}>{s.icon}</span> {s.label}
+                  <span style={{ fontSize: "18px" }}>{s.icon}</span>
                 </a>
               ))}
             </div>
           </div>
         </div>
+
+        {/* Videos — same "videos" collection feed and thumbnail-card
+            treatment as CommunityBoard.js's own Videos sidebar, right
+            beneath the Follow card. */}
+        {sidebarVideos.length > 0 && (
+          <div style={cardShell}>
+            <div style={{ background: BLUE, padding: "8px 12px" }}>
+              <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+                Videos
+              </div>
+            </div>
+            <div style={{ height: "3px", background: GOLD }} />
+            {sidebarVideos.map((v, i) => {
+              const relTime = formatRelativeTime(v.date);
+              return (
+                <a
+                  key={v.id}
+                  href={sanitizeUrl(v.video)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="wd-video-card"
+                  style={{ display: "block", position: "relative", textDecoration: "none", borderBottom: i < sidebarVideos.length - 1 ? "1px solid #f0f0f0" : "none" }}
+                >
+                  <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+                    {v.thumb ? (
+                      <img
+                        className="wd-video-thumb"
+                        src={sanitizeUrl(v.thumb)}
+                        alt={v.title || "Video thumbnail"}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <span style={{ color: "#fff", fontSize: "26px" }}>▶</span>
+                      </div>
+                    )}
+                    <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+                    <div
+                      className="wd-video-play"
+                      style={{
+                        position: "absolute", top: "50%", left: "50%",
+                        transform: "translate(-50%, -50%) scale(0.8)",
+                        width: "36px", height: "36px", borderRadius: "50%",
+                        background: "rgba(255,255,255,0.95)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        opacity: 0, transition: "opacity 0.25s ease, transform 0.25s ease",
+                        boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+                      }}
+                    >
+                      <span style={{ color: BLUE, fontSize: "14px", marginLeft: "2px" }}>▶</span>
+                    </div>
+                    {relTime && (
+                      <div style={{ position: "absolute", top: "6px", right: "6px" }}>
+                        <span style={{ background: "rgba(0,0,0,0.65)", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          {relTime}
+                        </span>
+                      </div>
+                    )}
+                    {v.title && (
+                      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "8px 10px" }}>
+                        <div style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, color: "#fff", fontSize: "11px", letterSpacing: "0.02em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.25 }}>
+                          {v.title}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </a>
+              );
+            })}
+            <Link
+              to="/videos"
+              style={{
+                display: "block", textAlign: "center", background: BLUE, color: GOLD,
+                fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.05em",
+                padding: "9px", textDecoration: "none",
+              }}
+            >
+              View More Videos →
+            </Link>
+          </div>
+        )}
 
         {feedItems.length > 0 && (
           <div style={cardShell}>
