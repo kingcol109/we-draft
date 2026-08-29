@@ -22,11 +22,6 @@ const conferenceOrder = [
   "AAC", "CUSA", "MAC", "Mountain West", "Sun Belt",
 ];
 
-const NFL_DIVISIONS = [
-  { conf: "AFC", divisions: ["AFC East", "AFC North", "AFC South", "AFC West"] },
-  { conf: "NFC", divisions: ["NFC East", "NFC North", "NFC South", "NFC West"] },
-];
-
 const COMMUNITY_YEARS = [
   { label: "2027 Draft Class", path: "/community" },
   { label: "2028 Draft Class", path: "/community/2028" },
@@ -44,11 +39,8 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tickerText, setTickerText] = useState(FALLBACK_MESSAGE);
   const [schools, setSchools] = useState([]);
-  const [nflTeams, setNflTeams] = useState([]);
   const [cfbOpen, setCfbOpen] = useState(false);
   const [cfbTimeout, setCfbTimeout] = useState(null);
-  const [nflOpen, setNflOpen] = useState(false);
-  const [nflTimeout, setNflTimeout] = useState(null);
   const [communityOpen, setCommunityOpen] = useState(false);
   const [communityTimeout, setCommunityTimeout] = useState(null);
   const [boardsOpen, setBoardsOpen] = useState(false);
@@ -164,22 +156,6 @@ export default function Navbar() {
   }, []);
 
   /* ======================
-     LOAD NFL TEAMS
-  ====================== */
-  useEffect(() => {
-    async function fetchNFLTeams() {
-      try {
-        const snapshot = await getDocs(collection(db, "nfl"));
-        const data = snapshot.docs.map((d) => ({ _id: d.id, ...d.data() }));
-        setNflTeams(data);
-      } catch (err) {
-        console.error("Error loading NFL teams:", err);
-      }
-    }
-    fetchNFLTeams();
-  }, []);
-
-  /* ======================
      PENDING FRIEND REQUESTS (Profile badge)
   ====================== */
   useEffect(() => {
@@ -195,17 +171,6 @@ export default function Navbar() {
     acc[conf] = schools.filter((s) => s.Conference === conf);
     return acc;
   }, {});
-
-  const nflGrouped = {};
-  NFL_DIVISIONS.forEach(({ divisions }) => {
-    divisions.forEach((div) => {
-      const [conf, ...rest] = div.split(" ");
-      const divName = rest.join(" ");
-      nflGrouped[div] = nflTeams
-        .filter((t) => t.Conference === conf && t.Division === divName)
-        .sort((a, b) => (a.Team || "").localeCompare(b.Team || ""));
-    });
-  });
 
   // Fallback only — the real link source is each school's uploaded `Slug` field
   // (TeamSlug column in the Schools sheet). This just covers schools synced
@@ -252,20 +217,6 @@ export default function Navbar() {
           text-overflow: ellipsis;
         }
         .cfb-team-link:hover { background: #f0f5ff; color: #0055a5; }
-        .nfl-team-link {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 6px;
-          text-decoration: none;
-          color: #222;
-          border-radius: 5px;
-          font-weight: 700;
-          font-size: 12px;
-          transition: background 0.12s ease;
-          white-space: nowrap;
-        }
-        .nfl-team-link:hover { background: #f0f5ff; color: #0055a5; }
         .community-year-link {
           display: block;
           padding: 10px 16px;
@@ -465,88 +416,7 @@ export default function Navbar() {
               </div>
             )}
 
-            <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
             <Link to="/we-pick" style={baseStyle}>We-Pick</Link>
-
-            {/* ── NFL DROPDOWN ── */}
-            <div
-              style={{ position: "relative" }}
-              onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
-              onMouseLeave={() => { const t = setTimeout(() => setNflOpen(false), 150); setNflTimeout(t); }}
-            >
-              <Link to="/nfl" style={baseStyle}>NFL</Link>
-
-              {nflOpen && (
-                <div
-                  onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
-                  onMouseLeave={() => setNflOpen(false)}
-                  style={{
-                    position: "fixed",
-                    top: "60px",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: "min(640px, 96vw)",
-                    background: "#ffffff",
-                    border: "2px solid #0055a5",
-                    borderRadius: "10px",
-                    boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
-                    zIndex: 10002,
-                    overflow: "hidden",
-                  }}
-                >
-                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>NFL Teams</div>
-                    <Link to="/nfl" onClick={() => setNflOpen(false)}
-                      style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
-                      View All →
-                    </Link>
-                  </div>
-                  <div style={{ height: "3px", backgroundColor: "#f6a21d" }} />
-
-                  <div style={{ padding: "12px 10px" }}>
-                    {NFL_DIVISIONS.map(({ conf, divisions }, ci) => (
-                      <div key={conf} style={{ marginBottom: ci === 0 ? "14px" : 0 }}>
-                        <div style={{ fontSize: "11px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #f6a21d", paddingBottom: "3px", marginBottom: "8px" }}>
-                          {conf}
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0 6px" }}>
-                          {divisions.map((div) => {
-                            const divLabel = div.replace(`${conf} `, "");
-                            const divTeams = nflGrouped[div] || [];
-                            return (
-                              <div key={div}>
-                                <div style={{ fontSize: "9px", fontWeight: 900, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "4px" }}>
-                                  {divLabel}
-                                </div>
-                                {divTeams.map((team) => {
-                                  const abbr = team.Abbreviation || team._id;
-                                  return (
-                                    <Link
-                                      key={team._id}
-                                      to={`/nfl/${abbr.toLowerCase()}`}
-                                      className="nfl-team-link"
-                                      onClick={() => setNflOpen(false)}
-                                    >
-                                      {team.Logo1 && (
-                                        <img src={team.Logo1} alt={team.Team}
-                                          loading="lazy"
-                                          style={{ width: 14, height: 14, objectFit: "contain", flexShrink: 0 }}
-                                          onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                                      )}
-                                      {team.City} {team.Team}
-                                    </Link>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
 
             {/* ── CFB DROPDOWN ── */}
             <div
@@ -621,6 +491,8 @@ export default function Navbar() {
               )}
             </div>
 
+            <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
+
             {user ? (
               <Link to="/profile" style={baseStyle}>
                 Profile
@@ -672,9 +544,8 @@ export default function Navbar() {
             {[
               { path: "/community", label: "Community Board" },
               { path: "/we-pick", label: "We-Pick" },
-              { path: "/mocks", label: "Mock Drafts" },
-              { path: "/nfl", label: "NFL Teams" },
               { path: "/cfb", label: "CFB Teams" },
+              { path: "/mocks", label: "Mock Drafts" },
             ].map((l) => (
               <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
                 {l.label}

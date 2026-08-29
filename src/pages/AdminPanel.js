@@ -9,6 +9,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import ArticlesManager from "../components/ArticlesManager";
 import PerformancesManager from "../components/PerformancesManager";
+import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import verifiedBadge from "../assets/verified.png";
@@ -227,6 +228,7 @@ const SECTIONS = [
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "performances", label: "Performances", icon: "⭐", ready: true },
+  { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
   { key: "requests", label: "Requests", icon: "📥", ready: true },
   { key: "users", label: "Users", icon: "👤", ready: true },
@@ -7782,6 +7784,38 @@ const gameSortMs = (g) => {
   return toMs(g.Date) + (mins != null ? mins * 60000 : 0);
 };
 
+// The actual UTC instant a kickoff Time (ET wall-clock, no zone attached —
+// CFB kickoffs are always quoted in US Eastern) lands at, combined with a
+// game's Date (UTC midnight) — same conversion GamePage.js's
+// kickoffMsFromDate and WePickHub.js's kickoffMs independently use to
+// decide client-side whether picks are still open. Persisted here (see
+// handleSave's own KickoffAt field below) as a plain UTC Timestamp so
+// firestore.rules can enforce the same lock server-side without needing
+// Intl/timezone math of its own — rules just compare request.time against
+// this already-converted value. Reads the actual UTC offset for
+// America/New_York on the game's own date via Intl (not hardcoded UTC-5)
+// so this stays correct across the EDT/EST switch partway through the
+// season instead of drifting an hour on one side of it.
+const ET_OFFSET_FALLBACK_MIN = -300; // EST — only used if Intl's parse ever fails
+const etOffsetMinutesAt = (ms) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(ms));
+    const tz = parts.find((p) => p.type === "timeZoneName")?.value || "";
+    const m = /GMT([+-]\d+)(?::(\d+))?/.exec(tz);
+    if (!m) return ET_OFFSET_FALLBACK_MIN;
+    const h = parseInt(m[1], 10);
+    const mins = m[2] ? parseInt(m[2], 10) : 0;
+    return h * 60 + (h < 0 ? -mins : mins);
+  } catch {
+    return ET_OFFSET_FALLBACK_MIN;
+  }
+};
+const kickoffMsFromDate = (dateMs, time) => {
+  const mins = timeToMinutes(time);
+  if (!dateMs || mins == null) return null;
+  return dateMs + mins * 60000 - etOffsetMinutesAt(dateMs) * 60000;
+};
+
 // Renders the current Key Players selections — one row per player rather
 // than PerformancesManager.js's compact flex-wrap pill, since each one now
 // also carries an optional note (shown on GamePage.js when that player's
@@ -8130,11 +8164,17 @@ function CFBScheduleSection() {
       // Same delete-vs-omit distinction as the scores below: a cleared
       // kickoff Time on an existing doc has to be explicitly deleted, or
       // updateDoc() just leaves whatever Time was saved before in place.
+      // KickoffAt (the real UTC instant, for firestore.rules to enforce the
+      // pick lock server-side — see kickoffMsFromDate's own comment above)
+      // tracks Time the same way: set alongside it, cleared alongside it.
       let timeCleared = false;
       if (formState.Time) {
         payload.Time = formState.Time;
+        const kickoffMs = kickoffMsFromDate(new Date(formState.Date).getTime(), formState.Time);
+        if (kickoffMs != null) payload.KickoffAt = new Date(kickoffMs);
       } else if (!isNew) {
         payload.Time = deleteField();
+        payload.KickoffAt = deleteField();
         timeCleared = true;
       }
       // Same delete-vs-omit treatment for the TV channel — clearing it back
@@ -8190,7 +8230,7 @@ function CFBScheduleSection() {
           const merged = { ...g, ...payload };
           if (homeScoreCleared) delete merged.HomeScore;
           if (awayScoreCleared) delete merged.AwayScore;
-          if (timeCleared) delete merged.Time;
+          if (timeCleared) { delete merged.Time; delete merged.KickoffAt; }
           if (channelCleared) delete merged.Channel;
           return merged;
         }));
@@ -10913,6 +10953,7 @@ export default function AdminPanel() {
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "performances" && <PerformancesManager />}
+            {activeSection === "calendar" && <ContentCalendarManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
             {activeSection === "requests" && <RequestsSection />}
             {activeSection === "users" && <UsersSection />}
