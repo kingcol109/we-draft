@@ -35,6 +35,11 @@ const TREND_STYLE = {
   "on fire": { icon: "🔥", label: "On Fire", color: RED },
 };
 
+// Same tier ranking PerformancePage.js's own "More Performances" sidebar
+// sorts by — Dominant first, then Great, then Good, everything else after.
+const GRADE_PRIORITY = { Dominant: 0, Great: 1, Good: 2, Productive: 3, Average: 4, Bad: 5 };
+const gradePriority = (grade) => (grade in GRADE_PRIORITY ? GRADE_PRIORITY[grade] : 6);
+
 const SITE_TITLE = "We-Draft.com - NFL Draft Scouting Reports, Rankings & Mock Drafts";
 const SITE_DESCRIPTION = "Build your NFL Draft board, read scouting reports, compare community evaluations, create mock drafts, and follow thousands of college football prospects with rankings, film links, measurable data, and the latest draft news.";
 const SITE_URL = "https://we-draft.com/";
@@ -439,16 +444,24 @@ export default function HomeInSeason() {
     fetch();
   }, []);
 
-  // Top Performances — Dominant/Great only, same "performances" query
-  // PerformancesHub.jsx uses, newest game first.
+  // Top Performances — Dominant/Great/Good, same "performances" query
+  // PerformancesHub.jsx uses. Tier first (Dominant, then Great, then Good —
+  // same GRADE_PRIORITY ranking PerformancePage.js's own "More Performances"
+  // sidebar sorts by), newest game as the tiebreaker within a tier, so a
+  // Good performance from today never bumps a Dominant one from earlier in
+  // the week out of the list.
   useEffect(() => {
     const fetch = async () => {
       try {
         const snap = await getDocs(query(collection(db, "performances"), where("status", "==", "published")));
         const top = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => p.grade === "Dominant" || p.grade === "Great")
-          .sort((a, b) => (b.gameDate?.toDate ? b.gameDate.toDate().getTime() : 0) - (a.gameDate?.toDate ? a.gameDate.toDate().getTime() : 0))
+          .filter((p) => ["Dominant", "Great", "Good"].includes(p.grade))
+          .sort((a, b) => {
+            const tier = gradePriority(a.grade) - gradePriority(b.grade);
+            if (tier !== 0) return tier;
+            return (b.gameDate?.toDate ? b.gameDate.toDate().getTime() : 0) - (a.gameDate?.toDate ? a.gameDate.toDate().getTime() : 0);
+          })
           .slice(0, 6);
         setTopPerformances(top);
       } catch (err) { console.error("Error fetching top performances:", err); }
@@ -845,14 +858,14 @@ export default function HomeInSeason() {
             </div>
             )}
 
-            {/* -- Top Performances — Dominant/Great only (see the fetch
-                effect above's own query). -- */}
+            {/* -- Top Performances — Dominant/Great/Good (see the fetch
+                effect above's own query and tier sort). -- */}
             {topPerformances.length > 0 && (
             <div>
               <SectionTitle linkTo="/performances" linkLabel="See all →">Performances</SectionTitle>
               <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.18)" }}>
                 <div style={{ background: BLUE, padding: "10px 16px" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Dominant & Great</div>
+                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Dominant, Great & Good</div>
                 </div>
                 <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
                 {topPerformances.map((p, i, arr) => (
@@ -866,7 +879,7 @@ export default function HomeInSeason() {
                       <div style={{
                         flexShrink: 0, fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "10px",
                         textTransform: "uppercase", letterSpacing: "0.04em",
-                        background: p.grade === "Dominant" ? "#3B6D11" : "#0F6E56", color: "#fff",
+                        background: p.grade === "Dominant" ? "#3B6D11" : p.grade === "Great" ? "#0F6E56" : BLUE, color: "#fff",
                       }}>
                         {p.grade}
                       </div>

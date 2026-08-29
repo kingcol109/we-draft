@@ -148,6 +148,74 @@ function compareStandingsEntries(a, b) {
   return (a.diffTotal ?? Infinity) - (b.diffTotal ?? Infinity);
 }
 
+// ── Live week standings — a not-yet-graded week's board no longer just
+// sits empty until scripts/gradeWePickWeek.js's weekly Sunday run: this
+// computes the exact same thing that script does (see its own header
+// comment — duplicated here for the same "small pure helper, plain client
+// code, no shared module" reason gradeWePickWeek.js's copy is duplicated
+// from this file's own scoreGamePick/rankedStatus rather than imported),
+// straight from the public schedule26/{id}/picks data, so a week's
+// standings update the moment an admin marks a game Final instead of
+// waiting for every game in the week to finish. Qualification (did they
+// pick 6 valid games) still looks at the full ranked set regardless of
+// finality, but the actual record/points/diffTotal are computed only over
+// the ranked games that have gone Final so far — an undecided game isn't a
+// loss just because it hasn't been won yet (see finalRankedRows below).
+// Once STANDINGS_COLLECTION actually has a graded doc for the week, that
+// stored copy is preferred over recomputing this live (see
+// StandingsSection's own fetch effect) — this is only ever the stand-in
+// for a week still in progress.
+async function computeLiveWeekStandings(week) {
+  const gamesSnap = await getDocs(query(collection(db, "schedule26"), where("Week", "==", week)));
+  const games = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if (games.length === 0) return [];
+
+  const pickSnaps = await Promise.all(
+    games.map((g) => getDocs(collection(db, "schedule26", g.id, "picks")))
+  );
+  const byUid = new Map(); // uid -> [{ pick, game }]
+  games.forEach((game, i) => {
+    pickSnaps[i].forEach((snap) => {
+      const uid = snap.id;
+      const pick = snap.data();
+      if (!byUid.has(uid)) byUid.set(uid, []);
+      byUid.get(uid).push({ pick, game });
+    });
+  });
+
+  const uids = [...byUid.keys()];
+  const userSnaps = await Promise.all(uids.map((uid) => getDoc(doc(db, "users", uid))));
+  const usernameByUid = {};
+  userSnaps.forEach((snap, i) => { usernameByUid[uids[i]] = snap.exists() ? (snap.data().username || "").trim() : ""; });
+
+  const entries = [];
+  byUid.forEach((rows, uid) => {
+    // Qualification (6 games, GOTW, 2+ Featured) is about what was picked,
+    // not what's been played yet — stays the full ranked set regardless of
+    // finality, same as gradeWePickWeek.js (which only ever runs once every
+    // game in the week already is Final, so this distinction never mattered
+    // there the way it does for a still-in-progress live week).
+    const rankedRows = rows.filter((r) => r.pick?.ranked === true && hasScorePick(r.pick) && !r.game.RankedDisqualified);
+    if (!rankedStatus(rankedRows.map((r) => r.game), week).isQualified) return; // unqualified = didn't play, same as gradeWePickWeek.js
+    // The actual record/points/diffTotal, though, only count games that
+    // have gone Final — an undecided game isn't a loss just because it
+    // isn't a win yet. scoreGamePick already returns 0 for a non-final
+    // game, but `total` (the record's own denominator, shown as
+    // correct-incorrect) has to be filtered explicitly or an in-progress
+    // game would still get counted as one of the "incorrect" ones.
+    const finalRankedRows = rankedRows.filter((r) => isGameFinal(r.game));
+    let points = 0, correct = 0, diffTotal = 0;
+    finalRankedRows.forEach(({ pick, game }) => {
+      const p = scoreGamePick(pick, game);
+      points += p;
+      if (p > 0) correct++;
+      diffTotal += Math.abs(game.AwayScore - pick.awayScore) + Math.abs(game.HomeScore - pick.homeScore);
+    });
+    entries.push({ uid, displayName: usernameByUid[uid] || "Anonymous Fan", correct, total: finalRankedRows.length, points, diffTotal });
+  });
+  return entries;
+}
+
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const PAGE_BG = "linear-gradient(180deg, #06162c, #0d2544)";
@@ -1506,14 +1574,16 @@ function MyPicksSection() {
 }
 
 // Community rankings — a 2026 season-long board plus a per-week board,
-// each backed by one doc in STANDINGS_COLLECTION (see its own comment for
-// the doc-id/shape convention). This is foundation only: nothing computes
-// or writes those docs yet (the scoring formula is still TBD), so every
-// view here renders straight into the "nobody's been ranked yet" empty
-// state until that lands — the fetch, routing, and table are all real,
-// just waiting on data. Unlike My Picks, this works for signed-out
-// visitors too (it's a public leaderboard, not a personal list), so it
-// does its own schedule26 fetch rather than relying on MyPicksSection's.
+// each backed by one doc in STANDINGS_COLLECTION once scripts/
+// gradeWePickWeek.js's weekly Sunday run officially grades it (see that
+// doc's own comment for the id/shape convention). A week still in progress
+// has no such doc yet — rather than sitting empty until Sunday,
+// computeLiveWeekStandings recomputes the same thing client-side from
+// picks/scores as they come in, so the board updates the moment an admin
+// marks a game Final (see the fetch effect below and its own "Live" badge).
+// Unlike My Picks, this works for signed-out visitors too (it's a public
+// leaderboard, not a personal list), so it does its own schedule26 fetch
+// rather than relying on MyPicksSection's.
 function StandingsSection() {
   const { user, profile } = useAuth();
   const { week: weekParam } = useParams();
@@ -1526,6 +1596,10 @@ function StandingsSection() {
   const [selectedWeek, setSelectedWeek] = useState(weekParam || "");
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
+  // True when `entries` came from computeLiveWeekStandings (this week isn't
+  // graded yet) rather than a stored, official STANDINGS_COLLECTION doc —
+  // drives the "Live" badge near the board's own header below.
+  const [isLive, setIsLive] = useState(false);
   // Top 10 by default; expands to each view's own ceiling (see
   // STANDINGS_LIMITS) so a season board doesn't dump 100 rows on load.
   const [expanded, setExpanded] = useState(false);
@@ -1542,15 +1616,15 @@ function StandingsSection() {
   const [friendUids, setFriendUids] = useState(null); // null = not fetched yet
   const [friendNamesByUid, setFriendNamesByUid] = useState({});
   const [friendsLoading, setFriendsLoading] = useState(false);
-  // Real points-based standings don't exist yet (scoring's still TBD — see
-  // STANDINGS_COLLECTION's own comment), so a week's board is always
-  // empty right now. Rather than just an empty state, that gap is filled
-  // with something that's actually live today: who's already submitted
-  // their Ranked 6 for this week (SUBMISSIONS_COLLECTION) — a roster in
-  // Friends scope, a bare count in Community scope. Fetched whenever the
-  // week changes (not gated on entries being empty) so it's ready the
-  // instant it's needed, and naturally stops being shown once real
-  // entries exist for a week. Season view has no such fallback —
+  // Before anyone in a week has a single qualified pick yet (nobody's
+  // starred a Ranked 6, or every game is still Week 0-early), even the live
+  // computation above has nothing to show. That gap is filled with
+  // something that's actually live today regardless: who's already
+  // submitted their Ranked 6 for this week (SUBMISSIONS_COLLECTION) — a
+  // roster in Friends scope, a bare count in Community scope. Fetched
+  // whenever the week changes (not gated on entries being empty) so it's
+  // ready the instant it's needed, and naturally stops being shown once
+  // real entries exist for a week. Season view has no such fallback —
   // "submitted for the season" isn't a real action, only per-week is.
   const [weekSubmissions, setWeekSubmissions] = useState(null); // null = not fetched yet
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
@@ -1584,18 +1658,34 @@ function StandingsSection() {
   useEffect(() => {
     const docId = view === "season" ? "season" : selectedWeek;
     setExpanded(false); // switching boards always starts back at Top 10
-    if (!docId) { setEntries([]); setLoading(false); return; }
+    if (!docId) { setEntries([]); setIsLive(false); setLoading(false); return; }
     let cancelled = false;
     setLoading(true);
     getDoc(doc(db, STANDINGS_COLLECTION, docId))
-      .then((snap) => {
+      .then(async (snap) => {
         if (cancelled) return;
-        const data = snap.exists() ? snap.data() : null;
-        setEntries(Array.isArray(data?.entries) ? data.entries : []);
+        // A graded doc (see scripts/gradeWePickWeek.js) is the official,
+        // locked-in record once it exists — preferred over recomputing.
+        // Season has no live fallback (it's a sum of already-graded weeks
+        // only); an in-progress week does, via computeLiveWeekStandings.
+        if (snap.exists()) {
+          setEntries(Array.isArray(snap.data()?.entries) ? snap.data().entries : []);
+          setIsLive(false);
+          return;
+        }
+        if (view === "week") {
+          const live = await computeLiveWeekStandings(docId);
+          if (cancelled) return;
+          setEntries(live); // sortedEntries below re-sorts via compareStandingsEntries regardless
+          setIsLive(live.length > 0);
+        } else {
+          setEntries([]);
+          setIsLive(false);
+        }
       })
       .catch((e) => {
         console.error("We-Pick standings fetch error:", e);
-        if (!cancelled) setEntries([]);
+        if (!cancelled) { setEntries([]); setIsLive(false); }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -1722,6 +1812,13 @@ function StandingsSection() {
 
   return (
     <>
+      {/* Same live-pulse keyframe as GamePage.js's own "N minutes ago" dot —
+          just the Live badge's own dot here. */}
+      <style>{`
+        .wd-wepick-live-dot { animation: wdWePickLivePulse 1.4s ease-in-out infinite; }
+        @keyframes wdWePickLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+      `}</style>
+
       {/* Explains the mechanics up front since the board itself is empty
           until real scoring exists — so landing here still answers "how
           does this work" instead of just showing a bare empty state.
@@ -1769,10 +1866,27 @@ function StandingsSection() {
       </div>
 
       <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
-        <div style={{ background: GOLD, padding: "10px 16px" }}>
+        <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             🏆 {scope === "friends" ? "Friend " : ""}{view === "season" ? "2026 Season Standings" : `${selectedWeek || "Weekly"} Standings`}
           </div>
+          {/* This week hasn't been officially graded yet (scripts/
+              gradeWePickWeek.js runs Sundays) — these numbers are computed
+              live from picks/scores as they come in, and will match the
+              official board once every game this week goes Final. */}
+          {isLive && (
+            <span
+              title="Computed live from scores as games finish — becomes official once this week is fully graded."
+              style={{
+                flexShrink: 0, display: "flex", alignItems: "center", gap: "4px",
+                background: "rgba(0,0,0,0.25)", color: "#fff", fontSize: "10px", fontWeight: 900,
+                padding: "3px 9px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
+              }}
+            >
+              <span className="wd-wepick-live-dot" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ff4d4d", display: "inline-block" }} />
+              Live
+            </span>
+          )}
         </div>
         <div style={{ background: "rgba(0,0,0,0.25)" }}>
           {scope === "friends" && !user ? (
@@ -1785,10 +1899,10 @@ function StandingsSection() {
           ) : loading || (scope === "friends" && friendsLoading) ? (
             <LoadingSpinner label="Loading" size={36} minHeight="160px" />
           ) : sortedEntries.length === 0 && view === "week" && selectedWeek ? (
-            // No real points-based standings for this week yet (scoring's
-            // still TBD — see STANDINGS_COLLECTION's own comment), so this
+            // Nobody's qualified for a points-based standing yet this week
+            // (too early — see weekSubmissions' own comment above), so this
             // fills the gap with something that's actually live right now:
-            // who's submitted their Ranked 6 (see weekSubmissions above).
+            // who's submitted their Ranked 6.
             <div>
               {/* Your own status leads, above either scope's content below
                   (not folded into the Friends roster specifically) — it's
@@ -1954,9 +2068,15 @@ function StandingsRow({ entry, rank, isMe, showAvg, verified }) {
     <tr style={{ borderTop: "1px solid rgba(255,255,255,0.1)", background: isMe ? "rgba(246,162,29,0.18)" : "transparent", boxShadow: isMe ? `inset 3px 0 0 ${GOLD}` : "none" }}>
       <td style={standingsTdStyle}>{rank}</td>
       <td style={{ ...standingsTdStyle, textAlign: "left" }}>
-        {entry.displayName || "Anonymous Fan"}
-        {verified && <VerifiedBadge />}
-        {isMe && <span style={{ marginLeft: "6px", color: GOLD, fontSize: "11px", fontWeight: 900 }}>(You)</span>}
+        {/* inline-flex, not the bare text run this used to be — a long
+            display name filling the column could otherwise wrap the badge
+            (a separate inline <img>, no space tying it to the name) onto
+            its own line below the name instead of staying right next to it. */}
+        <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "nowrap" }}>
+          {entry.displayName || "Anonymous Fan"}
+          {verified && <VerifiedBadge />}
+          {isMe && <span style={{ marginLeft: "6px", color: GOLD, fontSize: "11px", fontWeight: 900 }}>(You)</span>}
+        </span>
       </td>
       <td style={standingsTdStyle}>{entry.correct ?? 0}-{(entry.total ?? 0) - (entry.correct ?? 0)}</td>
       <td style={standingsTdStyle}>{entry.points ?? 0}</td>
@@ -2870,12 +2990,19 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
   if (final && pick) {
     const actualWinner = game.AwayScore > game.HomeScore ? "away" : game.HomeScore > game.AwayScore ? "home" : null;
     const correct = actualWinner && side === actualWinner;
+    // Only a real score pick ever earns points at all (see scoreGamePick's
+    // own guard — a winner-only pick scores 0 regardless of correctness,
+    // since it can't count toward Ranked either), so the point figure only
+    // shows up for those — showing "+0 pts" next to a correct winner-only
+    // call would read as a scoring failure rather than "this pick type
+    // just doesn't earn points."
+    const points = hasScorePick(pick) ? scoreGamePick(pick, game) : null;
     resultBadge = (
       <span style={{
         flexShrink: 0, fontWeight: 900, fontSize: "10px", padding: "2px 8px", borderRadius: "6px",
         background: correct ? "#1a7f37" : "#c0392b", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em",
       }}>
-        {correct ? "✓ Correct" : "✗ Missed"}
+        {correct ? "✓ Correct" : "✗ Missed"}{points != null && ` · ${points} pts`}
       </span>
     );
   }
