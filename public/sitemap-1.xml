@@ -2122,6 +2122,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/beau-brungard-2027-qb</loc>
+    <lastmod>2026-08-29</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/beau-pribula-2027-qb</loc>
     <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
@@ -4994,11 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/jordan-allen-2027-db</loc>
     <lastmod>2026-08-29</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jordan-allen-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>

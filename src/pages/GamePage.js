@@ -144,6 +144,20 @@ function sanitizeUrl(url) {
   return u;
 }
 
+// Same fallback NewsArticle.jsx/PlayerProfile.js/TeamPage.js/Navbar.js all
+// use for a school with no manually-set Slug field — most FCS schools
+// (added ad hoc through AdminPanel.js's Team Branding "+ New Team" form,
+// which has no Slug input) never get one. Without this, TeamHeroSide below
+// just rendered those teams' names as plain, unclickable text instead of a
+// broken link — safer than the bare `.Slug` links elsewhere that collapsed
+// to the literal "/team/undefined" for every such team, but still worse
+// than actually linking through, now that TeamPage.js itself resolves a
+// derived slug like this one back to the right school.
+const toTeamSlug = (school) => {
+  if (!school) return "";
+  return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
+};
+
 // Imgur happily serves raw image bytes from imgur.com itself (which is why
 // a plain <img> works), but caps that host's CORS header to imgur.com — the
 // canvas read useTrimmedImage needs below requires the i.imgur.com CDN
@@ -428,8 +442,9 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed, rank }) {
     </>
   );
 
-  return schoolData?.Slug ? (
-    <Link to={`/team/${schoolData.Slug}`} style={style}>{inner}</Link>
+  const teamSlug = schoolData?.Slug || toTeamSlug(schoolData?.School || school);
+  return teamSlug ? (
+    <Link to={`/team/${teamSlug}`} style={style}>{inner}</Link>
   ) : (
     <div style={style}>{inner}</div>
   );
@@ -1965,9 +1980,11 @@ export default function GamePage() {
                     </div>
                     {scoredPicks.length > 0 && (
                       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: "8px", marginBottom: "8px" }}>
+                        {/* >= on both sides (not > on one) so a tie lights up
+                            both numbers white instead of only the away one. */}
                         <span style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: awayWinPct >= homeWinPct ? "#fff" : "rgba(255,255,255,0.5)", lineHeight: 1 }}>{avgAwayScore}</span>
                         <span style={{ fontSize: "13px", fontWeight: 900, color: "rgba(255,255,255,0.4)" }}>–</span>
-                        <span style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: homeWinPct > awayWinPct ? "#fff" : "rgba(255,255,255,0.5)", lineHeight: 1 }}>{avgHomeScore}</span>
+                        <span style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: homeWinPct >= awayWinPct ? "#fff" : "rgba(255,255,255,0.5)", lineHeight: 1 }}>{avgHomeScore}</span>
                       </div>
                     )}
                     <div style={{ display: "flex", height: "7px", borderRadius: "5px", overflow: "hidden", background: "rgba(255,255,255,0.15)" }}>

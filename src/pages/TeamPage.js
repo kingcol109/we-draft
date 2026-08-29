@@ -18,7 +18,7 @@ import EarlyContributorFlair from "../assets/early contributor.png";
 import Year2ContributorFlair from "../assets/y2contributor.png";
 import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
-import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
+import { fetchAllRankMaps, ranksForGame, currentRankMap, RANKINGS_LIMIT } from "../utils/rankings";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -111,6 +111,19 @@ function sanitizeUrl(url) {
   if (!/^https?:\/\//i.test(u)) return `https://${u}`;
   return u;
 }
+
+// Same fallback NewsArticle.jsx/PlayerProfile.js/generate-sitemap.js/
+// Navbar.js all use for a school with no manually-set Slug field — most
+// schools added through AdminPanel.js's Team Branding "+ New Team" form
+// (that's most FCS schools, added ad hoc) never get one, since that form
+// has no Slug input at all. Every `/team/:slug` link built from a raw
+// `.Slug` with no fallback collapses to the literal string "/team/undefined"
+// for these — every such team's link points at the exact same broken URL,
+// which is why unrelated FCS teams all appeared to open "the same team."
+const toTeamSlug = (school) => {
+  if (!school) return "";
+  return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
+};
 
 // ── Shared sidebar card shell ──
 function SidebarCard({ title, color1, color2, children, headerRight }) {
@@ -934,6 +947,12 @@ export default function TeamPage() {
   const [activeTab, setActiveTab] = useState("prospects");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
+  // Whether this team's own schoolData.FCS flag is set — drives the
+  // stripped-down sidebar (Top 25 instead of Conference, no Schedule,
+  // generic News/Videos) built throughout this component. Lives in state
+  // (not just a local variable in the load effect) since the render below
+  // needs it too.
+  const [fcs, setFcs] = useState(false);
   const [conferenceTeams, setConferenceTeams] = useState([]);
   const [teamNews, setTeamNews] = useState([]);
   const [teamPerformances, setTeamPerformances] = useState([]);
@@ -975,6 +994,13 @@ export default function TeamPage() {
 
   useEffect(() => {
     setSeoDataReady(false);
+    // `school` (unlike `canonicalSchool`, set unconditionally below) only
+    // ever got set inside the `if (schoolData)` branch further down — with
+    // no reset here, navigating from a team whose lookup succeeded straight
+    // to one whose lookup fails (e.g. any FCS team, before the fix above)
+    // left the previous team's Mascot/etc. rendering on screen under the
+    // new team's own name/roster/schedule instead of just disappearing.
+    setSchool(null);
     const load = async () => {
       try {
         let schoolData = null;
@@ -982,8 +1008,25 @@ export default function TeamPage() {
         if (!slugQuery.empty) {
           schoolData = slugQuery.docs[0].data();
         } else {
-          const directSnap = await getDoc(doc(db, "schools", slugFallback));
-          if (directSnap.exists()) schoolData = directSnap.data();
+          // Most schools (nearly every FCS one — added ad hoc through
+          // AdminPanel.js's Team Branding "+ New Team" form, which has no
+          // Slug input) have no Slug field and a random auto-generated doc
+          // ID, so neither the query above nor a direct doc(db, "schools",
+          // slugFallback) lookup ever finds them. Every link that points
+          // here builds its URL as `team.Slug || toTeamSlug(team.School)`
+          // (see that helper's own comment), so matching the same way here
+          // — scanning for whichever school's derived slug equals this
+          // page's own `slug` — is what actually closes the loop, instead
+          // of guessing a name back out of the URL and hoping a doc ID or
+          // Slug field happens to match it.
+          const allSnap = await getDocs(collection(db, "schools"));
+          const bySlug = allSnap.docs.find((d) => toTeamSlug(d.data().School) === slug);
+          if (bySlug) {
+            schoolData = bySlug.data();
+          } else {
+            const directSnap = await getDoc(doc(db, "schools", slugFallback));
+            if (directSnap.exists()) schoolData = directSnap.data();
+          }
         }
 
         if (schoolData) {
@@ -1000,6 +1043,13 @@ export default function TeamPage() {
 
         const resolvedSchool = schoolData?.School || slugFallback;
         setCanonicalSchool(resolvedSchool);
+        // FCS teams get a stripped-down sidebar (Top 25 instead of
+        // Conference, no Schedule, generic News/Videos — see the IIFEs
+        // below and the Top25Sidebar/render section further down) since
+        // there's no real conference-mates/schedule/news data behind most
+        // of them the way there is for FBS teams.
+        const isFCS = !!schoolData?.FCS;
+        setFcs(isFCS);
 
         // ── Stage 1: everything below is independent of everything else in
         // this stage (only resolvedSchool/schoolData.Conference feed in) —
@@ -1011,7 +1061,11 @@ export default function TeamPage() {
         let dMap = {};
         await Promise.all([
           (async () => {
-            if (!schoolData?.Conference) return;
+            // Conference-mates list is replaced by Top25Sidebar for FCS
+            // teams (built at render time from rankingsByWeek/schoolsMap,
+            // both already fetched below regardless) — no need to spend a
+            // read on this for them.
+            if (isFCS || !schoolData?.Conference) return;
             const confSnap = await getDocs(query(
               collection(db, "schools"),
               where("Conference", "==", schoolData.Conference)
@@ -1023,6 +1077,22 @@ export default function TeamPage() {
           })(),
           (async () => {
             try {
+              // FCS teams show the generic site-wide news/articles feed
+              // instead — most have no players/games actually tagging them,
+              // so the team-scoped query below would come back empty anyway.
+              if (isFCS) {
+                const [newsSnap, articleSnap] = await Promise.all([
+                  getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+                  getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(NEWS_LIMIT))),
+                ]);
+                const combined = [
+                  ...newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() })),
+                  ...articleSnap.docs.map((d) => { const data = d.data(); return { id: d.id, type: "article", ...data, title: data.titleShort || data.title }; }),
+                ].sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0))
+                  .slice(0, NEWS_LIMIT);
+                setTeamNews(combined);
+                return;
+              }
               // Articles: pulled by `schools` (each linked player's school,
               // snapshotted the first time they're linked — see
               // ArticlesManager.js's own handleSave), not by whether this
@@ -1089,8 +1159,10 @@ export default function TeamPage() {
             dMap = built;
             setDraftMap(built);
           })(),
-          // Schedule — a team can appear as either Away or Home, so run both queries and merge
+          // Schedule — a team can appear as either Away or Home, so run both queries and merge.
+          // Not shown for FCS teams (see isFCS above) — skip the reads entirely.
           (async () => {
+            if (isFCS) { setSchedule([]); return; }
             try {
               const [awaySnap, homeSnap] = await Promise.all([
                 getDocs(query(collection(db, "schedule26"), where("Away", "==", resolvedSchool))),
@@ -1289,39 +1361,64 @@ export default function TeamPage() {
           ]);
           const chunkSnaps = [...playerChunkSnaps, recruitSnap];
 
-          if (chunks.length > 0 || !recruitSnap.empty) {
-            const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
-            const seenVideoIds = new Set();
-            const vids = [];
-            chunkSnaps.forEach((snap) => {
-              snap.docs.forEach((d) => {
-                if (seenVideoIds.has(d.id)) return;
-                seenVideoIds.add(d.id);
+          const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
+          const seenVideoIds = new Set();
+          const vids = [];
+          chunkSnaps.forEach((snap) => {
+            snap.docs.forEach((d) => {
+              if (seenVideoIds.has(d.id)) return;
+              seenVideoIds.add(d.id);
+              const data = d.data();
+              const items = Array.isArray(data.items) ? data.items : [];
+              // Prefer whichever item belongs to a player on this roster
+              // or a recruit committed here; fall back to items[0]
+              // per-field, same pattern as the player page.
+              const matched = items.find((it) => it.type === "recruit" ? it.commitment === resolvedSchool : rosterIds.has(it.playerId)) || null;
+              const first = items[0] || null;
+              vids.push({
+                id: d.id,
+                video: data.Video || "",
+                date: data.Date || null,
+                // GenTitle/GenThumb (AdminPanel.js VideosSection) are the
+                // video's own fallback, set once per video rather than per
+                // player — last resort once neither a roster player's own
+                // tag nor the first item on the video has an override set.
+                // Same fix as PlayerProfile.js's own video fetch.
+                title: matched?.title || first?.title || data.GenTitle || "",
+                thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
+              });
+            });
+          });
+          vids.sort((a, b) => toMs(b.date) - toMs(a.date));
+          const ownVids = vids.filter((v) => v.video);
+
+          // FCS teams: this team's own tagged videos (almost always none —
+          // most FCS schools have no players/recruits actually tracked in
+          // the videos collection) lead, then the generic site-wide feed
+          // fills in the rest, up to VIDEO_MAX_TOTAL, same exclusion
+          // (no Recruiting tag) CommunityBoard.js's own Videos sidebar uses.
+          if (isFCS) {
+            const genericSnap = await getDocs(collection(db, "videos"));
+            const genericVids = genericSnap.docs
+              .filter((d) => !seenVideoIds.has(d.id))
+              .map((d) => {
                 const data = d.data();
                 const items = Array.isArray(data.items) ? data.items : [];
-                // Prefer whichever item belongs to a player on this roster
-                // or a recruit committed here; fall back to items[0]
-                // per-field, same pattern as the player page.
-                const matched = items.find((it) => it.type === "recruit" ? it.commitment === resolvedSchool : rosterIds.has(it.playerId)) || null;
                 const first = items[0] || null;
-                vids.push({
+                return {
                   id: d.id,
                   video: data.Video || "",
                   date: data.Date || null,
-                  // GenTitle/GenThumb (AdminPanel.js VideosSection) are the
-                  // video's own fallback, set once per video rather than per
-                  // player — last resort once neither a roster player's own
-                  // tag nor the first item on the video has an override set.
-                  // Same fix as PlayerProfile.js's own video fetch.
-                  title: matched?.title || first?.title || data.GenTitle || "",
-                  thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
-                });
-              });
-            });
-            vids.sort((a, b) => toMs(b.date) - toMs(a.date));
-            setTeamVideos(vids.filter((v) => v.video));
+                  title: data.GenTitle || first?.title || "",
+                  thumb: data.GenThumb || first?.thumb || "",
+                  tags: Array.isArray(data.Tags) ? data.Tags : [],
+                };
+              })
+              .filter((v) => v.video && !v.tags.includes("Recruiting"))
+              .sort((a, b) => toMs(b.date) - toMs(a.date));
+            setTeamVideos([...ownVids, ...genericVids].slice(0, VIDEO_MAX_TOTAL));
           } else {
-            setTeamVideos([]);
+            setTeamVideos(ownVids);
           }
         } catch (e) {
           console.error("Videos load error:", e);
@@ -1434,7 +1531,97 @@ export default function TeamPage() {
           ) : (
             <Link
               key={team.Slug || team.School}
-              to={`/team/${team.Slug}`}
+              to={`/team/${team.Slug || toTeamSlug(team.School)}`}
+              style={rowStyle}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              {rowContent}
+            </Link>
+          );
+        })
+      )}
+    </SidebarCard>
+  );
+
+  // ── Top 25 sidebar — FCS teams' left-column replacement for
+  // ConferenceSidebar above (most have no real conference-mates data worth
+  // showing). Built from the same rankingsByWeek/schoolsMap state every
+  // team page already fetches regardless, so this costs no extra reads.
+  // Row styling mirrors ConferenceSidebar's own, with a rank number added. ──
+  const top25Entries = Object.entries(currentRankMap(rankingsByWeek))
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, RANKINGS_LIMIT)
+    .map(([schoolName, rank]) => ({ School: schoolName, Rank: rank, ...(schoolsMap[schoolName] || {}) }));
+
+  const Top25Sidebar = (
+    <SidebarCard
+      title="Top 25"
+      color1={BLUE} color2={GOLD}
+      headerRight={
+        <Link to="/cfb" style={{ color: GOLD, fontSize: "11px", fontWeight: 900, textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+          Full Poll →
+        </Link>
+      }
+    >
+      {top25Entries.length === 0 ? (
+        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No poll published yet.</div>
+      ) : (
+        top25Entries.map((team, i) => {
+          const isSelf = team.School === canonicalSchool;
+          const rowStyle = {
+            display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
+            textDecoration: "none",
+            background: isSelf ? "#fff8e6" : "#fff",
+            borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
+            borderBottom: i < top25Entries.length - 1 ? "1px solid #f0f0f0" : "none",
+            transition: "background 0.12s",
+          };
+          const rowContent = (
+            <>
+              <div style={{ flexShrink: 0, width: "20px", textAlign: "center", fontWeight: 900, fontSize: "12px", color: "#999" }}>
+                {team.Rank}
+              </div>
+              {team.Logo1 ? (
+                <div style={{
+                  width: "28px", height: "28px", flexShrink: 0, display: "flex",
+                  alignItems: "center", justifyContent: "center",
+                  background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+                }}>
+                  <img
+                    src={sanitizeUrl(team.Logo1)}
+                    alt={team.School}
+                    loading="lazy"
+                    style={{ width: "24px", height: "24px", objectFit: "contain" }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                </div>
+              ) : (
+                <div style={{
+                  width: "28px", height: "28px", flexShrink: 0, borderRadius: "4px",
+                  background: team.Color1 || BLUE, display: "flex", alignItems: "center",
+                  justifyContent: "center", color: "#fff", fontSize: "10px", fontWeight: 900,
+                }}>
+                  {team.School.charAt(0)}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontWeight: 900, fontSize: "13px", color: BLUE, lineHeight: 1.2,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>
+                  {team.School}
+                </div>
+              </div>
+              {!isSelf && <span style={{ color: "#ccc", fontSize: "14px", fontWeight: 900, flexShrink: 0 }}>›</span>}
+            </>
+          );
+          return isSelf ? (
+            <div key={team.School} style={rowStyle}>{rowContent}</div>
+          ) : (
+            <Link
+              key={team.School}
+              to={`/team/${team.Slug || toTeamSlug(team.School)}`}
               style={rowStyle}
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
@@ -1602,7 +1789,7 @@ export default function TeamPage() {
             return (
               <Link
                 key={g.id || i}
-                to={`/team/${opponentData.Slug}`}
+                to={`/team/${opponentData.Slug || toTeamSlug(opponentData.School)}`}
                 style={rowStyle2}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
@@ -1901,22 +2088,23 @@ export default function TeamPage() {
                 <details style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
                   <summary style={{ backgroundColor: BLUE, padding: "10px 14px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
                     <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                      {school?.Conference || "Conference"} Teams ▾
+                      {fcs ? "Top 25" : `${school?.Conference || "Conference"} Teams`} ▾
                     </div>
                   </summary>
                   <div style={{ height: "4px", backgroundColor: GOLD }} />
                   <div style={{ background: "#fff" }}>
-                    {conferenceTeams.map((team, i) => {
+                    {(fcs ? top25Entries : conferenceTeams).map((team, i, arr) => {
                       const isSelf = team.School === canonicalSchool;
                       const rowStyle = {
                         display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
                         textDecoration: "none",
                         background: isSelf ? "#fff8e6" : "#fff",
                         borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
-                        borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+                        borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
                       };
                       const rowContent = (
                         <>
+                          {fcs && <span style={{ flexShrink: 0, width: "16px", textAlign: "center", fontWeight: 900, fontSize: "11px", color: "#999" }}>{team.Rank}</span>}
                           {team.Logo1 ? (
                             <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                               <img src={sanitizeUrl(team.Logo1)} alt={team.School} loading="lazy" style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -1929,7 +2117,7 @@ export default function TeamPage() {
                       return isSelf ? (
                         <div key={team.Slug || team.School} style={rowStyle}>{rowContent}</div>
                       ) : (
-                        <Link key={team.Slug || team.School} to={`/team/${team.Slug}`} style={rowStyle}>
+                        <Link key={team.Slug || team.School} to={`/team/${team.Slug || toTeamSlug(team.School)}`} style={rowStyle}>
                           {rowContent}
                         </Link>
                       );
@@ -1938,7 +2126,7 @@ export default function TeamPage() {
                 </details>
                 {teamVideos.length > 0 && VideosSidebar}
                 {NewsSidebar}
-                {ScheduleSidebar}
+                {!fcs && ScheduleSidebar}
                 {teamPerformances.length > 0 && PerformancesSidebar}
               </>
             )}
@@ -1951,7 +2139,7 @@ export default function TeamPage() {
             alignItems: "start",
           }}>
             <div style={{ position: "sticky", top: "20px" }}>
-              {!loading && ConferenceSidebar}
+              {!loading && (fcs ? Top25Sidebar : ConferenceSidebar)}
             </div>
             <div>
               <HeroCard
@@ -1977,7 +2165,7 @@ export default function TeamPage() {
                 <>
                   {teamVideos.length > 0 && VideosSidebar}
                   {NewsSidebar}
-                  {ScheduleSidebar}
+                  {!fcs && ScheduleSidebar}
                   {teamPerformances.length > 0 && PerformancesSidebar}
                 </>
               )}

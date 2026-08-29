@@ -960,9 +960,17 @@ export default function PlayerProfile() {
     const fetch = async () => {
       if (!player?.School) { setBranding(null); setBrandingReady(true); return; }
       try {
-        const sSnap = await getDoc(doc(db,"schools",player.School));
-        if (sSnap.exists()) {
-          const b = sSnap.data();
+        // Queried by the `School` field rather than assumed to be the doc's
+        // own ID — a school's doc ID is only ever the school name for
+        // whatever was in the original bulk import; any team added since
+        // through AdminPanel.js's Team Branding "+ New Team" form (that's
+        // most FCS schools, added ad hoc when a game/player needed one) gets
+        // a random auto-generated ID instead, so a straight doc(db,
+        // "schools", player.School) lookup silently found nothing for them
+        // and every FCS player fell back to no branding at all.
+        const schoolQuery = await getDocs(query(collection(db, "schools"), where("School", "==", player.School)));
+        if (!schoolQuery.empty) {
+          const b = schoolQuery.docs[0].data();
           // Dark variant preferred — this now feeds a full-opacity
           // background layer in the drafted-player hero (see heroCollegeLogo
           // below), not a small box on a light card, so it needs the same

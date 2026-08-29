@@ -35,18 +35,6 @@ const TREND_STYLE = {
   "on fire": { icon: "🔥", label: "On Fire", color: RED },
 };
 
-// Same tiebreak as WePickHub.js's own compareStandingsEntries (duplicated
-// here rather than shared, matching this codebase's per-file convention for
-// small helpers) — points first, then most correct winners, then lowest
-// cumulative score differential.
-function compareStandingsEntries(a, b) {
-  const points = (b.points ?? 0) - (a.points ?? 0);
-  if (points !== 0) return points;
-  const correct = (b.correct ?? 0) - (a.correct ?? 0);
-  if (correct !== 0) return correct;
-  return (a.diffTotal ?? Infinity) - (b.diffTotal ?? Infinity);
-}
-
 const SITE_TITLE = "We-Draft.com - NFL Draft Scouting Reports, Rankings & Mock Drafts";
 const SITE_DESCRIPTION = "Build your NFL Draft board, read scouting reports, compare community evaluations, create mock drafts, and follow thousands of college football prospects with rankings, film links, measurable data, and the latest draft news.";
 const SITE_URL = "https://we-draft.com/";
@@ -374,7 +362,6 @@ export default function HomeInSeason() {
   const [videos, setVideos] = useState([]);
   const [trending, setTrending] = useState([]);
   const [topPerformances, setTopPerformances] = useState([]);
-  const [topStandings, setTopStandings] = useState([]);
   const [weekGameCount, setWeekGameCount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
@@ -465,21 +452,6 @@ export default function HomeInSeason() {
           .slice(0, 6);
         setTopPerformances(top);
       } catch (err) { console.error("Error fetching top performances:", err); }
-    };
-    fetch();
-  }, []);
-
-  // We-Pick season leaderboard preview — top 3 entries from the same
-  // wePickStandings2026/season doc WePickHub.js's own Season Standings tab
-  // reads, sorted with its exact tiebreak order (compareStandingsEntries
-  // above).
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDoc(doc(db, "wePickStandings2026", "season"));
-        const entries = Array.isArray(snap.data()?.entries) ? snap.data().entries : [];
-        setTopStandings([...entries].sort(compareStandingsEntries).slice(0, 3));
-      } catch (err) { console.error("Error fetching We-Pick standings:", err); }
     };
     fetch();
   }, []);
@@ -913,82 +885,6 @@ export default function HomeInSeason() {
         </div>
         )}
 
-        {/* ===== WE-PICK — its own headline band now (used to be a small
-            teaser tucked next to Videos below), matching the This Week in
-            CFB band's treatment: a big "Make Your Picks" CTA beside a live
-            preview of the season leaderboard's top 3 (same
-            wePickStandings2026/season doc + tiebreak order WePickHub.js's
-            own Season Standings tab reads — see compareStandingsEntries
-            above, duplicated from there). Always shown — "make a pick" is
-            actionable even in a week with no standings/trending/
-            performances data yet, unlike the This Week in CFB band above. ===== */}
-        <div style={{ marginBottom: isMobile ? "28px" : "40px" }}>
-          <div style={{ marginBottom: "18px" }}>
-            <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#fff", background: BLUE, display: "inline-block", padding: "8px 18px", borderRadius: "6px" }}>
-              🔮 We-Pick
-            </div>
-          </div>
-
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-            gap: isMobile ? "24px" : "20px",
-            alignItems: "start",
-          }}>
-
-            {/* -- Make Your Picks CTA -- */}
-            <div>
-              <SectionTitle>Make Your Picks</SectionTitle>
-              <Link to="/we-pick" style={{
-                display: "flex", flexDirection: "column", gap: "10px", textDecoration: "none",
-                background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
-                border: `2px solid ${GOLD}`, borderRadius: "10px", padding: "24px 20px",
-                height: "100%", boxSizing: "border-box", boxShadow: "0 8px 40px rgba(0,85,165,0.18)",
-              }}>
-                <span style={{ fontSize: "34px", lineHeight: 1 }}>🔮</span>
-                <span style={{ fontWeight: 900, fontSize: "18px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>Make Your Picks</span>
-                <span style={{ fontWeight: 700, fontSize: "12px", color: "rgba(255,255,255,0.7)", lineHeight: 1.4 }}>
-                  {weekGameCount != null ? `${weekGameCount} game${weekGameCount === 1 ? "" : "s"} up for grabs this week` : "Predict this week's games"}
-                </span>
-                <span style={{ marginTop: "auto", fontWeight: 900, fontSize: "12px", color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Pick Now →
-                </span>
-              </Link>
-            </div>
-
-            {/* -- Season leaderboard preview -- */}
-            <div>
-              <SectionTitle linkTo="/we-pick/standings" linkLabel="Full standings →">Leaderboard</SectionTitle>
-              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.18)" }}>
-                <div style={{ background: BLUE, padding: "10px 16px" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2026 Season</div>
-                </div>
-                <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-                {topStandings.length === 0 ? (
-                  <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px", background: "#fff" }}>No standings yet</div>
-                ) : topStandings.map((e, i) => (
-                  <div key={e.uid || i} style={{
-                    display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px",
-                    background: "#fff", borderBottom: i < topStandings.length - 1 ? "1px solid #f0f0f0" : "none",
-                  }}>
-                    <div style={{
-                      flexShrink: 0, width: "28px", height: "28px", borderRadius: "50%",
-                      background: i === 0 ? GOLD : "#eee", color: i === 0 ? "#fff" : "#888",
-                      display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: "13px",
-                    }}>
-                      {i + 1}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: "14px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {e.displayName || "Anonymous Fan"}
-                    </div>
-                    <div style={{ flexShrink: 0, fontWeight: 900, fontSize: "13px", color: "#888" }}>{e.points ?? 0} pts</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-          </div>
-        </div>
 
         {/* ===== SCOUTING — Recent Evals + both draft boards, still fully
             here and fully working, just deliberately smaller/lower-priority
@@ -1128,38 +1024,70 @@ export default function HomeInSeason() {
           </div>
         </div>
 
-        {/* ===== VIDEOS — small, tucked below Scouting rather than
-            competing with the Trending/Performances band above. We-Pick
-            used to have its teaser here too; it's now its own headline
-            band further up. ===== */}
+        {/* ===== VIDEOS + WE-PICK — small, tucked below Scouting rather than
+            competing with the Trending/Performances band above. ===== */}
         <div style={{ marginBottom: isMobile ? "28px" : "40px" }}>
-          <SectionTitle linkTo="/news" linkLabel="See all →">Videos</SectionTitle>
-          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-            <div style={{ background: BLUE, padding: "8px 14px" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
-            </div>
-            <div style={{ height: "3px", background: GOLD }} />
-            {videos.length > 0 ? videos.map((v, i) => (
-              <a key={v.id} href={v.video} target="_blank" rel="noopener noreferrer" style={{
-                display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px",
-                textDecoration: "none", background: "#fff",
-                borderBottom: i < videos.length - 1 ? "1px solid #f0f0f0" : "none",
-              }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-              >
-                {v.thumb ? (
-                  <img src={v.thumb} alt="" style={{ width: "44px", height: "44px", objectFit: "cover", borderRadius: "5px", flexShrink: 0 }} />
-                ) : (
-                  <div style={{ width: "44px", height: "44px", borderRadius: "5px", background: "#eee", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px" }}>▶️</div>
-                )}
-                <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: "11px", color: "#222", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                  {v.title || "Watch"}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr",
+            gap: isMobile ? "20px" : "16px",
+            alignItems: "start",
+          }}>
+
+            {/* -- Videos (real data) -- */}
+            <div>
+              <SectionTitle linkTo="/news" linkLabel="See all →">Videos</SectionTitle>
+              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+                <div style={{ background: BLUE, padding: "8px 14px" }}>
+                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
                 </div>
-              </a>
-            )) : (
-              <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>No videos yet</div>
-            )}
+                <div style={{ height: "3px", background: GOLD }} />
+                {videos.length > 0 ? videos.map((v, i) => (
+                  <a key={v.id} href={v.video} target="_blank" rel="noopener noreferrer" style={{
+                    display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px",
+                    textDecoration: "none", background: "#fff",
+                    borderBottom: i < videos.length - 1 ? "1px solid #f0f0f0" : "none",
+                  }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                  >
+                    {v.thumb ? (
+                      <img src={v.thumb} alt="" style={{ width: "44px", height: "44px", objectFit: "cover", borderRadius: "5px", flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: "44px", height: "44px", borderRadius: "5px", background: "#eee", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px" }}>▶️</div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: "11px", color: "#222", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                      {v.title || "Watch"}
+                    </div>
+                  </a>
+                )) : (
+                  <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>No videos yet</div>
+                )}
+              </div>
+            </div>
+
+            {/* -- We-Pick teaser — deliberately small, one card, not its
+                own headline section. Also reachable from the hero's own
+                chip grid above. -- */}
+            <div>
+              <SectionTitle>We-Pick</SectionTitle>
+              <Link to="/we-pick" style={{
+                display: "flex", flexDirection: "column", gap: "8px", textDecoration: "none",
+                background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
+                border: `2px solid ${GOLD}`, borderRadius: "10px", padding: "18px 16px",
+                height: "100%", boxSizing: "border-box",
+              }}>
+                <span style={{ fontSize: "26px", lineHeight: 1 }}>🔮</span>
+                <span style={{ fontWeight: 900, fontSize: "14px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>Make Your Picks</span>
+                <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.7)", lineHeight: 1.4 }}>
+                  {weekGameCount != null ? `${weekGameCount} game${weekGameCount === 1 ? "" : "s"} up for grabs` : "Predict this week's games"}
+                </span>
+                <span style={{ marginTop: "auto", fontWeight: 900, fontSize: "11px", color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Pick Now →
+                </span>
+              </Link>
+            </div>
+
           </div>
         </div>
 
