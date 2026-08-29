@@ -2121,7 +2121,26 @@ export default function GamePage() {
                     </div>
                   ) : picksLocked ? (
                     <div style={{ textAlign: "center", color: "rgba(255,255,255,0.85)", fontStyle: "italic", fontSize: "13px" }}>
-                      Pick this game starting {new Date(picksOpenAtMs).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}.
+                      {/* kickoffPassed (game underway, not yet Final) means
+                          picksOpenAtMs is already in the past — showing "Pick
+                          this game starting {that date}" would read as
+                          nonsense mid-game, so that message is only for the
+                          other picksLocked case (this week's picks haven't
+                          opened yet). */}
+                      {kickoffPassed
+                        ? "Predictions are not available during the game."
+                        : `Pick this game starting ${new Date(picksOpenAtMs).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}.`}
+                      {/* Locked doesn't mean gone — same "Your pick" readout
+                          the isFinal branch above shows, so a prediction made
+                          before kickoff is still visible (just no longer
+                          editable) while the game's actually being played. */}
+                      {kickoffPassed && myPick && (
+                        <div style={{ marginTop: "10px", fontStyle: "normal", fontWeight: 800, color: "#fff" }}>
+                          {myPick.awayScore != null && myPick.homeScore != null
+                            ? `Your pick: ${game.Away} ${myPick.awayScore} – ${game.Home} ${myPick.homeScore}`
+                            : `Your pick: ${pickedSideOf(myPick) === "away" ? game.Away : pickedSideOf(myPick) === "home" ? game.Home : "—"} to win`}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <>

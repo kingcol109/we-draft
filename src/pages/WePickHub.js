@@ -2787,8 +2787,12 @@ function CompositionChip({ label, value, ok }) {
 // the game's own page (a "stretched link" behind the content, with the
 // inputs/buttons individually kept interactive) — no separate "view game"
 // link needed. A final game renders read-only with the real score and a
-// correct/incorrect badge; a not-yet-open game just shows no score slot at
-// all (the week-level status card above already says when picks open).
+// correct/incorrect badge; once kickoff passes on a still-live game, an
+// existing score pick still shows (read-only, no correct/incorrect badge
+// yet — the game isn't over) instead of just vanishing. A game with no
+// pick at all — including one that hasn't opened yet, which never had a
+// chance to get one — just shows no score slot (the week-level status card
+// above already says when picks open).
 // The star toggles whether an existing score pick counts toward the
 // week's Ranked 6 — shown on any pick (never for a disqualified game), but
 // only actually clickable once there's a score behind it; tapping it on a
@@ -2913,6 +2917,19 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
             background: "#fff", pointerEvents: "auto",
           }}
         />
+      ) : hasScorePick(pick) ? (
+        // Locked (kickoff already passed on a still-live game — a
+        // not-yet-open game never had a pick to begin with) but there's a
+        // real score pick on file: still show it, just as plain text
+        // instead of an editable box. scoreVal already holds the saved
+        // pick's value here (the sync effect above sets it from `pick`,
+        // and with no input rendered nothing could've changed it since).
+        <span style={{
+          flexShrink: 0, width: "42px", textAlign: "center", fontFamily: "'Courier New', monospace", fontWeight: 900,
+          fontSize: "18px", color: "rgba(255,255,255,0.85)",
+        }}>
+          {scoreVal}
+        </span>
       ) : null}
       {(schoolData?.LogoBlack || schoolData?.LogoDark || schoolData?.Logo1) && (
         <img

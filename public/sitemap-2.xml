@@ -1647,6 +1647,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/pofele-ashlock-2027-wr</loc>
+    <lastmod>2026-08-29</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/preston-hodge-2026-db</loc>
     <lastmod>2026-08-29</lastmod>
     <priority>0.7</priority>
@@ -3503,7 +3508,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/game/north-carolina-vs-tcu-8-29-2026</loc>
-    <lastmod>2026-08-24</lastmod>
+    <lastmod>2026-08-29</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -4993,11 +4998,6 @@
   </url>
   <url>
     <loc>https://we-draft.com/game/cincinnati-vs-west-virginia-10-17-2026</loc>
-    <lastmod>2026-07-14</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/game/kansas-vs-kansas-state-10-17-2026</loc>
     <lastmod>2026-07-14</lastmod>
     <priority>0.6</priority>
   </url>
