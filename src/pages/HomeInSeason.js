@@ -26,40 +26,14 @@ const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const RED = "#c0392b";
 
-// ── DUMMY DATA — trending players and top performances below are hardcoded
-// placeholders, not a Firestore read. Both collections (trends/performances)
-// are genuinely empty right now (off-season) — this exists purely so the
-// "This Week in CFB" band has something real-looking to lay out and style
-// while the rest of the page gets built. Swap DUMMY_TRENDING/
-// DUMMY_PERFORMANCES for real queries (see PlayerProfile.js's own Top 5
-// Trending fetch and PerformancesHub.jsx's own performances query for the
-// shape to match) once the season is actually generating this data — the
-// cards below don't link to real player/performance pages on purpose (there
-// aren't any yet), so update those Links at the same time. ──
-const DUMMY_TRENDING = [
-  { name: "Marcus Bell", position: "QB", school: "Florida State", trend: "up" },
-  { name: "Trevon Carter", position: "EDGE", school: "Ohio State", trend: "breakout" },
-  { name: "Jaylen Ross", position: "WR", school: "Alabama", trend: "on fire" },
-  { name: "DeShawn Miller", position: "RB", school: "Texas", trend: "up" },
-  { name: "Kaden Whitfield", position: "CB", school: "Georgia", trend: "on fire" },
-  { name: "Isaiah Cole", position: "TE", school: "Michigan", trend: "breakout" },
-];
+// TREND_STYLE keys match the `trends` collection's own `Trend` field values
+// (lowercased) — see the live fetch below, same mapping PlayerProfile.js's
+// and MarginSidebars.js's own Trending widgets use.
 const TREND_STYLE = {
   up: { icon: "▲", label: "Trending Up", color: "#16a34a" },
   breakout: { icon: "⚡", label: "Breakout", color: "#4a535e" },
   "on fire": { icon: "🔥", label: "On Fire", color: RED },
 };
-// Dominant/Great only — this is the "top performances" band's whole
-// premise (see the section header below), so only those two grades belong
-// here even once this is a real query.
-const DUMMY_PERFORMANCES = [
-  { name: "Marcus Bell", school: "Florida State", statLine: "24/31, 312 YDS, 4 TD", grade: "Dominant" },
-  { name: "Jaylen Ross", school: "Alabama", statLine: "8 REC, 142 YDS, 2 TD", grade: "Great" },
-  { name: "DeShawn Miller", school: "Texas", statLine: "22 CAR, 178 YDS, 3 TD", grade: "Dominant" },
-  { name: "Trevon Carter", school: "Ohio State", statLine: "3 SACK, 5 TFL, 1 FF", grade: "Great" },
-  { name: "Kaden Whitfield", school: "Georgia", statLine: "2 INT, 6 PBU, 8 TKL", grade: "Dominant" },
-  { name: "Isaiah Cole", school: "Michigan", statLine: "6 REC, 98 YDS, 2 TD", grade: "Great" },
-];
 
 const SITE_TITLE = "We-Draft.com - NFL Draft Scouting Reports, Rankings & Mock Drafts";
 const SITE_DESCRIPTION = "Build your NFL Draft board, read scouting reports, compare community evaluations, create mock drafts, and follow thousands of college football prospects with rankings, film links, measurable data, and the latest draft news.";
@@ -386,6 +360,8 @@ export default function HomeInSeason() {
   const [news, setNews] = useState([]);
   const [articles, setArticles] = useState([]);
   const [videos, setVideos] = useState([]);
+  const [trending, setTrending] = useState([]);
+  const [topPerformances, setTopPerformances] = useState([]);
   const [weekGameCount, setWeekGameCount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
@@ -445,13 +421,46 @@ export default function HomeInSeason() {
     fetch();
   }, []);
 
+  // Trending — same "trends" collection / Shown===true / Order sort as
+  // PlayerProfile.js's and MarginSidebars.js's own Trending widgets, capped
+  // to 6 for this band's two-column layout.
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, "trends"));
+        const shown = snap.docs
+          .map((d) => ({ slug: d.id, ...d.data() }))
+          .filter((t) => t.Shown === true)
+          .sort((a, b) => (a.Order ?? 0) - (b.Order ?? 0))
+          .slice(0, 6);
+        setTrending(shown);
+      } catch (err) { console.error("Error fetching trending:", err); }
+    };
+    fetch();
+  }, []);
+
+  // Top Performances — Dominant/Great only, same "performances" query
+  // PerformancesHub.jsx uses, newest game first.
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "performances"), where("status", "==", "published")));
+        const top = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((p) => p.grade === "Dominant" || p.grade === "Great")
+          .sort((a, b) => (b.gameDate?.toDate ? b.gameDate.toDate().getTime() : 0) - (a.gameDate?.toDate ? a.gameDate.toDate().getTime() : 0))
+          .slice(0, 6);
+        setTopPerformances(top);
+      } catch (err) { console.error("Error fetching top performances:", err); }
+    };
+    fetch();
+  }, []);
+
   // We-Pick teaser's only real number — how many schedule26 games kick off
   // in the next 7 days and don't have both scores in yet. Scoped to a
   // rolling week rather than counting every unplayed game left in the
   // whole season (891 of them right now), which would read as a nonsense
-  // number on a "this week" teaser. Genuinely live data (schedule26 is
-  // populated even off-season), unlike the trending/performances
-  // placeholders above.
+  // number on a "this week" teaser.
   useEffect(() => {
     const fetch = async () => {
       try {
@@ -801,14 +810,17 @@ export default function HomeInSeason() {
                   <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>This Week</div>
                 </div>
                 <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-                {DUMMY_TRENDING.map((t, i) => {
-                  const style = TREND_STYLE[t.trend];
+                {trending.length === 0 ? (
+                  <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px", background: "#fff" }}>No trending players yet</div>
+                ) : trending.map((t, i) => {
+                  const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
+                  if (!style) return null;
                   return (
-                    <Link key={i} to="/community" style={{
+                    <Link key={t.slug} to={`/player/${t.slug}`} style={{
                       display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px",
                       textDecoration: "none", background: "#fff",
                       borderLeft: `4px solid ${style.color}`,
-                      borderBottom: i < DUMMY_TRENDING.length - 1 ? "1px solid #f0f0f0" : "none",
+                      borderBottom: i < trending.length - 1 ? "1px solid #f0f0f0" : "none",
                     }}>
                       <div style={{
                         flexShrink: 0, width: "34px", height: "34px", borderRadius: "7px",
@@ -818,8 +830,8 @@ export default function HomeInSeason() {
                         {style.icon}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.position} · {t.school}</div>
+                        <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.First} {t.Last}</div>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.Position} · {t.School}</div>
                       </div>
                       <span style={{ color: "#ccc", fontSize: "16px", fontWeight: 900 }}>›</span>
                     </Link>
@@ -828,9 +840,8 @@ export default function HomeInSeason() {
               </div>
             </div>
 
-            {/* -- Top Performances — Dominant/Great only, see
-                DUMMY_PERFORMANCES's own comment above once this is a real
-                query. -- */}
+            {/* -- Top Performances — Dominant/Great only (see the fetch
+                effect above's own query). -- */}
             <div>
               <SectionTitle linkTo="/performances" linkLabel="See all →">Performances</SectionTitle>
               <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.18)" }}>
@@ -838,14 +849,16 @@ export default function HomeInSeason() {
                   <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Dominant & Great</div>
                 </div>
                 <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-                {DUMMY_PERFORMANCES.filter((p) => p.grade === "Dominant" || p.grade === "Great").map((p, i, arr) => (
-                  <Link key={i} to="/performances" style={{
+                {topPerformances.length === 0 ? (
+                  <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px", background: "#fff" }}>No graded performances yet</div>
+                ) : topPerformances.map((p, i, arr) => (
+                  <Link key={p.id} to={`/performance/${p.slug || p.id}`} style={{
                     display: "flex", flexDirection: "column", gap: "4px", padding: "13px 16px",
                     textDecoration: "none", background: "#fff",
                     borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
                   }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                      <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                      <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.playerName || p.titleShort}</div>
                       <div style={{
                         flexShrink: 0, fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "10px",
                         textTransform: "uppercase", letterSpacing: "0.04em",
@@ -855,7 +868,9 @@ export default function HomeInSeason() {
                       </div>
                     </div>
                     <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>{p.school}</div>
-                    <div className={gradeStatLineClass(p.grade)} style={{ fontSize: "13px", fontWeight: 700, color: "#333", fontFamily: "'Courier New', monospace" }}>{p.statLine}</div>
+                    {p.statLine && (
+                      <div className={gradeStatLineClass(p.grade)} style={{ fontSize: "13px", fontWeight: 700, color: "#333", fontFamily: "'Courier New', monospace" }}>{p.statLine}</div>
+                    )}
                   </Link>
                 ))}
               </div>
