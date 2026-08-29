@@ -3,22 +3,30 @@
 // Admin Panel "Content Calendar" section — a month grid for planning
 // upcoming videos, articles, and posts. Each entry is scoped to a subject
 // (a player, recruit, or team) whose name is the entry's own display text
-// ("the subject will be the text" — there's no separate title/note field by
-// design); the entry's content type (video/article/post) drives how it's
-// styled (color + icon), not what it says.
+// on the chip itself ("the subject will be the text" was the original
+// spec); the entry's content type (video/article/post) drives how it's
+// styled (color + icon). An optional free-text Note can be added on top of
+// that — an angle to take, who's involved, anything the subject name alone
+// doesn't capture — shown via the chip's own tooltip and a small 📝 marker,
+// never inline on the chip itself (there's no room, and the whole point of
+// the subject-as-title design is staying scannable at a glance).
 //
-// Two kinds of entries share this same grid:
-//   - Manual plans (this component's own `contentCalendar` docs) — an idea
-//     not created yet, just a subject/type/date. Draggable to a different
-//     day (see handleDropOnDate) — that's the whole point of planning here.
-//   - Pulled-in real content — every existing video (`videos`) and article
-//     (`articles`) doc, placed on its own Date/publishedAt, standing in for
-//     the player it's tagged to (or a generic name — see videoEntries/
-//     articleEntries below — when it's tagged to more than one). Performances
-//     are deliberately excluded (not asked for). These aren't separately
-//     stored anywhere; they're derived every render from the videos/articles
-//     collections themselves, and are read-only/not draggable here — moving
-//     when a video or article actually goes live is the Videos/Articles
+// Two kinds of entries share this same grid, visually distinguished (solid
+// border vs. dashed + a small 🔗 marker — see the legend above the grid and
+// the chip styling in the render below):
+//   - Manual plans (this component's own `contentCalendar` docs, solid
+//     border) — an idea not created yet, just a subject/type/date/note.
+//     Draggable to a different day (see handleDropOnDate) — that's the
+//     whole point of planning here.
+//   - Pulled-in real content (dashed border) — every existing video
+//     (`videos`) and article (`articles`) doc, placed on its own Date/
+//     publishedAt, standing in for the player it's tagged to (or a generic
+//     name — see videoEntries/articleEntries below — when it's tagged to
+//     more than one). Performances are deliberately excluded (not asked
+//     for). These aren't separately stored anywhere; they're derived every
+//     render from the videos/articles collections themselves, and are
+//     read-only/not draggable/no note here — moving when a video or
+//     article actually goes live (or annotating it) is the Videos/Articles
 //     tabs' own job, not this calendar's.
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -52,6 +60,11 @@ const SUBJECT_TYPES = [
   { key: "player", label: "Player" },
   { key: "recruit", label: "Recruit" },
   { key: "team", label: "Team" },
+  // Not every planned entry has one clean player/recruit/team it's about —
+  // this skips SubjectCombobox for a plain text field instead, so
+  // subjectLabel (the chip's own display text) can just be typed directly.
+  // subjectId stays empty for these; nothing looks it up by id.
+  { key: "custom", label: "Custom" },
 ];
 
 const inputStyle = {
@@ -101,7 +114,7 @@ const truncateLabel = (label) => {
   return label.length > MAX_LABEL_CHARS ? `${label.slice(0, MAX_LABEL_CHARS)}...` : label;
 };
 
-const BLANK_FORM = { date: "", type: "video", subjectType: "player", subjectId: "", subjectLabel: "" };
+const BLANK_FORM = { date: "", type: "video", subjectType: "player", subjectId: "", subjectLabel: "", note: "" };
 
 // Search-input + dropdown-of-matches combobox for picking this entry's
 // subject — same pattern as PerformancesManager.js's own VideoLookupCombobox,
@@ -368,6 +381,7 @@ export default function ContentCalendarManager() {
       subjectType: entry.subjectType || "player",
       subjectId: entry.subjectId || "",
       subjectLabel: entry.subjectLabel || "",
+      note: entry.note || "",
     });
     setSaveMessage("");
   };
@@ -377,7 +391,10 @@ export default function ContentCalendarManager() {
   const handleSave = async () => {
     if (!formState) return;
     if (!formState.date) { setSaveMessage("Failed: pick a date."); return; }
-    if (!formState.subjectId) { setSaveMessage("Failed: pick a subject."); return; }
+    // Custom Text needs a typed label instead of a tagged subjectId — every
+    // other subject type still needs an actual pick.
+    const hasSubject = formState.subjectType === "custom" ? !!formState.subjectLabel.trim() : !!formState.subjectId;
+    if (!hasSubject) { setSaveMessage("Failed: pick a subject or enter a title."); return; }
     setSaving(true);
     setSaveMessage("");
     try {
@@ -387,7 +404,8 @@ export default function ContentCalendarManager() {
         type: formState.type,
         subjectType: formState.subjectType,
         subjectId: formState.subjectId,
-        subjectLabel: formState.subjectLabel,
+        subjectLabel: formState.subjectLabel.trim(),
+        note: formState.note?.trim() || "",
       };
       if (isNew) {
         payload.createdAt = serverTimestamp();
@@ -459,6 +477,18 @@ export default function ContentCalendarManager() {
               <span style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.04em" }}>{t.label}</span>
             </div>
           ))}
+          <div style={{ width: "1px", height: "14px", background: "#ddd" }} />
+          {/* Same solid-vs-dashed distinction the chips themselves use (see
+              the grid render below) — added manually vs. pulled in from the
+              Videos/Articles feed on its own. */}
+          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+            <span style={{ width: "9px", height: "9px", borderRadius: "3px", background: "#888", border: "1px solid #666", display: "inline-block" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: "#888" }}>Added</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+            <span style={{ width: "9px", height: "9px", borderRadius: "3px", background: "#888", border: "1px dashed #666", display: "inline-block" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: "#888" }}>🔗 Pulled from feed</span>
+          </div>
           <span style={{ fontSize: "10px", fontWeight: 700, color: "#bbb", fontStyle: "italic", marginLeft: "auto" }}>
             Drag a planned entry to a different day to reschedule it
           </span>
@@ -528,6 +558,9 @@ export default function ContentCalendarManager() {
                   {dayEntries.map((entry) => {
                     const style = CONTENT_TYPE_BY_KEY[entry.type] || CONTENT_TYPES[0];
                     const isManual = entry.source === "manual";
+                    const note = isManual ? entry.raw?.note : "";
+                    const tooltip = [`${style.label} — ${entry.subjectLabel}`, isManual ? "Added manually" : "Pulled from its own feed"];
+                    if (note) tooltip.push(note);
                     return (
                       <div
                         key={entry.id}
@@ -538,19 +571,26 @@ export default function ContentCalendarManager() {
                           e.dataTransfer.setData("text/plain", JSON.stringify({ refId: entry.refId, dateKey: entry.dateKey }));
                         } : undefined}
                         onClick={(e) => { e.stopPropagation(); if (isManual) selectEntry(entry.raw); }}
-                        title={`${style.label} — ${entry.subjectLabel}`}
+                        title={tooltip.join(" — ")}
                         style={{
                           display: "flex", alignItems: "center", gap: "4px", flexShrink: 0,
                           width: "100%", minWidth: 0, boxSizing: "border-box",
                           background: style.color, color: "#fff", borderRadius: "4px",
                           padding: "2px 6px", fontSize: "10px", fontWeight: 800,
                           cursor: isManual ? "grab" : "default",
+                          // Solid border = added manually here; dashed,
+                          // slightly faded = pulled in from the Videos/
+                          // Articles feed on its own — see the legend above.
+                          border: isManual ? "1px solid rgba(255,255,255,0.4)" : "1px dashed rgba(255,255,255,0.55)",
+                          opacity: isManual ? 1 : 0.82,
                         }}
                       >
                         <span style={{ flexShrink: 0 }}>{style.icon}</span>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {truncateLabel(entry.subjectLabel)}
                         </span>
+                        {note && <span style={{ flexShrink: 0 }} title="Has a note">📝</span>}
+                        {!isManual && <span style={{ flexShrink: 0, opacity: 0.85 }} title="Pulled from its own feed">🔗</span>}
                       </div>
                     );
                   })}
@@ -635,14 +675,36 @@ export default function ContentCalendarManager() {
                   </button>
                 ))}
               </div>
-              <SubjectCombobox
-                subjectType={formState.subjectType}
-                subjectId={formState.subjectId}
-                subjectLabel={formState.subjectLabel}
-                players={players}
-                recruits={recruits}
-                teams={teams}
-                onChange={(id, label) => setFormState((p) => ({ ...p, subjectId: id, subjectLabel: label }))}
+              {formState.subjectType === "custom" ? (
+                <input
+                  value={formState.subjectLabel}
+                  onChange={(e) => setFormState((p) => ({ ...p, subjectLabel: e.target.value }))}
+                  placeholder="Type whatever this entry is about..."
+                  style={inputStyle}
+                />
+              ) : (
+                <SubjectCombobox
+                  subjectType={formState.subjectType}
+                  subjectId={formState.subjectId}
+                  subjectLabel={formState.subjectLabel}
+                  players={players}
+                  recruits={recruits}
+                  teams={teams}
+                  onChange={(id, label) => setFormState((p) => ({ ...p, subjectId: id, subjectLabel: label }))}
+                />
+              )}
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                Note <span style={{ textTransform: "none", fontWeight: 700, color: "#bbb" }}>(optional)</span>
+              </div>
+              <textarea
+                value={formState.note}
+                onChange={(e) => setFormState((p) => ({ ...p, note: e.target.value }))}
+                placeholder="What this is about, an angle to take, who's involved..."
+                rows={3}
+                style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit", fontWeight: 500 }}
               />
             </div>
 

@@ -1956,7 +1956,6 @@ export default function TeamPage() {
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No performances yet.</div>
       ) : (
         teamPerformances.map((p, i) => {
-          const d = p.gameDate?.toDate?.();
           const g = gradeStylesPerf[p.grade];
           return (
             <Link
@@ -1971,17 +1970,23 @@ export default function TeamPage() {
               onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
-              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                <div style={{ background: GOLD, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                    {d?.toLocaleDateString(undefined, { month: "short" })}
-                  </span>
-                </div>
-                <div style={{ padding: "2px 0", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>
-                    {d?.toLocaleDateString(undefined, { day: "numeric" })}
-                  </span>
-                </div>
+              {/* This team's own logo (the player's team, not the
+                  opponent's) — the "vs. {opponent}" line below still says
+                  who it was against. */}
+              <div style={{
+                flexShrink: 0, width: 36, height: 36, border: `2px solid ${BLUE}`, borderRadius: "4px",
+                overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f5",
+              }}>
+                {branding?.logo1 ? (
+                  <img
+                    src={sanitizeUrl(branding.logo1)}
+                    alt={canonicalSchool}
+                    style={{ width: "28px", height: "28px", objectFit: "contain" }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  />
+                ) : (
+                  <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE }}>{(canonicalSchool || "?").charAt(0)}</span>
+                )}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", gap: "4px", marginBottom: "3px", flexWrap: "wrap" }}>
@@ -2005,6 +2010,11 @@ export default function TeamPage() {
                 <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
                   {p.titleShort}
                 </div>
+                {p.opponent && (
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#999", marginTop: "2px" }}>
+                    vs. {p.opponent}
+                  </div>
+                )}
               </div>
             </Link>
           );
