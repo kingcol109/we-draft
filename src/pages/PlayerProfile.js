@@ -2110,7 +2110,7 @@ useEffect(() => {
                 <span>{t.Last}</span>
               </span>
               <span className="wd-trend2-sub">
-                {notesList.length > 0 ? notesList.join(" · ") : "No notes yet."}
+                {notesList.length > 0 ? notesList.join(" · ") : ""}
               </span>
             </div>
             <span className="wd-trend2-chevron">›</span>

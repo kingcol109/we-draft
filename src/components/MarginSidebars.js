@@ -514,7 +514,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
                       <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
                         <span className="wd-margin-trend-chip-name">{t.First} {t.Last}</span>
                         <span className="wd-margin-trend-chip-sub">
-                          {notesList.length > 0 ? notesList.join(" · ") : "No notes yet."}
+                          {notesList.length > 0 ? notesList.join(" · ") : ""}
                         </span>
                       </div>
                       <span className="wd-margin-trend-chip-chevron">›</span>
