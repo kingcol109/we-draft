@@ -422,36 +422,36 @@ const weekNumber = (w) => {
   return m ? Number(m[1]) : 999;
 };
 
-// ── Picks the week containing right now (by its own games' dates, Monday-
-// Sunday via mondayOfWeekUtc), falling back to the nearest upcoming week,
-// then the earliest week on file — "the current week" as a default,
-// instead of always defaulting to whichever week sorts first. Shared by
-// MyPicksSection and StandingsSection so both land on the same week by
-// default rather than each guessing independently. `weeks` must already be
-// sorted ascending (weekNumber).
+// ── Picks "the current week" as a default, instead of always defaulting to
+// whichever week sorts first. Shared by MyPicksSection and StandingsSection
+// so both land on the same week by default rather than each guessing
+// independently. `weeks` must already be sorted ascending (weekNumber).
 //
-// A week whose entire slate has already gone Final is skipped outright —
-// otherwise a week can keep winning "the current week" purely because
-// today still falls within its calendar Mon-Sun window (e.g. a week's
-// games all wrap up by Saturday but its Sunday hasn't happened yet), even
-// though there's nothing left in it to pick and the next week is already
-// open. This is also what makes the default advance on its own once each
-// week wraps, instead of needing a hardcoded week bumped by hand. ──
+// A week stays the default until the *next* week's own first game actually
+// kicks off — not the instant the current week's slate wraps up. Week 0
+// going fully Final on a Saturday shouldn't hand the default to Week 1
+// before Week 1 has even started; it should keep showing Week 0's own
+// (by-then-final) results until there's something new to actually look at.
+// Concretely: walk the weeks in order, and keep advancing `current` past a
+// week the moment its own earliest game's kickoff (kickoffMs — the same
+// ET-aware conversion the pick lock itself uses; falls back to the game's
+// plain Date if Time was never entered, same as kickoffMs's own fallback)
+// has already passed; stop at the first week that hasn't started yet, and
+// whatever `current` was left at is the answer. If literally no week has
+// started yet (the very start of a season), this falls back to the
+// earliest week on file. ──
 function pickCurrentWeek(games, weeks) {
   const nowMs = Date.now();
-  let bestWeek = weeks[0] || "";
-  let bestFuture = Infinity;
+  const startMs = (g) => kickoffMs(g) ?? toMs(g.Date);
+  let current = weeks[0] || "";
   for (const w of weeks) {
     const weekGames = games.filter((g) => g.Week === w && toMs(g.Date));
     if (weekGames.length === 0) continue;
-    if (weekGames.every((g) => isGameFinal(g))) continue;
-    const minDate = Math.min(...weekGames.map((g) => toMs(g.Date)));
-    const monday = mondayOfWeekUtc(minDate);
-    const sunday = monday + 7 * 24 * 60 * 60 * 1000 - 1;
-    if (nowMs >= monday && nowMs <= sunday) return w;
-    if (minDate >= nowMs && minDate < bestFuture) { bestFuture = minDate; bestWeek = w; }
+    const earliestStart = Math.min(...weekGames.map(startMs));
+    if (nowMs < earliestStart) break; // weeks are ascending — nothing later has started either
+    current = w;
   }
-  return bestWeek;
+  return current;
 }
 
 // Default sort tier — Game of the Week first, then Featured, then every
