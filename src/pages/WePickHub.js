@@ -333,6 +333,21 @@ function scoreGamePick(pick, game) {
   return 100 + awayAcc + homeAcc;
 }
 
+// The single highest-scoring pick (by scoreGamePick) among a set of games —
+// "your best call of the week" for a Report Card, regardless of whether
+// that particular pick happened to be starred Ranked. Games with no score
+// pick, or that aren't Final, score 0 via scoreGamePick's own guard and so
+// never win over an actual scored one; null when nothing scored at all.
+function bestPickOf(games, myPicksById) {
+  let best = null;
+  games.forEach((game) => {
+    const pick = myPicksById[game.id];
+    const points = scoreGamePick(pick, game);
+    if (points > 0 && (!best || points > best.points)) best = { game, pick, points };
+  });
+  return best;
+}
+
 // Minutes-since-midnight, for actually chronological sorting — a game's
 // Date field is UTC midnight regardless of kickoff, so every game on the
 // same calendar day ties on Date alone; Time has to be the real tiebreaker,
@@ -413,7 +428,15 @@ const weekNumber = (w) => {
 // instead of always defaulting to whichever week sorts first. Shared by
 // MyPicksSection and StandingsSection so both land on the same week by
 // default rather than each guessing independently. `weeks` must already be
-// sorted ascending (weekNumber). ──
+// sorted ascending (weekNumber).
+//
+// A week whose entire slate has already gone Final is skipped outright —
+// otherwise a week can keep winning "the current week" purely because
+// today still falls within its calendar Mon-Sun window (e.g. a week's
+// games all wrap up by Saturday but its Sunday hasn't happened yet), even
+// though there's nothing left in it to pick and the next week is already
+// open. This is also what makes the default advance on its own once each
+// week wraps, instead of needing a hardcoded week bumped by hand. ──
 function pickCurrentWeek(games, weeks) {
   const nowMs = Date.now();
   let bestWeek = weeks[0] || "";
@@ -421,6 +444,7 @@ function pickCurrentWeek(games, weeks) {
   for (const w of weeks) {
     const weekGames = games.filter((g) => g.Week === w && toMs(g.Date));
     if (weekGames.length === 0) continue;
+    if (weekGames.every((g) => isGameFinal(g))) continue;
     const minDate = Math.min(...weekGames.map((g) => toMs(g.Date)));
     const monday = mondayOfWeekUtc(minDate);
     const sunday = monday + 7 * 24 * 60 * 60 * 1000 - 1;
@@ -445,18 +469,34 @@ const gameTier = (g) => {
 // and disqualified games never count, no matter how many of them exist).
 // Week 0 drops the Game of the Week/Featured requirements entirely (its
 // slate has never had either flag set — see isPickable above) and just
-// needs 6 ranked games, any 6, full stop.
+// needs exactly 6 ranked games, full stop.
+//
+// total === 6, not >= 6 — the Ranked 6 is exactly 6, not "6 or more."
+// handleToggleRanked/handleSaveScore both already refuse to let the UI
+// star a 7th game, but that's only a client-side guard: a direct Firestore
+// write (or a bug) can still land more than 6 ranked picks on a user's
+// week, and until this was `=== 6` every one of those extra games' points
+// still counted toward standings — total >= 6 was true either way, so
+// isQualified never actually noticed. `=== 6` means having more than 6
+// zeroes the whole week for standings purposes (same as not qualifying at
+// all), same as scripts/gradeWePickWeek.js's own isRankedQualified — no
+// upside to a bypass either way, since Firestore rules alone can't reject
+// a 7th ranked write outright (that would need counting sibling docs at
+// write time, which rules can't do).
 function rankedStatus(rankedGames, week) {
   const total = rankedGames.length;
+  if (total > 6) {
+    return { isQualified: false, text: `You have ${total} ranked games — remove ${total - 6} to qualify (exactly 6 needed).` };
+  }
   if (week === "Week 0") {
-    const isQualified = total >= 6;
+    const isQualified = total === 6;
     if (isQualified) return { isQualified, text: "You're qualified for Ranked this week! 🏆" };
     const remaining = 6 - total;
     return { isQualified, text: `Still need: ${remaining} more game${remaining === 1 ? "" : "s"} overall.` };
   }
   const gotwCount = rankedGames.filter((g) => g.GameOfWeek).length;
   const featuredCount = rankedGames.filter((g) => g.Featured).length;
-  const isQualified = total >= 6 && gotwCount >= 1 && featuredCount >= 2;
+  const isQualified = total === 6 && gotwCount >= 1 && featuredCount >= 2;
   if (isQualified) return { isQualified, text: "You're qualified for Ranked this week! 🏆" };
   const needs = [];
   if (gotwCount < 1) needs.push("the Game of the Week");
@@ -612,6 +652,11 @@ function MyPicksSection() {
   // rather than showing a made-up number on something meant to be posted
   // publicly.
   const [weekPlacement, setWeekPlacement] = useState(null);
+  // Same idea as weekPlacement above, but hardcoded to Week 0 specifically
+  // and fetched independent of selectedWeek — this is what lets the pinned
+  // Week 0 recap card (see its own comment further down) keep showing
+  // placement even once the default week has moved on to Week 1.
+  const [week0Placement, setWeek0Placement] = useState(null);
   // Share modal — clicking either "Share Picks" or "Share Report Card"
   // (see handleSharePicks/handleShareReportCard) fills this in with the
   // card's content instead of sharing directly; the modal renders a hidden
@@ -740,6 +785,33 @@ function MyPicksSection() {
     [allGames, selectedWeek]
   );
 
+  // A starred score prediction on a still-qualified game — see the fuller
+  // "three buckets" comment further down, near unrankedGames/noPickGames,
+  // for how this fits alongside those. Computed up here (ahead of this
+  // component's `if (loading) return` early return below) specifically so
+  // rankedCountRef's own hook calls, right below, can run unconditionally
+  // every render as React's rules require.
+  const rankedGames = gamesForWeek.filter((g) => {
+    const p = myPicksById[g.id];
+    return hasScorePick(p) && p.ranked === true && !g.RankedDisqualified;
+  });
+
+  // handleSaveScore/handleToggleRanked's "is the Ranked 6 already full?"
+  // check used to read rankedGames.length directly — correct most of the
+  // time, but rankedGames is a render-time snapshot: two saves fired close
+  // enough together (e.g. quickly confirming several games' scores in a
+  // row) can both run from the *same* render, both reading the
+  // pre-either-save count, both concluding there's room, and both landing
+  // as ranked — the exact way a user could end up with 7. This ref is
+  // authoritative on top of that render snapshot: reconciled to the real
+  // count whenever it (or the week) actually changes, but also bumped
+  // immediately, synchronously, the instant either handler below commits
+  // to ranking or unranking a pick — before the write's own await — so a
+  // second call arriving before the first one's state update has even
+  // landed still sees the reservation and correctly refuses a 7th.
+  const rankedCountRef = useRef(rankedGames.length);
+  useEffect(() => { rankedCountRef.current = rankedGames.length; }, [rankedGames.length, selectedWeek]);
+
   const weekMonday = useMemo(() => {
     const dates = gamesForWeek.map((g) => toMs(g.Date)).filter(Boolean);
     return dates.length ? mondayOfWeekUtc(Math.min(...dates)) : 0;
@@ -779,6 +851,24 @@ function MyPicksSection() {
     return () => { cancelled = true; };
   }, [weekIsPast, user, selectedWeek]);
 
+  // Same fetch as weekPlacement above, but always for Week 0 specifically —
+  // the pinned recap card needs its own placement regardless of whichever
+  // week is currently selected.
+  useEffect(() => {
+    if (!user) { setWeek0Placement(null); return; }
+    let cancelled = false;
+    getDoc(doc(db, STANDINGS_COLLECTION, "Week 0"))
+      .then((snap) => {
+        if (cancelled) return;
+        const entries = Array.isArray(snap.data()?.entries) ? snap.data().entries : [];
+        if (entries.length === 0) { setWeek0Placement(null); return; }
+        const idx = [...entries].sort(compareStandingsEntries).findIndex((e) => e.uid === user.uid);
+        setWeek0Placement(idx >= 0 ? { rank: idx + 1, outOf: entries.length } : null);
+      })
+      .catch((e) => { console.error("We-Pick Week 0 placement fetch error:", e); if (!cancelled) setWeek0Placement(null); });
+    return () => { cancelled = true; };
+  }, [user]);
+
   const handleSaveScore = async (gameId, awayStr, homeStr, visibility, noteStr) => {
     if (!user) return;
     const a = Math.max(0, Math.min(99, Math.round(Number(awayStr))));
@@ -789,6 +879,14 @@ function MyPicksSection() {
     // from somewhere that skips the button.
     if (a === h) return;
     const existing = myPicksById[gameId];
+    // Same "already full" reservation handleToggleRanked uses below — see
+    // rankedCountRef's own comment for why this reads the ref instead of
+    // rankedGames.length directly. A pick that already has a score keeps
+    // whatever ranked value it already had (no new reservation to make,
+    // however this vote turns out) — new-pick-only.
+    const isNewRankedPick = !hasScorePick(existing) && rankedCountRef.current < 6;
+    const ranked = hasScorePick(existing) ? (existing?.ranked ?? true) : isNewRankedPick;
+    if (isNewRankedPick) rankedCountRef.current += 1;
     const payload = {
       uid: user.uid,
       displayName: profile?.username?.trim() || "Anonymous Fan",
@@ -808,10 +906,8 @@ function MyPicksSection() {
       // score still gets the same default-on treatment as a brand new
       // pick) — except once the week's Ranked 6 is already full, where a
       // brand new pick defaults to unranked instead of silently becoming a
-      // 7th. rankedGames.length is safe to read here uncounted: a pick
-      // without a score yet (which is exactly the branch this applies to)
-      // can never already be one of the 6 it's being compared against.
-      ranked: hasScorePick(existing) ? (existing?.ranked ?? true) : rankedGames.length < 6,
+      // 7th.
+      ranked,
       visibility,
       updatedAt: serverTimestamp(),
     };
@@ -824,6 +920,7 @@ function MyPicksSection() {
       setMyPicks((prev) => [...prev.filter((p) => p.id !== gameId), { id: gameId, ...payload }]);
     } catch (e) {
       console.error("We-Pick save error:", e);
+      if (isNewRankedPick) rankedCountRef.current -= 1; // reservation didn't pan out — release it
     } finally {
       setSavingId("");
     }
@@ -836,15 +933,20 @@ function MyPicksSection() {
     if (!user) return;
     const existing = myPicksById[gameId];
     if (!existing) return;
-    // Turning ranked ON with the week's 6 already spoken for — rankedGames
-    // can't already include this game (it's off, that's why next is true),
-    // so its length is exactly the count this addition would push past 6.
-    // Prompt rather than either silently no-op'ing or silently bumping
-    // some other game off the list for them.
-    if (next && rankedGames.length >= 6) {
+    // Turning ranked ON with the week's 6 already spoken for — this game
+    // can't already be one of them (it's off, that's why next is true), so
+    // rankedCountRef.current is exactly the count this addition would push
+    // past 6. Prompt rather than either silently no-op'ing or silently
+    // bumping some other game off the list for them. Reads the ref, not
+    // rankedGames.length directly — see rankedCountRef's own comment for
+    // why (two star-clicks fired close enough together could otherwise
+    // both read the same stale pre-either-click count and both go
+    // through, landing a 7th).
+    if (next && rankedCountRef.current >= 6) {
       alert("Your Ranked 6 is already full for this week — remove one before adding another.");
       return;
     }
+    if (next) rankedCountRef.current += 1; else rankedCountRef.current -= 1;
     const { id, ...rest } = existing;
     const payload = { ...rest, ranked: next, updatedAt: serverTimestamp() };
     setSavingId(gameId);
@@ -856,6 +958,7 @@ function MyPicksSection() {
       setMyPicks((prev) => prev.map((p) => (p.id === gameId ? { ...p, ranked: next } : p)));
     } catch (e) {
       console.error("We-Pick ranked-toggle error:", e);
+      if (next) rankedCountRef.current -= 1; else rankedCountRef.current += 1; // reservation didn't pan out — release it
     } finally {
       setSavingId("");
     }
@@ -987,11 +1090,10 @@ function MyPicksSection() {
   // game's disqualified) → "Unranked"; a starred score prediction on a
   // still-qualified game → "Ranked". A winner-only prediction can never be
   // ranked (scores are required), but it still counts as "a prediction"
-  // for landing in Unranked rather than Games.
-  const rankedGames = gamesForWeek.filter((g) => {
-    const p = myPicksById[g.id];
-    return hasScorePick(p) && p.ranked === true && !g.RankedDisqualified;
-  });
+  // for landing in Unranked rather than Games. (rankedGames itself is
+  // computed further up, before this component's loading early-return —
+  // rankedCountRef, a hook, has to run unconditionally every render, and
+  // needs rankedGames.length to seed/reconcile itself.)
   const unrankedGames = gamesForWeek.filter((g) => {
     const p = myPicksById[g.id];
     if (!p) return false;
@@ -1004,6 +1106,31 @@ function MyPicksSection() {
   // Report Card's (weekIsPast, computed above) headline numbers.
   const weekRankedTally = tallyAccuracy(rankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
   const weekUnrankedTally = tallyAccuracy(unrankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
+  // Best single call of the week, ranked or not — see bestPickOf's own
+  // comment above.
+  const weekBestPick = bestPickOf(gamesForWeek, myPicksById);
+
+  // Pinned Week 0 recap — now that pickCurrentWeek skips a fully-final week
+  // for the default landing week (see its own comment), the Report Card
+  // above no longer shows automatically once Week 1 becomes the default;
+  // this keeps Week 0's own little scorecard visible regardless of
+  // selectedWeek, same shape as the dynamic one above just computed
+  // straight from allGames/myPicksById (already loaded for every week, not
+  // just gamesForWeek's currently-selected one) instead of scoped state.
+  const week0Games = allGames.filter((g) => g.Week === "Week 0");
+  const week0RankedGames = week0Games.filter((g) => {
+    const p = myPicksById[g.id];
+    return hasScorePick(p) && p.ranked === true && !g.RankedDisqualified;
+  });
+  const week0UnrankedGames = week0Games.filter((g) => {
+    const p = myPicksById[g.id];
+    if (!p) return false;
+    return !(hasScorePick(p) && p.ranked === true && !g.RankedDisqualified);
+  });
+  const week0RankedTally = tallyAccuracy(week0RankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
+  const week0UnrankedTally = tallyAccuracy(week0UnrankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
+  const week0BestPick = bestPickOf(week0Games, myPicksById);
+  const showWeek0Recap = selectedWeek !== "Week 0" && (week0RankedTally.total > 0 || week0UnrankedTally.total > 0);
 
   // Opens the share modal with this card's content — the modal (rendered
   // near the bottom of this component) captures a hidden branded version of
@@ -1020,6 +1147,9 @@ function MyPicksSection() {
     }
     if (weekUnrankedTally.total > 0) {
       rows.push({ kind: "stat", label: "Unranked", value: `${weekUnrankedTally.correct}-${weekUnrankedTally.incorrect}` });
+    }
+    if (weekBestPick) {
+      rows.push({ kind: "stat", label: "Best Pick", value: `${weekBestPick.game.Away} @ ${weekBestPick.game.Home} — ${weekBestPick.points} pts` });
     }
     rows.push({ kind: "stat", label: "Placement", value: weekPlacement ? `#${weekPlacement.rank} of ${weekPlacement.outOf} 🔥` : "Pending" });
     setShareModal({
@@ -1144,6 +1274,58 @@ function MyPicksSection() {
         </div>
       )}
 
+      {/* Pinned Week 0 recap — see showWeek0Recap's own comment above for
+          why this exists separately from the dynamic Report Card below
+          (which only covers whichever week is currently selected). Smaller/
+          plainer than that one on purpose ("the little Week 0 scorecard")
+          — no Share button, this is just a standing reminder of how it
+          went, not something meant to be posted. */}
+      {showWeek0Recap && (
+        <div style={{ marginBottom: "18px", border: `2px solid ${GOLD}`, borderRadius: "10px", overflow: "hidden", background: "rgba(0,0,0,0.2)" }}>
+          <div style={{ background: "rgba(246,162,29,0.18)", padding: "8px 14px" }}>
+            <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🏆 Week 0 Recap
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", display: "flex", gap: "20px", flexWrap: "wrap", alignItems: "center" }}>
+            {week0RankedTally.total > 0 && (
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Ranked</div>
+                <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
+                  {week0RankedTally.correct}-{week0RankedTally.incorrect}
+                  <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", marginLeft: "5px" }}>
+                    ({Math.round((week0RankedTally.correct / week0RankedTally.total) * 100)}%)
+                  </span>
+                </div>
+              </div>
+            )}
+            {week0UnrankedTally.total > 0 && (
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Unranked</div>
+                <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
+                  {week0UnrankedTally.correct}-{week0UnrankedTally.incorrect}
+                </div>
+              </div>
+            )}
+            <div>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Placement</div>
+              <div style={{ fontSize: "16px", fontWeight: 900, color: week0Placement ? GOLD : "rgba(255,255,255,0.5)" }}>
+                {week0Placement ? `#${week0Placement.rank} of ${week0Placement.outOf}` : "Pending"}
+              </div>
+            </div>
+            {week0BestPick && (
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
+                <div style={{ fontSize: "13px", fontWeight: 800, color: "#fff" }}>
+                  {week0BestPick.game.Away} @ {week0BestPick.game.Home}
+                  <span style={{ fontSize: "11px", color: GOLD, marginLeft: "6px" }}>{week0BestPick.points} pts</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {weekIsPast ? (
         /* Report Card — every game's Final, so the pickable/composition/
            Submit UI (below) no longer applies. Doubles as something meant
@@ -1199,6 +1381,15 @@ function MyPicksSection() {
                     </div>
                   </div>
                 </div>
+                {weekBestPick && (
+                  <div style={{ marginBottom: "14px" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
+                    <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>
+                      {weekBestPick.game.Away} @ {weekBestPick.game.Home}
+                      <span style={{ fontSize: "12px", color: GOLD, marginLeft: "8px" }}>{weekBestPick.points} pts</span>
+                    </div>
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "12px" }}>
                   <div style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     We-Draft.com

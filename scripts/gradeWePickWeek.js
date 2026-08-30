@@ -77,12 +77,19 @@ function scoreGamePick(pick, game) {
   return 100 + awayAcc + homeAcc;
 }
 
+// total === 6, not >= 6 — see WePickHub.js's own rankedStatus (this file's
+// copy of that same qualification rule) for why: the client-side "can't
+// star a 7th" guard is bypassable by a direct write, and until this was
+// `=== 6` every extra ranked game beyond 6 still had its points summed
+// into the week's total below, since `total >= 6` never noticed. `=== 6`
+// zeroes the whole week for anyone who somehow has more than 6, removing
+// any upside from a bypass.
 function isRankedQualified(rankedGames, week) {
   const total = rankedGames.length;
-  if (week === "Week 0") return total >= 6;
+  if (week === "Week 0") return total === 6;
   const gotwCount = rankedGames.filter((g) => g.GameOfWeek).length;
   const featuredCount = rankedGames.filter((g) => g.Featured).length;
-  return total >= 6 && gotwCount >= 1 && featuredCount >= 2;
+  return total === 6 && gotwCount >= 1 && featuredCount >= 2;
 }
 
 // ── Grades one already-confirmed-all-Final week: fetches its picks, scores
