@@ -169,6 +169,13 @@ async function computeLiveWeekStandings(week) {
   const gamesSnap = await getDocs(query(collection(db, "schedule26"), where("Week", "==", week)));
   const games = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   if (games.length === 0) return [];
+  // Nothing's actually happened yet — a qualified user's Ranked 6 would
+  // all still show 0-0/0 pts (scoreGamePick only ever returns non-zero for
+  // a Final game), which is a useless-looking table to put in front of
+  // "who's submitted their Ranked 6" instead. Stay empty here (StandingsSection
+  // falls back to that submitted-count/roster view, same as before this
+  // live computation existed) until at least one game's gone Final.
+  if (!games.some((g) => isGameFinal(g))) return [];
 
   const pickSnaps = await Promise.all(
     games.map((g) => getDocs(collection(db, "schedule26", g.id, "picks")))

@@ -133,6 +133,21 @@ export default function CFBPage() {
           if (startMs[w] <= now) current = w;
           else break;
         }
+        // Once that week's entire slate has already gone Final, jump ahead
+        // to the next one — a schedule page should already be showing
+        // what's coming up next, not last week's now-final scores, for the
+        // several days between a week wrapping and the next one's own
+        // first kickoff (unlike We-Pick's own default-week pick, which
+        // deliberately stays put until the next week actually starts, since
+        // that one still has live results/a Report Card worth showing).
+        const currentIdx = allWeeks.indexOf(current);
+        if (currentIdx >= 0 && currentIdx < allWeeks.length - 1) {
+          const currentWeekGames = gameDocs.filter((g) => g.Week === current);
+          const isFinal = (g) => g.Final && g.HomeScore != null && g.AwayScore != null;
+          if (currentWeekGames.length > 0 && currentWeekGames.every(isFinal)) {
+            current = allWeeks[currentIdx + 1];
+          }
+        }
         // A week named in the URL (e.g. deep-linked from elsewhere) wins
         // over the auto-detected "current" week.
         let initialWeek = current;
