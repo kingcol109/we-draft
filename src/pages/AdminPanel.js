@@ -1905,7 +1905,8 @@ function HistoricalSection() {
         ]);
         const g = {};
         if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
-        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits || []).sort();
+        // Kickers/punters skip the Generic pool — see PlayerProfile.js.
+        if (genSnap.exists() && position !== "K" && position !== "P") g["Generic"] = (genSnap.data().traits || []).sort();
         setTraitGroups(g);
       } catch (e) {
         console.error("Admin historical traits fetch error:", e);
@@ -3045,7 +3046,8 @@ function DummyEvaluationsSection() {
         ]);
         const g = {};
         if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
-        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits || []).sort();
+        // Kickers/punters skip the Generic pool — see PlayerProfile.js.
+        if (genSnap.exists() && position !== "K" && position !== "P") g["Generic"] = (genSnap.data().traits || []).sort();
         setTraitGroups(g);
       } catch (e) {
         console.error("Admin dummy evals traits fetch error:", e);
@@ -3900,7 +3902,8 @@ function RecruitsSection() {
         ]);
         const g = {};
         if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
-        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits || []).sort();
+        // Kickers/punters skip the Generic pool — see PlayerProfile.js.
+        if (genSnap.exists() && position !== "K" && position !== "P") g["Generic"] = (genSnap.data().traits || []).sort();
         setTraitGroups(g);
       } catch (e) {
         console.error("Admin recruit traits fetch error:", e);
@@ -10496,7 +10499,100 @@ function MiscBrandingSection() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <HomePageModeToggle />
+      <WePickCurrentWeekControl />
       <TvChannelsManager />
+    </div>
+  );
+}
+
+// config/wePick.currentWeekOverride — read by WePickHub.js's pickCurrentWeek
+// (My Picks and Standings both share it) and, when it names a real week,
+// wins outright over that function's own kickoff-timestamp guess. The auto
+// logic is right most of the time, but it's still inferring "current" from
+// each game's Time field, and there's no code-free way to correct it when
+// it's wrong (a typo'd kickoff time, a Thursday opener, a bye week) short of
+// this override. "Auto" clears the override and hands the default back to
+// the kickoff-based logic.
+function WePickCurrentWeekControl() {
+  const [weeks, setWeeks] = useState(null); // null = not loaded yet
+  const [override, setOverride] = useState(""); // "" = Auto
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [gamesSnap, configSnap] = await Promise.all([
+          getDocs(collection(db, "schedule26")),
+          getDoc(doc(db, "config", "wePick")),
+        ]);
+        const games = gamesSnap.docs.map((d) => d.data());
+        const weekList = Array.from(new Set(games.map((g) => g.Week).filter(Boolean)))
+          .sort((a, b) => weekNumber(a) - weekNumber(b));
+        setWeeks(weekList);
+        setOverride(configSnap.exists() ? configSnap.data().currentWeekOverride || "" : "");
+      } catch (e) {
+        console.error("We-Pick current-week fetch error:", e);
+        setWeeks([]);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const handleSet = async (next) => {
+    if (next === override || saving) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      await setDoc(doc(db, "config", "wePick"), { currentWeekOverride: next, updatedAt: serverTimestamp() });
+      setOverride(next);
+      setSaveMessage(next ? `${next} is now the default for everyone.` : "Back to auto (kickoff-based) default.");
+    } catch (e) {
+      console.error("We-Pick current-week save error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🏈 We-Pick Current Week
+        </div>
+      </div>
+      <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        {weeks === null ? (
+          <LoadingSpinner label="Loading" size={20} minHeight="50px" />
+        ) : (
+          <>
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+              Which week My Picks and Standings default to. Auto follows kickoffs; picking a week here pins it for everyone.
+            </div>
+            <select
+              value={override}
+              disabled={saving}
+              onChange={(e) => handleSet(e.target.value)}
+              style={{
+                padding: "10px", borderRadius: "8px", border: "2px solid " + BLUE,
+                fontWeight: 800, fontSize: "13px", color: BLUE, background: "#fff",
+                cursor: saving ? "default" : "pointer",
+              }}
+            >
+              <option value="">Auto (kickoff-based)</option>
+              {weeks.map((w) => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
+            {saveMessage && (
+              <div style={{ fontSize: "11px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -1021,7 +1021,11 @@ export default function PlayerProfile() {
         const [posSnap, genSnap] = await Promise.all([getDoc(doc(db,"traits",player.Position)), getDoc(doc(db,"traits","Generic"))]);
         const g = {};
         if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits||[]).sort();
-        if (genSnap.exists()) g["Generic"] = (genSnap.data().traits||[]).sort();
+        // Kickers/punters skip the Generic pool entirely — those traits
+        // ("elite burst," "high football IQ," etc.) are written with every
+        // other position in mind and don't really apply to a specialist,
+        // so their eval only ever offers Position Specific options.
+        if (genSnap.exists() && player.Position !== "K" && player.Position !== "P") g["Generic"] = (genSnap.data().traits||[]).sort();
         setTraits(g);
       } catch(e) { console.error(e); }
     };

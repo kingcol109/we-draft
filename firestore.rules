@@ -112,13 +112,17 @@ service cloud.firestore {
     // purely to power its own autocomplete. Same admin-only-both-ways
     // treatment as recruits above.
     match /highSchools/{doc} {
-      // Public read limited to Ranking == 3 — HighSchoolTeamPage.js
-      // queries where("Ranking","==",3), a constraint Firestore can prove
-      // holds for every doc that query could ever return, so this doesn't
-      // need a broader "any signed-in/any user" rule. A school still at
-      // Ranking 1/2 (not built yet) stays exactly as invisible to a public
-      // read as it was before — only admin (isAdmin() below) can see those.
-      allow read: if resource.data.Ranking == 3 || isAdmin();
+      // Public read used to be limited to Ranking == 3 — the only ones
+      // HighSchoolTeamPage.js actually builds a team page for here (it
+      // queries where("Ranking","==",3), so it only ever sees those
+      // regardless of how wide this rule is). Opened up to every doc
+      // instead: a separate project reads this same collection (via this
+      // same Firebase project) for its own high school branding, and needs
+      // every school, not just the 3s we-draft itself has pages for. This
+      // doesn't add any new schools to we-draft's own public surface — that
+      // Ranking==3 query is what actually gates what shows up here, not
+      // this rule.
+      allow read: if true;
       allow write: if isAdmin();
     }
     // Named recruit groups — same shape as playerGroups above (own

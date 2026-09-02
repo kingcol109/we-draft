@@ -446,8 +446,16 @@ const weekNumber = (w) => {
 // has already passed; stop at the first week that hasn't started yet, and
 // whatever `current` was left at is the answer. If literally no week has
 // started yet (the very start of a season), this falls back to the
-// earliest week on file. ──
-function pickCurrentWeek(games, weeks) {
+// earliest week on file.
+//
+// `override` — config/wePick.currentWeekOverride, set from AdminPanel's
+// We-Pick Current Week control — wins outright when it names a real week.
+// The auto kickoff-based logic above is solid most of the time, but it's
+// still a guess (Time-field typos, a Thursday opener, a bye-heavy week),
+// and admin needs a plain manual escape hatch rather than having to reason
+// about kickoff math to fix a wrong default for everyone. ──
+function pickCurrentWeek(games, weeks, override) {
+  if (override && weeks.includes(override)) return override;
   const nowMs = Date.now();
   const startMs = (g) => kickoffMs(g) ?? toMs(g.Date);
   let current = weeks[0] || "";
@@ -714,6 +722,17 @@ function MyPicksSection() {
       ].join("\n")
     : "";
 
+  // Same as shareText, but with a call-to-action right before the link —
+  // only the Text button uses this one; Email/X keep the plain shareText.
+  const smsShareText = shareModal
+    ? [
+        `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
+        ...shareModal.rows.map((r) => `${r.label}: ${r.value}`),
+        "Make Your Picks",
+        "we-draft.com/we-pick",
+      ].join("\n")
+    : "";
+
   const handleSaveShareImage = () => {
     if (!shareImageUrl || !shareModal) return;
     const link = document.createElement("a");
@@ -727,11 +746,12 @@ function MyPicksSection() {
     const fetchAll = async () => {
       setLoading(true);
       try {
-        const [gamesSnap, schoolsSnap, mirrorSnap, rankMaps] = await Promise.all([
+        const [gamesSnap, schoolsSnap, mirrorSnap, rankMaps, weekConfigSnap] = await Promise.all([
           getDocs(collection(db, "schedule26")),
           getDocs(collection(db, "schools")),
           getDocs(collection(db, "users", user.uid, "picks")),
           fetchAllRankMaps(),
+          getDoc(doc(db, "config", "wePick")),
         ]);
 
         const games = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -744,9 +764,11 @@ function MyPicksSection() {
 
         setMyPicks(mirrorSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-        // Default to the current week (see pickCurrentWeek above).
+        // Default to the current week (see pickCurrentWeek above) — unless
+        // AdminPanel's We-Pick Current Week control has pinned one.
         const weeks = Array.from(new Set(games.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
-        setSelectedWeek(pickCurrentWeek(games, weeks));
+        const weekOverride = weekConfigSnap.exists() ? weekConfigSnap.data().currentWeekOverride : null;
+        setSelectedWeek(pickCurrentWeek(games, weeks, weekOverride));
       } catch (e) {
         console.error("We-Pick fetch error:", e);
       } finally {
@@ -1751,7 +1773,7 @@ function MyPicksSection() {
                 𝕏 X
               </a>
               <a
-                href={`sms:?&body=${encodeURIComponent(shareText)}`}
+                href={`sms:?&body=${encodeURIComponent(smsShareText)}`}
                 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
               >
                 💬 Text
@@ -1834,12 +1856,16 @@ function StandingsSection() {
   useEffect(() => {
     const loadWeeks = async () => {
       try {
-        const snap = await getDocs(collection(db, "schedule26"));
+        const [snap, weekConfigSnap] = await Promise.all([
+          getDocs(collection(db, "schedule26")),
+          getDoc(doc(db, "config", "wePick")),
+        ]);
         const games = snap.docs.map((d) => d.data());
         const weeks = Array.from(new Set(games.map((g) => g.Week).filter(Boolean)))
           .sort((a, b) => weekNumber(a) - weekNumber(b));
         setWeekOptions(weeks);
-        setSelectedWeek((prev) => prev || pickCurrentWeek(games, weeks));
+        const weekOverride = weekConfigSnap.exists() ? weekConfigSnap.data().currentWeekOverride : null;
+        setSelectedWeek((prev) => prev || pickCurrentWeek(games, weeks, weekOverride));
       } catch (e) {
         console.error("We-Pick standings week-list error:", e);
       }
