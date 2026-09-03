@@ -681,6 +681,39 @@ function MyPicksSection() {
   const [shareModal, setShareModal] = useState(null);
   const [shareImageUrl, setShareImageUrl] = useState(null);
   const shareCardRef = useRef(null);
+  // Own friend code, for the "Add me using my friend code" line the Text
+  // share appends below the link (see smsShareText below) — same
+  // generate-once-and-save-to-users/{uid} logic as FriendsSection's own
+  // ensureCode, duplicated here since a user sharing picks may never have
+  // opened the Friends tab yet and generated one there.
+  const [myFriendCode, setMyFriendCode] = useState("");
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const ensureCode = async () => {
+      try {
+        const ownSnap = await getDoc(doc(db, "users", user.uid));
+        const existing = ownSnap.exists() ? ownSnap.data().friendCode : null;
+        if (existing) {
+          if (!cancelled) setMyFriendCode(existing);
+          return;
+        }
+        let candidate = "";
+        for (let attempt = 0; attempt < 8; attempt++) {
+          candidate = generateFriendCode();
+          const dupeSnap = await getDocs(query(collection(db, "users"), where("friendCode", "==", candidate)));
+          if (dupeSnap.empty) break;
+        }
+        await setDoc(doc(db, "users", user.uid), { friendCode: candidate }, { merge: true });
+        if (!cancelled) setMyFriendCode(candidate);
+      } catch (e) {
+        console.error("My Picks friend code fetch/generate error:", e);
+      }
+    };
+    ensureCode();
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Waits a frame after shareModal's data lands so the hidden card (below,
   // in the render) has actually painted with that content before capturing
@@ -733,14 +766,17 @@ function MyPicksSection() {
       ].join("\n")
     : "";
 
-  // Same as shareText, but with a call-to-action right before the link —
-  // only the Text button uses this one; Email/X keep the plain shareText.
+  // Same as shareText, but with a call-to-action right before the link, and
+  // (once myFriendCode has loaded — see the ensureCode effect above) a
+  // friend-add line right after it — only the Text button uses this one;
+  // Email/X keep the plain shareText.
   const smsShareText = shareModal
     ? [
         `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
         ...shareModal.rows.map(formatShareRow),
         "Make Your Picks",
         "we-draft.com/we-pick",
+        ...(myFriendCode ? [`Add me using my friend code ${myFriendCode}`] : []),
       ].join("\n")
     : "";
 
@@ -2389,6 +2425,14 @@ function FriendsSection() {
   const [recsLoading, setRecsLoading] = useState(false);
   const [visibleRecsCount, setVisibleRecsCount] = useState(3);
   const [sendingRecUid, setSendingRecUid] = useState(null);
+  // Recommendations this user has X'd out — not a block, just "stop
+  // suggesting this person to me." Persisted on the user's own doc
+  // (dismissedRecUids) rather than only in local state, so a dismissal
+  // survives a reload/re-visit instead of the same name popping right back
+  // up. Loaded alongside the friend-code fetch below (same doc read, no
+  // extra round trip) since both need users/{uid} anyway.
+  const [dismissedUids, setDismissedUids] = useState([]);
+  const [dismissingUid, setDismissingUid] = useState(null);
 
   // Own friend code — generated once and saved to users/{uid} the first
   // time this tab is visited without one on file yet. Retries (up to 8x,
@@ -2401,7 +2445,9 @@ function FriendsSection() {
       setCodeLoading(true);
       try {
         const ownSnap = await getDoc(doc(db, "users", user.uid));
-        const existing = ownSnap.exists() ? ownSnap.data().friendCode : null;
+        const ownData = ownSnap.exists() ? ownSnap.data() : null;
+        if (!cancelled) setDismissedUids(ownData?.dismissedRecUids || []);
+        const existing = ownData?.friendCode || null;
         if (existing) {
           if (!cancelled) setFriendCode(existing);
           return;
@@ -2529,11 +2575,33 @@ function FriendsSection() {
 
   // Cheap reactive filter on top of the expensive fetch above — a
   // recommendation drops off the list the instant a request is sent (or if
-  // they'd already sent you one), no re-fetch needed.
+  // they'd already sent you one) or dismissed, no re-fetch needed.
   const recommendations = useMemo(
-    () => rawRecommendations.filter((r) => !outgoing.some((o) => o.toUid === r.uid) && !incoming.some((i) => i.fromUid === r.uid)),
-    [rawRecommendations, outgoing, incoming]
+    () => rawRecommendations.filter((r) =>
+      !outgoing.some((o) => o.toUid === r.uid) &&
+      !incoming.some((i) => i.fromUid === r.uid) &&
+      !dismissedUids.includes(r.uid)
+    ),
+    [rawRecommendations, outgoing, incoming, dismissedUids]
   );
+
+  // X'ing out a recommendation — not a block, just stops suggesting this
+  // person; they can still send/receive a request (by friend code, or if
+  // they show up as a recommendation for the OTHER person) same as anyone
+  // else. Optimistic locally, rolled back if the write fails.
+  const handleDismissRecommendation = async (targetUid) => {
+    setDismissingUid(targetUid);
+    setDismissedUids((prev) => [...prev, targetUid]);
+    try {
+      await setDoc(doc(db, "users", user.uid), { dismissedRecUids: [...dismissedUids, targetUid] }, { merge: true });
+    } catch (e) {
+      console.error("Dismiss recommendation error:", e);
+      setDismissedUids((prev) => prev.filter((u) => u !== targetUid));
+      alert("Failed to dismiss — try again.");
+    } finally {
+      setDismissingUid(null);
+    }
+  };
 
   const handleSendRequestToRecommendation = async (targetUid, targetName) => {
     if (!user) { login(); return; }
@@ -2780,17 +2848,33 @@ function FriendsSection() {
                     {r.mutualCount} mutual friend{r.mutualCount !== 1 ? "s" : ""}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleSendRequestToRecommendation(r.uid, r.name)}
-                  disabled={sendingRecUid === r.uid}
-                  style={{
-                    background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "6px",
-                    padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
-                    cursor: sendingRecUid === r.uid ? "default" : "pointer", opacity: sendingRecUid === r.uid ? 0.6 : 1,
-                  }}
-                >
-                  {sendingRecUid === r.uid ? "…" : "Add Friend"}
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                  <button
+                    onClick={() => handleSendRequestToRecommendation(r.uid, r.name)}
+                    disabled={sendingRecUid === r.uid}
+                    style={{
+                      background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "6px",
+                      padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
+                      cursor: sendingRecUid === r.uid ? "default" : "pointer", opacity: sendingRecUid === r.uid ? 0.6 : 1,
+                    }}
+                  >
+                    {sendingRecUid === r.uid ? "…" : "Add Friend"}
+                  </button>
+                  <button
+                    onClick={() => handleDismissRecommendation(r.uid)}
+                    disabled={dismissingUid === r.uid}
+                    title="Not interested — stop suggesting this person"
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: "26px", height: "26px", borderRadius: "50%",
+                      background: "rgba(255,255,255,0.1)", border: "none", color: "rgba(255,255,255,0.6)",
+                      fontSize: "13px", fontWeight: 900, lineHeight: 1,
+                      cursor: dismissingUid === r.uid ? "default" : "pointer", opacity: dismissingUid === r.uid ? 0.5 : 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             ))}
             {visibleRecsCount < recommendations.length && (
