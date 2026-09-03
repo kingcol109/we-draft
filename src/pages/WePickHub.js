@@ -714,10 +714,21 @@ function MyPicksSection() {
     return () => { cancelled = true; };
   }, [shareModal]);
 
+  // Matches the Hidden Share Card's own matchup rendering — a "matchup" row
+  // (My Ranked 6) reads as "Florida State over SMU 31-28" instead of a
+  // neutral "Florida State vs SMU: 31–28", so the winner is obvious without
+  // the image itself. "stat" rows (Report Card) keep the plain label/value
+  // format, which already reads fine on its own (e.g. "Ranked: 5-1 (83%)").
+  const formatShareRow = (r) => {
+    if (r.kind !== "matchup") return `${r.label}: ${r.value}`;
+    const matchup = r.winnerName ? `${r.winnerName} over ${r.loserName}` : r.fallbackLabel;
+    return r.value === "TO WIN" ? matchup : `${matchup} ${r.value}`;
+  };
+
   const shareText = shareModal
     ? [
         `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
-        ...shareModal.rows.map((r) => `${r.label}: ${r.value}`),
+        ...shareModal.rows.map(formatShareRow),
         "we-draft.com/we-pick",
       ].join("\n")
     : "";
@@ -727,7 +738,7 @@ function MyPicksSection() {
   const smsShareText = shareModal
     ? [
         `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
-        ...shareModal.rows.map((r) => `${r.label}: ${r.value}`),
+        ...shareModal.rows.map(formatShareRow),
         "Make Your Picks",
         "we-draft.com/we-pick",
       ].join("\n")
@@ -1189,38 +1200,42 @@ function MyPicksSection() {
 
   // Same shape as handleShareReportCard above, but for bragging rights
   // *before* kickoff — the actual Ranked 6 predictions, not results. Every
-  // row keeps both team names (even a winner-only pick, which only "knows"
-  // one side) so the card can bold/dim them to show who's favored at a
-  // glance instead of burying it in a score. accentColor is the favored
-  // team's own Color1 — the one bit of real team-color flavor this
-  // text-only card (see the html-to-image IMG filter below) can still
-  // carry without risking a CORS-tainted canvas on a logo image.
+  // row leads with the winnerName ("Florida State over SMU") instead of a
+  // neutral "Away vs Home" — who's picked to win reads instantly instead of
+  // requiring a bold/dim comparison or a second glance at the score.
+  // fallbackLabel only ever shows up for a malformed pick (pickedSideOf
+  // returning null — no explicit pickedTeam and no scores to infer a side
+  // from), which shouldn't happen for anything in rankedGames but is kept
+  // as a plain "Away vs Home" rather than rendering "null over null".
+  // accentColor is the favored team's own Color1 — the one bit of real
+  // team-color flavor this text-only card (see the html-to-image IMG
+  // filter below) can still carry without risking a CORS-tainted canvas on
+  // a logo image.
   const handleSharePicks = () => {
     const rows = rankedGames.map((g) => {
       const p = myPicksById[g.id];
       const awaySchool = schoolsByName?.[g.Away];
       const homeSchool = schoolsByName?.[g.Home];
+      const fallbackLabel = `${g.Away} vs ${g.Home}`;
       if (p?.awayScore != null && p?.homeScore != null) {
         const awayWinning = p.awayScore > p.homeScore;
+        const winnerName = awayWinning ? g.Away : g.Home;
+        const loserName = awayWinning ? g.Home : g.Away;
+        const winnerScore = awayWinning ? p.awayScore : p.homeScore;
+        const loserScore = awayWinning ? p.homeScore : p.awayScore;
         return {
-          kind: "matchup",
-          label: `${g.Away} vs ${g.Home}`,
-          value: `${p.awayScore}–${p.homeScore}`,
-          awayName: g.Away, homeName: g.Home,
-          awayWinning, homeWinning: !awayWinning,
+          kind: "matchup", winnerName, loserName, fallbackLabel,
+          value: `${winnerScore}-${loserScore}`,
           accentColor: (awayWinning ? awaySchool : homeSchool)?.Color1 || GOLD,
         };
       }
       const side = pickedSideOf(p);
-      const awayWinning = side === "away";
-      const homeWinning = side === "home";
+      const winnerName = side === "away" ? g.Away : side === "home" ? g.Home : null;
+      const loserName = side === "away" ? g.Home : side === "home" ? g.Away : null;
       return {
-        kind: "matchup",
-        label: `${g.Away} vs ${g.Home}`,
+        kind: "matchup", winnerName, loserName, fallbackLabel,
         value: "TO WIN",
-        awayName: g.Away, homeName: g.Home,
-        awayWinning, homeWinning,
-        accentColor: (awayWinning ? awaySchool : homeWinning ? homeSchool : null)?.Color1 || GOLD,
+        accentColor: (side === "away" ? awaySchool : side === "home" ? homeSchool : null)?.Color1 || GOLD,
       };
     });
     setShareModal({
@@ -1697,14 +1712,18 @@ function MyPicksSection() {
                     }}
                   >
                     {row.kind === "matchup" ? (
-                      // The favored team (awayWinning/homeWinning) bolds
-                      // bright white; the other side dims — who's picked to
-                      // win reads at a glance instead of only living in the
-                      // score off to the side.
-                      <span style={{ fontSize: "14px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                        <span style={{ color: row.awayWinning ? "#fff" : "rgba(255,255,255,0.4)" }}>{row.awayName}</span>
-                        <span style={{ color: "rgba(255,255,255,0.4)", fontWeight: 700 }}> vs </span>
-                        <span style={{ color: row.homeWinning ? "#fff" : "rgba(255,255,255,0.4)" }}>{row.homeName}</span>
+                      // Leads with the winner ("Florida State over SMU")
+                      // instead of a neutral "Away vs Home" — who's picked
+                      // to win reads instantly instead of only living in
+                      // the score off to the side.
+                      <span style={{ fontSize: "14px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        {row.winnerName ? (
+                          <>
+                            {row.winnerName}
+                            <span style={{ color: "rgba(255,255,255,0.5)", fontWeight: 700 }}> over </span>
+                            {row.loserName}
+                          </>
+                        ) : row.fallbackLabel}
                       </span>
                     ) : (
                       <span style={{ fontSize: "14px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em" }}>
