@@ -75,6 +75,15 @@ export default function UserProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [role, setRole] = useState(null);
+  // Social handles — verified users only (gated in the render below; see
+  // VerifiedNameBadge.js, the shared hover card everywhere a verified name
+  // shows, for the read side of these same three fields). Admin can also
+  // set these for a user via AdminPanel.js's Users section.
+  const [youtube, setYoutube] = useState("");
+  const [xHandle, setXHandle] = useState("");
+  const [instagram, setInstagram] = useState("");
+  const [socialsSaving, setSocialsSaving] = useState(false);
+  const [socialsMessage, setSocialsMessage] = useState("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
   const [playerName, setPlayerName] = useState("");
@@ -121,6 +130,9 @@ export default function UserProfile() {
         setDisplayedUsername(data.username || "");
         setVerified(data.verified || false);
         setRole(data.role || "public");
+        setYoutube(data.youtube || "");
+        setXHandle(data.x || "");
+        setInstagram(data.instagram || "");
       }
       setLoading(false);
     };
@@ -154,6 +166,29 @@ export default function UserProfile() {
     await syncAuthProfile(rawUsername);
     setError("");
     alert("Profile updated!");
+  };
+
+  // Verified-only — the input fields themselves only render when `verified`
+  // is true (see the render below), so this never runs for anyone else in
+  // the normal UI flow. Stores whatever was typed as-is (a bare handle, a
+  // "@handle", or a pasted full profile URL) — VerifiedNameBadge.js's own
+  // toHandle() strips it down to just the handle when building the actual
+  // link, so there's no format the user has to get exactly right here.
+  const saveSocials = async () => {
+    if (!user) return;
+    setSocialsSaving(true);
+    setSocialsMessage("");
+    try {
+      await setDoc(doc(db, "users", user.uid), {
+        youtube: youtube.trim(), x: xHandle.trim(), instagram: instagram.trim(),
+      }, { merge: true });
+      setSocialsMessage("Social links saved.");
+    } catch (e) {
+      console.error("Save socials error:", e);
+      setSocialsMessage("Failed to save — try again.");
+    } finally {
+      setSocialsSaving(false);
+    }
   };
 
   const submitRequest = async () => {
@@ -287,6 +322,34 @@ export default function UserProfile() {
             {error && <p style={{ color: "red", fontSize: "12px", fontWeight: 700, marginBottom: "8px", marginTop: "-6px" }}>{error}</p>}
             <button onClick={saveProfile} style={btnStyle("primary")}>Save Display Name</button>
           </div>
+
+          {/* Social Links — verified users only. Shown anywhere this
+              person's name appears (We-Pick, evaluations, comments/picks)
+              via the hover card in VerifiedNameBadge.js, which reads these
+              same three fields. */}
+          {verified && (
+            <div style={{ marginBottom: "18px" }}>
+              <div style={{ fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: BLUE, marginBottom: "4px" }}>
+                Social Links
+              </div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#999", marginBottom: "8px" }}>
+                Shown on a hover card wherever your verified name appears — leave any blank to hide it.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <input type="text" value={youtube} onChange={(e) => setYoutube(e.target.value)} style={inputStyle} placeholder="▶ YouTube handle" />
+                <input type="text" value={xHandle} onChange={(e) => setXHandle(e.target.value)} style={inputStyle} placeholder="𝕏 X handle" />
+                <input type="text" value={instagram} onChange={(e) => setInstagram(e.target.value)} style={inputStyle} placeholder="📷 Instagram handle" />
+              </div>
+              {socialsMessage && (
+                <p style={{ color: socialsMessage.startsWith("Failed") ? "red" : "#2e7d32", fontSize: "12px", fontWeight: 700, marginBottom: "8px" }}>
+                  {socialsMessage}
+                </p>
+              )}
+              <button onClick={saveSocials} disabled={socialsSaving} style={btnStyle("primary")}>
+                {socialsSaving ? "Saving..." : "Save Social Links"}
+              </button>
+            </div>
+          )}
 
           <div style={{ height: "1px", backgroundColor: "#eee", margin: "4px 0 16px" }} />
 

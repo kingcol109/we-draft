@@ -18,9 +18,9 @@ import * as htmlToImage from "html-to-image";
 import { db } from "../firebase";
 import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch, query, where, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
+import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { useAuth } from "../context/AuthContext";
 import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
-import verifiedBadgeIcon from "../assets/verified.png";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -98,19 +98,6 @@ async function fetchVerifiedByUid(uids) {
     if (s.exists() && s.data().verified) map[unique[i]] = true;
   });
   return map;
-}
-
-// Small inline checkmark badge, matching UserProfile.js's own verified-badge
-// treatment — used anywhere a friend/standings name is rendered here.
-function VerifiedBadge({ size = 13 }) {
-  return (
-    <img
-      src={verifiedBadgeIcon}
-      alt="Verified"
-      title="Verified"
-      style={{ width: size, height: size, verticalAlign: "middle", marginLeft: "5px", flexShrink: 0 }}
-    />
-  );
 }
 
 // ── Ranked Standings scoring — locked-in spec, not computed anywhere yet ──
@@ -2235,8 +2222,7 @@ function StandingsSection() {
                       }}
                     >
                       <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff", display: "flex", alignItems: "center" }}>
-                        {f.name}
-                        {verifiedByUid[f.uid] && <VerifiedBadge />}
+                        <VerifiedNameBadge uid={f.uid} name={f.name} verified={!!verifiedByUid[f.uid]} />
                       </div>
                       {f.submitted ? (
                         <span style={{ fontSize: "10px", fontWeight: 900, color: "#4ade80", textTransform: "uppercase", letterSpacing: "0.05em" }}>✓ Submitted</span>
@@ -2352,8 +2338,7 @@ function StandingsRow({ entry, rank, isMe, showAvg, verified }) {
             (a separate inline <img>, no space tying it to the name) onto
             its own line below the name instead of staying right next to it. */}
         <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "nowrap" }}>
-          {entry.displayName || "Anonymous Fan"}
-          {verified && <VerifiedBadge />}
+          <VerifiedNameBadge uid={entry.uid} name={entry.displayName} verified={verified} />
           {isMe && <span style={{ marginLeft: "6px", color: GOLD, fontSize: "11px", fontWeight: 900 }}>(You)</span>}
         </span>
       </td>
@@ -2914,8 +2899,7 @@ function FriendsSection() {
             friends.map((f, i) => (
               <div key={f.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: i < friends.length - 1 ? "1px solid rgba(255,255,255,0.1)" : "none" }}>
                 <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff", display: "flex", alignItems: "center" }}>
-                  {f.name}
-                  {f.verified && <VerifiedBadge />}
+                  <VerifiedNameBadge uid={f.uid} name={f.name} verified={!!f.verified} />
                 </div>
                 <button
                   onClick={() => handleRemoveFriend(f)}

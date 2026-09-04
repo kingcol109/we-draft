@@ -19,8 +19,8 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
-import verifiedBadge from "../assets/verified.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
@@ -3864,8 +3864,9 @@ useEffect(() => {
                 <div key={ev.uid} className="bg-white rounded-lg overflow-hidden mb-4" style={{ border:`2px solid ${color1}` }}>
                   <div className="flex items-center justify-between px-3 py-2" style={{ backgroundColor:color1 }}>
                     <div className="flex items-center gap-2">
-                      <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"13px":"17px" }}>{ev.username}</span>
-                      {ev.verified && <img src={verifiedBadge} alt="Verified" className="w-4 h-4 inline-block" loading="lazy" />}
+                      <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"13px":"17px" }}>
+                        <VerifiedNameBadge uid={ev.uid} name={ev.username} verified={!!ev.verified} size={16} />
+                      </span>
                     </div>
                     {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
                   </div>

@@ -1,5 +1,5 @@
 // src/pages/AdminPanel.js
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
@@ -6568,6 +6568,14 @@ function UsersSection() {
   const [searchQuery, setSearchQuery] = useState("");
   const [savingUid, setSavingUid] = useState(null);
   const [fetchError, setFetchError] = useState("");
+  // Social links (youtube/x/instagram) — verified-only, same three fields
+  // UserProfile.js's own Social Links section writes and
+  // VerifiedNameBadge.js's hover card reads everywhere a verified name
+  // shows. editingUid opens one inline edit row at a time, right below
+  // that user's own row rather than a separate modal.
+  const [editingUid, setEditingUid] = useState(null);
+  const [socialsForm, setSocialsForm] = useState({ youtube: "", x: "", instagram: "" });
+  const [savingSocials, setSavingSocials] = useState(false);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -6613,6 +6621,26 @@ function UsersSection() {
     }
   };
 
+  const startEditSocials = (u) => {
+    setEditingUid(u.id);
+    setSocialsForm({ youtube: u.youtube || "", x: u.x || "", instagram: u.instagram || "" });
+  };
+
+  const handleSaveSocials = async (uid) => {
+    setSavingSocials(true);
+    try {
+      const fields = { youtube: socialsForm.youtube.trim(), x: socialsForm.x.trim(), instagram: socialsForm.instagram.trim() };
+      await updateDoc(doc(db, "users", uid), fields);
+      setUsers((prev) => prev.map((row) => (row.id === uid ? { ...row, ...fields } : row)));
+      setEditingUid(null);
+    } catch (e) {
+      console.error("Admin save socials error:", e);
+      alert("Failed to save — check console.");
+    } finally {
+      setSavingSocials(false);
+    }
+  };
+
   const verifiedCount = users.filter((u) => u.verified).length;
 
   return (
@@ -6651,6 +6679,7 @@ function UsersSection() {
                   <th style={thStyle}>Email</th>
                   <th style={thStyle}>Friend Code</th>
                   <th style={thStyle}>Joined</th>
+                  <th style={thStyle}>Socials</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Verified</th>
                 </tr>
               </thead>
@@ -6658,7 +6687,8 @@ function UsersSection() {
                 {filtered.map((u, i) => {
                   const dateMs = toMs(u.createdAt);
                   return (
-                    <tr key={u.id} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
+                  <Fragment key={u.id}>
+                    <tr style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
                       <td style={tdStyle}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{ fontWeight: 900, color: "#222" }}>{u.username || "(no username)"}</span>
@@ -6676,6 +6706,22 @@ function UsersSection() {
                       <td style={tdStyle}>{u.email || "—"}</td>
                       <td style={{ ...tdStyle, fontFamily: "monospace" }}>{u.friendCode || "—"}</td>
                       <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                      <td style={tdStyle}>
+                        {u.verified ? (
+                          <button
+                            onClick={() => startEditSocials(u)}
+                            style={{
+                              background: "none", border: "2px solid " + BLUE, borderRadius: "6px",
+                              color: BLUE, cursor: "pointer", fontSize: "11px", fontWeight: 800,
+                              padding: "5px 10px", textTransform: "uppercase", letterSpacing: "0.03em",
+                            }}
+                          >
+                            {[u.youtube, u.x, u.instagram].some(Boolean) ? "Edit" : "+ Add"}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: "11px", color: "#bbb", fontStyle: "italic" }}>Verify first</span>
+                        )}
+                      </td>
                       <td style={{ ...tdStyle, textAlign: "right" }}>
                         <button
                           onClick={() => handleToggleVerified(u)}
@@ -6693,6 +6739,59 @@ function UsersSection() {
                         </button>
                       </td>
                     </tr>
+                    {/* Inline social-links editor — its own full-width row
+                        directly under this user's own row (via
+                        startEditSocials/"Edit"/"+ Add" above), rather than a
+                        separate modal. */}
+                    {editingUid === u.id && (
+                      <tr style={{ background: "#fffaf0", borderBottom: "1px solid #f0f0f0" }}>
+                        <td colSpan={6} style={{ padding: "12px 10px" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                            <input
+                              value={socialsForm.youtube}
+                              onChange={(e) => setSocialsForm((p) => ({ ...p, youtube: e.target.value }))}
+                              placeholder="▶ YouTube handle"
+                              style={{ ...inputStyle, flex: "1 1 160px", width: "auto" }}
+                            />
+                            <input
+                              value={socialsForm.x}
+                              onChange={(e) => setSocialsForm((p) => ({ ...p, x: e.target.value }))}
+                              placeholder="𝕏 X handle"
+                              style={{ ...inputStyle, flex: "1 1 160px", width: "auto" }}
+                            />
+                            <input
+                              value={socialsForm.instagram}
+                              onChange={(e) => setSocialsForm((p) => ({ ...p, instagram: e.target.value }))}
+                              placeholder="📷 Instagram handle"
+                              style={{ ...inputStyle, flex: "1 1 160px", width: "auto" }}
+                            />
+                            <button
+                              onClick={() => handleSaveSocials(u.id)}
+                              disabled={savingSocials}
+                              style={{
+                                background: BLUE, color: "#fff", border: "none", borderRadius: "6px",
+                                padding: "8px 16px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase",
+                                letterSpacing: "0.04em", cursor: savingSocials ? "default" : "pointer", opacity: savingSocials ? 0.6 : 1,
+                              }}
+                            >
+                              {savingSocials ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              onClick={() => setEditingUid(null)}
+                              disabled={savingSocials}
+                              style={{
+                                background: "#fff", color: "#666", border: "2px solid #ddd", borderRadius: "6px",
+                                padding: "8px 16px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase",
+                                letterSpacing: "0.04em", cursor: savingSocials ? "default" : "pointer",
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                   );
                 })}
               </tbody>

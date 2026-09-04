@@ -16,8 +16,8 @@ import { db } from "../firebase";
 import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, addDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import GameMarginSidebars from "../components/GameMarginSidebars";
+import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { useAuth } from "../context/AuthContext";
-import verifiedBadge from "../assets/verified.png";
 import GameOfWeekBadge from "../assets/weekgame.png";
 import FeaturedGameBadge from "../assets/featgame.png";
 import confetti from "canvas-confetti";
@@ -1550,10 +1550,9 @@ export default function GamePage() {
                   <div key={c.id} style={{ borderBottom: i < gameComments.length - 1 ? "1px solid #eee" : "none", paddingBottom: "14px" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                        <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{commentAuthorName}</span>
-                        {verifiedByUid[c.uid] && (
-                          <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "14px", height: "14px" }} />
-                        )}
+                        <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>
+                          <VerifiedNameBadge uid={c.uid} name={commentAuthorName} verified={!!verifiedByUid[c.uid]} size={14} />
+                        </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                         <div style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
@@ -1674,10 +1673,9 @@ export default function GamePage() {
                             <div key={r.id}>
                               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                                  <span style={{ fontWeight: 900, fontSize: "12px", color: BLUE }}>{replyAuthorName}</span>
-                                  {verifiedByUid[r.uid] && (
-                                    <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "12px", height: "12px" }} />
-                                  )}
+                                  <span style={{ fontWeight: 900, fontSize: "12px", color: BLUE }}>
+                                    <VerifiedNameBadge uid={r.uid} name={replyAuthorName} verified={!!verifiedByUid[r.uid]} size={12} />
+                                  </span>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                   <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa" }}>
@@ -2421,10 +2419,7 @@ export default function GamePage() {
                                 )}
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <span style={{ display: "flex", alignItems: "center", gap: "5px", fontWeight: 900, fontSize: "13px", color: BLUE }}>
-                                    {namesByUid[p.id] || p.displayName || "Anonymous Fan"}
-                                    {verifiedByUid[p.id] && (
-                                      <img src={verifiedBadge} alt="Verified" title="Verified" loading="lazy" style={{ width: "14px", height: "14px" }} />
-                                    )}
+                                    <VerifiedNameBadge uid={p.id} name={namesByUid[p.id] || p.displayName} verified={!!verifiedByUid[p.id]} size={14} />
                                   </span>
                                   {p.prediction && (
                                     <div style={{ fontSize: "12px", fontWeight: 600, color: "#666", marginTop: "4px", lineHeight: 1.4 }}>{p.prediction}</div>
