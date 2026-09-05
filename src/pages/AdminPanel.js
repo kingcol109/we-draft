@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
@@ -801,8 +801,17 @@ function PlayerDataSection() {
   // existing one.
   const seedHighSchoolIfNew = async () => {
     const hsName = (formState.HighSchool || "").trim();
-    if (hsName && !highSchoolOptions.some((h) => h.Name.toLowerCase() === hsName.toLowerCase())) {
-      const newHighSchool = { Name: hsName, State: formState.State || "", createdAt: serverTimestamp() };
+    const hsState = (formState.State || "").trim();
+    // Matched on Name AND State together — matching on Name alone meant a
+    // second "Aurora" (say, in Colorado) was treated as already existing
+    // the instant *any* "Aurora" (say, in California) was on file, so the
+    // new one silently never got created. Two schools sharing a name in
+    // different states are two different schools.
+    const hsExists = highSchoolOptions.some((h) =>
+      h.Name.toLowerCase() === hsName.toLowerCase() && (h.State || "").trim().toLowerCase() === hsState.toLowerCase()
+    );
+    if (hsName && !hsExists) {
+      const newHighSchool = { Name: hsName, State: hsState, createdAt: serverTimestamp() };
       await addDoc(collection(db, "highSchools"), newHighSchool);
       setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
     }
@@ -2068,10 +2077,16 @@ function HistoricalSection() {
     try {
       // Seeds the shared highSchools collection the first time this exact
       // name (case-insensitive) is entered — same lazy find-or-create as
-      // RecruitsSection/PlayerDataSection.
+      // RecruitsSection/PlayerDataSection. Matched on Name AND State
+      // together (see PlayerDataSection's own seedHighSchoolIfNew for why —
+      // two schools can share a name in different states).
       const hsName = (formState.HighSchool || "").trim();
-      if (hsName && !highSchoolOptions.some((h) => h.Name.toLowerCase() === hsName.toLowerCase())) {
-        const newHighSchool = { Name: hsName, State: formState.State || "", createdAt: serverTimestamp() };
+      const hsState = (formState.State || "").trim();
+      const hsExists = highSchoolOptions.some((h) =>
+        h.Name.toLowerCase() === hsName.toLowerCase() && (h.State || "").trim().toLowerCase() === hsState.toLowerCase()
+      );
+      if (hsName && !hsExists) {
+        const newHighSchool = { Name: hsName, State: hsState, createdAt: serverTimestamp() };
         await addDoc(collection(db, "highSchools"), newHighSchool);
         setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
       }
@@ -4152,10 +4167,16 @@ function RecruitsSection() {
       // (case-insensitive) is entered, so it becomes an autocomplete
       // suggestion for every recruit after this one. Runs on every save
       // rather than on blur, so a recruit that's never actually saved
-      // never creates an orphan high school doc. ──
+      // never creates an orphan high school doc. Matched on Name AND State
+      // together (see PlayerDataSection's own seedHighSchoolIfNew for why —
+      // two schools can share a name in different states). ──
       const hsName = (formState.HighSchool || "").trim();
-      if (hsName && !highSchoolOptions.some((h) => h.Name.toLowerCase() === hsName.toLowerCase())) {
-        const newHighSchool = { Name: hsName, State: formState.State || "", createdAt: serverTimestamp() };
+      const hsState = (formState.State || "").trim();
+      const hsExists = highSchoolOptions.some((h) =>
+        h.Name.toLowerCase() === hsName.toLowerCase() && (h.State || "").trim().toLowerCase() === hsState.toLowerCase()
+      );
+      if (hsName && !hsExists) {
+        const newHighSchool = { Name: hsName, State: hsState, createdAt: serverTimestamp() };
         await addDoc(collection(db, "highSchools"), newHighSchool);
         setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
       }
@@ -10599,6 +10620,7 @@ function MiscBrandingSection() {
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <HomePageModeToggle />
       <WePickCurrentWeekControl />
+      <WePickEndWeekControl />
       <TvChannelsManager />
     </div>
   );
@@ -10687,6 +10709,314 @@ function WePickCurrentWeekControl() {
             {saveMessage && (
               <div style={{ fontSize: "11px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
                 {saveMessage}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Duplicated scoring/qualification helpers — same exact copy
+// scripts/gradeWePickWeek.js keeps of WePickHub.js's own scoreGamePick/
+// isRankedQualified, kept a third time here since this runs in the browser
+// bundle (client Firestore SDK, under the signed-in admin's own auth) while
+// that script runs in plain Node via the Admin SDK — neither can import
+// from the other. If the scoring spec ever changes, all three copies need
+// updating together. ──
+const wePickIsGameFinal = (g) => g.Final && g.HomeScore != null && g.AwayScore != null;
+const wePickHasScorePick = (p) => !!p && p.awayScore != null && p.homeScore != null;
+const wePickPickedSideOf = (p) => {
+  if (p.pickedTeam === "away" || p.pickedTeam === "home") return p.pickedTeam;
+  if (p.awayScore == null || p.homeScore == null) return null;
+  if (p.awayScore > p.homeScore) return "away";
+  if (p.homeScore > p.awayScore) return "home";
+  return null;
+};
+function wePickScoreGamePick(pick, game) {
+  if (!game || !wePickIsGameFinal(game) || !wePickHasScorePick(pick)) return 0;
+  const side = wePickPickedSideOf(pick);
+  const actualWinner = game.AwayScore > game.HomeScore ? "away" : game.HomeScore > game.AwayScore ? "home" : null;
+  if (!actualWinner || side !== actualWinner) return 0;
+  const awayAcc = Math.max(0, 100 - 10 * Math.abs(game.AwayScore - pick.awayScore));
+  const homeAcc = Math.max(0, 100 - 10 * Math.abs(game.HomeScore - pick.homeScore));
+  return 100 + awayAcc + homeAcc;
+}
+function wePickIsRankedQualified(rankedGames, week) {
+  const total = rankedGames.length;
+  if (week === "Week 0") return total === 6;
+  const gotwCount = rankedGames.filter((g) => g.GameOfWeek).length;
+  const featuredCount = rankedGames.filter((g) => g.Featured).length;
+  return total === 6 && gotwCount >= 1 && featuredCount >= 2;
+}
+
+// ── The actual grading pass for one week — a client-SDK port of
+// scripts/gradeWePickWeek.js's own gradeWeek, callable from the "End Week"
+// button below instead of only from the Sunday-morning GitHub Actions cron.
+// Runs under the signed-in admin's own auth rather than the Admin SDK, so
+// every collection this touches (schedule26/{id}/picks, users,
+// wePickStandings2026, users/{uid}/wePickStats) already has to allow an
+// isAdmin() write/read in firestore.rules — see each of those rules' own
+// comments, all written with exactly this "trusted process" in mind even
+// before this button existed. Writes the week's standings doc (entries +
+// graded: true, the same idempotency flag the cron script checks) and
+// increments every earned badge counter, then fully recomputes the season
+// totals from every graded week so this is safe to call even out of strict
+// week order. ──
+async function gradeWeekClient(week, games) {
+  const pickSnaps = await Promise.all(
+    games.map((g) => getDocs(collection(db, "schedule26", g.id, "picks")))
+  );
+
+  const byUid = new Map(); // uid -> [{ pick, game }]
+  games.forEach((game, i) => {
+    pickSnaps[i].forEach((snap) => {
+      const uid = snap.id;
+      const pick = snap.data();
+      if (!byUid.has(uid)) byUid.set(uid, []);
+      byUid.get(uid).push({ pick, game });
+    });
+  });
+
+  const uids = [...byUid.keys()];
+  const userSnaps = await Promise.all(uids.map((uid) => getDoc(doc(db, "users", uid))));
+  const usernameByUid = {};
+  userSnaps.forEach((snap, i) => {
+    usernameByUid[uids[i]] = snap.exists() ? (snap.data().username || "").trim() : "";
+  });
+
+  const badgeDeltas = new Map(); // uid -> { sweep, snipe, topDog, immaculate }
+  const bump = (uid, key, n = 1) => {
+    if (!badgeDeltas.has(uid)) badgeDeltas.set(uid, { sweep: 0, snipe: 0, topDog: 0, immaculate: 0 });
+    badgeDeltas.get(uid)[key] += n;
+  };
+
+  const entries = [];
+  let maxPoints = null;
+
+  for (const [uid, rows] of byUid) {
+    rows.forEach(({ pick, game }) => {
+      if (wePickHasScorePick(pick) && wePickScoreGamePick(pick, game) === 300) bump(uid, "snipe");
+    });
+
+    const rankedRows = rows.filter((r) => r.pick?.ranked === true && wePickHasScorePick(r.pick) && !r.game.RankedDisqualified);
+    if (!wePickIsRankedQualified(rankedRows.map((r) => r.game), week)) continue; // unqualified = didn't play, for standings purposes
+
+    let points = 0;
+    let correct = 0;
+    let diffTotal = 0;
+    let allPerfect = rankedRows.length === 6;
+    rankedRows.forEach(({ pick, game }) => {
+      const p = wePickScoreGamePick(pick, game);
+      points += p;
+      if (p > 0) correct++;
+      if (p !== 300) allPerfect = false;
+      diffTotal += Math.abs(game.AwayScore - pick.awayScore) + Math.abs(game.HomeScore - pick.homeScore);
+    });
+
+    entries.push({ uid, displayName: usernameByUid[uid] || "Anonymous Fan", correct, total: rankedRows.length, points, diffTotal });
+    if (rankedRows.length === 6 && correct === 6) bump(uid, "sweep");
+    if (allPerfect) bump(uid, "immaculate");
+    if (maxPoints === null || points > maxPoints) maxPoints = points;
+  }
+
+  if (maxPoints !== null) {
+    entries.forEach((e) => { if (e.points === maxPoints) bump(e.uid, "topDog"); });
+  }
+
+  await setDoc(doc(db, "wePickStandings2026", week), {
+    entries, graded: true, gradedAt: serverTimestamp(),
+  });
+
+  const badgeEntries = [...badgeDeltas.entries()].filter(([, d]) => d.sweep || d.snipe || d.topDog || d.immaculate);
+  for (let i = 0; i < badgeEntries.length; i += 500) { // Firestore's own hard cap on ops per batch
+    const batch = writeBatch(db);
+    badgeEntries.slice(i, i + 500).forEach(([uid, d]) => {
+      const ref = doc(db, "users", uid, "wePickStats", "season2026");
+      const inc = {};
+      if (d.sweep) inc.sweepCount = increment(d.sweep);
+      if (d.snipe) inc.snipeCount = increment(d.snipe);
+      if (d.topDog) inc.topDogCount = increment(d.topDog);
+      if (d.immaculate) inc.immaculateCount = increment(d.immaculate);
+      batch.set(ref, inc, { merge: true });
+    });
+    await batch.commit();
+  }
+
+  // Full recompute (not an incremental merge) from every graded week's
+  // entries — same reasoning as the cron script's own recomputeSeasonStandings:
+  // self-healing if a past week's entries were ever hand-corrected, and
+  // safe to call after ending a week out of order.
+  const standingsSnap = await getDocs(collection(db, "wePickStandings2026"));
+  const totals = new Map();
+  standingsSnap.forEach((docSnap) => {
+    if (docSnap.id === "season") return;
+    const data = docSnap.data();
+    if (!data?.graded || !Array.isArray(data.entries)) return;
+    data.entries.forEach((e) => {
+      if (!totals.has(e.uid)) {
+        totals.set(e.uid, { uid: e.uid, displayName: e.displayName, points: 0, correct: 0, total: 0, diffTotal: 0, weeksPlayed: 0 });
+      }
+      const t = totals.get(e.uid);
+      t.displayName = e.displayName || t.displayName;
+      t.points += e.points || 0;
+      t.correct += e.correct || 0;
+      t.total += e.total || 0;
+      t.diffTotal += e.diffTotal || 0;
+      t.weeksPlayed += 1;
+    });
+  });
+  await setDoc(doc(db, "wePickStandings2026", "season"), {
+    entries: [...totals.values()], graded: true, gradedAt: serverTimestamp(),
+  });
+
+  return { participants: uids.length, qualified: entries.length, topDogPoints: maxPoints, badgesAwarded: badgeEntries.length };
+}
+
+// ── "End Week" — the manual, admin-triggered equivalent of
+// scripts/gradeWePickWeek.js's own Sunday-morning cron run (see
+// gradeWeekClient above), for whenever the admin wants a week's winner
+// declared and badges awarded right now rather than waiting on the next
+// scheduled run. Deliberately requires every game in the chosen week to
+// already be Final before the button will do anything — grading a week
+// with games still in progress would score those games' picks as 0 (an
+// unplayed game isn't "wrong", it just isn't graded yet), incorrectly
+// zeroing out real Ranked 6 entries that include it. Also refuses a week
+// that's already graded, the same idempotency guard the cron script checks
+// (wePickStandings2026/{week}.graded), so a double-click can't double-count
+// badges. Once grading succeeds, advances config/wePick.currentWeekOverride
+// (the same field WePickCurrentWeekControl above manages) to the next week
+// in schedule order — "ending" a week is also what flips My Picks/
+// Standings's own default over to the next one for every user. ──
+function WePickEndWeekControl() {
+  const [weeks, setWeeks] = useState(null); // null = not loaded yet
+  const [gamesByWeek, setGamesByWeek] = useState(new Map());
+  const [gradedWeeks, setGradedWeeks] = useState(new Set());
+  const [selectedWeek, setSelectedWeek] = useState("");
+  const [ending, setEnding] = useState(false);
+  const [message, setMessage] = useState("");
+  const [summary, setSummary] = useState(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [gamesSnap, standingsSnap] = await Promise.all([
+          getDocs(collection(db, "schedule26")),
+          getDocs(collection(db, "wePickStandings2026")),
+        ]);
+        const games = gamesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const byWeek = new Map();
+        games.forEach((g) => {
+          if (!g.Week) return;
+          if (!byWeek.has(g.Week)) byWeek.set(g.Week, []);
+          byWeek.get(g.Week).push(g);
+        });
+        setGamesByWeek(byWeek);
+        setWeeks([...byWeek.keys()].sort((a, b) => weekNumber(a) - weekNumber(b)));
+
+        const graded = new Set();
+        standingsSnap.forEach((d) => { if (d.id !== "season" && d.data()?.graded) graded.add(d.id); });
+        setGradedWeeks(graded);
+      } catch (e) {
+        console.error("We-Pick end-week fetch error:", e);
+        setWeeks([]);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const selectedGames = selectedWeek ? gamesByWeek.get(selectedWeek) || [] : [];
+  const notFinalCount = selectedGames.filter((g) => !wePickIsGameFinal(g)).length;
+  const allFinal = selectedGames.length > 0 && notFinalCount === 0;
+  const alreadyGraded = !!selectedWeek && gradedWeeks.has(selectedWeek);
+  const canEnd = !!selectedWeek && allFinal && !alreadyGraded && !ending;
+
+  const handleEndWeek = async () => {
+    if (!canEnd) return;
+    if (!window.confirm(`End ${selectedWeek}? This declares the winner, awards badges, and advances the default week for every user. This can't be undone from here.`)) return;
+    setEnding(true);
+    setMessage("");
+    setSummary(null);
+    try {
+      const result = await gradeWeekClient(selectedWeek, selectedGames);
+      setSummary(result);
+      setGradedWeeks((prev) => new Set(prev).add(selectedWeek));
+
+      const idx = weeks.indexOf(selectedWeek);
+      const nextWeek = idx >= 0 && idx < weeks.length - 1 ? weeks[idx + 1] : null;
+      if (nextWeek) {
+        await setDoc(doc(db, "config", "wePick"), { currentWeekOverride: nextWeek, updatedAt: serverTimestamp() }, { merge: true });
+      }
+      setMessage(`${selectedWeek} ended.` + (nextWeek ? ` Default week advanced to ${nextWeek}.` : " No later week on the schedule to advance to."));
+    } catch (e) {
+      console.error("End week error:", e);
+      setMessage("Failed to end the week — check console.");
+    } finally {
+      setEnding(false);
+    }
+  };
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🏁 End We-Pick Week
+        </div>
+      </div>
+      <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        {weeks === null ? (
+          <LoadingSpinner label="Loading" size={20} minHeight="50px" />
+        ) : (
+          <>
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+              Declares the winner, awards badges (Sweep/Snipe/Top Dog/Immaculate), and advances everyone's default week — same result as waiting for Sunday morning's automatic grading, done right now instead.
+            </div>
+            <select
+              value={selectedWeek}
+              disabled={ending}
+              onChange={(e) => { setSelectedWeek(e.target.value); setMessage(""); setSummary(null); }}
+              style={{
+                padding: "10px", borderRadius: "8px", border: "2px solid " + BLUE,
+                fontWeight: 800, fontSize: "13px", color: BLUE, background: "#fff",
+                cursor: ending ? "default" : "pointer",
+              }}
+            >
+              <option value="">Select a week...</option>
+              {weeks.map((w) => (
+                <option key={w} value={w}>{w}{gradedWeeks.has(w) ? " — already graded" : ""}</option>
+              ))}
+            </select>
+            {selectedWeek && !alreadyGraded && !allFinal && (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a6300" }}>
+                ⚠ {notFinalCount} game{notFinalCount !== 1 ? "s" : ""} in {selectedWeek} {notFinalCount !== 1 ? "aren't" : "isn't"} marked Final yet — mark every game Final in CFB Schedule first.
+              </div>
+            )}
+            {alreadyGraded && (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#666" }}>
+                {selectedWeek} has already been graded.
+              </div>
+            )}
+            <button
+              onClick={handleEndWeek}
+              disabled={!canEnd}
+              style={{
+                padding: "10px", borderRadius: "8px", border: "2px solid " + BLUE,
+                background: canEnd ? BLUE : "#eee", color: canEnd ? "#fff" : "#999",
+                fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                cursor: canEnd ? "pointer" : "default",
+              }}
+            >
+              {ending ? "Ending..." : "End Week & Advance"}
+            </button>
+            {summary && (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#666" }}>
+                {summary.qualified}/{summary.participants} qualified · top score {summary.topDogPoints ?? "—"} · {summary.badgesAwarded} user{summary.badgesAwarded !== 1 ? "s" : ""} earned a badge
+              </div>
+            )}
+            {message && (
+              <div style={{ fontSize: "11px", fontWeight: 800, color: message.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {message}
               </div>
             )}
           </>
