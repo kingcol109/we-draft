@@ -463,6 +463,64 @@ function TruncatedEvaluationText({ text, keyPrefix, color }) {
   );
 }
 
+// Game Notes / Games Watched for one public evaluation in the feed below
+// (read-only — no remove button, unlike the evaluator's own editor). A note
+// with actual written text renders as a full card with its grade badge; a
+// note added with just a grade and no text is only a "watched" marker, so
+// it drops into the plainer Games Watched row instead and never surfaces
+// its grade — same with-text/watched-only split as the editor's own panel.
+function GameNotesFeedSection({ gameNotes, color, mobile }) {
+  if (!Array.isArray(gameNotes) || gameNotes.length === 0) return null;
+  const sorted = [...gameNotes].sort((a, b) => (b.dateMs || 0) - (a.dateMs || 0));
+  const withText = sorted.filter((n) => n.note?.trim());
+  const watchedOnly = sorted.filter((n) => !n.note?.trim());
+  const fmtDate = (ms) => (ms ? ` (${new Date(ms).toLocaleDateString("en-US", { timeZone: "UTC" })})` : "");
+  const headingSize = mobile ? "8px" : "14px";
+  return (
+    <div style={{ padding: mobile ? "0 12px 12px" : "0 16px 16px" }}>
+      {withText.length > 0 && (
+        <div style={{ marginBottom: watchedOnly.length > 0 ? (mobile ? "8px" : "12px") : 0 }}>
+          <div className="font-black uppercase" style={{ fontSize: headingSize, color, letterSpacing: "0.1em", borderBottom: `${mobile ? "1px" : "2px"} solid ${color}`, paddingBottom: mobile ? "3px" : "4px", marginBottom: mobile ? "6px" : "10px" }}>
+            Game Notes
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: mobile ? "6px" : "8px" }}>
+            {withText.map((n) => {
+              const tagInfo = GAME_NOTE_TAGS.find((t) => t.key === n.tag);
+              return (
+                <div key={n.gameId} style={{ border: "1px solid #eee", borderRadius: "6px", padding: mobile ? "6px 8px" : "8px 10px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                    <div style={{ fontSize: mobile ? "11px" : "12px", fontWeight: 900, color: "#333" }}>
+                      vs {n.opponent}{fmtDate(n.dateMs)}
+                    </div>
+                    <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", background: tagInfo?.color || "#999", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+                      {n.tag}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: mobile ? "11.5px" : "12.5px", color: "#555", marginTop: "4px", lineHeight: 1.4 }}>{n.note}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {watchedOnly.length > 0 && (
+        <div>
+          <div style={{ fontSize: mobile ? "8px" : "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>
+            Games Watched
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {watchedOnly.map((n) => (
+              <span key={n.gameId} style={{ fontSize: mobile ? "10px" : "11px", fontWeight: 800, color: "#555", background: "#f3f3f3", borderRadius: "20px", padding: "3px 10px" }}>
+                vs {n.opponent}{fmtDate(n.dateMs)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PlayerProfile() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -497,12 +555,15 @@ export default function PlayerProfile() {
   const [nflFit, setNflFit] = useState("");
   const [evaluation, setEvaluation] = useState("");
   const [visibility, setVisibility] = useState("public");
-  // Per-game notes on this player's evaluation — one tag+note per final
-  // game they played in (see the "Game Notes" panel below the evaluation
-  // textarea). Stored as part of the same evaluation doc, not a separate
-  // collection — {gameId, opponent, dateMs, tag, note} per entry, with
-  // opponent/dateMs captured at add time so displaying an already-added
-  // note never needs to re-fetch or re-hold onto the full games list.
+  // Per-game notes on this player's evaluation — one tag(grade)+note per
+  // final game they played in (see the "Game Notes" panel below the
+  // evaluation textarea). The written note is optional — grading a game
+  // with no note attached is just a "watched" marker and renders under
+  // Games Watched instead (see gameNotesWithText/gameNotesWatchedOnly).
+  // Stored as part of the same evaluation doc, not a separate collection —
+  // {gameId, opponent, dateMs, tag, note} per entry, with opponent/dateMs
+  // captured at add time so displaying an already-added note never needs
+  // to re-fetch or re-hold onto the full games list.
   const [gameNotes, setGameNotes] = useState([]);
   const [showGameNotes, setShowGameNotes] = useState(false);
   const [availableGames, setAvailableGames] = useState(null); // null = not fetched yet
@@ -922,13 +983,17 @@ export default function PlayerProfile() {
   // to the `videos` collection, migrated from slug- to playerId-keyed items —
   // see AdminPanel.js VideosSection). Each video can reference up to 3
   // players, each with its own title/thumb override — fall back to items[0]
-  // if this player's own tag has no override set. ──
+  // if this player's own tag has no override set. If the player has no
+  // videos of their own, fall back to the 3 most recently added CFB/Draft
+  // videos site-wide (same tag treatment as VideosPage.js), using each
+  // video's own GenTitle/GenThumb rather than a per-player override since
+  // none of these videos are actually tagged to this player. ──
   useEffect(() => {
     if (!player?.id) return;
+    const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
     const fetch = async () => {
       try {
         const snap = await getDocs(query(collection(db,"videos"), where("playerIds","array-contains",player.id)));
-        const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
         const vids = snap.docs
           .map((d) => {
             const data = d.data();
@@ -949,7 +1014,35 @@ export default function PlayerProfile() {
           })
           .filter((v) => v.video)
           .sort((a, b) => toMs(b.date) - toMs(a.date));
-        setPlayerVideos(vids);
+
+        if (vids.length > 0) {
+          setPlayerVideos(vids);
+          setVisibleVideoCount(3);
+          return;
+        }
+
+        // No videos tagged to this player — show the 3 most recent
+        // CFB/Draft videos site-wide instead.
+        const allSnap = await getDocs(collection(db, "videos"));
+        const fallback = allSnap.docs
+          .map((d) => {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const first = items[0] || null;
+            const tags = Array.isArray(data.Tags) ? data.Tags : [];
+            return {
+              id: d.id,
+              video: data.Video || "",
+              date: data.Date || null,
+              title: data.GenTitle || first?.title || "",
+              thumb: data.GenThumb || first?.thumb || "",
+              tags: tags.length > 0 ? tags : ["CFB"],
+            };
+          })
+          .filter((v) => v.video && v.tags.some((t) => t === "CFB" || t === "Draft"))
+          .sort((a, b) => toMs(b.date) - toMs(a.date))
+          .slice(0, 3);
+        setPlayerVideos(fallback);
         setVisibleVideoCount(3);
       } catch(e) { setPlayerVideos([]); }
     };
@@ -1486,6 +1579,14 @@ useEffect(() => {
   const notedGameIds = new Set(gameNotes.map((n) => n.gameId));
   const pickableGames = (availableGames || []).filter((g) => !notedGameIds.has(g.id));
 
+  // Split for display: a note with actual written text is a real "Game
+  // Note" (tag + note shown together); a note added with just a grade and
+  // no text is only a "watched" marker, so it renders under Games Watched
+  // instead with its grade left off (see the Game Notes panel below).
+  const sortedGameNotes = [...gameNotes].sort((a, b) => b.dateMs - a.dateMs);
+  const gameNotesWithText = sortedGameNotes.filter((n) => n.note?.trim());
+  const gameNotesWatchedOnly = sortedGameNotes.filter((n) => !n.note?.trim());
+
   // Adding/removing a note immediately triggers a full evaluation save
   // (not just a "gameNotes" field patch) — the note itself only lives in
   // Firestore once handleSaveEvaluation actually writes the doc, so
@@ -1493,17 +1594,19 @@ useEffect(() => {
   // silently unsaved (and lost on navigating away) the moment it's added.
   // `overrideGameNotes` is how the just-computed array reaches that save
   // without waiting on setGameNotes' own state update to land first.
+  // Only the grade (tag) is required — a written note is optional, so
+  // picking a game and grading it is enough to log it as watched (see
+  // Games Watched above) without forcing a full write-up.
   const handleAddGameNote = async () => {
     const game = (availableGames || []).find((g) => g.id === selectedGameId);
     if (!game) return;
-    if (!noteTag) { alert("Pick a tag for this game first."); return; }
+    if (!noteTag) { alert("Grade this game first."); return; }
     const text = noteText.trim();
-    if (!text) { alert("Write a note first."); return; }
     if (text.split(/\s+/).filter(Boolean).length > GAME_NOTE_MAX_WORDS) {
       alert(`Keep the note to ${GAME_NOTE_MAX_WORDS} words or fewer.`);
       return;
     }
-    if (containsProfanity(text)) { alert("❌ That note contains inappropriate language."); return; }
+    if (text && containsProfanity(text)) { alert("❌ That note contains inappropriate language."); return; }
     const updated = [...gameNotes, { gameId: game.id, opponent: game.opponent, dateMs: game.dateMs, tag: noteTag, note: text }];
     setGameNotes(updated);
     setSelectedGameId(""); setNoteTag(""); setNoteText("");
@@ -3629,9 +3732,15 @@ useEffect(() => {
 
                   {showGameNotes && (
                     <div style={{ border: `2px solid ${color1}`, borderTop: "none", borderRadius: "0 0 6px 6px", padding: "12px 14px" }}>
-                      {gameNotes.length > 0 && (
+                      {/* A note with actual text keeps the full tag+note card
+                          below; a note that's just a grade with no written
+                          note (added without ever filling in the textarea —
+                          see handleAddGameNote) is just a "watched" marker,
+                          so it drops into the plainer Games Watched list
+                          instead and never surfaces its grade. */}
+                      {gameNotesWithText.length > 0 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "14px" }}>
-                          {[...gameNotes].sort((a, b) => b.dateMs - a.dateMs).map((n) => {
+                          {gameNotesWithText.map((n) => {
                             const tagInfo = GAME_NOTE_TAGS.find((t) => t.key === n.tag);
                             return (
                               <div key={n.gameId} style={{ border: "1px solid #eee", borderRadius: "6px", padding: "8px 10px" }}>
@@ -3657,6 +3766,31 @@ useEffect(() => {
                               </div>
                             );
                           })}
+                        </div>
+                      )}
+
+                      {gameNotesWatchedOnly.length > 0 && (
+                        <div style={{ marginBottom: "14px" }}>
+                          <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>
+                            Games Watched
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            {gameNotesWatchedOnly.map((n) => (
+                              <div key={n.gameId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", border: "1px solid #eee", borderRadius: "6px", padding: "6px 10px" }}>
+                                <div style={{ fontSize: "12px", fontWeight: 900, color: "#333" }}>
+                                  vs {n.opponent}{n.dateMs ? ` (${new Date(n.dateMs).toLocaleDateString("en-US", { timeZone: "UTC" })})` : ""}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveGameNote(n.gameId)}
+                                  disabled={saving}
+                                  style={{ background: "none", border: "none", color: "#c0392b", fontSize: "11px", fontWeight: 800, textDecoration: "underline", cursor: saving ? "default" : "pointer", padding: 0, opacity: saving ? 0.5 : 1 }}
+                                >
+                                  {saving ? "…" : "Remove"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
 
@@ -3695,13 +3829,13 @@ useEffect(() => {
                                   className="w-full rounded px-3 py-2 border-2 font-bold"
                                   style={{ borderColor: color1, marginBottom: "8px" }}
                                 >
-                                  <option value="">Tag this game...</option>
+                                  <option value="">Grade this game...</option>
                                   {GAME_NOTE_TAGS.map((t) => <option key={t.key} value={t.key}>{t.key}</option>)}
                                 </select>
                                 <textarea
                                   value={noteText}
                                   onChange={(e) => setNoteText(e.target.value)}
-                                  placeholder={`A short note on this game (up to ${GAME_NOTE_MAX_WORDS} words)...`}
+                                  placeholder={`Optional — a short note on this game (up to ${GAME_NOTE_MAX_WORDS} words)...`}
                                   className="w-full rounded px-3 py-2 border-2 font-medium"
                                   style={{ borderColor: overLimit ? "#c0392b" : color1, height: "70px" }}
                                 />
@@ -3712,15 +3846,15 @@ useEffect(() => {
                                   <button
                                     type="button"
                                     onClick={() => handleAddGameNote()}
-                                    disabled={!noteTag || !noteText.trim() || overLimit || saving}
+                                    disabled={!noteTag || overLimit || saving}
                                     style={{
                                       background: color1, color: "#fff", border: `2px solid ${color2}`, borderRadius: "6px",
                                       padding: "7px 16px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
-                                      cursor: (!noteTag || !noteText.trim() || overLimit || saving) ? "default" : "pointer",
-                                      opacity: (!noteTag || !noteText.trim() || overLimit || saving) ? 0.5 : 1,
+                                      cursor: (!noteTag || overLimit || saving) ? "default" : "pointer",
+                                      opacity: (!noteTag || overLimit || saving) ? 0.5 : 1,
                                     }}
                                   >
-                                    {saving ? "Saving..." : "Add Note"}
+                                    {saving ? "Saving..." : noteText.trim() ? "Add Note" : "Mark Watched"}
                                   </button>
                                 </div>
                               </>
@@ -3910,6 +4044,7 @@ useEffect(() => {
                           <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-m-${ev.uid}`} color={color1} />
                         </div>
                       </div>}
+                      <GameNotesFeedSection gameNotes={ev.gameNotes} color={color1} mobile />
                     </div>
                   ) : (
                     <div>
@@ -3948,6 +4083,8 @@ useEffect(() => {
                           </div>
                         </div>
                       </>}
+                      {Array.isArray(ev.gameNotes) && ev.gameNotes.length > 0 && <div style={{ height:"1px", backgroundColor:"#e5e7eb", margin:"0 16px" }} />}
+                      <GameNotesFeedSection gameNotes={ev.gameNotes} color={color1} />
                     </div>
                   )}
                 </div>
