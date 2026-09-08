@@ -420,7 +420,7 @@ function TrendTag({
 // signal without it). Cached on window so remounting the popover across
 // opens/closes — or a future second WatchButton on the same page — never
 // re-injects the script or races a second copy of the same promise. ──
-function loadYouTubeIframeApi() {
+export function loadYouTubeIframeApi() {
   if (window.YT?.Player) return Promise.resolve(window.YT);
   if (!window.__wdYouTubeApiPromise) {
     window.__wdYouTubeApiPromise = new Promise((resolve) => {
@@ -713,6 +713,35 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
   // small Watch popover already uses successfully for its own auto-advance
   // (loadVideoById on a player that never moves in the DOM at all) —
   // proven code path, and there's no relocation left to go wrong.
+  // Plays a clip respecting mutedRef, with a fallback for mobile browsers
+  // that silently refuse unmuted autoplay: this whole chain (tap Watch →
+  // async script load → YT.Player construction → onReady) never happens
+  // inside the same synchronous tick as the tap that started it, so by the
+  // time playVideo() actually runs, the "user activation" a lot of mobile
+  // browsers require for unmuted autoplay has already expired — the video
+  // just sits paused, which combined with the loading spinner (only ever
+  // cleared by an actual PLAYING event) read as stuck loading forever. If
+  // playback hasn't actually started shortly after asking for it unmuted,
+  // force mute and retry once — silent-but-playing beats frozen-and-silent,
+  // and the mute button is right there for anyone who wants sound back.
+  // Never fires at all once already muted, and never fires when unmuted
+  // autoplay does succeed (most desktop browsers).
+  const attemptPlay = (player) => {
+    if (mutedRef.current) player.mute(); else player.unMute();
+    player.playVideo();
+    if (mutedRef.current) return;
+    setTimeout(() => {
+      if (!playerRef.current || mutedRef.current) return;
+      const state = playerRef.current.getPlayerState?.();
+      if (state !== window.YT?.PlayerState?.PLAYING) {
+        mutedRef.current = true;
+        setMuted(true);
+        playerRef.current.mute();
+        playerRef.current.playVideo();
+      }
+    }, 900);
+  };
+
   useEffect(() => {
     let cancelled = false;
     loadYouTubeIframeApi().then((YT) => {
@@ -724,20 +753,22 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
         videoId: vid,
         playerVars: { autoplay: 1, playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0 },
         events: {
-          onReady: (e) => { if (mutedRef.current) e.target.mute(); else e.target.unMute(); e.target.playVideo(); },
+          onReady: (e) => attemptPlay(e.target),
           // Auto-advance — scrolling to the next slide (rather than
           // loadVideoById in place) is the mechanism here; the
           // IntersectionObserver below notices the scroll and updates
           // activeIndex itself, so there's exactly one path (manual swipe
           // or this) that ever changes which slide is "active," and the
           // effect right below is what actually swaps the video for it.
-          // Also where the loading spinner turns off/on: PLAYING is the
-          // one state that actually means "there's a frame on screen now,"
-          // BUFFERING covers both the very first load and every later
-          // re-buffer, so gating on those two (rather than something
-          // timing-based) tracks whatever YouTube itself is actually doing.
+          // Also where the loading spinner turns off/on: PLAYING and PAUSED
+          // both mean "there's an actual frame on screen now" (PAUSED
+          // covers a still-blocked-autoplay clip that attemptPlay's own
+          // retry hasn't resolved yet — better to show that frozen frame
+          // than hide it behind a spinner that would otherwise never
+          // clear), BUFFERING covers both the very first load and every
+          // later re-buffer.
           onStateChange: (e) => {
-            if (e.data === YT.PlayerState.PLAYING) setVideoLoading(false);
+            if (e.data === YT.PlayerState.PLAYING || e.data === YT.PlayerState.PAUSED) setVideoLoading(false);
             else if (e.data === YT.PlayerState.BUFFERING) setVideoLoading(true);
             if (e.data !== YT.PlayerState.ENDED) return;
             slideRefs.current[activeIndexRef.current + 1]?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -759,9 +790,9 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
     const clip = feedRef.current[activeIndex];
     const vid = clip ? extractYouTubeId(clip.video) : "";
     if (!vid || !playerRef.current) return;
-    setVideoLoading(true); // back to buffering until onStateChange reports PLAYING for the new clip
+    setVideoLoading(true); // back to buffering until onStateChange reports PLAYING/PAUSED for the new clip
     playerRef.current.loadVideoById(vid);
-    if (mutedRef.current) playerRef.current.mute(); else playerRef.current.unMute();
+    attemptPlay(playerRef.current); // same blocked-unmuted-autoplay fallback as the very first clip
   }, [activeIndex]);
 
   // Watches every slide currently in the DOM and promotes whichever one is

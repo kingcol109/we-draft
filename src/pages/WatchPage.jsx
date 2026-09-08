@@ -18,7 +18,7 @@ import ReactDOM from "react-dom";
 import { Helmet } from "react-helmet-async";
 import { collection, documentId, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { WatchFullscreenFeed } from "./PlayerProfile";
+import { WatchFullscreenFeed, loadYouTubeIframeApi } from "./PlayerProfile";
 import LoadingSpinner from "../components/LoadingSpinner";
 
 const SITE_BLUE = "#0055a5";
@@ -34,6 +34,19 @@ export default function WatchPage() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // Kicked off immediately, in parallel with the Firestore fetch below, not
+  // awaited here — this is what WatchFullscreenFeed's own player-creation
+  // effect will also call once it mounts, but by then this external script
+  // (https://www.youtube.com/iframe_api) is either already loaded or
+  // already in flight either way, since loadYouTubeIframeApi caches the one
+  // promise on window.__wdYouTubeApiPromise. Opened from a player page this
+  // cost is invisible because the visitor's already been on the site for a
+  // while by the time they click Watch; landing straight on /watch has
+  // nothing else competing for that time, so starting it here instead of
+  // only after both Firestore round trips resolve measurably shortens time
+  // to first frame.
+  useEffect(() => { loadYouTubeIframeApi(); }, []);
 
   useEffect(() => {
     let cancelled = false;
