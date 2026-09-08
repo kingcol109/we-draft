@@ -53,7 +53,21 @@ export default function WatchPage() {
     const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "videos"), where("Short", "==", true)));
+        const [snap, trendSnap] = await Promise.all([
+          getDocs(query(collection(db, "videos"), where("Short", "==", true))),
+          // Same trend-priority WatchFullscreenFeed's own feed-extension
+          // fetch uses (see PlayerProfile.js's copy of this comment) — the
+          // very first thing /watch plays should follow the same
+          // ordering as everywhere else in the feed: top-5 trending, then
+          // trending, then most recent.
+          getDocs(collection(db, "trends")),
+        ]);
+        const trendOrderBySlug = {};
+        trendSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.Shown === true) trendOrderBySlug[d.id] = data.Order ?? 0;
+        });
+
         const rows = snap.docs
           .map((d) => {
             const data = d.data();
@@ -74,11 +88,37 @@ export default function WatchPage() {
           .filter((v) => v.video && v.playerId && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
           .sort((a, b) => toMs(b.date) - toMs(a.date));
 
+        // playerSlug isn't known yet at this point (that's the whole reason
+        // for the second, player-lookup round trip below) so trend tiering
+        // has to key off playerId here instead of slug — trends docs are
+        // keyed by slug, so this resolves each row's playerId to its slug
+        // first via a batched "in" lookup, same players fetch that already
+        // has to happen anyway, just widened to every distinct playerId in
+        // `rows` instead of only the single eventual winner.
+        const playerIds = [...new Set(rows.map((r) => r.playerId))];
+        const idChunks = [];
+        for (let i = 0; i < playerIds.length; i += 10) idChunks.push(playerIds.slice(i, i + 10));
+        const playerSnaps = await Promise.all(
+          idChunks.map((chunk) => getDocs(query(collection(db, "players"), where(documentId(), "in", chunk))))
+        );
+        const playersById = {};
+        playerSnaps.forEach((pSnap) => pSnap.docs.forEach((d) => { playersById[d.id] = d.data(); }));
+
+        const top5Slugs = new Set(
+          Object.entries(trendOrderBySlug).sort((a, b) => a[1] - b[1]).slice(0, 5).map(([slug]) => slug)
+        );
+        const tierOf = (slug) => (top5Slugs.has(slug) ? 0 : slug in trendOrderBySlug ? 1 : 2);
+        rows.sort((a, b) => {
+          const slugA = playersById[a.playerId]?.Slug || "";
+          const slugB = playersById[b.playerId]?.Slug || "";
+          const ta = tierOf(slugA), tb = tierOf(slugB);
+          if (ta !== tb) return ta - tb;
+          return ta === 0 ? trendOrderBySlug[slugA] - trendOrderBySlug[slugB] : 0;
+        });
+
         const first = rows[0] || null;
         if (!first) { if (!cancelled) setSeedClip(false); return; }
-
-        const pSnap = await getDocs(query(collection(db, "players"), where(documentId(), "in", [first.playerId])));
-        const p = pSnap.docs[0]?.data() || null;
+        const p = playersById[first.playerId] || null;
         if (!p?.Slug) { if (!cancelled) setSeedClip(false); return; }
 
         if (!cancelled) {

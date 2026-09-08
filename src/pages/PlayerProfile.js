@@ -612,6 +612,11 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
   // false once YouTube actually reports PLAYING, and back to true every
   // time the active slide changes and a new video gets loaded in.
   const [videoLoading, setVideoLoading] = useState(true);
+  // Mobile-only "more info" panel — see its own render comment further
+  // down for the full reasoning. Closed on every slide change so it never
+  // sits open showing a since-scrolled-away player's info over whoever's
+  // playing now.
+  const [infoOpen, setInfoOpen] = useState(false);
 
   const feedRef = useRef(initialClips); // kept in sync below; lets the player-rebuild
   const activeIndexRef = useRef(0);     // effect and the ended-handler read the latest
@@ -621,7 +626,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
   const playerRef = useRef(null);       // the single YT.Player instance, created once, never moved
 
   useEffect(() => { feedRef.current = feed; }, [feed]);
-  useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
+  useEffect(() => { activeIndexRef.current = activeIndex; setInfoOpen(false); }, [activeIndex]);
 
   // Extends the feed with recent Shorts from every player, not just this
   // one — runs once (a fresh WatchFullscreenFeed instance mounts each time
@@ -634,7 +639,24 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
     const toMsLocal = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
     const fetchMore = async () => {
       try {
-        const snap = await getDocs(query(collection(db, "videos"), where("Short", "==", true)));
+        const [snap, trendSnap] = await Promise.all([
+          getDocs(query(collection(db, "videos"), where("Short", "==", true))),
+          // Same "trends" collection/Shown flag/Order the page's own "Top 5
+          // Trending" sidebar and the Watch Next chips already read — used
+          // below to reorder this batch: top-5-trending players' Shorts
+          // first (in their own Order), then everyone else who's trending
+          // at all, then the rest by recency (already the base sort order,
+          // and a stable sort preserves it within each tier).
+          getDocs(collection(db, "trends")),
+        ]);
+        const trendOrderBySlug = {};
+        trendSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.Shown === true) trendOrderBySlug[d.id] = data.Order ?? 0;
+        });
+        const top5Slugs = new Set(
+          Object.entries(trendOrderBySlug).sort((a, b) => a[1] - b[1]).slice(0, 5).map(([slug]) => slug)
+        );
         const raw = snap.docs
           .map((d) => {
             const data = d.data();
@@ -683,6 +705,17 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
             playerSchool: p?.School || "",
             playerEligible: p?.Eligible || "",
           };
+        });
+
+        // Tier 0 = top 5 trending (own Order rank breaks ties within it),
+        // tier 1 = trending but outside the top 5, tier 2 = everyone else.
+        // A stable sort (native to every modern engine) leaves tier 1/2
+        // exactly as `raw`'s own most-recent-first order already left them.
+        const tierOf = (slug) => (top5Slugs.has(slug) ? 0 : slug in trendOrderBySlug ? 1 : 2);
+        more.sort((a, b) => {
+          const ta = tierOf(a.playerSlug), tb = tierOf(b.playerSlug);
+          if (ta !== tb) return ta - tb;
+          return ta === 0 ? trendOrderBySlug[a.playerSlug] - trendOrderBySlug[b.playerSlug] : 0;
         });
 
         if (!cancelled && more.length > 0) setFeed((prev) => [...prev, ...more]);
@@ -1097,6 +1130,27 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
     setSearchQuery("");
   };
 
+  // Mobile full-bleeds .wd-watch-col to the viewport's own width/height,
+  // but a Short is a fixed 9:16 clip — on a phone whose screen isn't
+  // exactly that ratio, something has to give: either crop the video (not
+  // an option, YouTube's embed doesn't) or letterbox/pillarbox it, and
+  // YouTube does that letterboxing itself, inside the iframe, with its own
+  // opaque black fill — pixels this page has no CSS reach into (cross-
+  // origin iframe content). The only way to make those bars anything but
+  // black is to never let YouTube's own letterboxing happen at all: size
+  // the iframe's OWN box to exactly the video's 9:16 (so YouTube fills it
+  // edge to edge, no internal letterboxing of its own), center that box,
+  // and paint OUR OWN background — the active player's Color1 — behind it
+  // in whatever margin is left on whichever axis actually has one. The
+  // double min() handles either axis: a screen narrower than 9:16 gets the
+  // gap on top/bottom, one wider than 9:16 gets it on the sides, and
+  // either way the math never lets the box overflow the viewport. Desktop
+  // already gets this for free — .wd-watch-col itself is already capped to
+  // `min(100%, calc(100dvh * 9/16))` — so this only branches for mobile.
+  const mobileFrameStyle = isMobile
+    ? { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "min(100vw, calc(100dvh * 9 / 16))", height: "min(100dvh, calc(100vw * 16 / 9))" }
+    : { position: "absolute", inset: 0 };
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "#000", display: "flex", alignItems: "stretch", justifyContent: "center" }}>
       {/* Height fallback pairs (a real stylesheet rule, not an inline style
@@ -1351,21 +1405,36 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
           capped to its own native 9:16 (never wider than the viewport is
           tall) on desktop, so the two side margins actually have room to
           exist instead of the video eating the whole monitor. */}
-      <div className="wd-watch-col" style={{ position: "relative", width: isMobile ? "100%" : "min(100%, calc(100dvh * 9 / 16))", flexShrink: 0 }}>
+      <div className="wd-watch-col" style={{ position: "relative", width: isMobile ? "100%" : "min(100%, calc(100dvh * 9 / 16))", flexShrink: 0, background: isMobile ? activeColor1 : "#000" }}>
         {/* The single, fixed video layer — always covers exactly whichever
             slide is currently scrolled into view, since every slide is one
             full viewport tall (see .wd-watch-slide). Sits behind the
             scrollable list below (DOM order = stacking order here, no
             z-index needed) so touch/scroll gestures still reach the
             scrollable container above it instead of getting captured by
-            the iframe first. */}
-        <div ref={videoLayerRef} className="wd-watch-video-layer" style={{ position: "absolute", inset: 0, background: "#000", overflow: "hidden" }} />
+            the iframe first. Sized/centered via mobileFrameStyle (see its
+            own comment above) — on mobile this box IS exactly the video's
+            9:16, so whatever's left of .wd-watch-col around it (this div's
+            own activeColor1 background, set above) is what actually shows
+            as the "bars," not YouTube's own internal letterboxing. */}
+        {/* Wraps (rather than being) the sized/centered box — .wd-watch-
+            video-layer's own CSS class forces width/height:100% !important
+            (needed so the iframe inside it always fills whatever box it's
+            given, mobile or desktop), which would silently win over trying
+            to set a smaller size on that same element inline. Nesting the
+            actual sizing on a plain wrapper div one level up sidesteps
+            that: the video layer's own 100%/100% then resolves against
+            THIS box, not .wd-watch-col directly. */}
+        <div style={{ ...mobileFrameStyle, overflow: "hidden" }}>
+          <div ref={videoLayerRef} className="wd-watch-video-layer" style={{ position: "absolute", inset: 0, background: "#000", overflow: "hidden" }} />
+        </div>
         {/* We-Draft's own branded spinner, not YouTube's — sits above the
             video layer but below the scrollable slide chrome (pointer
             events off, since it's purely a "hang on" indicator, never
-            something to click through). */}
+            something to click through). Same mobileFrameStyle box as the
+            video itself, so it never covers the colored bars alongside it. */}
         {videoLoading && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", pointerEvents: "none" }}>
+          <div style={{ ...mobileFrameStyle, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", pointerEvents: "none" }}>
             <LoadingSpinner size={48} />
           </div>
         )}
@@ -1420,15 +1489,13 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
                     </div>
                   )}
                 </div>
-                {/* Desktop moves this to the left margin instead (next to
-                    the rest of that player's card) — see below — since
-                    there's a side to put it on there; mobile has no
-                    equivalent margin, so it stays as a video overlay. */}
-                {isMobile && clip.gameInfo && (
-                  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
-                    <GameInfoFooter gameInfo={clip.gameInfo} isDraftClip={isDraftClip} color1={color1} large />
-                  </div>
-                )}
+                {/* Game tag scrapped on mobile — desktop still gets it in
+                    the left margin (there's a side to put it on there);
+                    mobile has no equivalent margin, and it competed for the
+                    same bottom-of-video real estate the "more info" panel
+                    now owns (see the persistent chrome below), so it's
+                    gone here entirely rather than fighting for the same
+                    space. */}
               </div>
             );
           })}
@@ -1553,11 +1620,119 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
           </div>
         )}
 
+        {/* Mobile-only "more info" trigger — desktop already has this same
+            player info sitting permanently in its own left margin, so this
+            only exists here. Bottom-center, same row/offset as
+            subscribe (left) and mute (right). */}
+        {isMobile && (
+          <button
+            onClick={() => setInfoOpen((o) => !o)}
+            aria-label={infoOpen ? "Hide player info" : "Show player info"}
+            style={{
+              position: "absolute", bottom: "max(90px, calc(env(safe-area-inset-bottom) + 76px))", left: "50%", transform: "translateX(-50%)", zIndex: 1,
+              width: "38px", height: "38px", borderRadius: "50%",
+              background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.4)",
+              color: "#fff", fontSize: "17px", fontWeight: 900, fontStyle: "italic", fontFamily: "Georgia, serif", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            i
+          </button>
+        )}
+
+        {/* Mobile-only "more info" panel — player info (grade/strengths/
+            weaknesses/link to profile), same data the desktop left margin
+            already shows, but there's no margin to put it in here. The
+            video keeps playing behind/above it rather than pausing —
+            sized to match the fixed bottom-bar band every Short's own
+            template already bakes into the clip (a stat callout, team
+            colors); the actual game footage above that band is
+            deliberately left uncovered. Anchored just above the "Watch
+            Next" strip's own content (tuned to roughly clear that strip's
+            label + chip row, not the taller button-row offset above it —
+            sitting there instead left this covering more of the actual
+            video than intended) rather than flush to the video's bottom
+            edge; that strip's own z-index (see its own comment) still wins
+            on top of this either way if they ever do touch. The outer box
+            is pointer-events:none so the video above the panel stays
+            scrollable/swipeable; the panel itself re-enables pointer-
+            events to be its own interactive surface. */}
+        {isMobile && infoOpen && activeClip && (activeClip.playerName || activeClip.playerSlug) && (
+          <div style={{ ...mobileFrameStyle, zIndex: 2, pointerEvents: "none" }}>
+            <div
+              className="wd-watch-scroll"
+              style={{
+                position: "absolute", left: 0, right: 0, bottom: "max(66px, calc(env(safe-area-inset-bottom) + 52px))", height: "22%", minHeight: "150px",
+                overflowY: "auto", pointerEvents: "auto", boxSizing: "border-box",
+                background: "rgba(10,10,10,0.94)", borderRadius: "10px", border: `2px solid ${activeColor2}`,
+                margin: "0 14px", padding: "10px 44px 10px 14px",
+              }}
+            >
+              <button
+                onClick={() => setInfoOpen(false)}
+                aria-label="Close player info"
+                style={{ position: "absolute", top: "8px", right: "10px", background: "none", border: "none", color: "#fff", fontSize: "20px", cursor: "pointer", lineHeight: 1, padding: "4px" }}
+              >
+                ×
+              </button>
+              <div style={{ fontSize: "15px", fontWeight: 900, color: "#fff", textTransform: "uppercase", lineHeight: 1.15 }}>
+                {activeClip.playerName || "—"}
+              </div>
+              {(activeClip.playerPosition || activeClip.playerSchool || activeClip.playerEligible) && (
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.75)", marginTop: "2px" }}>
+                  {[activeClip.playerPosition, activeClip.playerSchool, activeClip.playerEligible && `${formatEligible(activeClip.playerEligible)} Class`].filter(Boolean).join(" · ")}
+                </div>
+              )}
+              {activeCard?.gradeLabel && (() => {
+                const gd = gradeDisplay(activeCard.gradeLabel);
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "26px", height: "26px", borderRadius: "6px", backgroundColor: gd.bg, border: `2px solid ${gd.border}`, flexShrink: 0 }}>
+                      <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff" }}>{gd.short}</span>
+                    </div>
+                    <span style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase" }}>{activeCard.gradeLabel}</span>
+                  </div>
+                );
+              })()}
+              {activeCard?.topStrengths?.length > 0 && (
+                <div style={{ fontSize: "11px", fontWeight: 800, color: "#16a34a", textTransform: "uppercase", marginTop: "8px" }}>
+                  ✓ {activeCard.topStrengths.join(" · ")}
+                </div>
+              )}
+              {activeCard?.topWeaknesses?.length > 0 && (
+                <div style={{ fontSize: "11px", fontWeight: 800, color: "#dc2626", textTransform: "uppercase", marginTop: "4px" }}>
+                  ✕ {activeCard.topWeaknesses.join(" · ")}
+                </div>
+              )}
+              {activeClip.playerSlug && (
+                activeClip.playerSlug === originPlayerSlug ? (
+                  <button
+                    onClick={onClose}
+                    style={{ display: "inline-block", fontSize: "11px", fontWeight: 900, color: "#fff", background: activeColor1, border: `2px solid ${activeColor2}`, borderRadius: "8px", padding: "7px 14px", marginTop: "10px", textTransform: "uppercase", cursor: "pointer" }}
+                  >
+                    View Full Profile →
+                  </button>
+                ) : (
+                  <Link
+                    to={`/player/${activeClip.playerSlug}`}
+                    style={{ display: "inline-block", fontSize: "11px", fontWeight: 900, color: "#fff", background: activeColor1, border: `2px solid ${activeColor2}`, borderRadius: "8px", padding: "7px 14px", marginTop: "10px", textDecoration: "none", textTransform: "uppercase" }}
+                  >
+                    View Full Profile →
+                  </Link>
+                )
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Mobile-only — desktop gets the vertical "Watch Next" list in the
             right margin instead (below). Tap a name to jump the feed
-            straight to their clip instead of scrolling to find it. */}
+            straight to their clip instead of scrolling to find it.
+            zIndex above the "more info" panel (2) — recommended players
+            should always stay reachable/visible on top of it rather than
+            the two fighting over the same strip of screen. */}
         {isMobile && recommended.length > 0 && (
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: "max(14px, env(safe-area-inset-bottom))", padding: "0 14px" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: "max(14px, env(safe-area-inset-bottom))", padding: "0 14px", zIndex: 3 }}>
             <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px", paddingLeft: "2px" }}>
               Watch Next
             </div>
