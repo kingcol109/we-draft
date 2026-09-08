@@ -34,10 +34,13 @@ const FLAIR_OPTIONS = [
   "Early Contributor", "Year 2 Contributor", "Developmental", "Proven",
 ];
 
+// key is the stored value on Flag (players and recruits both) — label is
+// just the admin-facing name for what each color means, so it can change
+// without touching any already-saved data or filter logic keyed off color.
 const FLAG_COLORS = [
-  { key: "red", hex: "#c0392b" },
-  { key: "green", hex: "#2e7d32" },
-  { key: "blue", hex: "#1565c0" },
+  { key: "red", hex: "#c0392b", label: "Video" },
+  { key: "green", hex: "#2e7d32", label: "Watch" },
+  { key: "blue", hex: "#1565c0", label: "Follow" },
 ];
 
 // ── Grade scale — mirrors PlayerProfile.js exactly, so average-grade math
@@ -1086,20 +1089,28 @@ function PlayerDataSection() {
             <div style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "5px" }}>
               Flag
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
               {FLAG_COLORS.map((f) => {
                 const active = selectedFlags.includes(f.key);
                 return (
                   <button
                     key={f.key}
                     onClick={() => setSelectedFlags((prev) => prev.includes(f.key) ? prev.filter((x) => x !== f.key) : [...prev, f.key])}
-                    title={f.key + " flag"}
+                    title={f.label}
                     style={{
-                      width: "26px", height: "26px", borderRadius: "50%", cursor: "pointer",
-                      background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
-                      boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                      display: "flex", flexDirection: "column", alignItems: "center", gap: "3px",
+                      background: "none", border: "none", cursor: "pointer", padding: 0,
                     }}
-                  />
+                  >
+                    <span
+                      style={{
+                        display: "block", width: "26px", height: "26px", borderRadius: "50%",
+                        background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
+                        boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                      }}
+                    />
+                    <span style={{ fontSize: "8px", fontWeight: 800, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</span>
+                  </button>
                 );
               })}
             </div>
@@ -1208,7 +1219,7 @@ function PlayerDataSection() {
                     <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE }}>
                       {p.Flag && (
                         <span
-                          title={p.Flag + " flag"}
+                          title={(FLAG_COLORS.find((f) => f.key === p.Flag) || {}).label || p.Flag}
                           style={{
                             display: "inline-block", width: "9px", height: "9px", borderRadius: "50%",
                             marginRight: "7px", background: (FLAG_COLORS.find((f) => f.key === p.Flag) || {}).hex || "#999",
@@ -1377,13 +1388,21 @@ function PlayerDataSection() {
                         key={f.key}
                         type="button"
                         onClick={() => handleFieldChange("Flag", active ? "" : f.key)}
-                        title={f.key + " flag"}
+                        title={f.label}
                         style={{
-                          width: "28px", height: "28px", borderRadius: "50%", cursor: "pointer",
-                          background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
-                          boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                          display: "flex", flexDirection: "column", alignItems: "center", gap: "3px",
+                          background: "none", border: "none", cursor: "pointer", padding: 0,
                         }}
-                      />
+                      >
+                        <span
+                          style={{
+                            display: "block", width: "28px", height: "28px", borderRadius: "50%",
+                            background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
+                            boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                          }}
+                        />
+                        <span style={{ fontSize: "8px", fontWeight: 800, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</span>
+                      </button>
                     );
                   })}
                   {formState.Flag && (
@@ -4418,7 +4437,7 @@ function RecruitsSection() {
                     <div style={{ fontWeight: 900, fontSize: "14px", color: BLUE }}>
                       {r.Flag && (
                         <span
-                          title={r.Flag + " flag"}
+                          title={(FLAG_COLORS.find((f) => f.key === r.Flag) || {}).label || r.Flag}
                           style={{
                             display: "inline-block", width: "9px", height: "9px", borderRadius: "50%",
                             marginRight: "7px", background: (FLAG_COLORS.find((f) => f.key === r.Flag) || {}).hex || "#999",
@@ -4596,13 +4615,21 @@ function RecruitsSection() {
                         key={f.key}
                         type="button"
                         onClick={() => handleFieldChange("Flag", active ? "" : f.key)}
-                        title={f.key + " flag"}
+                        title={f.label}
                         style={{
-                          width: "28px", height: "28px", borderRadius: "50%", cursor: "pointer",
-                          background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
-                          boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                          display: "flex", flexDirection: "column", alignItems: "center", gap: "3px",
+                          background: "none", border: "none", cursor: "pointer", padding: 0,
                         }}
-                      />
+                      >
+                        <span
+                          style={{
+                            display: "block", width: "28px", height: "28px", borderRadius: "50%",
+                            background: f.hex, border: active ? "3px solid #333" : "3px solid transparent",
+                            boxShadow: active ? "none" : "0 0 0 1px #ddd",
+                          }}
+                        />
+                        <span style={{ fontSize: "8px", fontWeight: 800, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</span>
+                      </button>
                     );
                   })}
                   {formState.Flag && (
