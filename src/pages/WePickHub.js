@@ -632,6 +632,12 @@ function MyPicksSection() {
   const [rankingsByWeek, setRankingsByWeek] = useState({});
   const [myPicks, setMyPicks] = useState([]); // [{id: gameId, ...pickFields}]
   const [selectedWeek, setSelectedWeek] = useState("");
+  // The actual "current" week per pickCurrentWeek (auto kickoff-based, or
+  // AdminPanel's manual override) — snapshotted alongside selectedWeek's own
+  // initial value, but never changed by the week dropdown afterward. Lets
+  // the pinned recap below (recapWeek) keep pointing at "the week before
+  // this one" regardless of which week the user is currently browsing.
+  const [currentWeek, setCurrentWeek] = useState("");
   const [savingId, setSavingId] = useState("");
   const [removingId, setRemovingId] = useState("");
   // The week's locked-in Ranked 6, once submitted (see handleSubmitForRanking
@@ -654,11 +660,11 @@ function MyPicksSection() {
   // rather than showing a made-up number on something meant to be posted
   // publicly.
   const [weekPlacement, setWeekPlacement] = useState(null);
-  // Same idea as weekPlacement above, but hardcoded to Week 0 specifically
-  // and fetched independent of selectedWeek — this is what lets the pinned
-  // Week 0 recap card (see its own comment further down) keep showing
-  // placement even once the default week has moved on to Week 1.
-  const [week0Placement, setWeek0Placement] = useState(null);
+  // Same idea as weekPlacement above, but for recapWeek (the week right
+  // before currentWeek — see its own comment further down) and fetched
+  // independent of selectedWeek — this is what lets the pinned recap card
+  // keep showing placement even once the default week has moved on.
+  const [recapPlacement, setRecapPlacement] = useState(null);
   // Share modal — clicking either "Share Picks" or "Share Report Card"
   // (see handleSharePicks/handleShareReportCard) fills this in with the
   // card's content instead of sharing directly; the modal renders a hidden
@@ -802,7 +808,9 @@ function MyPicksSection() {
         // AdminPanel's We-Pick Current Week control has pinned one.
         const weeks = Array.from(new Set(games.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
         const weekOverride = weekConfigSnap.exists() ? weekConfigSnap.data().currentWeekOverride : null;
-        setSelectedWeek(pickCurrentWeek(games, weeks, weekOverride));
+        const current = pickCurrentWeek(games, weeks, weekOverride);
+        setSelectedWeek(current);
+        setCurrentWeek(current);
       } catch (e) {
         console.error("We-Pick fetch error:", e);
       } finally {
@@ -840,6 +848,15 @@ function MyPicksSection() {
     () => Array.from(new Set(allGames.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b)),
     [allGames]
   );
+
+  // The pinned recap's week — whichever week sits right before currentWeek
+  // in schedule order (Week 1 once Week 2 is current, Week 2 once Week 3
+  // is, and so on), not hardcoded to any one week. Replaces an earlier
+  // version of this that only ever recapped Week 0 — see the recap card's
+  // own comment further down for why a *pinned* recap is needed at all
+  // (separate from the dynamic per-selectedWeek Report Card just below it).
+  const currentWeekIdx = weekOptions.indexOf(currentWeek);
+  const recapWeek = currentWeekIdx > 0 ? weekOptions[currentWeekIdx - 1] : null;
 
   const gamesForWeek = useMemo(
     () => allGames
@@ -914,23 +931,23 @@ function MyPicksSection() {
     return () => { cancelled = true; };
   }, [weekIsPast, user, selectedWeek]);
 
-  // Same fetch as weekPlacement above, but always for Week 0 specifically —
-  // the pinned recap card needs its own placement regardless of whichever
+  // Same fetch as weekPlacement above, but always for recapWeek specifically
+  // — the pinned recap card needs its own placement regardless of whichever
   // week is currently selected.
   useEffect(() => {
-    if (!user) { setWeek0Placement(null); return; }
+    if (!user || !recapWeek) { setRecapPlacement(null); return; }
     let cancelled = false;
-    getDoc(doc(db, STANDINGS_COLLECTION, "Week 0"))
+    getDoc(doc(db, STANDINGS_COLLECTION, recapWeek))
       .then((snap) => {
         if (cancelled) return;
         const entries = Array.isArray(snap.data()?.entries) ? snap.data().entries : [];
-        if (entries.length === 0) { setWeek0Placement(null); return; }
+        if (entries.length === 0) { setRecapPlacement(null); return; }
         const idx = [...entries].sort(compareStandingsEntries).findIndex((e) => e.uid === user.uid);
-        setWeek0Placement(idx >= 0 ? { rank: idx + 1, outOf: entries.length } : null);
+        setRecapPlacement(idx >= 0 ? { rank: idx + 1, outOf: entries.length } : null);
       })
-      .catch((e) => { console.error("We-Pick Week 0 placement fetch error:", e); if (!cancelled) setWeek0Placement(null); });
+      .catch((e) => { console.error("We-Pick recap placement fetch error:", e); if (!cancelled) setRecapPlacement(null); });
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, recapWeek]);
 
   const handleSaveScore = async (gameId, awayStr, homeStr, visibility, noteStr) => {
     if (!user) return;
@@ -1173,27 +1190,28 @@ function MyPicksSection() {
   // comment above.
   const weekBestPick = bestPickOf(gamesForWeek, myPicksById);
 
-  // Pinned Week 0 recap — now that pickCurrentWeek skips a fully-final week
-  // for the default landing week (see its own comment), the Report Card
-  // above no longer shows automatically once Week 1 becomes the default;
-  // this keeps Week 0's own little scorecard visible regardless of
+  // Pinned recap of recapWeek (the week right before currentWeek — see its
+  // own comment above) — now that pickCurrentWeek skips a fully-final week
+  // for the default landing week, the Report Card above no longer shows
+  // automatically once the next week becomes the default; this keeps the
+  // previous week's own little scorecard visible regardless of
   // selectedWeek, same shape as the dynamic one above just computed
   // straight from allGames/myPicksById (already loaded for every week, not
   // just gamesForWeek's currently-selected one) instead of scoped state.
-  const week0Games = allGames.filter((g) => g.Week === "Week 0");
-  const week0RankedGames = week0Games.filter((g) => {
+  const recapGames = recapWeek ? allGames.filter((g) => g.Week === recapWeek) : [];
+  const recapRankedGames = recapGames.filter((g) => {
     const p = myPicksById[g.id];
     return hasScorePick(p) && p.ranked === true && !g.RankedDisqualified;
   });
-  const week0UnrankedGames = week0Games.filter((g) => {
+  const recapUnrankedGames = recapGames.filter((g) => {
     const p = myPicksById[g.id];
     if (!p) return false;
     return !(hasScorePick(p) && p.ranked === true && !g.RankedDisqualified);
   });
-  const week0RankedTally = tallyAccuracy(week0RankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
-  const week0UnrankedTally = tallyAccuracy(week0UnrankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
-  const week0BestPick = bestPickOf(week0Games, myPicksById);
-  const showWeek0Recap = selectedWeek !== "Week 0" && (week0RankedTally.total > 0 || week0UnrankedTally.total > 0);
+  const recapRankedTally = tallyAccuracy(recapRankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
+  const recapUnrankedTally = tallyAccuracy(recapUnrankedGames.map((g) => ({ pick: myPicksById[g.id], game: g })));
+  const recapBestPick = bestPickOf(recapGames, myPicksById);
+  const showRecap = !!recapWeek && selectedWeek !== recapWeek && (recapRankedTally.total > 0 || recapUnrankedTally.total > 0);
 
   // Opens the share modal with this card's content — the modal (rendered
   // near the bottom of this component) captures a hidden branded version of
@@ -1341,51 +1359,51 @@ function MyPicksSection() {
         </div>
       )}
 
-      {/* Pinned Week 0 recap — see showWeek0Recap's own comment above for
+      {/* Pinned recap of recapWeek — see showRecap's own comment above for
           why this exists separately from the dynamic Report Card below
           (which only covers whichever week is currently selected). Smaller/
-          plainer than that one on purpose ("the little Week 0 scorecard")
+          plainer than that one on purpose ("the little recap scorecard")
           — no Share button, this is just a standing reminder of how it
           went, not something meant to be posted. */}
-      {showWeek0Recap && (
+      {showRecap && (
         <div style={{ marginBottom: "18px", border: `2px solid ${GOLD}`, borderRadius: "10px", overflow: "hidden", background: "rgba(0,0,0,0.2)" }}>
           <div style={{ background: "rgba(246,162,29,0.18)", padding: "8px 14px" }}>
             <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🏆 Week 0 Recap
+              🏆 {recapWeek} Recap
             </div>
           </div>
           <div style={{ padding: "12px 14px", display: "flex", gap: "20px", flexWrap: "wrap", alignItems: "center" }}>
-            {week0RankedTally.total > 0 && (
+            {recapRankedTally.total > 0 && (
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Ranked</div>
                 <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
-                  {week0RankedTally.correct}-{week0RankedTally.incorrect}
+                  {recapRankedTally.correct}-{recapRankedTally.incorrect}
                   <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", marginLeft: "5px" }}>
-                    ({Math.round((week0RankedTally.correct / week0RankedTally.total) * 100)}%)
+                    ({Math.round((recapRankedTally.correct / recapRankedTally.total) * 100)}%)
                   </span>
                 </div>
               </div>
             )}
-            {week0UnrankedTally.total > 0 && (
+            {recapUnrankedTally.total > 0 && (
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Unranked</div>
                 <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
-                  {week0UnrankedTally.correct}-{week0UnrankedTally.incorrect}
+                  {recapUnrankedTally.correct}-{recapUnrankedTally.incorrect}
                 </div>
               </div>
             )}
             <div>
               <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Placement</div>
-              <div style={{ fontSize: "16px", fontWeight: 900, color: week0Placement ? GOLD : "rgba(255,255,255,0.5)" }}>
-                {week0Placement ? `#${week0Placement.rank} of ${week0Placement.outOf}` : "Pending"}
+              <div style={{ fontSize: "16px", fontWeight: 900, color: recapPlacement ? GOLD : "rgba(255,255,255,0.5)" }}>
+                {recapPlacement ? `#${recapPlacement.rank} of ${recapPlacement.outOf}` : "Pending"}
               </div>
             </div>
-            {week0BestPick && (
+            {recapBestPick && (
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
                 <div style={{ fontSize: "13px", fontWeight: 800, color: "#fff" }}>
-                  {week0BestPick.game.Away} @ {week0BestPick.game.Home}
-                  <span style={{ fontSize: "11px", color: GOLD, marginLeft: "6px" }}>{week0BestPick.points} pts</span>
+                  {recapBestPick.game.Away} @ {recapBestPick.game.Home}
+                  <span style={{ fontSize: "11px", color: GOLD, marginLeft: "6px" }}>{recapBestPick.points} pts</span>
                 </div>
               </div>
             )}

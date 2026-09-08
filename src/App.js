@@ -8,6 +8,7 @@ import { HelmetProvider, Helmet } from "react-helmet-async";
 import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
 import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
 
 // Pages — lazy-loaded per route instead of one bundle everyone downloads
@@ -68,6 +69,13 @@ const MyDraftClass = lazy(() => import("./pages/MyDraftClass"));
 
 // We-Pick
 const WePickHub = lazy(() => import("./pages/WePickHub"));
+
+// Legal — standalone, static content pages, linked from Footer.js and the
+// signup/login modal (AuthModal.jsx).
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const CommunityGuidelines = lazy(() => import("./pages/CommunityGuidelines"));
+const CookiePolicy = lazy(() => import("./pages/CookiePolicy"));
 
 // Shared fallback while a route's chunk downloads — same full-page spinner
 // convention every page already uses for its own data loading, so a route
@@ -176,10 +184,19 @@ function MainLayout() {
             {/* Friends — fourth tab: friend code, add-by-code, requests,
                 friend list (see WePickHub.js's own activeTab handling). */}
             <Route path="/we-pick/friends" element={<WePickHub />} />
+            <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/guidelines" element={<CommunityGuidelines />} />
+            <Route path="/cookies" element={<CookiePolicy />} />
             <Route path="*" element={<div style={{ textAlign: "center", color: "red", fontWeight: "bold" }}>404 – Route not found</div>} />
           </Routes>
         </Suspense>
       </div>
+      {/* Site-wide now — this component previously wasn't imported/rendered
+          anywhere at all, so no page actually had a footer. Carries the
+          Terms/Privacy/Guidelines/Cookie Policy links referenced from
+          AuthModal.jsx's signup disclosure. */}
+      <Footer />
       <Analytics />
     </>
   );

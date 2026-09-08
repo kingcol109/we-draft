@@ -317,9 +317,9 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     fetch();
   }, [isMobile, otherStream]);
 
-  // Videos card — same "videos" collection + Recruiting-tag exclusion as
-  // CommunityBoard.js's own Videos sidebar, so this reads as the exact same
-  // feed rather than a differently-curated one.
+  // Videos card — same "videos" collection + Recruiting-tag/Short exclusion
+  // as CommunityBoard.js's own Videos sidebar, so this reads as the exact
+  // same feed rather than a differently-curated one.
   useEffect(() => {
     if (isMobile) return;
     const fetch = async () => {
@@ -334,12 +334,17 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
               id: d.id,
               video: data.Video || "",
               date: data.Date || null,
+              // A Short (AdminPanel.js's "Format" checkbox) is a 30s-1min
+              // vertical clip meant for a player page's own Watch button,
+              // not a long-form breakdown — excluded here same as
+              // PlayerProfile.js's own Videos sidebar.
+              short: data.Short === true,
               title: data.GenTitle || first?.title || "",
               thumb: data.GenThumb || first?.thumb || "",
               tags: Array.isArray(data.Tags) ? data.Tags : [],
             };
           })
-          .filter((v) => !!v.video && !v.tags.includes("Recruiting"))
+          .filter((v) => !!v.video && !v.short && !v.tags.includes("Recruiting"))
           .sort((a, b) => toMs(b.date) - toMs(a.date))
           .slice(0, SIDEBAR_VIDEO_LIMIT);
         setSidebarVideos(vids);

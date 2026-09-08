@@ -79,6 +79,30 @@ function sanitizeUrl(url) {
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
+// ── Extracts a YouTube video ID out of any of the URL shapes a `videos`
+// collection doc's own Video field (AdminPanel.js VideosSection) might
+// actually contain — a Short link (youtube.com/shorts/ID), a normal watch
+// link (youtube.com/watch?v=ID, with or without a timestamp/playlist tacked
+// on), a shortened youtu.be/ID link, or an already-bare embed URL
+// (youtube.com/embed/ID). Returns "" for anything else (a non-YouTube URL,
+// or a malformed one) so the caller can fall back to just opening the raw
+// link instead of trying to embed it. Used by watchClips/WatchButton below
+// (the hero toolbar's "▶ Watch" button/popover). ──
+function extractYouTubeId(url) {
+  if (!url) return "";
+  const patterns = [
+    /youtube\.com\/shorts\/([A-Za-z0-9_-]{6,})/,
+    /youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/,
+    /[?&]v=([A-Za-z0-9_-]{6,})/,
+    /youtu\.be\/([A-Za-z0-9_-]{6,})/,
+  ];
+  for (const re of patterns) {
+    const m = url.match(re);
+    if (m) return m[1];
+  }
+  return "";
+}
+
 // ── Measurement display formatting — mirrors AdminPanel.js's own
 // decompose*/format*Display helpers (EIGHTHS_FRACTION_LABEL included) for
 // the same feet/inches/eighths math, duplicated here since this page never
@@ -388,6 +412,316 @@ function TrendTag({
   );
 }
 
+// ── Lazily loads the YouTube IFrame Player API script (needed, instead of
+// a plain static iframe, so WatchButton below can detect a clip actually
+// ending and auto-advance the queue — there's no reliable "video ended"
+// signal without it). Cached on window so remounting the popover across
+// opens/closes — or a future second WatchButton on the same page — never
+// re-injects the script or races a second copy of the same promise. ──
+function loadYouTubeIframeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (!window.__wdYouTubeApiPromise) {
+    window.__wdYouTubeApiPromise = new Promise((resolve) => {
+      const prevReady = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { prevReady?.(); resolve(window.YT); };
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    });
+  }
+  return window.__wdYouTubeApiPromise;
+}
+
+// ── Watch button + its own popover, same self-contained portal pattern as
+// TrendTag above (own trigger ref, own show/position state, portals to
+// document.body so the hero card's overflow:hidden can't clip it) — except
+// this one toggles on click, not hover (autoplay shouldn't fire just from a
+// mouse passing over the button), and deliberately skips a dark full-screen
+// backdrop. A previous version of this was a fixed, page-covering modal —
+// closer to a real media player takeover than a lightweight "here's a quick
+// clip" popup. This instead drops a small branded card right below the
+// button itself (an invisible click-away layer behind it handles dismissal
+// instead of a visible overlay), so the rest of the page stays visible and
+// this reads as part of it rather than something that hijacks the screen.
+//
+// clips — every Short tagged to this player, most-recently-added first (see
+// watchClips in the main component): { video, isDraft, gameInfo }. Plays the
+// newest one first, then auto-advances backwards through the rest on its
+// own once each one ends, oldest last — a single sitting runs through this
+// player's whole Shorts history instead of just the latest clip. Each
+// clip's own isDraft/gameInfo swaps the popover's header/info-bar as the
+// queue advances — a Draft-tagged clip gets a black/gold "NFL DRAFT"
+// treatment instead of the player's team colors, and a CFB-tagged clip
+// with a linked game shows that game's opponent/date/result underneath. ──
+function WatchButton({ clips, color1, color2, isMobile }) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  // Tracks our own custom mute toggle below — controls=0 hides YouTube's
+  // native mute button along with everything else, so this is the only
+  // record of mute state; always starts true (matching the player's own
+  // mute=1) since a fresh player mounts every time the popover reopens.
+  const [muted, setMuted] = useState(true);
+  // Mirrors indexRef below into real state purely so the header/info-bar
+  // can re-render as the queue auto-advances — the ref itself is what the
+  // YT.Player event callback actually reads/writes (a stale closure over
+  // React state would otherwise always see whatever index it started at).
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const triggerRef = useRef(null);
+  const playerMountRef = useRef(null); // YT.Player replaces this div with its own iframe
+  const playerRef = useRef(null); // the YT.Player instance itself, once ready
+  const mutedRef = useRef(true); // onStateChange's closure can't see React state updates
+  const queueRef = useRef([]); // YouTube IDs left to play, most-recent-first order
+  const indexRef = useRef(0);
+
+  // Safe against an empty/missing clips so every hook below can still be
+  // called unconditionally — the actual "nothing to show" bailout is the
+  // `if (!hasClips) return null;` further down, after every hook call.
+  const hasClips = !!(clips && clips.length > 0);
+  const youTubeIds = (clips || []).map((c) => extractYouTubeId(c.video)).filter(Boolean);
+  const currentClip = (clips || [])[currentIndex] || null;
+  const popoverWidth = isMobile ? 285 : 330; // 50% larger than the original 190/220
+
+  const toggleMute = () => {
+    const next = !muted;
+    mutedRef.current = next;
+    if (next) playerRef.current?.mute(); else playerRef.current?.unMute();
+    setMuted(next);
+  };
+
+  const handleClick = () => {
+    // None of this player's clips are a recognizable YouTube URL — no
+    // reliable way to embed/autoplay them, so just open the newest one like
+    // Film does rather than pretending to have a player for it.
+    if (youTubeIds.length === 0) { window.open(sanitizeUrl(clips[0].video), "_blank", "noopener,noreferrer"); return; }
+    if (show) { setShow(false); return; }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      // Clamped so the popover never runs past the right edge of the
+      // viewport — the button itself can sit anywhere along the toolbar
+      // (it wraps on mobile), unlike TrendTag's tags which stay centered.
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - popoverWidth - 12));
+      setPos({ top: rect.bottom + 10, left });
+    }
+    queueRef.current = youTubeIds;
+    indexRef.current = 0;
+    setCurrentIndex(0);
+    mutedRef.current = true;
+    setMuted(true);
+    setShow(true);
+  };
+
+  // Builds the real YT.Player once the popover mounts (and the API script
+  // has loaded), and tears it down when it closes — a fresh player every
+  // open, always starting from queue index 0 (the newest clip).
+  useEffect(() => {
+    if (!show) return;
+    let cancelled = false;
+    loadYouTubeIframeApi().then((YT) => {
+      if (cancelled || !playerMountRef.current) return;
+      playerRef.current = new YT.Player(playerMountRef.current, {
+        videoId: queueRef.current[0],
+        playerVars: {
+          autoplay: 1, mute: 1, playsinline: 1, controls: 0,
+          disablekb: 1, fs: 0, modestbranding: 1, rel: 0,
+        },
+        events: {
+          onReady: (e) => { e.target.mute(); e.target.playVideo(); },
+          // Auto-advance — the whole point of a queue instead of a single
+          // clip. ENDED (0) is the only state that means "move on"; nothing
+          // else (paused, buffering) should skip ahead.
+          onStateChange: (e) => {
+            if (e.data !== YT.PlayerState.ENDED) return;
+            indexRef.current += 1;
+            if (indexRef.current >= queueRef.current.length) return; // that was the oldest clip — stop
+            e.target.loadVideoById(queueRef.current[indexRef.current]);
+            if (mutedRef.current) e.target.mute(); else e.target.unMute();
+            setCurrentIndex(indexRef.current);
+          },
+        },
+      });
+    });
+    return () => {
+      cancelled = true;
+      try { playerRef.current?.destroy(); } catch { /* already gone */ }
+      playerRef.current = null;
+    };
+  }, [show]);
+
+  if (!hasClips) return null;
+
+  // Draft-tagged clips get their own black/gold "NFL Draft" identity
+  // instead of this player's team colors — draft coverage is a national,
+  // not school-specific, story. Everything else (CFB, untagged, Recruiting)
+  // keeps the team-color treatment.
+  const isDraftClip = !!currentClip?.isDraft;
+  const headerGradient = isDraftClip
+    ? `linear-gradient(120deg, #1a1a1a, ${SITE_GOLD})`
+    : `linear-gradient(120deg, ${color1}, ${color2})`;
+  const headerLabel = isDraftClip ? "NFL Draft" : "Watch";
+  const glowColor = isDraftClip ? SITE_GOLD : color2;
+
+  return (
+    <>
+      {/* Scoped to this component's own two pieces — the trigger button's
+          ambient "there's something here" pulse (always running, so the
+          button reads as alive even before anyone hovers it), and the
+          popover's pop-in entrance + pulsing glow border + header shine
+          sweep once it's open. Colors ride on color1/color2 (this player's
+          own team colors) via CSS custom properties rather than being
+          baked into the keyframes themselves, so one keyframe definition
+          works for every player instead of needing a version per team. */}
+      <style>{`
+        @keyframes wdWatchBtnPulse {
+          0%   { box-shadow: 0 0 0 0 var(--wd-watch-glow); }
+          70%  { box-shadow: 0 0 0 8px transparent; }
+          100% { box-shadow: 0 0 0 0 transparent; }
+        }
+        .wd-watch-btn { animation: wdWatchBtnPulse 2.2s ease-out infinite; }
+
+        @keyframes wdWatchPopIn {
+          0%   { opacity: 0; transform: scale(0.82) translateY(-8px); }
+          65%  { opacity: 1; transform: scale(1.04) translateY(0); }
+          100% { transform: scale(1) translateY(0); }
+        }
+        .wd-watch-pop { animation: wdWatchPopIn 0.32s cubic-bezier(.34,1.56,.64,1) both; }
+
+        @keyframes wdWatchBorderGlow {
+          0%, 100% { box-shadow: 0 18px 40px rgba(0,0,0,0.35), 0 0 0 0 var(--wd-watch-glow); }
+          50%      { box-shadow: 0 18px 40px rgba(0,0,0,0.35), 0 0 20px 2px var(--wd-watch-glow); }
+        }
+        .wd-watch-pop { animation: wdWatchPopIn 0.32s cubic-bezier(.34,1.56,.64,1) both, wdWatchBorderGlow 2.4s ease-in-out 0.32s infinite; }
+
+        @keyframes wdWatchShine {
+          0%   { left: -60%; }
+          15%  { left: 130%; }
+          100% { left: 130%; }
+        }
+        .wd-watch-shine { animation: wdWatchShine 3s ease-in-out infinite; }
+      `}</style>
+      <button
+        ref={triggerRef}
+        onClick={handleClick}
+        className="text-white font-extrabold rounded-full transition hover:opacity-80 wd-watch-btn"
+        style={{ "--wd-watch-glow": `${color2}88`, border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}
+      >
+        ▶ Watch
+      </button>
+      {show && youTubeIds.length > 0 && ReactDOM.createPortal(
+        <>
+          {/* Invisible click-away layer, not a visible dark backdrop — the
+              page underneath stays fully visible, just no longer clickable
+              until this closes. */}
+          <div onClick={() => setShow(false)} style={{ position:"fixed", inset:0, zIndex:9998 }} />
+          <div
+            className="wd-watch-pop"
+            style={{
+              "--wd-watch-glow": `${glowColor}70`,
+              position: "fixed", top: pos.top + "px", left: pos.left + "px",
+              width: popoverWidth + "px",
+              background: "#fff", border: `2px solid ${isDraftClip ? SITE_GOLD : color1}`, borderRadius: "14px",
+              overflow: "hidden", zIndex: 9999,
+            }}
+          >
+            <div style={{ position:"relative", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"7px 10px", backgroundImage:headerGradient }}>
+              <div style={{ display:"flex", alignItems:"center", gap:"6px", position:"relative", zIndex:1 }}>
+                {isDraftClip ? (
+                  <span style={{ fontSize:"13px", lineHeight:1 }}>🏈</span>
+                ) : (
+                  <img src="/wd-icon.png" alt="" style={{ width:"15px", height:"15px", objectFit:"contain" }} />
+                )}
+                <span style={{ fontSize:"11px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em" }}>{headerLabel}</span>
+              </div>
+              <button
+                onClick={() => setShow(false)}
+                aria-label="Close"
+                style={{ position:"relative", zIndex:1, background:"none", border:"none", color:"#fff", fontSize:"16px", cursor:"pointer", lineHeight:1, padding:0 }}
+              >
+                ×
+              </button>
+              {/* Glossy sheen sweep — same idea as the flair badge's own
+                  wd-flair-shine further up this file, just its own scoped
+                  copy so this component doesn't depend on the flair being
+                  present anywhere on the page. */}
+              <div
+                className="wd-watch-shine"
+                aria-hidden="true"
+                style={{
+                  position:"absolute", top:0, left:"-60%", width:"40%", height:"100%",
+                  background:"linear-gradient(115deg, transparent, rgba(255,255,255,0.55), transparent)",
+                  transform:"skewX(-20deg)", pointerEvents:"none",
+                }}
+              />
+            </div>
+            {/* autoplay=1/mute=1 in playerVars above fire because this only
+                ever mounts from a real click on the Watch button; mute=1
+                has to ride along with autoplay or some browsers silently
+                block it entirely. controls=0/disablekb=1/fs=0/
+                modestbranding=1 strip as much of YouTube's own chrome as
+                the embed API allows — the logo watermark and "Watch on
+                YouTube" link aren't ours to remove (YouTube's ToS, not a
+                technical limit), but the control bar, keyboard shortcuts,
+                and fullscreen button are. That also means there's no native
+                mute button left, hence the custom one below. */}
+            <div style={{ position:"relative", width:"100%", aspectRatio:"9 / 16", background:"#000" }}>
+              <div ref={playerMountRef} style={{ width:"100%", height:"100%" }} />
+              <button
+                onClick={toggleMute}
+                aria-label={muted ? "Unmute" : "Mute"}
+                style={{
+                  position:"absolute", bottom:"10px", right:"10px",
+                  width:"30px", height:"30px", borderRadius:"50%",
+                  background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.4)",
+                  color:"#fff", fontSize:"14px", cursor:"pointer",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                }}
+              >
+                {muted ? "🔇" : "🔊"}
+              </button>
+            </div>
+            {/* Opponent/date/result for a CFB-tagged clip with a linked
+                game (currentClip.gameInfo, resolved up in the main
+                component's fetch effect — no extra query needed here). Only
+                ever set on a CFB clip, so this and the Draft header above
+                never show at the same time for the same clip. Same
+                small-label-over-bold-value language the hero's own
+                "Selected by" uses, and a solid color pill for the result —
+                same shape as GradeBadge — instead of plain colored text, so
+                this reads as a native piece of the page rather than a
+                bolted-on caption. */}
+            {currentClip?.gameInfo && (
+              <div style={{ padding:"8px 10px", borderTop:`3px solid ${isDraftClip ? SITE_GOLD : color1}`, background:"#fafafa" }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px" }}>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:"8px", fontWeight:900, color:"#999", textTransform:"uppercase", letterSpacing:"0.08em" }}>Game</div>
+                    <div style={{ fontSize:"12px", fontWeight:900, color:isDraftClip?"#7a5c00":color1, textTransform:"uppercase", letterSpacing:"0.02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      vs {currentClip.gameInfo.opponent}
+                    </div>
+                    {currentClip.gameInfo.dateMs > 0 && (
+                      <div style={{ fontSize:"10px", fontWeight:700, color:"#999", marginTop:"1px" }}>
+                        {new Date(currentClip.gameInfo.dateMs).toLocaleDateString(undefined, { month:"short", day:"numeric", timeZone:"UTC" })}
+                      </div>
+                    )}
+                  </div>
+                  {currentClip.gameInfo.resultLabel && (
+                    <span style={{
+                      flexShrink:0, fontSize:"11px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em",
+                      borderRadius:"6px", padding:"4px 10px",
+                      background: currentClip.gameInfo.resultLabel.startsWith("W") ? "#16a34a" : currentClip.gameInfo.resultLabel.startsWith("L") ? "#dc2626" : "#888",
+                    }}>
+                      {currentClip.gameInfo.resultLabel}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ── Renders evaluation text with lines starting in •, -, or * grouped into
 // real bullet lists; everything else renders as normal paragraphs. Used
 // anywhere a saved evaluation is displayed (Scout's Take, public feed,
@@ -533,6 +867,14 @@ export default function PlayerProfile() {
   // itself so closing it doesn't have to also clear the cached image.
   const [evalShareImageUrl, setEvalShareImageUrl] = useState(null);
   const [evalShareOpen, setEvalShareOpen] = useState(false);
+  // Watch button (see WatchButton above) — watchClips is every Short tagged
+  // to this player, most-recently-added first (see the video-fetch effect
+  // below, which pulls them from the same `videos` collection/
+  // AdminPanel.js VideosSection the regular Videos sidebar uses — just
+  // filtered to Short === true instead of excluding it). WatchButton plays
+  // the first one, then auto-advances backwards through the rest as each
+  // one ends. An empty array hides the Watch button entirely.
+  const [watchClips, setWatchClips] = useState([]);
   const evaluationTextareaRef = useRef(null);
   const [draftedBy, setDraftedBy] = useState(null);
   const [draftInfo, setDraftInfo] = useState(null);
@@ -983,18 +1325,28 @@ export default function PlayerProfile() {
   // to the `videos` collection, migrated from slug- to playerId-keyed items —
   // see AdminPanel.js VideosSection). Each video can reference up to 3
   // players, each with its own title/thumb override — fall back to items[0]
-  // if this player's own tag has no override set. If the player has no
-  // videos of their own, fall back to the 3 most recently added CFB/Draft
-  // videos site-wide (same tag treatment as VideosPage.js), using each
-  // video's own GenTitle/GenThumb rather than a per-player override since
-  // none of these videos are actually tagged to this player. ──
+  // if this player's own tag has no override set. A video marked Short
+  // (AdminPanel.js's own "Format" checkbox) is a 30s-1min vertical clip, not
+  // a long-form breakdown — it's excluded from the Videos sidebar entirely
+  // and instead feeds the hero toolbar's "▶ Watch" button (watchClips, all
+  // of this player's own Shorts, most-recent first — WatchButton plays the
+  // newest and auto-advances backwards through the rest) via the same
+  // fetch, no second query. Every Short also carries a bit of display info
+  // WatchButton uses per-clip: isDraft (Tags includes "Draft" — swaps in a
+  // different popover treatment) and gameInfo (a CFB-tagged Short's linked
+  // schedule26 game, resolved here into opponent/date/result so the popover
+  // never needs its own extra fetch). If the player has no long-form videos
+  // of their own, fall back to the 3 most recently added CFB/Draft videos
+  // site-wide (same tag treatment as VideosPage.js, also Short-excluded),
+  // using each video's own GenTitle/GenThumb rather than a per-player
+  // override since none of these are actually tagged to this player. ──
   useEffect(() => {
     if (!player?.id) return;
     const toMs = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts==="number" ? ts : Date.parse(ts)||0;
     const fetch = async () => {
       try {
         const snap = await getDocs(query(collection(db,"videos"), where("playerIds","array-contains",player.id)));
-        const vids = snap.docs
+        const all = snap.docs
           .map((d) => {
             const data = d.data();
             const items = Array.isArray(data.items) ? data.items : [];
@@ -1004,6 +1356,9 @@ export default function PlayerProfile() {
               id: d.id,
               video: data.Video || "",
               date: data.Date || null,
+              short: data.Short === true,
+              tags: Array.isArray(data.Tags) ? data.Tags : [],
+              gameSlug: data.GameSlug || "",
               // GenTitle/GenThumb (AdminPanel.js VideosSection) are the
               // video's own fallback, set once per video rather than per
               // player — last resort once neither this player's own tag nor
@@ -1015,14 +1370,75 @@ export default function PlayerProfile() {
           .filter((v) => v.video)
           .sort((a, b) => toMs(b.date) - toMs(a.date));
 
+        const shorts = all.filter((v) => v.short);
+
+        // Resolve each CFB-tagged Short's linked game (AdminPanel.js's Game
+        // FieldRow, GameSlug) into the opponent/date/result WatchButton
+        // shows under the video — schedule26 docs are addressed by Slug via
+        // a query, same as GamePage.js's own lookup, not a plain doc(id)
+        // (the doc's real ID is an unrelated sheet row key).
+        const gameSlugs = [...new Set(shorts.filter((v) => v.tags.includes("CFB") && v.gameSlug).map((v) => v.gameSlug))];
+        const gamesBySlug = {};
+        if (gameSlugs.length > 0) {
+          const gameSnaps = await Promise.all(
+            gameSlugs.map((s) => getDocs(query(collection(db, "schedule26"), where("Slug", "==", s))))
+          );
+          gameSnaps.forEach((gSnap, i) => { if (!gSnap.empty) gamesBySlug[gameSlugs[i]] = gSnap.docs[0].data(); });
+        }
+        const buildGameInfo = (g) => {
+          if (!g) return null;
+          const isHome = g.Home === player.School;
+          const opponent = isHome ? g.Away : g.Home;
+          let resultLabel = "";
+          if (g.Final && g.HomeScore != null && g.AwayScore != null) {
+            const own = isHome ? g.HomeScore : g.AwayScore;
+            const opp = isHome ? g.AwayScore : g.HomeScore;
+            resultLabel = `${own > opp ? "W" : own < opp ? "L" : "T"} ${own}-${opp}`;
+          }
+          return { opponent, dateMs: toMs(g.Date), resultLabel };
+        };
+
+        const rawClips = shorts.map((v) => ({
+          video: v.video,
+          isDraft: v.tags.includes("Draft"),
+          gameInfo: v.tags.includes("CFB") ? buildGameInfo(gamesBySlug[v.gameSlug]) : null,
+        }));
+
+        // Swap each gameInfo's opponent to its short-form name (schools/
+        // {School}.Short, e.g. "Bama") — same field GameMarginSidebars.js's
+        // scoreboard bug and PerformancesManager.js's hashtags already read,
+        // so this reads consistently with the rest of the site instead of
+        // the full school name. "in" queries cap at 10 values, hence the
+        // chunking (opponents across a player's whole Shorts history should
+        // rarely exceed that, but never assume).
+        const opponents = [...new Set(rawClips.filter((c) => c.gameInfo).map((c) => c.gameInfo.opponent))];
+        const shortNameByOpponent = {};
+        if (opponents.length > 0) {
+          const chunks = [];
+          for (let i = 0; i < opponents.length; i += 10) chunks.push(opponents.slice(i, i + 10));
+          const schoolSnaps = await Promise.all(
+            chunks.map((chunk) => getDocs(query(collection(db, "schools"), where("School", "in", chunk))))
+          );
+          schoolSnaps.forEach((sSnap) => sSnap.docs.forEach((d) => {
+            const data = d.data();
+            if (data.School) shortNameByOpponent[data.School] = data.Short || "";
+          }));
+        }
+
+        setWatchClips(rawClips.map((c) => c.gameInfo
+          ? { ...c, gameInfo: { ...c.gameInfo, opponent: shortNameByOpponent[c.gameInfo.opponent] || c.gameInfo.opponent } }
+          : c
+        ));
+        const vids = all.filter((v) => !v.short);
+
         if (vids.length > 0) {
           setPlayerVideos(vids);
           setVisibleVideoCount(3);
           return;
         }
 
-        // No videos tagged to this player — show the 3 most recent
-        // CFB/Draft videos site-wide instead.
+        // No long-form videos tagged to this player — show the 3 most
+        // recent CFB/Draft videos site-wide instead.
         const allSnap = await getDocs(collection(db, "videos"));
         const fallback = allSnap.docs
           .map((d) => {
@@ -1034,17 +1450,18 @@ export default function PlayerProfile() {
               id: d.id,
               video: data.Video || "",
               date: data.Date || null,
+              short: data.Short === true,
               title: data.GenTitle || first?.title || "",
               thumb: data.GenThumb || first?.thumb || "",
               tags: tags.length > 0 ? tags : ["CFB"],
             };
           })
-          .filter((v) => v.video && v.tags.some((t) => t === "CFB" || t === "Draft"))
+          .filter((v) => v.video && !v.short && v.tags.some((t) => t === "CFB" || t === "Draft"))
           .sort((a, b) => toMs(b.date) - toMs(a.date))
           .slice(0, 3);
         setPlayerVideos(fallback);
         setVisibleVideoCount(3);
-      } catch(e) { setPlayerVideos([]); }
+      } catch(e) { setPlayerVideos([]); setWatchClips([]); }
     };
     fetch();
   }, [player?.id]);
@@ -2869,6 +3286,12 @@ useEffect(() => {
                   (draftedBy) — the hero already carries their landing team
                   and pick info at that point, so a "Film" link back to
                   pre-draft tape reads as stale clutter next to it. */}
+              {/* Watch — every Short tagged to this player, newest first
+                  (watchClips, set from the same `videos` collection/
+                  AdminPanel.js VideosSection the Videos sidebar uses — just
+                  filtered to Short === true instead of excluding it). See
+                  WatchButton above for the popover + auto-advance queue. */}
+              <WatchButton clips={watchClips} color1={color1} color2={color2} isMobile={isMobile} />
               {player.Link && String(player.Eligible) === "2026" && !draftedBy && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
                   className="text-white font-extrabold rounded-full transition hover:opacity-80"

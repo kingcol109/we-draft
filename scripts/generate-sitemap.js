@@ -298,6 +298,13 @@ for (const doc of allTeams) {
     { path: "/we-pick", priority: 0.8, lastmod: today },
     { path: "/we-pick/standings", priority: 0.7, lastmod: today },
     { path: "/we-pick/stats", priority: 0.6, lastmod: today },
+    // Legal — low priority (utility pages, not content anyone searches for)
+    // but still worth Google actually crawling/indexing, same reasoning as
+    // every other static page here.
+    { path: "/terms", priority: 0.3, lastmod: today },
+    { path: "/privacy", priority: 0.3, lastmod: today },
+    { path: "/guidelines", priority: 0.3, lastmod: today },
+    { path: "/cookies", priority: 0.3, lastmod: today },
   ];
 
   /* =========================

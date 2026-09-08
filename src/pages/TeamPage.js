@@ -1379,6 +1379,11 @@ export default function TeamPage() {
                 id: d.id,
                 video: data.Video || "",
                 date: data.Date || null,
+                // A Short (AdminPanel.js's "Format" checkbox) is a 30s-1min
+                // vertical clip meant for a player page's own Watch button,
+                // not a long-form breakdown — excluded here same as
+                // PlayerProfile.js's own Videos sidebar.
+                short: data.Short === true,
                 // GenTitle/GenThumb (AdminPanel.js VideosSection) are the
                 // video's own fallback, set once per video rather than per
                 // player — last resort once neither a roster player's own
@@ -1390,13 +1395,14 @@ export default function TeamPage() {
             });
           });
           vids.sort((a, b) => toMs(b.date) - toMs(a.date));
-          const ownVids = vids.filter((v) => v.video);
+          const ownVids = vids.filter((v) => v.video && !v.short);
 
           // FCS teams: this team's own tagged videos (almost always none —
           // most FCS schools have no players/recruits actually tracked in
           // the videos collection) lead, then the generic site-wide feed
           // fills in the rest, up to VIDEO_MAX_TOTAL, same exclusion
-          // (no Recruiting tag) CommunityBoard.js's own Videos sidebar uses.
+          // (no Recruiting tag, no Shorts) CommunityBoard.js's own Videos
+          // sidebar uses.
           if (isFCS) {
             const genericSnap = await getDocs(collection(db, "videos"));
             const genericVids = genericSnap.docs
@@ -1409,12 +1415,13 @@ export default function TeamPage() {
                   id: d.id,
                   video: data.Video || "",
                   date: data.Date || null,
+                  short: data.Short === true,
                   title: data.GenTitle || first?.title || "",
                   thumb: data.GenThumb || first?.thumb || "",
                   tags: Array.isArray(data.Tags) ? data.Tags : [],
                 };
               })
-              .filter((v) => v.video && !v.tags.includes("Recruiting"))
+              .filter((v) => v.video && !v.short && !v.tags.includes("Recruiting"))
               .sort((a, b) => toMs(b.date) - toMs(a.date));
             setTeamVideos([...ownVids, ...genericVids].slice(0, VIDEO_MAX_TOTAL));
           } else {

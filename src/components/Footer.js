@@ -1,4 +1,15 @@
 import React from "react";
+import { Link } from "react-router-dom";
+
+// Rendered once, site-wide, from App.js's MainLayout — see that file's own
+// comment on why (this component previously wasn't imported anywhere at
+// all, so no page actually had a footer).
+const LEGAL_LINKS = [
+  { to: "/terms", label: "Terms of Service" },
+  { to: "/privacy", label: "Privacy Policy" },
+  { to: "/guidelines", label: "Community Guidelines" },
+  { to: "/cookies", label: "Cookie Policy" },
+];
 
 export default function Footer({ color1 = "#0055a5", color2 = "#f6a21d" }) {
   return (
@@ -43,6 +54,18 @@ export default function Footer({ color1 = "#0055a5", color2 = "#f6a21d" }) {
         >
           Twitter / X
         </a>
+      </div>
+
+      <div className="flex justify-center gap-4 mb-4 flex-wrap">
+        {LEGAL_LINKS.map((l) => (
+          <Link
+            key={l.to}
+            to={l.to}
+            className="text-xs font-semibold text-gray-500 hover:underline"
+          >
+            {l.label}
+          </Link>
+        ))}
       </div>
 
       <p className="text-xs text-gray-500 italic">

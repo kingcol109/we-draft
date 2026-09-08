@@ -138,6 +138,22 @@ export default function AuthModal() {
             </div>
           ) : (
             <>
+              {/* Consent disclosure — signup only, sits above both the
+                  Google button and the email/password form since either one
+                  creates the account. Not a blocking checkbox: clicking
+                  either path is the acceptance, same pattern Google itself
+                  uses on its own "Continue with Google" buttons elsewhere. */}
+              {mode === "signup" && (
+                <div style={{ fontSize: "11.5px", fontWeight: 600, color: "#999", lineHeight: 1.5, marginBottom: "16px", textAlign: "center" }}>
+                  By creating an account, you agree to our{" "}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: BLUE, fontWeight: 800, textDecoration: "underline" }}>Terms of Service</a>{" "}
+                  and{" "}
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: BLUE, fontWeight: 800, textDecoration: "underline" }}>Privacy Policy</a>,
+                  and to follow our{" "}
+                  <a href="/guidelines" target="_blank" rel="noopener noreferrer" style={{ color: BLUE, fontWeight: 800, textDecoration: "underline" }}>Community Guidelines</a>.
+                </div>
+              )}
+
               {/* Google button — only on signin/signup, not reset */}
               {mode !== "reset" && (
                 <>

@@ -5722,6 +5722,91 @@ function PlayerLookupCombobox({ playerId, onChange, players, placeholder = "Sear
   );
 }
 
+// ── Game lookup — same shape as PlayerLookupCombobox above, just searching
+// schedule26 by team names instead of players by name, and connecting by
+// Slug instead of a doc ID (schedule26 docs are already addressed by Slug
+// everywhere else in this codebase — see AdminPanel.js's own CFB Schedule
+// section). Powers the "Game" field on a CFB-tagged Short (see VideosSection
+// below) — PlayerProfile.js's Watch popover reads that Slug back to show
+// the clip's opponent/date/score. ──
+function GameLookupCombobox({ gameSlug, onChange, games, placeholder = "Search team vs team..." }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const gameLabel = (g) => `${g.Away} @ ${g.Home}`;
+  const gameDate = (g) => {
+    const ms = toMs(g.Date);
+    return ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
+  };
+
+  const selected = games.find((g) => g.Slug === gameSlug) || null;
+  const displayValue = open ? query : (selected ? gameLabel(selected) : "");
+
+  const q = query.trim().toLowerCase();
+  const filtered = (q
+    ? games.filter((g) => gameLabel(g).toLowerCase().includes(q))
+    : games
+  ).slice(0, 8);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <input
+          value={displayValue}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
+          placeholder={placeholder}
+          autoComplete="off"
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        {selected && !open && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            title="Clear"
+            style={{
+              flexShrink: 0, width: "26px", height: "26px", borderRadius: "6px",
+              border: "2px solid #ddd", background: "#fff", color: "#999",
+              fontWeight: 900, fontSize: "13px", cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+          background: "#fff", border: "2px solid #ddd", borderRadius: "6px",
+          maxHeight: "220px", overflowY: "auto", boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+        }}>
+          {filtered.map((g) => (
+            <div
+              key={g.Slug}
+              onClick={() => { onChange(g.Slug); setQuery(""); setOpen(false); }}
+              style={{ padding: "8px 10px", cursor: "pointer" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+            >
+              <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{gameLabel(g)}</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
+                {gameDate(g)}{g.Final && g.HomeScore != null && g.AwayScore != null ? ` · Final ${g.AwayScore}-${g.HomeScore}` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // commitment is a snapshot of the recruit's Commitment at the moment
 // they're tagged (see VideosSection's recruit-select handler) — TeamPage.js
 // matches against this frozen value, not a live lookup, so tagging a
@@ -5745,8 +5830,16 @@ function VideosSection() {
   // instead of a player page, since they don't have one (see TeamPage.js's
   // own video-fetch effect).
   const [allRecruits, setAllRecruits] = useState([]);
+  // Every schedule26 game — powers the "Game" picker on a CFB-tagged Short
+  // (see the Game FieldRow further down), letting PlayerProfile.js's Watch
+  // popover show that clip's opponent/date/score.
+  const [allGames, setAllGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  // Defaults to long-form only — Shorts are a much smaller, denser list
+  // (and easy to lose track of among the regular breakdowns) so they only
+  // show up here when an admin actually asks for them.
+  const [formatFilter, setFormatFilter] = useState("videos"); // "videos" | "shorts"
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [formState, setFormState] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -5759,10 +5852,14 @@ function VideosSection() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [videosSnap, playersSnap, recruitsSnap] = await Promise.all([
+        const [videosSnap, playersSnap, recruitsSnap, gamesSnap] = await Promise.all([
           getDocs(collection(db, "videos")),
           getDocs(collection(db, "players")),
           getDocs(collection(db, "recruits")),
+          // Every schedule26 game, final or not — lets a CFB-tagged Short
+          // reference an upcoming game (e.g. a hype clip ahead of kickoff),
+          // not just ones that have already been played.
+          getDocs(collection(db, "schedule26")),
         ]);
         const vids = videosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         vids.sort((a, b) => toMs(b.Date) - toMs(a.Date));
@@ -5777,11 +5874,16 @@ function VideosSection() {
         const recruits = recruitsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         recruits.sort((a, b) => (a.Last || "").localeCompare(b.Last || ""));
         setAllRecruits(recruits);
+
+        const games = gamesSnap.docs.map((d) => d.data()).filter((g) => g.Slug && g.Home && g.Away);
+        games.sort((a, b) => toMs(b.Date) - toMs(a.Date));
+        setAllGames(games);
       } catch (e) {
         console.error("Admin videos fetch error:", e);
         setVideos([]);
         setAllPlayers([]);
         setAllRecruits([]);
+        setAllGames([]);
       } finally {
         setLoading(false);
       }
@@ -5801,19 +5903,21 @@ function VideosSection() {
     return map;
   }, [allRecruits]);
 
-  const filtered = videos.filter((v) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.trim().toLowerCase();
-    const items = Array.isArray(v.items) ? v.items : [];
-    return (
-      (v.GenTitle || "").toLowerCase().includes(q) ||
-      (v.Video || "").toLowerCase().includes(q) ||
-      items.some((it) => {
-        const tagged = it.type === "recruit" ? recruitsById.get(it.recruitId) : playersById.get(it.playerId);
-        return (tagged && (tagged.First + " " + tagged.Last).toLowerCase().includes(q)) || (it.title || "").toLowerCase().includes(q);
-      })
-    );
-  });
+  const filtered = videos
+    .filter((v) => (formatFilter === "shorts" ? v.Short === true : v.Short !== true))
+    .filter((v) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.trim().toLowerCase();
+      const items = Array.isArray(v.items) ? v.items : [];
+      return (
+        (v.GenTitle || "").toLowerCase().includes(q) ||
+        (v.Video || "").toLowerCase().includes(q) ||
+        items.some((it) => {
+          const tagged = it.type === "recruit" ? recruitsById.get(it.recruitId) : playersById.get(it.playerId);
+          return (tagged && (tagged.First + " " + tagged.Last).toLowerCase().includes(q)) || (it.title || "").toLowerCase().includes(q);
+        })
+      );
+    });
 
   const selectVideo = (v) => {
     setSelectedVideo(v);
@@ -5822,6 +5926,8 @@ function VideosSection() {
       Video: v.Video || "",
       Date: toDateInputValue(v.Date) || toDateInputValue(new Date()),
       Tags: v.Tags || [],
+      Short: v.Short === true,
+      GameSlug: v.GameSlug || "",
       GenTitle: v.GenTitle || "",
       GenThumb: v.GenThumb || "",
       // Every item saved before recruit-tagging existed has no `type` at
@@ -5844,7 +5950,15 @@ function VideosSection() {
     setFormState({
       Video: "",
       Date: toDateInputValue(new Date()),
-      Tags: [],
+      // Matches whichever tab is currently open — adding a video while
+      // viewing Shorts almost certainly means adding another Short, and
+      // auto-tagged CFB the moment it does (see handleToggleShort's own
+      // comment on why) — mirrored here so a brand new Short created
+      // directly from the Shorts tab starts the same way a video that gets
+      // checked Short mid-edit does.
+      Short: formatFilter === "shorts",
+      Tags: formatFilter === "shorts" ? ["CFB"] : [],
+      GameSlug: "",
       GenTitle: "",
       GenThumb: "",
       items: [{ ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
@@ -5904,6 +6018,20 @@ function VideosSection() {
     });
   };
 
+  // Checking "This is a Short" auto-tags it CFB — only when nothing's been
+  // tagged yet, so this never fights an admin who already deliberately
+  // tagged it Draft/Recruiting before flipping the Short checkbox. CFB vs
+  // Draft is what PlayerProfile.js's Watch popover uses to pick which
+  // design to show (see that file's own comment); Recruiting-tagged Shorts
+  // just get the plain CFB-style treatment there, same as an untagged one.
+  const handleToggleShort = (checked) => {
+    setFormState((prev) => ({
+      ...prev,
+      Short: checked,
+      Tags: checked && (!prev.Tags || prev.Tags.length === 0) ? ["CFB"] : prev.Tags,
+    }));
+  };
+
   const isNew = selectedVideo?.isNew === true;
 
   const handleSave = async () => {
@@ -5926,6 +6054,18 @@ function VideosSection() {
         Video: formState.Video.trim(),
         Date: formState.Date ? new Date(formState.Date) : new Date(),
         Tags: formState.Tags || [],
+        // Marks this as a short-form clip (30s-1min, vertical) rather than a
+        // long-form breakdown — PlayerProfile.js's own Watch button (hero
+        // toolbar) pulls every tagged player's Short-marked videos from this
+        // same collection, instead of the regular Videos sidebar (which
+        // excludes anything marked Short — see that page's own video-fetch
+        // effect).
+        Short: !!formState.Short,
+        // Only meaningful on a CFB-tagged Short (see the Game FieldRow's own
+        // comment) — cleared here regardless of Tags so switching a Short
+        // away from CFB after picking a game doesn't leave a stale,
+        // unreachable reference sitting in Firestore.
+        GameSlug: (formState.Tags || []).includes("CFB") ? (formState.GameSlug || "") : "",
         GenTitle: formState.GenTitle.trim(),
         GenThumb: formState.GenThumb.trim(),
         items: cleanedItems,
@@ -6072,6 +6212,24 @@ function VideosSection() {
             + Add Video
           </button>
         </div>
+        <div style={{ padding: "12px 14px 0", display: "flex", gap: "8px" }}>
+          {[{ key: "videos", label: "Videos" }, { key: "shorts", label: "Shorts" }].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFormatFilter(f.key)}
+              style={{
+                padding: "6px 16px", fontWeight: 900, fontSize: "12px",
+                textTransform: "uppercase", letterSpacing: "0.04em",
+                border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+                background: formatFilter === f.key ? BLUE : "#fff",
+                color: formatFilter === f.key ? "#fff" : BLUE,
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee" }}>
           <input
             type="text"
@@ -6101,7 +6259,13 @@ function VideosSection() {
               const isSelected = selectedVideo?.id === v.id;
               const items = Array.isArray(v.items) ? v.items : [];
               const displayTitle = v.GenTitle || items[0]?.title || "Untitled Video";
-              const displayThumb = v.GenThumb || items[0]?.thumb || "";
+              // Shorts always show the We-Draft shield instead of a real
+              // thumbnail — a quick highlight clip doesn't get a bespoke
+              // custom thumb the way a long-form breakdown does, so this
+              // keeps every Short's list row visually consistent rather
+              // than a mix of blank boxes and whatever GenThumb happens to
+              // have (usually nothing, for this format).
+              const displayThumb = v.Short ? "/wd-icon-512.png" : (v.GenThumb || items[0]?.thumb || "");
               return (
                 <div
                   key={v.id}
@@ -6116,12 +6280,22 @@ function VideosSection() {
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f7f9fc"; }}
                   onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
                 >
-                  <div style={{ flexShrink: 0, width: "64px", height: "36px", borderRadius: "4px", background: "#111", overflow: "hidden" }}>
+                  <div style={{ flexShrink: 0, width: "64px", height: "36px", borderRadius: "4px", background: v.Short ? "#f2f4f6" : "#111", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {displayThumb && (
-                      <img src={displayThumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      <img
+                        src={displayThumb}
+                        alt=""
+                        style={v.Short
+                          ? { width: "26px", height: "26px", objectFit: "contain" }
+                          : { width: "100%", height: "100%", objectFit: "cover" }}
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                      />
                     )}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* No inline "Short" badge here — the Videos/Shorts
+                        toggle above already separates the two, so every row
+                        in view is the same format. */}
                     <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {displayTitle}
                     </div>
@@ -6194,6 +6368,20 @@ function VideosSection() {
               <FieldRow label="Date">
                 <input type="date" value={formState.Date} onChange={(e) => handleFieldChange("Date", e.target.value)} style={inputStyle} />
               </FieldRow>
+              <FieldRow label="Format">
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "13px" }}>
+                  <input
+                    type="checkbox"
+                    checked={formState.Short}
+                    onChange={(e) => handleToggleShort(e.target.checked)}
+                    style={{ width: "16px", height: "16px", accentColor: BLUE }}
+                  />
+                  This is a Short (30s–1min, vertical)
+                </label>
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  A tagged player's most recent Short surfaces as a "▶ Watch" button on their player page (autoplays in a popup) — separate from the regular Videos sidebar below, which only shows long-form videos.
+                </div>
+              </FieldRow>
               <FieldRow label="Tags">
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                   {VIDEO_TAGS.map((tag) => {
@@ -6220,6 +6408,39 @@ function VideosSection() {
                   Recruiting-tagged videos are excluded from the Community Board sidebar. An untagged video is treated as CFB everywhere.
                 </div>
               </FieldRow>
+              {/* Game — only for a CFB-tagged Short. PlayerProfile.js's
+                  Watch popover reads this back to show that clip's
+                  opponent/date/score right under the video; a Short doesn't
+                  need to be *about* the game (a hype clip works fine) since
+                  this is purely "which game does this belong to," not "is
+                  this clip footage from that game." Offered games are
+                  narrowed to ones this Short's own tagged player(s)/
+                  recruit(s) actually played — Home or Away matches one of
+                  their schools — and already Final, since the popover shows
+                  a final score, not a scheduled one. */}
+              {formState.Short && (formState.Tags || []).includes("CFB") && (() => {
+                const taggedSchools = new Set(
+                  formState.items
+                    .map((it) => it.type === "recruit" ? it.commitment : (playersById.get(it.playerId)?.School))
+                    .filter(Boolean)
+                );
+                const relevantGames = taggedSchools.size > 0
+                  ? allGames.filter((g) => g.Final === true && (taggedSchools.has(g.Home) || taggedSchools.has(g.Away)))
+                  : [];
+                return (
+                  <FieldRow label="Game (optional)">
+                    <GameLookupCombobox
+                      gameSlug={formState.GameSlug}
+                      onChange={(slug) => handleFieldChange("GameSlug", slug)}
+                      games={relevantGames}
+                      placeholder={taggedSchools.size > 0 ? "Search team vs team..." : "Tag a player/recruit above first"}
+                    />
+                    <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                      Only final games involving this Short's tagged player(s)' team(s) are offered. Tagging a game shows its opponent, date, and score on the Watch popover — leave blank for a Short that isn't tied to one specific game.
+                    </div>
+                  </FieldRow>
+                );
+              })()}
               <FieldRow label="Generic Title (fallback if no player match)">
                 <input value={formState.GenTitle} onChange={(e) => handleFieldChange("GenTitle", e.target.value)} placeholder="e.g. 2026 Impact Freshman RBs" style={inputStyle} />
               </FieldRow>

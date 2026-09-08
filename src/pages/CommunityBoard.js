@@ -733,6 +733,11 @@ export default function CommunityBoard() {
               id: d.id,
               video: data.Video || "",
               date: data.Date || null,
+              // A Short (AdminPanel.js's "Format" checkbox) is a 30s-1min
+              // vertical clip meant for a player page's own Watch button,
+              // not a long-form breakdown — excluded here same as
+              // PlayerProfile.js's own Videos sidebar.
+              short: data.Short === true,
               title: data.GenTitle || (first && first.title) || "",
               thumb: data.GenThumb || (first && first.thumb) || "",
               tags: Array.isArray(data.Tags) ? data.Tags : [],
@@ -742,7 +747,7 @@ export default function CommunityBoard() {
           // focused) Community Board sidebar — an untagged video (nothing
           // set yet in AdminPanel.js's Videos tab) is never excluded here,
           // only an explicit Recruiting tag is.
-          .filter(function (v) { return !!v.video && !v.tags.includes("Recruiting"); })
+          .filter(function (v) { return !!v.video && !v.short && !v.tags.includes("Recruiting"); })
           .sort(function (a, b) { return toMs(b.date) - toMs(a.date); })
           .slice(0, SIDEBAR_VIDEO_LIMIT);
         setSidebarVideos(vids);
