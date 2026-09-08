@@ -5644,6 +5644,21 @@ function toDateInputValue(d) {
   return dateObj.toISOString().slice(0, 10);
 }
 
+// Same idea as toDateInputValue but for <input type="datetime-local">
+// (VideosSection's own "Publish At" scheduling field) — YYYY-MM-DDTHH:mm in
+// the browser's own local time, not UTC (a datetime-local input has no
+// timezone of its own; toISOString would silently shift the displayed time
+// against whatever the admin actually typed). Building it from
+// getFullYear/getMonth/etc. rather than toISOString().slice(0,16) is what
+// keeps it local instead of UTC-shifted.
+function toDateTimeLocalValue(d) {
+  if (!d) return "";
+  const dateObj = d?.toDate ? d.toDate() : d instanceof Date ? d : new Date(d);
+  if (isNaN(dateObj.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}T${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
+}
+
 // ── Player lookup — search by name, connect by ID. Unlike the old
 // PlayerSlugCombobox this replaced, the input never displays or accepts the
 // connected value directly (an ID isn't something an admin would ever type
@@ -5930,6 +5945,12 @@ function VideosSection() {
       GameSlug: v.GameSlug || "",
       GenTitle: v.GenTitle || "",
       GenThumb: v.GenThumb || "",
+      // Empty = public immediately (the normal case). A future PublishAt
+      // hides this from every public read (see each page's own video-fetch
+      // effect) until that moment passes — same idea as scheduling a
+      // YouTube upload to go public later, so the two flip on at the same
+      // time instead of the We-Draft side leaking it early.
+      PublishAt: toDateTimeLocalValue(v.PublishAt),
       // Every item saved before recruit-tagging existed has no `type` at
       // all — treated as "player" here, same as everywhere else this
       // field is read.
@@ -5961,6 +5982,7 @@ function VideosSection() {
       GameSlug: "",
       GenTitle: "",
       GenThumb: "",
+      PublishAt: "",
       items: [{ ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
     });
     setSaveMessage("");
@@ -6068,6 +6090,11 @@ function VideosSection() {
         GameSlug: (formState.Tags || []).includes("CFB") ? (formState.GameSlug || "") : "",
         GenTitle: formState.GenTitle.trim(),
         GenThumb: formState.GenThumb.trim(),
+        // null (not "", which Firestore would store as a truthy string
+        // every reader would then have to also treat as "no schedule") once
+        // the admin clears the field — every public read treats "no
+        // PublishAt at all" and "PublishAt in the past" identically.
+        PublishAt: formState.PublishAt ? new Date(formState.PublishAt) : null,
         items: cleanedItems,
         playerIds: cleanedItems.filter((it) => it.type === "player").map((it) => it.playerId),
         // recruitIds is admin-side bookkeeping only (which recruits are
@@ -6308,6 +6335,14 @@ function VideosSection() {
                       {v.Date ? new Date(toMs(v.Date)).toLocaleDateString(undefined, { timeZone: "UTC" }) : "No date"}
                       {(v.Tags || []).length > 0 && " · " + v.Tags.join(", ")}
                     </div>
+                    {/* Only while still in the future — once PublishAt
+                        passes this is publicly visible same as any other
+                        video, so the badge would just be stale noise. */}
+                    {v.PublishAt && toMs(v.PublishAt) > Date.now() && (
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "10px", fontWeight: 900, color: "#92650a", background: "#fff3d9", borderRadius: "8px", padding: "1px 7px", marginTop: "4px", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                        🕒 Scheduled {new Date(toMs(v.PublishAt)).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      </div>
+                    )}
                     {items.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
                         {items.map((it, i) => {
@@ -6367,6 +6402,22 @@ function VideosSection() {
               </FieldRow>
               <FieldRow label="Date">
                 <input type="date" value={formState.Date} onChange={(e) => handleFieldChange("Date", e.target.value)} style={inputStyle} />
+              </FieldRow>
+              <FieldRow label="Publish At">
+                <input
+                  type="datetime-local"
+                  value={formState.PublishAt}
+                  onChange={(e) => handleFieldChange("PublishAt", e.target.value)}
+                  style={inputStyle}
+                />
+                <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                  Optional. Leave blank to publish immediately. Set a future date/time to hide this everywhere on We-Draft until that moment — matches a YouTube upload scheduled to go public later, so both flip on together instead of this leaking early. Your device's own local time.
+                </div>
+                {formState.PublishAt && new Date(formState.PublishAt).getTime() > Date.now() && (
+                  <div style={{ marginTop: "6px", display: "inline-flex", alignItems: "center", gap: "6px", padding: "4px 10px", borderRadius: "20px", background: "#fff8e6", border: `1px solid ${GOLD}`, fontSize: "11px", fontWeight: 900, color: "#92650a", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    🕒 Scheduled — hidden until {new Date(formState.PublishAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                  </div>
+                )}
               </FieldRow>
               <FieldRow label="Format">
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, fontSize: "13px" }}>

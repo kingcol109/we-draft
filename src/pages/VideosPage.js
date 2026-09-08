@@ -108,9 +108,13 @@ export default function VideosPage() {
               players: items
                 .map((it) => (it.playerId ? playersById[it.playerId] : null))
                 .filter(Boolean),
+              publishAt: data.PublishAt || null,
             };
           })
-          .filter((v) => v.video)
+          // publishAt (AdminPanel.js VideosSection's "Publish At" scheduling
+          // field) hides this from the public hub until that moment passes —
+          // same idea as a YouTube upload scheduled to go public later.
+          .filter((v) => v.video && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
           .sort((a, b) => toMs(b.date) - toMs(a.date));
         setVideos(vids);
       } catch (e) {

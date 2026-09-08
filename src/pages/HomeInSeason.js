@@ -415,9 +415,13 @@ export default function HomeInSeason() {
               date: data.Date || null,
               title: data.GenTitle || (first && first.title) || "",
               thumb: data.GenThumb || (first && first.thumb) || "",
+              publishAt: data.PublishAt || null,
             };
           })
-          .filter((v) => !!v.video)
+          // publishAt (AdminPanel.js VideosSection's "Publish At" scheduling
+          // field) hides this from the homepage until that moment passes —
+          // same idea as a YouTube upload scheduled to go public later.
+          .filter((v) => !!v.video && (!v.publishAt || (v.publishAt?.toDate ? v.publishAt.toDate().getTime() : new Date(v.publishAt).getTime()) <= Date.now()))
           .sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0))
           .slice(0, 4);
         setVideos(vids);

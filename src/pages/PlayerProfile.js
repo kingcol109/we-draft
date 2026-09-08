@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import ReactDOM from "react-dom";
 import Logo1 from "../assets/Logo1.png";
 import HomageLogo from "../assets/homagelogo.png";
+import WatchLogo from "../assets/watchlogo.png";
 import {
   doc,
   getDoc,
@@ -15,6 +16,7 @@ import {
   where,
   orderBy,
   limit,
+  documentId,
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -432,110 +434,313 @@ function loadYouTubeIframeApi() {
   return window.__wdYouTubeApiPromise;
 }
 
-// ── Watch button + its own popover, same self-contained portal pattern as
-// TrendTag above (own trigger ref, own show/position state, portals to
-// document.body so the hero card's overflow:hidden can't clip it) — except
-// this one toggles on click, not hover (autoplay shouldn't fire just from a
-// mouse passing over the button), and deliberately skips a dark full-screen
-// backdrop. A previous version of this was a fixed, page-covering modal —
-// closer to a real media player takeover than a lightweight "here's a quick
-// clip" popup. This instead drops a small branded card right below the
-// button itself (an invisible click-away layer behind it handles dismissal
-// instead of a visible overlay), so the rest of the page stays visible and
-// this reads as part of it rather than something that hijacks the screen.
+// ── Opponent wordmark/result footer for a CFB-tagged clip with a linked
+// game — shared between the small Watch popover and each slide of
+// WatchFullscreenFeed below so the two don't drift out of sync with each
+// other. Opponent shows as its actual wordmark (falling back to the
+// short-form name — schools/{School}.Short — only if that school has
+// nothing else on file) rather than spelled-out text; a solid color pill
+// for the result — same shape as GradeBadge — with the date stacked
+// underneath it. `large` scales the whole thing up for
+// WatchFullscreenFeed's own much wider slides — the small popover (330px
+// wide at most) and a full-viewport screen shouldn't render the same fixed
+// pixel size. The logo itself sits in a flex:1 box (fills whatever space is
+// actually left between "vs" and the result badge) sized with height+width
+// both 100% and object-fit:contain — a fixed height+max-width pairing
+// looked fine for a true wide wordmark but rendered a school with no
+// Wordmark on file (falling back to its square Logo1) tiny, since a square
+// image capped at a *height* still only comes out that same size wide.
+// Filling a real box lets a wordmark stretch across the available width
+// while a square logo still grows to the box's full height — each shape
+// ends up as large as it can get without distortion, instead of both being
+// bound by whichever single fixed number happens to suit one shape only. ──
+function GameInfoFooter({ gameInfo, isDraftClip, color1, large }) {
+  if (!gameInfo) return null;
+  // large's box is capped by viewport height (16vh), not just a flat
+  // pixel value — "fill up the space it can" means it should actually
+  // scale with how much room a full-screen slide has, not sit at some
+  // fixed size regardless of screen size.
+  const logoBoxHeight = large ? "min(150px, 16vh)" : "32px";
+  return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:large?"22px":"8px", padding:large?"26px 28px":"8px 10px", borderTop:`3px solid ${isDraftClip ? SITE_GOLD : color1}`, background:"#fafafa" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:large?"16px":"6px", minWidth:0, flex:1 }}>
+        <span style={{ flexShrink:0, fontSize:large?"26px":"11px", fontWeight:900, color:isDraftClip?"#7a5c00":color1, textTransform:"uppercase", letterSpacing:"0.04em" }}>vs</span>
+        {gameInfo.logo ? (
+          <div style={{ flex:1, minWidth:0, height:logoBoxHeight, display:"flex", alignItems:"center" }}>
+            <img
+              src={sanitizeUrl(gameInfo.logo)}
+              alt={gameInfo.opponent}
+              title={gameInfo.opponent}
+              style={{ height:"100%", width:"100%", objectFit:"contain", objectPosition:"left center" }}
+              referrerPolicy="no-referrer"
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+            />
+          </div>
+        ) : (
+          <span style={{ fontSize:large?"32px":"12px", fontWeight:900, color:isDraftClip?"#7a5c00":color1, textTransform:"uppercase", letterSpacing:"0.02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {gameInfo.opponent}
+          </span>
+        )}
+      </div>
+      {(gameInfo.resultLabel || gameInfo.dateMs > 0) && (
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", flexShrink:0, gap:large?"8px":"3px" }}>
+          {gameInfo.resultLabel && (
+            <span style={{
+              fontSize:large?"22px":"11px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em",
+              borderRadius:large?"10px":"6px", padding:large?"9px 20px":"4px 10px",
+              background: gameInfo.resultLabel.startsWith("W") ? "#16a34a" : gameInfo.resultLabel.startsWith("L") ? "#dc2626" : "#888",
+            }}>
+              {gameInfo.resultLabel}
+            </span>
+          )}
+          {gameInfo.dateMs > 0 && (
+            <span style={{ fontSize:large?"16px":"9px", fontWeight:700, color:"#999" }}>
+              {new Date(gameInfo.dateMs).toLocaleDateString(undefined, { month:"short", day:"numeric", timeZone:"UTC" })}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Watch button — a self-contained trigger, portals straight into
+// WatchFullscreenFeed (below) on click, on both mobile and desktop. This
+// used to open a small anchored popover first (with its own mini YT.Player
+// and an "⤢" button to expand from there), same as mobile's "screen in
+// screen" used to; both were scrapped once full screen was just as available
+// one click away — a small embedded player added a whole second YT.Player
+// lifecycle to maintain for a experience full screen already covers better.
 //
 // clips — every Short tagged to this player, most-recently-added first (see
-// watchClips in the main component): { video, isDraft, gameInfo }. Plays the
-// newest one first, then auto-advances backwards through the rest on its
-// own once each one ends, oldest last — a single sitting runs through this
-// player's whole Shorts history instead of just the latest clip. Each
-// clip's own isDraft/gameInfo swaps the popover's header/info-bar as the
-// queue advances — a Draft-tagged clip gets a black/gold "NFL DRAFT"
-// treatment instead of the player's team colors, and a CFB-tagged clip
-// with a linked game shows that game's opponent/date/result underneath. ──
-function WatchButton({ clips, color1, color2, isMobile }) {
+// watchClips in the main component): { video, isDraft, gameInfo }.
+// WatchFullscreenFeed plays the newest first and auto-advances backwards
+// through the rest, then keeps going into other players' Shorts once this
+// player's queue runs out. ──
+function WatchButton({ clips, color1, color2, isMobile, originPlayer }) {
   const [show, setShow] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  // Tracks our own custom mute toggle below — controls=0 hides YouTube's
-  // native mute button along with everything else, so this is the only
-  // record of mute state; always starts true (matching the player's own
-  // mute=1) since a fresh player mounts every time the popover reopens.
-  const [muted, setMuted] = useState(true);
-  // Mirrors indexRef below into real state purely so the header/info-bar
-  // can re-render as the queue auto-advances — the ref itself is what the
-  // YT.Player event callback actually reads/writes (a stale closure over
-  // React state would otherwise always see whatever index it started at).
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const triggerRef = useRef(null);
-  const playerMountRef = useRef(null); // YT.Player replaces this div with its own iframe
-  const playerRef = useRef(null); // the YT.Player instance itself, once ready
-  const mutedRef = useRef(true); // onStateChange's closure can't see React state updates
-  const queueRef = useRef([]); // YouTube IDs left to play, most-recent-first order
-  const indexRef = useRef(0);
 
-  // Safe against an empty/missing clips so every hook below can still be
-  // called unconditionally — the actual "nothing to show" bailout is the
-  // `if (!hasClips) return null;` further down, after every hook call.
   const hasClips = !!(clips && clips.length > 0);
   const youTubeIds = (clips || []).map((c) => extractYouTubeId(c.video)).filter(Boolean);
-  const currentClip = (clips || [])[currentIndex] || null;
-  const popoverWidth = isMobile ? 285 : 330; // 50% larger than the original 190/220
-
-  const toggleMute = () => {
-    const next = !muted;
-    mutedRef.current = next;
-    if (next) playerRef.current?.mute(); else playerRef.current?.unMute();
-    setMuted(next);
-  };
 
   const handleClick = () => {
     // None of this player's clips are a recognizable YouTube URL — no
     // reliable way to embed/autoplay them, so just open the newest one like
     // Film does rather than pretending to have a player for it.
     if (youTubeIds.length === 0) { window.open(sanitizeUrl(clips[0].video), "_blank", "noopener,noreferrer"); return; }
-    if (show) { setShow(false); return; }
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) {
-      // Clamped so the popover never runs past the right edge of the
-      // viewport — the button itself can sit anywhere along the toolbar
-      // (it wraps on mobile), unlike TrendTag's tags which stay centered.
-      const left = Math.max(12, Math.min(rect.left, window.innerWidth - popoverWidth - 12));
-      setPos({ top: rect.bottom + 10, left });
-    }
-    queueRef.current = youTubeIds;
-    indexRef.current = 0;
-    setCurrentIndex(0);
-    mutedRef.current = true;
-    setMuted(true);
     setShow(true);
   };
 
-  // Builds the real YT.Player once the popover mounts (and the API script
-  // has loaded), and tears it down when it closes — a fresh player every
-  // open, always starting from queue index 0 (the newest clip).
+  if (!hasClips) return null;
+
+  return (
+    <>
+      {/* The trigger button's ambient "there's something here" pulse —
+          always running, so the button reads as alive even before anyone
+          hovers it. Rides on color2 (this player's own team color) via a
+          CSS custom property rather than baked into the keyframe itself, so
+          one keyframe definition works for every player instead of needing
+          a version per team. */}
+      <style>{`
+        @keyframes wdWatchBtnPulse {
+          0%   { box-shadow: 0 0 0 0 var(--wd-watch-glow); }
+          70%  { box-shadow: 0 0 0 8px transparent; }
+          100% { box-shadow: 0 0 0 0 transparent; }
+        }
+        .wd-watch-btn { animation: wdWatchBtnPulse 2.2s ease-out infinite; }
+      `}</style>
+      <button
+        onClick={handleClick}
+        className="text-white font-extrabold rounded-full transition hover:opacity-80 wd-watch-btn"
+        style={{ "--wd-watch-glow": `${color2}88`, border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}
+      >
+        ▶ Watch
+      </button>
+      {show && youTubeIds.length > 0 && ReactDOM.createPortal(
+        <WatchFullscreenFeed
+          initialClips={clips.map((c) => ({
+            ...c,
+            isOrigin: true,
+            playerId: originPlayer?.id || "",
+            playerName: originPlayer?.name || "",
+            playerSlug: originPlayer?.slug || "",
+            playerPosition: originPlayer?.position || "",
+            playerSchool: originPlayer?.school || "",
+            playerEligible: originPlayer?.eligible || "",
+          }))}
+          excludeVideoUrls={clips.map((c) => c.video)}
+          onClose={() => setShow(false)}
+          color1={color1}
+          color2={color2}
+          isMobile={isMobile}
+          originPlayerSlug={originPlayer?.slug || ""}
+        />,
+        document.body
+      )}
+    </>
+  );
+}
+
+// ── Full-viewport Shorts feed — opened via WatchButton's "⤢" expand
+// button, on both mobile and desktop. Starts with this player's own
+// remaining queue (initialClips), then extends itself with the most
+// recently added Shorts site-wide (any player) once that fetch resolves,
+// so scrolling down keeps finding more instead of dead-ending. One
+// vertical-snap slide per clip; only the currently-active slide (per
+// IntersectionObserver, not scroll position math) ever has a live
+// YT.Player mounted — every other slide is just a plain black placeholder,
+// so this never runs more than one iframe at a time regardless of how many
+// clips have loaded. Audio starts ON here (unlike the small popover, which
+// starts muted) — a deliberate, requested exception, since expanding to
+// full screen is itself the explicit "yes, play sound" gesture.
+//
+// Mobile full-bleeds the video edge to edge, TikTok/Reels-style, with a
+// horizontal "Watch Next" strip pinned above the bottom safe area. Desktop
+// instead keeps the video at its native 9:16 width (full-bleeding a
+// vertical video across an entire wide monitor would look absurd) and puts
+// the freed-up width to use as two side margins: left shows who's playing
+// right now (name/position/school/class, plus a link to their real page),
+// right lists other players to jump to — same underlying "recommended"
+// data as mobile's bottom strip, just laid out to fit a tall column
+// instead of a short wide one. ──
+export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, color1, color2, isMobile, originPlayerSlug = "" }) {
+  const [feed, setFeed] = useState(initialClips);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [muted, setMuted] = useState(false); // starts unmuted — see header comment
+  // We-Draft's own branded spinner (LoadingSpinner) over the video layer
+  // while a clip is buffering — starts true (nothing's loaded yet), flips
+  // false once YouTube actually reports PLAYING, and back to true every
+  // time the active slide changes and a new video gets loaded in.
+  const [videoLoading, setVideoLoading] = useState(true);
+
+  const feedRef = useRef(initialClips); // kept in sync below; lets the player-rebuild
+  const activeIndexRef = useRef(0);     // effect and the ended-handler read the latest
+  const mutedRef = useRef(false);       // feed/index/mute without listing them as deps
+  const slideRefs = useRef([]);         // DOM node per slide, indexed — scrollIntoView targets
+  const videoLayerRef = useRef(null);   // the single, fixed video layer — see its own render comment
+  const playerRef = useRef(null);       // the single YT.Player instance, created once, never moved
+
+  useEffect(() => { feedRef.current = feed; }, [feed]);
+  useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
+
+  // Extends the feed with recent Shorts from every player, not just this
+  // one — runs once (a fresh WatchFullscreenFeed instance mounts each time
+  // this is opened, so "on mount" already means "once per session"). A
+  // failure here just means the feed stops at initialClips instead of
+  // continuing — never blocks the clips already playing.
   useEffect(() => {
-    if (!show) return;
+    let cancelled = false;
+    const excludeSet = new Set(excludeVideoUrls || []);
+    const toMsLocal = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
+    const fetchMore = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "videos"), where("Short", "==", true)));
+        const raw = snap.docs
+          .map((d) => {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const playerItem = items.find((it) => it.type === "player" && it.playerId) || null;
+            return {
+              video: data.Video || "",
+              date: data.Date || null,
+              isDraft: Array.isArray(data.Tags) && data.Tags.includes("Draft"),
+              playerId: playerItem?.playerId || "",
+              publishAt: data.PublishAt || null,
+            };
+          })
+          // publishAt (AdminPanel.js's "Publish At" scheduling field) hides
+          // a Short from every public read until that moment passes — same
+          // idea as a YouTube upload scheduled to go public later, so the
+          // two flip on together instead of We-Draft leaking it early.
+          .filter((v) => v.video && extractYouTubeId(v.video) && !excludeSet.has(v.video) && (!v.publishAt || toMsLocal(v.publishAt) <= Date.now()))
+          .sort((a, b) => toMsLocal(b.date) - toMsLocal(a.date))
+          .slice(0, 30);
+
+        // One extra round trip to attach each clip's actual player name —
+        // the video doc itself only carries a playerId, not a display name.
+        const playerIds = [...new Set(raw.map((r) => r.playerId).filter(Boolean))];
+        const playersById = {};
+        if (playerIds.length > 0) {
+          const chunks = [];
+          for (let i = 0; i < playerIds.length; i += 10) chunks.push(playerIds.slice(i, i + 10));
+          const playerSnaps = await Promise.all(
+            chunks.map((chunk) => getDocs(query(collection(db, "players"), where(documentId(), "in", chunk))))
+          );
+          playerSnaps.forEach((pSnap) => pSnap.docs.forEach((d) => { playersById[d.id] = d.data(); }));
+        }
+
+        const more = raw.map((r) => {
+          const p = r.playerId ? playersById[r.playerId] : null;
+          return {
+            video: r.video,
+            isDraft: r.isDraft,
+            isOrigin: false,
+            gameInfo: null, // only this player's own CFB-tagged clips carry a resolved game — not worth re-deriving here for every other player's clip
+            playerId: r.playerId || "",
+            playerName: p ? `${p.First || ""} ${p.Last || ""}`.trim() : "",
+            playerSlug: p?.Slug || "",
+            playerPosition: p?.Position || "",
+            playerSchool: p?.School || "",
+            playerEligible: p?.Eligible || "",
+          };
+        });
+
+        if (!cancelled && more.length > 0) setFeed((prev) => [...prev, ...more]);
+      } catch (e) {
+        console.error("Watch fullscreen feed extension error:", e);
+      }
+    };
+    fetchMore();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately once-on-mount; excludeVideoUrls/initialClips are a fresh snapshot every time this component mounts (see its own header comment)
+  }, []);
+
+  // Creates the single YT.Player exactly once — targeting videoLayerRef, a
+  // fixed layer that always visually covers whichever slide is currently
+  // scrolled into view (every slide is exactly one viewport tall — see the
+  // render below), not any one slide's own DOM position. Reads
+  // activeIndexRef (not the activeIndex this effect closed over — this
+  // only ever runs once, on mount) so if the user scrolls before the API
+  // script finishes loading, it still starts on whatever's actually active
+  // by the time it's ready, not stale slide 0.
+  //
+  // An earlier version of this tried to relocate a *single* iframe between
+  // each slide's own mount div (destroying nothing, just moving it via
+  // appendChild as the active slide changed) — the video itself was
+  // supposed to update via that relocation, but in practice it silently
+  // kept playing whatever it started on. Rather than keep chasing exactly
+  // why relocation wasn't taking, this switches to the same mechanism the
+  // small Watch popover already uses successfully for its own auto-advance
+  // (loadVideoById on a player that never moves in the DOM at all) —
+  // proven code path, and there's no relocation left to go wrong.
+  useEffect(() => {
     let cancelled = false;
     loadYouTubeIframeApi().then((YT) => {
-      if (cancelled || !playerMountRef.current) return;
-      playerRef.current = new YT.Player(playerMountRef.current, {
-        videoId: queueRef.current[0],
-        playerVars: {
-          autoplay: 1, mute: 1, playsinline: 1, controls: 0,
-          disablekb: 1, fs: 0, modestbranding: 1, rel: 0,
-        },
+      if (cancelled || !videoLayerRef.current) return;
+      const clip = feedRef.current[activeIndexRef.current];
+      const vid = clip ? extractYouTubeId(clip.video) : "";
+      if (!vid) return;
+      playerRef.current = new YT.Player(videoLayerRef.current, {
+        videoId: vid,
+        playerVars: { autoplay: 1, playsinline: 1, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, rel: 0 },
         events: {
-          onReady: (e) => { e.target.mute(); e.target.playVideo(); },
-          // Auto-advance — the whole point of a queue instead of a single
-          // clip. ENDED (0) is the only state that means "move on"; nothing
-          // else (paused, buffering) should skip ahead.
+          onReady: (e) => { if (mutedRef.current) e.target.mute(); else e.target.unMute(); e.target.playVideo(); },
+          // Auto-advance — scrolling to the next slide (rather than
+          // loadVideoById in place) is the mechanism here; the
+          // IntersectionObserver below notices the scroll and updates
+          // activeIndex itself, so there's exactly one path (manual swipe
+          // or this) that ever changes which slide is "active," and the
+          // effect right below is what actually swaps the video for it.
+          // Also where the loading spinner turns off/on: PLAYING is the
+          // one state that actually means "there's a frame on screen now,"
+          // BUFFERING covers both the very first load and every later
+          // re-buffer, so gating on those two (rather than something
+          // timing-based) tracks whatever YouTube itself is actually doing.
           onStateChange: (e) => {
+            if (e.data === YT.PlayerState.PLAYING) setVideoLoading(false);
+            else if (e.data === YT.PlayerState.BUFFERING) setVideoLoading(true);
             if (e.data !== YT.PlayerState.ENDED) return;
-            indexRef.current += 1;
-            if (indexRef.current >= queueRef.current.length) return; // that was the oldest clip — stop
-            e.target.loadVideoById(queueRef.current[indexRef.current]);
-            if (mutedRef.current) e.target.mute(); else e.target.unMute();
-            setCurrentIndex(indexRef.current);
+            slideRefs.current[activeIndexRef.current + 1]?.scrollIntoView({ behavior: "smooth", block: "start" });
           },
         },
       });
@@ -545,180 +750,928 @@ function WatchButton({ clips, color1, color2, isMobile }) {
       try { playerRef.current?.destroy(); } catch { /* already gone */ }
       playerRef.current = null;
     };
-  }, [show]);
+  }, []);
 
-  if (!hasClips) return null;
+  // Swaps the video whenever the active slide changes. The player itself
+  // never moves — see the fixed videoLayerRef above — so this is just
+  // loadVideoById, nothing more.
+  useEffect(() => {
+    const clip = feedRef.current[activeIndex];
+    const vid = clip ? extractYouTubeId(clip.video) : "";
+    if (!vid || !playerRef.current) return;
+    setVideoLoading(true); // back to buffering until onStateChange reports PLAYING for the new clip
+    playerRef.current.loadVideoById(vid);
+    if (mutedRef.current) playerRef.current.mute(); else playerRef.current.unMute();
+  }, [activeIndex]);
 
-  // Draft-tagged clips get their own black/gold "NFL Draft" identity
-  // instead of this player's team colors — draft coverage is a national,
-  // not school-specific, story. Everything else (CFB, untagged, Recruiting)
-  // keeps the team-color treatment.
-  const isDraftClip = !!currentClip?.isDraft;
-  const headerGradient = isDraftClip
-    ? `linear-gradient(120deg, #1a1a1a, ${SITE_GOLD})`
-    : `linear-gradient(120deg, ${color1}, ${color2})`;
-  const headerLabel = isDraftClip ? "NFL Draft" : "Watch";
-  const glowColor = isDraftClip ? SITE_GOLD : color2;
+  // Watches every slide currently in the DOM and promotes whichever one is
+  // most in view to "active." Re-runs as feed.length grows so newly added
+  // slides (from the background fetch above) actually get observed too —
+  // disconnecting and re-observing everything on each grow is simpler than
+  // tracking which slides are already watched, and cheap at this scale
+  // (at most a few dozen slides).
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const idx = Number(entry.target.dataset.idx);
+        if (!Number.isNaN(idx) && idx !== activeIndexRef.current) setActiveIndex(idx);
+      });
+    }, { threshold: 0.6 });
+    slideRefs.current.forEach((el) => { if (el) observer.observe(el); });
+    return () => observer.disconnect();
+  }, [feed.length]);
+
+  const toggleMute = () => {
+    const next = !muted;
+    mutedRef.current = next;
+    if (next) playerRef.current?.mute(); else playerRef.current?.unMute();
+    setMuted(next);
+  };
+
+  // Left margin's player card (school logo, community grade, top
+  // strengths/weaknesses) for whichever clip is active — fetched lazily
+  // per player and cached by id, since computing this for every clip in
+  // the feed up front (each one's own evaluations subcollection) would be
+  // needlessly expensive when only one card is ever shown at a time.
+  // playerCardsRef mirrors the state so the effect can check "already
+  // cached" synchronously without listing playerCards itself as a
+  // dependency (which would re-fire this on every cache write).
+  const [playerCards, setPlayerCards] = useState({}); // playerId -> { gradeLabel, topStrengths, topWeaknesses, schoolLogo, recentVideo }
+  const playerCardsRef = useRef({});
+  useEffect(() => { playerCardsRef.current = playerCards; }, [playerCards]);
+
+  useEffect(() => {
+    const clip = feedRef.current[activeIndex];
+    const playerId = clip?.playerId;
+    if (!playerId || playerCardsRef.current[playerId]) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [evalsSnap, schoolSnap, videosSnap] = await Promise.all([
+          getDocs(collection(db, "players", playerId, "evaluations")),
+          clip.playerSchool
+            ? getDocs(query(collection(db, "schools"), where("School", "==", clip.playerSchool)))
+            : Promise.resolve(null),
+          // Same playerIds array-contains query the main PlayerProfile
+          // page's own video fetch uses for its "Videos" sidebar — filtered
+          // to long-form (Short !== true) below, since this margin card is
+          // meant to surface a real profile video, not another Short.
+          getDocs(query(collection(db, "videos"), where("playerIds", "array-contains", playerId))),
+        ]);
+        const grades = [];
+        const sCounts = {}, wCounts = {};
+        evalsSnap.forEach((d) => {
+          const data = d.data();
+          if (data.grade && gradeScale[data.grade]) grades.push(gradeScale[data.grade]);
+          if (Array.isArray(data.strengths)) data.strengths.forEach((s) => { sCounts[s] = (sCounts[s] || 0) + 1; });
+          if (Array.isArray(data.weaknesses)) data.weaknesses.forEach((w) => { wCounts[w] = (wCounts[w] || 0) + 1; });
+        });
+        const gradeLabel = grades.length > 0
+          ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
+          : "Watchlist";
+        const topStrengths = Object.entries(sCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([s]) => s);
+        const topWeaknesses = Object.entries(wCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
+        const schoolData = schoolSnap && !schoolSnap.empty ? schoolSnap.docs[0].data() : null;
+        // Same LogoBlack → LogoDark → Logo1 preference GamePage.js/
+        // PerformancesHub.jsx/WePickHub.js already use — LogoBlack is the
+        // asset meant for exactly this kind of dark-background placement.
+        const schoolLogo = schoolData?.LogoBlack || schoolData?.LogoDark || schoolData?.Logo1 || "";
+        const toMsLocal = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
+        const recentVideo = videosSnap.docs
+          .map((d) => {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const matched = items.find((it) => it.playerId === playerId) || null;
+            const first = items[0] || null;
+            return {
+              video: data.Video || "",
+              date: data.Date || null,
+              short: data.Short === true,
+              title: matched?.title || first?.title || data.GenTitle || "",
+              thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
+              publishAt: data.PublishAt || null,
+            };
+          })
+          .filter((v) => v.video && !v.short && (!v.publishAt || toMsLocal(v.publishAt) <= Date.now()))
+          .sort((a, b) => toMsLocal(b.date) - toMsLocal(a.date))[0] || null;
+        if (!cancelled) setPlayerCards((prev) => ({ ...prev, [playerId]: { gradeLabel, topStrengths, topWeaknesses, schoolLogo, recentVideo } }));
+      } catch (e) {
+        console.error("Watch fullscreen player card fetch error:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeIndex]);
+
+  // Site-wide trending players (same trends collection/Shown flag/Order the
+  // page's own "Top 5 Trending" sidebar reads) — fetched once so the
+  // "Watch Next" list below can put a trending player ahead of a plain
+  // recommendation and badge them the same Up/Breakout/On Fire way that
+  // sidebar does. Keyed by slug for an O(1) lookup per recommended clip.
+  const [trendBySlug, setTrendBySlug] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    getDocs(collection(db, "trends")).then((snap) => {
+      if (cancelled) return;
+      const map = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const type = (data.Trend || "").toString().trim().toLowerCase();
+        if (data.Shown === true && TREND_STYLE[type]) map[d.id] = { type, order: data.Order ?? 0 };
+      });
+      setTrendBySlug(map);
+    }).catch((e) => console.error("Watch fullscreen trends fetch error:", e));
+    return () => { cancelled = true; };
+  }, []);
+
+  // Team logo + colors per school, for the "Watch Next" chips — same
+  // team-colored-chip pattern as PlayersMentionedList.js (Color1 as the
+  // chip's border/hover-fill, Color2 as the logo box's accent stroke)
+  // instead of the trend badge driving those colors; the trend (if any)
+  // still shows as plain label text in the subtitle, it just doesn't own
+  // the chip's color anymore. Fetched incrementally as new schools show up
+  // in the feed (schoolLogoRef mirrors the state so this can check
+  // "already have or already tried" without listing schoolLogoBySchool
+  // itself as a dependency); a school with no record on file is cached as
+  // {} so it's never re-requested.
+  const [schoolLogoBySchool, setSchoolLogoBySchool] = useState({});
+  const schoolLogoRef = useRef({});
+  useEffect(() => { schoolLogoRef.current = schoolLogoBySchool; }, [schoolLogoBySchool]);
+  useEffect(() => {
+    const schools = [...new Set(feed.map((c) => c.playerSchool).filter(Boolean))]
+      .filter((s) => !(s in schoolLogoRef.current));
+    if (schools.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const chunks = [];
+        for (let i = 0; i < schools.length; i += 10) chunks.push(schools.slice(i, i + 10));
+        const snaps = await Promise.all(
+          chunks.map((chunk) => getDocs(query(collection(db, "schools"), where("School", "in", chunk))))
+        );
+        const found = {};
+        snaps.forEach((sSnap) => sSnap.docs.forEach((d) => {
+          const data = d.data();
+          if (data.School) found[data.School] = { logo: data.LogoDark || data.Logo1 || "", color1: data.Color1 || "", color2: data.Color2 || "" };
+        }));
+        schools.forEach((s) => { if (!(s in found)) found[s] = {}; }); // no match — cache empty, don't retry
+        if (!cancelled) setSchoolLogoBySchool((prev) => ({ ...prev, ...found }));
+      } catch (e) {
+        console.error("Watch fullscreen school logo fetch error:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [feed.length]);
+
+  // Other players currently in the feed, deduped to their first
+  // appearance, excluding whoever's playing right now — the tappable
+  // "watch someone else" row/column. isOrigin (this player's own clips —
+  // see initialClips) never qualifies, which is exactly right: you
+  // wouldn't recommend the player already on screen. Trending-with-a-Short
+  // players sort first (in their sidebar's own Order), everyone else
+  // follows in whatever order they appeared in the feed.
+  const activeClip = feed[activeIndex] || null;
+  const activeCard = playerCards[activeClip?.playerId] || null;
+  const isActiveDraft = !!activeClip?.isDraft; // left panel's own GameInfoFooter needs this at this scope, outside the per-slide map below
+  // The left margin's own team-color accents (View Full Profile button,
+  // "Now Watching"/"Recent Video" labels, GameInfoFooter) need to follow
+  // WHOEVER'S ACTIVE, not stay stuck on color1/color2 — those two props are
+  // fixed for this whole session (the player whose Watch button opened it),
+  // so without this every other player scrolled/jumped to kept showing the
+  // original player's colors instead of their own. Same schoolLogoBySchool
+  // lookup the Watch Next chips already use for exactly this reason; falls
+  // back to the session's own color1/color2 until that fetch resolves for
+  // this particular school (or if it has none on file).
+  const activeSchoolInfo = schoolLogoBySchool[activeClip?.playerSchool] || {};
+  const activeColor1 = activeSchoolInfo.color1 || color1;
+  const activeColor2 = activeSchoolInfo.color2 || color2;
+  const activePlayerSlug = activeClip?.playerSlug || "";
+  const recommended = [];
+  const seenSlugs = new Set();
+  for (const c of feed) {
+    if (c.isOrigin || !c.playerName || !c.playerSlug || c.playerSlug === activePlayerSlug || seenSlugs.has(c.playerSlug)) continue;
+    seenSlugs.add(c.playerSlug);
+    recommended.push({ ...c, trend: trendBySlug[c.playerSlug] || null });
+    if (recommended.length >= 8) break;
+  }
+  recommended.sort((a, b) => {
+    if (!!a.trend !== !!b.trend) return a.trend ? -1 : 1;
+    if (a.trend && b.trend) return a.trend.order - b.trend.order;
+    return 0;
+  });
+  // "auto" (instant), not "smooth" — clicking a Watch Next chip or search
+  // result should just cut straight to that clip, the same as if it were
+  // already queued up next, not visibly scroll/fly past every slide in
+  // between to get there.
+  const jumpToPlayer = (playerSlug) => {
+    const idx = feed.findIndex((c) => c.playerSlug === playerSlug);
+    if (idx >= 0) slideRefs.current[idx]?.scrollIntoView({ behavior: "auto", block: "start" });
+  };
+
+  // Search — find ANY player site-wide who has a Short, not just the ~30
+  // already loaded into feed. null until first opened/focused (loaded
+  // lazily so someone who never searches never pays for this fetch); once
+  // loaded it's cached for the rest of this fullscreen session. Each
+  // result is that player's own MOST RECENT Short only — a player search
+  // is about finding *them*, not picking among their individual clips.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchablePlayers, setSearchablePlayers] = useState(null);
+  const loadSearchablePlayers = () => {
+    if (searchablePlayers !== null) return;
+    setSearchablePlayers([]); // mark "loading" immediately so a second focus/keystroke doesn't refire this
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "videos"), where("Short", "==", true)));
+        const toMsLocal = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
+        const rows = snap.docs
+          .map((d) => {
+            const data = d.data();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const playerItem = items.find((it) => it.type === "player" && it.playerId) || null;
+            return {
+              video: data.Video || "",
+              date: data.Date || null,
+              isDraft: Array.isArray(data.Tags) && data.Tags.includes("Draft"),
+              playerId: playerItem?.playerId || "",
+              publishAt: data.PublishAt || null,
+            };
+          })
+          .filter((v) => v.video && v.playerId && extractYouTubeId(v.video) && (!v.publishAt || toMsLocal(v.publishAt) <= Date.now()))
+          .sort((a, b) => toMsLocal(b.date) - toMsLocal(a.date));
+
+        const latestByPlayer = {};
+        rows.forEach((r) => { if (!latestByPlayer[r.playerId]) latestByPlayer[r.playerId] = r; });
+
+        const playerIds = Object.keys(latestByPlayer);
+        const playersById = {};
+        const chunks = [];
+        for (let i = 0; i < playerIds.length; i += 10) chunks.push(playerIds.slice(i, i + 10));
+        const playerSnaps = await Promise.all(
+          chunks.map((chunk) => getDocs(query(collection(db, "players"), where(documentId(), "in", chunk))))
+        );
+        playerSnaps.forEach((pSnap) => pSnap.docs.forEach((d) => { playersById[d.id] = d.data(); }));
+
+        const list = playerIds
+          .map((id) => {
+            const p = playersById[id];
+            const r = latestByPlayer[id];
+            if (!p?.Slug) return null;
+            return {
+              playerId: id, video: r.video, isDraft: r.isDraft,
+              name: `${p.First || ""} ${p.Last || ""}`.trim(),
+              slug: p.Slug, position: p.Position || "", school: p.School || "", eligible: p.Eligible || "",
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setSearchablePlayers(list);
+      } catch (e) {
+        console.error("Watch fullscreen search fetch error:", e);
+      }
+    })();
+  };
+  const searchResults = searchQuery.trim() && searchablePlayers
+    ? searchablePlayers.filter((p) => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase())).slice(0, 8)
+    : [];
+
+  // Picking a result either jumps to it if it's already loaded (e.g. it
+  // came up via the trending/recommended path too) or inserts it as a new
+  // clip at the end of the feed and jumps there once it's actually
+  // rendered — pendingJumpIndexRef defers that scrollIntoView to the next
+  // commit (the ref won't exist until React actually renders the new
+  // slide), same "wait for it to land, then act" shape the auto-advance
+  // effect above already uses via scrollIntoView off a ref. "auto"
+  // (instant), same reasoning as jumpToPlayer above — no scroll-through.
+  const pendingJumpIndexRef = useRef(null);
+  useEffect(() => {
+    if (pendingJumpIndexRef.current === null) return;
+    const idx = pendingJumpIndexRef.current;
+    pendingJumpIndexRef.current = null;
+    slideRefs.current[idx]?.scrollIntoView({ behavior: "auto", block: "start" });
+  }, [feed.length]);
+  const selectSearchResult = (result) => {
+    const existingIdx = feed.findIndex((c) => c.playerSlug === result.slug);
+    if (existingIdx >= 0) {
+      slideRefs.current[existingIdx]?.scrollIntoView({ behavior: "auto", block: "start" });
+    } else {
+      pendingJumpIndexRef.current = feed.length;
+      setFeed((prev) => [...prev, {
+        video: result.video, isDraft: result.isDraft, isOrigin: false, gameInfo: null,
+        playerId: result.playerId, playerName: result.name, playerSlug: result.slug,
+        playerPosition: result.position, playerSchool: result.school, playerEligible: result.eligible,
+      }]);
+    }
+    setSearchOpen(false);
+    setSearchQuery("");
+  };
 
   return (
-    <>
-      {/* Scoped to this component's own two pieces — the trigger button's
-          ambient "there's something here" pulse (always running, so the
-          button reads as alive even before anyone hovers it), and the
-          popover's pop-in entrance + pulsing glow border + header shine
-          sweep once it's open. Colors ride on color1/color2 (this player's
-          own team colors) via CSS custom properties rather than being
-          baked into the keyframes themselves, so one keyframe definition
-          works for every player instead of needing a version per team. */}
+    <div style={{ position: "fixed", inset: 0, zIndex: 10000, background: "#000", display: "flex", alignItems: "stretch", justifyContent: "center" }}>
+      {/* Height fallback pairs (a real stylesheet rule, not an inline style
+          object — a JS style object can't hold two values for the same
+          property the way text CSS can) so a browser without dvh support
+          still gets a sensible full-height slide/column instead of an
+          unset one.
+          .wd-watch-video-layer's iframe rule is the actual video-sizing
+          fix: the YouTube IFrame API sizes the <iframe> it creates off its
+          own default (roughly 640x390) whenever the target element's
+          computed size isn't already well-established at construction
+          time — an absolutely-positioned, inset:0 div can easily still
+          read as 0x0 at that exact instant. Whatever size the iframe ends
+          up with as an HTML attribute, a real CSS rule targeting it
+          overrides that outright, so this forces it to fill the layer
+          regardless of what YouTube decided on construction. */}
       <style>{`
-        @keyframes wdWatchBtnPulse {
-          0%   { box-shadow: 0 0 0 0 var(--wd-watch-glow); }
-          70%  { box-shadow: 0 0 0 8px transparent; }
-          100% { box-shadow: 0 0 0 0 transparent; }
+        .wd-watch-slide, .wd-watch-col { height: 100vh; height: 100dvh; }
+        .wd-watch-video-layer, .wd-watch-video-layer iframe {
+          position: absolute; inset: 0; width: 100% !important; height: 100% !important; border: none;
         }
-        .wd-watch-btn { animation: wdWatchBtnPulse 2.2s ease-out infinite; }
+        /* Every scrollable area in this overlay (the slide feed itself,
+           both margins, the search dropdowns) gets this same thin, dark,
+           team-colored-thumb scrollbar instead of each browser's chunky
+           default one, which read jarring against the fullscreen black —
+           scrollbar-color/-width for Firefox, ::-webkit-scrollbar for
+           everything Chromium/Safari-based. color2 (this feed's own
+           team-color prop) drives the thumb so it's never just a plain
+           gray bar, same idea as everything else in this overlay riding on
+           the active player's colors. */
+        .wd-watch-scroll { scrollbar-width: thin; scrollbar-color: ${color2} rgba(255,255,255,0.08); }
+        .wd-watch-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .wd-watch-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.08); border-radius: 4px; }
+        .wd-watch-scroll::-webkit-scrollbar-thumb { background: ${color2}; border-radius: 4px; }
+        .wd-watch-scroll::-webkit-scrollbar-thumb:hover { background: ${color1}; }
 
-        @keyframes wdWatchPopIn {
-          0%   { opacity: 0; transform: scale(0.82) translateY(-8px); }
-          65%  { opacity: 1; transform: scale(1.04) translateY(0); }
-          100% { transform: scale(1) translateY(0); }
+        /* Duplicated verbatim from PlayerProfile's own "Top 5 Trending"
+           sidebar style block (its own comment there has the full history)
+           rather than only relying on that copy — this component gets
+           portaled straight to document.body from WatchPage.jsx's /watch
+           route too, which never mounts PlayerProfile at all, so the
+           original copy isn't guaranteed to actually be in the document.
+           Without these rules the chip's own layout (flex row, the logo
+           box's size/fill, hover states) silently falls back to browser
+           defaults for a bare <button>/<div> — which is exactly the "only
+           shows logos, nothing else lines up" bug this fixes. Harmless to
+           duplicate when both copies ARE mounted (opened via a player's own
+           Watch button) — identical rules, same selectors, nothing to
+           conflict. */
+        .wd-trend2-chip {
+          display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+          text-decoration: none; border-radius: 10px; background: #fff;
+          border: 2px solid var(--c1);
+          transition: background 0.18s ease;
         }
-        .wd-watch-pop { animation: wdWatchPopIn 0.32s cubic-bezier(.34,1.56,.64,1) both; }
-
-        @keyframes wdWatchBorderGlow {
-          0%, 100% { box-shadow: 0 18px 40px rgba(0,0,0,0.35), 0 0 0 0 var(--wd-watch-glow); }
-          50%      { box-shadow: 0 18px 40px rgba(0,0,0,0.35), 0 0 20px 2px var(--wd-watch-glow); }
+        .wd-trend2-chip:hover { background: var(--c1); }
+        .wd-trend2-name {
+          display: flex; flex-direction: column;
+          color: ${SITE_BLUE}; font-weight: 900; font-size: 17px; line-height: 1.2;
+          word-break: break-word;
+          transition: color 0.18s ease;
         }
-        .wd-watch-pop { animation: wdWatchPopIn 0.32s cubic-bezier(.34,1.56,.64,1) both, wdWatchBorderGlow 2.4s ease-in-out 0.32s infinite; }
-
-        @keyframes wdWatchShine {
-          0%   { left: -60%; }
-          15%  { left: 130%; }
-          100% { left: 130%; }
+        .wd-trend2-chip:hover .wd-trend2-name { color: #fff; }
+        .wd-trend2-sub {
+          color: #777; font-weight: 700; font-size: 13px; margin-top: 3px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          transition: color 0.18s ease;
         }
-        .wd-watch-shine { animation: wdWatchShine 3s ease-in-out infinite; }
+        .wd-trend2-chip:hover .wd-trend2-sub { color: #fff; }
+        .wd-trend2-logobox {
+          flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+          width: 40px; height: 40px; border-radius: 8px; overflow: visible;
+          background: var(--c1); border: 2px solid var(--c2);
+          transition: background 0.35s ease 0.1s, border-color 0.35s ease 0.1s;
+        }
+        .wd-trend2-chip:hover .wd-trend2-logobox {
+          background: transparent; border-color: transparent;
+          transition: background 0.18s ease, border-color 0.18s ease;
+        }
+        .wd-trend2-logo-icon {
+          display: flex; align-items: center; justify-content: center;
+          width: 100%; height: 100%;
+          font-size: 18px; line-height: 1; color: #fff;
+          transform-origin: center;
+          transition: transform 0.22s ease;
+        }
+        .wd-trend2-chip:hover .wd-trend2-logo-icon { transform: scale(1.7); }
+        .wd-trend2-chevron {
+          flex-shrink: 0; color: var(--c1); font-size: 20px; font-weight: 900;
+          opacity: 0; transform: translateX(-6px);
+          transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease;
+        }
+        .wd-trend2-chip:hover .wd-trend2-chevron {
+          opacity: 1; transform: translateX(0); color: #fff;
+        }
+        /* Same reasoning — the left margin's "Recent Video" card reuses
+           PlayerProfile's own Videos-sidebar card classes for its thumbnail
+           hover-zoom, which live in that same not-guaranteed-mounted style
+           block. */
+        .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
+        .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
       `}</style>
-      <button
-        ref={triggerRef}
-        onClick={handleClick}
-        className="text-white font-extrabold rounded-full transition hover:opacity-80 wd-watch-btn"
-        style={{ "--wd-watch-glow": `${color2}88`, border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}
-      >
-        ▶ Watch
-      </button>
-      {show && youTubeIds.length > 0 && ReactDOM.createPortal(
-        <>
-          {/* Invisible click-away layer, not a visible dark backdrop — the
-              page underneath stays fully visible, just no longer clickable
-              until this closes. */}
-          <div onClick={() => setShow(false)} style={{ position:"fixed", inset:0, zIndex:9998 }} />
-          <div
-            className="wd-watch-pop"
+
+      {/* Left margin — desktop only. Who's playing right now — school logo,
+          name/position/class, community grade, top strengths/weaknesses —
+          plus a way out to their real page for the full evaluation this
+          feed has no room for. Grade/strengths/weaknesses/logo (activeCard)
+          load in a beat after the name/position (activeClip, already known
+          synchronously) since they're a separate lazy fetch — the card
+          just renders without them until that resolves, no spinner. */}
+      {!isMobile && (
+        <div className="wd-watch-scroll" style={{ width: "260px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", overflowY: "auto" }}>
+          {activeClip && (activeClip.playerName || activeClip.playerSlug) && (
+            <div style={{ color: "#fff", maxWidth: "230px" }}>
+              {activeCard?.schoolLogo && (
+                <img
+                  src={sanitizeUrl(activeCard.schoolLogo)}
+                  alt={activeClip.playerSchool}
+                  style={{ height: "min(120px, 14vh)", width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: "14px" }}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              )}
+              <div style={{ fontSize: "10px", fontWeight: 900, color: activeColor2, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>Now Watching</div>
+              <div style={{ fontSize: "26px", fontWeight: 900, lineHeight: 1.1, textTransform: "uppercase", marginBottom: "10px" }}>{activeClip.playerName || "—"}</div>
+              {(activeClip.playerPosition || activeClip.playerSchool) && (
+                <div style={{ fontSize: "14px", fontWeight: 700, color: "rgba(255,255,255,0.8)", marginBottom: "4px" }}>
+                  {[activeClip.playerPosition, activeClip.playerSchool].filter(Boolean).join(" · ")}
+                </div>
+              )}
+              {activeClip.playerEligible && (
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginBottom: "16px" }}>
+                  {formatEligible(activeClip.playerEligible)} Class
+                </div>
+              )}
+              {activeCard?.gradeLabel && (() => {
+                const gd = gradeDisplay(activeCard.gradeLabel);
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "40px", height: "40px", borderRadius: "8px", backgroundColor: gd.bg, border: `2px solid ${gd.border}`, flexShrink: 0 }}>
+                      <span style={{ fontSize: "15px", fontWeight: 900, color: "#fff" }}>{gd.short}</span>
+                    </div>
+                    <div style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                      Community<br />Grade: {activeCard.gradeLabel}
+                    </div>
+                  </div>
+                );
+              })()}
+              {activeCard?.topStrengths?.length > 0 && (
+                <div style={{ marginBottom: "14px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 900, color: "#16a34a", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid rgba(255,255,255,0.15)", paddingBottom: "4px", marginBottom: "6px" }}>Strengths</div>
+                  {activeCard.topStrengths.map((s, i) => (
+                    <div key={i} style={{ fontSize: "12px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em", padding: "2px 0" }}>{s}</div>
+                  ))}
+                </div>
+              )}
+              {activeCard?.topWeaknesses?.length > 0 && (
+                <div style={{ marginBottom: "18px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 900, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid rgba(255,255,255,0.15)", paddingBottom: "4px", marginBottom: "6px" }}>Weaknesses</div>
+                  {activeCard.topWeaknesses.map((w, i) => (
+                    <div key={i} style={{ fontSize: "12px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em", padding: "2px 0" }}>{w}</div>
+                  ))}
+                </div>
+              )}
+              {/* Only their single most recent long-form video, not a
+                  list — this margin is about this one clip playing right
+                  now, a whole "Videos" list is what their real profile
+                  page is for. Reuses the exact .wd-video-card/.wd-video-
+                  thumb classes the profile page's own Videos sidebar
+                  defines (that page's global <style> block is always
+                  mounted underneath this portal), so the same thumbnail
+                  hover-zoom just works here too with nothing new to style. */}
+              {activeCard?.recentVideo && (
+                <div style={{ marginBottom: "18px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 900, color: activeColor2, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>Recent Video</div>
+                  <a
+                    href={sanitizeUrl(activeCard.recentVideo.video)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="wd-video-card"
+                    style={{ display: "block", position: "relative", textDecoration: "none", borderRadius: "8px", overflow: "hidden" }}
+                  >
+                    <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
+                      {activeCard.recentVideo.thumb ? (
+                        <img
+                          className="wd-video-thumb"
+                          src={sanitizeUrl(activeCard.recentVideo.thumb)}
+                          alt={activeCard.recentVideo.title || "Video thumbnail"}
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => { e.currentTarget.style.display = "none"; }}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ color: "#fff", fontSize: "26px" }}>▶</span>
+                        </div>
+                      )}
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.15) 55%, transparent 100%)", pointerEvents: "none" }} />
+                      {activeCard.recentVideo.title && (
+                        <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "8px 10px" }}>
+                          <h3 style={{ color: "#fff", fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.2, textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
+                            {activeCard.recentVideo.title}
+                          </h3>
+                        </div>
+                      )}
+                    </div>
+                  </a>
+                </div>
+              )}
+              {/* Moved here from overlaying the video itself (see the
+                  slide's own comment on why) — same compact card the small
+                  Watch popover uses, just parked in the margin instead of
+                  under the clip. */}
+              {activeClip.gameInfo && (
+                <div style={{ borderRadius: "10px", overflow: "hidden", marginBottom: "18px" }}>
+                  <GameInfoFooter gameInfo={activeClip.gameInfo} isDraftClip={isActiveDraft} color1={activeColor1} />
+                </div>
+              )}
+              {/* If this was opened from that exact player's own page (see
+                  originPlayerSlug — WatchButton passes its own player's
+                  slug through) and their own clip is what's active, this
+                  link would just navigate to the page already sitting
+                  underneath the overlay — a same-route Link React Router
+                  won't necessarily even re-render for. Closing instead
+                  reveals it directly, which is the same result and doesn't
+                  depend on that. Anyone else's clip still navigates
+                  normally, same as always. */}
+              {activeClip.playerSlug && (
+                activeClip.playerSlug === originPlayerSlug ? (
+                  <button
+                    onClick={onClose}
+                    style={{ display: "inline-block", fontSize: "12px", fontWeight: 900, color: "#fff", background: activeColor1, border: `2px solid ${activeColor2}`, borderRadius: "8px", padding: "9px 16px", textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer" }}
+                  >
+                    View Full Profile →
+                  </button>
+                ) : (
+                  <Link
+                    to={`/player/${activeClip.playerSlug}`}
+                    style={{ display: "inline-block", fontSize: "12px", fontWeight: 900, color: "#fff", background: activeColor1, border: `2px solid ${activeColor2}`, borderRadius: "8px", padding: "9px 16px", textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.04em" }}
+                  >
+                    View Full Profile →
+                  </Link>
+                )
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Center — the video column itself. Full-bleed width on mobile;
+          capped to its own native 9:16 (never wider than the viewport is
+          tall) on desktop, so the two side margins actually have room to
+          exist instead of the video eating the whole monitor. */}
+      <div className="wd-watch-col" style={{ position: "relative", width: isMobile ? "100%" : "min(100%, calc(100dvh * 9 / 16))", flexShrink: 0 }}>
+        {/* The single, fixed video layer — always covers exactly whichever
+            slide is currently scrolled into view, since every slide is one
+            full viewport tall (see .wd-watch-slide). Sits behind the
+            scrollable list below (DOM order = stacking order here, no
+            z-index needed) so touch/scroll gestures still reach the
+            scrollable container above it instead of getting captured by
+            the iframe first. */}
+        <div ref={videoLayerRef} className="wd-watch-video-layer" style={{ position: "absolute", inset: 0, background: "#000", overflow: "hidden" }} />
+        {/* We-Draft's own branded spinner, not YouTube's — sits above the
+            video layer but below the scrollable slide chrome (pointer
+            events off, since it's purely a "hang on" indicator, never
+            something to click through). */}
+        {videoLoading && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", pointerEvents: "none" }}>
+            <LoadingSpinner size={48} />
+          </div>
+        )}
+        <div
+          className="wd-watch-scroll"
+          style={{ position: "absolute", inset: 0, overflowY: "auto", scrollSnapType: "y mandatory", WebkitOverflowScrolling: "touch" }}
+        >
+          {feed.map((clip, i) => {
+            const isDraftClip = !!clip.isDraft;
+            const headerGradient = isDraftClip
+              ? `linear-gradient(120deg, #1a1a1a, ${SITE_GOLD})`
+              : `linear-gradient(120deg, ${color1}, ${color2})`;
+            return (
+              <div
+                key={i}
+                ref={(el) => { slideRefs.current[i] = el; }}
+                data-idx={i}
+                className="wd-watch-slide"
+                style={{ position: "relative", width: "100%", scrollSnapAlign: "start" }}
+              >
+                {/* Per-slide branded header — same gradient/label logic as
+                    the small popover's own header, just overlaid on the
+                    video instead of sitting above it (there's no room to
+                    spare in a true full-screen layout). Shows the clip's
+                    own player name once the feed extends past
+                    initialClips (or immediately, on desktop, where the
+                    left margin already needs it — see activeClip above).
+                    The badge itself is a real link to that player's page
+                    (even on a Draft-labeled clip — the label reads
+                    differently, but it's still that same real player's
+                    highlight) — pointerEvents:none on the backdrop wrapper
+                    keeps the rest of that gradient area from swallowing
+                    scroll gestures, re-enabled just on the badge so it's
+                    still tappable. */}
+                <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "14px 14px 20px", backgroundImage: "linear-gradient(to bottom, rgba(0,0,0,0.55), transparent)", pointerEvents: "none" }}>
+                  {clip.playerSlug ? (
+                    <Link
+                      to={`/player/${clip.playerSlug}`}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "5px 10px", borderRadius: "20px", backgroundImage: headerGradient, textDecoration: "none", pointerEvents: "auto" }}
+                    >
+                      {isDraftClip ? <span style={{ fontSize: "12px" }}>🏈</span> : <img src="/wd-icon.png" alt="" style={{ width: "13px", height: "13px", objectFit: "contain" }} />}
+                      <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        {isDraftClip ? "NFL Draft" : (clip.playerName || "Watch")}
+                      </span>
+                    </Link>
+                  ) : (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "5px 10px", borderRadius: "20px", backgroundImage: headerGradient }}>
+                      {isDraftClip ? <span style={{ fontSize: "12px" }}>🏈</span> : <img src="/wd-icon.png" alt="" style={{ width: "13px", height: "13px", objectFit: "contain" }} />}
+                      <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        {isDraftClip ? "NFL Draft" : (clip.playerName || "Watch")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {/* Desktop moves this to the left margin instead (next to
+                    the rest of that player's card) — see below — since
+                    there's a side to put it on there; mobile has no
+                    equivalent margin, so it stays as a video overlay. */}
+                {isMobile && clip.gameInfo && (
+                  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
+                    <GameInfoFooter gameInfo={clip.gameInfo} isDraftClip={isDraftClip} color1={color1} large />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Persistent chrome — close + mute float above every slide rather
+            than living inside one, so they're always reachable regardless
+            of scroll position. Anchored to this column (not the whole
+            screen) so on desktop they hug the video itself instead of
+            stranding out at the browser window's outer edges. */}
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute", top: "max(14px, env(safe-area-inset-top))", right: "14px", zIndex: 1,
+            width: "36px", height: "36px", borderRadius: "50%",
+            background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.4)",
+            color: "#fff", fontSize: "20px", cursor: "pointer", lineHeight: 1,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          ×
+        </button>
+        <button
+          onClick={toggleMute}
+          aria-label={muted ? "Unmute" : "Mute"}
+          style={{
+            position: "absolute", bottom: isMobile ? "max(90px, calc(env(safe-area-inset-bottom) + 76px))" : "14px", right: "14px", zIndex: 1,
+            width: "38px", height: "38px", borderRadius: "50%",
+            background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.4)",
+            color: "#fff", fontSize: "16px", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          {muted ? "🔇" : "🔊"}
+        </button>
+
+        {/* Persistent, site-wide (not tied to whoever's active clip is)
+            YouTube subscribe link — sub_confirmation=1 opens the channel
+            with YouTube's own subscribe dialog already up rather than just
+            landing on the channel page. Bottom-left mirrors the mute
+            button's own bottom-right placement/offset, including the same
+            "make room for the mobile Watch Next strip" bump. */}
+        <a
+          href="https://www.youtube.com/@kingcoldsports?sub_confirmation=1"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Subscribe to @kingcoldsports on YouTube"
+          title="Subscribe on YouTube"
+          style={{
+            position: "absolute", bottom: isMobile ? "max(90px, calc(env(safe-area-inset-bottom) + 76px))" : "14px", left: "14px", zIndex: 1,
+            display: "flex", alignItems: "center", gap: "6px",
+            background: "#FF0000", border: "1px solid rgba(255,255,255,0.4)", borderRadius: "20px",
+            padding: "8px 14px 8px 10px", color: "#fff", fontSize: "12px", fontWeight: 900,
+            textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.03em",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.4)",
+          }}
+        >
+          <span style={{ fontSize: "14px", lineHeight: 1 }}>▶</span>
+          Subscribe
+        </a>
+
+        {/* Mobile-only search trigger — desktop's search box lives inline in
+            the right margin panel instead (below), so this button (and the
+            overlay it opens) only render on mobile. */}
+        {isMobile && (
+          <button
+            onClick={() => { setSearchOpen(true); loadSearchablePlayers(); }}
+            aria-label="Search players"
             style={{
-              "--wd-watch-glow": `${glowColor}70`,
-              position: "fixed", top: pos.top + "px", left: pos.left + "px",
-              width: popoverWidth + "px",
-              background: "#fff", border: `2px solid ${isDraftClip ? SITE_GOLD : color1}`, borderRadius: "14px",
-              overflow: "hidden", zIndex: 9999,
+              position: "absolute", top: "max(14px, env(safe-area-inset-top))", left: "14px", zIndex: 1,
+              width: "36px", height: "36px", borderRadius: "50%",
+              background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.4)",
+              color: "#fff", fontSize: "15px", cursor: "pointer", lineHeight: 1,
+              display: "flex", alignItems: "center", justifyContent: "center",
             }}
           >
-            <div style={{ position:"relative", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"7px 10px", backgroundImage:headerGradient }}>
-              <div style={{ display:"flex", alignItems:"center", gap:"6px", position:"relative", zIndex:1 }}>
-                {isDraftClip ? (
-                  <span style={{ fontSize:"13px", lineHeight:1 }}>🏈</span>
-                ) : (
-                  <img src="/wd-icon.png" alt="" style={{ width:"15px", height:"15px", objectFit:"contain" }} />
-                )}
-                <span style={{ fontSize:"11px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em" }}>{headerLabel}</span>
-              </div>
+            🔍
+          </button>
+        )}
+
+        {isMobile && searchOpen && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 3, background: "rgba(0,0,0,0.92)", display: "flex", flexDirection: "column", padding: "max(14px, env(safe-area-inset-top)) 16px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}>
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search players with Shorts..."
+                style={{ flex: 1, boxSizing: "border-box", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: "8px", padding: "11px 12px", color: "#fff", fontSize: "14px", fontWeight: 700, outline: "none" }}
+              />
               <button
-                onClick={() => setShow(false)}
-                aria-label="Close"
-                style={{ position:"relative", zIndex:1, background:"none", border:"none", color:"#fff", fontSize:"16px", cursor:"pointer", lineHeight:1, padding:0 }}
+                onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                aria-label="Close search"
+                style={{ width: "36px", height: "36px", borderRadius: "50%", flexShrink: 0, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.35)", color: "#fff", fontSize: "18px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
                 ×
               </button>
-              {/* Glossy sheen sweep — same idea as the flair badge's own
-                  wd-flair-shine further up this file, just its own scoped
-                  copy so this component doesn't depend on the flair being
-                  present anywhere on the page. */}
-              <div
-                className="wd-watch-shine"
-                aria-hidden="true"
-                style={{
-                  position:"absolute", top:0, left:"-60%", width:"40%", height:"100%",
-                  background:"linear-gradient(115deg, transparent, rgba(255,255,255,0.55), transparent)",
-                  transform:"skewX(-20deg)", pointerEvents:"none",
-                }}
-              />
             </div>
-            {/* autoplay=1/mute=1 in playerVars above fire because this only
-                ever mounts from a real click on the Watch button; mute=1
-                has to ride along with autoplay or some browsers silently
-                block it entirely. controls=0/disablekb=1/fs=0/
-                modestbranding=1 strip as much of YouTube's own chrome as
-                the embed API allows — the logo watermark and "Watch on
-                YouTube" link aren't ours to remove (YouTube's ToS, not a
-                technical limit), but the control bar, keyboard shortcuts,
-                and fullscreen button are. That also means there's no native
-                mute button left, hence the custom one below. */}
-            <div style={{ position:"relative", width:"100%", aspectRatio:"9 / 16", background:"#000" }}>
-              <div ref={playerMountRef} style={{ width:"100%", height:"100%" }} />
-              <button
-                onClick={toggleMute}
-                aria-label={muted ? "Unmute" : "Mute"}
-                style={{
-                  position:"absolute", bottom:"10px", right:"10px",
-                  width:"30px", height:"30px", borderRadius:"50%",
-                  background:"rgba(0,0,0,0.55)", border:"1px solid rgba(255,255,255,0.4)",
-                  color:"#fff", fontSize:"14px", cursor:"pointer",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                }}
-              >
-                {muted ? "🔇" : "🔊"}
-              </button>
-            </div>
-            {/* Opponent/date/result for a CFB-tagged clip with a linked
-                game (currentClip.gameInfo, resolved up in the main
-                component's fetch effect — no extra query needed here). Only
-                ever set on a CFB clip, so this and the Draft header above
-                never show at the same time for the same clip. Same
-                small-label-over-bold-value language the hero's own
-                "Selected by" uses, and a solid color pill for the result —
-                same shape as GradeBadge — instead of plain colored text, so
-                this reads as a native piece of the page rather than a
-                bolted-on caption. */}
-            {currentClip?.gameInfo && (
-              <div style={{ padding:"8px 10px", borderTop:`3px solid ${isDraftClip ? SITE_GOLD : color1}`, background:"#fafafa" }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px" }}>
-                  <div style={{ minWidth:0 }}>
-                    <div style={{ fontSize:"8px", fontWeight:900, color:"#999", textTransform:"uppercase", letterSpacing:"0.08em" }}>Game</div>
-                    <div style={{ fontSize:"12px", fontWeight:900, color:isDraftClip?"#7a5c00":color1, textTransform:"uppercase", letterSpacing:"0.02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      vs {currentClip.gameInfo.opponent}
-                    </div>
-                    {currentClip.gameInfo.dateMs > 0 && (
-                      <div style={{ fontSize:"10px", fontWeight:700, color:"#999", marginTop:"1px" }}>
-                        {new Date(currentClip.gameInfo.dateMs).toLocaleDateString(undefined, { month:"short", day:"numeric", timeZone:"UTC" })}
+            <div className="wd-watch-scroll" style={{ flex: 1, overflowY: "auto" }}>
+              {!searchQuery.trim() ? null : searchablePlayers === null || (searchablePlayers.length === 0 && searchResults.length === 0) ? (
+                <div style={{ padding: "10px 4px", color: "rgba(255,255,255,0.5)", fontSize: "13px", fontWeight: 700 }}>Loading…</div>
+              ) : searchResults.length === 0 ? (
+                <div style={{ padding: "10px 4px", color: "rgba(255,255,255,0.5)", fontSize: "13px", fontWeight: 700 }}>No matches</div>
+              ) : (
+                searchResults.map((r) => (
+                  <button
+                    key={r.playerId}
+                    onClick={() => selectSearchResult(r)}
+                    style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 4px", cursor: "pointer" }}
+                  >
+                    <div style={{ color: "#fff", fontWeight: 900, fontSize: "15px", textTransform: "uppercase" }}>{r.name}</div>
+                    {(r.position || r.school) && (
+                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "12px", fontWeight: 700, marginTop: "2px" }}>
+                        {[r.position, r.school].filter(Boolean).join(" · ")}
                       </div>
                     )}
-                  </div>
-                  {currentClip.gameInfo.resultLabel && (
-                    <span style={{
-                      flexShrink:0, fontSize:"11px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em",
-                      borderRadius:"6px", padding:"4px 10px",
-                      background: currentClip.gameInfo.resultLabel.startsWith("W") ? "#16a34a" : currentClip.gameInfo.resultLabel.startsWith("L") ? "#dc2626" : "#888",
-                    }}>
-                      {currentClip.gameInfo.resultLabel}
-                    </span>
-                  )}
-                </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Mobile-only — desktop gets the vertical "Watch Next" list in the
+            right margin instead (below). Tap a name to jump the feed
+            straight to their clip instead of scrolling to find it. */}
+        {isMobile && recommended.length > 0 && (
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: "max(14px, env(safe-area-inset-bottom))", padding: "0 14px" }}>
+            <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px", paddingLeft: "2px" }}>
+              Watch Next
+            </div>
+            <div style={{ display: "flex", gap: "8px", overflowX: "auto" }}>
+              {recommended.map((c) => {
+                const style = c.trend ? TREND_STYLE[c.trend.type] : null;
+                const schoolInfo = schoolLogoBySchool[c.playerSchool] || {};
+                const iconNode = style?.iconImg
+                  ? <img src={style.iconImg} alt="" style={{ width: "11px", height: "11px", objectFit: "contain", verticalAlign: "middle" }} />
+                  : style?.icon;
+                return (
+                  <button
+                    key={c.playerSlug}
+                    onClick={() => jumpToPlayer(c.playerSlug)}
+                    style={{
+                      flexShrink: 0, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: "5px",
+                      background: "rgba(0,0,0,0.55)", border: `1px solid ${schoolInfo.color1 || color2}`, borderRadius: "20px",
+                      padding: "6px 14px", color: "#fff", fontSize: "12px", fontWeight: 900,
+                      textTransform: "uppercase", letterSpacing: "0.03em", cursor: "pointer",
+                    }}
+                  >
+                    {iconNode && <span>{iconNode}</span>}
+                    {c.playerName}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Right margin — desktop only. Same recommended-players data as
+          mobile's bottom strip, laid out as a scrollable vertical list
+          instead — a tall narrow column suits that shape much better than
+          a short wide one would. Reuses the exact wd-trend2-chip classes
+          this page's own "Top 5 Trending" sidebar defines (that big <style>
+          block lives in PlayerProfile's own render, which is always
+          mounted underneath this portal, so the rules are already in the
+          document — nothing new to define here), but colored the same way
+          PlayersMentionedList.js colors its own chips: each player's real
+          team Color1/Color2 (border + hover-fill, logo box accent), not a
+          trend badge color — the logo box always shows their real team
+          logo, and a trend (if any) just reads as label text in the
+          subtitle now instead of owning the chip's color. */}
+      {!isMobile && (
+        <div className="wd-watch-scroll" style={{ width: "260px", flexShrink: 0, display: "flex", flexDirection: "column", justifyContent: "flex-start", padding: "20px", overflowY: "auto" }}>
+          {/* Search — any player site-wide with a Short, not just whoever's
+              already loaded into feed (see searchablePlayers/loadSearchablePlayers
+              above). Picking a result jumps to it if already in the feed,
+              otherwise appends it as a new clip and jumps there. */}
+          <div style={{ position: "relative", marginBottom: "20px" }}>
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={loadSearchablePlayers}
+              placeholder="🔍 Search players with Shorts..."
+              style={{ width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: "8px", padding: "10px 12px", color: "#fff", fontSize: "12.5px", fontWeight: 700, outline: "none" }}
+            />
+            {searchQuery.trim() && (
+              <div className="wd-watch-scroll" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 2, background: "#161616", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "8px", maxHeight: "280px", overflowY: "auto", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
+                {searchablePlayers === null || (searchablePlayers.length === 0 && searchResults.length === 0) ? (
+                  <div style={{ padding: "10px 12px", color: "rgba(255,255,255,0.5)", fontSize: "12px", fontWeight: 700 }}>Loading…</div>
+                ) : searchResults.length === 0 ? (
+                  <div style={{ padding: "10px 12px", color: "rgba(255,255,255,0.5)", fontSize: "12px", fontWeight: 700 }}>No matches</div>
+                ) : (
+                  searchResults.map((r) => (
+                    <button
+                      key={r.playerId}
+                      onClick={() => selectSearchResult(r)}
+                      style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "9px 12px", cursor: "pointer" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                    >
+                      <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase" }}>{r.name}</div>
+                      {(r.position || r.school) && (
+                        <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "11px", fontWeight: 700, marginTop: "2px" }}>
+                          {[r.position, r.school].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>
-        </>,
-        document.body
+          {recommended.length > 0 && (
+            <>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "10px" }}>
+                Watch Next
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {recommended.map((c) => {
+                  const style = c.trend ? TREND_STYLE[c.trend.type] : null;
+                  const schoolInfo = schoolLogoBySchool[c.playerSchool] || {};
+                  const color1 = schoolInfo.color1 || SITE_BLUE;
+                  const color2 = schoolInfo.color2 || SITE_GOLD;
+                  // The logo box always shows the player's real team logo
+                  // when one's on file. Only falls back to the trend icon
+                  // (or a plain play glyph) for a school with no logo yet.
+                  const logoNode = schoolInfo.logo ? (
+                    <img
+                      src={sanitizeUrl(schoolInfo.logo)}
+                      alt={c.playerSchool}
+                      style={{ width: "70%", height: "70%", objectFit: "contain" }}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  ) : style?.iconImg ? (
+                    <img src={style.iconImg} alt="" style={{ width: "18px", height: "18px", objectFit: "contain" }} />
+                  ) : (style?.icon || "▶");
+                  return (
+                    <button
+                      key={c.playerSlug}
+                      onClick={() => jumpToPlayer(c.playerSlug)}
+                      className="wd-trend2-chip"
+                      style={{ "--c1": color1, "--c2": color2, textAlign: "left", cursor: "pointer" }}
+                    >
+                      <div className="wd-trend2-logobox">
+                        <span className="wd-trend2-logo-icon">{logoNode}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+                        <span className="wd-trend2-name" style={{ fontSize: "13px" }}><span>{c.playerName}</span></span>
+                        {(c.playerPosition || c.playerSchool || style) && (
+                          <span className="wd-trend2-sub">
+                            {[c.playerPosition, c.playerSchool, style?.label].filter(Boolean).join(" · ")}
+                          </span>
+                        )}
+                      </div>
+                      <span className="wd-trend2-chevron">›</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {/* Fills whatever's left below the list (marginTop:"auto" pushes
+              it to the bottom of this flex column) rather than leaving that
+              space empty — a short list of recommendations, or none at all,
+              otherwise just trails off into bare black. */}
+          <div style={{ marginTop: "auto", paddingTop: "24px", display: "flex", justifyContent: "center" }}>
+            <img src={WatchLogo} alt="We-Draft.com" style={{ width: "70%", maxWidth: "180px", objectFit: "contain" }} />
+          </div>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -854,6 +1807,35 @@ function GameNotesFeedSection({ gameNotes, color, mobile }) {
     </div>
   );
 }
+
+// ── Grade scale/labels/display — module scope (pure, no component state)
+// so WatchFullscreenFeed's own left-margin player card can reuse the exact
+// same grade treatment as the rest of this page without duplicating it,
+// not just PlayerProfile's own render. ──
+const gradeScale = {
+  "Early First Round":1,"Middle First Round":2,"Late First Round":3,"Second Round":4,
+  "Third Round":5,"Fourth Round":6,"Fifth Round":7,"Sixth Round":8,"Seventh Round":9,"UDFA":10,
+};
+const gradeLabels = {
+  1:"Early First Round",2:"Middle First Round",3:"Late First Round",4:"Second Round",
+  5:"Third Round",6:"Fourth Round",7:"Fifth Round",8:"Sixth Round",9:"Seventh Round",10:"UDFA",
+};
+const gradeDisplay = (g) => {
+  const map = {
+    "Watchlist":          { short:"W",   bg:"#5F5E5A", border:"#444441" },
+    "Early First Round":  { short:"1st", bg:"#3B6D11", border:"#27500A" },
+    "Middle First Round": { short:"1st", bg:"#3B6D11", border:"#27500A" },
+    "Late First Round":   { short:"1st", bg:"#3B6D11", border:"#27500A" },
+    "Second Round":       { short:"2nd", bg:"#0F6E56", border:"#085041" },
+    "Third Round":        { short:"3rd", bg:"#185FA5", border:"#0C447C" },
+    "Fourth Round":       { short:"4th", bg:"#BA7517", border:"#854F0B" },
+    "Fifth Round":        { short:"5th", bg:"#BA7517", border:"#854F0B" },
+    "Sixth Round":        { short:"6th", bg:"#993C1D", border:"#712B13" },
+    "Seventh Round":      { short:"7th", bg:"#993C1D", border:"#712B13" },
+    "UDFA":               { short:"U",   bg:"#A32D2D", border:"#791F1F" },
+  };
+  return map[g] || { short:g, bg:"#5F5E5A", border:"#444441" };
+};
 
 export default function PlayerProfile() {
   const { slug } = useParams();
@@ -1022,31 +2004,6 @@ export default function PlayerProfile() {
     const t = setTimeout(recomputeAdLayout, 300);
     return () => clearTimeout(t);
   }, [pageVisible]);
-
-  const gradeScale = {
-    "Early First Round":1,"Middle First Round":2,"Late First Round":3,"Second Round":4,
-    "Third Round":5,"Fourth Round":6,"Fifth Round":7,"Sixth Round":8,"Seventh Round":9,"UDFA":10,
-  };
-  const gradeLabels = {
-    1:"Early First Round",2:"Middle First Round",3:"Late First Round",4:"Second Round",
-    5:"Third Round",6:"Fourth Round",7:"Fifth Round",8:"Sixth Round",9:"Seventh Round",10:"UDFA",
-  };
-  const gradeDisplay = (g) => {
-    const map = {
-      "Watchlist":          { short:"W",   bg:"#5F5E5A", border:"#444441" },
-      "Early First Round":  { short:"1st", bg:"#3B6D11", border:"#27500A" },
-      "Middle First Round": { short:"1st", bg:"#3B6D11", border:"#27500A" },
-      "Late First Round":   { short:"1st", bg:"#3B6D11", border:"#27500A" },
-      "Second Round":       { short:"2nd", bg:"#0F6E56", border:"#085041" },
-      "Third Round":        { short:"3rd", bg:"#185FA5", border:"#0C447C" },
-      "Fourth Round":       { short:"4th", bg:"#BA7517", border:"#854F0B" },
-      "Fifth Round":        { short:"5th", bg:"#BA7517", border:"#854F0B" },
-      "Sixth Round":        { short:"6th", bg:"#993C1D", border:"#712B13" },
-      "Seventh Round":      { short:"7th", bg:"#993C1D", border:"#712B13" },
-      "UDFA":               { short:"U",   bg:"#A32D2D", border:"#791F1F" },
-    };
-    return map[g] || { short:g, bg:"#5F5E5A", border:"#444441" };
-  };
 
   // Skews raw percentages so bars read as "more filled" at a glance — a low
   // exponent (< 0.5) pushes small percentages up more aggressively than a
@@ -1365,9 +2322,14 @@ export default function PlayerProfile() {
               // the first item on the video has an override set.
               title: matched?.title || first?.title || data.GenTitle || "",
               thumb: matched?.thumb || first?.thumb || data.GenThumb || "",
+              publishAt: data.PublishAt || null,
             };
           })
-          .filter((v) => v.video)
+          // publishAt (AdminPanel.js's "Publish At" scheduling field) hides
+          // this everywhere on We-Draft until that moment — same idea as a
+          // YouTube upload scheduled to go public later, so both flip on
+          // together instead of leaking here early.
+          .filter((v) => v.video && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
           .sort((a, b) => toMs(b.date) - toMs(a.date));
 
         const shorts = all.filter((v) => v.short);
@@ -1404,15 +2366,17 @@ export default function PlayerProfile() {
           gameInfo: v.tags.includes("CFB") ? buildGameInfo(gamesBySlug[v.gameSlug]) : null,
         }));
 
-        // Swap each gameInfo's opponent to its short-form name (schools/
-        // {School}.Short, e.g. "Bama") — same field GameMarginSidebars.js's
-        // scoreboard bug and PerformancesManager.js's hashtags already read,
-        // so this reads consistently with the rest of the site instead of
-        // the full school name. "in" queries cap at 10 values, hence the
-        // chunking (opponents across a player's whole Shorts history should
-        // rarely exceed that, but never assume).
+        // Resolves each gameInfo's opponent to its Wordmark (shown instead
+        // of the school name — see the Watch popover's game-info footer;
+        // WordmarkDark/Logo1 are fallbacks for a school with no light-bg
+        // wordmark on file) plus its short-form name (schools/{School}.Short,
+        // e.g. "Bama" — same field GameMarginSidebars.js's scoreboard bug
+        // and PerformancesManager.js's hashtags already read) as the img alt
+        // text/final fallback if nothing else is set. "in" queries cap at 10
+        // values, hence the chunking (opponents across a player's whole
+        // Shorts history should rarely exceed that, but never assume).
         const opponents = [...new Set(rawClips.filter((c) => c.gameInfo).map((c) => c.gameInfo.opponent))];
-        const shortNameByOpponent = {};
+        const schoolInfoByOpponent = {};
         if (opponents.length > 0) {
           const chunks = [];
           for (let i = 0; i < opponents.length; i += 10) chunks.push(opponents.slice(i, i + 10));
@@ -1421,14 +2385,15 @@ export default function PlayerProfile() {
           );
           schoolSnaps.forEach((sSnap) => sSnap.docs.forEach((d) => {
             const data = d.data();
-            if (data.School) shortNameByOpponent[data.School] = data.Short || "";
+            if (data.School) schoolInfoByOpponent[data.School] = { short: data.Short || "", logo: data.Wordmark || data.WordmarkDark || data.Logo1 || "" };
           }));
         }
 
-        setWatchClips(rawClips.map((c) => c.gameInfo
-          ? { ...c, gameInfo: { ...c.gameInfo, opponent: shortNameByOpponent[c.gameInfo.opponent] || c.gameInfo.opponent } }
-          : c
-        ));
+        setWatchClips(rawClips.map((c) => {
+          if (!c.gameInfo) return c;
+          const info = schoolInfoByOpponent[c.gameInfo.opponent];
+          return { ...c, gameInfo: { ...c.gameInfo, opponent: info?.short || c.gameInfo.opponent, logo: info?.logo || "" } };
+        }));
         const vids = all.filter((v) => !v.short);
 
         if (vids.length > 0) {
@@ -1454,9 +2419,10 @@ export default function PlayerProfile() {
               title: data.GenTitle || first?.title || "",
               thumb: data.GenThumb || first?.thumb || "",
               tags: tags.length > 0 ? tags : ["CFB"],
+              publishAt: data.PublishAt || null,
             };
           })
-          .filter((v) => v.video && !v.short && v.tags.some((t) => t === "CFB" || t === "Draft"))
+          .filter((v) => v.video && !v.short && v.tags.some((t) => t === "CFB" || t === "Draft") && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
           .sort((a, b) => toMs(b.date) - toMs(a.date))
           .slice(0, 3);
         setPlayerVideos(fallback);
@@ -3086,8 +4052,20 @@ useEffect(() => {
           background: transparent; border-color: transparent;
           transition: background 0.18s ease, border-color 0.18s ease;
         }
+        /* display:flex + a full 100%/100% of the (definitely-sized)
+           logobox — not inline-block — so a percentage-sized <img> child
+           (the Watch Next chip's real team logo, width/height:70%) has an
+           actual box to resolve that percentage against. inline-block had
+           no set size of its own (it sized to content instead), so the
+           image's own percentage dimensions had nothing definite to
+           resolve against and it fell back to its natural intrinsic size —
+           the "logos not fitting the box" bug. Fixed-size icons (the trend
+           emoji/img elsewhere this class is reused for) still center fine
+           inside the full box either way. */
         .wd-trend2-logo-icon {
-          display: inline-block; font-size: 18px; line-height: 1; color: #fff;
+          display: flex; align-items: center; justify-content: center;
+          width: 100%; height: 100%;
+          font-size: 18px; line-height: 1; color: #fff;
           transform-origin: center;
           transition: transform 0.22s ease;
         }
@@ -3265,23 +4243,33 @@ useEffect(() => {
                 <span style={{ fontSize: isMobile ? "16px" : "18px", lineHeight: 1 }}>♥</span>
                 {reactionCounts.likes}
               </button>
-              <button
-                onClick={handleToggleFollow}
-                title={following ? "Unfollow" : "Follow — get their news & performances in your feed"}
-                className="font-extrabold rounded-full transition hover:opacity-90"
-                style={{
-                  border: "2px solid #fff",
-                  background: following ? "#fff" : "rgba(255,255,255,0.12)",
-                  color: following ? color1 : "#fff",
-                  fontSize: isMobile ? "14px" : "16px",
-                  padding: isMobile ? "7px 14px" : "9px 18px",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  opacity: followLoading ? 0.6 : 1,
-                }}
-              >
-                {following ? "✓ Following" : "+ Follow"}
-              </button>
+              {/* Mobile drops Follow entirely, per explicit request — worth
+                  knowing this is the *only* place a user can ever follow a
+                  player (MyFeed.js reads the same users/{uid}/follows
+                  collection but only lets you unfollow from there; its own
+                  empty state literally says "Hit the Follow button on any
+                  player page"). Hiding it here means mobile visitors have
+                  no way to follow a player at all until/unless another
+                  entry point exists. */}
+              {!isMobile && (
+                <button
+                  onClick={handleToggleFollow}
+                  title={following ? "Unfollow" : "Follow — get their news & performances in your feed"}
+                  className="font-extrabold rounded-full transition hover:opacity-90"
+                  style={{
+                    border: "2px solid #fff",
+                    background: following ? "#fff" : "rgba(255,255,255,0.12)",
+                    color: following ? color1 : "#fff",
+                    fontSize: "16px",
+                    padding: "9px 18px",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                    opacity: followLoading ? 0.6 : 1,
+                  }}
+                >
+                  {following ? "✓ Following" : "+ Follow"}
+                </button>
+              )}
               {/* Drops once the player has an actual NFL draft result
                   (draftedBy) — the hero already carries their landing team
                   and pick info at that point, so a "Film" link back to
@@ -3291,7 +4279,20 @@ useEffect(() => {
                   AdminPanel.js VideosSection the Videos sidebar uses — just
                   filtered to Short === true instead of excluding it). See
                   WatchButton above for the popover + auto-advance queue. */}
-              <WatchButton clips={watchClips} color1={color1} color2={color2} isMobile={isMobile} />
+              <WatchButton
+                clips={watchClips}
+                color1={color1}
+                color2={color2}
+                isMobile={isMobile}
+                originPlayer={{
+                  id: player.id,
+                  name: `${player.First || ""} ${player.Last || ""}`.trim(),
+                  slug: player.Slug || slug,
+                  position: player.Position || "",
+                  school: player.School || "",
+                  eligible: player.Eligible || "",
+                }}
+              />
               {player.Link && String(player.Eligible) === "2026" && !draftedBy && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
                   className="text-white font-extrabold rounded-full transition hover:opacity-80"
