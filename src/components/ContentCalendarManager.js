@@ -51,6 +51,12 @@ const GOLD = "#f6a21d";
 // at a glance, scanning the whole month.
 const CONTENT_TYPES = [
   { key: "video", label: "Video", icon: "▶", color: "#b45309" },
+  // Pulled-in entries split video/short below by that video doc's own
+  // Short flag (AdminPanel.js VideosSection) rather than needing its own
+  // separate fetch — same data, just a different color so the two read
+  // apart at a glance scanning the month. Also pickable here manually, for
+  // planning a Short that doesn't exist yet.
+  { key: "short", label: "Short", icon: "🎬", color: "#ec4899" },
   { key: "article", label: "Article", icon: "📰", color: "#0055a5" },
   { key: "post", label: "Post", icon: "📣", color: "#7c3aed" },
 ];
@@ -103,12 +109,14 @@ const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // of their tallest member) is ever "warped" taller than the rest by a
 // Saturday with a dozen pulled-in videos/articles. Overflow past this
 // scrolls inside the cell instead (see the chip-list div in the grid render
-// below), rather than growing it.
+// below), rather than growing it — that only actually holds if the cell
+// itself also sets overflow:hidden (see its own style comment); height
+// alone doesn't stop a grid item's automatic minimum size from winning.
 const CELL_HEIGHT = "96px";
 // Calendar chips are narrow — a long subject name doesn't just get clipped
 // by CSS overflow, it's hard-cut to a fixed length so every chip reads as
 // roughly the same width regardless of font/browser rounding.
-const MAX_LABEL_CHARS = 12;
+const MAX_LABEL_CHARS = 16;
 const truncateLabel = (label) => {
   if (!label) return "";
   return label.length > MAX_LABEL_CHARS ? `${label.slice(0, MAX_LABEL_CHARS)}...` : label;
@@ -262,10 +270,10 @@ export default function ContentCalendarManager() {
         const person = it.type === "recruit" ? recruitsById.get(it.recruitId) : playersById.get(it.playerId);
         if (person) subjectLabel = `${person.First || ""} ${person.Last || ""}`.trim();
       }
-      if (!subjectLabel) subjectLabel = v.GenTitle || "Video";
+      if (!subjectLabel) subjectLabel = v.GenTitle || (v.Short ? "Short" : "Video");
       const dateKey = dateKeyFromTimestamp(v.Date);
       if (!dateKey) return null;
-      return { id: `video:${v.id}`, refId: v.id, source: "video", type: "video", subjectLabel, dateKey };
+      return { id: `video:${v.id}`, refId: v.id, source: "video", type: v.Short === true ? "short" : "video", subjectLabel, dateKey };
     }).filter(Boolean);
   }, [videos, playersById, recruitsById]);
 
@@ -448,7 +456,7 @@ export default function ContentCalendarManager() {
   if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="200px" />;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: "18px", alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 230px", gap: "14px", alignItems: "start" }}>
       {/* ===== Left: month grid ===== */}
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -528,8 +536,20 @@ export default function ContentCalendarManager() {
                   // exact same size regardless of how many entries a given
                   // day has; a busy Saturday scrolls internally (see the
                   // chip-list div below) instead of stretching its whole row
-                  // taller than the rest of the grid.
-                  height: CELL_HEIGHT, padding: "6px", borderRight: "1px solid #f0f0f0", borderBottom: "1px solid #f0f0f0",
+                  // taller than the rest of the grid. height alone isn't
+                  // enough here: this cell is itself a CSS grid item, and a
+                  // grid item's automatic minimum size defaults to its
+                  // content's min-content — which can still win over an
+                  // explicit height and stretch the row anyway — UNLESS the
+                  // item's own overflow is something other than visible.
+                  // The inner chip-list div's own overflowY:auto further
+                  // down doesn't count for this; it has to be set here too,
+                  // on the cell itself, which is what was actually letting
+                  // a busy day (and everything below it that month) push
+                  // past the grid and get clipped/hidden by whatever
+                  // contains the whole calendar.
+                  height: CELL_HEIGHT, minHeight: CELL_HEIGHT, maxHeight: CELL_HEIGHT, overflow: "hidden",
+                  padding: "6px", borderRight: "1px solid #f0f0f0", borderBottom: "1px solid #f0f0f0",
                   background: cell.inMonth ? "#fff" : "#fafbfc", cursor: "pointer",
                   display: "flex", flexDirection: "column", gap: "3px", boxSizing: "border-box",
                 }}

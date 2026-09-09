@@ -7,6 +7,7 @@ import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -135,6 +136,8 @@ export default function NFLTeamPage() {
   const [statsCache, setStatsCache] = useState({});
   const [statsLoading, setStatsLoading] = useState({});
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  useMobileStuckPageWatchdog(!team && loading, teamKey, { enabled: isMobile });
   const [seoDataReady, setSeoDataReady] = useState(false);
   const hoverTimeout = useRef(null);
   const picksRef = useRef(null);

@@ -7,6 +7,7 @@ import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import MarginAds from "../components/MarginAds";
 import EngagementSection, { useEngagement, LikeButton } from "../components/EngagementSection";
 import PlayersMentionedList from "../components/PlayersMentionedList";
@@ -33,6 +34,8 @@ export default function NewsArticle() {
   const [schoolInfo, setSchoolInfo] = useState({}); // School name -> { logo, logoDark, wordmark, wordmarkDark, slug, color1, color2 }
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  useMobileStuckPageWatchdog(loading, id, { enabled: isMobile });
   const contentRef = useRef(null);
 
   useEffect(() => {

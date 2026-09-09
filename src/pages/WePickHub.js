@@ -761,8 +761,9 @@ function MyPicksSection() {
 
   // Same as shareText, but with a call-to-action right before the link, and
   // (once myFriendCode has loaded — see the ensureCode effect above) a
-  // friend-add line right after it — only the Text button uses this one;
-  // Email/X keep the plain shareText.
+  // friend-add line right after it. Text and X both use this one now (X
+  // used to get the plainer shareText, but the ask was to make the two
+  // match); Email is the only one still on the plain shareText.
   const smsShareText = shareModal
     ? [
         `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
@@ -1826,7 +1827,7 @@ function MyPicksSection() {
                 📧 Email
               </a>
               <a
-                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`}
+                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(smsShareText)}`}
                 target="_blank" rel="noopener noreferrer"
                 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
               >

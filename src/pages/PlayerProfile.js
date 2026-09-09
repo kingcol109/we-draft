@@ -22,6 +22,7 @@ import {
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { Helmet } from "react-helmet-async";
@@ -572,9 +573,25 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
   // one — runs once (a fresh WatchFullscreenFeed instance mounts each time
   // this is opened, so "on mount" already means "once per session"). A
   // failure here just means the feed stops at initialClips instead of
-  // continuing — never blocks the clips already playing.
+  // continuing — never blocks the clips already playing. This is also the
+  // only source of "Watch Next" recommendations (recommended below
+  // excludes every isOrigin clip, i.e. everything in initialClips), which
+  // is why that list was reported showing up "only sometimes": mobile
+  // browsers routinely suspend an in-flight request when the tab gets
+  // backgrounded (screen lock, app switch, a notification) without ever
+  // rejecting the promise — same class of bug already fixed for the main
+  // player-page fetch elsewhere (see PlayerProfile's own watchdog comment)
+  // — and since this effect only ever runs once, it never notices its own
+  // fetch silently died; Watch Next just never populates for the rest of
+  // that session. Retrying the same fetchMore() (not reloading the page —
+  // this shouldn't interrupt whatever's already playing) once the tab
+  // comes back visible, or after a flat timeout regardless, covers both
+  // "hung while backgrounded" and "just hung." `appended` guards against
+  // the original hung call and a retry both eventually landing and
+  // double-appending the same batch.
   useEffect(() => {
     let cancelled = false;
+    let appended = false;
     const excludeSet = new Set(excludeVideoUrls || []);
     const toMsLocal = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
     const fetchMore = async () => {
@@ -658,13 +675,27 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
           return ta === 0 ? trendOrderBySlug[a.playerSlug] - trendOrderBySlug[b.playerSlug] : 0;
         });
 
-        if (!cancelled && more.length > 0) setFeed((prev) => [...prev, ...more]);
+        if (!cancelled && !appended && more.length > 0) {
+          appended = true;
+          setFeed((prev) => [...prev, ...more]);
+        }
       } catch (e) {
         console.error("Watch fullscreen feed extension error:", e);
       }
     };
     fetchMore();
-    return () => { cancelled = true; };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && !appended) fetchMore();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const retryTimer = setTimeout(() => { if (!appended) fetchMore(); }, 8000);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearTimeout(retryTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately once-on-mount; excludeVideoUrls/initialClips are a fresh snapshot every time this component mounts (see its own header comment)
   }, []);
 
@@ -2229,48 +2260,10 @@ export default function PlayerProfile() {
     fetch();
   }, [slug]);
 
-  // ── Mobile "stuck loading forever" watchdog — mobile browsers routinely
-  // suspend a backgrounded tab's in-flight requests (app switch, screen
-  // lock) without ever rejecting the underlying promise; getDocs() above
-  // just never resolves once the tab comes back, and this page has no way
-  // to tell "still fetching" apart from "silently abandoned." A manual
-  // refresh sidesteps it entirely — fresh connection, fresh request, loads
-  // instantly — which is exactly the fix this reproduces automatically:
-  // if the tab was hidden and becomes visible again while `player` still
-  // hasn't loaded, or if it's simply been stuck too long regardless, force
-  // a real reload rather than trusting a retry over whatever connection
-  // state the backgrounding left behind. Desktop doesn't get this — tabs
-  // there aren't suspended the same way, and this bug report was mobile-
-  // only. Guarded by sessionStorage so a genuinely slow (not stuck)
-  // connection gets exactly one automatic reload per slug, never a loop —
-  // the guard clears again once the page actually loads, so a later,
-  // separate hang on the same page still gets its own one retry. ──
-  useEffect(() => {
-    if (typeof window === "undefined" || !isMobile) return;
-    const guardKey = `wd_watchdog_${slug}`;
-    if (player) {
-      try { sessionStorage.removeItem(guardKey); } catch { /* private mode etc — nothing to clear */ }
-      return;
-    }
-    let alreadyTried = false;
-    try { alreadyTried = sessionStorage.getItem(guardKey) === "1"; } catch { /* assume not tried */ }
-    if (alreadyTried) return;
-
-    const forceReload = () => {
-      try { sessionStorage.setItem(guardKey, "1"); } catch { /* best effort — still reload either way */ }
-      window.location.reload();
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible" && !player) forceReload();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    const timer = setTimeout(() => { if (!player) forceReload(); }, 3000);
-
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      clearTimeout(timer);
-    };
-  }, [isMobile, player, slug]);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  // First written inline here; now shared with every other page that has
+  // this same "load one thing by slug, spinner until it lands" shape.
+  useMobileStuckPageWatchdog(!player, slug, { enabled: isMobile });
 
   // ── Fade the page in once the core player doc has loaded, instead of
   // popping straight to fully-rendered content. ──

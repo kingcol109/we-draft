@@ -15,6 +15,7 @@ import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, addDoc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import GameMarginSidebars from "../components/GameMarginSidebars";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { useAuth } from "../context/AuthContext";
@@ -691,6 +692,8 @@ export default function GamePage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  useMobileStuckPageWatchdog(loading, slug, { enabled: isMobile });
   const contentRef = useRef(null);
   const pickFormRef = useRef(null);
   const communityPicksRef = useRef(null);

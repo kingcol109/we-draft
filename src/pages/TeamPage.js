@@ -4,6 +4,7 @@ import { useParams, Link } from "react-router-dom";
 import { collection, getDocs, getDoc, doc, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { Helmet } from "react-helmet-async";
 import EliteFlair from "../assets/elite.png";
 import StarFlair from "../assets/star.png";
@@ -946,6 +947,11 @@ export default function TeamPage() {
   const [canonicalSchool, setCanonicalSchool] = useState("");
   const [activeTab, setActiveTab] = useState("prospects");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment
+  // (first written for PlayerProfile.js's own player-doc fetch, this is
+  // that same fix extracted so every page with this "load one thing by
+  // slug, spinner until it lands" shape can share it).
+  useMobileStuckPageWatchdog(!branding && loading, slug, { enabled: isMobile });
 
   // Whether this team's own schoolData.FCS flag is set — drives the
   // stripped-down sidebar (Top 25 instead of Conference, no Schedule,

@@ -3,10 +3,14 @@ import { useParams } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 
 export default function ArticlePage() {
   const { slug } = useParams();
   const [article, setArticle] = useState(null);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  // No isMobile state on this page, so this checks window.innerWidth itself.
+  useMobileStuckPageWatchdog(!article, slug);
 
   useEffect(() => {
     const fetchArticle = async () => {

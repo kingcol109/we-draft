@@ -19,6 +19,7 @@ import MarginAds from "../components/MarginAds";
 import EngagementSection, { useEngagement, LikeButton } from "../components/EngagementSection";
 import PlayersMentionedList from "../components/PlayersMentionedList";
 import MorePerformancesList, { timeAgo } from "../components/MorePerformancesList";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -61,6 +62,8 @@ export default function PerformancePage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  useMobileStuckPageWatchdog(loading, slug, { enabled: isMobile });
   const contentRef = useRef(null);
 
   useEffect(() => {

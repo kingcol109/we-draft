@@ -19,6 +19,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { useCurrentRankMap } from "../utils/rankings";
 
 const BLUE = "#0055a5";
@@ -157,6 +158,10 @@ export default function HighSchoolTeamPage() {
   const [contentLoading, setContentLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("prospects");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  // Mobile "stuck loading forever" watchdog — see the hook's own comment.
+  // school === null is specifically "still loading" here (false is a
+  // resolved "not available," not stuck).
+  useMobileStuckPageWatchdog(school === null, slug, { enabled: isMobile });
   const currentRankMap = useCurrentRankMap();
   const [top25Schools, setTop25Schools] = useState([]); // sorted [{Rank, School, Logo1, Slug}]
 
