@@ -434,75 +434,14 @@ export function loadYouTubeIframeApi() {
   return window.__wdYouTubeApiPromise;
 }
 
-// ── Opponent wordmark/result footer for a CFB-tagged clip with a linked
-// game — shared between the small Watch popover and each slide of
-// WatchFullscreenFeed below so the two don't drift out of sync with each
-// other. Opponent shows as its actual wordmark (falling back to the
-// short-form name — schools/{School}.Short — only if that school has
-// nothing else on file) rather than spelled-out text; a solid color pill
-// for the result — same shape as GradeBadge — with the date stacked
-// underneath it. `large` scales the whole thing up for
-// WatchFullscreenFeed's own much wider slides — the small popover (330px
-// wide at most) and a full-viewport screen shouldn't render the same fixed
-// pixel size. The logo itself sits in a flex:1 box (fills whatever space is
-// actually left between "vs" and the result badge) sized with height+width
-// both 100% and object-fit:contain — a fixed height+max-width pairing
-// looked fine for a true wide wordmark but rendered a school with no
-// Wordmark on file (falling back to its square Logo1) tiny, since a square
-// image capped at a *height* still only comes out that same size wide.
-// Filling a real box lets a wordmark stretch across the available width
-// while a square logo still grows to the box's full height — each shape
-// ends up as large as it can get without distortion, instead of both being
-// bound by whichever single fixed number happens to suit one shape only. ──
-function GameInfoFooter({ gameInfo, isDraftClip, color1, large }) {
-  if (!gameInfo) return null;
-  // large's box is capped by viewport height (16vh), not just a flat
-  // pixel value — "fill up the space it can" means it should actually
-  // scale with how much room a full-screen slide has, not sit at some
-  // fixed size regardless of screen size.
-  const logoBoxHeight = large ? "min(150px, 16vh)" : "32px";
-  return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:large?"22px":"8px", padding:large?"26px 28px":"8px 10px", borderTop:`3px solid ${isDraftClip ? SITE_GOLD : color1}`, background:"#fafafa" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:large?"16px":"6px", minWidth:0, flex:1 }}>
-        <span style={{ flexShrink:0, fontSize:large?"26px":"11px", fontWeight:900, color:isDraftClip?"#7a5c00":color1, textTransform:"uppercase", letterSpacing:"0.04em" }}>vs</span>
-        {gameInfo.logo ? (
-          <div style={{ flex:1, minWidth:0, height:logoBoxHeight, display:"flex", alignItems:"center" }}>
-            <img
-              src={sanitizeUrl(gameInfo.logo)}
-              alt={gameInfo.opponent}
-              title={gameInfo.opponent}
-              style={{ height:"100%", width:"100%", objectFit:"contain", objectPosition:"left center" }}
-              referrerPolicy="no-referrer"
-              onError={(e) => { e.currentTarget.style.display = "none"; }}
-            />
-          </div>
-        ) : (
-          <span style={{ fontSize:large?"32px":"12px", fontWeight:900, color:isDraftClip?"#7a5c00":color1, textTransform:"uppercase", letterSpacing:"0.02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-            {gameInfo.opponent}
-          </span>
-        )}
-      </div>
-      {(gameInfo.resultLabel || gameInfo.dateMs > 0) && (
-        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", flexShrink:0, gap:large?"8px":"3px" }}>
-          {gameInfo.resultLabel && (
-            <span style={{
-              fontSize:large?"22px":"11px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.04em",
-              borderRadius:large?"10px":"6px", padding:large?"9px 20px":"4px 10px",
-              background: gameInfo.resultLabel.startsWith("W") ? "#16a34a" : gameInfo.resultLabel.startsWith("L") ? "#dc2626" : "#888",
-            }}>
-              {gameInfo.resultLabel}
-            </span>
-          )}
-          {gameInfo.dateMs > 0 && (
-            <span style={{ fontSize:large?"16px":"9px", fontWeight:700, color:"#999" }}>
-              {new Date(gameInfo.dateMs).toLocaleDateString(undefined, { month:"short", day:"numeric", timeZone:"UTC" })}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// GameInfoFooter (opponent wordmark/result footer for a CFB-tagged Short)
+// used to render here — removed along with its last two call sites (the
+// small Watch popover, scrapped separately, and WatchFullscreenFeed's own
+// mobile overlay/desktop left-margin copies). Admin can still tag a Short
+// to its game (AdminPanel.js's Game FieldRow, GameSlug) and this file still
+// resolves that into a gameInfo object per clip (see the player video-fetch
+// effect's buildGameInfo) — it's just never displayed anywhere in the Watch
+// feed anymore, gameInfo sits unused on each clip instead.
 
 // ── Watch button — a self-contained trigger, portals straight into
 // WatchFullscreenFeed (below) on click, on both mobile and desktop. This
@@ -996,10 +935,9 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
   // follows in whatever order they appeared in the feed.
   const activeClip = feed[activeIndex] || null;
   const activeCard = playerCards[activeClip?.playerId] || null;
-  const isActiveDraft = !!activeClip?.isDraft; // left panel's own GameInfoFooter needs this at this scope, outside the per-slide map below
   // The left margin's own team-color accents (View Full Profile button,
-  // "Now Watching"/"Recent Video" labels, GameInfoFooter) need to follow
-  // WHOEVER'S ACTIVE, not stay stuck on color1/color2 — those two props are
+  // "Now Watching"/"Recent Video" labels) need to follow WHOEVER'S ACTIVE,
+  // not stay stuck on color1/color2 — those two props are
   // fixed for this whole session (the player whose Watch button opened it),
   // so without this every other player scrolled/jumped to kept showing the
   // original player's colors instead of their own. Same schoolLogoBySchool
@@ -1361,15 +1299,12 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
                   </a>
                 </div>
               )}
-              {/* Moved here from overlaying the video itself (see the
-                  slide's own comment on why) — same compact card the small
-                  Watch popover uses, just parked in the margin instead of
-                  under the clip. */}
-              {activeClip.gameInfo && (
-                <div style={{ borderRadius: "10px", overflow: "hidden", marginBottom: "18px" }}>
-                  <GameInfoFooter gameInfo={activeClip.gameInfo} isDraftClip={isActiveDraft} color1={activeColor1} />
-                </div>
-              )}
+              {/* Game info scrapped from Shorts entirely (mobile already
+                  dropped it — see that per-slide comment; this was the
+                  last place it still showed, desktop's own left margin).
+                  Admin can still tag a CFB Short to its game (GameSlug) —
+                  that's just not surfaced anywhere in this feed anymore,
+                  gameInfo is simply never read here now. */}
               {/* If this was opened from that exact player's own page (see
                   originPlayerSlug — WatchButton passes its own player's
                   slug through) and their own clip is what's active, this
@@ -1958,10 +1893,12 @@ function TruncatedEvaluationText({ text, keyPrefix, color }) {
 
 // Game Notes / Games Watched for one public evaluation in the feed below
 // (read-only — no remove button, unlike the evaluator's own editor). A note
-// with actual written text renders as a full card with its grade badge; a
-// note added with just a grade and no text is only a "watched" marker, so
-// it drops into the plainer Games Watched row instead and never surfaces
-// its grade — same with-text/watched-only split as the editor's own panel.
+// with actual written text renders as a full card, its grade badge included
+// only if one was actually set (neither a grade nor a note is required to
+// log a game — see handleAddGameNote's own comment); a note added with no
+// text — graded or not — is only a "watched" marker, so it drops into the
+// plainer Games Watched row instead and never surfaces a grade at all —
+// same with-text/watched-only split as the editor's own panel.
 function GameNotesFeedSection({ gameNotes, color, mobile }) {
   if (!Array.isArray(gameNotes) || gameNotes.length === 0) return null;
   const sorted = [...gameNotes].sort((a, b) => (b.dateMs || 0) - (a.dateMs || 0));
@@ -1985,9 +1922,11 @@ function GameNotesFeedSection({ gameNotes, color, mobile }) {
                     <div style={{ fontSize: mobile ? "11px" : "12px", fontWeight: 900, color: "#333" }}>
                       vs {n.opponent}{fmtDate(n.dateMs)}
                     </div>
-                    <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", background: tagInfo?.color || "#999", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
-                      {n.tag}
-                    </span>
+                    {n.tag && (
+                      <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", background: tagInfo?.color || "#999", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+                        {n.tag}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: mobile ? "11.5px" : "12.5px", color: "#555", marginTop: "4px", lineHeight: 1.4 }}>{n.note}</div>
                 </div>
@@ -2288,6 +2227,49 @@ export default function PlayerProfile() {
     };
     fetch();
   }, [slug]);
+
+  // ── Mobile "stuck loading forever" watchdog — mobile browsers routinely
+  // suspend a backgrounded tab's in-flight requests (app switch, screen
+  // lock) without ever rejecting the underlying promise; getDocs() above
+  // just never resolves once the tab comes back, and this page has no way
+  // to tell "still fetching" apart from "silently abandoned." A manual
+  // refresh sidesteps it entirely — fresh connection, fresh request, loads
+  // instantly — which is exactly the fix this reproduces automatically:
+  // if the tab was hidden and becomes visible again while `player` still
+  // hasn't loaded, or if it's simply been stuck too long regardless, force
+  // a real reload rather than trusting a retry over whatever connection
+  // state the backgrounding left behind. Desktop doesn't get this — tabs
+  // there aren't suspended the same way, and this bug report was mobile-
+  // only. Guarded by sessionStorage so a genuinely slow (not stuck)
+  // connection gets exactly one automatic reload per slug, never a loop —
+  // the guard clears again once the page actually loads, so a later,
+  // separate hang on the same page still gets its own one retry. ──
+  useEffect(() => {
+    if (typeof window === "undefined" || !isMobile) return;
+    const guardKey = `wd_watchdog_${slug}`;
+    if (player) {
+      try { sessionStorage.removeItem(guardKey); } catch { /* private mode etc — nothing to clear */ }
+      return;
+    }
+    let alreadyTried = false;
+    try { alreadyTried = sessionStorage.getItem(guardKey) === "1"; } catch { /* assume not tried */ }
+    if (alreadyTried) return;
+
+    const forceReload = () => {
+      try { sessionStorage.setItem(guardKey, "1"); } catch { /* best effort — still reload either way */ }
+      window.location.reload();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && !player) forceReload();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const timer = setTimeout(() => { if (!player) forceReload(); }, 5000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearTimeout(timer);
+    };
+  }, [isMobile, player, slug]);
 
   // ── Fade the page in once the core player doc has loaded, instead of
   // popping straight to fully-rendered content. ──
@@ -3169,9 +3151,11 @@ useEffect(() => {
   const pickableGames = (availableGames || []).filter((g) => !notedGameIds.has(g.id));
 
   // Split for display: a note with actual written text is a real "Game
-  // Note" (tag + note shown together); a note added with just a grade and
-  // no text is only a "watched" marker, so it renders under Games Watched
-  // instead with its grade left off (see the Game Notes panel below).
+  // Note" (tag + note shown together, if a tag was even set — see its own
+  // render); a note added with no text — whether or not a grade was
+  // picked — is just a "watched" marker, so it renders under Games
+  // Watched instead with any grade left off (see the Game Notes panel
+  // below).
   const sortedGameNotes = [...gameNotes].sort((a, b) => b.dateMs - a.dateMs);
   const gameNotesWithText = sortedGameNotes.filter((n) => n.note?.trim());
   const gameNotesWatchedOnly = sortedGameNotes.filter((n) => !n.note?.trim());
@@ -3183,13 +3167,14 @@ useEffect(() => {
   // silently unsaved (and lost on navigating away) the moment it's added.
   // `overrideGameNotes` is how the just-computed array reaches that save
   // without waiting on setGameNotes' own state update to land first.
-  // Only the grade (tag) is required — a written note is optional, so
-  // picking a game and grading it is enough to log it as watched (see
-  // Games Watched above) without forcing a full write-up.
+  // Neither the grade (tag) nor a written note is required — picking a
+  // game and hitting "Mark Watched" is enough on its own to log it as
+  // watched (see Games Watched above); a grade and/or a note are both
+  // there for anyone who wants to say more, not a requirement to log
+  // having seen the game at all.
   const handleAddGameNote = async () => {
     const game = (availableGames || []).find((g) => g.id === selectedGameId);
     if (!game) return;
-    if (!noteTag) { alert("Grade this game first."); return; }
     const text = noteText.trim();
     if (text.split(/\s+/).filter(Boolean).length > GAME_NOTE_MAX_WORDS) {
       alert(`Keep the note to ${GAME_NOTE_MAX_WORDS} words or fewer.`);
@@ -5379,9 +5364,11 @@ useEffect(() => {
                                     vs {n.opponent}{n.dateMs ? ` (${new Date(n.dateMs).toLocaleDateString("en-US", { timeZone: "UTC" })})` : ""}
                                   </div>
                                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                    <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", background: tagInfo?.color || "#999", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
-                                      {n.tag}
-                                    </span>
+                                    {n.tag && (
+                                      <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", background: tagInfo?.color || "#999", borderRadius: "10px", padding: "2px 8px", textTransform: "uppercase" }}>
+                                        {n.tag}
+                                      </span>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => handleRemoveGameNote(n.gameId)}
@@ -5459,7 +5446,7 @@ useEffect(() => {
                                   className="w-full rounded px-3 py-2 border-2 font-bold"
                                   style={{ borderColor: color1, marginBottom: "8px" }}
                                 >
-                                  <option value="">Grade this game...</option>
+                                  <option value="">Grade this game (optional)...</option>
                                   {GAME_NOTE_TAGS.map((t) => <option key={t.key} value={t.key}>{t.key}</option>)}
                                 </select>
                                 <textarea
@@ -5476,12 +5463,12 @@ useEffect(() => {
                                   <button
                                     type="button"
                                     onClick={() => handleAddGameNote()}
-                                    disabled={!noteTag || overLimit || saving}
+                                    disabled={overLimit || saving}
                                     style={{
                                       background: color1, color: "#fff", border: `2px solid ${color2}`, borderRadius: "6px",
                                       padding: "7px 16px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
-                                      cursor: (!noteTag || overLimit || saving) ? "default" : "pointer",
-                                      opacity: (!noteTag || overLimit || saving) ? 0.5 : 1,
+                                      cursor: (overLimit || saving) ? "default" : "pointer",
+                                      opacity: (overLimit || saving) ? 0.5 : 1,
                                     }}
                                   >
                                     {saving ? "Saving..." : noteText.trim() ? "Add Note" : "Mark Watched"}

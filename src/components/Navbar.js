@@ -493,6 +493,8 @@ export default function Navbar() {
 
             <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
 
+            <Link to="/watch" style={baseStyle}>▶ Watch</Link>
+
             {user ? (
               <Link to="/profile" style={baseStyle}>
                 Profile
@@ -546,6 +548,7 @@ export default function Navbar() {
               { path: "/we-pick", label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
               { path: "/mocks", label: "Mock Drafts" },
+              { path: "/watch", label: "▶ Watch" },
             ].map((l) => (
               <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
                 {l.label}

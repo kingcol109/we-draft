@@ -495,7 +495,7 @@ export default function HomeOffSeason() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "280px", maxWidth: "420px", alignSelf: "stretch" }}>
               {[
                 { label: "Evaluate Players", sub: "Grade every prospect", to: "/community", icon: "📋" },
-                { label: "Find Hidden Gems", sub: "Under-the-radar talent", to: "/community/2028", icon: "💎" },
+                { label: "Watch", sub: "Player Shorts, one after another", to: "/watch", icon: "▶" },
                 { label: "Create Mock Drafts", sub: "Build and share your mock", to: "/mocks", icon: "🏈" },
                 { label: "Draft News", sub: "Latest prospect analysis", to: "/news", icon: "📰" },
               ].map(({ label, sub, to, icon }) => (
