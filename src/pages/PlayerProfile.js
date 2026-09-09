@@ -482,16 +482,17 @@ function WatchButton({ clips, color1, color2, isMobile, originPlayer }) {
           a version per team. */}
       <style>{`
         @keyframes wdWatchBtnPulse {
-          0%   { box-shadow: 0 0 0 0 var(--wd-watch-glow); }
-          70%  { box-shadow: 0 0 0 8px transparent; }
-          100% { box-shadow: 0 0 0 0 transparent; }
+          0%   { box-shadow: 0 0 0 0 var(--wd-watch-glow), 0 0 0 0 var(--wd-watch-glow); }
+          40%  { box-shadow: 0 0 0 6px var(--wd-watch-glow), 0 0 14px 4px var(--wd-watch-glow); }
+          70%  { box-shadow: 0 0 0 14px transparent, 0 0 14px 4px transparent; }
+          100% { box-shadow: 0 0 0 14px transparent, 0 0 14px 4px transparent; }
         }
-        .wd-watch-btn { animation: wdWatchBtnPulse 2.2s ease-out infinite; }
+        .wd-watch-btn { animation: wdWatchBtnPulse 3s ease-out infinite; }
       `}</style>
       <button
         onClick={handleClick}
         className="text-white font-extrabold rounded-full transition hover:opacity-80 wd-watch-btn"
-        style={{ "--wd-watch-glow": `${color2}88`, border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}
+        style={{ "--wd-watch-glow": `${color2}dd`, border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}
       >
         ▶ Watch
       </button>
@@ -2263,7 +2264,7 @@ export default function PlayerProfile() {
       if (document.visibilityState === "visible" && !player) forceReload();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    const timer = setTimeout(() => { if (!player) forceReload(); }, 5000);
+    const timer = setTimeout(() => { if (!player) forceReload(); }, 3000);
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -4093,7 +4094,7 @@ useEffect(() => {
             12%  { left: 130%; }
             100% { left: 130%; }
           }
-          .wd-flair-shine { animation: wdFlairShine 4.5s ease-in-out infinite; }
+          .wd-flair-shine { animation: wdFlairShine 10s ease-in-out infinite; }
         `}</style>
       )}
 
