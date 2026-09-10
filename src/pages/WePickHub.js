@@ -893,6 +893,39 @@ function MyPicksSection() {
   const rankedCountRef = useRef(rankedGames.length);
   useEffect(() => { rankedCountRef.current = rankedGames.length; }, [rankedGames.length, selectedWeek]);
 
+  // Auto-locks in the Ranked 6 the instant it qualifies — replaces the old
+  // manual "Submit for Ranking" button entirely. Fires once when a week
+  // first qualifies, and again any time the locked-in set of games or any
+  // of their score predictions actually changes afterward (editing a
+  // score, swapping which game is starred) — signature strings, not the
+  // arrays/objects themselves, are the dependency so this doesn't refire
+  // every render over a new-but-equal-content array reference. Computed
+  // and called up here (ahead of the `if (!user)`/`if (loading)` early
+  // returns below, same reasoning as rankedGames/rankedCountRef above) so
+  // this hook still runs unconditionally every render; the render-time
+  // `alreadySubmitted` further down duplicates this same match check
+  // purely for its own UI display, since it can't be computed this early
+  // (status/rankedGameIds aren't named until after those early returns).
+  const earlyRankedStatus = rankedStatus(rankedGames, selectedWeek);
+  const earlyRankedGameIds = rankedGames.map((g) => g.id).sort();
+  const earlyRankedSignature = earlyRankedGameIds.join(",");
+  const earlyPredictionsSignature = earlyRankedGameIds
+    .map((id) => { const p = myPicksById[id]; return `${id}:${p?.awayScore ?? ""}:${p?.homeScore ?? ""}`; })
+    .join("|");
+  useEffect(() => {
+    if (!user || !earlyRankedStatus.isQualified) return;
+    const submittedIds = (submission?.gameIds || []).slice().sort();
+    const idsMatch = earlyRankedGameIds.length === submittedIds.length && earlyRankedGameIds.every((id, i) => id === submittedIds[i]);
+    const predictionsMatch = earlyRankedGameIds.every((id) => {
+      const current = myPicksById[id];
+      const submitted = submission?.predictions?.[id];
+      return !!submitted && current?.awayScore === submitted.awayScore && current?.homeScore === submitted.homeScore;
+    });
+    if (idsMatch && predictionsMatch) return; // already locked in exactly as-is
+    handleSubmitForRanking(earlyRankedGameIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- earlyRankedSignature/earlyPredictionsSignature intentionally stand in for myPicksById/rankedGames/submission (see comment above); handleSubmitForRanking is stable enough within one render pass
+  }, [user, earlyRankedStatus.isQualified, earlyRankedSignature, earlyPredictionsSignature, selectedWeek]);
+
   const weekMonday = useMemo(() => {
     const dates = gamesForWeek.map((g) => toMs(g.Date)).filter(Boolean);
     return dates.length ? mondayOfWeekUtc(Math.min(...dates)) : 0;
@@ -1083,13 +1116,12 @@ function MyPicksSection() {
     }
   };
 
-  // Locks in the current Ranked 6 as this week's official submission —
-  // only callable once rankedStatus says the composition requirement is
-  // met (the button itself stays disabled/hidden otherwise). Re-submitting
-  // after changing which games are starred just overwrites the snapshot;
-  // nothing here stops a user from starring/unstarring afterward, it just
-  // means their submission is stale until they submit again (see
-  // alreadySubmitted's set-comparison in the render below).
+  // Locks in the current Ranked 6 as this week's official submission.
+  // Called automatically by the earlyRankedStatus effect above the instant
+  // a week qualifies — there's no manual "Submit" button anymore — and
+  // again any time the locked-in set of games or a score prediction on one
+  // of them changes afterward, so a submission is never left stale behind
+  // whatever's actually starred.
   const handleSubmitForRanking = async (rankedGameIds) => {
     if (!user || !selectedWeek) return;
     setSubmitting(true);
@@ -1338,7 +1370,7 @@ function MyPicksSection() {
             ["⭐", "Star 6 picks", " each week to build your Ranked 6 — the Game of the Week plus at least 2 Featured games (Week 0: any 6, no restrictions)."],
             ["🎯", "Call the winner", " — bank 100 points for the right team, 0 for the wrong one, no matter how close the final score was."],
             ["🔟", "Nail the score", " — once you've got the winner, earn up to 100 more points per side, losing 10 for every point you're off."],
-            ["🔒", "Submit before kickoff", " to lock in your Ranked 6 — your season score is the sum of every week you qualify."],
+            ["🔒", "Qualify before kickoff", " and your Ranked 6 locks in automatically — your season score is the sum of every week you qualify."],
           ].map(([icon, lead, rest], i) => (
             <li key={i} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
               <span style={{ flexShrink: 0 }}>{icon}</span>
@@ -1524,23 +1556,20 @@ function MyPicksSection() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
                   <div style={{ fontSize: "13px", fontWeight: 800, color: status.isQualified ? "#8ef0a5" : "rgba(255,255,255,0.85)" }}>
-                    {/* Being qualified doesn't count toward the leaderboard
-                        on its own — Submit for Ranking still has to happen
-                        (or happen again, if a score changed since the last
-                        submit — see alreadySubmitted). Say so right in the
-                        qualified message instead of leaving that only to
-                        the button's own label, which is easy to miss. */}
-                    {status.isQualified && !alreadySubmitted
-                      ? `${status.text} Submit your Ranked 6 below to lock it in.`
+                    {/* No more "now go submit it" — qualifying locks it in on
+                        its own (see the earlyRankedStatus effect above), so
+                        this just confirms that already happened instead of
+                        asking for a separate action. */}
+                    {status.isQualified
+                      ? (alreadySubmitted ? `${status.text} 🔒 Locked in.` : `${status.text} Locking in…`)
                       : status.text}
                   </div>
                   {status.isQualified && (
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {/* Bragging rights before kickoff — see
                           handleSharePicks. Shown as soon as the Ranked 6
-                          qualifies, whether or not it's been submitted yet,
-                          since "qualified" already means all 6 picks are
-                          locked in on the player's own end. */}
+                          qualifies — no separate submit step to wait on
+                          anymore, qualifying and locking in happen together. */}
                       <button
                         onClick={handleSharePicks}
                         style={{
@@ -1551,26 +1580,13 @@ function MyPicksSection() {
                       >
                         🔗 Share Picks
                       </button>
-                      <button
-                        onClick={() => handleSubmitForRanking(rankedGameIds)}
-                        disabled={submitting || alreadySubmitted}
-                        style={{
-                          flexShrink: 0, border: "none", borderRadius: "8px", padding: "9px 18px",
-                          fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
-                          background: alreadySubmitted ? "rgba(142,240,165,0.18)" : GOLD,
-                          color: alreadySubmitted ? "#8ef0a5" : "#fff",
-                          cursor: submitting || alreadySubmitted ? "default" : "pointer",
-                        }}
-                      >
-                        {alreadySubmitted ? "✓ Submitted for Ranking" : submitting ? "Submitting…" : "Submit for Ranking"}
-                      </button>
                     </div>
                   )}
                 </div>
-                {/* Hard-to-miss confirmation that the click actually went
-                    through — fades away on its own; the button's own
-                    "✓ Submitted for Ranking" state carries the ongoing
-                    status after this clears. */}
+                {/* Hard-to-miss confirmation that the auto-lock-in actually
+                    went through — fades away on its own; the status line
+                    above ("🔒 Locked in.") carries the ongoing state after
+                    this clears. */}
                 {submitFeedback !== "idle" && (
                   <div style={{
                     marginTop: "10px", fontSize: "13px", fontWeight: 800, padding: "9px 12px", borderRadius: "8px",
@@ -1579,7 +1595,7 @@ function MyPicksSection() {
                   }}>
                     {submitFeedback === "success"
                       ? `✅ Locked in! Your Ranked 6 for ${selectedWeek} is submitted.`
-                      : "⚠️ Something went wrong submitting — try again."}
+                      : "⚠️ Something went wrong locking in your picks — check your connection and try changing a pick to retrigger it."}
                   </div>
                 )}
               </>
@@ -2118,7 +2134,7 @@ function StandingsSection() {
             ["⭐", "Star 6 picks", " each week to build your Ranked 6 — the Game of the Week plus at least 2 Featured games (Week 0: any 6, no restrictions)."],
             ["🎯", "Call the winner", " — bank 100 points for the right team, 0 for the wrong one, no matter how close the final score was."],
             ["🔟", "Nail the score", " — once you've got the winner, earn up to 100 more points per side, losing 10 for every point you're off."],
-            ["🔒", "Submit before kickoff", " to lock in your Ranked 6 — your season score is the sum of every week you qualify."],
+            ["🔒", "Qualify before kickoff", " and your Ranked 6 locks in automatically — your season score is the sum of every week you qualify."],
           ].map(([icon, lead, rest], i) => (
             <li key={i} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
               <span style={{ flexShrink: 0 }}>{icon}</span>
@@ -2192,25 +2208,29 @@ function StandingsSection() {
               {/* Your own status leads, above either scope's content below
                   (not folded into the Friends roster specifically) — it's
                   relevant regardless of which scope you're looking at, and
-                  a signed-in visitor who hasn't submitted yet gets a direct
-                  prompt to go do it instead of just finding out passively. */}
+                  a signed-in visitor who hasn't qualified yet gets a direct
+                  prompt to go do it instead of just finding out passively.
+                  There's no separate submit action anymore (see
+                  earlyRankedStatus's own effect on the Picks tab) —
+                  qualifying locks it in on its own, so this only ever
+                  points them at making picks, never at "submitting." */}
               {user && !submissionsLoading && (
                 (weekSubmissions || []).some((s) => s.uid === user.uid) ? (
                   <div style={{ padding: "12px 16px", background: "rgba(74,222,128,0.12)", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
                     <div style={{ fontSize: "13px", fontWeight: 800, color: "#4ade80" }}>
-                      ✓ You've submitted your picks for {selectedWeek}.
+                      ✓ Your picks for {selectedWeek} are locked in.
                     </div>
                   </div>
                 ) : (
                   <div style={{ padding: "12px 16px", background: "rgba(246,162,29,0.14)", borderBottom: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                     <div style={{ fontSize: "13px", fontWeight: 800, color: GOLD }}>
-                      You haven't submitted your picks for {selectedWeek} yet.
+                      You haven't qualified for {selectedWeek} yet.
                     </div>
                     <Link
                       to="/we-pick"
                       style={{ background: GOLD, color: "#06162c", border: "none", borderRadius: "6px", padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none", whiteSpace: "nowrap" }}
                     >
-                      Submit Now →
+                      Make Picks →
                     </Link>
                   </div>
                 )
