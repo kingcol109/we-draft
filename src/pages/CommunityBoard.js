@@ -6,6 +6,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo2 from "../assets/Logo2.png";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -282,10 +283,28 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
 // the click handler still preventDefaults and runs the same toggle()
 // instead of letting the browser navigate normally.
 function PositionFilterBar({ options, selected, setSelected, isMobile, eligibleYear }) {
-  const toggle = (pos) => setSelected((prev) => prev.includes(pos) ? prev.filter((x) => x !== pos) : [...prev, pos]);
+  // Mobile-only single-select: clicking a position shows just that group
+  // (replacing whatever was selected before); clicking the already-active
+  // one deselects it and falls back to the whole class. Desktop keeps its
+  // original multi-select checkbox-style toggle.
+  const toggle = (pos) => setSelected((prev) => {
+    if (!isMobile) return prev.includes(pos) ? prev.filter((x) => x !== pos) : [...prev, pos];
+    return prev.includes(pos) ? [] : [pos];
+  });
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center", marginBottom: isMobile ? "8px" : "18px" }}>
+    <div style={{
+      display: "flex",
+      // Mobile-only: nowrap + horizontal scroll fallback so the (now
+      // shorter, K/P-dropped) chip row fits one line; desktop is
+      // untouched (wraps, centered, original spacing).
+      flexWrap: isMobile ? "nowrap" : "wrap",
+      overflowX: isMobile ? "auto" : "visible",
+      WebkitOverflowScrolling: "touch",
+      gap: isMobile ? "5px" : "8px",
+      justifyContent: "center",
+      marginBottom: isMobile ? "8px" : "18px",
+    }}>
       {options.map((pos) => {
         const active = selected.includes(pos);
         return (
@@ -294,10 +313,11 @@ function PositionFilterBar({ options, selected, setSelected, isMobile, eligibleY
             to={`/community/${eligibleYear}/${pos.toLowerCase()}`}
             onClick={(e) => { e.preventDefault(); toggle(pos); }}
             style={{
-              padding: isMobile ? "10px 20px" : "14px 32px",
-              fontWeight: 900, fontSize: isMobile ? "16px" : "19px",
+              flexShrink: 0,
+              padding: isMobile ? "7px 10px" : "14px 32px",
+              fontWeight: 900, fontSize: isMobile ? "12px" : "19px",
               textTransform: "uppercase", letterSpacing: "0.05em",
-              border: "3px solid " + GOLD, borderRadius: "10px", cursor: "pointer",
+              border: (isMobile ? "2px" : "3px") + " solid " + GOLD, borderRadius: isMobile ? "8px" : "10px", cursor: "pointer",
               background: active ? BLUE : "#fff",
               color: active ? "#fff" : BLUE,
               whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s",
@@ -538,9 +558,16 @@ export default function CommunityBoard() {
   // ── SEO tags — computed from URL params alone (no fetched data), so they
   // can render on every pass, including the loading spinner. This is what
   // lets Prerender.io capture a valid <title>/description/canonical even if
-  // it snapshots before the player list has loaded. ──
+  // it snapshots before the player list has loaded. positionParam stays the
+  // raw (possibly comma-joined — see NFLTeamPage.jsx's "+" links, e.g.
+  // /community/2027/dl,edge) URL segment for anything that just echoes it
+  // back into a URL; positionParams is the parsed array for anything that
+  // needs to reason about each position individually. ──
   const positionParam = position ? position.toUpperCase() : null;
-  const positionLabel = positionParam ? (POSITION_LABELS[positionParam] || positionParam) : null;
+  const positionParams = positionParam ? positionParam.split(",").map((p) => p.trim()).filter(Boolean) : [];
+  const positionLabel = positionParams.length > 0
+    ? positionParams.map((p) => POSITION_LABELS[p] || p).join(" / ")
+    : null;
 
   const pageTitle = positionLabel
     ? eligibleYear + " NFL Draft " + positionLabel + " Rankings | We-Draft.com"
@@ -584,6 +611,12 @@ export default function CommunityBoard() {
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
+
+  // ── Same mobile stuck-page reload as PlayerProfile.js/TeamPage.js/etc —
+  // a backgrounded tab can leave this page's fetch hanging indefinitely,
+  // so force a real reload after 3s (or on tab refocus) rather than let it
+  // spin forever. Keyed on year+position so switching boards resets it. ──
+  useMobileStuckPageWatchdog(loading, `community_${eligibleYear}_${positionParam || "all"}`, { enabled: isMobile });
 
   // ── Tells Prerender.io's headless browser when this page's data has
   // actually finished loading, instead of letting it guess via a fixed
@@ -651,17 +684,24 @@ export default function CommunityBoard() {
       programmaticNavRef.current = false;
       return;
     }
-    const posUpper = position ? position.toUpperCase() : null;
+    // posList is normally 0 or 1 positions (the position bar is single-
+    // select — see PositionFilterBar's own toggle), but a deep link can
+    // land here with more than one (comma-joined, e.g. NFLTeamPage.jsx's
+    // "+" button linking a Defensive Line group to /community/2027/dl,edge)
+    // — those just seed selectedPositions with every position listed.
+    const posList = position ? position.toUpperCase().split(",").map((p) => p.trim()).filter(Boolean) : [];
     setSelectedPositions((prev) => {
-      if (posUpper && prev.length === 1 && prev[0] === posUpper) return prev;
-      if (!posUpper && prev.length === 0) return prev;
-      return posUpper ? [posUpper] : [];
+      const same = prev.length === posList.length && posList.every((p) => prev.includes(p));
+      return same ? prev : posList;
     });
   }, [position]);
 
   useEffect(() => {
-    const currentPos = position ? position.toUpperCase() : null;
-    const desiredPos = selectedPositions.length === 1 ? selectedPositions[0] : null;
+    // Sorted so a 2+-position deep link's URL round-trips as the same
+    // string regardless of selection order, instead of this effect
+    // reading it as "changed" and re-navigating in a loop.
+    const currentPos = position ? position.toUpperCase().split(",").sort().join(",") : null;
+    const desiredPos = selectedPositions.length > 0 ? [...selectedPositions].sort().join(",") : null;
     if (desiredPos === currentPos) return;
     programmaticNavRef.current = true;
     navigate(yearPath(eligibleYear, desiredPos), { replace: true });
@@ -984,6 +1024,9 @@ export default function CommunityBoard() {
       return ai - bi;
     }
   );
+  // Mobile-only: Kicker/Punter dropped so the chip row fits one line on a
+  // narrow screen. Desktop keeps the full allPositions list unchanged.
+  const mobilePositions = allPositions.filter((pos) => pos !== "K" && pos !== "P");
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
   if (loading) {
@@ -1149,14 +1192,14 @@ export default function CommunityBoard() {
         <div style={{ height: "4px", background: GOLD }} />
       </div>
 
-      {/* Draft Year — mobile collapses the whole row (3 big pills + a
-          separate Archive dropdown) into one compact dropdown, since that
-          row wraps to multiple lines and eats a lot of vertical space on a
-          narrow screen. Desktop keeps the big pill row unchanged. */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
-        {isMobile ? (
-          <YearDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
-        ) : (
+      {/* Draft Year — desktop only up here now; on mobile the year filter
+          moved down into the 2x2 filter grid (in Position's old slot, as a
+          YearDropdown button) instead of getting its own row, since
+          Position now gets the same full chip bar desktop uses (see
+          below) and there wasn't room for both a standalone year row and a
+          standalone position row on a narrow screen. */}
+      {!isMobile && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
             <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
             {ACTIVE_YEARS.map((yr) => (
@@ -1177,15 +1220,13 @@ export default function CommunityBoard() {
               </Link>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Desktop-only Position chip row — on mobile, Position joins the rest
-          of the filter buttons in the single grid below instead of getting
-          its own separate centered row (that, plus the old 3-item/2-column
-          grid leaving Comm Grade dangling alone next to an empty cell, plus
-          a mixed dropdown/toggle/search-input/text-link row underneath, was
-          the "all over the place" mobile layout being fixed here). */}
+      {/* Desktop-only Position chip row, unchanged from before the mobile
+          rework — mobile gets its own copy further down (see the "Position
+          — its own centered row" comment below), scoped to mobile-only
+          fixes (single-select toggle, K/P dropped, one-line sizing). */}
       {!is2029Empty && !isMobile && (
         <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
       )}
@@ -1219,7 +1260,9 @@ export default function CommunityBoard() {
                   below since a growing text input doesn't belong in a
                   fixed-column button grid. */}
               <div className="wd-mobile-filter-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "8px" }}>
-                <DropdownChecklist title="Position" options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} />
+                {/* Position moved up to its own full chip bar (see
+                    PositionFilterBar above) — Year takes this slot instead. */}
+                <YearDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
@@ -1246,6 +1289,11 @@ export default function CommunityBoard() {
                   </button>
                 )}
               </div>
+              {/* Position — mobile-only fix: its own centered row under
+                  "My Board", above the search box, using the K/P-dropped
+                  mobilePositions list. Desktop's chip row stays up top
+                  (unchanged, see above) with the full allPositions list. */}
+              <PositionFilterBar options={mobilePositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
               <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
                 style={{ display: "block", width: "100%", boxSizing: "border-box", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px 14px", fontWeight: 700, fontSize: "14px", color: BLUE, outline: "none", marginBottom: "6px" }} />
               <div style={{ textAlign: "center" }}>
@@ -1288,8 +1336,8 @@ export default function CommunityBoard() {
           <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
             <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                {selectedPositions.length === 1
-                  ? (eligibleYear + " " + (POSITION_LABELS[selectedPositions[0]] || selectedPositions[0]) + " Rankings")
+                {selectedPositions.length > 0
+                  ? (eligibleYear + " " + selectedPositions.map((p) => POSITION_LABELS[p] || p).join(" / ") + " Rankings")
                   : (eligibleYear + " Draft Class")}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

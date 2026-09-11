@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import BoardsMarginSidebars from "../components/BoardsMarginSidebars";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -233,6 +234,13 @@ export default function UserBoards() {
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
+
+  // ── Same mobile stuck-page reload as PlayerProfile.js/CommunityBoard.js/
+  // etc — a backgrounded tab can leave this page's fetch hanging
+  // indefinitely, so force a real reload after 3s (or on tab refocus)
+  // rather than let it spin forever. Keyed on the selected year so
+  // switching years resets it. ──
+  useMobileStuckPageWatchdog(loading, `user_boards_${eligibleYear}`, { enabled: isMobile });
 
   const handleYearSelect = (yr) => {
     setEligibleYear(yr);

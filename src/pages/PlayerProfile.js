@@ -23,6 +23,7 @@ import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
+import { getAnonId } from "../utils/anonId";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { Helmet } from "react-helmet-async";
@@ -2846,12 +2847,18 @@ useEffect(() => {
 
   // ── Reactions (like/upvote/downvote) — same aggregation pattern as
   // community evaluations above: read the whole subcollection, compute
-  // totals client-side. No Cloud Functions/counters needed at this scale. ──
+  // totals client-side. No Cloud Functions/counters needed at this scale.
+  // Liking doesn't require an account — a logged-out visitor's own doc is
+  // keyed by a persisted anon id (see utils/anonId.js) instead of a real
+  // uid, so "mine" below checks that id too, falling back to it only once
+  // we know there's no real user (avoids briefly reading the anon doc as
+  // "mine" while auth is still resolving on load). ──
   useEffect(() => {
     const fetch = async () => {
       if (!player?.id) return;
       try {
         const snap = await getDocs(collection(db,"players",player.id,"reactions"));
+        const myId = user ? user.uid : getAnonId();
         let likes = 0, up = 0, down = 0;
         let mine = { liked: false, vote: null };
         snap.forEach((d) => {
@@ -2859,7 +2866,7 @@ useEffect(() => {
           if (data.liked) likes++;
           if (data.vote === "up") up++;
           else if (data.vote === "down") down++;
-          if (user && d.id === user.uid) mine = { liked: !!data.liked, vote: data.vote || null };
+          if (d.id === myId) mine = { liked: !!data.liked, vote: data.vote || null };
         });
         setReactionCounts({ likes, up, down });
         setMyReaction(mine);
@@ -2868,15 +2875,18 @@ useEffect(() => {
     fetch();
   }, [player, user]);
 
-  // ── Toggle like: independent of up/down vote. ──
+  // ── Toggle like: independent of up/down vote. No login required — a
+  // guest's like is keyed by their persisted anon id (see utils/anonId.js)
+  // instead of a real uid; firestore.rules accepts either for this
+  // subcollection's `liked` field specifically. ──
   const handleToggleLike = () => {
-    if (!user) { login(); return; }
     if (!player?.id) return;
+    const myId = user ? user.uid : getAnonId();
     const nextLiked = !myReaction.liked;
     setReactionCounts((c) => ({ ...c, likes: c.likes + (nextLiked ? 1 : -1) }));
     setMyReaction((r) => ({ ...r, liked: nextLiked }));
-    setDoc(doc(db,"players",player.id,"reactions",user.uid), {
-      uid: user.uid, liked: nextLiked, vote: myReaction.vote, updatedAt: serverTimestamp(),
+    setDoc(doc(db,"players",player.id,"reactions",myId), {
+      uid: myId, liked: nextLiked, vote: myReaction.vote, updatedAt: serverTimestamp(),
     }, { merge: true }).catch((e) => console.error(e));
   };
 
@@ -3001,7 +3011,35 @@ useEffect(() => {
           if (!aV && bV) return 1;
           return 0;
         });
-        setDraftClassPlayers(list.filter((p) => p.Position === player.Position));
+        const posList = list.filter((p) => p.Position === player.Position);
+
+        // ── School logos for the class list rows — same batched "in" query
+        // pattern WatchButton uses for its schoolLogoBySchool map, just
+        // scoped to only the schools that actually show up in this
+        // position group (not the whole class year) since that's all the
+        // rows below ever render. ──
+        const schoolNames = [...new Set(posList.map((p) => p.School).filter(Boolean))];
+        const schoolLogos = {};
+        if (schoolNames.length > 0) {
+          try {
+            const chunks = [];
+            for (let i = 0; i < schoolNames.length; i += 10) chunks.push(schoolNames.slice(i, i + 10));
+            const schoolSnaps = await Promise.all(
+              chunks.map((chunk) => getDocs(query(collection(db, "schools"), where("School", "in", chunk))))
+            );
+            schoolSnaps.forEach((sSnap) => sSnap.docs.forEach((d) => {
+              const sData = d.data();
+              // Logo1 specifically (not the LogoDark-first fallback other
+              // dark-background spots on this page use) — these rows sit
+              // on a plain white background, same as the NFL Fits logos
+              // above, which use Logo1 directly too.
+              if (sData.School) schoolLogos[sData.School] = sData.Logo1 || "";
+            }));
+          } catch (e) {
+            console.error("Draft class school logo fetch error:", e);
+          }
+        }
+        setDraftClassPlayers(posList.map((p) => ({ ...p, SchoolLogo: schoolLogos[p.School] || "" })));
         const classSelfIndex = list.findIndex((p) => p.isSelf);
         setClassRank(classSelfIndex >= 0 ? classSelfIndex + 1 : null);
         setClassSize(list.length);
@@ -3677,12 +3715,25 @@ useEffect(() => {
               >
                 {gd.short}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "14px", lineHeight: 1.2 }}>
+              {/* Team logo — same 28px footprint as the grade badge to its
+                  left, sitting between it and the name. A school with no
+                  logo on file just leaves this slot empty rather than
+                  showing a broken image. */}
+              {p.SchoolLogo && (
+                <img
+                  src={sanitizeUrl(p.SchoolLogo)} alt={p.School} title={p.School}
+                  style={{ flexShrink: 0, width: "28px", height: "28px", objectFit: "contain" }}
+                  loading="lazy" referrerPolicy="no-referrer"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              )}
+              {/* School dropped — name alone now fills the cell, sized to
+                  match the round-tag's overall 28px box footprint (not its
+                  tiny internal digits) so the two sit at the same visual
+                  scale side by side. */}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <span style={{ display: "block", color: SITE_BLUE, fontWeight: 900, fontSize: "18px", lineHeight: "28px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {`${p.First} ${p.Last}`}
-                </span>
-                <span style={{ color: "#777", fontWeight: 700, fontSize: "12px", marginTop: "2px" }}>
-                  {p.School || "—"}
                 </span>
               </div>
             </>
@@ -3710,12 +3761,15 @@ useEffect(() => {
   );
 
   // ── Mobile: collapsible dropdown ──
-  const playerFullName = `${player.First || ""} ${player.Last || ""}`.trim();
+  // Banner reads purely as "{year} {position} Class" now (e.g. "2027 QB
+  // Class") — no player name — sized up big/bold as the headline text
+  // instead of a small caption under the player's name, so it reads as a
+  // section banner rather than a label on this particular player.
   const DraftClassDropdown = (
     <details style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
       <summary style={{
         backgroundColor: SITE_BLUE,
-        padding: "10px 14px",
+        padding: "14px",
         cursor: "pointer",
         listStyle: "none",
         display: "flex",
@@ -3723,15 +3777,10 @@ useEffect(() => {
         justifyContent: "space-between",
         userSelect: "none",
       }}>
-        <div>
-          <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            {playerFullName}
-          </div>
-          <h2 style={{ color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: "11px", marginTop: "2px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            {draftClassLabel} Class ▾
-          </h2>
-        </div>
-        <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "18px" }}>⬇</span>
+        <h2 style={{ color: "#fff", fontWeight: 900, fontSize: "20px", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          {draftClassLabel} Class
+        </h2>
+        <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>View More</span>
       </summary>
       <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
       {DraftClassListContent}
@@ -4373,8 +4422,11 @@ useEffect(() => {
 
         {/* ===== LEFT COLUMN: Trending + Draft Class ===== */}
         {isMobile ? (
+          // Trending dropdown moved out of here — on mobile it now sits
+          // further down the main column, between Community Scouting
+          // Report and My Evaluation (see the Evaluation Form section
+          // below), instead of crowding the very top of the page.
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {TrendingSidebarDropdown}
             {DraftClassDropdown}
           </div>
         ) : (
@@ -4618,7 +4670,13 @@ useEffect(() => {
                 </span>
                 <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                 <span className="font-bold" style={{ color:"rgba(255,255,255,0.8)", fontSize:isMobile?"12px":"19px" }}>{formatEligible(player.Eligible)}</span>
-                {isTrendingUp && (
+                {/* Desktop keeps the trend tag inline with position/school/
+                    year (room enough on that wide a row); mobile moves it to
+                    its own row below instead — see the block right after
+                    this row — so the tag's tooltip glow/animation don't
+                    crowd the name/position/school/year line on a narrow
+                    screen. */}
+                {!isMobile && isTrendingUp && (
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
@@ -4633,7 +4691,7 @@ useEffect(() => {
                     />
                   </>
                 )}
-                {isBreakoutTrend && (
+                {!isMobile && isBreakoutTrend && (
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
@@ -4648,7 +4706,7 @@ useEffect(() => {
                     />
                   </>
                 )}
-                {isOnFireTrend && (
+                {!isMobile && isOnFireTrend && (
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
@@ -4664,6 +4722,49 @@ useEffect(() => {
                   </>
                 )}
               </div>
+              {/* Mobile-only trend tag row — same tags as above, just
+                  demoted to their own line under position/school/year
+                  instead of fighting them for space on the narrow row. */}
+              {isMobile && (isTrendingUp || isBreakoutTrend || isOnFireTrend) && (
+                <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:"6px" }}>
+                  {isTrendingUp && (
+                    <TrendTag
+                      icon="▲" iconClassName="wd-trendup-icon" label="Trending Up"
+                      tagClassName="wd-trendup-tag"
+                      tagGradient="linear-gradient(135deg, #14532d, #16a34a)" tagBorder="#4ade80" tagColor="#eafff0"
+                      tooltipGradient="linear-gradient(135deg, #0f2b1a, #1e4028)" tooltipBorder="rgba(74,222,128,0.55)"
+                      tooltipGlow="rgba(74,222,128,0.08)" tooltipDivider="rgba(74,222,128,0.6)"
+                      tooltipTextColor="#eafff0" headerIcon="▲"
+                      headerText={((player.First||"") + " " + (player.Last||"")).trim() + " Trending Up"}
+                      notes={trendNotesList} notesColor="#d4f5df" isMobile={isMobile}
+                    />
+                  )}
+                  {isBreakoutTrend && (
+                    <TrendTag
+                      iconImg={BreakoutIcon} iconClassName="wd-breakout-icon" headerIconImg={BreakoutIcon} label="Breakout"
+                      tagClassName="wd-breakout-tag"
+                      tagGradient="linear-gradient(135deg, #2c333b, #4a535e)" tagBorder="#8fd8ff" tagColor="#eaf6ff"
+                      tooltipGradient="linear-gradient(135deg, #1c2128, #2f3742)" tooltipBorder="rgba(143,216,255,0.55)"
+                      tooltipGlow="rgba(143,216,255,0.08)" tooltipDivider="rgba(143,216,255,0.6)"
+                      tooltipTextColor="#eaf6ff"
+                      headerText={((player.First||"") + " " + (player.Last||"")).trim() + " Breakout Performance"}
+                      notes={breakoutStats} notesColor="#cfe9ff" isMobile={isMobile}
+                    />
+                  )}
+                  {isOnFireTrend && (
+                    <TrendTag
+                      iconImg={OnFireIcon} iconClassName="wd-onfire-icon" headerIconImg={OnFireIcon} label="On Fire"
+                      tagClassName="wd-onfire-tag"
+                      tagGradient="linear-gradient(135deg, #4d0000, #ff0000)" tagBorder="#ff6666" tagColor="#ffe6e6"
+                      tooltipGradient="linear-gradient(135deg, #2b0000, #5c0000)" tooltipBorder="rgba(255,102,102,0.55)"
+                      tooltipGlow="rgba(255,0,0,0.08)" tooltipDivider="rgba(255,102,102,0.6)"
+                      tooltipTextColor="#ffe6e6"
+                      headerText={((player.First||"") + " " + (player.Last||"")).trim() + " On Fire"}
+                      notes={trendNotesList} notesColor="#ffcccc" isMobile={isMobile}
+                    />
+                  )}
+                </div>
+              )}
               {draftedBy && draftInfo && (
                 <div className="flex items-center justify-center gap-3 mt-2">
                   <div style={{ display:"flex", gap:"6px" }}>
@@ -5166,6 +5267,16 @@ useEffect(() => {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Trending dropdown, mobile only — dropped here (between Community
+            Scouting Report above and My Evaluation below) instead of at the
+            very top of the page; see the left-column block above where it
+            used to render for desktop's sticky-sidebar version. */}
+        {isMobile && TrendingSidebarDropdown && (
+          <div className="mb-8">
+            {TrendingSidebarDropdown}
           </div>
         )}
 
