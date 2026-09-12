@@ -3667,7 +3667,11 @@ useEffect(() => {
     ? [...draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT), draftClassPlayers[selfIndex]]
     : draftClassPlayers.slice(0, DRAFT_CLASS_LIMIT);
 
-  const DraftClassListContent = (
+  // Mobile-only row look (team logo between badge and name, name resized
+  // to the badge's footprint, school line dropped) vs. desktop's original
+  // row (stacked name/school, no logo) — desktop was never meant to change
+  // here, so this takes a flag instead of being one shared JSX block.
+  const renderDraftClassListContent = (mobileVariant) => (
     <>
       <Link
         to={communityYearPath}
@@ -3715,27 +3719,40 @@ useEffect(() => {
               >
                 {gd.short}
               </div>
-              {/* Team logo — same 28px footprint as the grade badge to its
-                  left, sitting between it and the name. A school with no
-                  logo on file just leaves this slot empty rather than
-                  showing a broken image. */}
-              {p.SchoolLogo && (
-                <img
-                  src={sanitizeUrl(p.SchoolLogo)} alt={p.School} title={p.School}
-                  style={{ flexShrink: 0, width: "28px", height: "28px", objectFit: "contain" }}
-                  loading="lazy" referrerPolicy="no-referrer"
-                  onError={(e) => { e.currentTarget.style.display = "none"; }}
-                />
+              {mobileVariant ? (
+                <>
+                  {/* Team logo — same 28px footprint as the grade badge to
+                      its left, sitting between it and the name. A school
+                      with no logo on file just leaves this slot empty
+                      rather than showing a broken image. */}
+                  {p.SchoolLogo && (
+                    <img
+                      src={sanitizeUrl(p.SchoolLogo)} alt={p.School} title={p.School}
+                      style={{ flexShrink: 0, width: "28px", height: "28px", objectFit: "contain" }}
+                      loading="lazy" referrerPolicy="no-referrer"
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  )}
+                  {/* School dropped — name alone now fills the cell, sized
+                      to match the round-tag's overall 28px box footprint
+                      (not its tiny internal digits) so the two sit at the
+                      same visual scale side by side. */}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{ display: "block", color: SITE_BLUE, fontWeight: 900, fontSize: "18px", lineHeight: "28px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {`${p.First} ${p.Last}`}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "14px", lineHeight: 1.2 }}>
+                    {`${p.First} ${p.Last}`}
+                  </span>
+                  <span style={{ color: "#777", fontWeight: 700, fontSize: "12px", marginTop: "2px" }}>
+                    {p.School || "—"}
+                  </span>
+                </div>
               )}
-              {/* School dropped — name alone now fills the cell, sized to
-                  match the round-tag's overall 28px box footprint (not its
-                  tiny internal digits) so the two sit at the same visual
-                  scale side by side. */}
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <span style={{ display: "block", color: SITE_BLUE, fontWeight: 900, fontSize: "18px", lineHeight: "28px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {`${p.First} ${p.Last}`}
-                </span>
-              </div>
             </>
           );
           return p.isSelf ? (
@@ -3753,10 +3770,10 @@ useEffect(() => {
     </>
   );
 
-  // ── Desktop: full sidebar card ──
+  // ── Desktop: full sidebar card — original row look, unchanged. ──
   const DraftClassList = (
     <SidebarCard title={draftClassLabel} color1={SITE_BLUE} color2={SITE_GOLD}>
-      {DraftClassListContent}
+      {renderDraftClassListContent(false)}
     </SidebarCard>
   );
 
@@ -3783,7 +3800,7 @@ useEffect(() => {
         <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>View More</span>
       </summary>
       <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
-      {DraftClassListContent}
+      {renderDraftClassListContent(true)}
     </details>
   );
 
