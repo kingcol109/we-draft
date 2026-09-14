@@ -62,6 +62,21 @@ const CONTENT_TYPES = [
 ];
 const CONTENT_TYPE_BY_KEY = Object.fromEntries(CONTENT_TYPES.map((t) => [t.key, t]));
 
+// Same three Flag values AdminPanel.js's Player Data section colors a
+// player with (see that file's own FLAG_COLORS) — the Player Bank below
+// reads that same field to group players by which of these three needs
+// they're flagged for. defaultType is just a starting point for the "new
+// entry" form a bank player pre-fills (see startEntryForBankPlayer) —
+// Watch maps to Short since that's the site's own Shorts/Watch feature,
+// Video to the plain Video type, and Follow (no clean content-type
+// equivalent) falls back to Post; all three stay fully editable on the
+// form same as any other entry.
+const FLAG_GROUPS = [
+  { key: "green", label: "Watch", hex: "#2e7d32", defaultType: "short" },
+  { key: "blue", label: "Follow", hex: "#1565c0", defaultType: "post" },
+  { key: "red", label: "Video", hex: "#c0392b", defaultType: "video" },
+];
+
 const SUBJECT_TYPES = [
   { key: "player", label: "Player" },
   { key: "recruit", label: "Recruit" },
@@ -224,6 +239,20 @@ export default function ContentCalendarManager() {
   const [removing, setRemoving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
+  // Player Bank (below the grid) — which Flag group is currently shown.
+  // Defaults to the first group rather than nothing selected, since an
+  // empty bank on first render would just look broken.
+  const [selectedBankGroup, setSelectedBankGroup] = useState(FLAG_GROUPS[0].key);
+  // Player currently mid-update (their own Flag re-assignment write in
+  // flight) — just disables that one chip's dots so a slow connection
+  // can't double-fire the same write, not a page-wide loading state.
+  const [flagSavingId, setFlagSavingId] = useState("");
+  // The Bank's own "add a player to this group" search — a fresh
+  // {id, label} pair per pick rather than living in formState, since
+  // picking here writes straight to that player's own doc immediately
+  // instead of building up an entry to save later.
+  const [bankAddPick, setBankAddPick] = useState({ id: "", label: "" });
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -253,6 +282,15 @@ export default function ContentCalendarManager() {
 
   const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const recruitsById = useMemo(() => new Map(recruits.map((r) => [r.id, r])), [recruits]);
+
+  // Player Bank — every player flagged (AdminPanel.js's Player Data →
+  // Flag) into whichever of the three groups is currently selected.
+  const bankPlayers = useMemo(
+    () => players
+      .filter((p) => p.Flag === selectedBankGroup)
+      .sort((a, b) => `${a.First || ""} ${a.Last || ""}`.localeCompare(`${b.First || ""} ${b.Last || ""}`)),
+    [players, selectedBankGroup]
+  );
 
   // One video doc -> one display entry, standing in for whichever player/
   // recruit it's tagged to. "items" holds up to 3 tag slots (see
@@ -381,6 +419,37 @@ export default function ContentCalendarManager() {
     setSaveMessage("");
   };
 
+  // Player Bank chip clicked — opens the same "new entry" form startNewEntry
+  // does, just pre-filled with that player as the subject and the group's
+  // own defaultType (see FLAG_GROUPS) instead of blank. Date is left empty
+  // (no day was clicked) for the admin to pick.
+  const startEntryForBankPlayer = (player, defaultType) => {
+    setSelectedEntry({ id: null, isNew: true });
+    setFormState({
+      ...BLANK_FORM,
+      type: defaultType,
+      subjectType: "player",
+      subjectId: player.id,
+      subjectLabel: `${player.First || ""} ${player.Last || ""}`.trim(),
+    });
+    setSaveMessage("");
+  };
+
+  // Reassign (or clear, newFlag === "") a player's own Flag straight from
+  // the Bank — same field AdminPanel.js's Player Data → Flag writes,
+  // just editable here too instead of needing a trip to that tab.
+  const handleSetPlayerFlag = async (playerId, newFlag) => {
+    setFlagSavingId(playerId);
+    try {
+      await updateDoc(doc(db, "players", playerId), { Flag: newFlag });
+      setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, Flag: newFlag } : p)));
+    } catch (e) {
+      console.error("Player Bank flag update error:", e);
+    } finally {
+      setFlagSavingId("");
+    }
+  };
+
   const selectEntry = (entry) => {
     setSelectedEntry(entry);
     setFormState({
@@ -456,6 +525,7 @@ export default function ContentCalendarManager() {
   if (loading) return <LoadingSpinner label="Loading" size={28} minHeight="200px" />;
 
   return (
+    <>
     <div style={{ display: "grid", gridTemplateColumns: "1fr 230px", gap: "14px", alignItems: "start" }}>
       {/* ===== Left: month grid ===== */}
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
@@ -777,5 +847,138 @@ export default function ContentCalendarManager() {
         )}
       </div>
     </div>
+
+    {/* ===== Player Bank ===== */}
+    {/* Every player currently Flagged (AdminPanel.js's Player Data → Flag)
+        into whichever of the three groups is selected below — a quick pool
+        to plan content from instead of hunting each one down individually.
+        Clicking a chip's name opens the same "new entry" form a calendar-
+        day click does (see startEntryForBankPlayer); the small dots under
+        it reassign (or the × clears) that player's own Flag right here
+        (see handleSetPlayerFlag) instead of needing a trip to Player Data.
+        The search box lets an unflagged player be added to the current
+        group the same way. */}
+    <div style={{ marginTop: "14px", border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Player Bank
+        </div>
+        <div style={{ display: "flex", gap: "6px", marginLeft: "auto" }}>
+          {FLAG_GROUPS.map((g) => {
+            const active = selectedBankGroup === g.key;
+            const count = players.filter((p) => p.Flag === g.key).length;
+            return (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => setSelectedBankGroup(g.key)}
+                style={{
+                  display: "flex", alignItems: "center", gap: "6px",
+                  padding: "6px 12px", borderRadius: "20px", cursor: "pointer",
+                  border: "2px solid " + g.hex,
+                  background: active ? g.hex : "rgba(255,255,255,0.9)",
+                  color: active ? "#fff" : g.hex,
+                  fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+                }}
+              >
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: active ? "#fff" : g.hex, flexShrink: 0 }} />
+                {g.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ height: "3px", background: GOLD }} />
+
+      {/* Add a player straight into the currently-selected group. */}
+      <div style={{ padding: "12px 16px 0", maxWidth: "320px" }}>
+        <SubjectCombobox
+          subjectType="player"
+          subjectId={bankAddPick.id}
+          subjectLabel={bankAddPick.label}
+          players={players}
+          recruits={[]}
+          teams={[]}
+          onChange={(id, label) => {
+            if (id) handleSetPlayerFlag(id, selectedBankGroup);
+            setBankAddPick({ id: "", label: "" }); // reset so the box is ready for the next add either way
+          }}
+        />
+      </div>
+
+      <div style={{ padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "8px", minHeight: "56px" }}>
+        {bankPlayers.length === 0 ? (
+          <div style={{ color: "#999", fontWeight: 700, fontSize: "13px", fontStyle: "italic", padding: "8px 0" }}>
+            No players flagged {FLAG_GROUPS.find((g) => g.key === selectedBankGroup)?.label} yet.
+          </div>
+        ) : (
+          bankPlayers.map((p) => {
+            const group = FLAG_GROUPS.find((g) => g.key === selectedBankGroup);
+            const isSaving = flagSavingId === p.id;
+            return (
+              <div
+                key={p.id}
+                style={{
+                  display: "flex", flexDirection: "column", gap: "6px",
+                  padding: "6px 10px 8px", borderRadius: "8px",
+                  border: "2px solid " + group.hex, background: "#fff",
+                  opacity: isSaving ? 0.6 : 1,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => startEntryForBankPlayer(p, group.defaultType)}
+                  title={`Plan content for ${p.First || ""} ${p.Last || ""}`.trim()}
+                  style={{
+                    display: "flex", flexDirection: "column", alignItems: "flex-start",
+                    background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left",
+                  }}
+                >
+                  <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>
+                    {`${p.First || ""} ${p.Last || ""}`.trim()}
+                  </span>
+                  <span style={{ fontWeight: 700, fontSize: "11px", color: "#888" }}>
+                    {[p.Position, p.School].filter(Boolean).join(" · ") || "—"}
+                  </span>
+                </button>
+                {/* Reassign/clear this player's own Flag — separate click
+                    target from the button above, so picking a group above
+                    doesn't also open the new-entry form. */}
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  {FLAG_GROUPS.map((g) => (
+                    <button
+                      key={g.key}
+                      type="button"
+                      disabled={isSaving}
+                      title={`Move to ${g.label}`}
+                      onClick={() => handleSetPlayerFlag(p.id, g.key)}
+                      style={{
+                        width: "16px", height: "16px", borderRadius: "50%", padding: 0,
+                        border: "2px solid " + (g.key === p.Flag ? g.hex : "#ddd"),
+                        background: g.key === p.Flag ? g.hex : "#fff",
+                        cursor: isSaving ? "default" : "pointer",
+                      }}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    title="Remove flag"
+                    onClick={() => handleSetPlayerFlag(p.id, "")}
+                    style={{
+                      marginLeft: "2px", background: "none", border: "none", color: "#bbb",
+                      fontWeight: 900, fontSize: "12px", cursor: isSaving ? "default" : "pointer", padding: 0, lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+    </>
   );
 }
