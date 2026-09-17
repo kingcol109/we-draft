@@ -105,6 +105,7 @@ export default function VideosPage() {
               title: data.GenTitle || first?.title || "",
               thumb: data.GenThumb || first?.thumb || "",
               tags: Array.isArray(data.Tags) ? data.Tags : [],
+              short: data.Short === true,
               players: items
                 .map((it) => (it.playerId ? playersById[it.playerId] : null))
                 .filter(Boolean),
@@ -114,7 +115,12 @@ export default function VideosPage() {
           // publishAt (AdminPanel.js VideosSection's "Publish At" scheduling
           // field) hides this from the public hub until that moment passes —
           // same idea as a YouTube upload scheduled to go public later.
-          .filter((v) => v.video && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
+          // Shorts (data.Short === true) are excluded entirely — they're a
+          // fixed 9:16 clip meant for the swipeable /watch feed
+          // (WatchFullscreenFeed), not this grid of 16:9 film-breakdown
+          // thumbnails; the header's Watch button sends visitors there
+          // instead.
+          .filter((v) => v.video && !v.short && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
           .sort((a, b) => toMs(b.date) - toMs(a.date));
         setVideos(vids);
       } catch (e) {
@@ -180,11 +186,30 @@ export default function VideosPage() {
 
         {/* ===== Header ===== */}
         <div style={{ marginBottom: "24px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
-            <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
-              Videos
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
+              <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+                Videos
+              </div>
             </div>
+            {/* Shorts (data.Short === true) are excluded from the grid below
+                — this sends visitors to /watch's fullscreen, swipeable feed
+                for those instead of mixing a 9:16 clip format into this
+                16:9 film-breakdown grid. */}
+            <Link
+              to="/watch"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "6px",
+                padding: isMobile ? "7px 14px" : "9px 18px", borderRadius: "999px",
+                background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
+                fontWeight: 900, fontSize: isMobile ? "13px" : "14px", textDecoration: "none",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+            >
+              ▶ Watch
+            </Link>
           </div>
           <div style={{ height: "3px", width: "160px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
           <div style={{ height: "3px", width: "160px", background: GOLD, borderRadius: "2px" }} />
