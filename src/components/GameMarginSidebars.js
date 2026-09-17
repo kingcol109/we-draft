@@ -1,17 +1,17 @@
 // src/components/GameMarginSidebars.js
 //
 // GamePage.js's margin sidebars — a third pairing alongside MarginAds.js
-// (player/article/performance pages) and MarginSidebars.js (News/Performances
-// hubs). Left: sitewide Top Performances, so a reader on one game can jump to
-// the best write-ups anywhere. Right: Other Featured Games, so a reader on a
-// showcase matchup finds their way to the site's other showcase matchups.
-// Same fixed-position gutter-measurement technique as the other two — measure
-// contentRef's bounding rect vs viewport, position:fixed + translateY(-50%).
+// (player/article pages) and MarginSidebars.js (the News hub). Left: every
+// other game on the same week's slate, so a reader can jump straight to
+// another game without going back to the full schedule. Right: Other
+// Featured Games, so a reader on a showcase matchup finds their way to the
+// site's other showcase matchups. Same fixed-position gutter-measurement
+// technique as the other two — measure contentRef's bounding rect vs
+// viewport, position:fixed + translateY(-50%).
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "./statLineGlow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -89,7 +89,6 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
   const [layout, setLayout] = useState({ width: 160, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
   const [visible, setVisible] = useState(false);
   const [weekSlate, setWeekSlate] = useState([]);
-  const [topPerformances, setTopPerformances] = useState([]);
   const [featuredGames, setFeaturedGames] = useState([]);
   const [newsItems, setNewsItems] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
@@ -203,24 +202,6 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     fetch();
   }, [isMobile, gameWeek, excludeGameId]);
 
-  // Left (second card) — sitewide Top Performances (same grade filter the
-  // News/Performances margin feeds already use), most recent first.
-  useEffect(() => {
-    if (isMobile) return;
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(query(collection(db, "performances"), where("status", "==", "published")));
-        const items = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => ["Dominant", "Great", "Good"].includes(p.grade))
-          .sort((a, b) => toMs(b.gameDate) - toMs(a.gameDate))
-          .slice(0, 5);
-        setTopPerformances(items);
-      } catch (e) { setTopPerformances([]); }
-    };
-    fetch();
-  }, [isMobile]);
-
   // Right — Game of the Week and Featured games happening THIS calendar
   // week (Mon–Sun UTC), so the label is actually true rather than just an
   // approximation from sorting by time-proximity. Two separate queries
@@ -252,9 +233,8 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     fetch();
   }, [isMobile, excludeGameId]);
 
-  // Right (second card) — latest News, same "other stream" feed
-  // MarginSidebars.js shows on the Performances hub: news is unfiltered,
-  // articles only count if they're priority 1/2.
+  // Right (second card) — latest News: news is unfiltered, articles only
+  // count if they're priority 1/2.
   useEffect(() => {
     if (isMobile) return;
     const fetch = async () => {
@@ -299,11 +279,9 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     <div ref={anchorRef} style={{ position: "relative", height: 0 }}>
       {(!layout.show || isMobile) ? null : (
       <>
-      <style>{STAT_LINE_GLOW_STYLE}</style>
-
       {/* ===== Left: This Week's Slate (every other game in the current
-          game's own Week), stacked above sitewide Top Performances ===== */}
-      {(weekSlate.length > 0 || topPerformances.length > 0) && (
+          game's own Week) ===== */}
+      {weekSlate.length > 0 && (
         <div style={positionStyle("left")}>
           {weekSlate.length > 0 && (
           <div style={cardShell}>
@@ -377,45 +355,6 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                 See Full Slate →
               </Link>
             )}
-          </div>
-          )}
-
-          {topPerformances.length > 0 && (
-          <div style={cardShell}>
-            <div style={{ background: BLUE, padding: "8px 12px" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-                Top Performances
-              </div>
-            </div>
-            <div style={{ height: "3px", background: GOLD }} />
-            {topPerformances.map((item, i) => {
-              const school = schoolsByName[item.school];
-              return (
-                <Link
-                  key={item.id}
-                  to={`/performance/${item.slug || item.id}`}
-                  style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none", borderBottom: i < topPerformances.length - 1 ? "1px solid #f0f0f0" : "none" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-                >
-                  {school?.Logo1 ? (
-                    <img src={sanitizeUrl(school.Logo1)} alt="" loading="lazy" style={{ width: "22px", height: "22px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                  ) : (
-                    <span style={{ width: "22px", height: "22px", flexShrink: 0, borderRadius: "4px", background: "#eee", display: "inline-block" }} />
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: "12px", fontWeight: 900, color: "#222", lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {item.playerName || item.titleShort}
-                    </div>
-                    {item.statLine && (
-                      <div className={gradeStatLineClass(item.grade)} style={{ fontFamily: "'Courier New', monospace", fontSize: "10.5px", fontWeight: 700, color: "#666", marginTop: "2px" }}>
-                        {item.statLine}
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
           </div>
           )}
         </div>
@@ -495,9 +434,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
 
           {/* Second right-side card — Top Stories, stacked below Featured
               Games so a game-page reader also has a way into the rest of
-              the site's coverage, not just other games. Same "Top Stories"
-              card MarginSidebars.js shows on the News/Performances hubs —
-              same label, same item/button treatment. */}
+              the site's coverage, not just other games. */}
           {newsItems.length > 0 && (
             <div style={cardShell}>
               <div style={{ background: BLUE, padding: "8px 12px" }}>

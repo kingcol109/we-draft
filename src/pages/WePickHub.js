@@ -511,9 +511,9 @@ function rankedStatus(rankedGames, week) {
 export default function WePickHub() {
   const { user } = useAuth();
   const location = useLocation();
-  // Path-based, same convention as PerformancesHub.jsx's activeTab — lets
-  // /we-pick/standings (and /we-pick/standings/:week) or /we-pick/stats
-  // deep-link straight into the tab instead of always landing on My Picks.
+  // Path-based — lets /we-pick/standings (and /we-pick/standings/:week) or
+  // /we-pick/stats deep-link straight into the tab instead of always
+  // landing on My Picks.
   const activeTab = location.pathname.startsWith("/we-pick/standings")
     ? "standings"
     : location.pathname.startsWith("/we-pick/stats")

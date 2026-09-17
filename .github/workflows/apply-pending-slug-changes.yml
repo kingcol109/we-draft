@@ -1,0 +1,33 @@
+name: Apply Pending Slug Changes
+
+# Runs daily at 7am UTC (2am ET — see sync-analytics.yml's own comment:
+# GitHub Actions schedules always run in UTC, adjust below for a different
+# local time). Daily rather than a once-a-year Feb 1 cron so a missed or
+# delayed run still catches up the next day instead of needing a manual
+# rerun — see scripts/applyPendingSlugChanges.js, which is itself
+# idempotent (nothing left due once processed). Also runnable on-demand via
+# workflow_dispatch, same as the other scheduled scripts.
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Apply pending slug changes
+        run: node scripts/applyPendingSlugChanges.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

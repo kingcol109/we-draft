@@ -8,7 +8,6 @@ import { DndContext, closestCenter, useSensor, useSensors, PointerSensor } from 
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import ArticlesManager from "../components/ArticlesManager";
-import PerformancesManager from "../components/PerformancesManager";
 import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
@@ -223,6 +222,17 @@ function generateSlug(first, last, position, eligible) {
   return s;
 }
 
+// \u2500\u2500 Next Feb 1 (UTC) from right now \u2014 used by handleResolvePortal to defer
+// a Transfer Portal player's slug change for SEO continuity (see that
+// function's own comment and scripts/applyPendingSlugChanges.js, the daily
+// script that actually applies it once this date arrives). If it's already
+// past Feb 1 this year, rolls to next year rather than a date in the past.
+function nextFebFirstUTC(from = new Date()) {
+  const y = from.getUTCFullYear();
+  const thisYear = new Date(Date.UTC(y, 1, 1));
+  return from < thisYear ? thisYear : new Date(Date.UTC(y + 1, 1, 1));
+}
+
 const SECTIONS = [
   { key: "players", label: "Player Data", icon: "🏈", ready: true },
   { key: "trends", label: "Trends", icon: "📈", ready: true },
@@ -230,7 +240,6 @@ const SECTIONS = [
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
-  { key: "performances", label: "Performances", icon: "⭐", ready: true },
   { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
   { key: "requests", label: "Requests", icon: "📥", ready: true },
@@ -459,6 +468,10 @@ function PlayerDataSection() {
   const [selectedPositions, setSelectedPositions] = useState([]);
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedFlags, setSelectedFlags] = useState([]);
+  // Quick "who's actually in the portal right now" filter — separate from
+  // Flag above (that's the Watch/Follow/Video tag, unrelated), reading
+  // InPortal directly instead.
+  const [portalOnly, setPortalOnly] = useState(false);
   // Named groups — a separate layer from Flag (one color per player, quick
   // visual tag) for arbitrary many-to-many organizing ("Top 100",
   // "Sleepers", a specific scout's watchlist, etc.). Each playerGroups doc
@@ -481,6 +494,11 @@ function PlayerDataSection() {
   const [removing, setRemoving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [playerDataTab, setPlayerDataTab] = useState("players");
+  // Transfer Portal — "committed to" school typed while resolving a
+  // player's portal status (see handleResolvePortal). Its own piece of
+  // state rather than part of formState since it isn't a normal editable
+  // player field and clears itself the moment the decision is saved.
+  const [portalNewSchool, setPortalNewSchool] = useState("");
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -607,6 +625,7 @@ function PlayerDataSection() {
     if (selectedPositions.length > 0 && !selectedPositions.includes(p.Position)) return false;
     if (selectedSchools.length > 0 && !selectedSchools.includes(p.School)) return false;
     if (selectedFlags.length > 0 && !selectedFlags.includes(p.Flag)) return false;
+    if (portalOnly && !p.InPortal) return false;
     if (selectedGroups.length > 0) {
       const playerGroupNames = groupNamesByPlayer.get(p.id) || [];
       if (!selectedGroups.some((n) => playerGroupNames.includes(n))) return false;
@@ -665,6 +684,7 @@ function PlayerDataSection() {
     setDuplicateMatches(null);
     setSlugChangePrompt(null);
     setConfirmDelete(false);
+    setPortalNewSchool("");
   };
 
   const startNewPlayer = () => {
@@ -675,6 +695,7 @@ function PlayerDataSection() {
     setSlugCollision(null);
     setSlugChangePrompt(null);
     setConfirmDelete(false);
+    setPortalNewSchool("");
   };
 
   const handleFieldChange = (field, value) => {
@@ -899,8 +920,15 @@ function PlayerDataSection() {
     const currentSlug = selectedPlayer.Slug || "";
     const validBase = !!newBase && newBase !== "-";
     const slugStillMatches = !validBase || currentSlug === newBase || currentSlug.startsWith(newBase + "-");
+    // A Transfer Portal resolve (see handleResolvePortal) can leave Eligible
+    // bumped (2027->2028) while deliberately deferring the slug itself to
+    // PendingSlugChangeAt (Feb 1 — see scripts/applyPendingSlugChanges.js)
+    // for SEO continuity. Suppress the usual "slug no longer matches"
+    // prompt/rewrite entirely while that's pending, so a routine edit in
+    // the meantime can't jump the gun and change the slug early.
+    const slugChangeDeferred = !!selectedPlayer.PendingSlugChangeAt;
 
-    if (!slugStillMatches && !skipSlugUpdate && !forcedSlug) {
+    if (!slugStillMatches && !skipSlugUpdate && !forcedSlug && !slugChangeDeferred) {
       setSlugChangePrompt({ newBase, oldSlug: currentSlug });
       setSaveMessage("");
       return;
@@ -916,7 +944,7 @@ function PlayerDataSection() {
         // just flag that it no longer matches this player's current info
         // (see the "SLUG" badge in the player list / this field's note).
         fields.SlugOutdated = true;
-      } else if (!slugStillMatches) {
+      } else if (!slugStillMatches && !slugChangeDeferred) {
         const slugToWrite = forcedSlug || newBase;
         const dupSnap = await getDocs(query(collection(db, "players"), where("Slug", "==", slugToWrite)));
         if (!dupSnap.empty && slugToWrite !== currentSlug) {
@@ -939,6 +967,18 @@ function PlayerDataSection() {
       // sitemap-generation date regardless of when they were actually
       // last edited.
       await updateDoc(doc(db, "players", selectedPlayer.id), { ...fields, updatedAt: serverTimestamp() });
+      // Any slug change, for any reason (name/position/class edit here, or
+      // the scheduled Feb 1 script) leaves the old one redirecting to the
+      // new one — playerSlugRedirects/{oldSlug} is read by PlayerProfile.js
+      // whenever a slug doesn't match a live player, before it falls back
+      // to "not found".
+      if (fields.Slug && fields.Slug !== currentSlug) {
+        await setDoc(doc(db, "playerSlugRedirects", currentSlug), {
+          newSlug: fields.Slug,
+          playerId: selectedPlayer.id,
+          changedAt: serverTimestamp(),
+        });
+      }
       setAllPlayers((prev) =>
         prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...fields } : p))
       );
@@ -958,6 +998,145 @@ function PlayerDataSection() {
     } catch (e) {
       console.error("Admin player save error:", e);
       setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Transfer Portal ──
+  // Three states a player can be in: not in the portal at all (no Flag on
+  // this doc for it); InPortal true (their name, position, etc. all stay
+  // as-is — only PlayerProfile.js's own hero banner reacts to this — while
+  // the destination is unknown); resolved, where School has moved to the
+  // new team and PriorSchool/PriorSchoolYear preserve where they came from
+  // for the player page's own history line. These write straight to
+  // Firestore the moment a button is clicked (like ContentCalendarManager's
+  // own Flag reassignment) rather than going through the general Save
+  // button/formState — a player's name/position/etc. mid-edit shouldn't be
+  // able to block or get bundled into a portal status change, and vice
+  // versa.
+  const handleEnterPortal = async () => {
+    if (!selectedPlayer || isNew) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const fields = {
+        InPortal: true,
+        PortalEnteredAt: serverTimestamp(),
+        // Snapshotted now (not read back off School later) so a stray edit
+        // to School while a player sits in the portal can't corrupt which
+        // school Resolve later credits as where they transferred from.
+        PortalOriginalSchool: selectedPlayer.School || formState.School || "",
+        PortalSeasonYear: String(new Date().getFullYear()),
+      };
+      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
+      setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...fields } : p)));
+      setSelectedPlayer((prev) => ({ ...prev, ...fields }));
+      setSaveMessage("Moved into the Transfer Portal.");
+    } catch (e) {
+      console.error("Admin enter-portal error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Backs out of a portal move made by mistake — leaves School/PriorSchool
+  // untouched, just clears the in-portal state itself.
+  const handleCancelPortal = async () => {
+    if (!selectedPlayer || isNew) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const fields = {
+        InPortal: false,
+        PortalEnteredAt: deleteField(),
+        PortalOriginalSchool: deleteField(),
+        PortalSeasonYear: deleteField(),
+      };
+      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
+      const localFields = { InPortal: false };
+      setAllPlayers((prev) => prev.map((p) => {
+        if (p.id !== selectedPlayer.id) return p;
+        const next = { ...p, ...localFields };
+        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        return next;
+      }));
+      setSelectedPlayer((prev) => {
+        const next = { ...prev, ...localFields };
+        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        return next;
+      });
+      setSaveMessage("Removed from the Transfer Portal.");
+    } catch (e) {
+      console.error("Admin cancel-portal error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // The actual decision — moves School to the new team and files the old
+  // one under PriorSchool/PriorSchoolYear (e.g. "2026") for the player
+  // page's own history line, permanently (this isn't cleared by a later
+  // transfer — only ever the single most recent former school). A 2027
+  // (the class about to actually enter the draft) who transfers is,
+  // definitionally, not declaring — they're back for another season
+  // somewhere new, which bumps them to the 2028 class. Eligible updates to
+  // that immediately (it drives grouping/grading everywhere on the site
+  // right away), but the slug itself — which bakes the class year in (see
+  // generateSlug) — deliberately does NOT change yet, for SEO continuity;
+  // PendingSlugChangeAt schedules that for the next Feb 1 instead (see
+  // scripts/applyPendingSlugChanges.js, and handleSave's own
+  // slugChangeDeferred guard, which keeps the normal edit flow from
+  // jumping the gun on it in the meantime).
+  const handleResolvePortal = async () => {
+    if (!selectedPlayer || isNew) return;
+    const newSchool = portalNewSchool.trim();
+    if (!newSchool) { setSaveMessage("Enter the school they committed to."); return; }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const bumpToNextClass = selectedPlayer.Eligible === "2027";
+      const fields = {
+        School: newSchool,
+        PriorSchool: selectedPlayer.PortalOriginalSchool || selectedPlayer.School || "",
+        PriorSchoolYear: selectedPlayer.PortalSeasonYear || String(new Date().getFullYear()),
+        InPortal: false,
+        PortalEnteredAt: deleteField(),
+        PortalOriginalSchool: deleteField(),
+        PortalSeasonYear: deleteField(),
+        updatedAt: serverTimestamp(),
+        ...(bumpToNextClass ? { Eligible: "2028", PendingSlugChangeAt: nextFebFirstUTC() } : {}),
+      };
+      await updateDoc(doc(db, "players", selectedPlayer.id), fields);
+      const localFields = {
+        School: fields.School, PriorSchool: fields.PriorSchool, PriorSchoolYear: fields.PriorSchoolYear, InPortal: false,
+        ...(bumpToNextClass ? { Eligible: fields.Eligible, PendingSlugChangeAt: fields.PendingSlugChangeAt } : {}),
+      };
+      setAllPlayers((prev) => prev.map((p) => {
+        if (p.id !== selectedPlayer.id) return p;
+        const next = { ...p, ...localFields };
+        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        return next;
+      }));
+      setSelectedPlayer((prev) => {
+        const next = { ...prev, ...localFields };
+        delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        return next;
+      });
+      // Keeps the general form's own School/Eligible fields (and anything
+      // relying on formState, like the slug regenerate check) in sync too.
+      setFormState((prev) => (prev ? { ...prev, School: newSchool, ...(bumpToNextClass ? { Eligible: "2028" } : {}) } : prev));
+      setPortalNewSchool("");
+      setSaveMessage(
+        bumpToNextClass
+          ? `Committed to ${newSchool} — bumped to the 2028 class. Slug updates automatically Feb 1.`
+          : `Committed to ${newSchool}.`
+      );
+    } catch (e) {
+      console.error("Admin resolve-portal error:", e);
+      setSaveMessage("Failed to update — check console.");
     } finally {
       setSaving(false);
     }
@@ -1116,6 +1295,21 @@ function PlayerDataSection() {
             </div>
           </div>
 
+          <div>
+            <button
+              onClick={() => setPortalOnly((v) => !v)}
+              style={{
+                display: "flex", alignItems: "center", gap: "6px",
+                border: "2px solid #b45309", borderRadius: "20px", padding: "6px 12px",
+                background: portalOnly ? "#b45309" : "#fff", color: portalOnly ? "#fff" : "#b45309",
+                fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
+                cursor: "pointer",
+              }}
+            >
+              🔄 In Transfer Portal {portalOnly ? "✓" : ""}
+            </button>
+          </div>
+
           {/* Named groups — separate from Flag above (one color per player)
               since a player can belong to any number of these. Filtering
               happens here; creating/deleting a group and adding/removing
@@ -1227,6 +1421,14 @@ function PlayerDataSection() {
                         />
                       )}
                       {(p.First || "") + " " + (p.Last || "")}
+                      {p.InPortal && (
+                        <span
+                          title={p.PortalOriginalSchool ? `In the Transfer Portal — from ${p.PortalOriginalSchool}` : "In the Transfer Portal"}
+                          style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 900, color: "#b45309", border: "1px solid #b45309", borderRadius: "10px", padding: "1px 6px" }}
+                        >
+                          🔄 PORTAL
+                        </span>
+                      )}
                       {p.Live === false && (
                         <span style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 900, color: "#c0392b", border: "1px solid #c0392b", borderRadius: "10px", padding: "1px 6px" }}>
                           HIDDEN
@@ -1333,7 +1535,84 @@ function PlayerDataSection() {
                   onChange={(v) => handleFieldChange("School", v)}
                   options={schoolOptions}
                 />
+                {selectedPlayer?.PriorSchool && !selectedPlayer?.InPortal && (
+                  <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                    Transferred from {selectedPlayer.PriorSchool}{selectedPlayer.PriorSchoolYear ? ` (${selectedPlayer.PriorSchoolYear})` : ""}
+                  </div>
+                )}
+                {selectedPlayer?.PendingSlugChangeAt && (() => {
+                  const d = selectedPlayer.PendingSlugChangeAt.toDate ? selectedPlayer.PendingSlugChangeAt.toDate() : selectedPlayer.PendingSlugChangeAt;
+                  return (
+                    <div style={{ fontSize: "11px", color: "#b45309", fontWeight: 700, marginTop: "4px" }}>
+                      ⏳ Slug ("{selectedPlayer.Slug}") switches to match the {selectedPlayer.Eligible} class automatically on {d.toLocaleDateString()}.
+                    </div>
+                  );
+                })()}
               </FieldRow>
+              {!isNew && (
+                <FieldRow label="Transfer Portal">
+                  {selectedPlayer?.InPortal ? (
+                    <div style={{ border: "2px solid #b45309", borderRadius: "8px", padding: "10px", background: "#fff8ee" }}>
+                      <div style={{ fontWeight: 900, fontSize: "12px", color: "#b45309", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "6px" }}>
+                        🔄 In the Transfer Portal
+                        {selectedPlayer.PortalOriginalSchool ? ` — from ${selectedPlayer.PortalOriginalSchool}` : ""}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#888", marginBottom: "8px" }}>
+                        Enter their new school once a decision is made — School above updates to it, and {selectedPlayer.PortalOriginalSchool || "their old school"} is saved as their {selectedPlayer.PortalSeasonYear || ""} team.
+                        {selectedPlayer.Eligible === "2027" && (
+                          <> Since they're 2027, this also bumps them to the 2028 class — their slug stays put until Feb 1 for SEO, then updates automatically.</>
+                        )}
+                      </div>
+                      <SchoolCombobox
+                        value={portalNewSchool}
+                        onChange={setPortalNewSchool}
+                        options={schoolOptions}
+                      />
+                      <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={handleResolvePortal}
+                          disabled={saving || !portalNewSchool.trim()}
+                          style={{
+                            flex: 1, background: "#b45309", color: "#fff", border: "none",
+                            borderRadius: "6px", padding: "8px", fontWeight: 900, fontSize: "12px",
+                            textTransform: "uppercase", letterSpacing: "0.04em",
+                            cursor: saving || !portalNewSchool.trim() ? "default" : "pointer",
+                            opacity: saving || !portalNewSchool.trim() ? 0.6 : 1,
+                          }}
+                        >
+                          Committed — Resolve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelPortal}
+                          disabled={saving}
+                          style={{
+                            background: "#fff", color: "#999", border: "2px solid #ddd",
+                            borderRadius: "6px", padding: "8px 12px", fontWeight: 900, fontSize: "12px",
+                            textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleEnterPortal}
+                      disabled={saving}
+                      style={{
+                        background: "#fff", color: "#b45309", border: "2px solid #b45309",
+                        borderRadius: "6px", padding: "8px 14px", fontWeight: 900, fontSize: "12px",
+                        textTransform: "uppercase", letterSpacing: "0.04em", cursor: saving ? "default" : "pointer",
+                      }}
+                    >
+                      🔄 Move to Transfer Portal
+                    </button>
+                  )}
+                </FieldRow>
+              )}
               <FieldRow label="Position">
                 <select value={formState.Position} onChange={(e) => handleFieldChange("Position", e.target.value)} style={inputStyle}>
                   <option value="">—</option>
@@ -7150,13 +7429,12 @@ function UsersSection() {
 // history, so there's no per-day series to plot. ──
 // Top-level tabs inside the Analytics section — "Overview" is everything
 // that already existed (stat cards, page-view totals, the evals/signups
-// chart, and the Players & Evaluations table); Games/Performances/Articles
-// are new, each backed by ContentAnalyticsTable + CONTENT_ANALYTICS_CONFIG
-// further down this file.
+// chart, and the Players & Evaluations table); Games/Articles are new,
+// each backed by ContentAnalyticsTable + CONTENT_ANALYTICS_CONFIG further
+// down this file.
 const CONTENT_TABS = [
   { key: "overview", label: "Overview" },
   { key: "game", label: "Games" },
-  { key: "performance", label: "Performances" },
   { key: "article", label: "Articles" },
 ];
 
@@ -7224,7 +7502,7 @@ function AnalyticsSection() {
 
       if (analyticsRes.status === "fulfilled") {
         // Player-only — the analytics collection now also holds game/
-        // performance/article docs (namespaced as "{type}_{slug}", see
+        // article docs (namespaced as "{type}_{slug}", see
         // syncGoogleAnalytics.js), each with its own tab below. A doc with
         // no `type` at all predates that field and is still a player doc.
         let last24 = 0, last7 = 0, last30 = 0, total = 0, lastSyncedMs = 0, playerCount = 0;
@@ -7848,11 +8126,11 @@ const inputStyle = {
   outline: "none", boxSizing: "border-box", fontFamily: "inherit",
 };
 
-// ── Source-collection readers for the Games/Performances/Articles analytics
-// tabs — each returns a flat { slug, title, subtitle, dateMs } row. Kept
-// separate per type since each source collection has a completely
-// different shape; ContentAnalyticsTable below joins whatever comes back
-// against analytics docs by slug. ──
+// ── Source-collection readers for the Games/Articles analytics tabs — each
+// returns a flat { slug, title, subtitle, dateMs } row. Kept separate per
+// type since each source collection has a completely different shape;
+// ContentAnalyticsTable below joins whatever comes back against analytics
+// docs by slug. ──
 async function fetchGameRows() {
   const snap = await getDocs(collection(db, "schedule26"));
   return snap.docs
@@ -7863,19 +8141,6 @@ async function fetchGameRows() {
       title: `${g.Away || "?"} @ ${g.Home || "?"}`,
       subtitle: [g.Week, g.Final ? "Final" : null].filter(Boolean).join(" · "),
       dateMs: toMs(g.Date),
-    }));
-}
-
-async function fetchPerformanceRows() {
-  const snap = await getDocs(collection(db, "performances"));
-  return snap.docs
-    .map((d) => d.data())
-    .filter((p) => p.slug)
-    .map((p) => ({
-      slug: p.slug,
-      title: p.titleShort || p.titleLong || "Untitled performance",
-      subtitle: p.playerName || "",
-      dateMs: toMs(p.createdAt) || toMs(p.gameDate),
     }));
 }
 
@@ -7911,12 +8176,11 @@ async function fetchArticleRows() {
 
 const CONTENT_ANALYTICS_CONFIG = {
   game: { label: "Games", noun: "game", publicPrefix: "/game/", fetchRows: fetchGameRows },
-  performance: { label: "Performances", noun: "performance", publicPrefix: "/performance/", fetchRows: fetchPerformanceRows },
   article: { label: "Articles", noun: "article", publicPrefix: "/news/", fetchRows: fetchArticleRows },
 };
 
-// ── Games/Performances/Articles page-view table — one reusable component
-// driven by CONTENT_ANALYTICS_CONFIG, joined against the analytics
+// ── Games/Articles page-view table — one reusable component driven by
+// CONTENT_ANALYTICS_CONFIG, joined against the analytics
 // collection's type-namespaced docs (analytics/{type}_{slug}, see
 // syncGoogleAnalytics.js) by their `slug` field rather than doc id, since
 // the doc id carries the type prefix this query already filtered on. Same
@@ -8124,10 +8388,9 @@ function ContentAnalyticsTable({ type }) {
 
 // ── CFB Schedule — direct editor for the schedule26 collection (each doc is
 // one game: Home, Away, Date, Week, optional Home/AwayScore once played).
-// This is the same collection TeamPage.js reads for its Schedule sidebar and
-// PerformancesManager.js reads to list a player's games — editing here is
-// the only way to fix a wrong score/date/matchup short of going into the
-// Firebase console directly. ──
+// This is the same collection TeamPage.js reads for its Schedule sidebar —
+// editing here is the only way to fix a wrong score/date/matchup short of
+// going into the Firebase console directly. ──
 const BLANK_GAME_FORM = {
   // Channel holds the TV channel's Name (matching tvChannels/{doc}.Name) —
   // same "reference by name, not doc id" convention Home/Away already use
@@ -8166,9 +8429,9 @@ const createSlug = (text) => (text || "").toLowerCase().replace(/[^a-z0-9\s-]/g,
 // the away team leading here too. Recomputed from scratch on every save
 // (rather than only set once) so a corrected matchup/date always keeps the
 // slug in sync — nothing else derives an identity from the old slug, since
-// the doc ID (not the slug) is the canonical foreign key every other
-// collection (performances) points at. Every existing game was also
-// one-time backfilled to a year-inclusive slug (previously only games
+// the doc ID (not the slug) is the canonical foreign key other collections
+// point at. Every existing game was also one-time backfilled to a
+// year-inclusive slug (previously only games
 // saved after this function was added got one) via a script run directly
 // against schedule26 — no schedule26 doc should be missing the year now.
 const gameSlugFor = (away, home, dateInputValue) => {
@@ -8238,10 +8501,9 @@ const kickoffMsFromDate = (dateMs, time) => {
   return dateMs + mins * 60000 - etOffsetMinutesAt(dateMs) * 60000;
 };
 
-// Renders the current Key Players selections — one row per player rather
-// than PerformancesManager.js's compact flex-wrap pill, since each one now
-// also carries an optional note (shown on GamePage.js when that player's
-// row is hovered) that needs room for a text field.
+// Renders the current Key Players selections — one row per player, since
+// each one carries an optional note (shown on GamePage.js when that
+// player's row is hovered) that needs room for a text field.
 function KeyPlayersChips({ playerIds, allPlayers, onRemove, notes, onNoteChange }) {
   if (!playerIds.length) return null;
   const byId = new Map(allPlayers.map((p) => [p.id, p]));
@@ -8877,10 +9139,9 @@ function CFBScheduleSection() {
               </label>
             </div>
 
-            {/* Key Players — same search-and-add chip pattern as the
-                Performances editor's "Players Mentioned" field, just split
-                into two lists (one per side) so each team's picks stay
-                scoped to that team's roster. */}
+            {/* Key Players — a search-and-add chip pattern, split into two
+                lists (one per side) so each team's picks stay scoped to
+                that team's roster. */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
@@ -9276,8 +9537,8 @@ const LEAGUE_CONFIG = {
     nameField: "School",
     subLabelField: "Mascot",
     groupField: "Conference",
-    // The school's own short-form abbreviation (e.g. "Bama") — GameMarginSidebars.js's
-    // scoreboard bug and PerformancesManager.js's auto-generated hashtags both read this.
+    // The school's own short-form abbreviation (e.g. "Bama") —
+    // GameMarginSidebars.js's scoreboard bug reads this.
     shortField: "Short",
     shortLabel: "Short Name",
     conferenceOptions: CFB_CONFERENCES,
@@ -9614,8 +9875,8 @@ function TeamBrandingPane({ league }) {
   // ── Add a brand-new team (school or NFL club) — same form as editing, plus
   // a name/mascot pair up top that only ever applies here: an existing
   // team's name is treated as immutable everywhere else in this pane since
-  // players, games, performances, and ads all reference it by that exact
-  // string, and silently renaming it would orphan every reference. ──
+  // players, games, and ads all reference it by that exact string, and
+  // silently renaming it would orphan every reference. ──
   const startNewTeam = () => {
     setSelectedTeam({ id: null, isNew: true });
     setFormState({
@@ -9742,8 +10003,8 @@ function TeamBrandingPane({ league }) {
   // from "Yes, Delete Permanently") rather than a native window.confirm() —
   // deleting a team is higher blast-radius than the video/game/trend deletes
   // that do use window.confirm() elsewhere, since players, schedule games,
-  // performances, and ads all reference a team by name/abbreviation and
-  // aren't cleaned up here (see the warning copy below). ──
+  // and ads all reference a team by name/abbreviation and aren't cleaned up
+  // here (see the warning copy below). ──
   const handleDeleteTeam = async () => {
     if (!selectedTeam || isNewTeam) return;
     setRemoving(true);
@@ -10013,7 +10274,7 @@ function TeamBrandingPane({ league }) {
                 copyStatus={logoCopyStatus.LogoBlack || "idle"}
               />
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "-8px" }}>
-                Optional — the Performances terminal uses this team's dark logo by default and switches to this black version once set.
+                Optional — several spots on the site (PlayerProfile.js's left margin, GamePage.js, WePickHub.js) use this team's dark logo by default and switch to this black version once set.
               </div>
               <ColorHexField
                 label="Color 1 (Primary)"
@@ -10060,7 +10321,7 @@ function TeamBrandingPane({ league }) {
                   </div>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "#666", marginBottom: "12px" }}>
                     This removes the {cfg.label} team record and cannot be undone. Players, schedule games,
-                    performances, and ads that still reference "{selectedTeam[cfg.nameField]}" by name won't be
+                    and ads that still reference "{selectedTeam[cfg.nameField]}" by name won't be
                     cleaned up automatically and may show broken logos/links afterward.
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
@@ -11776,7 +12037,6 @@ export default function AdminPanel() {
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
-            {activeSection === "performances" && <PerformancesManager />}
             {activeSection === "calendar" && <ContentCalendarManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
             {activeSection === "requests" && <RequestsSection />}

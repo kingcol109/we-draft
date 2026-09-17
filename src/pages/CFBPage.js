@@ -119,7 +119,7 @@ export default function CFBPage() {
         setGames(gameDocs);
 
         // Default to the latest week whose earliest game has already
-        // kicked off — same "current week" notion PerformancesHub.jsx uses.
+        // kicked off.
         const startMs = {};
         gameDocs.forEach((g) => {
           if (!g.Week || !g.Date) return;

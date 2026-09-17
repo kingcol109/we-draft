@@ -75,9 +75,8 @@ const toTeamSlug = (school) => {
   return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
 };
 
-// Slug = short-form title + the published date — same deterministic
-// formula PerformancesManager.js uses (short titles alone collide easily
-// across articles). Fully automatic now — there's no admin-facing Slug
+// Slug = short-form title + the published date (short titles alone collide
+// easily across articles). Fully automatic now — there's no admin-facing Slug
 // input to override it with (see the read-only preview in the form below)
 // — computed fresh at create time and then left untouched by every later
 // edit (handleSave never rewrites slug on an existing article), so a
@@ -125,11 +124,8 @@ const statusStyles = {
   draft: { background: "#f0f0f0", color: "#666" },
 };
 
-// Same search-input + dropdown-of-matches pattern as
-// PerformancesManager.js's own VideoLookupCombobox — picks an existing
-// video doc (from the "videos" collection, the same one PerformancesManager
-// draws from) instead of a hand-pasted URL, so tagging a video here works
-// identically to tagging one on a performance.
+// Search-input + dropdown-of-matches pattern — picks an existing video doc
+// (from the "videos" collection) instead of a hand-pasted URL.
 function VideoLookupCombobox({ videoId, onChange, videos }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);

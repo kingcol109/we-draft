@@ -86,6 +86,22 @@ service cloud.firestore {
       }
     }
 
+    // Old slug -> new slug redirects — doc id is the OLD slug, written
+    // whenever a player's Slug field changes for any reason (a name/
+    // position/class edit via AdminPanel.js's PlayerDataSection.handleSave,
+    // or scripts/applyPendingSlugChanges.js's scheduled Feb 1 run for a
+    // Transfer Portal class bump — that one's via the Admin SDK, which
+    // bypasses these rules entirely, same as every other scheduled script
+    // in this app). PlayerProfile.js reads this by the old slug whenever a
+    // slug doesn't match a live player, before falling back to "not found".
+    // Public read (a stale/shared link needs to resolve for every visitor,
+    // not just signed-in ones); write locked to admin since AdminPanel.js
+    // is the only client meant to create these.
+    match /playerSlugRedirects/{oldSlug} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // ── Collection-group rule for "evaluations", needed for the Admin
     // Panel's Analytics tab, which runs collectionGroup(db, "evaluations")
     // to total evaluations across every player in one query instead of
@@ -400,10 +416,9 @@ service cloud.firestore {
     // doc — same likes/comments/replies structure as schedule26/{doc}'s own
     // hype/comments above (see the detailed reasoning there), just under a
     // path this function doesn't know in advance. Firestore rules aren't
-    // inherited by nested collections, so articles/{doc} and
-    // performances/{doc} below each need their own copy of this rather
-    // than one shared match block — there's no "include" mechanism for
-    // partial rule fragments.
+    // inherited by nested collections, so a doc like articles/{doc} below
+    // needs its own copy of this rather than one shared match block —
+    // there's no "include" mechanism for partial rule fragments.
     match /articles/{doc} {
       allow read: if true;
       allow write: if isAdminOrWriter();
@@ -429,35 +444,6 @@ service cloud.firestore {
         }
         // Single level of replies only — same create/delete/no-update shape
         // as comments itself.
-        match /replies/{replyId} {
-          allow read: if true;
-          allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
-          allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
-          allow update: if false;
-          match /likes/{uid} {
-            allow read: if true;
-            allow write: if request.auth != null && request.auth.uid == uid;
-          }
-        }
-      }
-    }
-    match /performances/{doc} {
-      allow read: if true;
-      allow write: if isAdminOrWriter();
-      // Same likes/comments/replies shape as articles/{doc} above.
-      match /likes/{uid} {
-        allow read: if true;
-        allow write: if request.auth != null && request.auth.uid == uid;
-      }
-      match /comments/{commentId} {
-        allow read: if true;
-        allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
-        allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin());
-        allow update: if false;
-        match /likes/{uid} {
-          allow read: if true;
-          allow write: if request.auth != null && request.auth.uid == uid;
-        }
         match /replies/{replyId} {
           allow read: if true;
           allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;

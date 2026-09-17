@@ -50,17 +50,6 @@ const NEWS_LIMIT = 8;
 // NEWS_LIMIT already fetched.
 const NEWS_INITIAL_COUNT = 3;
 
-// Mirrors PerformancesManager.js / PerformancePage.js's grade badge colors.
-const gradeStylesPerf = {
-  Dominant: { background: "#e6f4ea", color: "#1a7f37" },
-  Great: { background: "#eaf6ec", color: "#2e7d32" },
-  Good: { background: "#eaf1ff", color: "#0055a5" },
-  Productive: { background: "#fff8e1", color: "#9c7a00" },
-  Average: { background: "#f0f0f0", color: "#666" },
-  Bad: { background: "#fdeaea", color: "#c0392b" },
-};
-
-
 // Hero "energy" overlays — same drifting yard-line texture + breathing
 // spotlight recipe as GamePage.js's own matchup hero (wdFieldDrift/
 // wdSpotlightPulse there), renamed per-page rather than shared since this
@@ -961,7 +950,6 @@ export default function TeamPage() {
   const [fcs, setFcs] = useState(false);
   const [conferenceTeams, setConferenceTeams] = useState([]);
   const [teamNews, setTeamNews] = useState([]);
-  const [teamPerformances, setTeamPerformances] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [schoolsMap, setSchoolsMap] = useState({});
   // Top 25 rankings, keyed by week — the schedule spans a whole season's
@@ -1116,20 +1104,6 @@ export default function TeamPage() {
                 .slice(0, NEWS_LIMIT);
               setTeamNews(combined);
             } catch { setTeamNews([]); }
-          })(),
-          // Performances tagged to this team's games — matched by school name
-          // (same denormalized field Performances-by-week and the player
-          // profile sidebar use), not by slug, since that's how the Admin
-          // Panel's Performances tab stores it.
-          (async () => {
-            try {
-              const perfSnap = await getDocs(query(collection(db, "performances"), where("school", "==", resolvedSchool), where("status", "==", "published")));
-              const perfs = perfSnap.docs
-                .map((d) => ({ id: d.id, type: "performance", ...d.data() }))
-                .sort((a, b) => (b.gameDate?.toMillis?.() || 0) - (a.gameDate?.toMillis?.() || 0))
-                .slice(0, NEWS_LIMIT);
-              setTeamPerformances(perfs);
-            } catch { setTeamPerformances([]); }
           })(),
           (async () => {
             const nflSnap = await getDocs(collection(db, "nfl"));
@@ -1963,79 +1937,6 @@ export default function TeamPage() {
     </SidebarCard>
   );
 
-  const PerformancesSidebar = (
-    <SidebarCard title="Performances" color1={BLUE} color2={GOLD}>
-      {teamPerformances.length === 0 ? (
-        <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No performances yet.</div>
-      ) : (
-        teamPerformances.map((p, i) => {
-          const g = gradeStylesPerf[p.grade];
-          return (
-            <Link
-              key={p.id}
-              to={`/performance/${p.slug}`}
-              style={{
-                display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
-                textDecoration: "none", background: "#fff",
-                borderBottom: i < teamPerformances.length - 1 ? "1px solid #f0f0f0" : "none",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-            >
-              {/* This team's own logo (the player's team, not the
-                  opponent's) — the "vs. {opponent}" line below still says
-                  who it was against. */}
-              <div style={{
-                flexShrink: 0, width: 36, height: 36, border: `2px solid ${BLUE}`, borderRadius: "4px",
-                overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f5",
-              }}>
-                {branding?.logo1 ? (
-                  <img
-                    src={sanitizeUrl(branding.logo1)}
-                    alt={canonicalSchool}
-                    style={{ width: "28px", height: "28px", objectFit: "contain" }}
-                    onError={(e) => { e.currentTarget.style.display = "none"; }}
-                  />
-                ) : (
-                  <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE }}>{(canonicalSchool || "?").charAt(0)}</span>
-                )}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", gap: "4px", marginBottom: "3px", flexWrap: "wrap" }}>
-                  <span style={{
-                    backgroundColor: "#7c3aed", color: "#fff", letterSpacing: "0.06em", fontSize: "7px",
-                    padding: "2px 5px", display: "inline-block", borderRadius: "2px",
-                    fontWeight: 900, textTransform: "uppercase",
-                  }}>
-                    Performance
-                  </span>
-                  {g && (
-                    <span style={{
-                      background: g.background, color: g.color, letterSpacing: "0.06em", fontSize: "7px",
-                      padding: "2px 5px", display: "inline-block", borderRadius: "2px",
-                      fontWeight: 900, textTransform: "uppercase",
-                    }}>
-                      {p.grade}
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
-                  {p.titleShort}
-                </div>
-                {p.opponent && (
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#999", marginTop: "2px" }}>
-                    vs. {p.opponent}
-                  </div>
-                )}
-              </div>
-            </Link>
-          );
-        })
-      )}
-    </SidebarCard>
-  );
-
   return (
     <>
       <style>{HERO_STYLE}</style>
@@ -2150,7 +2051,6 @@ export default function TeamPage() {
                 {teamVideos.length > 0 && VideosSidebar}
                 {NewsSidebar}
                 {!fcs && ScheduleSidebar}
-                {teamPerformances.length > 0 && PerformancesSidebar}
               </>
             )}
           </div>
@@ -2189,7 +2089,6 @@ export default function TeamPage() {
                   {teamVideos.length > 0 && VideosSidebar}
                   {NewsSidebar}
                   {!fcs && ScheduleSidebar}
-                  {teamPerformances.length > 0 && PerformancesSidebar}
                 </>
               )}
             </div>

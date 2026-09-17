@@ -67,28 +67,15 @@ export default function News() {
       <div ref={contentRef} style={{ maxWidth: "1000px", margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* ===== Header ===== */}
-        <div style={{ marginBottom: "24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "14px" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
-              <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
-              <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
-                News
-              </div>
+        <div style={{ marginBottom: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+            <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
+            <div style={{ fontSize: isMobile ? "20px" : "28px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+              News
             </div>
-            <div style={{ height: "3px", width: "160px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-            <div style={{ height: "3px", width: "160px", background: GOLD, borderRadius: "2px" }} />
           </div>
-          <Link
-            to="/performances"
-            style={{
-              display: "inline-flex", alignItems: "center", gap: "8px",
-              background: BLUE, color: "#fff", border: `2px solid ${GOLD}`,
-              borderRadius: "24px", padding: "10px 20px", textDecoration: "none",
-              fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
-            }}
-          >
-            View Performances →
-          </Link>
+          <div style={{ height: "3px", width: "160px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+          <div style={{ height: "3px", width: "160px", background: GOLD, borderRadius: "2px" }} />
         </div>
 
         {/* ===== Content ===== */}
@@ -165,7 +152,7 @@ export default function News() {
         )}
       </div>
 
-      <MarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} otherStream="performances" />
+      <MarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} />
     </>
   );
 }

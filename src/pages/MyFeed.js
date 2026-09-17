@@ -1,7 +1,7 @@
 // src/pages/MyFeed.js
 //
-// A signed-in user's personalized feed of news/performances for the players
-// they follow (see the Follow button on PlayerProfile.js and the
+// A signed-in user's personalized feed of news for the players they follow
+// (see the Follow button on PlayerProfile.js and the
 // users/{uid}/follows/{playerId} subcollection it writes to). Reachable from
 // the "My Boards" navbar dropdown and from a button on UserBoards.js (the
 // "My Draft Board" landing page), which also shows a compact preview of this
@@ -14,7 +14,6 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -27,8 +26,6 @@ const toMs = (ts) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
-const TYPE_FILTERS = ["All", "Performances", "News"];
-
 export default function MyFeed() {
   const { user, login, profile } = useAuth();
   const displayName = profile?.username?.trim() || null;
@@ -38,9 +35,7 @@ export default function MyFeed() {
   const [follows, setFollows] = useState([]);
   const [followsLoading, setFollowsLoading] = useState(true);
   const [feedItems, setFeedItems] = useState([]);
-  const [schoolLogos, setSchoolLogos] = useState({});
   const [yearFilter, setYearFilter] = useState("All");
-  const [typeFilter, setTypeFilter] = useState("All");
   const [unfollowingId, setUnfollowingId] = useState(null);
 
   useEffect(() => {
@@ -63,48 +58,28 @@ export default function MyFeed() {
     fetch();
   }, [user]);
 
-  // School logos, for performance items' team icons — same lookup MarginSidebars.js uses.
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(collection(db, "schools"));
-        const map = {};
-        snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data.Logo1 || ""; });
-        setSchoolLogos(map);
-      } catch (e) { /* logos are non-critical */ }
-    };
-    fetch();
-  }, []);
-
-  // Feed — published performances/articles for followed players. Fetches the
-  // whole published set and filters client-side (same idiom MarginSidebars.js
-  // and PerformancesHub.jsx already use) rather than chunking `in`/
-  // `array-contains-any` queries into groups of 10, since follow lists are
-  // small and this avoids needing new composite indexes.
+  // Feed — published articles for followed players. Fetches the whole
+  // published set and filters client-side (same idiom MarginSidebars.js
+  // already uses) rather than chunking `in`/`array-contains-any` queries
+  // into groups of 10, since follow lists are small and this avoids needing
+  // new composite indexes. Only `articles` carry a playerIds array (built
+  // from in-body player links) — plain `news` items don't tag specific
+  // players, so they can't be attributed to anyone's follow list and are
+  // left out.
   useEffect(() => {
     if (follows.length === 0) { setFeedItems([]); return; }
     const followedIds = new Set(follows.map((f) => f.id));
     const fetch = async () => {
       try {
-        const [perfSnap, articleSnap] = await Promise.all([
-          getDocs(query(collection(db, "performances"), where("status", "==", "published"))),
-          getDocs(query(collection(db, "articles"), where("status", "==", "published"))),
-        ]);
-        const perfItems = perfSnap.docs
-          .map((d) => ({ id: d.id, ...d.data(), _kind: "performance" }))
-          .filter((p) => followedIds.has(p.playerId));
-        // Only `articles` carry a playerIds array (built from in-body player
-        // links) — plain `news` items don't tag specific players, so they
-        // can't be attributed to anyone's follow list and are left out.
+        const articleSnap = await getDocs(query(collection(db, "articles"), where("status", "==", "published")));
         const articleItems = articleSnap.docs
-          .map((d) => ({ id: d.id, ...d.data(), _kind: "article" }))
-          .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)));
-        // Performances sort by their own gameDate; articles by publishedAt
-        // only, never last-updated — an old article getting a small edit
-        // (which bumps updatedAt) must not jump back to the top of this feed.
-        const combined = [...perfItems, ...articleItems]
-          .sort((a, b) => toMs(b.gameDate || b.publishedAt) - toMs(a.gameDate || a.publishedAt));
-        setFeedItems(combined);
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)))
+          // publishedAt only, never last-updated — an old article getting a
+          // small edit (which bumps updatedAt) must not jump back to the
+          // top of this feed.
+          .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt));
+        setFeedItems(articleItems);
       } catch (e) { console.error(e); setFeedItems([]); }
     };
     fetch();
@@ -127,9 +102,7 @@ export default function MyFeed() {
     (yearFilter === "All" ? follows : follows.filter((f) => f.playerEligible === yearFilter)).map((f) => f.id)
   );
 
-  const filteredFeed = feedItems
-    .filter((item) => item._kind === "performance" ? yearFollowedIds.has(item.playerId) : item.playerIds.some((pid) => yearFollowedIds.has(pid)))
-    .filter((item) => typeFilter === "All" ? true : typeFilter === "Performances" ? item._kind === "performance" : item._kind === "article");
+  const filteredFeed = feedItems.filter((item) => item.playerIds.some((pid) => yearFollowedIds.has(pid)));
 
   if (!user) return (
     <div style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -142,7 +115,7 @@ export default function MyFeed() {
               My Feed
             </div>
             <div style={{ fontSize: "14px", fontWeight: 700, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-              News & Performances From Players You Follow
+              News From Players You Follow
             </div>
           </div>
         </div>
@@ -151,7 +124,7 @@ export default function MyFeed() {
           <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "28px" }}>
             {[
               { icon: "⭐", text: "Follow prospects from any player page" },
-              { icon: "📰", text: "See their news and performance write-ups in one place" },
+              { icon: "📰", text: "See their news and write-ups in one place" },
               { icon: "🗓️", text: "Filter by draft class year" },
             ].map(({ icon, text }) => (
               <div key={text} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -188,7 +161,6 @@ export default function MyFeed() {
     <>
       <Helmet><title>{feedTitle} | We-Draft</title></Helmet>
       <style>{`
-        ${STAT_LINE_GLOW_STYLE}
         .wd-feed-item:hover { background: #f3f8ff; }
         .wd-following-pill:hover .wd-unfollow-x { opacity: 1; }
       `}</style>
@@ -217,7 +189,7 @@ export default function MyFeed() {
                 Not Following Anyone Yet
               </div>
               <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#888", maxWidth: "440px", margin: "0 auto 20px", lineHeight: 1.6 }}>
-                Hit the Follow button on any player page to get their news and performances here.
+                Hit the Follow button on any player page to get their news here.
               </div>
               <Link to="/community" style={{ display: "inline-block", padding: "10px 24px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", background: GOLD, border: `2px solid ${BLUE}`, borderRadius: "8px", textDecoration: "none" }}>
                 Browse the Community Board →
@@ -254,12 +226,6 @@ export default function MyFeed() {
                   {yr}
                 </button>
               ))}
-              <div style={{ width: "2px", height: "20px", background: "#eee", margin: "0 4px" }} />
-              {TYPE_FILTERS.map((t) => (
-                <button key={t} onClick={() => setTypeFilter(t)} style={{ border: `2px solid ${BLUE}`, borderRadius: "20px", padding: "6px 16px", fontWeight: 900, fontSize: "13px", cursor: "pointer", background: typeFilter === t ? GOLD : "#fff", color: typeFilter === t ? "#fff" : BLUE }}>
-                  {t}
-                </button>
-              ))}
             </div>
 
             {/* Feed */}
@@ -273,47 +239,29 @@ export default function MyFeed() {
               <div style={{ height: "3px", background: GOLD }} />
               {filteredFeed.length === 0 ? (
                 <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
-                  No news or performances match your filters yet.
+                  No news matches your filters yet.
                 </div>
-              ) : filteredFeed.map((item, i) => {
-                const isPerf = item._kind === "performance";
-                const href = isPerf ? `/performance/${item.slug || item.id}` : `/news/${item.slug}`;
-                const logo = isPerf ? schoolLogos[item.school] : null;
-                return (
-                  <Link
-                    key={item.id}
-                    to={href}
-                    className="wd-feed-item"
-                    style={{
-                      display: "flex", alignItems: "center", gap: "14px", padding: "14px 18px", textDecoration: "none",
-                      borderBottom: i < filteredFeed.length - 1 ? "1px solid #eee" : "none", background: "#fff",
-                    }}
-                  >
-                    {isPerf ? (
-                      logo ? (
-                        <img src={logo} alt="" style={{ width: "34px", height: "34px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                      ) : (
-                        <span style={{ width: "34px", height: "34px", flexShrink: 0, borderRadius: "6px", background: "#eee", display: "inline-block" }} />
-                      )
-                    ) : (
-                      <span style={{ width: "34px", height: "34px", flexShrink: 0, borderRadius: "6px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px" }}>📰</span>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "15px", fontWeight: 900, color: "#222", lineHeight: 1.3 }}>
-                        {isPerf ? (item.playerName || item.titleShort) : item.title}
-                      </div>
-                      {isPerf && item.statLine && (
-                        <div className={gradeStatLineClass(item.grade)} style={{ fontFamily: "'Courier New', monospace", fontSize: "12px", fontWeight: 700, color: "#666", marginTop: "3px" }}>
-                          {item.statLine}
-                        </div>
-                      )}
-                      {!isPerf && item.excerpt && (
-                        <div style={{ fontSize: "12px", fontWeight: 600, color: "#888", marginTop: "3px", lineHeight: 1.4 }}>{item.excerpt}</div>
-                      )}
+              ) : filteredFeed.map((item, i) => (
+                <Link
+                  key={item.id}
+                  to={`/news/${item.slug}`}
+                  className="wd-feed-item"
+                  style={{
+                    display: "flex", alignItems: "center", gap: "14px", padding: "14px 18px", textDecoration: "none",
+                    borderBottom: i < filteredFeed.length - 1 ? "1px solid #eee" : "none", background: "#fff",
+                  }}
+                >
+                  <span style={{ width: "34px", height: "34px", flexShrink: 0, borderRadius: "6px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px" }}>📰</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "15px", fontWeight: 900, color: "#222", lineHeight: 1.3 }}>
+                      {item.title}
                     </div>
-                  </Link>
-                );
-              })}
+                    {item.excerpt && (
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: "#888", marginTop: "3px", lineHeight: 1.4 }}>{item.excerpt}</div>
+                    )}
+                  </div>
+                </Link>
+              ))}
             </div>
           </>
         )}

@@ -310,7 +310,7 @@ export default function VideosPage() {
         )}
       </div>
 
-      <MarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} otherStream="news" />
+      <MarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} />
     </>
   );
 }

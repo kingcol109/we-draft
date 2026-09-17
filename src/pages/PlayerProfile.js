@@ -25,7 +25,6 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { getAnonId } from "../utils/anonId";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
@@ -239,10 +238,8 @@ const TREND_STYLE = {
   },
 };
 
-// ── Game Notes tag scale — a separate, coarser 5-tier scale from the
-// site's Performance grades (Dominant/Great/Good/Productive/Average/Bad),
-// specific to this per-game evaluator note: how this one game looked for
-// this player, not a formal performance grade. ──
+// ── Game Notes tag scale — a coarse 5-tier scale specific to this per-game
+// evaluator note: how this one game looked for this player. ──
 const GAME_NOTE_TAGS = [
   { key: "Great", color: "#16a34a" },
   { key: "Good", color: "#0f6e56" },
@@ -870,8 +867,8 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
         const topWeaknesses = Object.entries(wCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
         const schoolData = schoolSnap && !schoolSnap.empty ? schoolSnap.docs[0].data() : null;
         // Same LogoBlack → LogoDark → Logo1 preference GamePage.js/
-        // PerformancesHub.jsx/WePickHub.js already use — LogoBlack is the
-        // asset meant for exactly this kind of dark-background placement.
+        // WePickHub.js already use — LogoBlack is the asset meant for
+        // exactly this kind of dark-background placement.
         const schoolLogo = schoolData?.LogoBlack || schoolData?.LogoDark || schoolData?.Logo1 || "";
         const toMsLocal = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0;
         const recentVideo = videosSnap.docs
@@ -2255,11 +2252,23 @@ export default function PlayerProfile() {
           const fortyKey = Object.keys(data).find((k) => k.replace(/\s/g,"") === "40Yard");
           if (fortyKey) data["40 Yard"] = data[fortyKey];
           setPlayer({ id:d.id, ...data });
+          return;
+        }
+        // No live player on this slug — it may be a former one (name/
+        // position/class edit via AdminPanel.js, or a Transfer Portal
+        // class bump's scheduled Feb 1 change — see
+        // scripts/applyPendingSlugChanges.js). playerSlugRedirects/{slug}
+        // is written every time a slug changes for any reason, keyed by
+        // the OLD slug, so a stale bookmark/shared link/search result
+        // still lands on the right page instead of a dead end.
+        const redirectSnap = await getDoc(doc(db,"playerSlugRedirects",slug));
+        if (redirectSnap.exists() && redirectSnap.data().newSlug) {
+          navigate(`/player/${redirectSnap.data().newSlug}`, { replace: true });
         }
       } catch(e) { console.error(e); }
     };
     fetch();
-  }, [slug]);
+  }, [slug, navigate]);
 
   // Mobile "stuck loading forever" watchdog — see the hook's own comment.
   // First written inline here; now shared with every other page that has
@@ -2364,14 +2373,14 @@ export default function PlayerProfile() {
     if (!slug) return;
     const fetch = async () => {
       try {
-        // These four reads (player news, player articles, player
-        // performances, school items) don't depend on each other at all —
-        // they used to run as four sequential awaits, one after another,
-        // which on a real network is four round-trips of latency stacked up
-        // for one sidebar feed. Firing them together via Promise.all cuts
-        // that to about one round-trip's worth of wall-clock time. Each
-        // still has its own try/catch (an unrelated missing index or
-        // transient failure in one shouldn't wipe out the others' results).
+        // These three reads (player news, player articles, school items)
+        // don't depend on each other at all — they used to run as
+        // sequential awaits, one after another, which on a real network is
+        // that many round-trips of latency stacked up for one sidebar feed.
+        // Firing them together via Promise.all cuts that to about one
+        // round-trip's worth of wall-clock time. Each still has its own
+        // try/catch (an unrelated missing index or transient failure in one
+        // shouldn't wipe out the others' results).
         const schoolSlug = player?.School ? toTeamSlug(player.School) : null;
 
         const fetchPlayerNews = async () => {
@@ -2388,41 +2397,9 @@ export default function PlayerProfile() {
           if (!player?.id) return [];
           try {
             const articleSnap = await getDocs(query(collection(db,"articles"), where("status","==","published"), where("playerIds","array-contains",player.id), orderBy("publishedAt","desc")));
-            // Same titleShort-over-title preference as the performances
-            // mapping below, once ArticlesManager.js's own short-form title
-            // field is set.
             return articleSnap.docs.map((d) => { const data = d.data(); return { id:d.id, type:"article", _priority:1, ...data, title: data.titleShort || data.title }; });
           } catch(articleErr) {
             console.warn("Articles index missing, skipping:", articleErr);
-            return [];
-          }
-        };
-
-        // Game performances — authored from the Admin Panel's Performances
-        // tab. Matched the same way as articles (playerIds array-contains,
-        // published only) so a performance mentioning several players shows
-        // up on all of their profiles, not just the primary subject's.
-        // Sorted client-side rather than via orderBy so this doesn't need its
-        // own composite Firestore index on top of the ones articles/news
-        // already have. The displayed/sorted date is always the game's date,
-        // never the authoring date — a performance should read as "what
-        // happened in this game," not "when the write-up was published."
-        const fetchPlayerPerformances = async () => {
-          if (!player?.id) return [];
-          try {
-            const perfSnap = await getDocs(query(collection(db,"performances"), where("playerIds","array-contains",player.id), where("status","==","published")));
-            return perfSnap.docs
-              .map((d) => {
-                const data = d.data();
-                return {
-                  id: d.id, type:"performance", _priority:1, ...data,
-                  title: data.titleShort || data.titleLong,
-                  publishedAt: data.gameDate,
-                };
-              })
-              .sort((a, b) => (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0));
-          } catch(perfErr) {
-            console.warn("Performances unavailable, skipping:", perfErr);
             return [];
           }
         };
@@ -2442,15 +2419,15 @@ export default function PlayerProfile() {
           } catch(e) { return []; }
         };
 
-        const [playerNewsItems, playerArticleItems, playerPerformanceItems, schoolItemsRaw] = await Promise.all([
-          fetchPlayerNews(), fetchPlayerArticles(), fetchPlayerPerformances(), fetchSchoolItems(),
+        const [playerNewsItems, playerArticleItems, schoolItemsRaw] = await Promise.all([
+          fetchPlayerNews(), fetchPlayerArticles(), fetchSchoolItems(),
         ]);
 
-        const existingIds = new Set([...playerNewsItems, ...playerArticleItems, ...playerPerformanceItems].map((n) => n.id));
+        const existingIds = new Set([...playerNewsItems, ...playerArticleItems].map((n) => n.id));
         const schoolItems = schoolItemsRaw.filter((n) => !existingIds.has(n.id));
 
         // Sort: player content first, school content second, each sorted by date within group
-        const combined = [...playerArticleItems, ...playerPerformanceItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
+        const combined = [...playerArticleItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
           if (a._priority !== b._priority) return a._priority - b._priority;
           return (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0);
         });
@@ -2554,10 +2531,10 @@ export default function PlayerProfile() {
         // WordmarkDark/Logo1 are fallbacks for a school with no light-bg
         // wordmark on file) plus its short-form name (schools/{School}.Short,
         // e.g. "Bama" — same field GameMarginSidebars.js's scoreboard bug
-        // and PerformancesManager.js's hashtags already read) as the img alt
-        // text/final fallback if nothing else is set. "in" queries cap at 10
-        // values, hence the chunking (opponents across a player's whole
-        // Shorts history should rarely exceed that, but never assume).
+        // already reads) as the img alt text/final fallback if nothing else
+        // is set. "in" queries cap at 10 values, hence the chunking
+        // (opponents across a player's whole Shorts history should rarely
+        // exceed that, but never assume).
         const opponents = [...new Set(rawClips.filter((c) => c.gameInfo).map((c) => c.gameInfo.opponent))];
         const schoolInfoByOpponent = {};
         if (opponents.length > 0) {
@@ -3331,10 +3308,10 @@ useEffect(() => {
   // being edited (player.updatedAt), any scouting evaluation on this player
   // changing (lastEvalUpdate, public or private — even a private eval moves
   // the Community Grade/Strengths/Weaknesses/Fits percentages shown on the
-  // page), or a news/article/performance mentioning this player being
-  // published (playerNews[].publishedAt). All three are data this page
-  // already fetches for its own content, so this doesn't add any network
-  // calls — just takes the max of timestamps already in hand. ──
+  // page), or a news/article mentioning this player being published
+  // (playerNews[].publishedAt). All three are data this page already
+  // fetches for its own content, so this doesn't add any network calls —
+  // just takes the max of timestamps already in hand. ──
   const toMsForStamp = (ts) => ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : 0;
   const pageLastUpdatedMs = Math.max(
     toMsForStamp(player.updatedAt),
@@ -3805,8 +3782,8 @@ useEffect(() => {
   );
 
   // ── Top 5 Trending sidebar — same team-colored chip pattern as
-  // PlayersMentionedList.js/MorePerformancesList.js (whole chip fills
-  // solid on hover, name flips white, chevron slides in, "logo" grows
+  // PlayersMentionedList.js (whole chip fills solid on hover, name flips
+  // white, chevron slides in, "logo" grows
   // dramatically from center), except the fill is the trend's own color
   // (Up/Breakout/On Fire — see TREND_STYLE), not a school color, and the
   // logo box holds the trend's own icon (▲/⚡/🔥) rather than a team logo —
@@ -4011,7 +3988,7 @@ useEffect(() => {
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No recent news.</div>
       ) : (
         playerNews.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
-          <Link key={n.slug || n.id} to={n.type === "performance" ? `/performance/${n.slug}` : `/news/${n.slug}`}
+          <Link key={n.slug || n.id} to={`/news/${n.slug}`}
             style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
@@ -4030,11 +4007,6 @@ useEffect(() => {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <h3 className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</h3>
-              {n.type === "performance" && n.statLine && (
-                <div className={gradeStatLineClass(n.grade)} style={{ fontFamily: "'Courier New', monospace", fontWeight: 700, fontSize: "10.5px", color: "#666", marginTop: "3px" }}>
-                  {n.statLine}
-                </div>
-              )}
             </div>
           </Link>
         ))
@@ -4222,12 +4194,6 @@ useEffect(() => {
           75%      { transform: scale(1.05) rotate(-2deg); filter: drop-shadow(0 0 7px rgba(255,0,0,1)); }
         }
         .wd-onfire-icon { display:inline-block; animation: wdOnFireIconFlicker 0.9s ease-in-out infinite; }
-
-        /* Performance stat lines — "pop" scaled to how good the grade was,
-           via statLineGlow.js (shared with MyFeed.js/TeamPage.js/GamePage.js/
-           PerformancesHub.jsx/the MarginSidebars family) instead of a
-           whole-row glow. */
-        ${STAT_LINE_GLOW_STYLE}
 
         /* Top 5 Trending sidebar chips — same mechanics as
            PlayersMentionedList.js's chips (whole chip fills solid on hover,
@@ -4508,7 +4474,7 @@ useEffect(() => {
               {!isMobile && (
                 <button
                   onClick={handleToggleFollow}
-                  title={following ? "Unfollow" : "Follow — get their news & performances in your feed"}
+                  title={following ? "Unfollow" : "Follow — get their news in your feed"}
                   className="font-extrabold rounded-full transition hover:opacity-90"
                   style={{
                     border: "2px solid #fff",
@@ -4673,6 +4639,23 @@ useEffect(() => {
                 centers the name/tags on the row's true middle instead of
                 being skewed off-axis by a sibling box eating space. */}
             <div className="flex-1 text-center">
+              {/* Transfer Portal banner — the one thing on this page that
+                  reacts to AdminPanel.js's "Move to Transfer Portal"
+                  action (see PlayerDataSection there); everything else
+                  about the player (name, position, etc.) stays exactly as
+                  it was until a destination school actually resolves it. */}
+              {player.InPortal && (
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: "6px",
+                  background: "#b45309", border: "2px solid #fff", borderRadius: "999px",
+                  color: "#fff", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase",
+                  fontSize: isMobile ? "10px" : "13px", padding: isMobile ? "3px 12px" : "5px 16px",
+                  marginBottom: isMobile ? "8px" : "12px", textShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  pointerEvents: "auto",
+                }}>
+                  🔄 In the Transfer Portal
+                </div>
+              )}
               <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:"#fff", letterSpacing:"0.02em", textShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
                 <div>{player.First}</div>
                 <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
@@ -4780,6 +4763,15 @@ useEffect(() => {
                       notes={trendNotesList} notesColor="#ffcccc" isMobile={isMobile}
                     />
                   )}
+                </div>
+              )}
+              {/* Former school — set once a portal move resolves (see
+                  AdminPanel.js's handleResolvePortal); stays visible
+                  permanently after that, same as the rest of the player's
+                  bio, rather than only while InPortal is true. */}
+              {!player.InPortal && player.PriorSchool && (
+                <div className="mt-1" style={{ color:"rgba(255,255,255,0.65)", fontWeight:700, fontSize:isMobile?"11px":"13px" }}>
+                  Transferred from {player.PriorSchool}{player.PriorSchoolYear ? ` (${player.PriorSchoolYear})` : ""}
                 </div>
               )}
               {draftedBy && draftInfo && (
@@ -4973,8 +4965,8 @@ useEffect(() => {
               below the card, so it reads as attached to the player info it
               describes rather than an orphaned label. See pageLastUpdatedMs
               above: the most recent of the player record being edited, any
-              evaluation on this player changing, or a news/article/
-              performance mentioning them being published. */}
+              evaluation on this player changing, or a news/article
+              mentioning them being published. */}
           {pageLastUpdatedMs > 0 && (
             <div className="bg-white" style={{ padding: isMobile ? "6px 16px" : "6px 32px", textAlign: "right", borderTop: "1px solid #eee" }}>
               <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic" }}>

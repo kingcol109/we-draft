@@ -2,13 +2,12 @@
 //
 // Public page for a single game, authored from the Admin Panel's CFB
 // Schedule editor (see AdminPanel.js's CFBScheduleSection). Renders one of
-// two states off the same schedule26 doc: pregame (matchup + key players +
-// preview notes) and final (score + review notes + each team's top
-// performances — key players step aside once there's real performance data
-// to show instead). Left/right position is the only "AWAY"/"HOME" label
-// anywhere on the page — each side's own logo identifies the school, so
-// nothing here restates a full name a second time next to it or spells out
-// which side is which.
+// two states off the same schedule26 doc: pregame and final (score +
+// review notes), with each team's Key Players staying visible in both.
+// Left/right position is the only "AWAY"/"HOME" label anywhere on the
+// page — each side's own logo identifies the school, so nothing here
+// restates a full name a second time next to it or spells out which side
+// is which.
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -22,7 +21,6 @@ import { useAuth } from "../context/AuthContext";
 import GameOfWeekBadge from "../assets/weekgame.png";
 import FeaturedGameBadge from "../assets/featgame.png";
 import confetti from "canvas-confetti";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 import { useCurrentRankMap, ranksForGame, withRank } from "../utils/rankings";
 
 // Same flair badge assets/config as PlayerProfile.js's hero (duplicated
@@ -65,11 +63,7 @@ const FLAIR_CONFIG = {
   "Proven":               { img: ProvenFlair,           stroke: "#00124b" },
 };
 
-const GRADE_PRIORITY = { Dominant: 0, Great: 1, Good: 2, Productive: 3, Average: 4, Bad: 5 };
-const gradePriority = (grade) => (grade in GRADE_PRIORITY ? GRADE_PRIORITY[grade] : 6);
-
 const PAGE_STYLE = `
-  ${STAT_LINE_GLOW_STYLE}
   .wd-perf-row-link { transition: background 0.15s ease, padding-left 0.15s ease; }
   .wd-perf-row-link:hover { background: rgba(255,255,255,0.14); padding-left: 20px; }
   .wd-perf-row-chevron { opacity: 0; transform: translateX(-6px); transition: opacity 0.15s ease, transform 0.15s ease; }
@@ -110,9 +104,8 @@ const PAGE_STYLE = `
     50%      { opacity: 1; }
   }
 
-  /* Key Player hover note (and, post-game, Top Performances' stat line —
-     same classes, reused as-is) — the name+note stack sits in a fixed-
-     height box (sized up front to fit both states) so revealing the note
+  /* Key Player hover note — the name+note stack sits in a fixed-
+     height box so revealing the note
      never changes the row's own height. Instead, hovering slides the name
      up to the top of that box and fades the note in underneath it, all
      within space that was already reserved — nothing below the row
@@ -314,9 +307,10 @@ const pickedSideOf = (p) => {
 // the margin sidebars, so the hero can spend the extra width on scale
 // instead. Logo preference for this page: LogoDark (reads better against
 // the hero's colored background than a school's normal logo) else the plain
-// primary logo — LogoBlack is a separate asset meant for the Performances
-// terminal's near-black background, not a colored one like this hero's, so
-// it isn't part of this chain.
+// primary logo — LogoBlack is a separate asset meant for a near-black or
+// white background (see this file's own Key Players fallback logo further
+// down), not a colored one like this hero's, so it isn't part of this
+// chain.
 //
 // Backdrop wordmark: WordmarkDark if the school has one, else the plain
 // Wordmark used the same way (a low-opacity backdrop doesn't need the
@@ -451,19 +445,16 @@ function TeamHeroSide({ school, schoolData, isMobile, dimmed, rank }) {
   );
 }
 
-// One team's content column — Key Players pregame, Top Performances once
-// Final (never both; Key Players steps aside for real performance data the
-// moment there's some to show). Sits directly in the hero, below that
-// team's own big logo (see the caller), so no mini-logo/team-label header
-// is needed here anymore — which side this is is already obvious from
-// position alone. A translucent glass panel (not a white card) so it reads
-// as part of the same dark hero graphic instead of a light box bolted on
-// top of it.
-function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes, isMobile }) {
+// One team's content column — Key Players, pregame or final. Sits directly
+// in the hero, below that team's own big logo (see the caller), so no
+// mini-logo/team-label header is needed here anymore — which side this is
+// is already obvious from position alone. A translucent glass panel (not a
+// white card) so it reads as part of the same dark hero graphic instead of
+// a light box bolted on top of it.
+function TeamColumn({ schoolData, keyPlayers, keyPlayerNotes, isMobile }) {
   const accent1 = schoolData?.Color1 || BLUE;
   const accent2 = schoolData?.Color2 || GOLD;
-  const isFinalMode = mode === "final";
-  const items = isFinalMode ? performances : keyPlayers;
+  const items = keyPlayers;
 
   // A faded wordmark (dark version preferred, since it sits on a dark
   // panel — plain Wordmark as the fallback, not Logo1, which reads as a
@@ -488,47 +479,6 @@ function TeamColumn({ schoolData, keyPlayers, performances, mode, keyPlayerNotes
             }}
           />
         )
-      ) : isFinalMode ? (
-        // Player name + stat line — the title lives on the performance's
-        // own page; the grade shows up as a pop on the stat line itself
-        // (see gradeStatLineClass) once it's revealed, not as text or a
-        // row-wide glow. Same fixed-height slide-up/fade-in reveal as the
-        // Key Players rows below (see the wd-keyplayer-* comment in
-        // PAGE_STYLE): the name sits where it always did, and hovering
-        // slides it up to make room for the stat line fading in
-        // underneath, all within space already reserved — nothing shifts.
-        // Rows with no statLine just render the name with no reveal box at
-        // all, same as Key Players' no-note case.
-        performances.map((perf, i) => (
-          <Link
-            key={perf.id}
-            to={`/performance/${perf.slug}`}
-            className={`wd-perf-row-link${isMobile ? " wd-keyplayer-note-forced" : ""}`}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "12px 16px", textDecoration: "none",
-              borderBottom: i < performances.length - 1 ? "1px solid rgba(255,255,255,0.15)" : "none",
-              borderLeft: `4px solid ${accent2}`,
-            }}
-          >
-            {perf.statLine ? (
-              <div style={{ position: "relative", height: "36px", flex: 1, minWidth: 0 }}>
-                <div className="wd-keyplayer-name-anim" style={{ color: "#fff", fontWeight: 900, fontSize: "16px", lineHeight: 1.3, textShadow: "0 1px 3px rgba(0,0,0,0.4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {perf.playerName || perf.titleShort}
-                </div>
-                <div className="wd-keyplayer-note-wrap" style={{ top: "19px" }}>
-                  <div className={gradeStatLineClass(perf.grade)} style={{ color: "rgba(255,255,255,0.75)", fontWeight: 700, fontSize: "12px", fontFamily: "'Courier New', monospace", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {perf.statLine}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ minWidth: 0, color: "#fff", fontWeight: 900, fontSize: "16px", lineHeight: 1.3, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>
-                {perf.playerName || perf.titleShort}
-              </div>
-            )}
-            <span className="wd-perf-row-chevron" style={{ color: GOLD, fontSize: "18px", fontWeight: 900, flexShrink: 0 }}>›</span>
-          </Link>
-        ))
       ) : (
         keyPlayers.map((p, i) => {
           // A player's own flair badge (same asset/config as their profile
@@ -635,8 +585,6 @@ export default function GamePage() {
   const [relatedArticles, setRelatedArticles] = useState([]);
   const [keyPlayersAway, setKeyPlayersAway] = useState([]);
   const [keyPlayersHome, setKeyPlayersHome] = useState([]);
-  const [performancesAway, setPerformancesAway] = useState([]);
-  const [performancesHome, setPerformancesHome] = useState([]);
   const [picks, setPicks] = useState([]);
   const [verifiedByUid, setVerifiedByUid] = useState({});
   // Live current username per uid, fetched in the same users/{uid} batch
@@ -710,8 +658,6 @@ export default function GamePage() {
     setHomeSchool(null);
     setKeyPlayersAway([]);
     setKeyPlayersHome([]);
-    setPerformancesAway([]);
-    setPerformancesHome([]);
     setPicks([]);
     setVerifiedByUid({});
     setNamesByUid({});
@@ -772,16 +718,14 @@ export default function GamePage() {
         g = { id: snap.docs[0].id, ...snap.docs[0].data() };
         setGame(g);
 
-        const isFinal = g.Final && g.HomeScore != null && g.AwayScore != null;
-        const keyAwayIds = isFinal ? [] : (g.KeyPlayersAway || []);
-        const keyHomeIds = isFinal ? [] : (g.KeyPlayersHome || []);
+        const keyAwayIds = g.KeyPlayersAway || [];
+        const keyHomeIds = g.KeyPlayersHome || [];
 
-        const [awaySchoolSnap, homeSchoolSnap, keyAwaySnaps, keyHomeSnaps, perfSnap, picksSnap, hypeSnap] = await Promise.all([
+        const [awaySchoolSnap, homeSchoolSnap, keyAwaySnaps, keyHomeSnaps, picksSnap, hypeSnap] = await Promise.all([
           g.Away ? getDocs(query(collection(db, "schools"), where("School", "==", g.Away))) : null,
           g.Home ? getDocs(query(collection(db, "schools"), where("School", "==", g.Home))) : null,
           Promise.all(keyAwayIds.map((id) => getDoc(doc(db, "players", id)))),
           Promise.all(keyHomeIds.map((id) => getDoc(doc(db, "players", id)))),
-          isFinal ? getDocs(query(collection(db, "performances"), where("gameId", "==", g.id), where("status", "==", "published"))) : null,
           getDocs(collection(db, "schedule26", g.id, "picks")),
           getDocs(collection(db, "schedule26", g.id, "hype")),
         ]);
@@ -815,13 +759,6 @@ export default function GamePage() {
           });
           setVerifiedByUid((prev) => ({ ...prev, ...vMap }));
           setNamesByUid((prev) => ({ ...prev, ...nMap }));
-        }
-
-        if (perfSnap) {
-          const all = perfSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          const sortByGrade = (a, b) => gradePriority(a.grade) - gradePriority(b.grade);
-          setPerformancesAway(all.filter((p) => p.school === g.Away).sort(sortByGrade).slice(0, 5));
-          setPerformancesHome(all.filter((p) => p.school === g.Home).sort(sortByGrade).slice(0, 5));
         }
       } catch (e) {
         console.error("Game page load error:", e);
@@ -1354,14 +1291,12 @@ export default function GamePage() {
   const homeWon = isFinal && game.HomeScore > game.AwayScore;
   const awayColor = awaySchool?.Color1 || NEUTRAL_TEAM_COLOR;
   const homeColor = homeSchool?.Color1 || NEUTRAL_TEAM_COLOR;
-  // Pregame, an empty Key Players section entirely is just unfilled admin
-  // scaffolding, not meaningful context worth showing — unlike a Final game
-  // with no performances written up yet, which still stays visible as real
-  // information. But once at least one side has a pick, both columns show
-  // side by side as usual — the empty one just falls back to its own
-  // "None selected yet." message rather than disappearing and leaving a
-  // lopsided single-column layout.
-  const showKeyPlayersSection = isFinal || keyPlayersAway.length > 0 || keyPlayersHome.length > 0;
+  // An empty Key Players section entirely is just unfilled admin
+  // scaffolding, not meaningful context worth showing. Once at least one
+  // side has a pick, both columns show side by side as usual — the empty
+  // one just falls back to its own faded watermark rather than
+  // disappearing and leaving a lopsided single-column layout.
+  const showKeyPlayersSection = keyPlayersAway.length > 0 || keyPlayersHome.length > 0;
 
   // Picks unlock at 00:00 UTC the Monday of the game's own week — before
   // that, PicksForceOpen (an admin override, see AdminPanel.js) is the only
@@ -1406,9 +1341,8 @@ export default function GamePage() {
   const awayWinPct = pickCount ? Math.round((awayPickWins / pickCount) * 100) : 0;
   const homeWinPct = pickCount ? Math.round((homePickWins / pickCount) * 100) : 0;
   // "Back" always means this game's week slate — the CFB schedule for that
-  // week (every game, not just the ones with performances) — not the
-  // Performances hub. Only falls back to the CFB schedule's own default
-  // (current week) if this game somehow has no Week on file.
+  // week. Only falls back to the CFB schedule's own default (current week)
+  // if this game somehow has no Week on file.
   const weekSlateUrl = game.Week ? `/cfb/schedule/${encodeURIComponent(game.Week)}` : "/cfb/schedule";
   const weekSlateLabel = game.Week ? `← ${game.Week} Slate` : "← Full Schedule";
 
@@ -1446,7 +1380,7 @@ export default function GamePage() {
   // projects..." copy regardless of whether the game has even been played
   // yet, which is what this used to do.
   const seoDescription = isFinal
-    ? `Final: ${game.Away} ${game.AwayScore} – ${game.Home} ${game.HomeScore}${dateStr ? ` on ${dateStr}` : ""}. See top performances and how the We-Draft community predicted this game.`
+    ? `Final: ${game.Away} ${game.AwayScore} – ${game.Home} ${game.HomeScore}${dateStr ? ` on ${dateStr}` : ""}. See how the We-Draft community predicted this game.`
     : `${seoDateTime ? `${seoDateTime}. ` : ""}${seoPredictionSummary}`;
 
   // Structured data — SportsEvent, populated only from fields that actually
@@ -2001,9 +1935,9 @@ export default function GamePage() {
 
             {/* The admin-written Preview/Recap (game.Notes) — used to live
                 far down the page below Community Picks; now sits right in
-                the hero, above Key Players/Top Performances, restyled as a
-                translucent glass card so it reads as part of the same dark
-                graphic instead of a plain white box further down. */}
+                the hero, above Key Players, restyled as a translucent glass
+                card so it reads as part of the same dark graphic instead of
+                a plain white box further down. */}
             {game.Notes && (
               <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "26px" : "40px", maxWidth: "700px", marginLeft: "auto", marginRight: "auto" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "10px" }}>
@@ -2028,32 +1962,27 @@ export default function GamePage() {
               </div>
             )}
 
-            {/* Key Players (pregame) or Top Performances (final) — living
-                right in the hero, below the big logos, instead of stacked
-                far down the page under Notes, so this shows up as part of
-                the same matchup graphic rather than a separate section a
-                visitor might never scroll to. */}
+            {/* Key Players — living right in the hero, below the big logos,
+                instead of stacked far down the page under Notes, so this
+                shows up as part of the same matchup graphic rather than a
+                separate section a visitor might never scroll to. */}
             {showKeyPlayersSection && (
               <div style={{ position: "relative", zIndex: 1, marginTop: isMobile ? "18px" : "24px" }}>
                 <div style={{ textAlign: "center", marginBottom: "14px" }}>
                   <h2 style={{ margin: 0, color: "#fff", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", textShadow: "0 2px 6px rgba(0,0,0,0.5)" }}>
-                    {isFinal ? `${withRank(game.Away, awayRank)} vs ${withRank(game.Home, homeRank)} Top Performances` : "Key Players to Watch"}
+                    Key Players
                   </h2>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? "16px" : "24px" }}>
                   <TeamColumn
                     schoolData={awaySchool}
                     keyPlayers={keyPlayersAway}
-                    performances={performancesAway}
-                    mode={isFinal ? "final" : "pregame"}
                     keyPlayerNotes={game.KeyPlayerNotes}
                     isMobile={isMobile}
                   />
                   <TeamColumn
                     schoolData={homeSchool}
                     keyPlayers={keyPlayersHome}
-                    performances={performancesHome}
-                    mode={isFinal ? "final" : "pregame"}
                     keyPlayerNotes={game.KeyPlayerNotes}
                     isMobile={isMobile}
                   />

@@ -54,8 +54,6 @@ const NFLPage = lazy(() => import("./pages/NFLPage"));
 
 // Articles
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
-const PerformancePage = lazy(() => import("./pages/PerformancePage"));
-const PerformancesHub = lazy(() => import("./pages/PerformancesHub"));
 const VideosPage = lazy(() => import("./pages/VideosPage"));
 const WatchPage = lazy(() => import("./pages/WatchPage"));
 const GamePage = lazy(() => import("./pages/GamePage"));
@@ -161,23 +159,12 @@ function MainLayout() {
             <Route path="/my-draft-class" element={<MyDraftClass />} />
             <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
             <Route path="/article/:slug" element={<ArticlePage />} />
-            <Route path="/performances" element={<PerformancesHub />} />
-            {/* Trends is a literal path, ranked ahead of the dynamic :week
-                route below by React Router regardless of declaration order —
-                same page, its own tab. */}
-            <Route path="/performances/trends" element={<PerformancesHub />} />
-            {/* A specific week's slate — same page, just deep-linkable to one
-                week instead of always landing on "current" (see GamePage.js's
-                back-navigation, which points here rather than the bare hub). */}
-            <Route path="/performances/:week" element={<PerformancesHub />} />
-            <Route path="/performance/:slug" element={<PerformancePage />} />
             <Route path="/videos" element={<VideosPage />} />
             <Route path="/watch" element={<WatchPage />} />
             <Route path="/game/:slug" element={<GamePage />} />
             <Route path="/we-pick" element={<WePickHub />} />
             {/* Standings — same page component, tab + optional week param
-                (see WePickHub.js's own activeTab/useParams handling), mirroring
-                how /performances and /performances/:week share PerformancesHub. */}
+                (see WePickHub.js's own activeTab/useParams handling). */}
             <Route path="/we-pick/standings" element={<WePickHub />} />
             <Route path="/we-pick/standings/:week" element={<WePickHub />} />
             {/* My Stats — same page component, third tab (see WePickHub.js's

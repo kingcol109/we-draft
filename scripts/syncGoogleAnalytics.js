@@ -3,13 +3,13 @@
 // Pulls page-view data from GA4, keeps only pages under one of
 // PAGE_TYPES' prefixes below, and merge-writes it into Firestore's
 // analytics/{doc} collection — separate from the players/schedule26/
-// performances/articles collections entirely, joined only by slug (+ type)
+// articles collections entirely, joined only by slug (+ type)
 // at read time (see AdminPanel.js's AnalyticsSection).
 //
 // Doc IDs: "player" keeps the original bare-slug scheme (analytics/{slug})
 // for backward compatibility with every doc already written before other
 // types existed — every other type is namespaced as analytics/{type}_{slug}
-// so a game/performance/article slug can never collide with a player slug
+// so a game/article slug can never collide with a player slug
 // (or each other) in the same flat collection. Every doc, including
 // player ones, now carries an explicit `type` field going forward; a doc
 // with no `type` at all (only possible for player docs written before this
@@ -34,7 +34,6 @@ const { FieldValue } = require("firebase-admin/firestore");
 const PAGE_TYPES = [
   { type: "player", prefix: "/player/" },
   { type: "game", prefix: "/game/" },
-  { type: "performance", prefix: "/performance/" },
   // Articles and plain news items share the /news/:id route (see
   // NewsArticle.jsx) — both are tracked under the same "article" type here
   // since there's no separate URL prefix to tell them apart by.

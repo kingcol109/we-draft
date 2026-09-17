@@ -20,7 +20,6 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "../components/statLineGlow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -34,11 +33,6 @@ const TREND_STYLE = {
   breakout: { icon: "⚡", label: "Breakout", color: "#4a535e" },
   "on fire": { icon: "🔥", label: "On Fire", color: RED },
 };
-
-// Same tier ranking PerformancePage.js's own "More Performances" sidebar
-// sorts by — Dominant first, then Great, then Good, everything else after.
-const GRADE_PRIORITY = { Dominant: 0, Great: 1, Good: 2, Productive: 3, Average: 4, Bad: 5 };
-const gradePriority = (grade) => (grade in GRADE_PRIORITY ? GRADE_PRIORITY[grade] : 6);
 
 const SITE_TITLE = "We-Draft.com - NFL Draft Scouting Reports, Rankings & Mock Drafts";
 const SITE_DESCRIPTION = "Build your NFL Draft board, read scouting reports, compare community evaluations, create mock drafts, and follow thousands of college football prospects with rankings, film links, measurable data, and the latest draft news.";
@@ -366,7 +360,6 @@ export default function HomeInSeason() {
   const [articles, setArticles] = useState([]);
   const [videos, setVideos] = useState([]);
   const [trending, setTrending] = useState([]);
-  const [topPerformances, setTopPerformances] = useState([]);
   const [weekGameCount, setWeekGameCount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
@@ -444,31 +437,6 @@ export default function HomeInSeason() {
           .slice(0, 6);
         setTrending(shown);
       } catch (err) { console.error("Error fetching trending:", err); }
-    };
-    fetch();
-  }, []);
-
-  // Top Performances — Dominant/Great/Good, same "performances" query
-  // PerformancesHub.jsx uses. Tier first (Dominant, then Great, then Good —
-  // same GRADE_PRIORITY ranking PerformancePage.js's own "More Performances"
-  // sidebar sorts by), newest game as the tiebreaker within a tier, so a
-  // Good performance from today never bumps a Dominant one from earlier in
-  // the week out of the list.
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(query(collection(db, "performances"), where("status", "==", "published")));
-        const top = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => ["Dominant", "Great", "Good"].includes(p.grade))
-          .sort((a, b) => {
-            const tier = gradePriority(a.grade) - gradePriority(b.grade);
-            if (tier !== 0) return tier;
-            return (b.gameDate?.toDate ? b.gameDate.toDate().getTime() : 0) - (a.gameDate?.toDate ? a.gameDate.toDate().getTime() : 0);
-          })
-          .slice(0, 6);
-        setTopPerformances(top);
-      } catch (err) { console.error("Error fetching top performances:", err); }
     };
     fetch();
   }, []);
@@ -577,7 +545,6 @@ export default function HomeInSeason() {
   const mobileChips = [
     { label: "Evaluate", to: "/community", icon: "📋" },
     { label: "Mock Drafts", to: "/mocks", icon: "🏈" },
-    { label: "Performances", to: "/performances", icon: "📊" },
     { label: "NFL Teams", to: "/nfl", icon: "🏟️" },
     { label: "Colleges", to: "/cfb", icon: "🎓" },
     { label: "News", to: "/news", icon: "📰" },
@@ -625,7 +592,6 @@ export default function HomeInSeason() {
           transition: background 0.15s;
         }
         .mobile-chip:active { background: rgba(255,255,255,0.22); }
-        ${STAT_LINE_GLOW_STYLE}
       `}</style>
 
       <div style={{ width: "100%", padding: isMobile ? "10px 10px 60px" : "20px 4% 60px", fontFamily: "'Arial Black', Arial, sans-serif", boxSizing: "border-box" }}>
@@ -780,7 +746,7 @@ export default function HomeInSeason() {
                 </div>
               </div>
 
-              <Link to="/performances" style={{
+              <Link to="/we-pick" style={{
                 display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                 borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
@@ -789,9 +755,9 @@ export default function HomeInSeason() {
                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
               >
-                <span style={{ fontSize: "26px", lineHeight: 1 }}>📊</span>
-                <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>Top Performances</span>
-                <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>Every graded game</span>
+                <span style={{ fontSize: "26px", lineHeight: 1 }}>🔮</span>
+                <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>We-Pick</span>
+                <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>Predict every game</span>
               </Link>
 
             </div>
@@ -799,17 +765,13 @@ export default function HomeInSeason() {
 
         </div>
 
-        {/* ===== THIS WEEK IN CFB — the primary focus of this page now:
-            trending players and top (Dominant/Great) performances, right
-            after the hero and bigger than anything below it. Scouting
-            (Recent Evals + the draft boards) still gets its own section —
-            it hasn't gone away — it's just deliberately smaller/lower on
-            the page now than trending/performances are. Hidden entirely
-            once neither trending nor top performances has anything to show
-            (rather than a header over two empty cards); when only one of
-            the two has data, that one takes the full width instead of
-            leaving an empty column beside it. ===== */}
-        {(trending.length > 0 || topPerformances.length > 0) && (
+        {/* ===== THIS WEEK IN CFB — trending players, right after the hero
+            and bigger than anything below it. Scouting (Recent Evals + the
+            draft boards) still gets its own section — it hasn't gone away —
+            it's just deliberately smaller/lower on the page now than
+            trending is. Hidden entirely once trending has nothing to show,
+            rather than a header over an empty card. ===== */}
+        {trending.length > 0 && (
         <div style={{ marginBottom: isMobile ? "28px" : "40px" }}>
           <div style={{ marginBottom: "18px" }}>
             <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#fff", background: BLUE, display: "inline-block", padding: "8px 18px", borderRadius: "6px" }}>
@@ -817,87 +779,39 @@ export default function HomeInSeason() {
             </div>
           </div>
 
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: isMobile || !(trending.length > 0 && topPerformances.length > 0) ? "1fr" : "1fr 1fr",
-            gap: isMobile ? "24px" : "20px",
-            alignItems: "start",
-          }}>
-
-            {/* -- Trending -- */}
-            {trending.length > 0 && (
-            <div>
-              <SectionTitle linkTo="/performances/trends" linkLabel="See all →">Trending</SectionTitle>
-              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.18)" }}>
-                <div style={{ background: BLUE, padding: "10px 16px" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>This Week</div>
-                </div>
-                <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-                {trending.map((t, i) => {
-                  const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
-                  if (!style) return null;
-                  return (
-                    <Link key={t.slug} to={`/player/${t.slug}`} style={{
-                      display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px",
-                      textDecoration: "none", background: "#fff",
-                      borderLeft: `4px solid ${style.color}`,
-                      borderBottom: i < trending.length - 1 ? "1px solid #f0f0f0" : "none",
-                    }}>
-                      <div style={{
-                        flexShrink: 0, width: "34px", height: "34px", borderRadius: "7px",
-                        background: style.color, display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "15px", color: "#fff",
-                      }} title={style.label}>
-                        {style.icon}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.First} {t.Last}</div>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.Position} · {t.School}</div>
-                      </div>
-                      <span style={{ color: "#ccc", fontSize: "16px", fontWeight: 900 }}>›</span>
-                    </Link>
-                  );
-                })}
+          <div>
+            <SectionTitle>Trending</SectionTitle>
+            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.18)" }}>
+              <div style={{ background: BLUE, padding: "10px 16px" }}>
+                <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>This Week</div>
               </div>
-            </div>
-            )}
-
-            {/* -- Top Performances — Dominant/Great/Good (see the fetch
-                effect above's own query and tier sort). -- */}
-            {topPerformances.length > 0 && (
-            <div>
-              <SectionTitle linkTo="/performances" linkLabel="See all →">Performances</SectionTitle>
-              <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.18)" }}>
-                <div style={{ background: BLUE, padding: "10px 16px" }}>
-                  <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Dominant, Great & Good</div>
-                </div>
-                <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-                {topPerformances.map((p, i, arr) => (
-                  <Link key={p.id} to={`/performance/${p.slug || p.id}`} style={{
-                    display: "flex", flexDirection: "column", gap: "4px", padding: "13px 16px",
+              <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
+              {trending.map((t, i) => {
+                const style = TREND_STYLE[(t.Trend || "").toString().trim().toLowerCase()];
+                if (!style) return null;
+                return (
+                  <Link key={t.slug} to={`/player/${t.slug}`} style={{
+                    display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px",
                     textDecoration: "none", background: "#fff",
-                    borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+                    borderLeft: `4px solid ${style.color}`,
+                    borderBottom: i < trending.length - 1 ? "1px solid #f0f0f0" : "none",
                   }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                      <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.playerName || p.titleShort}</div>
-                      <div style={{
-                        flexShrink: 0, fontSize: "9px", fontWeight: 900, padding: "2px 8px", borderRadius: "10px",
-                        textTransform: "uppercase", letterSpacing: "0.04em",
-                        background: p.grade === "Dominant" ? "#3B6D11" : p.grade === "Great" ? "#0F6E56" : BLUE, color: "#fff",
-                      }}>
-                        {p.grade}
-                      </div>
+                    <div style={{
+                      flexShrink: 0, width: "34px", height: "34px", borderRadius: "7px",
+                      background: style.color, display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: "15px", color: "#fff",
+                    }} title={style.label}>
+                      {style.icon}
                     </div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>{p.school}</div>
-                    {p.statLine && (
-                      <div className={gradeStatLineClass(p.grade)} style={{ fontSize: "13px", fontWeight: 700, color: "#333", fontFamily: "'Courier New', monospace" }}>{p.statLine}</div>
-                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, fontSize: "15px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.First} {t.Last}</div>
+                      <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.Position} · {t.School}</div>
+                    </div>
+                    <span style={{ color: "#ccc", fontSize: "16px", fontWeight: 900 }}>›</span>
                   </Link>
-                ))}
-              </div>
+                );
+              })}
             </div>
-            )}
-
           </div>
         </div>
         )}
@@ -905,7 +819,7 @@ export default function HomeInSeason() {
 
         {/* ===== SCOUTING — Recent Evals + both draft boards, still fully
             here and fully working, just deliberately smaller/lower-priority
-            now that trending/performances (above) are the page's focus.
+            now that trending (above) is the page's focus.
             "2028 Draft Board" is gone — Top Underclassmen replaces it,
             ranking 2028 AND 2029 prospects together (see TopDraftBoard's
             own yearsCsv/compact comment) rather than two separate boards
@@ -1042,7 +956,7 @@ export default function HomeInSeason() {
         </div>
 
         {/* ===== VIDEOS + WE-PICK — small, tucked below Scouting rather than
-            competing with the Trending/Performances band above. ===== */}
+            competing with the Trending band above. ===== */}
         <div style={{ marginBottom: isMobile ? "28px" : "40px" }}>
           <div style={{
             display: "grid",

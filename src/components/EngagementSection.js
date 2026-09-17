@@ -3,9 +3,9 @@
 // Like + Comments, extracted from GamePage.js's own game comments (see its
 // handlePostComment/handleToggleHype/etc. — this is the same rules/shape,
 // generalized to any parent doc instead of being wired specifically to
-// schedule26/{gameId}). Reused by PerformancePage.js and NewsArticle.jsx so
-// a performance or article can be liked/commented on the same way a game
-// can, without duplicating this ~500 lines of state/handlers/markup.
+// schedule26/{gameId}). Reused by NewsArticle.jsx so an article can be
+// liked/commented on the same way a game can, without duplicating this
+// ~500 lines of state/handlers/markup.
 //
 // Three exports, all built on the same state:
 //   - useEngagement(docPath): the hook — all state/handlers, no markup.
@@ -19,12 +19,12 @@
 //     (it calls useEngagement itself) or an already-built `engagement` (to
 //     share one instance with a LikeButton rendered elsewhere) — not both.
 //
-// `docPath` is the parent doc's path as segments, e.g. ["performances", id]
-// or ["articles", id] — passed straight through to collection()/doc() to
-// build paths like performances/{id}/comments, performances/{id}/likes,
-// etc. Firestore rules for each parent collection must mirror
-// schedule26/{doc}'s own comments/likes/replies rules (see firestore.rules)
-// or every write here will be silently denied.
+// `docPath` is the parent doc's path as segments, e.g. ["articles", id] —
+// passed straight through to collection()/doc() to build paths like
+// articles/{id}/comments, articles/{id}/likes, etc. Firestore rules for
+// each parent collection must mirror schedule26/{doc}'s own comments/
+// likes/replies rules (see firestore.rules) or every write here will be
+// silently denied.
 import { useEffect, useState } from "react";
 import {
   collection, query, orderBy, getDocs, getDoc, addDoc, doc, deleteDoc, setDoc, serverTimestamp,
@@ -376,8 +376,8 @@ export function useEngagement(docPath) {
 // (heart icon, white border, solid white fill once liked) — meant to sit
 // in a page's own header/masthead bar, but works anywhere a `background`
 // prop is passed matching whatever it's sitting on (defaults to the
-// article/performance header's BLUE). "md" (the header-bar size, used by
-// NewsArticle.jsx/PerformancePage.js) sized to actually read as a real
+// article header's BLUE). "md" (the header-bar size, used by
+// NewsArticle.jsx) sized to actually read as a real
 // button next to the date/author text there, not shrink into an icon;
 // "sm" stays compact for EngagementSection's own comments-card header,
 // tucked beside the comment-count pill.

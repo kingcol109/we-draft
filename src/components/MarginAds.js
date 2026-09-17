@@ -4,9 +4,9 @@
 // rails that live in the empty gutters beside the main content on wide
 // viewports. Extracted from PlayerProfile.js (the original, more elaborate
 // version there prioritizes a drafted/affiliate team before falling back to
-// random) so ArticlePage/NewsArticle/PerformancePage can reuse the exact
-// same visual system without duplicating ~250 lines of ad-card markup three
-// times over. Those pages have no "this player's team" concept to prioritize
+// random) so ArticlePage/NewsArticle can reuse the exact same visual
+// system without duplicating ~250 lines of ad-card markup a second time.
+// Those pages have no "this player's team" concept to prioritize
 // anyway, so team selection here is always random — pass a contentRef to
 // whatever element the ads should center themselves around and this handles
 // the rest (fetch, layout measurement, resize, hover states).

@@ -45,9 +45,9 @@ export default function NewsArticle() {
   }, []);
 
   // School name → { logo, logoDark, wordmark, wordmarkDark, slug, color1,
-  // color2 } — for the "Players Mentioned" chips (PlayersMentionedList.js,
-  // shared with PerformancePage.js) and the "Teams Mentioned" chips
-  // (TeamsMentionedList.js). LogoDark/WordmarkDark/Color1/Color2 are the
+  // color2 } — for the "Players Mentioned" chips (PlayersMentionedList.js)
+  // and the "Teams Mentioned" chips (TeamsMentionedList.js). LogoDark/
+  // WordmarkDark/Color1/Color2 are the
   // same fields TeamPage.js's own hero uses for art that needs to read
   // against a saturated team-color fill, not the plain full-color Logo1.
   // Fetched once (the schools collection is small) rather than per-player/
@@ -138,8 +138,8 @@ export default function NewsArticle() {
   }, [article]);
 
   // Tagged video — article.videoId is ArticlesManager.js's own video-
-  // collection picker (mirrors PerformancePage.js's videoId/video handling).
-  // A legacy article saved before this field existed only has the old
+  // collection picker. A legacy article saved before this field existed
+  // only has the old
   // article.videoUrl string, in which case there's no video doc to fetch
   // and the below-title "Watch Video" button (see videoLinks below) is
   // still what renders for it.
@@ -213,10 +213,9 @@ export default function NewsArticle() {
 
   const rawHtml = article.content || article.long || "";
   const cleanHtml = rawHtml;
-  // Same per-player title/thumb override resolution as PerformancePage.js's
-  // own videoDisplay — prefer the item tagged to this article's first
-  // mentioned player, fall back to the first item, then the video's generic
-  // title/thumb.
+  // Per-player title/thumb override resolution — prefer the item tagged to
+  // this article's first mentioned player, fall back to the first item,
+  // then the video's generic title/thumb.
   const videoItems = Array.isArray(video?.items) ? video.items : [];
   const firstMentionedId = article.playerIds?.[0];
   const videoMatched = videoItems.find((it) => it.playerId === firstMentionedId) || null;
@@ -293,8 +292,6 @@ export default function NewsArticle() {
   // articles) instead of as one "sidebar" block that used to come before
   // the article on mobile. Desktop is unaffected — it still stacks all of
   // them inside a single sticky sidebar column exactly as before. ──
-  // Video card, shared look with PerformancePage.js's own VideoBlock — see
-  // its comments for why the title/thumb resolve the way they do above.
   const VideoBlock = videoDisplay && (
     <div>
       <div style={{ marginBottom: "14px" }}>
@@ -356,8 +353,8 @@ export default function NewsArticle() {
     </div>
   );
 
-  // Team-colored chips, shared with PerformancePage.js — see
-  // PlayersMentionedList.js for the styling/hover behavior itself.
+  // Team-colored chips — see PlayersMentionedList.js for the styling/hover
+  // behavior itself.
   const PlayersMentionedBlock = mentionedPlayers.length > 0 && (
     <PlayersMentionedList players={mentionedPlayers} schoolInfo={schoolInfo} />
   );

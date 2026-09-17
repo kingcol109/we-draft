@@ -99,12 +99,6 @@ async function getAllTeams() {
   const snapshot = await getDocs(colRef);
   return snapshot.docs;
 }
-async function getAllPublishedPerformances() {
-  const colRef = collection(db, "performances");
-  const q = query(colRef, where("status", "==", "published"));
-  const snapshot = await getDocs(q);
-  return snapshot.docs;
-}
 async function getAllGames() {
   const colRef = collection(db, "schedule26");
   const snapshot = await getDocs(colRef);
@@ -219,38 +213,6 @@ for (const doc of allTeams) {
 }
 
   /* =========================
-     PERFORMANCES
-  ========================= */
-  console.log("🔄 Fetching performances from Firestore...");
-  const allPerformances = await getAllPublishedPerformances();
-  console.log(`✅ Found ${allPerformances.length} published performances.`);
-
-  const performancePages = [];
-
-  for (const doc of allPerformances) {
-    const data = doc.data();
-    const slug = data?.slug;
-
-    if (!isValidSlug(slug)) {
-      console.warn("⚠️ Skipping invalid performance slug:", slug);
-      continue;
-    }
-
-    const lastmod =
-      data.updatedAt?.toDate?.()
-        ? data.updatedAt.toDate().toISOString().split("T")[0]
-        : data.createdAt?.toDate?.()
-        ? data.createdAt.toDate().toISOString().split("T")[0]
-        : today;
-
-    performancePages.push({
-      path: `/performance/${slug}`,
-      priority: 0.75,
-      lastmod,
-    });
-  }
-
-  /* =========================
      GAME PAGES
   ========================= */
   console.log("🔄 Fetching games from Firestore...");
@@ -262,7 +224,7 @@ for (const doc of allTeams) {
   for (const doc of allGames) {
     const data = doc.data();
     // Field is capitalized `Slug` here (schedule26's own convention),
-    // unlike players/news/articles/performances' lowercase `slug`.
+    // unlike players/news/articles' lowercase `slug`.
     const slug = data?.Slug;
 
     if (!isValidSlug(slug)) {
@@ -288,7 +250,6 @@ for (const doc of allTeams) {
   const staticPages = [
     { path: "/", priority: 1.0, lastmod: today },
     { path: "/news", priority: 0.8, lastmod: today },
-    { path: "/performances", priority: 0.8, lastmod: today },
     { path: "/videos", priority: 0.8, lastmod: today },
     { path: "/cfb", priority: 0.7, lastmod: today },
     { path: "/cfb/schedule", priority: 0.65, lastmod: today },
@@ -344,7 +305,7 @@ for (const doc of allTeams) {
   /* =========================
      BUILD XML
   ========================= */
-const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...performancePages, ...gamePages]
+const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...gamePages]
     .map(
       (u) => `
   <url>
@@ -365,7 +326,7 @@ ${urls}
   ========================= */
 // Split into chunks of 1000
   const chunkSize = 1000;
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...performancePages, ...gamePages];
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {
@@ -404,7 +365,6 @@ console.log(
   - ${teamPages.length} team pages
   - ${playerPages.length} player pages
   - ${newsPages.length} news articles
-  - ${performancePages.length} performances
   - ${gamePages.length} games`
 );
 }

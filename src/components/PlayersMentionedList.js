@@ -1,10 +1,11 @@
 // src/components/PlayersMentionedList.js
 //
-// "Players Mentioned" chips — shared by NewsArticle.jsx and
-// PerformancePage.js so both read as the exact same feature instead of two
-// slightly different hand-rolled versions (article's was the fuller one —
-// chevron/hover polish, Position+School subtitle — and became the base
-// here).
+// "Players Mentioned" chips — used by NewsArticle.jsx directly, and by
+// MarginSidebars.js for its own "Top 2027 Prospects" chip list (see
+// showHeader/compact below). PlayerProfile.js's Trending sidebar borrows
+// the same visual pattern (colors, hover behavior) but reimplements it
+// standalone rather than importing this component — see that file's own
+// comments pointing back here.
 //
 // Each chip is colored by the mentioned player's own school (Color1/
 // Color2/LogoDark from the schools collection, via `schoolInfo` — see
@@ -20,7 +21,7 @@
 // box's transform is left alone entirely (no translate) so nothing couples
 // with the logo's own scale; without that, growth reads as sliding
 // downward instead of expanding in place. A chevron on the right slides
-// into view on hover, same as MorePerformancesList.js's own chips.
+// into view on hover.
 import { Link } from "react-router-dom";
 
 const BLUE = "#0055a5";
@@ -37,7 +38,7 @@ const GOLD = "#f6a21d";
 // where the full size (built for NewsArticle.jsx's fixed 300px column)
 // reads as oversized — and forces First/Last onto their own line each,
 // always, rather than wrapping only once a long name actually runs out of
-// room. Off by default; NewsArticle.jsx/PerformancePage.js don't pass it.
+// room. Off by default; NewsArticle.jsx doesn't pass it.
 export default function PlayersMentionedList({ players, schoolInfo, showHeader = true, title = "Players Mentioned", padding, compact = false }) {
   if (!players || players.length === 0) return null;
   return (

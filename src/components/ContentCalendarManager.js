@@ -22,8 +22,7 @@
 //     (`videos`) and article (`articles`) doc, placed on its own Date/
 //     publishedAt, standing in for the player it's tagged to (or a generic
 //     name — see videoEntries/articleEntries below — when it's tagged to
-//     more than one). Performances are deliberately excluded (not asked
-//     for). These aren't separately stored anywhere; they're derived every
+//     more than one). These aren't separately stored anywhere; they're derived every
 //     render from the videos/articles collections themselves, and are
 //     read-only/not draggable/no note here — moving when a video or
 //     article actually goes live (or annotating it) is the Videos/Articles
@@ -140,7 +139,7 @@ const truncateLabel = (label) => {
 const BLANK_FORM = { date: "", type: "video", subjectType: "player", subjectId: "", subjectLabel: "", note: "" };
 
 // Search-input + dropdown-of-matches combobox for picking this entry's
-// subject — same pattern as PerformancesManager.js's own VideoLookupCombobox,
+// subject — same pattern as ArticlesManager.js's own VideoLookupCombobox,
 // just swapping its option source (players/recruits/teams) based on
 // subjectType rather than always searching one fixed collection.
 function SubjectCombobox({ subjectType, subjectId, subjectLabel, players, recruits, teams, onChange }) {
@@ -222,8 +221,7 @@ export default function ContentCalendarManager() {
   const [entries, setEntries] = useState([]);
   // Real, already-created content pulled onto the calendar alongside the
   // manual `entries` above — see videoEntries/articleEntries below for how
-  // each becomes a display entry. Performances are intentionally not
-  // fetched at all here.
+  // each becomes a display entry.
   const [videos, setVideos] = useState([]);
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);

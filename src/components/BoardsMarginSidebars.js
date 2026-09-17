@@ -1,19 +1,18 @@
 // src/components/BoardsMarginSidebars.js
 //
 // UserBoards.js's ("My Draft Board") margin sidebars — a fourth pairing
-// alongside MarginAds.js (player/article/performance pages),
-// MarginSidebars.js (News/Performances hubs), and GameMarginSidebars.js
-// (individual game pages). Left: a compact preview of the signed-in user's
-// My Feed (see MyFeed.js and the users/{uid}/follows subcollection the
-// Follow button on PlayerProfile.js writes to). Right: the same "follow us"
-// social card MarginSidebars.js shows, with no feed underneath it since
-// there's no second content stream to plug in here.
+// alongside MarginAds.js (player/article pages), MarginSidebars.js (the
+// News hub), and GameMarginSidebars.js (individual game pages). Left: a
+// compact preview of the signed-in user's My Feed (see MyFeed.js and the
+// users/{uid}/follows subcollection the Follow button on PlayerProfile.js
+// writes to). Right: the same "follow us" social card MarginSidebars.js
+// shows, with no feed underneath it since there's no second content stream
+// to plug in here.
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "./statLineGlow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -51,7 +50,6 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
   const [visible, setVisible] = useState(false);
   const [follows, setFollows] = useState([]);
   const [feedItems, setFeedItems] = useState([]);
-  const [schoolLogos, setSchoolLogos] = useState({});
   const anchorRef = useRef(null);
 
   const recompute = useRef(() => {});
@@ -108,44 +106,26 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
     fetch();
   }, [isMobile, user]);
 
-  // School logos, for performance items' team icons.
-  useEffect(() => {
-    if (isMobile || follows.length === 0) return;
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(collection(db, "schools"));
-        const map = {};
-        snap.docs.forEach((d) => { const data = d.data(); if (data.School) map[data.School] = data.Logo1 || ""; });
-        setSchoolLogos(map);
-      } catch (e) { /* logos are non-critical */ }
-    };
-    fetch();
-  }, [isMobile, follows.length]);
-
   // Feed preview — same fetch-whole-published-set-and-filter-client-side
-  // idiom as MyFeed.js, capped to the newest 6 for this compact card.
+  // idiom as MyFeed.js, capped to the newest 6 for this compact card. Only
+  // `articles` carry a playerIds array — plain `news` items don't tag
+  // specific players, so they're left out here too (see MyFeed.js's own
+  // comment on that).
   useEffect(() => {
     if (isMobile || follows.length === 0) { setFeedItems([]); return; }
     const followedIds = new Set(follows.map((f) => f.id));
     const fetch = async () => {
       try {
-        const [perfSnap, articleSnap] = await Promise.all([
-          getDocs(query(collection(db, "performances"), where("status", "==", "published"))),
-          getDocs(query(collection(db, "articles"), where("status", "==", "published"))),
-        ]);
-        const perfItems = perfSnap.docs
-          .map((d) => ({ id: d.id, ...d.data(), _kind: "performance" }))
-          .filter((p) => followedIds.has(p.playerId));
+        const articleSnap = await getDocs(query(collection(db, "articles"), where("status", "==", "published")));
         const articleItems = articleSnap.docs
-          .map((d) => ({ id: d.id, ...d.data(), _kind: "article" }))
-          .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)));
-        // Performances sort by their own gameDate; articles by publishedAt
-        // only, never last-updated — an old article getting a small edit
-        // (which bumps updatedAt) must not jump back to the top of this feed.
-        const combined = [...perfItems, ...articleItems]
-          .sort((a, b) => toMs(b.gameDate || b.publishedAt) - toMs(a.gameDate || a.publishedAt))
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)))
+          // publishedAt only, never last-updated — an old article getting a
+          // small edit (which bumps updatedAt) must not jump back to the
+          // top of this feed.
+          .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt))
           .slice(0, 6);
-        setFeedItems(combined);
+        setFeedItems(articleItems);
       } catch (e) { setFeedItems([]); }
     };
     fetch();
@@ -169,7 +149,6 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
       <style>{`
         .wd-margin-social-link:hover { filter: brightness(1.12); }
         .wd-margin-feed-item:hover { background: #f0f5ff; }
-        ${STAT_LINE_GLOW_STYLE}
       `}</style>
 
       {/* ===== Left: Following feed preview — never just empty, even with
@@ -185,7 +164,7 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
           {follows.length === 0 ? (
             <div style={{ padding: "16px 14px", textAlign: "center" }}>
               <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", lineHeight: 1.5, marginBottom: "10px" }}>
-                Follow players from their profile page to see their news &amp; performances here.
+                Follow players from their profile page to see their news here.
               </div>
               <Link to="/community" style={{ display: "inline-block", fontSize: "11px", fontWeight: 900, color: "#fff", background: GOLD, border: `2px solid ${BLUE}`, borderRadius: "6px", padding: "7px 12px", textDecoration: "none" }}>
                 Find Players →
@@ -196,42 +175,24 @@ export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalP
               No recent activity from your {follows.length} followed player{follows.length !== 1 ? "s" : ""} yet.
             </div>
           ) : (
-            feedItems.map((item, i) => {
-              const isPerf = item._kind === "performance";
-              const href = isPerf ? `/performance/${item.slug || item.id}` : `/news/${item.slug}`;
-              const logo = isPerf ? schoolLogos[item.school] : null;
-              return (
-                <Link
-                  key={item.id}
-                  to={href}
-                  className="wd-margin-feed-item"
-                  style={{
-                    display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none",
-                    borderBottom: i < feedItems.length - 1 ? "1px solid #f0f0f0" : "none",
-                  }}
-                >
-                  {isPerf ? (
-                    logo ? (
-                      <img src={logo} alt="" style={{ width: "20px", height: "20px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                    ) : (
-                      <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: "#eee", display: "inline-block" }} />
-                    )
-                  ) : (
-                    <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px" }}>📰</span>
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: "11px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {isPerf ? (item.playerName || item.titleShort) : item.title}
-                    </div>
-                    {isPerf && item.statLine && (
-                      <div className={gradeStatLineClass(item.grade)} style={{ fontFamily: "'Courier New', monospace", fontSize: "10px", fontWeight: 700, color: "#666", marginTop: "2px" }}>
-                        {item.statLine}
-                      </div>
-                    )}
+            feedItems.map((item, i) => (
+              <Link
+                key={item.id}
+                to={`/news/${item.slug}`}
+                className="wd-margin-feed-item"
+                style={{
+                  display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none",
+                  borderBottom: i < feedItems.length - 1 ? "1px solid #f0f0f0" : "none",
+                }}
+              >
+                <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px" }}>📰</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "11px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {item.title}
                   </div>
-                </Link>
-              );
-            })
+                </div>
+              </Link>
+            ))
           )}
           {follows.length > 0 && (
             <Link

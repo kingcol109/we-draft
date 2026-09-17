@@ -1,21 +1,18 @@
 // src/components/MarginSidebars.js
 //
-// News.jsx and PerformancesHub.jsx's margin sidebars — a different pairing
-// than MarginAds.js's Homage rails (those stay on player/article pages).
-// Left margin: the same "Trending" widget PlayerProfile.js shows, rebuilt
-// standalone here rather than imported (since PlayerProfile.js's version is
-// entangled with that page's own hover/self-highlight state) and sized for
-// more entries — this sidebar has the vertical room a player page doesn't.
-// Right margin: a "follow us" social card, then a Videos feed card (same
-// "videos" collection/thumbnail-card treatment as CommunityBoard.js's own
-// Videos sidebar), then a compact feed of the *other* content type
-// (performances on the News page, news/articles on the Performances page)
-// ending in a link to that page.
+// News.jsx's margin sidebars — a different pairing than MarginAds.js's
+// Homage rails (those stay on player/article pages). Left margin: the same
+// "Trending" widget PlayerProfile.js shows, rebuilt standalone here rather
+// than imported (since PlayerProfile.js's version is entangled with that
+// page's own hover/self-highlight state) and sized for more entries — this
+// sidebar has the vertical room a player page doesn't. Right margin: a
+// "follow us" social card, then a Videos feed card (same "videos"
+// collection/thumbnail-card treatment as CommunityBoard.js's own Videos
+// sidebar).
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { gradeStatLineClass, STAT_LINE_GLOW_STYLE } from "./statLineGlow";
 import PlayersMentionedList from "./PlayersMentionedList";
 // Breakout/On Fire trend icons — same custom images PlayerProfile.js's
 // version of this widget uses now instead of the ⚡/🔥 emoji glyphs (Up
@@ -121,15 +118,12 @@ const cardShell = {
  *   MarginAds.js).
  * @param {boolean} isMobile - hidden entirely on mobile (no gutter room).
  * @param {number} horizontalPadding - contentRef's own left/right padding.
- * @param {"news"|"performances"} otherStream - which content type the right
- *   card's feed pulls from (the type the *current* page is NOT).
  */
-export default function MarginSidebars({ contentRef, isMobile, horizontalPadding = 20, otherStream }) {
+export default function MarginSidebars({ contentRef, isMobile, horizontalPadding = 20 }) {
   const [layout, setLayout] = useState({ width: 200, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
   const [visible, setVisible] = useState(false);
   const [trending, setTrending] = useState([]);
   const [topProspects, setTopProspects] = useState([]);
-  const [feedItems, setFeedItems] = useState([]);
   const [sidebarVideos, setSidebarVideos] = useState([]);
   const [schoolInfo, setSchoolInfo] = useState({});
   // This component renders after (below, in DOM order) the main content it
@@ -251,10 +245,8 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
   }, [isMobile]);
 
   // School name → { logo, logoDark, color1, color2 } — same shape
-  // NewsArticle.jsx/PerformancePage.js build, for the performance feed's
-  // team icons *and* the "Top 2027 Prospects" chips (PlayersMentionedList.js,
-  // see below), so fetched unconditionally now rather than only when
-  // otherStream is "performances" — prospects can show up on either page.
+  // NewsArticle.jsx builds, for the "Top 2027 Prospects" chips
+  // (PlayersMentionedList.js, see below).
   useEffect(() => {
     if (isMobile) return;
     const fetch = async () => {
@@ -277,45 +269,6 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     };
     fetch();
   }, [isMobile]);
-
-  // Right — the other content type's feed, pre-filtered the same way the
-  // hub pages themselves default to: News page's feed only shows
-  // Dominant/Great/Good performances; Performances page's feed only shows
-  // Priority 1/2 articles (news items have no priority field, so they pass
-  // through unfiltered).
-  useEffect(() => {
-    if (isMobile) return;
-    const fetch = async () => {
-      try {
-        if (otherStream === "performances") {
-          const snap = await getDocs(query(collection(db, "performances"), where("status", "==", "published")));
-          const items = snap.docs
-            .map((d) => ({ id: d.id, ...d.data(), _kind: "performance" }))
-            .filter((p) => ["Dominant", "Great", "Good"].includes(p.grade))
-            .sort((a, b) => toMs(b.gameDate) - toMs(a.gameDate))
-            .slice(0, 6);
-          setFeedItems(items);
-        } else {
-          const [newsSnap, articleSnap] = await Promise.all([
-            getDocs(query(collection(db, "news"), where("active", "==", true))),
-            getDocs(query(collection(db, "articles"), where("status", "==", "published"))),
-          ]);
-          const newsItems = newsSnap.docs.map((d) => ({ id: d.id, ...d.data(), _kind: "news" }));
-          const articleItems = articleSnap.docs
-            .map((d) => ({ id: d.id, ...d.data(), _kind: "article" }))
-            .filter((a) => [1, 2].includes(a.priority));
-          // Published date only, never last-updated — an old article
-          // getting a small edit (which bumps updatedAt) must not jump back
-          // to the top of this feed.
-          const combined = [...newsItems, ...articleItems]
-            .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt))
-            .slice(0, 6);
-          setFeedItems(combined);
-        }
-      } catch (e) { setFeedItems([]); }
-    };
-    fetch();
-  }, [isMobile, otherStream]);
 
   // Videos card — same "videos" collection + Recruiting-tag/Short exclusion
   // as CommunityBoard.js's own Videos sidebar, so this reads as the exact
@@ -459,10 +412,8 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
           transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
         .wd-margin-social-circle:hover { transform: translateY(-3px) scale(1.1); box-shadow: 0 8px 16px rgba(0,0,0,0.32); }
-        .wd-margin-feed-item:hover { background: #f0f5ff; }
         .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
         .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        ${STAT_LINE_GLOW_STYLE}
       `}</style>
 
       {/* ===== Left: Trending stacked above Top 10 Prospects — positionStyle
@@ -669,61 +620,6 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
               }}
             >
               View More Videos →
-            </Link>
-          </div>
-        )}
-
-        {feedItems.length > 0 && (
-          <div style={cardShell}>
-            <div style={{ background: BLUE, padding: "8px 12px" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-                {otherStream === "performances" ? "Top Performances" : "Top Stories"}
-              </div>
-            </div>
-            <div style={{ height: "3px", background: GOLD }} />
-            {feedItems.map((item, i) => {
-              const isPerf = item._kind === "performance";
-              const href = isPerf ? `/performance/${item.slug || item.id}` : `/news/${item.slug}`;
-              const logo = isPerf ? schoolInfo[item.school]?.logo : null;
-              return (
-                <Link
-                  key={item.id}
-                  to={href}
-                  className="wd-margin-feed-item"
-                  style={{
-                    display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none",
-                    borderBottom: i < feedItems.length - 1 ? "1px solid #f0f0f0" : "none",
-                  }}
-                >
-                  {isPerf && (
-                    logo ? (
-                      <img src={logo} alt="" style={{ width: "20px", height: "20px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                    ) : (
-                      <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: "#eee", display: "inline-block" }} />
-                    )
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: "11px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: isPerf ? "nowrap" : "normal", overflow: isPerf ? "hidden" : "visible", textOverflow: isPerf ? "ellipsis" : "clip" }}>
-                      {isPerf ? (item.playerName || item.titleShort) : item.title}
-                    </div>
-                    {isPerf && item.statLine && (
-                      <div className={gradeStatLineClass(item.grade)} style={{ fontFamily: "'Courier New', monospace", fontSize: "10px", fontWeight: 700, color: "#666", marginTop: "2px" }}>
-                        {item.statLine}
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
-            <Link
-              to={otherStream === "performances" ? "/performances" : "/news"}
-              style={{
-                display: "block", textAlign: "center", background: BLUE, color: "#fff",
-                fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.05em",
-                padding: "9px", textDecoration: "none",
-              }}
-            >
-              View {otherStream === "performances" ? "Performances" : "News"} →
             </Link>
           </div>
         )}
