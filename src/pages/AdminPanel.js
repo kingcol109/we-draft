@@ -7151,6 +7151,24 @@ const tdStyle = {
   padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666",
 };
 
+// ── Clickable <th> for a sortable column — clicking toggles asc/desc when
+// it's already the active column, or switches to it (desc first) otherwise.
+// Used by UsersSection's Joined/Evaluations/Last Active columns. ──
+function SortableTh({ label, sortKey, activeKey, dir, onSort, align = "left" }) {
+  const isActive = activeKey === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      style={{ ...thStyle, textAlign: align, cursor: "pointer", userSelect: "none" }}
+    >
+      {label}
+      <span style={{ display: "inline-block", width: "10px", marginLeft: "3px", opacity: isActive ? 1 : 0.35 }}>
+        {isActive ? (dir === "asc" ? "▲" : "▼") : "▼"}
+      </span>
+    </th>
+  );
+}
+
 // ── Users section — full users collection read once, client-side search
 // (username/email/friend code) since even a large user base is small
 // relative to what other admin sections already fetch whole (Player Data
@@ -7167,6 +7185,13 @@ function UsersSection() {
   const [searchQuery, setSearchQuery] = useState("");
   const [savingUid, setSavingUid] = useState(null);
   const [fetchError, setFetchError] = useState("");
+  // uid -> saved-evaluation count, from the private users/{uid}/evaluations
+  // mirror (see PlayerProfile.js handleSaveEvaluation — it writes the same
+  // evalData to both players/{playerId}/evaluations/{uid} and this mirror).
+  // The mirror is keyed one level per uid, so a single collectionGroup read
+  // filtered to that parent gives an exact per-user count in one query
+  // instead of iterating every user's own subcollection individually.
+  const [evalCounts, setEvalCounts] = useState({});
   // Social links (youtube/x/instagram) — verified-only, same three fields
   // UserProfile.js's own Social Links section writes and
   // VerifiedNameBadge.js's hover card reads everywhere a verified name
@@ -7175,18 +7200,44 @@ function UsersSection() {
   const [editingUid, setEditingUid] = useState(null);
   const [socialsForm, setSocialsForm] = useState({ youtube: "", x: "", instagram: "" });
   const [savingSocials, setSavingSocials] = useState(false);
+  // Sortable columns: Joined/Evaluations/Last Active. "joined" defaults to
+  // desc (newest first) to match the fetch's own initial sort; clicking the
+  // already-active column flips direction instead of no-op'ing.
+  const [sortKey, setSortKey] = useState("joined");
+  const [sortDir, setSortDir] = useState("desc");
 
   useEffect(() => {
     const fetchUsers = async () => {
       setLoading(true);
       setFetchError("");
       try {
-        const snap = await getDocs(collection(db, "users"));
-        const rows = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((u) => !u.isDummy);
-        rows.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
-        setUsers(rows);
+        const [usersSnap, evalsRes] = await Promise.allSettled([
+          getDocs(collection(db, "users")),
+          getDocs(collectionGroup(db, "evaluations")),
+        ]);
+
+        if (usersSnap.status === "fulfilled") {
+          const rows = usersSnap.value.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((u) => !u.isDummy);
+          rows.sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+          setUsers(rows);
+        } else {
+          throw usersSnap.reason;
+        }
+
+        if (evalsRes.status === "fulfilled") {
+          const counts = {};
+          evalsRes.value.docs.forEach((d) => {
+            if (d.ref.parent?.parent?.parent?.id !== "users") return;
+            const uid = d.ref.parent.parent.id;
+            counts[uid] = (counts[uid] || 0) + 1;
+          });
+          setEvalCounts(counts);
+        } else {
+          console.error("Admin users evaluations fetch error:", evalsRes.reason);
+          setEvalCounts({});
+        }
       } catch (e) {
         console.error("Admin users fetch error:", e);
         setFetchError(e?.message || "Failed to load users.");
@@ -7205,6 +7256,29 @@ function UsersSection() {
         (u.friendCode || "").toLowerCase().includes(q)
       )
     : users;
+
+  const SORT_VALUE = {
+    joined: (u) => toMs(u.createdAt),
+    evaluations: (u) => evalCounts[u.id] || 0,
+    lastActive: (u) => toMs(u.lastActiveAt),
+  };
+  const sorted = useMemo(() => {
+    const getValue = SORT_VALUE[sortKey];
+    if (!getValue) return filtered;
+    const rows = [...filtered];
+    rows.sort((a, b) => (getValue(a) - getValue(b)) * (sortDir === "asc" ? 1 : -1));
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, evalCounts, sortKey, sortDir]);
+
+  const handleSort = (key) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
 
   const handleToggleVerified = async (u) => {
     setSavingUid(u.id);
@@ -7277,14 +7351,17 @@ function UsersSection() {
                   <th style={thStyle}>User</th>
                   <th style={thStyle}>Email</th>
                   <th style={thStyle}>Friend Code</th>
-                  <th style={thStyle}>Joined</th>
+                  <SortableTh label="Joined" sortKey="joined" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+                  <SortableTh label="Evaluations" sortKey="evaluations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
+                  <SortableTh label="Last Active" sortKey="lastActive" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <th style={thStyle}>Socials</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Verified</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((u, i) => {
+                {sorted.map((u, i) => {
                   const dateMs = toMs(u.createdAt);
+                  const lastActiveMs = toMs(u.lastActiveAt);
                   return (
                   <Fragment key={u.id}>
                     <tr style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
@@ -7305,6 +7382,8 @@ function UsersSection() {
                       <td style={tdStyle}>{u.email || "—"}</td>
                       <td style={{ ...tdStyle, fontFamily: "monospace" }}>{u.friendCode || "—"}</td>
                       <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                      <td style={{ ...tdStyle, textAlign: "center", fontWeight: 800 }}>{evalCounts[u.id] || 0}</td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{lastActiveMs > 0 ? new Date(lastActiveMs).toLocaleDateString() : "—"}</td>
                       <td style={tdStyle}>
                         {u.verified ? (
                           <button
@@ -7344,7 +7423,7 @@ function UsersSection() {
                         separate modal. */}
                     {editingUid === u.id && (
                       <tr style={{ background: "#fffaf0", borderBottom: "1px solid #f0f0f0" }}>
-                        <td colSpan={6} style={{ padding: "12px 10px" }}>
+                        <td colSpan={8} style={{ padding: "12px 10px" }}>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
                             <input
                               value={socialsForm.youtube}

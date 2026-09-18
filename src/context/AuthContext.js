@@ -8,7 +8,7 @@ import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 
 const AuthContext = createContext();
 
@@ -86,6 +86,11 @@ export function AuthProvider({ children }) {
           const snap = await getDoc(ref);
           if (snap.exists()) {
             setProfile(snap.data());
+            // Admin Panel's Users section shows this as "Last Active" —
+            // fire-and-forget so a write failure never blocks sign-in.
+            updateDoc(ref, { lastActiveAt: new Date().toISOString() }).catch((err) => {
+              console.error("Failed to update lastActiveAt:", err);
+            });
           } else {
             // First sign-in with no Firestore doc yet — happens for Google
             // sign-in, which (unlike signUpWithEmail) never wrote one.
@@ -97,6 +102,7 @@ export function AuthProvider({ children }) {
               username: "",
               usernameLower: "",
               createdAt: new Date().toISOString(),
+              lastActiveAt: new Date().toISOString(),
             };
             await setDoc(ref, newProfile, { merge: true });
             setProfile(newProfile);
