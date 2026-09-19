@@ -7826,10 +7826,16 @@ function AnalyticsSection() {
 // AnalyticsSection above (d.ref.parent.parent.id). Page views are joined
 // separately by Slug against the analytics collection — same field the
 // public site's /player/{slug} route and the sync script both key off of.
-// Columns are sortable by clicking the header. ──
+// Likes are joined from players/{playerId}/reactions, counting only docs
+// with liked === true — same subcollection PlayerProfile.js's Like button
+// reads/writes — and are all-time (not windowed by the range picker like
+// Evals/Views), since a reaction doc only has a current on/off state, not
+// a history of when it was toggled. Columns are sortable by clicking the
+// header. ──
 function PlayerEvaluationsTable() {
   const [allPlayers, setAllPlayers] = useState([]);
   const [allEvals, setAllEvals] = useState([]);
+  const [likesByPlayer, setLikesByPlayer] = useState(new Map());
   const [pageViewsBySlug, setPageViewsBySlug] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -7868,9 +7874,10 @@ function PlayerEvaluationsTable() {
       setLoading(true);
       setFetchErrors([]);
       const errors = [];
-      const [playersRes, evalRes, analyticsRes] = await Promise.allSettled([
+      const [playersRes, evalRes, reactionsRes, analyticsRes] = await Promise.allSettled([
         getDocs(collection(db, "players")),
         getDocs(collectionGroup(db, "evaluations")),
+        getDocs(collectionGroup(db, "reactions")),
         getDocs(collection(db, "analytics")),
       ]);
 
@@ -7902,6 +7909,26 @@ function PlayerEvaluationsTable() {
         console.error("Admin player-evaluations evaluations fetch error:", evalRes.reason);
         setAllEvals([]);
         errors.push("Evaluations: " + (evalRes.reason?.message || "read failed — likely missing a Firestore rule for collection-group reads on \"evaluations\"."));
+      }
+
+      // Likes come from players/{playerId}/reactions/{uid} — the same
+      // subcollection PlayerProfile.js's own like button reads/writes
+      // (see its handleToggleLike). It's the only collection named
+      // "reactions" in the app, so unlike evaluations there's no second
+      // copy to filter out — every doc the query returns belongs here.
+      if (reactionsRes.status === "fulfilled") {
+        const likes = new Map();
+        reactionsRes.value.docs.forEach((d) => {
+          if (!d.data().liked) return;
+          const playerId = d.ref.parent?.parent?.id;
+          if (!playerId) return;
+          likes.set(playerId, (likes.get(playerId) || 0) + 1);
+        });
+        setLikesByPlayer(likes);
+      } else {
+        console.error("Admin player-evaluations reactions fetch error:", reactionsRes.reason);
+        setLikesByPlayer(new Map());
+        errors.push("Likes: " + (reactionsRes.reason?.message || "read failed — likely missing a Firestore rule for collection-group reads on \"reactions\"."));
       }
 
       if (analyticsRes.status === "fulfilled") {
@@ -8004,6 +8031,7 @@ function PlayerEvaluationsTable() {
         avgGradeLabel,
         lastUpdatedMs: stats.lastUpdatedMs,
         views: viewsRaw != null ? (Number(viewsRaw) || 0) : null,
+        likes: likesByPlayer.get(p.id) || 0,
       };
     });
 
@@ -8013,6 +8041,7 @@ function PlayerEvaluationsTable() {
       else if (sortKey === "grade") { av = a.avgGradeLabel ? gradeScale[a.avgGradeLabel] : 99; bv = b.avgGradeLabel ? gradeScale[b.avgGradeLabel] : 99; }
       else if (sortKey === "updated") { av = a.lastUpdatedMs; bv = b.lastUpdatedMs; }
       else if (sortKey === "views") { av = a.views ?? -1; bv = b.views ?? -1; }
+      else if (sortKey === "likes") { av = a.likes; bv = b.likes; }
       else { av = a.evalCount; bv = b.evalCount; }
       if (typeof av === "string") {
         const cmp = av.localeCompare(bv);
@@ -8022,7 +8051,7 @@ function PlayerEvaluationsTable() {
     });
 
     return withStats;
-  }, [allPlayers, statsByPlayer, pageViewsBySlug, viewField, selectedYears, selectedPositions, selectedSchools, searchQuery, sortKey, sortDir]);
+  }, [allPlayers, statsByPlayer, likesByPlayer, pageViewsBySlug, viewField, selectedYears, selectedPositions, selectedSchools, searchQuery, sortKey, sortDir]);
 
   const toggleSort = (key) => {
     if (sortKey === key) {
@@ -8144,6 +8173,7 @@ function PlayerEvaluationsTable() {
                 <th style={{ padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", whiteSpace: "nowrap" }}>Pub / Priv</th>
                 <SortHeader label="Avg Grade" sortId="grade" align="center" />
                 <SortHeader label={"Views (" + rangeLabel + ")"} sortId="views" align="center" />
+                <SortHeader label="Likes" sortId="likes" align="center" />
                 <SortHeader label="Last Updated" sortId="updated" align="right" />
               </tr>
             </thead>
@@ -8184,6 +8214,9 @@ function PlayerEvaluationsTable() {
                     </td>
                     <td style={{ padding: "9px 10px", fontSize: "13px", fontWeight: 900, color: p.views != null && p.views > 0 ? BLUE : "#ccc", textAlign: "center" }}>
                       {p.views != null ? p.views.toLocaleString() : "—"}
+                    </td>
+                    <td style={{ padding: "9px 10px", fontSize: "13px", fontWeight: 900, color: p.likes > 0 ? "#ff4d6d" : "#ccc", textAlign: "center" }}>
+                      {p.likes > 0 ? p.likes.toLocaleString() : "—"}
                     </td>
                     <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#999", textAlign: "right", whiteSpace: "nowrap" }}>
                       {p.lastUpdatedMs > 0 ? new Date(p.lastUpdatedMs).toLocaleDateString() : "—"}

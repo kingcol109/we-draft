@@ -130,6 +130,18 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // ── Same collection-group gap as evaluations above, for "reactions" —
+    // needed for the Admin Panel's Players & Evaluations table, which runs
+    // collectionGroup(db, "reactions") to total each player's Likes in one
+    // query instead of N per-player reads. The nested match block above
+    // (players/{playerId}/reactions/{uid}) already grants `allow read: if
+    // true` on every doc this could return — "reactions" only exists at
+    // that one path — so this doesn't expose anything new, it just extends
+    // the same public-read grant to the collection-group form of the query. ──
+    match /{path=**}/reactions/{reactionId} {
+      allow read: if true;
+    }
+
     match /schools/{school} { allow read, write: if true; }
     match /nfl/{team} { allow read, write: if true; }
     // NFLTeamPage.jsx's "Team Needs" vote — one doc per voter (real uid or

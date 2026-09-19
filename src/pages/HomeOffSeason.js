@@ -683,8 +683,11 @@ export default function HomeOffSeason() {
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
                     {ev.grade && gradeDisplay(ev.grade) && <GradeBadge grade={ev.grade} />}
                     {ev.evaluation && (
-                      <p style={{ fontStyle: "italic", fontSize: "11px", color: "#444", lineHeight: 1.5, margin: 0 }}>
-                        "{ev.evaluation.length > 180 ? ev.evaluation.slice(0, 180) + "..." : ev.evaluation}"
+                      <p style={{
+                        fontStyle: "italic", fontSize: "11px", color: "#444", lineHeight: 1.5, margin: 0,
+                        display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden",
+                      }}>
+                        "{ev.evaluation}"
                       </p>
                     )}
                   </div>
