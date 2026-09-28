@@ -1,0 +1,39 @@
+name: Build Site Snapshots
+
+# Runs Mondays at 9:00 UTC (4am ET / 5am EDT — GitHub Actions schedules
+# always run in UTC, see sync-analytics.yml's own comment; adjust the cron
+# below for a different time). Rebuilds every precomputed compSnapshots doc
+# the public pages read instead of scanning whole collections per visit:
+# comparison comp pools + search index, class sidebar rankings (weekly by
+# design), margin ads, and the navbar draft ticker — see
+# scripts/buildSiteSnapshots.mjs. Idempotent: each run fully overwrites the
+# docs from current data. Also runnable on-demand via workflow_dispatch,
+# same as the other scheduled scripts; the admin panel's "Rebuild Site
+# Snapshots" button does the same build from the browser.
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      # Node 22 (not 20 like the other workflows): the script imports the
+      # app's own ESM builder (src/utils/snapshotBuilders.js) directly,
+      # which relies on Node 22's automatic ESM syntax detection.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build site snapshots
+        run: node scripts/buildSiteSnapshots.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

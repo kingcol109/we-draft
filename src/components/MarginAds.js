@@ -12,8 +12,9 @@
 // the rest (fetch, layout measurement, resize, hover states).
 import { useEffect, useRef, useState } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import HomageLogo from "../assets/homagelogo.png";
+import { fetchAds } from "../utils/siteSnapshots";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -70,8 +71,13 @@ function sanitizeUrl(url) {
  * @param {boolean} isMobile - ads never show on mobile (no gutter room).
  * @param {number} horizontalPadding - the contentRef element's own
  *   left/right padding in px (defaults to 60, matching PlayerProfile.js).
+ * @param {string} [preferTeam] - optional NFL abbreviation to show first
+ *   (e.g. a college's NFL affiliate on a player-scoped page, same idea as
+ *   PlayerProfile.js's own drafted-team/affiliate priority). Falls back to
+ *   random when that team has no ad; switching it later (a different
+ *   player loaded in place) switches the ad too.
  */
-export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60 }) {
+export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "" }) {
   const [allAds, setAllAds] = useState([]);
   const [adData, setAdData] = useState(null);
   const [adVisible, setAdVisible] = useState(false);
@@ -144,23 +150,36 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, [showMarginAds, adData, adTeamBranding]);
 
-  // Fetch ads and pick one at random — no drafted/affiliate priority here,
-  // these pages have no single "this team" to prioritize.
+  // Fetch ads and pick one — preferTeam's if it has one, otherwise random.
   useEffect(() => {
     if (isMobile) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const snap = await getDocs(collection(db, "ads"));
-        const ads = snap.docs.map((d) => d.data()).filter((a) => a.Link && a.Image1);
+        // One read from the weekly ads snapshot (utils/siteSnapshots.js),
+        // falling back to the ads collection if it's missing.
+        const ads = await fetchAds();
         if (!cancelled && ads.length > 0) {
           setAllAds(ads);
-          setAdData(ads[Math.floor(Math.random() * ads.length)]);
+          const preferred = preferTeam ? ads.find((a) => a.Team === preferTeam) : null;
+          setAdData(preferred || ads[Math.floor(Math.random() * ads.length)]);
         }
       } catch (e) { /* ads are non-critical — fail silently */ }
     }, 1000);
     return () => { cancelled = true; clearTimeout(t); };
+    // preferTeam changes after the fetch are handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
+
+  // preferTeam resolving (or changing) after the ads are already loaded —
+  // e.g. the page's school doc arriving a beat after this fetch, or a
+  // different player loaded in place. Leaves the current ad alone when the
+  // new team has none.
+  useEffect(() => {
+    if (!preferTeam || !allAds.length) return;
+    const preferred = allAds.find((a) => a.Team === preferTeam);
+    if (preferred) setAdData(preferred);
+  }, [preferTeam, allAds]);
 
   useEffect(() => {
     if (!adData) return;

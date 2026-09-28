@@ -38,6 +38,9 @@ const PAGE_TYPES = [
   // NewsArticle.jsx) — both are tracked under the same "article" type here
   // since there's no separate URL prefix to tell them apart by.
   { type: "article", prefix: "/news/" },
+  // Find Comparison pages (/comparison/<player Slug>, see Comparison.js).
+  // The bare /comparison calculator has no slug and isn't tracked.
+  { type: "comparison", prefix: "/comparison/" },
 ];
 
 const FIRESTORE_BATCH_LIMIT = 500; // Firestore's hard cap on ops per batch

@@ -596,6 +596,12 @@ export default function CommunityBoard() {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [seoDataReady, setSeoDataReady] = useState(false);
+  // Separate from `loading` (which clears after phase 1 of the fetch below)
+  // so the board keeps showing the spinner until community grades are in,
+  // instead of flashing an alphabetical board that then re-sorts. Kept off
+  // `loading` so the mobile stuck-page watchdog's 3s reload timer doesn't
+  // fire while the slower grade hydration is still running.
+  const [gradesReady, setGradesReady] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
   const boardDropdownRef = useRef(null);
@@ -813,6 +819,7 @@ export default function CommunityBoard() {
     if (playerCache[eligibleYear]) {
       setPlayers(playerCache[eligibleYear]);
       setLoading(false);
+      setGradesReady(true);
       setSeoDataReady(true);
       return;
     }
@@ -823,6 +830,7 @@ export default function CommunityBoard() {
       // No matching year — nothing to fetch, but loading must still clear
       // or this route hangs on the spinner forever.
       setLoading(false);
+      setGradesReady(true);
       setSeoDataReady(true);
       return;
     }
@@ -831,6 +839,7 @@ export default function CommunityBoard() {
 
     const fetchPlayers = async () => {
       setLoading(true);
+      setGradesReady(false);
       try {
         // Non-live (Live === false, admin-hidden) players are no longer
         // dropped here — they're kept in `players` and filtered out later,
@@ -850,12 +859,12 @@ export default function CommunityBoard() {
 
         if (cancelled) return;
 
-        // Phase 1 done — render immediately, clear the spinner, let
-        // prerenderReady fire. Grades aren't in yet, but every player's
-        // name/school/position is, which is what actually needs indexing.
+        // Phase 1 done — clears `loading` (for the stuck-page watchdog), but
+        // the spinner stays up via gradesReady, and prerenderReady waits for
+        // phase 2 too so Prerender.io snapshots the sorted board, not the
+        // spinner.
         setPlayers(basePlayers);
         setLoading(false);
-        setSeoDataReady(true);
 
         // Phase 2 — fill in community grades in the background.
         const withGrades = await Promise.all(
@@ -880,10 +889,13 @@ export default function CommunityBoard() {
         if (cancelled) return;
         setPlayers(withGrades);
         setPlayerCache((prev) => ({ ...prev, [eligibleYear]: withGrades }));
+        setGradesReady(true);
+        setSeoDataReady(true);
       } catch (err) {
         console.error("Error fetching players:", err);
         if (!cancelled) {
           setLoading(false);
+          setGradesReady(true);
           setSeoDataReady(true);
         }
       }
@@ -1029,7 +1041,7 @@ export default function CommunityBoard() {
   const mobilePositions = allPositions.filter((pos) => pos !== "K" && pos !== "P");
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
-  if (loading) {
+  if (loading || !gradesReady) {
     return (
       <>
         {SeoTags}

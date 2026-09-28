@@ -20,6 +20,8 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { getSiteSnapshot, fetchAds } from "../utils/siteSnapshots";
+import { STAT_METRICS, readMetric, percentileFromTable } from "../utils/historicalStats";
 import { useAuth } from "../context/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
@@ -145,6 +147,15 @@ function formatInchesForDisplay(raw) {
   const { whole, eighths } = decimalToEighths(num);
   const frac = EIGHTHS_FRACTION_LABEL[eighths];
   return `${whole}${frac ? " " + frac : ""}"`;
+}
+// Vertical: inches with an inch mark — 34 -> 34", 34.5 -> 34.5" (a trailing
+// .0 dropped; an inch mark already in the stored value isn't doubled).
+// Same display the comparison page uses (STAT_METRICS' vertical suffix).
+function formatVerticalForDisplay(raw) {
+  if (raw == null || raw === "") return "";
+  const num = parseFloat(String(raw).replace(/"/g, ""));
+  if (isNaN(num)) return String(raw);
+  return `${Number(num.toFixed(1))}"`;
 }
 function formatFeetInchesForDisplay(raw) {
   if (!raw) return raw;
@@ -455,7 +466,10 @@ export function loadYouTubeIframeApi() {
 // WatchFullscreenFeed plays the newest first and auto-advances backwards
 // through the rest, then keeps going into other players' Shorts once this
 // player's queue runs out. ──
-function WatchButton({ clips, color1, color2, isMobile, originPlayer }) {
+// Exported (named) so Comparison.js's hero toolbar can show the same Watch
+// button — it builds its clips via components/PlayerSidebars.js's
+// usePlayerSidebarData, shaped the same as watchClips here.
+export function WatchButton({ clips, color1, color2, isMobile, originPlayer }) {
   const [show, setShow] = useState(false);
 
   const hasClips = !!(clips && clips.length > 0);
@@ -2024,6 +2038,9 @@ export default function PlayerProfile() {
   // itself so closing it doesn't have to also clear the cached image.
   const [evalShareImageUrl, setEvalShareImageUrl] = useState(null);
   const [evalShareOpen, setEvalShareOpen] = useState(false);
+  // Bio starts collapsed behind a "Show Bio" button so it doesn't push the
+  // rest of the page down for visitors who don't want the long writeup.
+  const [bioOpen, setBioOpen] = useState(false);
   // Watch button (see WatchButton above) — watchClips is every Short tagged
   // to this player, most-recently-added first (see the video-fetch effect
   // below, which pulls them from the same `videos` collection/
@@ -2038,6 +2055,27 @@ export default function PlayerProfile() {
   const [playerNews, setPlayerNews] = useState([]);
   const [playerVideos, setPlayerVideos] = useState([]);
   const [visibleVideoCount, setVisibleVideoCount] = useState(3);
+  // ── Measurement pill percentiles — same hover treatment as the
+  // comparison page's chips (Comparison.js): hover (tap on touch) fills the
+  // pill with color1 and swaps the value for its percentile among every
+  // drafted player at the position. Tables come from the weekly
+  // compSnapshots/pct_{Position} doc (a few KB — see
+  // utils/snapshotBuilders.js); the latest drafted class's own pages use
+  // the "classes before theirs" cutoff so a player isn't ranked against
+  // himself. No doc yet (before the first rebuild) = pills stay static. ──
+  const [pctTables, setPctTables] = useState(null);
+  const [activePill, setActivePill] = useState(null);
+  const pillPointerType = useRef("mouse");
+  useEffect(() => {
+    if (!player?.Position) { setPctTables(null); return; }
+    let cancelled = false;
+    getSiteSnapshot(`pct_${player.Position}`).then((snap) => {
+      if (cancelled) return;
+      const cutoffs = snap?.cutoffs;
+      setPctTables(cutoffs ? (cutoffs[String(parseInt(player.Eligible, 10))] || cutoffs.all || null) : null);
+    });
+    return () => { cancelled = true; };
+  }, [player?.Position, player?.Eligible]);
   const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
   const cfbLogoRef = useRef("");
@@ -2047,6 +2085,11 @@ export default function PlayerProfile() {
   const [seoDataReady, setSeoDataReady] = useState(false);
   const [brandingReady, setBrandingReady] = useState(false);
   const [pageVisible, setPageVisible] = useState(false);
+  // Find Comparison button — gated on config/features.comparisonEnabled
+  // (toggled in Admin > Branding > Misc, see AdminPanel.js's
+  // ComparisonFeatureToggle) while the public comps calculator
+  // (src/pages/Comparison.js) is still in development. Defaults hidden.
+  const [comparisonEnabled, setComparisonEnabled] = useState(false);
 
   const [grade, setGrade] = useState("");
   const [strengths, setStrengths] = useState([]);
@@ -2126,6 +2169,12 @@ export default function PlayerProfile() {
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
   const [draftClassLoading, setDraftClassLoading] = useState(false);
   const [classRank, setClassRank] = useState(null);
+  // We-Draft rank within the player's own position group, from the grade
+  // ranking — set explicitly (not derived from the sidebar list's order)
+  // because the drafted class's sidebar is shown in *draft* order, and the
+  // rank must stay the We-Draft rank. null = derive from list position
+  // (the live build's list is grade-ordered, so that's the same thing).
+  const [positionRank, setPositionRank] = useState(null);
   const [classSize, setClassSize] = useState(0);
 
   // ── Top 5 Trending sidebar — site-wide spotlight, same on every player
@@ -2168,6 +2217,18 @@ export default function PlayerProfile() {
     window.addEventListener("resize", handler);
 
     return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // Find Comparison button visibility — same config/features doc the new
+  // /comparison page itself checks (see Comparison.js), so the button never
+  // shows while the route it points to is still blocked. Site-wide, not
+  // per-player, so this only needs to fetch once.
+  useEffect(() => {
+    let cancelled = false;
+    getDoc(doc(db, "config", "features"))
+      .then((snap) => { if (!cancelled) setComparisonEnabled(!!snap.exists() && snap.data().comparisonEnabled === true); })
+      .catch((e) => { console.error("Comparison feature-flag fetch error:", e); if (!cancelled) setComparisonEnabled(false); });
+    return () => { cancelled = true; };
   }, []);
 
   // ── The grid ref has no real size until content actually renders — recompute
@@ -2297,8 +2358,9 @@ export default function PlayerProfile() {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const snap = await getDocs(collection(db, "ads"));
-        const ads = snap.docs.map((d) => d.data()).filter((a) => a.Link && a.Image1);
+        // One read from the weekly ads snapshot (see utils/siteSnapshots.js
+        // — falls back to the ads collection if it's missing).
+        const ads = await fetchAds();
         if (!cancelled && ads.length > 0) {
           setAllAds(ads);
           const draftedAd = draftedBy ? ads.find((a) => a.Team === draftedBy) : null;
@@ -2564,7 +2626,12 @@ export default function PlayerProfile() {
 
         // No long-form videos tagged to this player — show the 3 most
         // recent CFB/Draft videos site-wide instead.
-        const allSnap = await getDocs(collection(db, "videos"));
+        // Newest 30 only, not the whole (ever-growing) videos collection —
+        // plenty of room for the Shorts / non-CFB-or-Draft / unpublished
+        // ones filtered out below to still leave 3. Every video has a
+        // Timestamp Date, so this is a plain single-field orderBy. Same fix
+        // as components/PlayerSidebars.js's copy of this fallback.
+        const allSnap = await getDocs(query(collection(db, "videos"), orderBy("Date", "desc"), limit(30)));
         const fallback = allSnap.docs
           .map((d) => {
             const data = d.data();
@@ -2741,15 +2808,14 @@ useEffect(() => {
   }, [player]);
 
   // ── Top 5 Trending sidebar data — same list on every player page, so this
-  // fetches once rather than re-running per player. Filters by Shown === true
-  // client-side rather than a where()+orderBy() query — "shown" is an
-  // explicit field, not a position within the collection, and the whole
-  // trends collection is small (admin-curated), so there's no real cost to
-  // reading all of it and sorting here instead of needing a composite index. ──
+  // fetches once rather than re-running per player. where(Shown == true)
+  // (a single-field filter, no composite index needed) so only the shown
+  // handful is read, not the whole trends collection; the Order sort stays
+  // client-side. ──
   useEffect(() => {
     const fetchTrending = async () => {
       try {
-        const snap = await getDocs(collection(db, "trends"));
+        const snap = await getDocs(query(collection(db, "trends"), where("Shown", "==", true)));
         const shown = snap.docs
           .map((d) => ({ slug: d.id, ...d.data() }))
           .filter((t) => t.Shown === true)
@@ -2938,10 +3004,54 @@ useEffect(() => {
   useEffect(() => {
     const fetchDraftClass = async () => {
       if (!player?.Position || !player?.Eligible) {
-        setDraftClassPlayers([]); setClassRank(null); setClassSize(0);
+        setDraftClassPlayers([]); setClassRank(null); setClassSize(0); setPositionRank(null);
         return;
       }
       setDraftClassLoading(true);
+      // Normal path: one read — the weekly class snapshot for this class +
+      // position (compSnapshots/class_{Eligible}_{Position}, built by
+      // utils/snapshotBuilders.js): already ranked with this page's exact
+      // rules, each row carrying its avg grade, overall class rank (cr),
+      // and school logo, plus the doc's classSize. Rankings there update
+      // weekly by design. A not-Live player isn't in anyone's list, so
+      // their own page gets its precomputed placement from the doc's
+      // `hidden` map instead (rank with them added, and where they slot
+      // into the position list) — same result the live build gives by
+      // ranking the Live class + self. Falls through to the live build
+      // below if the snapshot is missing or predates this player.
+      try {
+        const snapDoc = await getSiteSnapshot(`class_${player.Eligible}_${player.Position}`);
+        const selfRow = snapDoc?.rows?.find((r) => r.i === player.id);
+        const hidden = !selfRow ? snapDoc?.hidden?.[player.id] : null;
+        if (snapDoc && (selfRow || hidden)) {
+          // rd/pk/tm/tl only exist on the drafted class's docs (ordered by
+          // pick — see utils/snapshotBuilders.js); they switch the list
+          // into draft mode below.
+          const draftFields = (r) => ({ draftRound: r.rd ?? null, draftPick: r.pk ?? null, draftTeam: r.tm || "", teamLogo: r.tl || "", overallRank: r.cr ?? null });
+          const rows = snapDoc.rows.map((r) => ({
+            id: r.i, First: r.F || "", Last: r.L || "", School: r.s || "", Slug: r.sl || "",
+            Position: player.Position, avgGrade: r.g ?? null, isSelf: r.i === player.id, SchoolLogo: r.lg || "",
+            ...draftFields(r),
+          }));
+          if (hidden) {
+            rows.splice(hidden.pi, 0, {
+              id: player.id, First: player.First || "", Last: player.Last || "", School: player.School || "", Slug: player.Slug || "",
+              Position: player.Position, avgGrade: hidden.g ?? null, isSelf: true, SchoolLogo: hidden.lg || "",
+              ...draftFields(hidden),
+            });
+          }
+          setDraftClassPlayers(rows);
+          const selfCr = (selfRow || hidden).cr ?? null;
+          // Position rank = 1 + position-group players ranked ahead of him
+          // overall (cr is the grade-ranked overall class rank), however
+          // the list itself happens to be ordered.
+          setPositionRank(selfCr != null ? rows.filter((r) => !r.isSelf && r.overallRank != null && r.overallRank < selfCr).length + 1 : null);
+          setClassRank(selfCr);
+          setClassSize((snapDoc.classSize || 0) + (hidden ? 1 : 0));
+          setDraftClassLoading(false);
+          return;
+        }
+      } catch { /* fall through to the live build */ }
       try {
         const q = query(
           collection(db, "players"),
@@ -3017,6 +3127,7 @@ useEffect(() => {
           }
         }
         setDraftClassPlayers(posList.map((p) => ({ ...p, SchoolLogo: schoolLogos[p.School] || "" })));
+        setPositionRank(null); // grade-ordered list — list position is the rank
         const classSelfIndex = list.findIndex((p) => p.isSelf);
         setClassRank(classSelfIndex >= 0 ? classSelfIndex + 1 : null);
         setClassSize(list.length);
@@ -3319,24 +3430,57 @@ useEffect(() => {
     ...playerNews.map((n) => toMsForStamp(n.publishedAt)),
   );
 
+  // mk = the STAT_METRICS key its percentile comes from (Wingspan has no
+  // historical data to rank against, so it never gets one).
   const physicalMeasurements = [
-    {val:formatHeightForDisplay(player.Height),label:"Height"},{val:player.Weight,label:"Weight"},
-    {val:formatInchesForDisplay(player.Wingspan),label:"Wing"},{val:formatInchesForDisplay(player["Arm Length"]),label:"Arm"},{val:formatInchesForDisplay(player["Hand Size"]),label:"Hand"},
+    {val:formatHeightForDisplay(player.Height),label:"Height",mk:"height"},{val:player.Weight,label:"Weight",mk:"weight"},
+    {val:formatInchesForDisplay(player.Wingspan),label:"Wing",mk:null},{val:formatInchesForDisplay(player["Arm Length"]),label:"Arm",mk:"arm"},{val:formatInchesForDisplay(player["Hand Size"]),label:"Hand",mk:"hand"},
   ].filter((m)=>m.val);
 
   const athleticMeasurements = [
-    {val:player["40 Yard"],label:"40 Yd"},{val:player.Vertical,label:"Vert"},{val:formatFeetInchesForDisplay(player.Broad),label:"Broad"},
-    {val:player["3-Cone"],label:"3-Cone"},{val:player.Shuttle,label:"Shutt"},{val:player.Bench,label:"Bench"},
+    {val:player["40 Yard"],label:"40 Yd",mk:"forty"},{val:formatVerticalForDisplay(player.Vertical),label:"Vert",mk:"vertical"},{val:formatFeetInchesForDisplay(player.Broad),label:"Broad",mk:"broad"},
+    {val:player["3-Cone"],label:"3-Cone",mk:"threeCone"},{val:player.Shuttle,label:"Shutt",mk:"shuttle"},{val:player.Bench,label:"Bench",mk:"bench"},
   ].filter((m)=>m.val);
 
   const hasAthletic = athleticMeasurements.length > 0;
 
-  const StatPill = ({ val, label }) => (
-    <div style={{ display:"inline-flex", flexDirection:"column", alignItems:"center", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:isMobile?"5px 10px":"7px 16px", minWidth:isMobile?"52px":"68px" }}>
-      <span style={{ fontSize:isMobile?"13px":"18px", fontWeight:900, color:color1, lineHeight:1.1 }}>{val}</span>
-      <span style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color:"#888", letterSpacing:"0.08em", marginTop:"3px", textTransform:"uppercase" }}>{label}</span>
-    </div>
-  );
+  // Called as a function (renderStatPill(m)), not rendered as
+  // <StatPill/>: defined inside render, a component would get a new type
+  // every render and remount on each hover — killing the fade.
+  const renderStatPill = ({ val, label, mk }) => {
+    const metric = mk ? STAT_METRICS.find((x) => x.key === mk) : null;
+    const pct = metric ? percentileFromTable(readMetric(player, metric).value, pctTables?.[mk], metric.lowerIsBetter) : null;
+    const pctRounded = pct == null ? null : Math.min(99, Math.max(1, Math.round(pct)));
+    const active = activePill === label && pctRounded != null;
+    const suffix = (n) => (n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+    return (
+      <div
+        key={label}
+        onPointerDown={(e) => { pillPointerType.current = e.pointerType; }}
+        onPointerEnter={(e) => { if (e.pointerType === "mouse" && pctRounded != null) setActivePill(label); }}
+        onPointerLeave={(e) => { if (e.pointerType === "mouse") setActivePill((c) => (c === label ? null : c)); }}
+        onClick={() => { if (pillPointerType.current !== "mouse" && pctRounded != null) setActivePill((c) => (c === label ? null : label)); }}
+        title={pctRounded == null ? undefined : `${pctRounded}${suffix(pctRounded)} percentile among drafted ${player.Position}s`}
+        style={{
+          display:"inline-flex", flexDirection:"column", alignItems:"center",
+          background: active ? color1 : "#fff", border:`2px solid ${color1}`, borderRadius:"8px",
+          padding:isMobile?"5px 10px":"7px 16px", minWidth:isMobile?"52px":"68px",
+          transition:"background 0.2s ease", cursor:"default",
+        }}
+      >
+        {/* Value and percentile share one grid cell with only visibility
+            toggled, so the pill keeps its size on hover (same as
+            Comparison.js's chips). */}
+        <span style={{ display:"grid", fontSize:isMobile?"13px":"18px", fontWeight:900, lineHeight:1.1, justifyItems:"center" }}>
+          <span style={{ gridArea:"1 / 1", color:color1, visibility: active ? "hidden" : "visible" }}>{val}</span>
+          {pctRounded != null && (
+            <span style={{ gridArea:"1 / 1", color:"#fff", visibility: active ? "visible" : "hidden" }} aria-hidden={!active}>{pctRounded}%</span>
+          )}
+        </span>
+        <span style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color: active ? "rgba(255,255,255,0.8)" : "#888", letterSpacing:"0.08em", marginTop:"3px", textTransform:"uppercase", transition:"color 0.2s ease" }}>{label}</span>
+      </div>
+    );
+  };
 
   // ── Shared fixed-position placement for both margin ad cards, derived from
   // the measured gutter (see recomputeAdLayout above). Kept as one function
@@ -3638,6 +3782,9 @@ useEffect(() => {
   const draftClassLabel = `${formatEligible(player.Eligible)} ${player.Position}`.trim();
   const communityYearPath = String(player.Eligible) === "2027" ? "/community" : `/community/${player.Eligible}`;
 
+  // Drafted-class list (rows carry draft picks) — see draftMode below.
+  const draftListMode = draftClassPlayers.some((p) => p.draftPick != null);
+
   // ── Ensure the current player is always visible even if ranked beyond the cap ──
   const selfIndex = draftClassPlayers.findIndex((p) => p.isSelf);
   const displayList = selfIndex >= DRAFT_CLASS_LIMIT
@@ -3674,6 +3821,13 @@ useEffect(() => {
           {displayList.map((p, i) => {
           const gradeLabel = p.avgGrade != null ? gradeLabels[Math.round(p.avgGrade)] : "Watchlist";
           const gd = gradeDisplay(gradeLabel);
+          // Draft mode — the drafted class's list (already in pick order):
+          // the drafting team's logo replaces the grade badge, and
+          // "Round 1 Pick 15" replaces the school. Undrafted players in
+          // that class (listed after every pick) get a blank badge slot and
+          // "Undrafted".
+          const draftMode = draftListMode;
+          const draftLine = p.draftPick != null ? `Round ${p.draftRound} Pick ${p.draftPick}` : "Undrafted";
           const rowStyle = {
             display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px",
             textDecoration: "none",
@@ -3683,6 +3837,21 @@ useEffect(() => {
           };
           const rowContent = (
             <>
+              {draftMode ? (
+                <div style={{ flexShrink: 0, width: "28px", height: "28px", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  title={p.draftTeam ? teamNameFromAbbr(p.draftTeam) : "Undrafted"}>
+                  {p.teamLogo ? (
+                    <img
+                      src={sanitizeUrl(p.teamLogo)} alt={p.draftTeam ? teamNameFromAbbr(p.draftTeam) : ""}
+                      style={{ width: "28px", height: "28px", objectFit: "contain" }}
+                      loading="lazy" referrerPolicy="no-referrer"
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  ) : (
+                    <span style={{ color: "#ccc", fontWeight: 900, fontSize: "14px" }}>—</span>
+                  )}
+                </div>
+              ) : (
               <div
                 style={{
                   flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -3696,7 +3865,18 @@ useEffect(() => {
               >
                 {gd.short}
               </div>
-              {mobileVariant ? (
+              )}
+              {mobileVariant && draftMode ? (
+                // Mobile, draft mode: logo + name, pick on the right — no
+                // school logo (a second logo next to the team's would read
+                // as noise).
+                <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ flex: 1, minWidth: 0, color: SITE_BLUE, fontWeight: 900, fontSize: "18px", lineHeight: "28px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {`${p.First} ${p.Last}`}
+                  </span>
+                  <span style={{ flexShrink: 0, color: "#777", fontWeight: 800, fontSize: "11px", whiteSpace: "nowrap" }}>{draftLine}</span>
+                </div>
+              ) : mobileVariant ? (
                 <>
                   {/* Team logo — same 28px footprint as the grade badge to
                       its left, sitting between it and the name. A school
@@ -3726,7 +3906,7 @@ useEffect(() => {
                     {`${p.First} ${p.Last}`}
                   </span>
                   <span style={{ color: "#777", fontWeight: 700, fontSize: "12px", marginTop: "2px" }}>
-                    {p.School || "—"}
+                    {draftMode ? draftLine : (p.School || "—")}
                   </span>
                 </div>
               )}
@@ -4774,32 +4954,25 @@ useEffect(() => {
                   Transferred from {player.PriorSchool}{player.PriorSchoolYear ? ` (${player.PriorSchoolYear})` : ""}
                 </div>
               )}
+              {/* Drafted players: one pill in the team colors reading
+                  "Round 1 · Pick 1" (Pick is the overall pick number, same
+                  as draftOrder stores it), then the drafting team's name,
+                  still linking to its NFL team page — replaces the old pair
+                  of square Rd/Pick chips + "Selected by" label. Pill styling
+                  mirrors the position pill above, filled with color2. */}
               {draftedBy && draftInfo && (
-                <div className="flex items-center justify-center gap-3 mt-2">
-                  <div style={{ display:"flex", gap:"6px" }}>
-                    <div style={{
-                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-                      width:"44px", height:"44px", borderRadius:"8px",
-                      backgroundColor:color1, border:`2px solid ${color2}`,
-                    }}>
-                      <span style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.7)", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1 }}>Rd</span>
-                      <span style={{ fontSize:"20px", fontWeight:900, color:"#fff", lineHeight:1.1, marginTop:"2px" }}>{draftInfo.round}</span>
-                    </div>
-                    <div style={{
-                      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-                      width:"44px", height:"44px", borderRadius:"8px",
-                      backgroundColor:"#fff", border:`2px solid ${color1}`,
-                    }}>
-                      <span style={{ fontSize:"20px", fontWeight:900, color:color1, lineHeight:1.1 }}>{draftInfo.pick}</span>
-                      <span style={{ fontSize:"8px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1, marginTop:"2px" }}>Pick</span>
-                    </div>
-                  </div>
-                  <div className="text-left">
-                    <div style={{ fontSize:"10px", fontWeight:800, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.1em" }}>Selected by</div>
-                    <span onClick={()=>navigate(`/nfl/${draftedBy.toLowerCase()}`)} className="font-black uppercase cursor-pointer hover:underline" style={{ fontSize:isMobile?"13px":"18px", color:"#fff", letterSpacing:"0.04em", textShadow:"0 1px 4px rgba(0,0,0,0.4)", pointerEvents:"auto" }}>
-                      {teamNameFromAbbr(draftedBy)}
-                    </span>
-                  </div>
+                <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:isMobile?"6px":"10px" }}>
+                  <span className="font-extrabold rounded-full" style={{
+                    background:color2, border:"2px solid #fff", color:"#fff",
+                    letterSpacing:"0.05em", textTransform:"uppercase", whiteSpace:"nowrap",
+                    fontSize:isMobile?"11px":"15px", padding:isMobile?"2px 10px":"3px 16px",
+                    textShadow:"0 1px 3px rgba(0,0,0,0.25)",
+                  }}>
+                    Round {draftInfo.round} · Pick {draftInfo.pick}
+                  </span>
+                  <span onClick={()=>navigate(`/nfl/${draftedBy.toLowerCase()}`)} className="font-black uppercase cursor-pointer hover:underline" style={{ fontSize:isMobile?"13px":"18px", color:"#fff", letterSpacing:"0.04em", textShadow:"0 1px 4px rgba(0,0,0,0.4)", pointerEvents:"auto" }}>
+                    {teamNameFromAbbr(draftedBy)}
+                  </span>
                 </div>
               )}
             </div>
@@ -4909,41 +5082,65 @@ useEffect(() => {
             <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px", borderBottom: player.Bio ? "1px solid #eee" : undefined }}>
               {isMobile ? (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
-                  {physicalMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
-                  {hasAthletic && athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
+                  {physicalMeasurements.map(renderStatPill)}
+                  {hasAthletic && athleticMeasurements.map(renderStatPill)}
                 </div>
               ) : (
                 <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", gap:0 }}>
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
                     <div style={{ display:"flex", gap:"7px", flexWrap:"wrap", justifyContent:"center" }}>
-                      {physicalMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
+                      {physicalMeasurements.map(renderStatPill)}
                     </div>
                   </div>
                   {hasAthletic && <div style={{ width:"1px", background:"#e0e0e0", alignSelf:"stretch", margin:"0", flexShrink:0 }} />}
                   {hasAthletic && (
                     <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
                       <div style={{ display:"flex", gap:"7px", flexWrap:"wrap", justifyContent:"center" }}>
-                        {athleticMeasurements.map((m) => <StatPill key={m.label} val={m.val} label={m.label} />)}
+                        {athleticMeasurements.map(renderStatPill)}
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+              {comparisonEnabled && player.Slug && (
+                <div style={{ display: "flex", justifyContent: "center", marginTop: isMobile ? "14px" : "16px" }}>
+                  <Link
+                    to={`/comparison/${player.Slug}`}
+                    className="transition hover:opacity-90"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "8px",
+                      background: color1, color: "#fff", fontWeight: 900, fontSize: isMobile ? "14px" : "16px",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                      padding: isMobile ? "11px 22px" : "13px 30px", borderRadius: "999px", textDecoration: "none",
+                      boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+                    }}
+                  >
+                    🔎 Find Comparison
+                  </Link>
                 </div>
               )}
             </div>
           )}
 
           {player.Bio && (
-            <div className="bg-white" style={{ padding: isMobile ? "14px 16px" : "20px 32px" }}>
+            <div className="bg-white" style={{ padding: bioOpen ? (isMobile ? "14px 16px" : "20px 32px") : (isMobile ? "8px 16px" : "10px 32px") }}>
               <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
-                {/* Same bold branded header the rest of the page uses
-                    (Community Scouting Report, etc.) instead of a small
-                    gray label — a plain gray-on-white block was reading as
-                    an afterthought next to everything else on this page. */}
-                <SectionTitle>Bio</SectionTitle>
+                {/* No "Bio" heading and tight padding while collapsed — the
+                    whole point of hiding the bio is to get the Community
+                    Scouting Report on screen without scrolling. */}
+                <button
+                  type="button"
+                  onClick={() => setBioOpen(o => !o)}
+                  aria-expanded={bioOpen}
+                  style={{ background: color1, color: "#fff", border: "none", borderRadius: "6px", padding: isMobile ? "8px 14px" : "9px 18px", fontSize: isMobile ? "13px" : "14px", fontWeight: 700, cursor: "pointer", marginBottom: bioOpen ? "12px" : 0 }}
+                >
+                  {bioOpen ? "Hide Bio" : "Show Bio"}
+                </button>
                 {/* Same colored pull-quote treatment "Scout's Take" uses in
                     evaluations — a team-color accent border + tinted card
                     gives the bio some visual weight instead of just
                     floating as plain paragraph text. */}
+                {bioOpen && (
                 <div style={{ borderLeft: `4px solid ${color1}`, background: "#fafafa", borderRadius: "0 8px 8px 0", padding: isMobile ? "14px 16px" : "18px 22px" }}>
                   {/* Same bullet/paragraph renderer as evaluations — a bio
                       written as several newline-separated paragraphs (or with
@@ -4955,6 +5152,7 @@ useEffect(() => {
                     {renderEvaluationText(player.Bio, "bio")}
                   </div>
                 </div>
+                )}
               </div>
             </div>
           )}
@@ -5028,7 +5226,7 @@ useEffect(() => {
                   <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
                   {(selfIndex >= 0 || classRank) ? (
                     <div className="text-center" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
-                      {selfIndex >= 0 && <div>{selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                      {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
                       {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                     </div>
                   ) : <p className="italic text-gray-400 text-xs text-center">Not ranked</p>}
@@ -5108,7 +5306,7 @@ useEffect(() => {
                         <div className="mt-4 w-full">
                           <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.1em" }}>Class Rank</div>
                           <div className="text-center" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
-                            {selfIndex >= 0 && <div>{selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                            {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
                             {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                           </div>
                         </div>

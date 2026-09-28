@@ -22,6 +22,10 @@ const News = lazy(() => import("./pages/News"));
 const NewsArticle = lazy(() => import("./pages/NewsArticle"));
 const CommunityBoard = lazy(() => import("./pages/CommunityBoard"));
 const PlayerProfile = lazy(() => import("./pages/PlayerProfile"));
+// Public Find Comparison calculator — gated behind config/features
+// .comparisonEnabled itself (see Comparison.js), so it's routed like any
+// other public page rather than wrapped in AdminRoute.
+const Comparison = lazy(() => import("./pages/Comparison"));
 const UserBoards = lazy(() => import("./pages/UserBoards"));
 const UserProfile = lazy(() => import("./pages/UserProfile"));
 
@@ -62,6 +66,9 @@ const MyFeed = lazy(() => import("./pages/MyFeed"));
 // Admin — the single biggest chunk to keep out of everyone else's download
 // (TipTap editor + extensions, html2canvas, and every admin manager panel).
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
+// Football Sim Lab — admin-only prototype, reached from the Admin panel;
+// noindexed, disallowed in robots.txt, never linked publicly.
+const SimPage = lazy(() => import("./pages/SimPage"));
 
 // Games
 const MyDraftClass = lazy(() => import("./pages/MyDraftClass"));
@@ -100,6 +107,7 @@ function App() {
           <Routes>
             {/* Standalone — no navbar, no padding */}
             <Route path="/draft-tracker" element={<DraftTracker />} />
+            <Route path="/sim" element={<AdminRoute><SimPage /></AdminRoute>} />
 
             {/* All other routes — wrapped with Navbar */}
             <Route path="*" element={<MainLayout />} />
@@ -137,6 +145,10 @@ function MainLayout() {
                 cleanly with /community/:year. */}
             <Route path="/community/:year/:position" element={<CommunityBoard />} />
             <Route path="/player/:slug" element={<PlayerProfile />} />
+            <Route path="/comparison" element={<Comparison />} />
+            {/* /comparison/:slug preloads that prospect — same Slug format
+                /player/:slug uses (e.g. "jeremiah-smith-2027-wr"). */}
+            <Route path="/comparison/:slug" element={<Comparison />} />
             {/* Redirect old /player2 URLs to canonical /player URLs */}
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />

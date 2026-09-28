@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { DndContext, closestCenter, useSensor, useSensors, PointerSensor } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
@@ -11,6 +12,8 @@ import ArticlesManager from "../components/ArticlesManager";
 import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
+import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
+import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
 import verifiedBadge from "../assets/verified.png";
 
 const BLUE = "#0055a5";
@@ -244,6 +247,7 @@ const SECTIONS = [
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
   { key: "requests", label: "Requests", icon: "📥", ready: true },
   { key: "users", label: "Users", icon: "👤", ready: true },
+  { key: "sim", label: "Football Sim", icon: "🧪", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
 ];
@@ -313,6 +317,32 @@ function ComingSoonPane({ label }) {
       <div style={{ fontSize: "13px", fontWeight: 700, color: "#aaa", marginTop: "8px" }}>
         This section of the admin panel hasn't been built yet.
       </div>
+    </div>
+  );
+}
+
+// ── Football Sim Lab — the only way in to /sim (admin-only, unlisted,
+// noindexed; see src/pages/SimPage.js and src/sim/). ──
+function SimLabPane() {
+  return (
+    <div style={{ border: "2px solid #eaf1ff", borderRadius: "12px", padding: "28px 24px", background: "#fff" }}>
+      <div style={{ fontSize: "20px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        Football Sim Lab
+      </div>
+      <div style={{ fontSize: "13px", fontWeight: 700, color: "#666", marginTop: "8px", maxWidth: "640px", lineHeight: 1.5 }}>
+        Prototype football mechanics laboratory — Spread formation, Smash / Inside Zone vs. 4-3 / 3-4 in Tampa 2 or Man.
+        Runs entirely in the browser; nothing is saved to Firestore.
+      </div>
+      <Link
+        to="/sim"
+        style={{
+          display: "inline-block", marginTop: "18px", padding: "10px 18px", borderRadius: "8px",
+          background: BLUE, color: "#fff", fontWeight: 900, fontSize: "13px",
+          textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none",
+        }}
+      >
+        Open the Sim →
+      </Link>
     </div>
   );
 }
@@ -2018,7 +2048,7 @@ const HISTORICAL_ATHLETIC_FIELDS = [
   { formKey: "Broad", dataKey: "Broad", label: "Broad Jump", min: 80, max: 140, inputType: "broad" },
   { formKey: "Bench", dataKey: "Bench", label: "Bench", min: 0, max: 50, inputType: "text" },
   { formKey: "ThreeCone", dataKey: "3-Cone", label: "3-Cone", min: 6.0, max: 9.0, inputType: "text" },
-  { formKey: "Shuttle", dataKey: "Shuttle", label: "Shuttle", min: 3.7, max: 5.0, inputType: "text" },
+  { formKey: "Shuttle", dataKey: "Shuttle", label: "Shuttle", min: 3.7, max: 5.5, inputType: "text" },
 ];
 const HISTORICAL_COMBINE_FIELDS = [...HISTORICAL_PHYSICAL_FIELDS, ...HISTORICAL_ATHLETIC_FIELDS];
 
@@ -2142,6 +2172,7 @@ function historicalFlagsFor(record) {
 
 function HistoricalSection() {
   const [records, setRecords] = useState([]);
+  const [view, setView] = useState("records"); // "records" | "stats"
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
@@ -2478,7 +2509,35 @@ function HistoricalSection() {
   const liveFlags = formState ? historicalFlagsFor(formRecord) : [];
   const liveFlaggedKeys = new Set(liveFlags.map((f) => f.dataKey));
 
+  // Records (the list+form below) vs. Stats (position distributions over
+  // these same already-loaded records — no second fetch).
+  const viewTabs = (
+    <div style={{ display: "flex", gap: "6px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
+      {[{ key: "records", label: "Records" }, { key: "stats", label: "Stats" }, { key: "comps", label: "Comps" }].map((t) => (
+        <button
+          key={t.key}
+          onClick={() => setView(t.key)}
+          style={{
+            padding: "5px 14px", fontWeight: 900, fontSize: "11px",
+            textTransform: "uppercase", letterSpacing: "0.05em",
+            border: "2px solid " + GOLD, borderRadius: "6px", cursor: "pointer",
+            background: view === t.key ? GOLD : "#fff",
+            color: view === t.key ? "#fff" : GOLD,
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+      <CompSnapshotRebuild records={records} />
+    </div>
+  );
+
+  if (view === "stats") return <>{viewTabs}<HistoricalStatsView records={records} /></>;
+  if (view === "comps") return <>{viewTabs}<HistoricalCompsView records={records} /></>;
+
   return (
+    <>
+    {viewTabs}
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -2917,6 +2976,918 @@ function HistoricalSection() {
               </div>
             )}
           </div>
+        )}
+      </div>
+    </div>
+    </>
+  );
+}
+
+// ── Historical > Stats — per-position distributions of drafted players'
+// combine measurements (see src/utils/historicalStats.js for the math and
+// what's excluded). The reference baseline for percentiles and historical
+// comps; the ±1 SD height window shown per position is the candidate comp
+// filter under consideration. Optional draft-class range since the combine
+// data is still being filled in class by class — thin older classes can
+// be excluded rather than silently diluting the numbers. The 2026 class
+// isn't migrated into `historical` yet, so its drafted players are pulled
+// from players + draftOrder here and merged in (only when Stats or Comps
+// is opened — ~750 reads the Records view doesn't need). ──
+const LATEST_DRAFT_YEAR = "2026";
+
+// Fetched at most once per admin session — module-level so flipping
+// between Stats and Comps doesn't refetch. Cleared on failure so the next
+// mount retries instead of caching the error. Each drafted player's
+// evaluations are read too (one subcollection query per pick) so the class
+// carries community Strengths/Weaknesses (TraitSource: "community") —
+// that's what makes it eligible as comps, which require both.
+let latestClassPromise = null;
+function fetchLatestDraftClass() {
+  if (!latestClassPromise) {
+    latestClassPromise = Promise.all([
+      getDocs(query(collection(db, "players"), where("Eligible", "==", LATEST_DRAFT_YEAR))),
+      getDocs(collection(db, "draftOrder")),
+    ]).then(async ([playerSnap, orderSnap]) => {
+      const rows = draftedPlayersAsHistorical(
+        playerSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        orderSnap.docs.map((d) => d.data()),
+        LATEST_DRAFT_YEAR
+      );
+      const evalSnaps = await Promise.all(rows.map((r) => getDocs(collection(db, "players", r.id, "evaluations"))));
+      return rows.map((r, i) => {
+        const { strengths, weaknesses } = communityTraits(evalSnaps[i].docs.map((d) => d.data()));
+        return { ...r, Strengths: strengths, Weaknesses: weaknesses, TraitSource: "community", EvalCount: evalSnaps[i].size };
+      });
+    }).catch((e) => {
+      latestClassPromise = null;
+      throw e;
+    });
+  }
+  return latestClassPromise;
+}
+
+// Every drafted player to compare against: historical + the latest class.
+// { pool: null } while the latest class is still loading.
+function useHistoricalPool(records) {
+  const [latestClass, setLatestClass] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLatestDraftClass()
+      .then((rows) => { if (!cancelled) setLatestClass(rows); })
+      .catch((e) => {
+        console.error("Admin historical latest-class fetch error:", e);
+        if (!cancelled) setLatestClass([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  // historical shouldn't hold the latest class too, but if it ever gets
+  // migrated in, don't double-count it — drop historical's own copy.
+  const pool = useMemo(
+    () => (latestClass ? [...records.filter((r) => r.Year !== LATEST_DRAFT_YEAR), ...latestClass] : null),
+    [records, latestClass]
+  );
+  return { pool, latestCount: latestClass?.length || 0 };
+}
+const STATS_POSITION_ORDER = [...POSITION_ORDER, "K", "P", "LS"];
+
+function formatStatValue(metric, v) {
+  if (v == null) return "—";
+  if (metric.format === "height") return formatHeightDisplay(String(v));
+  if (metric.format === "inches") return formatInchesDisplay(String(v));
+  if (metric.format === "feetInches") return formatFeetInchesDisplay(String(v));
+  if (metric.suffix) return `${Number(v.toFixed(metric.decimals ?? 1))}${metric.suffix}`;
+  return v.toFixed(metric.decimals ?? 1);
+}
+
+function HistoricalStatsView({ records }) {
+  const [position, setPosition] = useState("QB");
+  const [fromYear, setFromYear] = useState("");
+  const [toYear, setToYear] = useState("");
+  const { pool, latestCount } = useHistoricalPool(records);
+  const allRecords = useMemo(() => pool || [], [pool]);
+  const years = useMemo(
+    () => [...new Set(allRecords.map((r) => r.Year).filter(Boolean))].sort(),
+    [allRecords]
+  );
+  const stats = useMemo(() => computePositionStats(allRecords, { fromYear, toYear }), [allRecords, fromYear, toYear]);
+  const positions = STATS_POSITION_ORDER.filter((p) => stats[p])
+    .concat(Object.keys(stats).filter((p) => !STATS_POSITION_ORDER.includes(p)).sort());
+  const pos = stats[position];
+  const heightStat = pos?.metrics.height;
+
+  if (!pool) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+
+  const th = { padding: "8px 10px", fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", textAlign: "right", whiteSpace: "nowrap" };
+  const td = { padding: "8px 10px", fontSize: "13px", fontWeight: 700, textAlign: "right", whiteSpace: "nowrap", borderTop: "1px solid #eee" };
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Position Stats — Drafted Players
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", color: "#fff", fontSize: "11px", fontWeight: 800 }}>
+          Classes
+          <select value={fromYear} onChange={(e) => setFromYear(e.target.value)} style={{ ...inputStyle, width: "90px", padding: "4px 6px" }}>
+            <option value="">All</option>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          to
+          <select value={toYear} onChange={(e) => setToYear(e.target.value)} style={{ ...inputStyle, width: "90px", padding: "4px 6px" }}>
+            <option value="">All</option>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        {positions.map((p) => (
+          <button
+            key={p}
+            onClick={() => setPosition(p)}
+            style={{
+              padding: "5px 12px", fontWeight: 900, fontSize: "12px",
+              border: "2px solid " + BLUE, borderRadius: "6px", cursor: "pointer",
+              background: position === p ? BLUE : "#fff", color: position === p ? "#fff" : BLUE,
+            }}
+          >
+            {p} <span style={{ opacity: 0.6, fontWeight: 700 }}>{stats[p].players}</span>
+          </button>
+        ))}
+      </div>
+
+      {!pos ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+          No drafted players in this range.
+        </div>
+      ) : (
+        <>
+          <div style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 700, color: "#333", display: "flex", gap: "24px", flexWrap: "wrap" }}>
+            <div><span style={{ color: "#888" }}>Drafted {position}s:</span> {pos.players.toLocaleString()}</div>
+            <div><span style={{ color: "#888" }}>Includes {LATEST_DRAFT_YEAR} class:</span> {latestCount} picks (from draftOrder)</div>
+            {heightStat?.sd != null && (
+              <div>
+                <span style={{ color: "#888" }}>±1 SD height window:</span>{" "}
+                {formatHeightDisplay(String(heightStat.mean - heightStat.sd))} – {formatHeightDisplay(String(heightStat.mean + heightStat.sd))}
+              </div>
+            )}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: BLUE }}>
+                  <th style={{ ...th, textAlign: "left" }}>Metric</th>
+                  <th style={th}>N</th>
+                  <th style={th}>Coverage</th>
+                  <th style={th}>Mean</th>
+                  <th style={th}>SD</th>
+                  <th style={th}>Min</th>
+                  <th style={th}>10th</th>
+                  <th style={th}>25th</th>
+                  <th style={th}>Median</th>
+                  <th style={th}>75th</th>
+                  <th style={th}>90th</th>
+                  <th style={th}>Max</th>
+                  <th style={th} title="Values outside plausibility bounds — excluded from these stats">🚩 Excl.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {STAT_METRICS.map((m) => {
+                  const s = pos.metrics[m.key];
+                  const fmt = (v) => (s.n ? formatStatValue(m, v) : "—");
+                  return (
+                    <tr key={m.key}>
+                      <td style={{ ...td, textAlign: "left", fontWeight: 900, color: BLUE }}>
+                        {m.label}
+                        {m.lowerIsBetter && <span style={{ color: "#999", fontWeight: 700, fontSize: "11px" }}> (lower = better)</span>}
+                      </td>
+                      <td style={td}>{s.n}</td>
+                      <td style={{ ...td, color: "#888" }}>{Math.round((s.n / pos.players) * 100)}%</td>
+                      <td style={td}>{fmt(s.mean)}</td>
+                      {/* SD as a plain number in the metric's own unit — a
+                          spread isn't a height, so no feet'inches format. */}
+                      <td style={td}>{s.sd != null ? `${s.sd.toFixed(m.decimals ?? 2)} ${m.unit}` : "—"}</td>
+                      <td style={td}>{fmt(s.min)}</td>
+                      <td style={td}>{fmt(s.p10)}</td>
+                      <td style={td}>{fmt(s.p25)}</td>
+                      <td style={td}>{fmt(s.p50)}</td>
+                      <td style={td}>{fmt(s.p75)}</td>
+                      <td style={td}>{fmt(s.p90)}</td>
+                      <td style={td}>{fmt(s.max)}</td>
+                      <td style={{ ...td, color: s.invalid ? "#c0392b" : "#bbb" }}>{s.invalid}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Historical > Comps — enter a prospect's measurements and/or
+// Strengths/Weaknesses, get the closest drafted players at the same
+// position (historical + latest class) — only players with Strengths AND
+// Weaknesses entered are eligible comps (see findComps' requireTraits);
+// SDs still come from every drafted player. All matching math is findComps in
+// src/utils/historicalStats.js; this is just input and display. Inputs
+// mirror the Historical record form exactly — feet/inches/eighths selects
+// for Height, inches/eighths for Arm/Hand, feet/inches for Broad (same
+// decompose/recompose helpers, same decimal-inches strings), text for the
+// rest, and the same traits/{Position} + traits/Generic checkbox pickers.
+// Runs on the button, not per keystroke, so half-entered values don't
+// reshuffle the results. ──
+const HEIGHT_WINDOW_OPTIONS = [
+  { value: "", label: "Off" },
+  { value: "0.5", label: "±0.5 SD" },
+  { value: "1", label: "±1 SD" },
+  { value: "1.5", label: "±1.5 SD" },
+  { value: "2", label: "±2 SD" },
+];
+// How much the Strengths/Weaknesses match counts, in "measurements' worth"
+// — see findComps' TRAIT_WEIGHT.
+const TRAIT_WEIGHT_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "1", label: "Low (= 1 measurement)" },
+  { value: "2", label: "Medium (= 2 measurements)" },
+  { value: "4", label: "High (= 4 measurements)" },
+];
+const COMP_RESULT_LIMIT = 25;
+const COMP_PHYSICAL_KEYS = ["height", "weight", "arm", "hand"];
+const COMP_ATHLETIC_KEYS = ["forty", "vertical", "broad", "bench", "threeCone", "shuttle"];
+const COMP_PICKERS = {
+  height: { decompose: decomposeHeight, recompose: recomposeHeight },
+  inches: { decompose: decomposeInches, recompose: recomposeInches },
+  feetInches: { decompose: decomposeFeetInches, recompose: recomposeFeetInches },
+};
+
+// "Load player" autofill — current prospects (ACTIVE_YEARS) only. Their
+// docs carry Height/Weight (plus the odd combine number, filled in too if
+// present); Strengths/Weaknesses come from their evaluations, either the
+// community consensus (communityTraits — same rule as PlayerProfile.js) or
+// the site's own admin account's evaluation. Evaluation docs are keyed by
+// the evaluator's uid, so the admin one is a single doc read.
+const KINGCOLD_UID = "pYSpX6IRyHdAlYpFP5NNbQ19ARI3"; // users/{uid}: "King Cold Sports" (@kingcoldsports)
+const TRAIT_SOURCE_OPTIONS = [
+  { value: "community", label: "Community consensus" },
+  { value: "admin", label: "Admin (@kingcoldsports)" },
+];
+
+// ── Rebuild Site Snapshots — every precomputed `compSnapshots` doc the
+// public pages read instead of scanning whole collections per visit: the
+// comparison page's comp pools + search index, the class sidebar lists
+// (PlayerProfile.js + Comparison.js, with grades and overall class rank),
+// the margin ads, and the navbar's draft ticker. What's in each doc and
+// how it's built lives in utils/snapshotBuilders.js — the same builder the
+// weekly scheduled job (scripts/buildSiteSnapshots.mjs, GitHub Actions)
+// runs, so a click here and a scheduled run produce identical docs. This
+// is just the on-demand version, e.g. right after a batch of retro grades.
+//
+// Inputs: `records` (this tab's already-loaded historical rows, including
+// edits saved this session) plus fresh reads of players, every player's
+// evaluations (one subcollection read each, chunked), draftOrder, schools,
+// and ads — ~4-5k reads per click. Each doc is size-checked (Firestore's
+// 1 MiB cap) before anything is written, and everything goes in one
+// batch, so a failure leaves the previous snapshots fully intact. ──
+const COMP_SNAPSHOT_MAX_BYTES = 900 * 1024;
+const EVAL_READ_CHUNK = 50;
+
+function CompSnapshotRebuild({ records }) {
+  const [meta, setMeta] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getDoc(doc(db, "compSnapshots", "_meta"))
+      .then((snap) => { if (!cancelled) setMeta(snap.exists() ? snap.data() : null); })
+      .catch(() => { if (!cancelled) setMeta(null); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const rebuild = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      setMessage("Reading players…");
+      const [playerSnap, orderSnap, schoolSnap, adSnap, nflSnap] = await Promise.all([
+        getDocs(collection(db, "players")),
+        getDocs(collection(db, "draftOrder")),
+        getDocs(collection(db, "schools")),
+        getDocs(collection(db, "ads")),
+        getDocs(collection(db, "nfl")),
+      ]);
+      const players = playerSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const evalsByPlayerId = {};
+      for (let i = 0; i < players.length; i += EVAL_READ_CHUNK) {
+        setMessage(`Reading evaluations… ${Math.min(i + EVAL_READ_CHUNK, players.length)}/${players.length}`);
+        const chunk = players.slice(i, i + EVAL_READ_CHUNK);
+        const snaps = await Promise.all(chunk.map((pl) => getDocs(collection(db, "players", pl.id, "evaluations"))));
+        snaps.forEach((snap, j) => { evalsByPlayerId[chunk[j].id] = snap.docs.map((d) => d.data()); });
+      }
+
+      const built = buildSiteSnapshotDocs({
+        historical: records,
+        players,
+        draftOrder: orderSnap.docs.map((d) => d.data()),
+        evalsByPlayerId,
+        schools: schoolSnap.docs.map((d) => d.data()),
+        ads: adSnap.docs.map((d) => d.data()),
+        nflTeams: nflSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        latestDraftYear: LATEST_DRAFT_YEAR,
+        activeYears: ACTIVE_YEARS,
+      });
+      built.forEach(({ id, data }) => {
+        const bytes = new Blob([JSON.stringify(data)]).size;
+        if (bytes > COMP_SNAPSHOT_MAX_BYTES) throw new Error(`${id} is ${Math.round(bytes / 1024)}KB — too large for one document`);
+      });
+
+      setMessage("Writing…");
+      const batch = writeBatch(db);
+      built.forEach(({ id, data }) => batch.set(doc(db, "compSnapshots", id), { ...data, builtAt: serverTimestamp(), builtBy: "admin" }));
+      await batch.commit();
+
+      const m = built.find((d) => d.id === "_meta").data;
+      setMeta({ ...m, builtAt: new Date(), builtBy: "admin" });
+      setMessage(`Rebuilt ${built.length} snapshots · ${m.gradedComps} graded comps · ${m.classLists} class lists · ${m.searchRows} searchable prospects.`);
+    } catch (e) {
+      console.error("Site snapshot rebuild error:", e);
+      setMessage(`Failed: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const builtAt = meta?.builtAt?.toDate ? meta.builtAt.toDate() : meta?.builtAt instanceof Date ? meta.builtAt : null;
+  return (
+    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+      <span style={{ fontSize: "11px", fontWeight: 700, color: message.startsWith("Failed") ? "#c0392b" : "#888" }}>
+        {message || (builtAt
+          ? `Site snapshots built ${builtAt.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}${meta?.builtBy === "schedule" ? " (weekly job)" : ""}`
+          : "Site snapshots not built yet")}
+      </span>
+      <button
+        onClick={rebuild}
+        disabled={busy}
+        title="Rebuild now instead of waiting for the weekly job: comparison pages, class sidebar rankings, ads, and the draft ticker"
+        style={{
+          padding: "5px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em",
+          border: "2px solid " + BLUE, borderRadius: "6px", cursor: busy ? "wait" : "pointer",
+          background: busy ? "#eee" : BLUE, color: busy ? "#888" : "#fff",
+        }}
+      >
+        {busy ? "Rebuilding…" : "Rebuild Site Snapshots"}
+      </button>
+    </div>
+  );
+}
+
+// Once per admin session, same caching idea as fetchLatestDraftClass.
+let activePlayersPromise = null;
+function fetchActivePlayers() {
+  if (!activePlayersPromise) {
+    activePlayersPromise = getDocs(query(collection(db, "players"), where("Eligible", "in", ACTIVE_YEARS)))
+      .then((snap) => snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => `${a.Last || ""} ${a.First || ""}`.localeCompare(`${b.Last || ""} ${b.First || ""}`)))
+      .catch((e) => {
+        activePlayersPromise = null;
+        throw e;
+      });
+  }
+  return activePlayersPromise;
+}
+
+// { strengths, weaknesses, note } for one prospect from the chosen source,
+// capped at 5 each and never the same trait on both sides — the same
+// constraints the pickers themselves enforce.
+async function fetchProspectTraits(playerId, source) {
+  let strengths = [];
+  let weaknesses = [];
+  let note;
+  if (source === "admin") {
+    const snap = await getDoc(doc(db, "players", playerId, "evaluations", KINGCOLD_UID));
+    if (snap.exists()) {
+      strengths = snap.data().strengths || [];
+      weaknesses = snap.data().weaknesses || [];
+      note = "admin evaluation";
+    } else {
+      note = "no admin evaluation";
+    }
+  } else {
+    const snap = await getDocs(collection(db, "players", playerId, "evaluations"));
+    ({ strengths, weaknesses } = communityTraits(snap.docs.map((d) => d.data())));
+    note = `${snap.size} community eval${snap.size === 1 ? "" : "s"}`;
+  }
+  strengths = strengths.slice(0, 5);
+  weaknesses = weaknesses.filter((t) => !strengths.includes(t)).slice(0, 5);
+  return { strengths, weaknesses, note };
+}
+
+// |z| per metric -> cell color: close / somewhat off / far.
+function zColor(z) {
+  const a = Math.abs(z);
+  if (a < 0.5) return "#2e7d32";
+  if (a < 1) return "#b7791f";
+  return "#c0392b";
+}
+
+function HistoricalCompsView({ records }) {
+  const { pool } = useHistoricalPool(records);
+  const [position, setPosition] = useState("WR");
+  const [inputs, setInputs] = useState({}); // metricKey -> decimal string, same shape as the record form's
+  const [strengths, setStrengths] = useState([]);
+  const [weaknesses, setWeaknesses] = useState([]);
+  const [traitGroups, setTraitGroups] = useState({});
+  const [heightWindow, setHeightWindow] = useState("0.5");
+  const [traitWeight, setTraitWeight] = useState("2");
+  const [submitted, setSubmitted] = useState(null); // { position, values, strengths, weaknesses, heightWindowSd, traitWeight }
+  const [activePlayers, setActivePlayers] = useState([]);
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [loadedPlayerId, setLoadedPlayerId] = useState("");
+  const [traitSource, setTraitSource] = useState("community");
+  const [loadStatus, setLoadStatus] = useState(""); // "Loading…" / what got filled in
+  // Guards against a slow earlier load finishing after a newer pick and
+  // overwriting it.
+  const loadSeq = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchActivePlayers()
+      .then((rows) => { if (!cancelled) setActivePlayers(rows); })
+      .catch((e) => console.error("Admin comps active players fetch error:", e));
+    return () => { cancelled = true; };
+  }, []);
+
+  const playerOptions = useMemo(() => {
+    const q = playerSearch.trim().toLowerCase();
+    const byYear = {};
+    activePlayers
+      .filter((p) => !q || `${p.First || ""} ${p.Last || ""} ${p.School || ""}`.toLowerCase().includes(q))
+      .forEach((p) => { (byYear[p.Eligible] || (byYear[p.Eligible] = [])).push(p); });
+    return ACTIVE_YEARS.filter((y) => byYear[y]).map((y) => ({ year: y, players: byYear[y] }));
+  }, [activePlayers, playerSearch]);
+
+  // Fills measurements from the player doc and traits from the chosen
+  // source. Position is set directly (not via changePosition) so the traits
+  // about to be filled don't get cleared.
+  const loadPlayer = async (playerId, source) => {
+    setLoadedPlayerId(playerId);
+    if (!playerId) { setLoadStatus(""); return; }
+    const player = activePlayers.find((p) => p.id === playerId);
+    if (!player) return;
+    const seq = ++loadSeq.current;
+    const nextInputs = {};
+    STAT_METRICS.forEach((m) => {
+      const { value } = readMetric(player, m);
+      if (value != null) nextInputs[m.key] = String(value);
+    });
+    setPosition(player.Position);
+    setInputs(nextInputs);
+    setStrengths([]);
+    setWeaknesses([]);
+    setSubmitted(null);
+    setLoadStatus("Loading traits…");
+    try {
+      const t = await fetchProspectTraits(playerId, source);
+      if (seq !== loadSeq.current) return;
+      setStrengths(t.strengths);
+      setWeaknesses(t.weaknesses);
+      const filled = STAT_METRICS.filter((m) => nextInputs[m.key] != null).map((m) => m.label);
+      setLoadStatus(`${filled.join(", ") || "No measurements"} · ${t.strengths.length} strengths / ${t.weaknesses.length} weaknesses (${t.note})`);
+    } catch (e) {
+      console.error("Admin comps prospect traits fetch error:", e);
+      if (seq === loadSeq.current) setLoadStatus("Couldn't load traits.");
+    }
+  };
+
+  const stats = useMemo(() => (pool ? computePositionStats(pool) : {}), [pool]);
+  const positions = STATS_POSITION_ORDER.filter((p) => stats[p]);
+  const gradedCount = useMemo(
+    () => (pool ? pool.filter((r) => r.Position === position && isGraded(r)).length : 0),
+    [pool, position]
+  );
+
+  // Same trait source + K/P rule as HistoricalSection's own fetch.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [posSnap, genSnap] = await Promise.all([
+          getDoc(doc(db, "traits", position)),
+          getDoc(doc(db, "traits", "Generic")),
+        ]);
+        const g = {};
+        if (posSnap.exists()) g["Position Specific"] = (posSnap.data().traits || []).sort();
+        if (genSnap.exists() && position !== "K" && position !== "P") g["Generic"] = (genSnap.data().traits || []).sort();
+        if (!cancelled) setTraitGroups(g);
+      } catch (e) {
+        console.error("Admin comps traits fetch error:", e);
+        if (!cancelled) setTraitGroups({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [position]);
+
+  // Traits are position-specific, so a position change clears them.
+  const changePosition = (p) => { setPosition(p); setStrengths([]); setWeaknesses([]); };
+
+  // Same rules as HistoricalSection's handleToggleTrait: max 5 each, and a
+  // trait can't be both a strength and a weakness.
+  const toggleTrait = (trait, kind) => {
+    const [list, setList, other] = kind === "Strengths" ? [strengths, setStrengths, weaknesses] : [weaknesses, setWeaknesses, strengths];
+    if (other.includes(trait)) return;
+    if (list.includes(trait)) setList(list.filter((t) => t !== trait));
+    else if (list.length < 5) setList([...list, trait]);
+  };
+
+  const setPart = (metric, part, value) => {
+    const picker = COMP_PICKERS[metric.format];
+    setInputs((prev) => {
+      const next = { ...picker.decompose(prev[metric.key]), [part]: value === "" ? "" : Number(value) };
+      return { ...prev, [metric.key]: picker.recompose(next) };
+    });
+  };
+
+  // Parsed + validated against the same plausibility bounds the stats use.
+  const parsed = useMemo(() => {
+    const out = {};
+    STAT_METRICS.forEach((m) => {
+      const raw = (inputs[m.key] || "").trim();
+      if (!raw) return;
+      const num = toNumber(raw);
+      out[m.key] = Number.isFinite(num) && num >= m.min && num <= m.max ? { value: num } : { error: true };
+    });
+    return out;
+  }, [inputs]);
+  const hasError = Object.values(parsed).some((p) => p.error);
+  const values = Object.fromEntries(Object.entries(parsed).filter(([, p]) => !p.error).map(([k, p]) => [k, p.value]));
+  const hasTraits = Number(traitWeight) > 0 && strengths.length + weaknesses.length > 0;
+  const canSearch = !hasError && (Object.keys(values).length > 0 || hasTraits);
+
+  const results = useMemo(() => {
+    if (!submitted || !pool) return [];
+    return findComps(
+      { position: submitted.position, values: submitted.values, strengths: submitted.strengths, weaknesses: submitted.weaknesses },
+      pool, stats,
+      { heightWindowSd: submitted.heightWindowSd, traitWeight: submitted.traitWeight, limit: COMP_RESULT_LIMIT }
+    );
+  }, [submitted, pool, stats]);
+
+  const runSearch = () => {
+    if (!canSearch) return;
+    setSubmitted({
+      position, values, strengths, weaknesses,
+      heightWindowSd: heightWindow ? Number(heightWindow) : null,
+      traitWeight: Number(traitWeight),
+    });
+  };
+  const clearAll = () => {
+    loadSeq.current += 1;
+    setInputs({}); setStrengths([]); setWeaknesses([]); setSubmitted(null);
+    setLoadedPlayerId(""); setLoadStatus("");
+  };
+
+  if (!pool) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+
+  const metricByKey = Object.fromEntries(STAT_METRICS.map((m) => [m.key, m]));
+  const submittedMetrics = submitted ? STAT_METRICS.filter((m) => submitted.values[m.key] != null) : [];
+  const submittedTraits = submitted && submitted.traitWeight > 0 && submitted.strengths.length + submitted.weaknesses.length > 0;
+  const heightStat = stats[position]?.metrics.height;
+  const topTen = results.slice(0, 10);
+  const roundCounts = {};
+  topTen.forEach((r) => { const rd = parseInt(r.record.Round, 10); roundCounts[rd] = (roundCounts[rd] || 0) + 1; });
+
+  const labelStyle = { fontSize: "10px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" };
+  const sectionStyle = { fontSize: "10px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" };
+  const th = { padding: "8px 10px", fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: "#fff", textAlign: "right", whiteSpace: "nowrap" };
+  const td = { padding: "7px 10px", fontSize: "12px", fontWeight: 700, textAlign: "right", whiteSpace: "nowrap", borderTop: "1px solid #eee" };
+
+  const renderMetric = (key) => {
+    const m = metricByKey[key];
+    const p = parsed[m.key];
+    const selectStyle = { ...inputStyle, flex: 1, ...(p?.error ? { border: "2px solid #c0392b" } : {}) };
+    let control;
+    if (m.format === "height") {
+      const { feet, inches, eighths } = decomposeHeight(inputs.height);
+      control = (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <select value={feet} onChange={(e) => setPart(m, "feet", e.target.value)} style={selectStyle}>
+            <option value="">Ft</option>
+            {[4, 5, 6, 7].map((f) => <option key={f} value={f}>{f}'</option>)}
+          </select>
+          <select value={inches} onChange={(e) => setPart(m, "inches", e.target.value)} style={selectStyle}>
+            <option value="">In</option>
+            {Array.from({ length: 12 }, (_, i) => i).map((i) => <option key={i} value={i}>{i}"</option>)}
+          </select>
+          <select value={eighths} onChange={(e) => setPart(m, "eighths", e.target.value)} style={selectStyle}>
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((e2) => <option key={e2} value={e2}>{EIGHTHS_FRACTION_LABEL[e2] || "0"}</option>)}
+          </select>
+        </div>
+      );
+    } else if (m.format === "inches") {
+      const { whole, eighths } = decomposeInches(inputs[m.key]);
+      control = (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <select value={whole} onChange={(e) => setPart(m, "whole", e.target.value)} style={selectStyle}>
+            <option value="">In</option>
+            {Array.from({ length: Math.floor(m.max) - Math.floor(m.min) + 1 }, (_, i) => i + Math.floor(m.min)).map((i) => <option key={i} value={i}>{i}"</option>)}
+          </select>
+          <select value={eighths} onChange={(e) => setPart(m, "eighths", e.target.value)} style={selectStyle}>
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((e2) => <option key={e2} value={e2}>{EIGHTHS_FRACTION_LABEL[e2] || "0"}</option>)}
+          </select>
+        </div>
+      );
+    } else if (m.format === "feetInches") {
+      const { feet, inches } = decomposeFeetInches(inputs[m.key]);
+      control = (
+        <div style={{ display: "flex", gap: "6px" }}>
+          <select value={feet} onChange={(e) => setPart(m, "feet", e.target.value)} style={selectStyle}>
+            <option value="">Ft</option>
+            {Array.from({ length: 8 }, (_, i) => i + 6).map((f) => <option key={f} value={f}>{f}'</option>)}
+          </select>
+          <select value={inches} onChange={(e) => setPart(m, "inches", e.target.value)} style={selectStyle}>
+            <option value="">In</option>
+            {Array.from({ length: 12 }, (_, i) => i).map((i) => <option key={i} value={i}>{i}"</option>)}
+          </select>
+        </div>
+      );
+    } else {
+      control = (
+        <input
+          value={inputs[m.key] || ""}
+          onChange={(e) => setInputs((prev) => ({ ...prev, [m.key]: e.target.value }))}
+          onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
+          style={p?.error ? { ...inputStyle, border: "2px solid #c0392b" } : inputStyle}
+        />
+      );
+    }
+    const display = m.format && p?.value != null ? formatStatValue(m, p.value) : "";
+    return (
+      <div key={m.key} style={m.format === "feetInches" ? { gridColumn: "1 / -1" } : undefined}>
+        <div style={{ ...labelStyle, color: p?.error ? "#c0392b" : "#888" }}>
+          {m.label}
+          {display && <span style={{ color: "#999", fontWeight: 700, textTransform: "none", letterSpacing: "normal" }}> ({display})</span>}
+          {p?.error && <span style={{ fontWeight: 700, textTransform: "none", letterSpacing: "normal" }}> — {m.min}–{m.max} {m.unit}</span>}
+        </div>
+        {control}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "18px", alignItems: "start" }}>
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Comp Calculator
+        </div>
+        <div style={{ padding: "14px" }}>
+          <div style={{ marginBottom: "14px", paddingBottom: "14px", borderBottom: "1px solid #eee" }}>
+            <div style={sectionStyle}>Load Player ({ACTIVE_YEARS[0]}–{ACTIVE_YEARS[ACTIVE_YEARS.length - 1]})</div>
+            <input
+              value={playerSearch}
+              onChange={(e) => setPlayerSearch(e.target.value)}
+              placeholder="Search name or school..."
+              style={{ ...inputStyle, marginBottom: "6px" }}
+            />
+            <select value={loadedPlayerId} onChange={(e) => loadPlayer(e.target.value, traitSource)} style={{ ...inputStyle, marginBottom: "6px" }}>
+              <option value="">{activePlayers.length ? "— Select a player —" : "Loading players…"}</option>
+              {playerOptions.map(({ year, players }) => (
+                <optgroup key={year} label={year}>
+                  {players.map((p) => (
+                    <option key={p.id} value={p.id}>{p.First} {p.Last} · {p.Position} · {p.School}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <div style={{ ...labelStyle, color: "#888" }}>Traits from</div>
+            <select
+              value={traitSource}
+              onChange={(e) => { setTraitSource(e.target.value); if (loadedPlayerId) loadPlayer(loadedPlayerId, e.target.value); }}
+              style={inputStyle}
+            >
+              {TRAIT_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {loadStatus && (
+              <div style={{ fontSize: "11px", fontWeight: 700, marginTop: "4px", color: "#888" }}>{loadStatus}</div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: "14px" }}>
+            <div style={{ ...labelStyle, color: "#888" }}>Position</div>
+            <select value={position} onChange={(e) => changePosition(e.target.value)} style={inputStyle}>
+              {positions.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <div style={{ fontSize: "11px", fontWeight: 700, marginTop: "3px", color: "#888" }}>
+              {gradedCount} drafted {position}s have Strengths/Weaknesses — only those are compared
+              ({LATEST_DRAFT_YEAR} picks use their community evaluations).
+            </div>
+          </div>
+
+          <div style={sectionStyle}>Physical</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "14px" }}>
+            {COMP_PHYSICAL_KEYS.map(renderMetric)}
+          </div>
+          <div style={sectionStyle}>Athletic</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "14px" }}>
+            {COMP_ATHLETIC_KEYS.map(renderMetric)}
+          </div>
+
+          <div style={sectionStyle}>Strengths / Weaknesses</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "14px" }}>
+            {Object.keys(traitGroups).length === 0 ? (
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#999", fontStyle: "italic" }}>No traits defined for {position}.</div>
+            ) : [
+              { kind: "Strengths", sel: strengths },
+              { kind: "Weaknesses", sel: weaknesses },
+            ].map(({ kind, sel }) => {
+              const other = kind === "Strengths" ? weaknesses : strengths;
+              return (
+                <div key={kind}>
+                  <div style={{ ...labelStyle, color: "#888" }}>{kind} (max 5)</div>
+                  <details style={{ border: "2px solid #ddd", borderRadius: "6px" }}>
+                    <summary style={{ cursor: "pointer", padding: "8px 10px", fontWeight: 700, fontSize: "13px", color: sel.length > 0 ? "#111" : "#999" }}>
+                      {sel.length > 0 ? sel.join(", ") : "Select " + kind.toLowerCase()}
+                    </summary>
+                    <div style={{ padding: "8px 10px", borderTop: "2px solid #ddd" }}>
+                      {Object.entries(traitGroups).map(([groupLabel, options]) => (
+                        <div key={groupLabel} style={{ marginBottom: "8px" }}>
+                          <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>
+                            {groupLabel}
+                          </div>
+                          {options.map((trait) => {
+                            const isOther = other.includes(trait);
+                            return (
+                              <label key={trait} style={{ display: "block", fontSize: "13px", padding: "3px 0", cursor: isOther ? "default" : "pointer", color: isOther ? "#ccc" : "#333" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={sel.includes(trait)}
+                                  disabled={(!sel.includes(trait) && sel.length >= 5) || isOther}
+                                  onChange={() => toggleTrait(trait, kind)}
+                                  style={{ marginRight: "8px" }}
+                                />
+                                {trait}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              );
+            })}
+            <div>
+              <div style={{ ...labelStyle, color: "#888" }}>Trait weight</div>
+              <select value={traitWeight} onChange={(e) => setTraitWeight(e.target.value)} style={inputStyle}>
+                {TRAIT_WEIGHT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={sectionStyle}>Filter</div>
+          <div style={{ ...labelStyle, color: "#888" }}>Height window</div>
+          <select value={heightWindow} onChange={(e) => setHeightWindow(e.target.value)} style={inputStyle}>
+            {HEIGHT_WINDOW_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {heightWindow && heightStat?.sd != null && (
+            <div style={{ fontSize: "11px", fontWeight: 700, marginTop: "3px", color: "#888" }}>
+              {position} height SD is {heightStat.sd.toFixed(2)}" — ±{(Number(heightWindow) * heightStat.sd).toFixed(2)}" of the entered height.
+              {parsed.height?.value == null && " Only applies once a height is entered."}
+            </div>
+          )}
+
+          <button
+            onClick={runSearch}
+            disabled={!canSearch}
+            style={{
+              width: "100%", marginTop: "14px", background: canSearch ? GOLD : "#ccc", color: "#fff", border: "none",
+              borderRadius: "8px", padding: "11px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.06em", cursor: canSearch ? "pointer" : "not-allowed",
+            }}
+          >
+            Find Matches
+          </button>
+          <button
+            onClick={clearAll}
+            style={{
+              width: "100%", marginTop: "8px", background: "#fff", color: BLUE, border: "2px solid " + BLUE,
+              borderRadius: "8px", padding: "8px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Matches
+          </div>
+          {submitted && (
+            <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
+              {submitted.position} · {submittedMetrics.length} metric{submittedMetrics.length === 1 ? "" : "s"}
+              {submittedTraits && ` + ${submitted.strengths.length + submitted.weaknesses.length} traits`}
+              {submitted.heightWindowSd != null && submitted.values.height != null && ` · height ±${submitted.heightWindowSd} SD`}
+            </div>
+          )}
+        </div>
+
+        {!submitted ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            Enter measurements and/or traits, then click Find Matches.
+          </div>
+        ) : results.length === 0 ? (
+          <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+            No graded {submitted.position}s match — try widening the height window.
+          </div>
+        ) : (
+          <>
+            <div style={{ padding: "10px 16px", fontSize: "12px", fontWeight: 700, color: "#333", borderBottom: "1px solid #eee", display: "flex", gap: "14px", flexWrap: "wrap" }}>
+              <span style={{ color: "#888" }}>Top {topTen.length} went:</span>
+              {[1, 2, 3, 4, 5, 6, 7].filter((rd) => roundCounts[rd]).map((rd) => (
+                <span key={rd}>R{rd} <span style={{ color: BLUE, fontWeight: 900 }}>×{roundCounts[rd]}</span></span>
+              ))}
+              <span style={{ color: "#888", marginLeft: "auto" }}>
+                Cell color = distance from entry: <span style={{ color: zColor(0) }}>&lt;0.5 SD</span> · <span style={{ color: zColor(0.7) }}>&lt;1 SD</span> · <span style={{ color: zColor(2) }}>1+ SD</span>
+              </span>
+            </div>
+            <div style={{ overflowX: "auto", maxHeight: "700px", overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: BLUE, position: "sticky", top: 0 }}>
+                    <th style={{ ...th, textAlign: "left" }}>#</th>
+                    <th style={{ ...th, textAlign: "left" }}>Player</th>
+                    <th style={th}>Match</th>
+                    <th style={th} title="Entered metrics (and traits, as one) this player also has on record">Data</th>
+                    <th style={th}>Drafted</th>
+                    {submittedMetrics.map((m) => <th key={m.key} style={th}>{m.label}</th>)}
+                    {submittedTraits && <th style={{ ...th, textAlign: "left" }}>Traits</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ background: "#f4f7fb" }}>
+                    <td style={{ ...td, textAlign: "left", color: "#888" }} colSpan={5}>Entered</td>
+                    {submittedMetrics.map((m) => <td key={m.key} style={{ ...td, color: BLUE, fontWeight: 900 }}>{formatStatValue(m, submitted.values[m.key])}</td>)}
+                    {submittedTraits && (
+                      <td style={{ ...td, textAlign: "left", whiteSpace: "normal", minWidth: "220px", fontSize: "11px" }}>
+                        {submitted.strengths.length > 0 && <div style={{ color: "#2e7d32" }}>+ {submitted.strengths.join(", ")}</div>}
+                        {submitted.weaknesses.length > 0 && <div style={{ color: "#c0392b" }}>− {submitted.weaknesses.join(", ")}</div>}
+                      </td>
+                    )}
+                  </tr>
+                  {results.map((r, i) => (
+                    <tr key={r.record.id || r.record.Slug || i}>
+                      <td style={{ ...td, textAlign: "left", color: "#888" }}>{i + 1}</td>
+                      <td style={{ ...td, textAlign: "left" }}>
+                        <div style={{ color: BLUE, fontWeight: 900 }}>{r.record.Player || `${r.record.First || ""} ${r.record.Last || ""}`.trim()}</div>
+                        <div style={{ color: "#888", fontSize: "11px" }}>{r.record.School}</div>
+                      </td>
+                      <td style={{ ...td, fontWeight: 900 }}>{r.similarity.toFixed(1)}%</td>
+                      <td style={{ ...td, color: r.shared < r.entered ? "#b7791f" : "#888" }}>{r.shared}/{r.entered}</td>
+                      <td style={td}>
+                        <div>{r.record.Year} · R{parseInt(r.record.Round, 10)}{r.record.Pick ? ` #${r.record.Pick}` : ""}</div>
+                        <div style={{ color: "#888", fontSize: "11px" }}>{r.record["NFL Team"]}</div>
+                      </td>
+                      {submittedMetrics.map((m) => {
+                        const z = r.breakdown[m.key];
+                        // breakdown z is (entry - candidate) / SD; flipped
+                        // here so the tooltip reads from the candidate's
+                        // side ("+0.40 SD" = candidate is higher).
+                        return (
+                          <td key={m.key} style={{ ...td, color: z == null ? "#ccc" : zColor(z) }} title={z == null ? "Not measured" : `${-z >= 0 ? "+" : ""}${(-z).toFixed(2)} SD vs. entry`}>
+                            {z == null ? "—" : formatStatValue(m, r.values[m.key])}
+                          </td>
+                        );
+                      })}
+                      {submittedTraits && (
+                        <td
+                          style={{ ...td, textAlign: "left", whiteSpace: "normal", minWidth: "220px", fontSize: "11px" }}
+                          title={r.traits ? `Strengths: ${r.traits.strengths.join(", ") || "—"}\nWeaknesses: ${r.traits.weaknesses.join(", ") || "—"}` : ""}
+                        >
+                          {!r.traits ? <span style={{ color: "#ccc" }}>No traits recorded</span> : (
+                            <>
+                              <span style={{ fontWeight: 900, color: BLUE }}>{Math.round(r.traits.score * 100)}%</span>
+                              {r.record.TraitSource === "community" && (
+                                <span style={{ color: "#888", fontWeight: 700 }}> · community ({r.record.EvalCount} eval{r.record.EvalCount === 1 ? "" : "s"})</span>
+                              )}
+                              {r.traits.sharedStrengths.length > 0 && <div style={{ color: "#2e7d32" }}>+ {r.traits.sharedStrengths.join(", ")}</div>}
+                              {r.traits.sharedWeaknesses.length > 0 && <div style={{ color: "#c0392b" }}>− {r.traits.sharedWeaknesses.join(", ")}</div>}
+                              {r.traits.conflicts.length > 0 && <div style={{ color: "#999", textDecoration: "line-through" }}>{r.traits.conflicts.join(", ")}</div>}
+                            </>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -7515,6 +8486,7 @@ const CONTENT_TABS = [
   { key: "overview", label: "Overview" },
   { key: "game", label: "Games" },
   { key: "article", label: "Articles" },
+  { key: "comparison", label: "Comparisons" },
 ];
 
 function AnalyticsSection() {
@@ -8286,9 +9258,37 @@ async function fetchArticleRows() {
   return [...articleRows, ...newsRows];
 }
 
+async function fetchComparisonRows() {
+  // Every prospect has a /comparison/<Slug> page, so listing them all would
+  // bury the handful that actually get traffic under thousands of "—" rows.
+  // Only slugs the sync has seen views for are listed, named from players.
+  const [analyticsSnap, playersSnap] = await Promise.all([
+    getDocs(query(collection(db, "analytics"), where("type", "==", "comparison"))),
+    getDocs(collection(db, "players")),
+  ]);
+  const bySlug = new Map();
+  playersSnap.docs.forEach((d) => {
+    const p = d.data();
+    if (p.Slug) bySlug.set(p.Slug, p);
+  });
+  return analyticsSnap.docs
+    .map((d) => d.data().slug)
+    .filter(Boolean)
+    .map((slug) => {
+      const p = bySlug.get(slug);
+      return {
+        slug,
+        title: p ? `${p.First || ""} ${p.Last || ""}`.trim() || slug : slug,
+        subtitle: p ? [p.Position, p.School, p.Eligible].filter(Boolean).join(" · ") : "Player not found",
+        dateMs: 0,
+      };
+    });
+}
+
 const CONTENT_ANALYTICS_CONFIG = {
   game: { label: "Games", noun: "game", publicPrefix: "/game/", fetchRows: fetchGameRows },
   article: { label: "Articles", noun: "article", publicPrefix: "/news/", fetchRows: fetchArticleRows },
+  comparison: { label: "Comparisons", noun: "comparison", publicPrefix: "/comparison/", fetchRows: fetchComparisonRows },
 };
 
 // ── Games/Articles page-view table — one reusable component driven by
@@ -11291,9 +12291,95 @@ function MiscBrandingSection() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <HomePageModeToggle />
+      <ComparisonFeatureToggle />
       <WePickCurrentWeekControl />
       <WePickEndWeekControl />
       <TvChannelsManager />
+    </div>
+  );
+}
+
+// config/features.comparisonEnabled — read by both PlayerProfile.js's Find
+// Comparison button and Comparison.js's /comparison route itself, so
+// flipping this off doesn't just unlink the button, it blocks the route
+// (direct link redirects home) while the calculator's still in
+// development. Same instant, no-deploy shape as HomePageModeToggle above.
+function ComparisonFeatureToggle() {
+  const [enabled, setEnabled] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  useEffect(() => {
+    const fetchFlag = async () => {
+      try {
+        const snap = await getDoc(doc(db, "config", "features"));
+        setEnabled(snap.exists() && snap.data().comparisonEnabled === true);
+      } catch (e) {
+        console.error("Comparison feature-flag fetch error:", e);
+        setEnabled(false);
+      }
+    };
+    fetchFlag();
+  }, []);
+
+  const handleSet = async (next) => {
+    if (next === enabled || saving) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      await setDoc(doc(db, "config", "features"), { comparisonEnabled: next, updatedAt: serverTimestamp() }, { merge: true });
+      setEnabled(next);
+      setSaveMessage(next ? "Find Comparison is now live for everyone." : "Find Comparison is hidden and its route is blocked.");
+    } catch (e) {
+      console.error("Comparison feature-flag save error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🔎 Find Comparison
+        </div>
+      </div>
+      <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+        {enabled === null ? (
+          <LoadingSpinner label="Loading" size={20} minHeight="50px" />
+        ) : (
+          <>
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
+              Whether the Find Comparison button (player pages) and its /comparison calculator are live to visitors.
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {[[false, "Hidden"], [true, "Live"]].map(([key, label]) => (
+                <button
+                  key={String(key)}
+                  onClick={() => handleSet(key)}
+                  disabled={saving}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: "8px",
+                    border: "2px solid " + BLUE,
+                    background: enabled === key ? BLUE : "#fff",
+                    color: enabled === key ? "#fff" : BLUE,
+                    fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                    cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+                  }}
+                >
+                  {enabled === key ? "✓ " : ""}{label}
+                </button>
+              ))}
+            </div>
+            {saveMessage && (
+              <div style={{ fontSize: "11px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
+                {saveMessage}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -12153,7 +13239,8 @@ export default function AdminPanel() {
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
             {activeSection === "requests" && <RequestsSection />}
             {activeSection === "users" && <UsersSection />}
-            {activeSection === "sync" && <ComingSoonPane label="Sync / System Status" />}
+            {activeSection === "sim" && <SimLabPane />}
+            {activeSection === "sync" &&<ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
           </div>
         </div>

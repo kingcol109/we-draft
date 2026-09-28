@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Logo2 from "../assets/Logo2.png";
 
 import {
@@ -13,6 +13,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { getSiteSnapshot } from "../utils/siteSnapshots";
 
 const FALLBACK_MESSAGE =
   "WELCOME TO WE-DRAFT.COM - CREATE DRAFT EVALUATIONS, VIEW COMMUNITY GRADES, DISCOVER HIDDEN GEMS, AND MORE - FOLLOW US ON INSTAGRAM AND X @WEDRAFTSITE FOR DAILY DRAFT CONTENT";
@@ -116,20 +117,29 @@ export default function Navbar() {
         }
       } catch {}
 
+      // Draft-pick lines: one read from the weekly snapshot (the same
+      // lines, prebuilt — see utils/snapshotBuilders.js) instead of ~64
+      // draftOrder docs on every fresh page load. Falls back to the live
+      // query if the snapshot is missing.
       try {
-        const draftQ = query(
-          collection(db, "draftOrder"),
-          where("Round", "<=", 2),
-          orderBy("Round"),
-          orderBy("Pick")
-        );
-        const draftSnap = await getDocs(draftQ);
-        let currentRound = null;
-        draftSnap.forEach((d) => {
-          const p = d.data();
-          if (p.Round !== currentRound) { currentRound = p.Round; parts.push(`ROUND ${currentRound}`); }
-          parts.push(p.Selection ? `PICK ${p.Pick}: ${p.Team} ${p.Selection.toUpperCase()}` : `PICK ${p.Pick}: ${p.Team}`);
-        });
+        const snap = await getSiteSnapshot("_draftTicker");
+        if (snap && Array.isArray(snap.parts)) {
+          parts.push(...snap.parts);
+        } else {
+          const draftQ = query(
+            collection(db, "draftOrder"),
+            where("Round", "<=", 2),
+            orderBy("Round"),
+            orderBy("Pick")
+          );
+          const draftSnap = await getDocs(draftQ);
+          let currentRound = null;
+          draftSnap.forEach((d) => {
+            const p = d.data();
+            if (p.Round !== currentRound) { currentRound = p.Round; parts.push(`ROUND ${currentRound}`); }
+            parts.push(p.Selection ? `PICK ${p.Pick}: ${p.Team} ${p.Selection.toUpperCase()}` : `PICK ${p.Pick}: ${p.Team}`);
+          });
+        }
       } catch {}
 
       if (parts.length > 0) setTickerText(FALLBACK_MESSAGE + "  •  " + parts.join("  •  "));
@@ -140,20 +150,31 @@ export default function Navbar() {
   /* ======================
      LOAD SCHOOLS
   ====================== */
+  // Only feeds the CFB hover dropdown, so it's fetched the first time that
+  // opens rather than on every page load — the Navbar mounts on every
+  // route, and most visitors (especially ones landing from search) never
+  // open it, so an eager read of the whole schools collection was ~240
+  // reads per fresh visit for nothing. Also narrowed to just the listed
+  // conferences ("in" takes up to 30 values; there are 11) instead of
+  // reading every school and filtering client-side.
+  const schoolsRequested = useRef(false);
+  const [schoolsLoading, setSchoolsLoading] = useState(false);
   useEffect(() => {
-    async function fetchSchools() {
-      try {
-        const snapshot = await getDocs(collection(db, "schools"));
+    if (!cfbOpen || schoolsRequested.current) return;
+    schoolsRequested.current = true;
+    setSchoolsLoading(true);
+    getDocs(query(collection(db, "schools"), where("Conference", "in", conferenceOrder)))
+      .then((snapshot) => {
         const data = snapshot.docs.map((d) => d.data());
-        const filtered = data.filter((s) => conferenceOrder.includes(s.Conference));
-        filtered.sort((a, b) => a.School.localeCompare(b.School));
-        setSchools(filtered);
-      } catch (err) {
+        data.sort((a, b) => a.School.localeCompare(b.School));
+        setSchools(data);
+      })
+      .catch((err) => {
         console.error("Error loading schools:", err);
-      }
-    }
-    fetchSchools();
-  }, []);
+        schoolsRequested.current = false; // let a later open retry
+      })
+      .finally(() => setSchoolsLoading(false));
+  }, [cfbOpen]);
 
   /* ======================
      PENDING FRIEND REQUESTS (Profile badge)
@@ -457,6 +478,9 @@ export default function Navbar() {
                   <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
 
                   <div style={{ overflowY: "auto", padding: "10px 12px", flex: 1 }}>
+                    {schoolsLoading && schools.length === 0 && (
+                      <div style={{ padding: "18px", textAlign: "center", color: "#999", fontSize: "12px", fontWeight: 700 }}>Loading teams…</div>
+                    )}
                     {conferenceOrder.map((conf) => {
                       const teams = grouped[conf];
                       if (!teams || teams.length === 0) return null;

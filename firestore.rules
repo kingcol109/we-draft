@@ -245,6 +245,13 @@ service cloud.firestore {
     match /draftOrder2027/{pick} { allow read, write: if true; }
     match /draftOrder2028/{pick} { allow read, write: if true; }
     match /historical/{doc} { allow read, write: if true; }
+    // Precomputed per-position comparison data (one doc per position +
+    // _meta) — read by the public Comparison.js page, rebuilt from the
+    // admin Historical tab (AdminPanel.js's CompSnapshotRebuild).
+    match /compSnapshots/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /news/{doc} { allow read, write: if true; }
     match /traits/{doc} { allow read, write: if true; }
     match /config/{doc} { allow read, write: if true; }

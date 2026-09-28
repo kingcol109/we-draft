@@ -116,6 +116,9 @@ async function generateSitemap() {
   console.log(`✅ Found ${allPlayers.length} players.`);
 
   const playerPages = [];
+  // Every player also has a Find Comparison page (/comparison/<Slug>, see
+  // Comparison.js) — same slug, same lastmod.
+  const comparisonPages = [];
 
   for (const doc of allPlayers) {
     const data = doc.data();
@@ -136,6 +139,11 @@ async function generateSitemap() {
     playerPages.push({
       path: `/player/${slug}`,
       priority: 0.7,
+      lastmod,
+    });
+    comparisonPages.push({
+      path: `/comparison/${slug}`,
+      priority: 0.6,
       lastmod,
     });
   }
@@ -255,6 +263,7 @@ for (const doc of allTeams) {
     { path: "/cfb/schedule", priority: 0.65, lastmod: today },
     { path: "/community", priority: 0.8, lastmod: today },
     { path: "/boards", priority: 0.8, lastmod: today },
+    { path: "/comparison", priority: 0.7, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
     { path: "/we-pick", priority: 0.8, lastmod: today },
     { path: "/we-pick/standings", priority: 0.7, lastmod: today },
@@ -305,7 +314,7 @@ for (const doc of allTeams) {
   /* =========================
      BUILD XML
   ========================= */
-const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...gamePages]
+const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages]
     .map(
       (u) => `
   <url>
@@ -326,7 +335,7 @@ ${urls}
   ========================= */
 // Split into chunks of 1000
   const chunkSize = 1000;
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...newsPages, ...gamePages];
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {
@@ -364,6 +373,7 @@ console.log(
   - ${communityBoardPages.length} community board pages
   - ${teamPages.length} team pages
   - ${playerPages.length} player pages
+  - ${comparisonPages.length} comparison pages
   - ${newsPages.length} news articles
   - ${gamePages.length} games`
 );
