@@ -587,8 +587,11 @@ export default function Comparison() {
   const [inputs, setInputs] = useState({});
   const [strengths, setStrengths] = useState([]);
   const [weaknesses, setWeaknesses] = useState([]);
+  // Community mention counts for a loaded player's traits (findComps'
+  // traitCounts) — weights the match toward their most-tagged traits.
+  const [traitCounts, setTraitCounts] = useState(null);
   const [traitGroups, setTraitGroups] = useState({});
-  const [heightWindow, setHeightWindow] = useState("0.5");
+  const [heightWindow, setHeightWindow] = useState("1");
   const [traitWeight, setTraitWeight] = useState(String(TRAIT_WEIGHT));
   const [fromYear, setFromYear] = useState("");
   const [toYear, setToYear] = useState("");
@@ -750,6 +753,7 @@ export default function Comparison() {
     setInputs(nextInputs);
     setStrengths([]);
     setWeaknesses([]);
+    setTraitCounts(null);
     setSubjectRound(null);
     setLoadStatus("Loading traits…");
     navigate(`/comparison/${player.Slug}`, { replace: true });
@@ -772,12 +776,13 @@ export default function Comparison() {
       setSubjectRound(round);
       setStrengths(t.strengths);
       setWeaknesses(t.weaknesses);
+      setTraitCounts(t.counts);
       setLoadStatus("");
       // Auto-run once traits are in, using the values/traits we just set.
       setSubmitted({
         position: player.Position,
         values: Object.fromEntries(Object.entries(nextInputs).map(([k, v]) => [k, Number(v)])),
-        strengths: t.strengths, weaknesses: t.weaknesses,
+        strengths: t.strengths, weaknesses: t.weaknesses, traitCounts: t.counts,
         heightWindowSd: heightWindow ? Number(heightWindow) : null, traitWeight: Number(traitWeight),
         fromYear, toYear, beforeYear: compCutoffYear(player), subjectRound: round,
       });
@@ -832,7 +837,7 @@ export default function Comparison() {
     };
   }, [showSearchResults]);
 
-  const changePosition = (p) => { setPosition(p); setStrengths([]); setWeaknesses([]); };
+  const changePosition = (p) => { setPosition(p); setStrengths([]); setWeaknesses([]); setTraitCounts(null); };
   const toggleTrait = (trait, kind) => {
     const [list, setList, other] = kind === "Strengths" ? [strengths, setStrengths, weaknesses] : [weaknesses, setWeaknesses, strengths];
     if (other.includes(trait)) return;
@@ -894,7 +899,7 @@ export default function Comparison() {
     const to = Number(submitted.toYear || classYears[classYears.length - 1] || 9999);
     const candidates = statsPool.filter((r) => Number(r.Year) >= from && Number(r.Year) <= to);
     return findComps(
-      { position: submitted.position, values: submitted.values, strengths: submitted.strengths, weaknesses: submitted.weaknesses },
+      { position: submitted.position, values: submitted.values, strengths: submitted.strengths, weaknesses: submitted.weaknesses, traitCounts: submitted.traitCounts },
       candidates, computePositionStats(statsPool),
       { heightWindowSd: submitted.heightWindowSd, traitWeight: submitted.traitWeight, limit: 10, subjectRound: submitted.subjectRound }
     );
@@ -929,12 +934,12 @@ export default function Comparison() {
 
   const runSearch = () => {
     if (!canSearch) return;
-    setSubmitted({ position, values, strengths, weaknesses, heightWindowSd: heightWindow ? Number(heightWindow) : null, traitWeight: Number(traitWeight), fromYear, toYear, beforeYear: cutoffYear, subjectRound: loadedPlayer ? subjectRound : null });
+    setSubmitted({ position, values, strengths, weaknesses, traitCounts, heightWindowSd: heightWindow ? Number(heightWindow) : null, traitWeight: Number(traitWeight), fromYear, toYear, beforeYear: cutoffYear, subjectRound: loadedPlayer ? subjectRound : null });
     setCalcOpen(false);
   };
   const clearAll = () => {
     loadSeq.current += 1;
-    setLoadedPlayer(null); setSubjectRound(null); setInputs({}); setStrengths([]); setWeaknesses([]); setSubmitted(null); setLoadStatus(""); setCalcOpen(true);
+    setLoadedPlayer(null); setSubjectRound(null); setInputs({}); setStrengths([]); setWeaknesses([]); setTraitCounts(null); setSubmitted(null); setLoadStatus(""); setCalcOpen(true);
     navigate("/comparison", { replace: true });
   };
 

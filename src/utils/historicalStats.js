@@ -153,6 +153,9 @@ export function computePositionStats(records, { fromYear, toYear } = {}) {
 // a trait tagged both ways goes to whichever side has more (ties go to
 // Strengths), top 5 each by count. This is how the latest class gets
 // traits to be compared on, since it has no admin retro grade yet.
+// counts: { [trait]: mentions on the side it landed on } for the returned
+// traits — findComps' input.traitCounts, so a near-unanimous strength
+// outweighs one only a few evaluators tagged.
 export function communityTraits(evaluations) {
   const sC = {};
   const wC = {};
@@ -161,10 +164,12 @@ export function communityTraits(evaluations) {
     if (Array.isArray(e.weaknesses)) e.weaknesses.forEach((t) => { wC[t] = (wC[t] || 0) + 1; });
   });
   const top = (entries) => entries.sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t]) => t);
-  return {
-    strengths: top(Object.entries(sC).filter(([t, c]) => c >= (wC[t] ?? -Infinity))),
-    weaknesses: top(Object.entries(wC).filter(([t, c]) => c > (sC[t] ?? -Infinity))),
-  };
+  const strengths = top(Object.entries(sC).filter(([t, c]) => c >= (wC[t] ?? -Infinity)));
+  const weaknesses = top(Object.entries(wC).filter(([t, c]) => c > (sC[t] ?? -Infinity)));
+  const counts = {};
+  strengths.forEach((t) => { counts[t] = sC[t]; });
+  weaknesses.forEach((t) => { counts[t] = wC[t]; });
+  return { strengths, weaknesses, counts };
 }
 
 // The most recent class isn't in `historical` yet — those players still
@@ -216,7 +221,10 @@ export function draftedPlayersAsHistorical(players, draftOrder, year) {
 // The score is absolute, not relative to how many traits were entered:
 // score = (min(shared strengths, T) + min(shared weaknesses, T) - conflicts)
 //         / 2T, clamped to [0, 1], T = TRAIT_MATCH_TARGET (3)
-// where a conflict is one side's strength being the other's weakness. So a
+// where a conflict is one side's strength being the other's weakness —
+// each trait weighted by how often the community tagged it when
+// input.traitCounts is given (see traitWeights; the formula above is the
+// all-weights-1 case). So a
 // perfect trait score takes 3 shared strengths AND 3 shared weaknesses —
 // entering only 1 strength can never score better than 1/6 on traits, and
 // a 100% match overall means same measurements + 3 and 3 shared. That maps
@@ -267,6 +275,38 @@ export function isGraded(record) {
   return hasTraitList(record.Strengths) && hasTraitList(record.Weaknesses);
 }
 
+// Per-trait weight from how often the community tagged it
+// (input.traitCounts, see communityTraits): mentions relative to the
+// side's most-mentioned trait, floored at TRAIT_MIN_REL_WEIGHT. So a
+// prospect whose top strength is on nearly every eval and whose others are
+// scattered matches mostly on that top one — a comp sharing only the minor
+// ones scores well below one sharing the headline trait. Traits with no
+// count (typed in by hand, or no counts passed at all) weigh 1, which is
+// the old unweighted behavior.
+export const TRAIT_MIN_REL_WEIGHT = 0.2;
+
+function traitWeights(list, counts) {
+  const max = counts ? Math.max(0, ...list.map((t) => counts[t] || 0)) : 0;
+  const w = {};
+  list.forEach((t) => {
+    w[t] = max > 0 && counts[t] != null ? Math.max(TRAIT_MIN_REL_WEIGHT, counts[t] / max) : 1;
+  });
+  return w;
+}
+
+// One side's weighted overlap: shared weight (best T shared) over the
+// weight of the input's top T traits, padded with 1s when fewer than T were
+// entered — keeps the score absolute (see findComps: 1 strength entered
+// still can't reach a full match).
+function sideScore(list, shared, w) {
+  const T = TRAIT_MATCH_TARGET;
+  const desc = (a, b) => b - a;
+  const top = list.map((t) => w[t]).sort(desc).slice(0, T);
+  const denom = top.reduce((a, x) => a + x, 0) + Math.max(0, T - top.length);
+  const num = shared.map((t) => w[t]).sort(desc).slice(0, T).reduce((a, x) => a + x, 0);
+  return { num, denom };
+}
+
 function traitMatch(input, record) {
   const cS = Array.isArray(record.Strengths) ? record.Strengths : [];
   const cW = Array.isArray(record.Weaknesses) ? record.Weaknesses : [];
@@ -274,10 +314,11 @@ function traitMatch(input, record) {
   const sharedStrengths = input.strengths.filter((t) => cS.includes(t));
   const sharedWeaknesses = input.weaknesses.filter((t) => cW.includes(t));
   const conflicts = [...input.strengths.filter((t) => cW.includes(t)), ...input.weaknesses.filter((t) => cS.includes(t))];
-  const T = TRAIT_MATCH_TARGET;
-  const score = Math.max(0, Math.min(1,
-    (Math.min(sharedStrengths.length, T) + Math.min(sharedWeaknesses.length, T) - conflicts.length) / (2 * T)
-  ));
+  const w = { ...traitWeights(input.strengths, input.traitCounts), ...traitWeights(input.weaknesses, input.traitCounts) };
+  const s = sideScore(input.strengths, sharedStrengths, w);
+  const k = sideScore(input.weaknesses, sharedWeaknesses, w);
+  const conflictWeight = conflicts.reduce((a, t) => a + w[t], 0);
+  const score = Math.max(0, Math.min(1, (s.num + k.num - conflictWeight) / (s.denom + k.denom)));
   return { score, sharedStrengths, sharedWeaknesses, conflicts, strengths: cS, weaknesses: cW };
 }
 
@@ -286,7 +327,7 @@ export function findComps(input, pool, stats, opts = {}) {
   const posStats = stats[input.position];
   if (!posStats) return [];
   const values = input.values || {};
-  const traitInput = { strengths: input.strengths || [], weaknesses: input.weaknesses || [] };
+  const traitInput = { strengths: input.strengths || [], weaknesses: input.weaknesses || [], traitCounts: input.traitCounts || null };
   const traitPicks = traitInput.strengths.length + traitInput.weaknesses.length;
   const useTraits = traitWeight > 0;
   const entered = STAT_METRICS.filter((m) => values[m.key] != null && posStats.metrics[m.key]?.sd);
