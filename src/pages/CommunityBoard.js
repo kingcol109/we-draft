@@ -1041,14 +1041,11 @@ export default function CommunityBoard() {
   const mobilePositions = allPositions.filter((pos) => pos !== "K" && pos !== "P");
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
-  if (loading || !gradesReady) {
-    return (
-      <>
-        {SeoTags}
-        <LoadingSpinner label="Loading Board" size={64} minHeight="100vh" />
-      </>
-    );
-  }
+  // Until community grades are in, the page chrome (header, filters,
+  // sidebars) renders as normal and only the ranking list shows a spinner —
+  // never an alphabetical list that then re-sorts.
+  const listLoading = loading || !gradesReady;
+  const ListSpinner = <div style={{ background: "#fff" }}><LoadingSpinner label="Loading Board" size={48} minHeight="320px" /></div>;
 
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
@@ -1354,14 +1351,14 @@ export default function CommunityBoard() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "11px", fontWeight: 700 }}>
-                  {sortedPlayers.length} player{sortedPlayers.length !== 1 ? "s" : ""}
+                  {listLoading ? "" : sortedPlayers.length + " player" + (sortedPlayers.length !== 1 ? "s" : "")}
                 </div>
                 {/* "View All" — small and easy to miss on purpose, since
                     non-live players are hidden by an admin's own deliberate
                     choice; this is an opt-in escape hatch, not something
                     most visitors need front-and-center. Only shows up at all
                     when there's actually something it would add. */}
-                {(inactiveHiddenCount > 0 || showInactive) && (
+                {!listLoading && (inactiveHiddenCount > 0 || showInactive) && (
                   <button
                     onClick={() => setShowInactive((v) => !v)}
                     style={{
@@ -1380,7 +1377,7 @@ export default function CommunityBoard() {
 
             {isMobile ? (
               <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
-                {sortedPlayers.length === 0 ? (
+                {listLoading ? ListSpinner : sortedPlayers.length === 0 ? (
                   <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
                     No players match your filters.
                   </div>
@@ -1492,7 +1489,7 @@ export default function CommunityBoard() {
                 })()}
                 <div style={{ height: "3px", background: GOLD }} />
 
-                {sortedPlayers.length === 0 ? (
+                {listLoading ? ListSpinner : sortedPlayers.length === 0 ? (
                   <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
                     No players match your filters.
                   </div>
