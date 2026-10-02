@@ -120,10 +120,10 @@ export const TUNING = {
     base: 0.82,
     cooldown: 0.9,
     missStun: 0.45,
-    engagedFactor: 0.35, // arm tackle while tied up with a blocker
+    engagedFactor: 0.2, // arm tackle while tied up with a blocker (rare — a blocked man mostly can't)
     carrierSlowOnMiss: 0.8,
     shedRange: 1.8, // a blocked defender can shed toward a carrier this close
-    shedRate: 0.9, // per second
+    shedRate: 0.6, // per second
   },
 
   block: {

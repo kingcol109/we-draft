@@ -2175,7 +2175,7 @@ function HistoricalSection() {
   const [view, setView] = useState("records"); // "records" | "stats"
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedYear, setSelectedYear] = useState("");
+  const [selectedYears, setSelectedYears] = useState([]);
   const [selected, setSelected] = useState(null); // { id, isNew } | full record
   const [formState, setFormState] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -2300,6 +2300,14 @@ function HistoricalSection() {
     () => Array.from(new Set(records.map((r) => r.Year).filter(Boolean))).sort((a, b) => Number(b) - Number(a)),
     [records]
   );
+  const positions = useMemo(
+    () => Array.from(new Set(records.map((r) => r.Position).filter(Boolean))).sort(),
+    [records]
+  );
+  const rounds = useMemo(
+    () => Array.from(new Set(records.map((r) => r.Round).filter(Boolean))).sort((a, b) => Number(a) - Number(b)),
+    [records]
+  );
 
   const highSchoolNames = useMemo(() => highSchoolOptions.map((h) => h.Name), [highSchoolOptions]);
   const highSchoolLabel = (name) => {
@@ -2330,11 +2338,22 @@ function HistoricalSection() {
   }, [records]);
 
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [selectedPositions, setSelectedPositions] = useState([]);
+  const [selectedRounds, setSelectedRounds] = useState([]);
+  // "" = all, "added" = at least one Strength, "missing" = none yet.
+  const [strengthsFilter, setStrengthsFilter] = useState("");
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return records
-      .filter((r) => !selectedYear || r.Year === selectedYear)
+      .filter((r) => selectedYears.length === 0 || selectedYears.includes(r.Year))
+      .filter((r) => selectedPositions.length === 0 || selectedPositions.includes(r.Position))
+      .filter((r) => selectedRounds.length === 0 || selectedRounds.includes(r.Round))
+      .filter((r) => {
+        if (!strengthsFilter) return true;
+        const has = (r.Strengths || []).length > 0;
+        return strengthsFilter === "added" ? has : !has;
+      })
       .filter((r) => !flaggedOnly || (flagsById[r.id]?.length > 0))
       .filter((r) => {
         if (!q) return true;
@@ -2347,14 +2366,14 @@ function HistoricalSection() {
         if (yearDiff !== 0) return yearDiff;
         return (Number(a.Pick) || 9999) - (Number(b.Pick) || 9999);
       });
-  }, [records, searchQuery, selectedYear, flaggedOnly, flagsById]);
+  }, [records, searchQuery, selectedYears, selectedPositions, selectedRounds, strengthsFilter, flaggedOnly, flagsById]);
 
   // Selecting a specific draft class should show that *entire* class, not
   // a truncated slice of it — the RESULT_LIMIT cap only makes sense as a
   // render-performance guard for an open-ended browse/search across all
   // 6,643 records. A single class tops out around 260 picks either way,
   // trivially renderable in full.
-  const shown = selectedYear ? filtered : filtered.slice(0, RESULT_LIMIT);
+  const shown = selectedYears.length > 0 ? filtered : filtered.slice(0, RESULT_LIMIT);
   const isNew = selected?.isNew;
 
   const selectRecord = (r) => {
@@ -2387,7 +2406,7 @@ function HistoricalSection() {
     const combine = {};
     HISTORICAL_COMBINE_FIELDS.forEach(({ formKey }) => { combine[formKey] = ""; });
     setFormState({
-      First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Year: selectedYear || "", Round: "", Pick: "", NFLTeam: "",
+      First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Year: selectedYears.length === 1 ? selectedYears[0] : "", Round: "", Pick: "", NFLTeam: "",
       RoundGrade: "", Strengths: [], Weaknesses: [],
       ...combine,
     });
@@ -2565,9 +2584,10 @@ function HistoricalSection() {
             placeholder="Search player, school, or NFL team..."
             style={{ ...inputStyle, flex: 1, minWidth: "160px" }}
           />
-          <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} style={{ ...inputStyle, width: "110px" }}>
-            <option value="">All Years</option>
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          <select value={strengthsFilter} onChange={(e) => setStrengthsFilter(e.target.value)} style={{ ...inputStyle, width: "150px" }}>
+            <option value="">All Strengths</option>
+            <option value="added">Strengths added</option>
+            <option value="missing">No strengths yet</option>
           </select>
           {/* Combine data doesn't make sense for every field (see
               historicalFlagsFor) — flagged, not auto-corrected, since a
@@ -2578,6 +2598,11 @@ function HistoricalSection() {
             <input type="checkbox" checked={flaggedOnly} onChange={(e) => setFlaggedOnly(e.target.checked)} />
             🚩 Flagged only
           </label>
+          <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
+            <FilterBar label="Year" options={years} selected={selectedYears} setSelected={setSelectedYears} />
+            <FilterBar label="Position" options={positions} selected={selectedPositions} setSelected={setSelectedPositions} />
+            <FilterBar label="Round" options={rounds} selected={selectedRounds} setSelected={setSelectedRounds} />
+          </div>
         </div>
 
         {shown.length === 0 ? (
@@ -2613,12 +2638,12 @@ function HistoricalSection() {
                   </div>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
                     {r.School || "—"}{r.Position ? ` · ${r.Position}` : ""}{r["NFL Team"] ? ` → ${r["NFL Team"]}` : ""}
-                    {r.RoundGrade && <span style={{ color: "#2e7d32" }}> · Retro: {r.RoundGrade}</span>}
+                    {(r.Strengths || []).length > 0 && <span style={{ color: "#2e7d32" }}> · Strengths added</span>}
                   </div>
                 </div>
               );
             })}
-            {!selectedYear && filtered.length > RESULT_LIMIT && (
+            {selectedYears.length === 0 && filtered.length > RESULT_LIMIT && (
               <div style={{ padding: "12px", textAlign: "center", color: "#999", fontSize: "11px", fontStyle: "italic" }}>
                 Showing first {RESULT_LIMIT} of {filtered.length.toLocaleString()} matches — refine your search or pick a year to see the rest.
               </div>
@@ -8149,12 +8174,15 @@ function SortableTh({ label, sortKey, activeKey, dir, onSort, align = "left" }) 
 // the Dummy Content feature; verified/role were previously only ever set by
 // hand in the Firebase console). Dummy accounts (isDummy: true) are
 // filtered out — they're synthetic evaluation authors, not real people to
-// manage here. ──
+// manage here. "Sim Beta" writes `simBeta` the same way — it opens /sim
+// (normally admin-only, see SimRoute.js) to that user and shows them a Sim
+// button on their own profile; same rules protection as verified. ──
 function UsersSection() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [savingUid, setSavingUid] = useState(null);
+  const [savingSimUid, setSavingSimUid] = useState(null);
   const [fetchError, setFetchError] = useState("");
   // uid -> saved-evaluation count, from the private users/{uid}/evaluations
   // mirror (see PlayerProfile.js handleSaveEvaluation — it writes the same
@@ -8265,6 +8293,20 @@ function UsersSection() {
     }
   };
 
+  const handleToggleSimBeta = async (u) => {
+    setSavingSimUid(u.id);
+    const next = !u.simBeta;
+    try {
+      await updateDoc(doc(db, "users", u.id), { simBeta: next });
+      setUsers((prev) => prev.map((row) => (row.id === u.id ? { ...row, simBeta: next } : row)));
+    } catch (e) {
+      console.error("Admin toggle sim beta error:", e);
+      alert("Failed to update — check console.");
+    } finally {
+      setSavingSimUid(null);
+    }
+  };
+
   const startEditSocials = (u) => {
     setEditingUid(u.id);
     setSocialsForm({ youtube: u.youtube || "", x: u.x || "", instagram: u.instagram || "" });
@@ -8286,6 +8328,7 @@ function UsersSection() {
   };
 
   const verifiedCount = users.filter((u) => u.verified).length;
+  const simBetaCount = users.filter((u) => u.simBeta).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
@@ -8297,7 +8340,7 @@ function UsersSection() {
           style={{ ...inputStyle, maxWidth: "360px" }}
         />
         <div style={{ fontSize: "12px", fontWeight: 800, color: "#999" }}>
-          {loading ? "Loading…" : `${users.length} user${users.length === 1 ? "" : "s"} · ${verifiedCount} verified`}
+          {loading ? "Loading…" : `${users.length} user${users.length === 1 ? "" : "s"} · ${verifiedCount} verified · ${simBetaCount} sim beta`}
         </div>
       </div>
 
@@ -8326,6 +8369,7 @@ function UsersSection() {
                   <SortableTh label="Evaluations" sortKey="evaluations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="center" />
                   <SortableTh label="Last Active" sortKey="lastActive" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
                   <th style={thStyle}>Socials</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Sim Beta</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Verified</th>
                 </tr>
               </thead>
@@ -8371,6 +8415,26 @@ function UsersSection() {
                           <span style={{ fontSize: "11px", color: "#bbb", fontStyle: "italic" }}>Verify first</span>
                         )}
                       </td>
+                      <td style={{ ...tdStyle, textAlign: "center" }}>
+                        {u.role === "admin" ? (
+                          <span style={{ fontSize: "11px", color: "#bbb", fontStyle: "italic" }}>Admin</span>
+                        ) : (
+                          <button
+                            onClick={() => handleToggleSimBeta(u)}
+                            disabled={savingSimUid === u.id}
+                            style={{
+                              padding: "6px 14px", fontWeight: 900, fontSize: "11px", minWidth: "80px",
+                              textTransform: "uppercase", letterSpacing: "0.04em",
+                              border: "2px solid " + (u.simBeta ? GOLD : "#ddd"), borderRadius: "20px",
+                              cursor: savingSimUid === u.id ? "default" : "pointer",
+                              background: u.simBeta ? GOLD : "#fff",
+                              color: u.simBeta ? "#fff" : "#999",
+                            }}
+                          >
+                            {savingSimUid === u.id ? "…" : u.simBeta ? "On ✓" : "Grant"}
+                          </button>
+                        )}
+                      </td>
                       <td style={{ ...tdStyle, textAlign: "right" }}>
                         <button
                           onClick={() => handleToggleVerified(u)}
@@ -8394,7 +8458,7 @@ function UsersSection() {
                         separate modal. */}
                     {editingUid === u.id && (
                       <tr style={{ background: "#fffaf0", borderBottom: "1px solid #f0f0f0" }}>
-                        <td colSpan={8} style={{ padding: "12px 10px" }}>
+                        <td colSpan={9} style={{ padding: "12px 10px" }}>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
                             <input
                               value={socialsForm.youtube}

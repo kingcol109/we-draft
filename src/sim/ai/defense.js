@@ -48,31 +48,43 @@ export function thinkDefender(p, world) {
 
   opts.push(readEndOption(p, world));
   opts.push(optionKeyOption(p, world));
+  opts.push(pitchManOption(p, world));
 
   const runner = believedRunner(p, world);
+  // A safety with the force is still pass-first, but he's the edge: he
+  // needs less certainty than a deep defender to come up and fill.
+  const forceSafety = p.role === "S" && /^force/.test(p.assignment.gap || "");
+  const commit = forceSafety ? FORCE_SAFETY_COMMIT : prof.runCommit;
   if (runner && prof.carrier > 0) {
     // Past his commit threshold, fitting the run outranks a plain drop. A
     // caught ball is a live runner wherever he caught it (a screen behind
     // the line) — nobody keeps dropping on it.
     const caught = world.state === "RUN_AFTER_CATCH" && runner.id !== "QB";
-    const score = runner.past || caught ? 3 : 1.8 + 4 * (p.belief.pRun - prof.runCommit);
+    const score = runner.past || caught ? 3 : 1.8 + 4 * (p.belief.pRun - commit);
     opts.push(runOption(p, world, runner, score));
   }
 
   opts.push(screenOption(p, world));
 
+  // A linebacker plays run until the offense shows him pass — the linemen
+  // set (retreat) or the QB winds up / throws. He never bails into his
+  // coverage on a guess: no read, no drop.
+  const lbOnRun = p.role === "LB" && cover.type !== "rush" && !passShown(p, world);
+  // The force safety: once the run read is solid (and nothing says pass) he
+  // comes down to set the edge before the back even has it — outranking his
+  // drop. Below that he stays in his coverage: pass first.
+  const safetyFill = forceSafety && !passShown(p, world) && p.belief.pRun >= FORCE_SAFETY_COMMIT;
   if (cover.type === "rush") opts.push(rushOption(p, world));
+  else if (lbOnRun) opts.push(downhillOption(p, world));
+  else if (safetyFill) {
+    // Full speed to the edge, right at the line — he's the force, and the
+    // edge has to be set before the back gets there.
+    const fill = downhillOption(p, world);
+    const pt = { x: fill.moveTo.x, y: LOS + 0.6 };
+    opts.push({ ...fill, moveTo: pt, debug: { kind: "fit", point: pt }, score: 2.4, speed: physOf(p).top, label: "Run! Fill the force — set the edge" });
+  }
   else if (cover.type === "zone") opts.push(...zoneOptions(p, world));
   else if (cover.type === "man") opts.push(...manOrDog(p, world));
-
-  // Read step only while the read is genuinely unclear — a linebacker who
-  // doesn't read run gets straight into his pass drop.
-  // A linebacker reads before he goes anywhere: he holds his read step
-  // until he's decided — run (fit) or pass (drop) — and doesn't turn his
-  // back on the backfield while it's still unclear.
-  const runRead = runner && p.belief.pRun >= prof.runCommit;
-  if (p.role === "LB" && cover.type !== "rush" && world.sinceSnap < 1.2 && p.belief.pRun > 0.38 && !runRead)
-    opts.push(readOption(p, 2.2));
 
   const chosen = decide(p, world, opts);
   // Playing a thrown ball on the run: head around to it.
@@ -156,9 +168,13 @@ function runOption(p, world, runner, score) {
   const tc = m.y < LOS ? clamp((LOS - m.y) / Math.max(m.vy, 1.5), 0, 1.5) : 0;
   const cx = m.x + m.vx * tc;
   const lb = p.role !== "DL";
+  // A scripted fit (Learn's demos, engine config.fits) is a commitment: he
+  // plays that gap until the ball's on him or past the line — no flowing
+  // with the track, no chasing — so the defense moves the way the demo set.
+  const scripted = !!(world.config.fits && world.config.fits[p.id]);
   // Linebackers flow with the ball's track, staying on their side of it;
   // a lineman just fights to stay in his gap.
-  const fx = lb ? gx + clamp(cx - gx, -2.5, 2.5) * 0.6 : gx;
+  const fx = lb && !scripted ? gx + clamp(cx - gx, -2.5, 2.5) * 0.6 : gx;
   const toMe = Math.abs(cx - (lb ? fx : gx)) < (lb ? 1.5 : 1.1);
   if (runner.past || d < 2.2 || (toMe && d < 5)) {
     return pursuitOption(p, world, runner, {
@@ -171,13 +187,15 @@ function runOption(p, world, runner, score) {
   // than sitting in a fit he's not coming to. (A patient back keeps them in
   // their gaps; that's what makes pressing and following blocks pay.)
   const csp = Math.hypot(m.vx, m.vy);
-  if (lb && (csp > 4.5 || Math.abs(cx - gx) > 2.5))
+  if (lb && !scripted && (csp > 4.5 || Math.abs(cx - gx) > 2.5))
     return pursuitOption(p, world, runner, {
       label: `Flow to ${runner.id} — inside-out`,
       shadeX: -Math.sign(m.vx || 0) * 0.8,
       score,
     });
-  const pt = { x: fx, y: LOS + (lb ? 1.1 : 0.1) };
+  // (A linebacker attacks his fit — across the line while the back is still
+  // in the backfield — rather than sitting on it.)
+  const pt = { x: fx, y: LOS + (lb ? (m.y < LOS - 0.5 ? -0.4 : 1.1) : 0.1) };
   return {
     key: "run", urgent: true, label: lb && Math.abs(fx - gx) > 0.8 ? `Flow — ${gap} side of the ball` : `Hold ${gap}`,
     reason: `run ${pct(p.belief.pRun)} · ${runner.id} aiming ${fmt(cx - CX, 1)} — ${gap} is mine`,
@@ -227,6 +245,39 @@ function optionKeyOption(p, world) {
   return {
     key: "optionFeather", label: "Pitch key — feather: between the QB and the pitch", reason: `QB ${fmt(d, 1)} yd away — make him decide`,
     score: 3.9, moveTo: { x: px, y: clamp(p.y, LOS + 0.3, LOS + 1.6) }, speed: Math.min(top, 5.5), face: -Math.PI / 2,
+  };
+}
+
+// ── Speed option: the force player to the side the option is going has the
+// PITCH MAN. The unblocked end (the pitch key) attacks the QB; the force
+// mirrors the back from outside-in — a step outside him and in front — so
+// that when the ball is pitched he's right there. With variance on he
+// doesn't always get it right: now and then he's late off the ball, and now
+// and then he plays the QB instead (two men on the QB, nobody on the pitch).
+// Once it's pitched, the normal run fit (force: squeeze from outside) takes
+// over. ──
+const PITCH_WRONG = 0.18; // chance (variance on) he takes the QB instead
+const PITCH_LATE = 0.25; // chance (variance on) he's a beat late
+function pitchManOption(p, world) {
+  const z = world.zone;
+  const gap = p.assignment.gap || "";
+  if (!world.play.option || !z || !gap.startsWith("force") || world.pitched || world.ball.state === "air") return null;
+  const side = gap.endsWith("L") ? -1 : 1;
+  if (side !== z.ps) return null; // the backside force stays home
+  // His read this rep (rolled once — variance decides if he blows it).
+  if (p.pitchRead === undefined) {
+    const v = world.config.variance;
+    p.pitchRead = v && world.rng() < PITCH_WRONG ? "qb" : "pitch";
+    p.pitchDelay = v && world.rng() < PITCH_LATE ? 0.3 + 0.3 * world.rng() : 0;
+  }
+  if (p.pitchRead === "qb" || world.sinceSnap < 0.15 + p.pitchDelay) return null;
+  const rb = p.perception.memory.RB;
+  if (!rb) return null;
+  const tgt = { x: rb.x + side * 1.3 + rb.vx * 0.35, y: Math.max(rb.y + rb.vy * 0.35 + 1.2, LOS + 0.4) };
+  return {
+    key: "pitchMan", urgent: true, label: "Speed option — I've got the pitch man",
+    reason: `the end has the QB${p.pitchDelay ? " (late)" : ""} — outside-in on the back`,
+    score: 2.9, moveTo: tgt, speed: physOf(p).top, face: { x: rb.x, y: rb.y }, debug: { kind: "fit", point: tgt },
   };
 }
 
@@ -375,13 +426,52 @@ function manOrDog(p, world) {
   return man;
 }
 
-function readOption(p, score) {
+// ── Has the offense shown pass? A linebacker reads the offensive line: run
+// blockers fire out at him, pass protectors set back. Retreating linemen
+// (his belief swings to pass), the QB winding up, or a ball in the air —
+// that's pass. Anything else he plays as run. ──
+const FORCE_SAFETY_COMMIT = 0.52; // run belief a force safety needs to come up (deep DBs need ~0.72)
+
+function passShown(p, world) {
+  if (world.ball.state === "air" || world.throwCharging) return true;
+  return world.sinceSnap > 0.2 && p.belief.pRun < 0.4;
+}
+
+// ── Linebacker on a run read: downhill, now. He fits his gap from the
+// inside out, flowing with the back's track, and attacks it to meet the
+// back in the backfield — taking away the inside lanes so the ball has to
+// bubble outside, to the force player setting the edge. A force / alley
+// man keeps his leverage: outside / inside-out, a couple of yards off.
+// (Once the back has the ball and is coming, runOption takes over.) ──
+function downhillOption(p, world) {
+  const gap = p.assignment.gap || "";
   const mem = p.perception.memory;
   const key = mem.RB && mem.RB.conf > 0.3 ? mem.RB : mem.QB;
-  const flow = key ? clamp(key.x + key.vx * 0.5 - p.home.x, -2, 2) * 0.3 : 0;
+  const top = physOf(p).top;
+  const face = key ? { x: key.x, y: key.y } : null;
+  if (gap.startsWith("force") || gap.startsWith("alley")) {
+    const side = gap.endsWith("L") ? -1 : 1;
+    const pt = gap.startsWith("force") ? { x: Math.max(side * p.home.x, side * (CX + side * 5.5)) * side, y: LOS + 1.5 } : { x: p.home.x, y: LOS + 2.5 };
+    return {
+      key: "downhill", urgent: true, label: gap.startsWith("force") ? "Set the edge — keep it inside" : "Alley — inside-out, a step behind",
+      reason: `run ${pct(p.belief.pRun)} — ${gap}`, score: 2.1, moveTo: pt, speed: top * 0.9, face, debug: { kind: "fit", point: pt },
+    };
+  }
+  // His gap's landmark moves with the offensive line (gapPoint follows their
+  // flow — zone steps one way, he steers that way), and he leans toward the
+  // back's track: no stopping to read, just a redirect as he comes.
+  const gx = /^[A-D]-[LR]$/.test(gap) ? gapPoint(p, world, gap) : p.home.x;
+  const scripted = !!(world.config.fits && world.config.fits[p.id]);
+  const track = key ? key.x + key.vx * 0.6 : gx;
+  const fx = scripted ? gx : gx + clamp(track - gx, -1.5, 1.5) * 0.5;
+  // How sure he is where the ball's going: from the snap he's coming
+  // downhill to the line at two-thirds speed; as the read firms up he
+  // speeds up and runs through it, into the backfield.
+  const sure = clamp((p.belief.pRun - 0.45) / 0.3, 0, 1);
+  const pt = { x: fx, y: lerp(LOS + 1.2, LOS - 0.6, sure) };
   return {
-    // First step is downhill — run keeps him coming, pass sends him to his drop.
-    key: "read", label: "Read step (downhill)", reason: `run ${pct(p.belief.pRun)} — reading the backfield`, score,
-    moveTo: { x: p.home.x + flow, y: p.home.y - 1.5 }, speed: 3.5, face: key ? { x: key.x, y: key.y } : null,
+    key: "downhill", urgent: true, label: sure < 1 ? `Downhill — keying the line, ${gap || "the ball"}` : `Downhill — fit ${gap || "the ball"}, meet the back`,
+    reason: `run ${pct(p.belief.pRun)} — line flowing ${fmt(fx - (GAPS[gap] != null ? CX + GAPS[gap] : p.home.x), 1)}`,
+    score: 2.1, moveTo: pt, speed: top * (0.65 + 0.35 * sure), face, debug: { kind: "fit", point: pt },
   };
 }

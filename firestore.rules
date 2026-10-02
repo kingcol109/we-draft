@@ -487,7 +487,8 @@ service cloud.firestore {
       // access or a fake verified badge by writing straight to the SDK,
       // bypassing the app's own UI entirely. create blocks setting either
       // field at all; update requires them to stay exactly as they already
-      // are, unless the requester is already an admin.
+      // are, unless the requester is already an admin. "simBeta" (Football
+      // Sim beta access, see SimRoute.js) gets the same protection.
       // isAdmin() bypass added for AdminPanel.js's Dummy Content tab, which
       // creates a companion users/{dummyUid} doc (username only, never
       // role/verified) purely so a dummy evaluation's admin-chosen name
@@ -497,7 +498,8 @@ service cloud.firestore {
       // would deny this create.
       allow create: if isAdmin()
                     || (request.auth != null && request.auth.uid == uid
-                        && !("role" in request.resource.data) && !("verified" in request.resource.data));
+                        && !("role" in request.resource.data) && !("verified" in request.resource.data)
+                        && !("simBeta" in request.resource.data));
       // .get(field, default) rather than plain dot access — almost every
       // existing user doc predates this rule and has no `role`/`verified`
       // field at all, and dot-accessing a missing map key errors out the
@@ -508,7 +510,8 @@ service cloud.firestore {
       allow update: if isAdmin()
                     || (request.auth != null && request.auth.uid == uid
                         && request.resource.data.get("role", null) == resource.data.get("role", null)
-                        && request.resource.data.get("verified", null) == resource.data.get("verified", null));
+                        && request.resource.data.get("verified", null) == resource.data.get("verified", null)
+                        && request.resource.data.get("simBeta", null) == resource.data.get("simBeta", null));
       allow delete: if isAdmin();
       match /evaluations/{playerId} {
         // isAdmin() bypass — same Dummy Content reasoning as

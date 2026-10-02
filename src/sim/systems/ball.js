@@ -49,6 +49,16 @@ function flatAngle(R, v, dh) {
   return Math.atan((R - Math.sqrt(disc)) / (2 * a));
 }
 
+// ── Across the body: the QBs are right-handed, so rolling right and
+// throwing back to the left means throwing across his body — he can't get
+// his hips into it. 0 (not at all) → 1 (sprinting right, throwing straight
+// left). Costs velocity here and accuracy in the scatter (engine). ──
+export function acrossBody(qb, dx) {
+  if (dx >= 0 || qb.vx <= 1.2) return 0;
+  const toLeft = clamp(-dx / Math.max(1, Math.abs(dx) + 4), 0, 1); // how far left the throw goes
+  return clamp((qb.vx - 1.2) / 4.5, 0, 1) * toLeft;
+}
+
 export function solveThrow(qb, targetX, targetY, hold) {
   const B = TUNING.ball;
   const { type, u } = throwProfile(hold);
@@ -62,6 +72,7 @@ export function solveThrow(qb, targetX, targetY, hold) {
   let dir = 0;
   let short = false;
   let bodyFactor = 1;
+  let across = 0;
   for (let i = 0; i < 4; i++) {
     const dx = ax - rx;
     const dy = ay - ry;
@@ -70,12 +81,17 @@ export function solveThrow(qb, targetX, targetY, hold) {
     // Throwing well off the line of the shoulders costs arm speed.
     const off = Math.abs(angDiff(dir, qb.facing));
     bodyFactor = 1 - 0.45 * clamp((off - 25 * DEG) / (120 * DEG), 0, 1);
-    const vMax = B.maxSpeed * bodyFactor * (qb.traits.arm ?? 1); // arm strength (dynasty)
+    // Across the body (a righty rolling right, throwing left) costs up to a
+    // third of his arm.
+    across = acrossBody(qb, targetX - qb.x);
+    const vMax = B.maxSpeed * bodyFactor * (1 - 0.33 * across) * (qb.traits.arm ?? 1); // arm strength (dynasty)
     const vLoft = speedForAngle(R, B.maxAngle, dh);
     // Even his hardest throw scales with the distance — nobody throws a
     // 7-yard flat at full velocity.
     const vFast = Math.max(vLoft, Math.min(vMax, B.shortSpeed + B.speedPerYard * R) * B.bulletFraction);
     v = clamp(lerp(vFast, vLoft, Math.pow(u, 0.85)), B.minSpeed, vMax);
+    // …and whatever the throw, across the body it comes out slower.
+    v = Math.max(B.minSpeed, v * (1 - 0.25 * across));
     const fa = flatAngle(R, v, dh);
     short = fa == null;
     angle = short ? 40 * DEG : fa; // can't get there: his best, and it falls short
@@ -89,9 +105,19 @@ export function solveThrow(qb, targetX, targetY, hold) {
     vx: Math.cos(dir) * vh + qb.vx * B.inherit,
     vy: Math.sin(dir) * vh + qb.vy * B.inherit,
     vz: v * Math.sin(angle),
-    speed: v, angle, type, u, short, bodyFactor,
+    speed: v, angle, type, u, short, bodyFactor, across,
     target: { x: targetX, y: targetY },
   };
+}
+
+// ── Where a thrown ball is catchable depends on how it was thrown. A
+// bullet is a line drive: catchable (and tippable, pickable) the whole way.
+// The more air under it, the more of its flight it spends over everyone's
+// heads — a touch or lofted ball only comes down into reach right where it
+// was aimed. Seconds before its arrival at the aim point that it becomes
+// catchable, by hold fraction u (throwProfile). ──
+export function catchWindow(u) {
+  return u < 0.18 ? Infinity : u < 0.45 ? 0.7 : u < 0.75 ? 0.35 : 0.28;
 }
 
 export function stepBall(ball, dt) {

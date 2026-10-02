@@ -21,6 +21,13 @@ const yds = (n) => {
   return `${r} yard${Math.abs(r) === 1 ? "" : "s"}`;
 };
 
+// The receiver's jersey for the throw diagram: his team's color and his
+// number (dynasty), else site blue and 88.
+export function jerseyOf(p) {
+  const info = p && p.info;
+  return { color: (info && info.team && info.team.color) || "#0055A5", number: info && info.number != null ? info.number : 88 };
+}
+
 // tone: good (offense did something well) · bad (for the offense) · info
 export function buildRecap(engine, result, chainsText) {
   const S = engine.stats || { missed: [], beatBlocks: [], cuts: 0, bursts: 0 };
@@ -150,6 +157,9 @@ export function buildRecap(engine, result, chainsText) {
   } else if (kind === "run" && type !== "INCOMPLETE") bar = { air: 0, after: yards, total: yards };
 
   return {
+    // The throw meter's read at the release and where the ball got to him
+    // (the recap shows both — see components/SimRecap.js).
+    throw: ti && !ti.pitch && ti.feedback ? { feedback: ti.feedback, placement: ti.placement, target: ti.intended, jersey: jerseyOf(by((ti.placement && ti.placement.who) || ti.intended)) } : null,
     badge: { text: badge[0], color: badge[1] },
     result: drive,
     yards,

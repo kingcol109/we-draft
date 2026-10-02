@@ -75,6 +75,9 @@ export default function UserProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [role, setRole] = useState(null);
+  // Football Sim beta access — granted per user from AdminPanel.js's Users
+  // section; adds a Sim quick link (/sim, gated by SimRoute.js).
+  const [simBeta, setSimBeta] = useState(false);
   // Social handles — verified users only (gated in the render below; see
   // VerifiedNameBadge.js, the shared hover card everywhere a verified name
   // shows, for the read side of these same three fields). Admin can also
@@ -130,6 +133,7 @@ export default function UserProfile() {
         setDisplayedUsername(data.username || "");
         setVerified(data.verified || false);
         setRole(data.role || "public");
+        setSimBeta(data.simBeta === true);
         setYoutube(data.youtube || "");
         setXHandle(data.x || "");
         setInstagram(data.instagram || "");
@@ -359,6 +363,7 @@ export default function UserProfile() {
               { to: "/my-draft-class", emoji: "🏈", label: "My Draft Class", sub: "Build your perfect 2026 draft class" },
               { to: "/boards", emoji: "📋", label: "My Boards", sub: "View and manage your scouting boards" },
               { to: "/whiteboard", emoji: "🗂", label: "Whiteboard", sub: "Organize your draft board" },
+              ...(simBeta || role === "admin" ? [{ to: "/sim", emoji: "🎮", label: "Football Sim", sub: "Beta — play the We-Draft football sim" }] : []),
             ].map(({ to, emoji, label, sub }) => (
               <Link key={to} to={to} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", boxSizing: "border-box", backgroundColor: "#fff", border: "2px solid " + BLUE, borderRadius: "8px", padding: isMobile ? "14px 16px" : "12px 16px", textDecoration: "none" }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}

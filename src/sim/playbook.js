@@ -169,7 +169,7 @@ export const playsideOf = (formationKey) => {
   return f.rbX ? -Math.sign(f.rbX) : f.fullback || 1;
 };
 
-export const FRONTS = { "4-3": "4-3", "3-4": "3-4", mug: "Double Mug (4-3)", nickel: "Nickel 4-2-5", bear: "Bear (46)", tite: "Tite (3-4, 4i-0-4i)" };
+export const FRONTS = { "4-3": "4-3", over: "4-3 Over", under: "4-3 Under", "3-4": "3-4 Stack (4-0-4)", mug: "Double Mug (4-3)", nickel: "Nickel 4-2-5", bear: "Bear (46)", tite: "Tite (3-4, 4i-0-4i)" };
 export const COVERAGES = {
   tampa2: "Tampa 2", cover3: "Cover 3", cover4: "Cover 4 (Quarters)", man: "Cover 1 (LB blitz)",
   cover2man: "Cover 2 Man", cover1robber: "Cover 1 Robber", zero: "Cover 0 (6-man blitz)",
@@ -526,13 +526,28 @@ const zone = (z, side) => ({ type: "zone", zone: z, side });
 const man = (target) => ({ type: "man", target });
 const rush = { type: "rush" };
 
+// ── Defensive line techniques — where a man lines up on the offensive
+// line, by number (the strength is +x; L = the weak side):
+//   even = head-up (0 center, 2 guard, 4 tackle, 6 tight end)
+//   odd  = outside shoulder (1 center, 3 guard, 5 tackle, 7 tight end)
+//   "i"  = inside shoulder (2i guard, 4i tackle, 6i tight end)
+// Linebackers use the same spots at depth (10 / 20 / 30 = over 1 / 2 / 3).
+// With no tight end, "9" is the ghost spot a man outside him would be. ──
+const SH = 0.42; // a lineman's shoulder from his nose (config body.width / 2)
+export const TECH = {
+  0: 0, 1: SH, "2i": OL_SPLIT - SH, 2: OL_SPLIT, 3: OL_SPLIT + SH,
+  "4i": 2 * OL_SPLIT - SH, 4: 2 * OL_SPLIT, 5: 2 * OL_SPLIT + SH,
+  "6i": 3 * OL_SPLIT - SH, 6: 3 * OL_SPLIT, 7: 3 * OL_SPLIT + SH, 9: 3 * OL_SPLIT + 1.1,
+};
+const tq = (t, side = 1) => side * TECH[t];
+
 const DEFENSES = {
   "4-3": {
     cover3: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-      ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -3.8, 4.8, "force-L", zone("curlFlat", L)],
       ["MLB", "MLB", "LB", 0.3, 5.2, "B-L", zone("hookIn", L)],
       ["SLB", "SLB", "LB", 3.8, 4.8, "A-R", zone("hookIn", R)],
@@ -542,10 +557,10 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 10, "force-R", zone("curlFlat", R)], // rolls down
     ],
     cover4: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-      ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -3.8, 4.8, "B-L", zone("curlFlat", L)],
       ["MLB", "MLB", "LB", 0.3, 5.2, "A-R", zone("hole")],
       ["SLB", "SLB", "LB", 7.0, 5.0, "force-R", zone("curlFlat", R)], // apex
@@ -555,10 +570,10 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 10, "alley-R", zone("quarterIn", R)],
     ],
     tampa2: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-      ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -3.8, 4.8, "B-L", zone("hook", L)],
       ["MLB", "MLB", "LB", 0.3, 5.2, "A-R", zone("tampa")],
       ["SLB", "SLB", "LB", 7.0, 5.0, "force-R", zone("hook", R)], // apex of Y and RT
@@ -568,10 +583,10 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 10, "alley-R", zone("deepHalf", R)],
     ],
     man: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-      ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -10.2, 5.2, "force-L", man("H")],
       ["MLB", "MLB", "LB", 0.3, 5.2, "A-R", man("RB")],
       ["SLB", "SLB", "LB", -1.6, 4.8, "B-L", rush], // blitz
@@ -582,10 +597,10 @@ const DEFENSES = {
     ],
     // Cover 2 Man: two deep halves, man across underneath, four rush.
     cover2man: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-      ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -10.2, 5.2, "force-L", man("H")],
       ["MLB", "MLB", "LB", 0.3, 5.2, "A-R", man("RB")],
       ["SLB", "SLB", "LB", 10.2, 5.2, "force-R", man("Y")],
@@ -597,10 +612,10 @@ const DEFENSES = {
     // Cover 1 Robber: free safety in the middle of the field, the strong
     // safety robs the hole, man across, four rush.
     cover1robber: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-      ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -10.2, 5.2, "force-L", man("H")],
       ["MLB", "MLB", "LB", 0.3, 5.2, "A-R", man("RB")],
       ["SLB", "SLB", "LB", 10.2, 5.2, "force-R", man("Y")],
@@ -612,12 +627,12 @@ const DEFENSES = {
   },
   "3-4": {
     cover3: [
-      ["DE-L", "DE", "DL", -2.4, 0.9, "B-L", rush],
-      ["NT", "NT", "DL", -0.1, 0.9, "A-L", rush],
-      ["DE-R", "DE", "DL", 2.4, 0.9, "B-R", rush],
+      ["DE-L", "DE", "DL", tq(4, L), 0.9, "B-L", rush],
+      ["NT", "NT", "DL", tq(0), 0.9, "A-L", rush],
+      ["DE-R", "DE", "DL", tq(4), 0.9, "B-R", rush],
       ["OLB-L", "OLB", "LB", -5.2, 1.1, "C-L", zone("curlFlat", L)],
-      ["ILB-L", "ILB", "LB", -1.8, 4.8, "A-R", zone("hookIn", L)],
-      ["ILB-R", "ILB", "LB", 1.8, 4.8, "alley-R", zone("hookIn", R)],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", zone("hookIn", L)],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "alley-R", zone("hookIn", R)],
       ["OLB-R", "OLB", "LB", 5.2, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("deepThird", L)],
       ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("deepThird", R)],
@@ -625,12 +640,12 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 10, "force-R", zone("curlFlat", R)], // rolls down
     ],
     cover4: [
-      ["DE-L", "DE", "DL", -2.4, 0.9, "B-L", rush],
-      ["NT", "NT", "DL", -0.1, 0.9, "A-L", rush],
-      ["DE-R", "DE", "DL", 2.4, 0.9, "B-R", rush],
+      ["DE-L", "DE", "DL", tq(4, L), 0.9, "B-L", rush],
+      ["NT", "NT", "DL", tq(0), 0.9, "A-L", rush],
+      ["DE-R", "DE", "DL", tq(4), 0.9, "B-R", rush],
       ["OLB-L", "OLB", "LB", -5.2, 1.1, "C-L", zone("curlFlat", L)],
-      ["ILB-L", "ILB", "LB", -1.8, 4.8, "A-R", zone("hole")],
-      ["ILB-R", "ILB", "LB", 1.8, 4.8, "force-R", zone("curlFlat", R)],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", zone("hole")],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "force-R", zone("curlFlat", R)],
       ["OLB-R", "OLB", "LB", 5.2, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("quarterOut", L)],
       ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("quarterOut", R)],
@@ -638,12 +653,12 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 10, "alley-R", zone("quarterIn", R)],
     ],
     tampa2: [
-      ["DE-L", "DE", "DL", -2.4, 0.9, "B-L", rush],
-      ["NT", "NT", "DL", -0.1, 0.9, "A-L", rush],
-      ["DE-R", "DE", "DL", 2.4, 0.9, "B-R", rush],
+      ["DE-L", "DE", "DL", tq(4, L), 0.9, "B-L", rush],
+      ["NT", "NT", "DL", tq(0), 0.9, "A-L", rush],
+      ["DE-R", "DE", "DL", tq(4), 0.9, "B-R", rush],
       ["OLB-L", "OLB", "LB", -5.2, 1.1, "C-L", zone("hook", L)],
-      ["ILB-L", "ILB", "LB", -1.8, 4.8, "A-R", zone("tampa")],
-      ["ILB-R", "ILB", "LB", 1.8, 4.8, "force-R", zone("hook", R)],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", zone("tampa")],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "force-R", zone("hook", R)],
       ["OLB-R", "OLB", "LB", 5.2, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -18.6, 1.7, "alley-L", zone("flat", L)], // press, 2.5 off
       ["CB-R", "CB", "CB", 18.6, 1.7, "alley-R", zone("flat", R)], // press, 2.5 off
@@ -651,12 +666,12 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 10, "alley-R", zone("deepHalf", R)],
     ],
     man: [
-      ["DE-L", "DE", "DL", -2.4, 0.9, "B-L", rush],
-      ["NT", "NT", "DL", -0.1, 0.9, "A-L", rush],
-      ["DE-R", "DE", "DL", 2.4, 0.9, "B-R", rush],
+      ["DE-L", "DE", "DL", tq(4, L), 0.9, "B-L", rush],
+      ["NT", "NT", "DL", tq(0), 0.9, "A-L", rush],
+      ["DE-R", "DE", "DL", tq(4), 0.9, "B-R", rush],
       ["OLB-L", "OLB", "LB", -5.2, 1.1, "C-L", rush],
       ["ILB-L", "ILB", "LB", -10.2, 5.2, "force-L", man("H")],
-      ["ILB-R", "ILB", "LB", 1.8, 4.8, "A-R", rush], // blitz
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "A-R", rush], // blitz
       ["OLB-R", "OLB", "LB", 5.2, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -17.2, 6, "alley-L", man("X")],
       ["CB-R", "CB", "CB", 17.2, 6, "alley-R", man("Z")],
@@ -664,12 +679,12 @@ const DEFENSES = {
       ["S-R", "SS", "S", 10.2, 10, "force-R", man("Y")],
     ],
     cover2man: [
-      ["DE-L", "DE", "DL", -2.4, 0.9, "B-L", rush],
-      ["NT", "NT", "DL", -0.1, 0.9, "A-L", rush],
-      ["DE-R", "DE", "DL", 2.4, 0.9, "B-R", rush],
+      ["DE-L", "DE", "DL", tq(4, L), 0.9, "B-L", rush],
+      ["NT", "NT", "DL", tq(0), 0.9, "A-L", rush],
+      ["DE-R", "DE", "DL", tq(4), 0.9, "B-R", rush],
       ["OLB-L", "OLB", "LB", -5.2, 1.1, "C-L", man("H")],
-      ["ILB-L", "ILB", "LB", -1.8, 4.8, "A-R", man("RB")],
-      ["ILB-R", "ILB", "LB", 1.8, 4.8, "B-R", man("Y")],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", man("RB")],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "B-R", man("Y")],
       ["OLB-R", "OLB", "LB", 5.2, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -18.2, 5, "alley-L", man("X")],
       ["CB-R", "CB", "CB", 18.2, 5, "alley-R", man("Z")],
@@ -677,12 +692,12 @@ const DEFENSES = {
       ["S-R", "SS", "S", 9, 11, "force-R", zone("deepHalf", R)],
     ],
     cover1robber: [
-      ["DE-L", "DE", "DL", -2.4, 0.9, "B-L", rush],
-      ["NT", "NT", "DL", -0.1, 0.9, "A-L", rush],
-      ["DE-R", "DE", "DL", 2.4, 0.9, "B-R", rush],
+      ["DE-L", "DE", "DL", tq(4, L), 0.9, "B-L", rush],
+      ["NT", "NT", "DL", tq(0), 0.9, "A-L", rush],
+      ["DE-R", "DE", "DL", tq(4), 0.9, "B-R", rush],
       ["OLB-L", "OLB", "LB", -5.2, 1.1, "C-L", man("H")],
-      ["ILB-L", "ILB", "LB", -1.8, 4.8, "A-R", man("RB")],
-      ["ILB-R", "ILB", "LB", 1.8, 4.8, "B-R", man("Y")],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", man("RB")],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "B-R", man("Y")],
       ["OLB-R", "OLB", "LB", 5.2, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -17.2, 6, "alley-L", man("X")],
       ["CB-R", "CB", "CB", 17.2, 6, "alley-R", man("Z")],
@@ -696,10 +711,10 @@ const DEFENSES = {
   mug: {
     // Cover 0 — all six come, man across
     zero: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -1.9, 0.9, "B-L", rush],
-      ["DT-R", "DT", "DL", 1.9, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(3, L), 0.9, "B-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -1.6, 4.6, "A-L", rush, { creep: [-0.75, 1.1] }],
       ["MLB", "MLB", "LB", 1.6, 4.6, "A-R", rush, { creep: [0.75, 1.1] }],
       ["SLB", "SLB", "LB", 7.0, 4.8, "force-R", man("RB")],
@@ -710,10 +725,10 @@ const DEFENSES = {
     ],
     // muggers drop: WILL hook, MIKE runs the middle
     tampa2: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -1.9, 0.9, "B-L", rush],
-      ["DT-R", "DT", "DL", 1.9, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(3, L), 0.9, "B-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -1.6, 4.6, "A-L", zone("hook", L), { creep: [-0.75, 1.1] }],
       ["MLB", "MLB", "LB", 1.6, 4.6, "A-R", zone("tampa"), { creep: [0.75, 1.1] }],
       ["SLB", "SLB", "LB", 7.0, 4.8, "force-R", zone("hook", R)],
@@ -724,10 +739,10 @@ const DEFENSES = {
     ],
     // muggers drop to the hooks
     cover3: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -1.9, 0.9, "B-L", rush],
-      ["DT-R", "DT", "DL", 1.9, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(3, L), 0.9, "B-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -1.6, 4.6, "A-L", zone("hookIn", L), { creep: [-0.75, 1.1] }],
       ["MLB", "MLB", "LB", 1.6, 4.6, "A-R", zone("hookIn", R), { creep: [0.75, 1.1] }],
       ["SLB", "SLB", "LB", 7.0, 4.8, "force-R", zone("curlFlat", R)],
@@ -738,10 +753,10 @@ const DEFENSES = {
     ],
     // muggers drop to the hooks
     cover4: [
-      ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-      ["DT-L", "DT", "DL", -1.9, 0.9, "B-L", rush],
-      ["DT-R", "DT", "DL", 1.9, 0.9, "B-R", rush],
-      ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+      ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+      ["DT-L", "DT", "DL", tq(3, L), 0.9, "B-L", rush],
+      ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+      ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
       ["WLB", "WLB", "LB", -1.6, 4.6, "A-L", zone("hookIn", L), { creep: [-0.75, 1.1] }],
       ["MLB", "MLB", "LB", 1.6, 4.6, "A-R", zone("hookIn", R), { creep: [0.75, 1.1] }],
       ["SLB", "SLB", "LB", 7.0, 4.8, "force-R", zone("curlFlat", R)],
@@ -758,10 +773,10 @@ const DEFENSES = {
 // 3-technique. ──
 DEFENSES.nickel = (() => {
   const line = [
-    ["DE-L", "DE", "DL", -4.2, 0.9, "C-L", rush],
-    ["DT-L", "DT", "DL", -0.8, 0.9, "A-L", rush],
-    ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-    ["DE-R", "DE", "DL", 4.2, 0.9, "C-R", rush],
+    ["DE-L", "DE", "DL", tq(5, L), 0.9, "C-L", rush],
+    ["DT-L", "DT", "DL", tq(1, L), 0.9, "A-L", rush],
+    ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+    ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
   ];
   return {
     cover3: [
@@ -824,17 +839,17 @@ DEFENSES.nickel = (() => {
 // interior) at the cost of the perimeter. ──
 DEFENSES.bear = (() => {
   const line = [
-    ["DT-L", "DT", "DL", -2.1, 0.9, "B-L", rush],
-    ["NT", "NT", "DL", 0, 0.9, "A-L", rush],
-    ["DT-R", "DT", "DL", 2.1, 0.9, "B-R", rush],
-    ["DE-R", "DE", "DL", 4.4, 0.9, "C-R", rush],
+    ["DT-L", "DT", "DL", tq(3, L), 0.9, "B-L", rush],
+    ["NT", "NT", "DL", tq(1), 0.9, "A-R", rush],
+    ["DT-R", "DT", "DL", tq(3), 0.9, "B-R", rush],
+    ["DE-R", "DE", "DL", tq(5), 0.9, "C-R", rush],
   ];
   return {
     cover3: [
       ...line,
-      ["SLB", "SLB", "LB", -4.4, 1.1, "C-L", zone("curlFlat", L)], // on the line, drops
-      ["WLB", "WLB", "LB", -1.4, 4.6, "A-R", zone("hookIn", L)],
-      ["MLB", "MLB", "LB", 1.4, 4.6, "D-R", zone("hookIn", R)],
+      ["SLB", "SLB", "LB", tq(5, L), 1.1, "C-L", zone("curlFlat", L)], // on the line, drops
+      ["WLB", "WLB", "LB", tq(2, L), 4.6, "A-L", zone("hookIn", L)],
+      ["MLB", "MLB", "LB", tq(2), 4.6, "D-R", zone("hookIn", R)],
       ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("deepThird", L)],
       ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("deepThird", R)],
       ["S-L", "FS", "S", 0, 11, "alley-L", zone("middleThird")],
@@ -844,9 +859,9 @@ DEFENSES.bear = (() => {
     // deep, the box safety on the Y.
     man: [
       ...line,
-      ["SLB", "SLB", "LB", -4.4, 1.1, "C-L", rush],
-      ["WLB", "WLB", "LB", -1.4, 4.6, "A-R", man("H")],
-      ["MLB", "MLB", "LB", 1.4, 4.6, "D-R", man("RB")],
+      ["SLB", "SLB", "LB", tq(5, L), 1.1, "C-L", rush],
+      ["WLB", "WLB", "LB", tq(2, L), 4.6, "A-L", man("H")],
+      ["MLB", "MLB", "LB", tq(2), 4.6, "D-R", man("RB")],
       ["CB-L", "CB", "CB", -17.2, 6, "alley-L", man("X")],
       ["CB-R", "CB", "CB", 17.2, 6, "alley-R", man("Z")],
       ["S-L", "FS", "S", 0, 11, "alley-L", zone("deepMiddle")],
@@ -856,9 +871,9 @@ DEFENSES.bear = (() => {
     // across with no help.
     zero: [
       ...line,
-      ["SLB", "SLB", "LB", -4.4, 1.1, "C-L", rush],
-      ["WLB", "WLB", "LB", -1.4, 4.6, "A-R", rush, { creep: [-0.8, 1.2] }],
-      ["MLB", "MLB", "LB", 1.4, 4.6, "D-R", man("RB")],
+      ["SLB", "SLB", "LB", tq(5, L), 1.1, "C-L", rush],
+      ["WLB", "WLB", "LB", tq(2, L), 4.6, "A-L", rush, { creep: [-0.8, 1.2] }],
+      ["MLB", "MLB", "LB", tq(2), 4.6, "D-R", man("RB")],
       ["CB-L", "CB", "CB", -18.6, 5, "alley-L", man("X")],
       ["CB-R", "CB", "CB", 18.6, 5, "alley-R", man("Z")],
       ["S-L", "FS", "S", -9, 9, "alley-L", man("H")],
@@ -872,16 +887,16 @@ DEFENSES.bear = (() => {
 // three men, so the inside zone has nowhere to cut back. Two edge OLBs. ──
 DEFENSES.tite = (() => {
   const line = [
-    ["DE-L", "DE", "DL", -2.5, 0.9, "B-L", rush],
+    ["DE-L", "DE", "DL", tq("4i", L), 0.9, "B-L", rush],
     ["NT", "NT", "DL", 0, 0.9, "A-L", rush],
-    ["DE-R", "DE", "DL", 2.5, 0.9, "B-R", rush],
+    ["DE-R", "DE", "DL", tq("4i"), 0.9, "B-R", rush],
   ];
   return {
     cover3: [
       ...line,
       ["OLB-L", "OLB", "LB", -5.0, 1.1, "C-L", zone("curlFlat", L)],
-      ["ILB-L", "ILB", "LB", -1.6, 4.8, "A-R", zone("hookIn", L)],
-      ["ILB-R", "ILB", "LB", 1.6, 4.8, "alley-R", zone("hookIn", R)],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", zone("hookIn", L)],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "alley-R", zone("hookIn", R)],
       ["OLB-R", "OLB", "LB", 5.0, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("deepThird", L)],
       ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("deepThird", R)],
@@ -891,8 +906,8 @@ DEFENSES.tite = (() => {
     cover4: [
       ...line,
       ["OLB-L", "OLB", "LB", -5.0, 1.1, "C-L", zone("curlFlat", L)],
-      ["ILB-L", "ILB", "LB", -1.6, 4.8, "A-R", zone("hole")],
-      ["ILB-R", "ILB", "LB", 1.6, 4.8, "force-R", zone("curlFlat", R)],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", zone("hole")],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "force-R", zone("curlFlat", R)],
       ["OLB-R", "OLB", "LB", 5.0, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("quarterOut", L)],
       ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("quarterOut", R)],
@@ -902,8 +917,8 @@ DEFENSES.tite = (() => {
     cover1robber: [
       ...line,
       ["OLB-L", "OLB", "LB", -5.0, 1.1, "C-L", man("H")],
-      ["ILB-L", "ILB", "LB", -1.6, 4.8, "A-R", man("RB")],
-      ["ILB-R", "ILB", "LB", 1.6, 4.8, "B-R", man("Y")],
+      ["ILB-L", "ILB", "LB", tq(2, L), 4.8, "A-R", man("RB")],
+      ["ILB-R", "ILB", "LB", tq(2), 4.8, "B-R", man("Y")],
       ["OLB-R", "OLB", "LB", 5.0, 1.1, "C-R", rush],
       ["CB-L", "CB", "CB", -17.2, 6, "alley-L", man("X")],
       ["CB-R", "CB", "CB", 17.2, 6, "alley-R", man("Z")],
@@ -913,8 +928,135 @@ DEFENSES.tite = (() => {
   };
 })();
 
-export function buildDefense(front, coverage) {
-  const rows = DEFENSES[front][coverage];
+// ── 4-3 Over / Under: same seven in the box, the line shifted toward or
+// away from the strength (the right, where the SAM and SS live). One
+// gap per man; the coverages are the shared 4-3 calls on top of either. ──
+function fourThreeCalls(spots) {
+  const at = (id, cover) => [id, ...spots[id], cover];
+  const line = ["DE-L", "DT-L", "DT-R", "DE-R"].map((id) => at(id, rush));
+  return {
+    cover3: [
+      ...line,
+      at("WLB", zone("hookIn", L)),
+      at("MLB", zone("hookIn", R)),
+      at("SLB", zone("curlFlat", R)),
+      ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("deepThird", L)],
+      ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("deepThird", R)],
+      ["S-L", "FS", "S", -9, 10.5, "force-L", zone("curlFlat", L)], // rolls down
+      ["S-R", "SS", "S", 9, 10.5, "alley-R", zone("middleThird")], // spins to the middle
+    ],
+    cover4: [
+      ...line,
+      at("WLB", zone("curlFlat", L)),
+      at("MLB", zone("hole")),
+      at("SLB", zone("curlFlat", R)),
+      ["CB-L", "CB", "CB", -19, 7, "alley-L", zone("quarterOut", L)],
+      ["CB-R", "CB", "CB", 19, 7, "alley-R", zone("quarterOut", R)],
+      ["S-L", "FS", "S", -9, 10, "force-L", zone("quarterIn", L)],
+      ["S-R", "SS", "S", 9, 10, "alley-R", zone("quarterIn", R)],
+    ],
+    tampa2: [
+      ...line,
+      at("WLB", zone("hook", L)),
+      at("MLB", zone("tampa")),
+      at("SLB", zone("hook", R)),
+      ["CB-L", "CB", "CB", -18.6, 1.7, "alley-L", zone("flat", L)],
+      ["CB-R", "CB", "CB", 18.6, 1.7, "alley-R", zone("flat", R)],
+      ["S-L", "FS", "S", -9, 10, "force-L", zone("deepHalf", L)],
+      ["S-R", "SS", "S", 9, 10, "alley-R", zone("deepHalf", R)],
+    ],
+    // Cover 1, SAM blitz: five rush, man across, free safety in the middle.
+    man: [
+      ...line,
+      at("WLB", man("H")),
+      at("MLB", man("RB")),
+      at("SLB", rush),
+      ["CB-L", "CB", "CB", -17.2, 6, "alley-L", man("X")],
+      ["CB-R", "CB", "CB", 17.2, 6, "alley-R", man("Z")],
+      ["S-L", "FS", "S", 0, 11, "alley-L", zone("deepMiddle")],
+      ["S-R", "SS", "S", 9, 9, "alley-R", man("Y")],
+    ],
+    cover2man: [
+      ...line,
+      at("WLB", man("H")),
+      at("MLB", man("RB")),
+      at("SLB", man("Y")),
+      ["CB-L", "CB", "CB", -18.2, 5, "alley-L", man("X")],
+      ["CB-R", "CB", "CB", 18.2, 5, "alley-R", man("Z")],
+      ["S-L", "FS", "S", -9, 11, "force-L", zone("deepHalf", L)],
+      ["S-R", "SS", "S", 9, 11, "alley-R", zone("deepHalf", R)],
+    ],
+    cover1robber: [
+      ...line,
+      at("WLB", man("H")),
+      at("MLB", man("RB")),
+      at("SLB", man("Y")),
+      ["CB-L", "CB", "CB", -17.2, 6, "alley-L", man("X")],
+      ["CB-R", "CB", "CB", 17.2, 6, "alley-R", man("Z")],
+      ["S-L", "FS", "S", 0, 12, "alley-L", zone("deepMiddle")],
+      ["S-R", "SS", "S", 3, 9, "alley-R", zone("robber")],
+    ],
+  };
+}
+
+// Over: 5 – 3 to the strength, 1 – 5 away — the 3-technique on the strong
+// guard's outside shoulder, the nose shaded weak (1). MIKE at 10 to the
+// strength, WILL at 30 to the weak side, SAM apexed outside the strong end
+// with the force.
+DEFENSES.over = fourThreeCalls({
+  "DE-L": ["DE", "DL", tq(5, L), 0.9, "C-L"],
+  "DT-L": ["DT", "DL", tq(1, L), 0.9, "A-L"],
+  "DT-R": ["DT", "DL", tq(3), 0.9, "B-R"],
+  "DE-R": ["DE", "DL", tq(5), 0.9, "C-R"],
+  SLB: ["SLB", "LB", tq(9), 4.6, "force-R"],
+  MLB: ["MLB", "LB", tq(1), 4.8, "A-R"], // 10
+  WLB: ["WLB", "LB", tq(3, L), 4.6, "B-L"], // 30
+});
+
+// Under: the line slides away from the strength — 5 and a 1 (nose shaded
+// strong) to the strength, 3 – 5 away — and the SAM walks up on the line
+// outside the strong end (five on the ball) with the force. MIKE at 30 to
+// the strength, WILL at 10 away.
+DEFENSES.under = fourThreeCalls({
+  "DE-L": ["DE", "DL", tq(5, L), 0.9, "C-L"],
+  "DT-L": ["DT", "DL", tq(3, L), 0.9, "B-L"],
+  "DT-R": ["DT", "DL", tq(1), 0.9, "A-R"],
+  "DE-R": ["DE", "DL", tq(5), 0.9, "C-R"],
+  SLB: ["SLB", "LB", tq(9), 1.1, "force-R"], // on the line
+  MLB: ["MLB", "LB", tq(3), 4.8, "B-R"], // 30
+  WLB: ["WLB", "LB", tq(1, L), 4.8, "A-L"], // 10
+});
+
+// ── Run strength: the side the defense sets its front to. The tight end's
+// side; with no tight end, the H-back's (King / Queen); with only the
+// running back in the backfield, AWAY from him (he's offset to the side he
+// protects — the run threat and the passing strength are the other way);
+// with the back straight behind (Pistol), the receiver strength; else the
+// right. Every front above is drawn with the
+// strength on the right (+x) — to the left, it's mirrored. ──
+export function runStrength(formationKey) {
+  const f = FORMATIONS[formationKey];
+  if (f.te) return Math.sign(f.te);
+  if (f.fullback) return Math.sign(f.fullback);
+  if (f.rbX) return -Math.sign(f.rbX);
+  return f.strong || 1;
+}
+
+// Mirror a defender's row: his spot, his gap / force / alley side, his zone
+// side, his name (DE-L ↔ DE-R — names say which side he's on) and, in man,
+// his man (the mirror receiver: X ↔ Z, H ↔ Y).
+const flipSide = (s) => s && s.replace(/-([LR])$/, (_, c) => (c === "L" ? "-R" : "-L"));
+const MIRROR_MAN = { X: "Z", Z: "X", H: "Y", Y: "H" };
+function mirrorRow([id, position, role, dx, dd, gap, cover, opts = {}]) {
+  const c = { ...cover };
+  if (c.side != null) c.side = -c.side;
+  if (c.type === "man" && MIRROR_MAN[c.target]) c.target = MIRROR_MAN[c.target];
+  const o = opts.creep ? { ...opts, creep: [-opts.creep[0], opts.creep[1]] } : opts;
+  return [flipSide(id), position, role, -dx, dd, flipSide(gap), c, o];
+}
+
+export function buildDefense(front, coverage, strength = 1) {
+  const rows = strength < 0 ? DEFENSES[front][coverage].map(mirrorRow) : DEFENSES[front][coverage];
   return rows.map(([id, position, role, dx, dd, gap, cover, opts = {}]) => {
     const assignment = { gap, cover: { ...cover } };
     // A defender who shows one spot and walks to another before the snap.

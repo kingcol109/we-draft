@@ -16,15 +16,16 @@
 // ──
 
 import { TUNING } from "./config.js";
-import { FIELD, LOS, CX, goalLineY, inBounds, setLOS } from "./field.js";
+import { FIELD, LOS, CX, GAPS, goalLineY, inBounds, setLOS } from "./field.js";
 import { mulberry32, clamp } from "./math.js";
 import { rollForm, formLabel } from "./variance.js";
-import { buildOffense, buildDefense, OFFENSE_PLAYS, playsideOf, coveragesFor } from "./playbook.js";
+import { buildOffense, buildDefense, OFFENSE_PLAYS, playsideOf, coveragesFor, runStrength, TECH } from "./playbook.js";
 import { freshBallKnowledge } from "./player.js";
 import { updatePerception, visibility } from "./systems/perception.js";
 import { updateBelief } from "./systems/belief.js";
 import { integrate, steer } from "./systems/movement.js";
-import { createBall, solveThrow, stepBall, predictPath } from "./systems/ball.js";
+import { createBall, solveThrow, stepBall, predictPath, catchWindow, acrossBody } from "./systems/ball.js";
+import { throwFeedback, pressureOn } from "./throwFeedback.js";
 import { updateEngagements, constrainEngaged, resolveCollisions } from "./systems/blocking.js";
 import { resolveCatch } from "./systems/catching.js";
 import { resolveTackles } from "./systems/tackling.js";
@@ -38,6 +39,10 @@ import { traitsFor, throwScatter } from "./dynasty/traits.js";
 import { updateZone, buildZoneCall } from "./ai/zoneScheme.js";
 
 const FAKE_END = 0.8; // s after the snap the play-action fake lasts
+// What "juiced" (config.juice) multiplies for the favored team in a demo.
+// A QB with no accuracy ratings (the lab's archetype): a solid starter.
+const DEFAULT_QB_ACCURACY = { acc: { short: 0.8, mid: 0.72, deep: 0.62 }, onRun: 0.65 };
+const JUICE = { strength: 1.2, block: 1.25, shed: 1.25, tackling: 1.25, reaction: 1.2, recognition: 1.2, accel: 1.06, speed: 1.04 };
 
 export class SimEngine {
   constructor(config = {}) {
@@ -78,14 +83,32 @@ export class SimEngine {
   }
 
   reset(seed) {
-    this.seed = seed ?? (Math.random() * 1e9) >>> 0;
+    // config.seed pins every rep to the same roll (Learn's demos replay
+    // identically each loop).
+    this.seed = seed ?? this.config.seed ?? (Math.random() * 1e9) >>> 0;
     this.rng = mulberry32(this.seed);
     // Where the ball is (a drive moves it; the lab plays from midfield).
     setLOS(this.config.ballOn ?? 60);
     this.lineToGain = this.config.lineToGain ?? LOS + 10;
     this.finished = false;
     this.offense = buildOffense(this.config.formation, this.config.play);
-    this.defense = buildDefense(this.config.front, this.config.coverage);
+    // The front sets to the offense's run strength (playbook.js runStrength).
+    this.strength = runStrength(this.config.formation);
+    this.defense = buildDefense(this.config.front, this.config.coverage, this.strength);
+    // Scripted run fits (Learn's demos): { [defenderId]: gap }, play-side
+    // relative — "A-play", "C-back", "force-play", "alley-back" — so a
+    // demo can set how the defense flows (everyone over the top for a
+    // cutback, everyone inside for a bounce). Overrides the call's gap.
+    if (this.config.fits) {
+      const ps = playsideOf(this.config.formation);
+      const side = (s) => s.replace("play", ps > 0 ? "R" : "L").replace("back", ps > 0 ? "L" : "R");
+      for (const d of this.defense) {
+        const f = this.config.fits[d.id];
+        if (!f) continue;
+        d.assignment.gap = side(f);
+        d.assignment.gapX = GAPS[d.assignment.gap] != null ? CX + GAPS[d.assignment.gap] : undefined;
+      }
+    }
     this.players = [...this.offense, ...this.defense];
     this.byId = Object.fromEntries(this.players.map((p) => [p.id, p]));
     // Dynasty: rostered players in the slots — their ratings, not the
@@ -93,10 +116,24 @@ export class SimEngine {
     const lineup = this.config.lineup;
     if (lineup) {
       for (const p of this.players) {
-        const rp = lineup[p.team] && lineup[p.team][p.id];
+        // (Rosters are slotted for the strength on the right; a mirrored
+        // front wears the other side's name — DE-L is the strong end then.)
+        const slot = p.team === "D" && this.strength < 0 ? p.id.replace(/-([LR])$/, (_, c) => (c === "L" ? "-R" : "-L")) : p.id;
+        const rp = lineup[p.team] && lineup[p.team][slot];
         if (!rp) continue;
         p.info = { id: rp.id, first: rp.first, last: rp.last, number: rp.number, pos: rp.pos, ovr: rp.ovr, team: lineup.teams && lineup.teams[p.team] };
         p.ratings = traitsFor(rp, p);
+      }
+    }
+    // Learn's demos are juiced toward the side of the ball being taught
+    // (config.juice "O" | "D"): that team plays a level up — stronger at
+    // the point of attack, quicker to read, surer to finish — so the demo
+    // shows the concept working, not a coin flip.
+    if (this.config.juice) {
+      for (const p of this.players) {
+        if (p.team !== this.config.juice) continue;
+        const r = (p.ratings = { ...p.ratings });
+        for (const [k, m] of Object.entries(JUICE)) r[k] = (r[k] ?? 1) * m;
       }
     }
     // Vanilla (every trait 1.0) unless rep-to-rep variance is switched on.
@@ -163,8 +200,62 @@ export class SimEngine {
     this.nextAssign = 0;
     this.zone = null;
     this.zonePreview = null;
+    this.readMade = false; // autopilot: the QB has made his read this rep
     // Play action: which way the run is faked (the boot goes the other way).
     this.fakeSide = OFFENSE_PLAYS[this.config.play].fake ? playsideOf(this.config.formation) : null;
+  }
+
+  // ── Autopilot (Learn mode's demos): nobody's at the controls, the play
+  // runs itself. `this.autopilot = { run }` — run is how the back takes it
+  // once he's pressed the play-side A gap: "read" (whatever the cleanest
+  // lane is), or forced "bang" / "bend" / "bounce" to demonstrate one.
+  // It drives the same inputs a person would — Space for the pull, the
+  // mouse as the ball carrier's intent — so nothing plays differently. ──
+  autopilotStep() {
+    const ap = this.autopilot;
+    if (!ap || this.state === "PRE_SNAP" || this.state === "PLAY_END" || this.playType !== "run") return;
+    const ps = (this.zone && this.zone.ps) || 1;
+    // The read: pull it if the end has come down the line after the back;
+    // otherwise it's a give (the default — the QB just doesn't pull).
+    // (ap.give: the demo is about the back, not the read — always hand off.)
+    if (!this.readMade && !ap.give && this.canPull() && this.zone && this.zone.readId) {
+      const e = this.byId[this.zone.readId];
+      if (ps * (e.x - e.home.x) > 0.8 || ps * e.vx > 2.4) {
+        this.readMade = true;
+        this.log(this.byId.QB, "Read: the end crashed", "pull it");
+        this.pull();
+      } else if (this.sinceSnap >= this.giveAt()) this.readMade = true;
+    }
+    const c = this.carrier();
+    if (!c || c.team !== "O" || this.meshing()) return;
+    this.input.moveAccum = 1e9; // "the mouse has moved": no auto-run, he steers by intent
+    let aim;
+    if (c.id === "QB") {
+      // Kept it: run where the end left — outside him, then up.
+      aim = c.y < LOS ? { x: CX - 7 * ps, y: LOS + 3 } : { x: c.x - 1.5 * ps, y: c.y + 12 };
+    } else {
+      // He presses his aiming point first — inside zone: the play-side A
+      // gap; outside zone: the outside leg of the tight end (or where he'd
+      // be) — then:
+      //   bang   — the aiming point is open: hit it, straight up
+      //   bend   — plant and cut back behind the flow (inside zone: the
+      //            backside A gap the defense left; outside zone: inside
+      //            the aiming point), then up
+      //   bounce — bend it flat outside the play-side tackle, then up
+      //   read   — straight up, taking the cleanest lane he sees
+      const wide = this.zone && this.zone.scheme === "outside";
+      const A = CX + (wide ? TECH[7] : GAPS["A-R"]) * ps;
+      const cut = CX + (wide ? 0.4 : -1.3) * ps; // where the bend goes
+      const off = ps * (c.x - CX); // + = play side
+      const run = ap.run || "read";
+      const decided = c.y >= LOS - (wide ? 2.2 : 1.4); // (outside zone decides at the tackle's hip, earlier)
+      if (run === "bounce" && c.y >= LOS - 2.4) aim = off < 5 ? { x: CX + 7.5 * ps, y: LOS + 0.3 } : { x: c.x + ps, y: c.y + 10 };
+      else if (!decided) aim = { x: A, y: LOS + (wide ? 2 : 4) };
+      else if (run === "bang") aim = { x: A, y: c.y + 10 };
+      else if (run === "bend") aim = ps * (c.x - cut) > 0.4 && c.y < LOS + 1.5 ? { x: cut, y: LOS + 3 } : { x: c.x - 0.3 * ps, y: c.y + 10 };
+      else aim = { x: c.x, y: c.y + 12 };
+    }
+    this.input.mouse = aim;
   }
 
   // The QB's automatic run fake on a play-action call, before he's yours.
@@ -204,6 +295,9 @@ export class SimEngine {
     if (this.state !== "PRE_SNAP") return;
     this.state = "SNAP";
     this.snapAt = this.t;
+    // A pinned seed: restart the roll at the snap, so the play doesn't
+    // depend on how long it sat pre-snap (that's frame-rate dependent).
+    if (this.config.seed != null) this.rng = mulberry32(this.seed);
     const qb = this.byId.QB;
     this.ball.state = "snap";
     this.ball.snap = { from: { x: CX, y: LOS }, to: { x: qb.x, y: qb.y }, t0: this.t };
@@ -399,7 +493,19 @@ export class SimEngine {
     // unless he throws well on the run.
     const aimX = tx;
     const aimY = ty;
-    const sd = throwScatter(qb.traits, Math.hypot(tx - qb.x, ty - qb.y), Math.hypot(qb.vx, qb.vy));
+    // (A QB with no accuracy ratings — the lab's archetype — throws like a
+    // solid starter rather than a robot.) Across the body and pressure in
+    // his face both spray it.
+    const traits = qb.traits.acc ? qb.traits : { ...qb.traits, ...DEFAULT_QB_ACCURACY };
+    const across = acrossBody(qb, tx - qb.x);
+    const press = pressureOn(this);
+    const sd =
+      throwScatter(traits, Math.hypot(tx - qb.x, ty - qb.y), Math.hypot(qb.vx, qb.vy)) *
+      (1 + 1.8 * across) *
+      (1 + 2.2 * press.k);
+    // The meter's read on the throw, frozen as it leaves his hand (what he
+    // tried to do — the aim, before any of the spray).
+    const feedback = throwFeedback(this, hold, { x: tx, y: ty });
     if (sd > 0) {
       const g = () => Math.sqrt(-2 * Math.log(Math.max(1e-9, this.rng()))) * Math.cos(2 * Math.PI * this.rng());
       tx += g() * sd;
@@ -416,6 +522,9 @@ export class SimEngine {
     b.state = "air";
     b.carrierId = null;
     qb.hasBall = false;
+    // When it comes into reach: the arc decides (ball.js catchWindow).
+    const flight = Math.hypot(tx - b.x, ty - b.y) / Math.max(1, s.speed * Math.cos(s.angle));
+    b.catchFrom = this.t + flight - catchWindow(s.u);
     this.throwInfo = { ...s, hold, at: this.t, from: { x: qb.x, y: qb.y }, aim: { x: aimX, y: aimY }, scatter: sd };
     // Pressure at the release: the closest defender to the passer.
     let near = null;
@@ -433,6 +542,8 @@ export class SimEngine {
       if (!intended || d < intended.d) intended = { id: p.id, d };
     }
     this.throwInfo.intended = intended ? intended.id : null;
+    this.throwInfo.feedback = feedback;
+    this.throwInfo.placement = null; // filled in as the ball gets to him (trackPlacement)
     // Where each eligible was headed at the release — carried forward to when
     // the ball comes down to his hands. How far the catch point is from that
     // is how good the throw was (on his path vs. he had to go get it).
@@ -544,8 +655,9 @@ export class SimEngine {
       this.nextAssign = this.t + 0.15;
     }
 
-    // 3. Decisions (and human input). Heads face with the chest unless a
-    // decision turns them this step.
+    // 3. Decisions (and human input — or the autopilot standing in for it).
+    // Heads face with the chest unless a decision turns them this step.
+    this.autopilotStep();
     const ctrl = this.controlledId();
     for (const p of this.players) p.gaze = null;
     for (const p of this.players) {
@@ -573,8 +685,36 @@ export class SimEngine {
     this.checkPlay();
   }
 
+  // ── Where the throw got to the man it was for: at the ball's closest
+  // horizontal pass by him — across him as the passer sees it (lat: + = the
+  // QB's left), its height, and ahead / behind his run. For the recap's
+  // upper-body diagram. ──
+  trackPlacement() {
+    const ti = this.throwInfo;
+    if (!ti || !ti.intended || this.ball.state !== "air") return;
+    const pl = this.placementFor(this.byId[ti.intended]);
+    if (pl.d > 4 || (ti.placement && pl.d >= ti.placement.d)) return;
+    ti.placement = pl;
+  }
+
+  placementFor(p) {
+    const b = this.ball;
+    const hs = Math.hypot(b.vx, b.vy) || 1;
+    const ux = b.vx / hs;
+    const uy = b.vy / hs;
+    const sp = Math.hypot(p.vx, p.vy);
+    return {
+      d: Math.hypot(b.x - p.x, b.y - p.y),
+      lat: (b.x - p.x) * -uy + (b.y - p.y) * ux,
+      z: b.z,
+      along: sp > 0.5 ? ((b.x - p.x) * p.vx + (b.y - p.y) * p.vy) / sp : 0,
+      who: p.id,
+    };
+  }
+
   updateBall(dt) {
     const b = this.ball;
+    this.trackPlacement();
     if (b.state === "snap") {
       const k = Math.min(1, (this.t - b.snap.t0) / TUNING.ball.snapTime);
       const qb = this.byId.QB;
@@ -645,6 +785,9 @@ export class SimEngine {
 
     if (b.state === "air") {
       const res = resolveCatch(this);
+      // Whoever actually played it (caught, dropped, picked, broke it up) —
+      // the diagram shows the ball on him, at that moment.
+      if (res && res.player && res.player.team === "O" && this.throwInfo) this.throwInfo.placement = this.placementFor(res.player);
       if (res) {
         if (res.type === "CATCH") {
           const p = res.player;

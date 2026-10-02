@@ -13,20 +13,24 @@ import { clamp } from "./math.js";
 import { FIELD, CX, LOS, OL_SPLIT, GAPS, goalLineY } from "./field.js";
 import { eyePoint, occluderHeight } from "./systems/perception.js";
 import { predictPath, throwProfile, solveThrow } from "./systems/ball.js";
-import { OFFENSE_PLAYS, ROUTES, FORMATIONS, COVERAGES, FRONTS } from "./playbook.js";
+import { OFFENSE_PLAYS, ROUTES, FORMATIONS, COVERAGES, FRONTS, TECH } from "./playbook.js";
+import { throwFeedback } from "./throwFeedback.js";
+import wordmarkSrc from "../assets/Logo2.png"; // "We-Draft.com", white with a gold outline
 
 const C = {
-  bg: "#16361b",
+  bg: "#003f7d", // the apron: deep site blue
+  stripe: "#F6A21D", // gold border just outside the sidelines
   grass: "#2f6b35",
   grassAlt: "#2b6431",
-  endzone: "#24542a",
+  endzone: "#0055A5", // site blue
   line: "rgba(255,255,255,0.88)",
   lineSoft: "rgba(255,255,255,0.55)",
   los: "#3b82f6",
   firstDown: "#facc15",
   offense: "#0055A5",
-  defense: "#F6A21D",
-  body: "#ffffff", // the head square
+  defense: "#ffffff", // defense: white bodies…
+  defenseHead: "#facc15", // …with a yellow head
+  body: "#ffffff", // the head square (offense)
   outline: "#000000",
   ball: "#8b4a1c",
 };
@@ -157,9 +161,16 @@ function drawField(ctx, cam, engine) {
     ctx.fillStyle = (y / 5) % 2 === 0 ? C.grass : C.grassAlt;
     ctx.fillRect(0, y, W, 5);
   }
-  ctx.fillStyle = C.endzone;
+  // (Dynasty / College: the home team's end zones, in its primary color.)
+  const home = engine.config.homeField;
+  ctx.fillStyle = (home && home.color) || C.endzone;
   ctx.fillRect(0, 0, W, FIELD.endZone);
   ctx.fillRect(0, goalLineY, W, FIELD.endZone);
+
+  // Gold border around the whole field, just outside the white boundary.
+  ctx.strokeStyle = C.stripe;
+  ctx.lineWidth = 0.6;
+  ctx.strokeRect(-0.55, -0.55, W + 1.1, FIELD.length + 1.1);
 
   ctx.strokeStyle = C.line;
   ctx.lineWidth = 0.22;
@@ -173,6 +184,9 @@ function drawField(ctx, cam, engine) {
     ctx.lineTo(W, y);
     ctx.stroke();
   }
+
+  drawFieldLogos(ctx, cam, y0, y1, engine.config.homeField);
+  fieldTransform(ctx, cam);
   // Hash marks and sideline ticks, every yard.
   ctx.lineWidth = 0.09;
   ctx.strokeStyle = C.lineSoft;
@@ -206,7 +220,9 @@ function drawField(ctx, cam, engine) {
     ctx.stroke();
   }
 
-  // Yard numbers (screen space so they read upright).
+  // Yard numbers, painted like a real field: each side's numbers read from
+  // their own sideline (tops toward the middle of the field). Screen space
+  // so the field transform's flip doesn't mirror them.
   screenTransform(ctx, cam);
   ctx.fillStyle = "rgba(255,255,255,0.8)";
   ctx.font = `bold ${Math.max(10, cam.scale * 1.7)}px Arial, sans-serif`;
@@ -215,10 +231,74 @@ function drawField(ctx, cam, engine) {
   for (let y = 20; y <= 100; y += 10) {
     if (y < y0 || y > y1) continue;
     const n = y <= 60 ? y - 10 : 110 - y;
-    for (const nx of [FIELD.numbersFromSideline, W - FIELD.numbersFromSideline]) {
+    for (const [nx, rot] of [[FIELD.numbersFromSideline, Math.PI / 2], [W - FIELD.numbersFromSideline, -Math.PI / 2]]) {
       const s = toScreen(cam, nx, y);
-      ctx.fillText(String(n), s.x, s.y);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(rot);
+      ctx.fillText(String(n), 0, 0);
+      ctx.restore();
     }
+  }
+}
+
+// ── Field branding: the WD at midfield and on both 25s, "We-Draft.com"
+// across both end zones. Images load lazily and the field just draws
+// without them until they're in (and always without them headless). ──
+const WD_ICON = "/wd-icon-512.png"; // public/
+const imgCache = {};
+function fieldImage(src) {
+  if (typeof Image === "undefined" || !src) return null;
+  if (!imgCache[src]) {
+    const im = new Image();
+    im.src = src;
+    imgCache[src] = im;
+  }
+  const im = imgCache[src];
+  return im.complete && im.naturalWidth ? im : null;
+}
+
+// Draw an image centered on a field point, `w` yards wide (screen space,
+// so it isn't flipped by the field transform).
+// `rot` (radians, screen clockwise) turns it to face a sideline.
+function drawOnField(ctx, cam, im, x, y, w, alpha, rot = 0) {
+  const h = (w * im.naturalHeight) / im.naturalWidth;
+  const c = toScreen(cam, x, y);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(c.x, c.y);
+  ctx.rotate(rot);
+  ctx.drawImage(im, (-w / 2) * cam.scale, (-h / 2) * cam.scale, w * cam.scale, h * cam.scale);
+  ctx.restore();
+}
+
+// The 25s, conference-logo style: between the numbers and the hashes, one
+// near each sideline on opposite 25s, each reading from its own sideline.
+const LOGO_25_IN = (FIELD.numbersFromSideline + FIELD.hashFromSideline) / 2;
+const LOGOS_25 = [
+  { y: 35, x: LOGO_25_IN, rot: Math.PI / 2 }, // own 25, left sideline: its top points to midfield
+  { y: 85, x: FIELD.width - LOGO_25_IN, rot: -Math.PI / 2 }, // opponent's 25, right sideline
+];
+
+// home: a Dynasty / College home field — { logo, wordmark, color }: the
+// team's logo at midfield, its (dark) wordmark in the end zones. The WD
+// stays on the 25s. Until an image has loaded, the We-Draft one stands in.
+function drawFieldLogos(ctx, cam, y0, y1, home) {
+  screenTransform(ctx, cam);
+  const wd = fieldImage(WD_ICON);
+  const homeLogo = home && fieldImage(home.logo);
+  if (homeLogo && y0 < 66 && y1 > 54) drawOnField(ctx, cam, homeLogo, CX, 60, 12, 0.95, Math.PI / 2);
+  if (wd) {
+    if (!homeLogo && y0 < 66 && y1 > 54) drawOnField(ctx, cam, wd, CX, 60, 11, 0.95, Math.PI / 2); // midfield, reads from the left sideline
+    for (const l of LOGOS_25) if (y0 < l.y + 4 && y1 > l.y - 4) drawOnField(ctx, cam, wd, l.x, l.y, 5, 0.9, l.rot);
+  }
+  const mark = (home && fieldImage(home.wordmark)) || fieldImage(wordmarkSrc);
+  if (mark) {
+    // As wide as fits sideline to sideline, but never taller than 7 yards
+    // (a squarer team wordmark would overflow the end zone).
+    const w = Math.min(FIELD.width - 10, (7 * mark.naturalWidth) / mark.naturalHeight);
+    if (y0 < FIELD.endZone) drawOnField(ctx, cam, mark, CX, FIELD.endZone / 2, w, 1);
+    if (y1 > goalLineY) drawOnField(ctx, cam, mark, CX, goalLineY + FIELD.endZone / 2, w, 1);
   }
 }
 
@@ -230,18 +310,22 @@ function drawPlayer(ctx, p, { selected, dim } = {}) {
   ctx.rotate(p.facing);
   if (dim) ctx.globalAlpha = 0.35;
   // Local frame: +x is forward. The broad side (width) is the front edge.
-  // Body: team color (a dynasty team's own primary color).
+  // Body: offense site blue, defense white (a dynasty team's own primary
+  // color when it has one).
   ctx.fillStyle = (p.info && p.info.team && p.info.team.color) || (p.team === "O" ? C.offense : C.defense);
   ctx.strokeStyle = selected ? "#e11d48" : C.outline;
   ctx.lineWidth = selected ? 0.12 : 0.06;
   ctx.fillRect(-B.depth / 2, -B.width / 2, B.depth, B.width);
   ctx.strokeRect(-B.depth / 2, -B.width / 2, B.depth, B.width);
-  // Chest square, centered on the broad front edge.
-  ctx.fillStyle = C.body; // head: always white
-  ctx.fillRect(B.depth / 2 - B.front / 2, -B.front / 2, B.front, B.front);
+  // Head: a square inside the body, against its front edge (it shows which
+  // way he's facing) — white on offense, yellow on defense.
+  const inset = 0.03;
+  const hx = B.depth / 2 - B.front - inset;
+  ctx.fillStyle = p.team === "O" ? C.body : C.defenseHead;
+  ctx.fillRect(hx, -B.front / 2, B.front, B.front);
   ctx.lineWidth = 0.04;
   ctx.strokeStyle = C.outline;
-  ctx.strokeRect(B.depth / 2 - B.front / 2, -B.front / 2, B.front, B.front);
+  ctx.strokeRect(hx, -B.front / 2, B.front, B.front);
   ctx.restore();
 }
 
@@ -526,12 +610,12 @@ function drawHud(ctx, cam, engine, ui, nowMs) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, 20, -Math.PI / 2, -Math.PI / 2 + pr.u * Math.PI * 2);
     ctx.stroke();
-    ctx.font = "bold 12px Arial, sans-serif";
+    ctx.font = "900 12px Arial, sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = "#fde047";
-    const th = solveThrow(engine.byId.QB, engine.input.mouse.x, engine.input.mouse.y, hold);
-    ctx.fillText(`${pr.type} ${Math.round((th.angle * 180) / Math.PI)}° · ${th.speed.toFixed(0)} yd/s`, s.x, s.y - 28);
+    ctx.fillText(pr.type.toUpperCase(), s.x, s.y - 28);
   }
+  drawThrowMeter(ctx, cam, engine, nowMs);
   // Carrier intent line.
   const ctrl = engine.byId[engine.controlledId()];
   if (ctrl && ctrl.id !== "QB" && ctrl.debug.intentPoint && engine.state !== "PRE_SNAP") {
@@ -547,7 +631,8 @@ function drawHud(ctx, cam, engine, ui, nowMs) {
     ctx.setLineDash([]);
   }
   // Speed option: the pitch key.
-  if (engine.canPitch() && engine.zone && engine.zone.optionKeyId) {
+  // (Not on autopilot — nobody's at the controls to press anything.)
+  if (!engine.autopilot && engine.canPitch() && engine.zone && engine.zone.optionKeyId) {
     const r = engine.byId[engine.zone.optionKeyId];
     const sp = toScreen(cam, r.x, r.y + 1.1);
     ctx.font = "bold 12px Arial, sans-serif";
@@ -556,7 +641,7 @@ function drawHud(ctx, cam, engine, ui, nowMs) {
     ctx.fillText("PITCH KEY — SPACE to pitch", sp.x, sp.y);
   }
   // Zone read cue.
-  if (engine.canPull() && engine.state !== "PRE_SNAP" && engine.zone && engine.zone.readId) {
+  if (!engine.autopilot && engine.canPull() && engine.state !== "PRE_SNAP" && engine.zone && engine.zone.readId) {
     const r = engine.byId[engine.zone.readId];
     const sp = toScreen(cam, r.x, r.y + 1.1);
     ctx.font = "bold 12px Arial, sans-serif";
@@ -576,41 +661,241 @@ function drawHud(ctx, cam, engine, ui, nowMs) {
   ctx.fillRect(8, 8, ctx.measureText(status).width + 16, 22);
   ctx.fillStyle = "#fff";
   ctx.fillText(status, 16, 12);
-  if (engine.state === "PRE_SNAP") {
-    const hint =
-      engine.playType === "pass"
-        ? "SPACE to snap · hold Z / X for offense / defense art · WASD move QB · mouse = eyes · hold/release click to throw"
-        : `SPACE to snap · hold Z / X for offense / defense art · mouse = RB intent (direction + distance = aggression) · A/D hard cut · W burst${
-            OFFENSE_PLAYS[engine.config.play].option
-              ? " · speed option: the QB attacks the pitch key — SPACE pitches (mouse takes the QB)"
-              : OFFENSE_PLAYS[engine.config.play].rpo
-              ? " · during the ride, click (hold/release) to pull and throw, SPACE to pull and keep — give otherwise"
-              : OFFENSE_PLAYS[engine.config.play].read
-              ? " · during the ride, SPACE pulls it (give otherwise)"
-              : ""
-          }`;
-    ctx.font = "12px Arial, sans-serif";
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(8, 34, ctx.measureText(hint).width + 16, 20);
-    ctx.fillStyle = "#e5e7eb";
-    ctx.fillText(hint, 16, 38);
+  // (The controls live in the ? Help panel, not across the field.)
+  if (engine.result) drawResult(ctx, cam, engine);
+}
+
+// ── Throw meter: pops up at the bottom of the field while a throw is held,
+// and sticks — through the ball's flight and the result — until the next
+// snap. Live feedback (sim/throwFeedback.js): type and power, who it's for,
+// placement vs. where he'll be, the window, hot ball, across the body,
+// pressure. Once the ball has got to him, a little upper-body diagram shows
+// where it arrived on him. Site-themed: blue plate, gold edge. ──
+const METER_TONE = { good: "#4ade80", ok: "#F6A21D", bad: "#f87171" };
+function drawThrowMeter(ctx, cam, engine, nowMs) {
+  const live = engine.throwCharging;
+  const ti = engine.throwInfo;
+  const fb = live ? throwFeedback(engine, engine.chargeSeconds(nowMs), engine.input.mouse) : ti && ti.feedback;
+  if (!fb) return;
+  const place = !live && ti ? ti.placement : null;
+  screenTransform(ctx, cam);
+  const w = Math.min(cam.W - 24, place ? 470 : 390);
+  const h = 96;
+  const x = cam.W / 2 - w / 2;
+  const y = cam.H - h - 16;
+  const bodyW = place ? 86 : 0;
+  ctx.save();
+  ctx.fillStyle = "#F6A21D";
+  ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
+  ctx.fillStyle = "#0055A5";
+  ctx.fillRect(x, y, w, h);
+  ctx.textBaseline = "middle";
+  const inner = w - bodyW;
+  ctx.textAlign = "left";
+  ctx.font = "italic 900 18px 'Arial Black', Arial, sans-serif";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(live ? fb.type : `${fb.type} — THROWN`, x + 12, y + 17);
+  ctx.textAlign = "right";
+  ctx.font = "900 12px Arial, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  ctx.fillText(fb.who ? `TO ${fb.who}` : "NO TARGET", x + inner - 12, y + 17);
+  // Power bar: bullet → lofted.
+  const bx = x + 12;
+  const bw = inner - 24;
+  const by = y + 32;
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.fillRect(bx, by, bw, 10);
+  ctx.fillStyle = "#F6A21D";
+  ctx.fillRect(bx, by, bw * fb.u, 10);
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+  for (const m of [0.18, 0.45, 0.75]) ctx.fillRect(bx + bw * m - 1, by - 2, 2, 14);
+  ctx.font = "800 9px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(255,255,255,0.6)";
+  [["BULLET", 0.09], ["FIRM", 0.315], ["TOUCH", 0.6], ["LOFTED", 0.875]].forEach(([t, m]) => ctx.fillText(t, bx + bw * m, by + 19));
+  // Chips, one row.
+  ctx.font = "italic 900 11px 'Arial Black', Arial, sans-serif";
+  let cx = x + 12;
+  const cy = y + h - 30;
+  for (const c of fb.chips) {
+    const cw = ctx.measureText(c.text).width + 16;
+    if (cx + cw > x + inner - 8) break; // (one row — extras are dropped rather than overflow)
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.fillRect(cx, cy, cw, 18);
+    ctx.fillStyle = METER_TONE[c.tone];
+    ctx.fillRect(cx, cy, 3, 18);
+    ctx.textAlign = "left";
+    ctx.fillText(c.text, cx + 9, cy + 9.5);
+    cx += cw + 6;
   }
-  // Result banner.
-  if (engine.result) {
-    const r = engine.result;
-    const yds = r.type === "INCOMPLETE" || r.type === "INTERCEPTION" ? "" : `  ${r.yards >= 0 ? "+" : ""}${r.yards.toFixed(1)} yd`;
-    const txt = `${r.type.replace(/_/g, " ")}${yds}`;
-    ctx.font = "bold 26px Arial, sans-serif";
-    ctx.textAlign = "center";
-    const w = ctx.measureText(txt).width;
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(cam.W / 2 - w / 2 - 20, cam.H * 0.14 - 8, w + 40, 64);
-    ctx.fillStyle = r.type === "INTERCEPTION" || r.type === "SACK" ? "#fca5a5" : "#fff";
-    ctx.fillText(txt, cam.W / 2, cam.H * 0.14);
-    ctx.font = "12px Arial, sans-serif";
-    ctx.fillStyle = "#d1d5db";
-    ctx.fillText((r.detail || "").slice(0, 110), cam.W / 2, cam.H * 0.14 + 34);
+  if (place) {
+    // His jersey: team color and number (dynasty), else site blue and 88.
+    const rp = engine.byId[place.who];
+    const info = rp && rp.info;
+    const jersey = { color: (info && info.team && info.team.color) || "#0055A5", number: info && info.number != null ? info.number : 88 };
+    drawPlacementBody(ctx, x + inner, y + 6, bodyW - 8, h - 12, place, jersey);
   }
+  ctx.restore();
+}
+
+// A receiver's upper body, front-on as the passer sees him (head, shoulders,
+// chest, the reach of his hands), with a dot where the ball got to him.
+// Field units: lat (yd, + = the passer's left), z (yd off the ground).
+function drawPlacementBody(ctx, x, y, w, h, pl, jersey) {
+  // 2.6 yd of height and ±1.1 yd of width fit the box.
+  const sc = Math.min(h / 2.6, w / 2.2);
+  const cx = x + w / 2;
+  const gy = y + h; // the ground (z = 0) at the bottom of the box
+  const P = (lat, z) => ({ x: cx - lat * sc, y: gy - z * sc });
+  const dark = "#0b1220";
+  const skin = "#c68b59";
+  const poly = (pts, fill) => {
+    ctx.beginPath();
+    pts.forEach(([lat, z], k) => {
+      const q = P(lat, z);
+      if (k) ctx.lineTo(q.x, q.y);
+      else ctx.moveTo(q.x, q.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.stroke();
+  };
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = 1;
+  // Reach: the catch window the hands can get to.
+  const r0 = P(0.75, 2.35);
+  const r1 = P(-0.75, 0.55);
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(r0.x, r0.y, r1.x - r0.x, r1.y - r0.y);
+  // Jersey, shoulder pads.
+  poly([[0.3, 1.6], [-0.3, 1.6], [-0.26, 0.85], [0.26, 0.85]], jersey.color);
+  poly([[0.47, 1.5], [0.4, 1.7], [0.16, 1.73], [-0.16, 1.73], [-0.4, 1.7], [-0.47, 1.5]], jersey.color);
+  // Number.
+  const n = P(0, 1.2);
+  ctx.font = `900 ${Math.round(0.34 * sc)}px 'Arial Black', Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 2;
+  ctx.strokeText(String(jersey.number), n.x, n.y);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(String(jersey.number), n.x, n.y);
+  ctx.lineWidth = 1;
+  // Helmet and facemask.
+  const hm = P(0, 1.9);
+  ctx.beginPath();
+  ctx.ellipse(hm.x, hm.y, 0.15 * sc, 0.17 * sc, 0, 0, Math.PI * 2);
+  ctx.fillStyle = jersey.color;
+  ctx.fill();
+  ctx.stroke();
+  const f0 = P(0.1, 1.86);
+  ctx.fillStyle = skin;
+  ctx.fillRect(f0.x, f0.y, 0.2 * sc, 0.13 * sc);
+  ctx.strokeStyle = "#e5e7eb";
+  ctx.beginPath();
+  for (const z of [1.84, 1.78]) {
+    const a = P(0.11, z);
+    const b = P(-0.11, z);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  // The ball.
+  const out = pl.d > 1.6;
+  const b = P(Math.max(-1, Math.min(1, pl.lat)), Math.max(0.15, Math.min(2.5, pl.z)));
+  ctx.fillStyle = out ? "#f87171" : "#8b4a1c";
+  ctx.strokeStyle = out ? "#7f1d1d" : "#F6A21D";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y, 6, 4, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+// ── The play result: a slanted site-blue plate with a gold edge and big
+// italic type — "GAIN OF 12", "TOUCHDOWN!", "SACKED" — whole yards only,
+// with a gold tag under it for what it means (FIRST DOWN, LOSS OF 4, OUT
+// OF BOUNDS). Pops in as the play ends. ──
+function resultCopy(engine) {
+  const r = engine.result;
+  const y = Math.round(r.yards || 0);
+  const firstDown = engine.lineToGain != null && LOS + (r.yards || 0) >= engine.lineToGain;
+  switch (r.type) {
+    case "TOUCHDOWN":
+      return { head: "TOUCHDOWN!", tag: `${y} YARDS`, big: true };
+    case "INTERCEPTION":
+      return { head: "INTERCEPTED", tag: "TURNOVER" };
+    case "INCOMPLETE":
+      return { head: "INCOMPLETE", tag: null };
+    case "SACK":
+      return { head: "SACKED", tag: y < 0 ? `LOSS OF ${-y}` : "NO GAIN" };
+    case "SAFETY":
+      return { head: "SAFETY", tag: "2 POINTS" };
+    default: {
+      const head = y > 0 ? `GAIN OF ${y}` : y < 0 ? `LOSS OF ${-y}` : "NO GAIN";
+      const tag = firstDown && y > 0 ? "FIRST DOWN" : r.type === "OUT_OF_BOUNDS" ? "OUT OF BOUNDS" : null;
+      return { head, tag };
+    }
+  }
+}
+
+function drawResult(ctx, cam, engine) {
+  screenTransform(ctx, cam);
+  const { head, tag, big } = resultCopy(engine);
+  const since = engine.endAt != null ? engine.t - engine.endAt : 1;
+  const k = clamp(since / 0.22, 0, 1);
+  const pop = 0.82 + 0.18 * (1 - Math.pow(1 - k, 3)); // ease-out pop
+  const size = Math.round(clamp(cam.W / (big ? 13 : 17), 26, big ? 64 : 48));
+  ctx.save();
+  ctx.translate(cam.W / 2, cam.H * 0.27); // (clear of the front bar)
+  ctx.scale(pop, pop);
+  ctx.globalAlpha = k;
+  ctx.font = `italic 900 ${size}px 'Arial Black', Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const tw = ctx.measureText(head).width;
+  const padX = size * 0.75;
+  const h = size * 1.45;
+  const w = tw + padX * 2;
+  const slant = h * 0.28; // parallelogram lean
+  const plate = (x0, y0, ww, hh, fill) => {
+    ctx.beginPath();
+    ctx.moveTo(x0 + slant, y0);
+    ctx.lineTo(x0 + ww + slant, y0);
+    ctx.lineTo(x0 + ww - slant, y0 + hh);
+    ctx.lineTo(x0 - slant, y0 + hh);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+  };
+  // Shadow, gold edge, then the plate.
+  plate(-w / 2 + 6, -h / 2 + 6, w, h, "rgba(0,0,0,0.35)");
+  plate(-w / 2 - 5, -h / 2 - 5, w + 10, h + 10, "#F6A21D");
+  plate(-w / 2, -h / 2, w, h, big ? "#F6A21D" : "#0055A5");
+  if (big) plate(-w / 2 + 4, -h / 2 + 4, w - 8, h - 8, "#0055A5");
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.fillText(head, 3, 4);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(head, 0, 1);
+  if (tag) {
+    const ts = Math.round(size * 0.42);
+    ctx.font = `italic 900 ${ts}px 'Arial Black', Arial, sans-serif`;
+    const tagW = ctx.measureText(tag).width + ts * 1.6;
+    const th = ts * 1.6;
+    const ty = h / 2 + 2;
+    const s2 = th * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(-tagW / 2 + s2, ty);
+    ctx.lineTo(tagW / 2 + s2, ty);
+    ctx.lineTo(tagW / 2 - s2, ty + th);
+    ctx.lineTo(-tagW / 2 - s2, ty + th);
+    ctx.closePath();
+    ctx.fillStyle = "#F6A21D";
+    ctx.fill();
+    ctx.fillStyle = "#0b2f5c";
+    ctx.fillText(tag, 0, ty + th / 2 + 1);
+  }
+  ctx.restore();
 }
 
 // ── Play art (hold Z pre-snap): the offense's assignments, drawn from the
@@ -1133,5 +1418,412 @@ export function renderFrame(ctx, maskCtx, cam, engine, ui, nowMs) {
   drawThrowVisuals(ctx, cam, engine, nowMs);
   drawPopups(ctx, cam, engine);
   if (ui.debug) drawDebugText(ctx, cam, engine, ui.selectedId);
+  // Learn mode's animated explainer for the section being read — pre-snap
+  // only; the snap clears the board for the real rep.
+  captionKicker = ui.demoKicker || "";
+  if (ui.demoFrontBar) drawFrontBar(ctx, cam, engine); // (Learn: demos and Try it)
+  if (ui.demo && engine.state === "PRE_SNAP") drawLessonDemo(ctx, cam, engine, ui.demo, ui.demoT ?? 0);
+  else if (ui.demo && ui.demoWatch) demoBanner(ctx, cam, ui.demoWatch); // the live rep: what to watch
   drawHud(ctx, cam, engine, ui, nowMs);
+}
+
+// ── Learn mode demos (src/sim/lessons.js → a section's `demo`). Each one
+// loops on a short timeline over the pre-snap field, drawn from the same
+// blocking call the line will make at the snap (previewZoneCall), so what
+// it shows is what the players are about to do. ──
+const DEMO = { covered: "#f8fafc", combo: "#fde047", climb: "#93c5fd", read: "#f472b6", track: "#86efac", ghost: "rgba(255,255,255,0.85)" };
+const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+
+// The first fraction f (0-1) of a polyline, by length — how lines "draw
+// themselves" in.
+function partial(pts, f) {
+  if (f >= 1) return pts;
+  const seg = [];
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    seg.push(d);
+    total += d;
+  }
+  let left = total * Math.max(0.001, f);
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    if (left >= seg[i - 1]) {
+      out.push(pts[i]);
+      left -= seg[i - 1];
+      continue;
+    }
+    const k = left / (seg[i - 1] || 1);
+    out.push({ x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * k, y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * k });
+    break;
+  }
+  return out.length > 1 ? out : [pts[0], pts[0]];
+}
+// The point f of the way along a polyline (a ghost runner).
+const along = (pts, f) => {
+  const q = partial(pts, f);
+  return q[q.length - 1];
+};
+
+// A label pill at a field point (screen space so the text isn't flipped).
+function demoTag(ctx, cam, x, y, text, color, alpha = 1) {
+  if (alpha <= 0) return;
+  screenTransform(ctx, cam);
+  const s = toScreen(cam, x, y);
+  ctx.globalAlpha = alpha;
+  ctx.font = "900 13px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const w = ctx.measureText(text).width + 14;
+  ctx.fillStyle = "rgba(4,12,28,0.88)";
+  ctx.fillRect(s.x - w / 2, s.y - 10, w, 20);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(s.x - w / 2 + 0.75, s.y - 9.25, w - 1.5, 18.5);
+  ctx.fillStyle = color;
+  ctx.fillText(text, s.x, s.y);
+  ctx.globalAlpha = 1;
+  fieldTransform(ctx, cam);
+}
+// The demo's narration: a broadcast-style lower third across the bottom
+// of the field — the section as a gold kicker over a big line saying what
+// this beat shows. Sized off the canvas so it reads at any width; a new
+// line slides in. Also used over the live play (the demo's `watch`).
+let captionKicker = "";
+const captionSeen = { text: "", at: 0 };
+function demoBanner(ctx, cam, text, kicker = captionKicker) {
+  screenTransform(ctx, cam);
+  const now = typeof performance !== "undefined" ? performance.now() : 0;
+  if (text !== captionSeen.text) Object.assign(captionSeen, { text, at: now });
+  const k = Math.min(1, (now - captionSeen.at) / 260); // slide-in
+  const size = Math.round(clamp(cam.W / 38, 15, 24));
+  const pad = Math.round(size * 0.7);
+  ctx.font = `900 ${size}px Arial, sans-serif`;
+  // Wrap to the field's width.
+  const maxW = cam.W - 2 * pad - 40;
+  const words = text.split(" ");
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (ctx.measureText(next).width > maxW && line) {
+      lines.push(line);
+      line = w;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  const kSize = Math.round(size * 0.55);
+  const lineH = Math.round(size * 1.25);
+  const h = pad * 2 + (kicker ? kSize + 6 : 0) + lines.length * lineH - (lineH - size);
+  const w = Math.min(cam.W - 24, Math.max(...lines.map((l) => ctx.measureText(l).width)) + pad * 2 + 8);
+  const x = 12;
+  const y = cam.H - h - 14 + (1 - k) * 18;
+  ctx.globalAlpha = k;
+  ctx.fillStyle = "rgba(4,12,28,0.88)";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#F6A21D";
+  ctx.fillRect(x, y, 6, h); // gold accent bar
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  let ty = y + pad;
+  if (kicker) {
+    ctx.font = `900 ${kSize}px Arial, sans-serif`;
+    ctx.fillStyle = "#F6A21D";
+    ctx.fillText(kicker.toUpperCase().split("").join(String.fromCharCode(8202)), x + pad + 6, ty);
+    ty += kSize + 6;
+  }
+  ctx.font = `900 ${size}px Arial, sans-serif`;
+  ctx.fillStyle = "#ffffff";
+  lines.forEach((l, i) => ctx.fillText(l, x + pad + 6, ty + i * lineH));
+  ctx.globalAlpha = 1;
+  fieldTransform(ctx, cam);
+}
+function ring(ctx, p, r, color, alpha = 1) {
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.16;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+function dot(ctx, p, color, r = 0.45) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── The front bar: across the top, the front the offense is blocking and
+// the run strength it set to. ──
+function drawFrontBar(ctx, cam, engine) {
+  screenTransform(ctx, cam);
+  const name = (FRONTS[engine.config.front] || engine.config.front).toUpperCase();
+  const str = engine.strength > 0 ? "STRENGTH ▶" : "◀ STRENGTH";
+  const size = Math.round(clamp(cam.W / 40, 14, 22));
+  ctx.textBaseline = "middle";
+  ctx.font = `italic 900 ${size}px 'Arial Black', Arial, sans-serif`;
+  const nameW = ctx.measureText(`VS. ${name}`).width;
+  ctx.font = `900 ${Math.round(size * 0.62)}px Arial, sans-serif`;
+  const strW = ctx.measureText(str).width;
+  const pad = size * 0.8;
+  const h = size * 2.3;
+  const w = pad * 3 + nameW + strW;
+  const x = cam.W / 2 - w / 2;
+  const y = 10;
+  ctx.fillStyle = "#F6A21D";
+  ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
+  ctx.fillStyle = "#0055A5";
+  ctx.fillRect(x, y, w, h);
+  ctx.textAlign = "left";
+  ctx.font = `italic 900 ${size}px 'Arial Black', Arial, sans-serif`;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(`VS. ${name}`, x + pad, y + h / 2 + 1);
+  ctx.font = `900 ${Math.round(size * 0.62)}px Arial, sans-serif`;
+  ctx.fillStyle = "#F6A21D";
+  ctx.fillText(str, x + pad * 2 + nameW, y + h / 2 + 1);
+  fieldTransform(ctx, cam);
+}
+
+// ── Defensive front demo: every front player's run fit, drawn from his
+// own assignment (playbook DEFENSES gap / force / alley) — the line's one
+// gap each, then the linebackers downhill, then force and alley. "quick"
+// draws it all at once (the live run demos). ──
+const FIT = { DL: "#f87171", LB: "#93c5fd", force: "#F6A21D", alley: "#c084fc" };
+function fitTarget(d) {
+  const g = d.assignment.gap || "";
+  const side = g.endsWith("L") ? -1 : 1;
+  if (/^[A-D]-[LR]$/.test(g)) return { x: CX + GAPS[g], y: LOS + (d.role === "DL" ? 0 : 0.5), label: `${g[0]} GAP`, color: d.role === "DL" ? FIT.DL : FIT.LB };
+  if (g.startsWith("force")) return { x: CX + side * (2 * OL_SPLIT + 2.6), y: LOS + 1.2, label: "FORCE", color: FIT.force };
+  if (g.startsWith("alley")) return { x: CX + side * (2 * OL_SPLIT + 0.8), y: LOS + 2.4, label: "ALLEY", color: FIT.alley };
+  return null;
+}
+function demoFrontFits(ctx, cam, engine, t, quick) {
+  // The front: the line, the linebackers, and any safety with a run fit.
+  const box = engine.defense.filter((d) => d.role === "DL" || d.role === "LB" || (d.role === "S" && d.y - LOS < 12));
+  const groups = [
+    box.filter((d) => d.role === "DL" || (d.role === "LB" && d.y - LOS < 2.5 && /^[A-D]-/.test(d.assignment.gap || ""))),
+    box.filter((d) => d.role === "LB" && d.y - LOS >= 2.5 && /^[A-D]-/.test(d.assignment.gap || "")),
+    box.filter((d) => /^(force|alley)/.test(d.assignment.gap || "")),
+  ];
+  const at = [1, 3.4, 5.6]; // when each group draws in
+  if (!quick)
+    demoBanner(
+      ctx, cam,
+      t < 1 ? "Every man has a gap: the front is built so the run has nowhere to go"
+        : t < 3.4 ? "Defensive line: attack your gap, one each"
+        : t < 5.6 ? "Linebackers: downhill, inside-out, so the ball bubbles outside"
+        : "Force sets the edge and turns it back inside; the alley player fills inside-out"
+    );
+  else demoBanner(ctx, cam, "Every man has a gap: line attacks, backers fill downhill, force sets the edge");
+  groups.forEach((g, gi) =>
+    g.forEach((d, i) => {
+      const f = quick ? 1 : ease((t - at[gi] - i * 0.3) / 0.6);
+      if (f <= 0) return;
+      const tg = fitTarget(d);
+      if (!tg) return;
+      artLine(ctx, partial([{ x: d.x, y: d.y }, toward({ x: d.x, y: d.y }, tg, 0.2)], f), tg.color, { arrow: f >= 1 });
+      const ly = d.role === "DL" || d.y - LOS < 2.5 ? d.y + 1.7 : d.y + 1.3;
+      demoTag(ctx, cam, d.x, ly, tg.label, tg.color, f);
+    })
+  );
+}
+
+// A demo is "name" or "name:variant" (zoneRead:crash, zoneTrack:bend). It
+// plays once before the snap — SimPage snaps when demoLength() is up — so
+// `t` is seconds since this rep's pre-snap began (ui.demoT).
+export function demoLength(demo) {
+  const name = String(demo).split(":")[0];
+  if (demo === "frontFits:quick") return 2.6;
+  return { zoneBlocking: 9, zoneRead: 4, zoneKick: 4, zoneTrack: 3.4, frontFits: 8 }[name] || 3;
+}
+
+function drawLessonDemo(ctx, cam, engine, demo, t) {
+  const call = engine.previewZoneCall();
+  if (!call) return;
+  const [name, variant] = String(demo).split(":");
+  fieldTransform(ctx, cam);
+  if (name === "zoneBlocking") demoZoneBlocking(ctx, cam, engine, call, t);
+  else if (name === "zoneRead") demoZoneRead(ctx, cam, engine, call, t, variant !== "sit");
+  else if (name === "zoneKick") demoZoneKick(ctx, cam, engine, call, t);
+  else if (name === "zoneTrack") demoZoneTrack(ctx, cam, engine, call, t, variant || "bang");
+  else if (name === "frontFits") demoFrontFits(ctx, cam, engine, t, variant === "quick");
+}
+
+// Everyone steps play side; each lineman's job draws in, play side first —
+// covered (block him), combo (two on one, one comes off to the backer),
+// uncovered (climb) — then the receivers' men and the end nobody blocks.
+function demoZoneBlocking(ctx, cam, engine, call, t) {
+  const by = engine.byId;
+  const ps = call.ps;
+  const ol = engine.offense.filter((o) => o.role === "OL").sort((a, b) => ps * (b.x - a.x));
+  const end = by[call.endId || call.readId || call.kickId];
+  // Outside zone: wider steps, the covered man reaches his man's play-side
+  // shoulder, and the helper overtakes the block so the covered man climbs.
+  const wide = call.scheme === "outside";
+  const arrow = ps > 0 ? "→" : "←";
+  demoBanner(
+    ctx, cam,
+    wide
+      ? t < 0.9 ? `Wide zone steps: everybody gets play side ${arrow}` : t < 5.2 ? "Covered: reach your man's play-side shoulder. Uncovered: help, then overtake." : t < 7 ? "Overtake: the helper takes the block over and the covered man climbs" : "The backside tackle cuts off the end; the back outruns the backside linebacker"
+      : t < 0.9 ? `Everybody steps play side ${arrow}` : t < 5.2 ? "Covered: block the man in your area. Uncovered: help the play-side teammate." : t < 7 ? "Then the helper climbs to a linebacker" : "The backside end is left unblocked"
+  );
+  // Play-side arrow behind the line.
+  const mid = { x: CX, y: LOS - 3.2 };
+  artLine(ctx, [{ x: mid.x - 2.5 * ps, y: mid.y }, { x: mid.x + 2.5 * ps, y: mid.y }], "#F6A21D");
+  demoTag(ctx, cam, mid.x, mid.y - 1.1, "PLAY SIDE", "#F6A21D");
+  ol.forEach((o, i) => {
+    const j = call.jobs[o.id];
+    const f = ease((t - 0.9 - i * 0.75) / 0.6);
+    if (f <= 0) return;
+    const step = { x: o.x + (wide ? 1.2 : 0.6) * ps, y: o.y + 0.15 };
+    if (j.kind === "climb") {
+      const lb = j.lb ? by[j.lb] : null;
+      artLine(ctx, partial([{ x: o.x, y: o.y }, step, lb ? toward(step, lb) : { x: step.x + ps, y: LOS + 4 }], f), DEMO.climb, { bar: f >= 1 && !!lb, arrow: f >= 1 && !lb });
+      demoTag(ctx, cam, o.x, o.y - 1.6, "UNCOVERED · CLIMB", DEMO.climb, f);
+      return;
+    }
+    const dl = by[j.kind === "combo" ? j.combo.dl : j.dl];
+    if (!dl) return;
+    // In a combo the play-side man is the covered one; the backside man is
+    // the uncovered lineman helping him before he climbs.
+    const helping = j.kind === "combo" && j.side === "back";
+    const color = helping ? DEMO.combo : DEMO.covered;
+    // (Reach: the block lands on his play-side shoulder.)
+    const spot = wide && !helping ? { x: dl.x + 0.45 * ps, y: dl.y } : dl;
+    artLine(ctx, partial([{ x: o.x, y: o.y }, step, toward(step, spot)], f), color, { bar: f >= 1, arrow: false });
+    const label = helping ? (wide ? "UNCOVERED · OVERTAKE" : "UNCOVERED · HELP") : wide ? "COVERED · REACH" : "COVERED";
+    demoTag(ctx, cam, o.x, o.y - (i % 2 ? 2.4 : 1.6), label, color, f);
+  });
+  // Combos: one of the pair peels off to the backer.
+  const fc = ease((t - 5.2) / 0.8);
+  if (fc > 0)
+    for (const c of call.combos) {
+      if (!c.lb) continue;
+      const dl = by[c.dl];
+      const lb = by[c.lb];
+      // Outside zone: the covered (play-side) man climbs off the overtake.
+      const from = wide ? by[c.play] : { x: dl.x, y: dl.y + 0.3 };
+      artLine(ctx, partial([{ x: from.x, y: from.y + (wide ? 0.4 : 0) }, toward(from, lb)], fc), DEMO.combo, { dash: [0.4, 0.3], bar: fc >= 1, arrow: false });
+      demoTag(ctx, cam, (dl.x + lb.x) / 2 + 1.6 * ps, (dl.y + lb.y) / 2 + 0.4, wide ? "COVERED MAN CLIMBS" : "CLIMB TO THE LB", DEMO.combo, fc);
+    }
+  // Receivers: the man lined up on them.
+  if (fc > 0)
+    for (const [wid, did] of Object.entries(call.stalk)) {
+      const w = by[wid];
+      artLine(ctx, partial([{ x: w.x, y: w.y }, toward(w, by[did], 0.7)], fc), DEMO.covered, { bar: fc >= 1, arrow: false });
+    }
+  // The end nobody blocks.
+  if (end && t > 7) {
+    ring(ctx, end, 1.1 * (0.85 + 0.25 * Math.sin(t * 6)), DEMO.read);
+    demoTag(ctx, cam, end.x, end.y + 1.9, "UNBLOCKED", DEMO.read);
+  }
+}
+
+// The read: the QB's eyes on the end. He crashes → pull it (the QB goes
+// where he left); he sits → give it.
+function demoZoneRead(ctx, cam, engine, call, t, crash) {
+  const by = engine.byId;
+  const ps = call.ps;
+  const end = by[call.readId || call.endId];
+  if (!end) return;
+  const qb = by.QB;
+  const rb = by.RB;
+  const mesh = engine.meshPoint();
+  const k = t;
+  demoBanner(ctx, cam, crash ? "He crashes down the line → PULL it" : "He sits and waits for the QB → GIVE it");
+  // The QB's eyes stay on him.
+  artLine(ctx, [{ x: qb.x, y: qb.y }, toward(qb, end, 1.2)], DEMO.read, { dash: [0.3, 0.3], arrow: false });
+  ring(ctx, end, 1.1, DEMO.read, 0.9);
+  demoTag(ctx, cam, end.x, end.y + 1.9, "THE READ", DEMO.read);
+  const fe = ease((k - 0.4) / 1.4);
+  if (crash) {
+    // He chases the back's track…
+    const path = [{ x: end.x, y: end.y }, { x: end.x + 1.2 * ps, y: LOS - 0.6 }, { x: mesh.x + 1.6 * ps, y: mesh.y + 1.2 }];
+    artLine(ctx, partial(path, fe), "#f87171", { arrow: fe >= 1 });
+    if (fe > 0) dot(ctx, along(path, fe), "rgba(248,113,113,0.85)");
+    // …so the QB keeps it and runs where he was.
+    const fq = ease((k - 2) / 1.3);
+    const qpath = [{ x: qb.x, y: qb.y }, { x: qb.x - 2.2 * ps, y: qb.y + 1.2 }, { x: end.x - 0.6 * ps, y: LOS + 3 }];
+    if (fq > 0) {
+      artLine(ctx, partial(qpath, fq), DEMO.track, { arrow: fq >= 1 });
+      dot(ctx, along(qpath, fq), DEMO.ghost, 0.4);
+      demoTag(ctx, cam, end.x - 0.6 * ps, LOS + 4.4, "QB KEEPS", DEMO.track, fq);
+    }
+  } else {
+    // He sits on the QB…
+    const path = [{ x: end.x, y: end.y }, { x: end.x + 0.3 * ps, y: LOS - 0.4 }];
+    artLine(ctx, partial(path, fe), "#f87171", { arrow: false });
+    if (fe > 0) dot(ctx, along(path, fe), "rgba(248,113,113,0.85)");
+    // …so it's a give.
+    const fr = ease((k - 1.6) / 1.6);
+    const rpath = [{ x: rb.x, y: rb.y }, mesh, { x: CX + GAPS["A-R"] * ps, y: LOS - 0.3 }, { x: CX + GAPS["A-R"] * ps, y: LOS + 4 }];
+    if (fr > 0) {
+      artLine(ctx, partial(rpath, fr), DEMO.track, { arrow: fr >= 1 });
+      dot(ctx, along(rpath, fr), DEMO.ghost, 0.4);
+      demoTag(ctx, cam, CX + 1.2 * ps, LOS + 5.2, "HAND IT OFF", DEMO.track, fr);
+    }
+  }
+}
+
+// Split zone: no read — the H comes across the formation, behind the
+// line, and kicks the end out.
+function demoZoneKick(ctx, cam, engine, call, t) {
+  const by = engine.byId;
+  const k = by[call.kickId || call.endId];
+  const h = by.H;
+  if (!k || !h) return;
+  demoBanner(ctx, cam, "Or don't read him: the H comes across and kicks him out");
+  ring(ctx, k, 1.1, DEMO.read, 0.9);
+  demoTag(ctx, cam, k.x, k.y + 1.9, "BACKSIDE END", DEMO.read);
+  const side = Math.sign(k.x - CX) || 1;
+  const via = Math.sign(h.x - CX) === side ? [] : [{ x: CX + side * (2 * OL_SPLIT + 0.2), y: LOS - 1.8 }];
+  const path = [{ x: h.x, y: h.y }, ...via, toward({ x: k.x - side * 0.4, y: LOS - 1 }, k, 0.5)];
+  const f = ease((t - 0.4) / 2);
+  artLine(ctx, partial(path, f), DEMO.covered, { bar: f >= 1, arrow: false });
+  if (f > 0 && f < 1) dot(ctx, along(path, f), DEMO.ghost, 0.4);
+  demoTag(ctx, cam, h.x, h.y - 1.6, "H · KICK OUT", DEMO.covered, Math.min(1, f * 3));
+}
+
+// The back: press the play-side A gap, then take what's there — bang it,
+// bend it back, or bounce it. `branch` is the one this rep shows (the
+// other two stay faint); the ghost runs it.
+function demoZoneTrack(ctx, cam, engine, call, t, branch) {
+  const by = engine.byId;
+  const ps = call.ps;
+  const rb = by.RB;
+  const mesh = engine.meshPoint();
+  // Inside zone aims at the play-side A gap; outside zone at the outside
+  // leg of the tight end (a ghost one with no TE) — and doesn't bounce.
+  const wide = call.scheme === "outside";
+  const A = { x: CX + (wide ? TECH[7] : GAPS["A-R"]) * ps, y: LOS - 0.5 };
+  const press = [{ x: rb.x, y: rb.y }, mesh, A];
+  const branches = wide
+    ? [
+        { name: "BANG", why: "the aiming point is open, hit it", pts: [A, { x: A.x + 0.1 * ps, y: LOS + 2.5 }, { x: A.x + 0.2 * ps, y: LOS + 7 }] },
+        { name: "BEND", why: "the defense overflows, cut it back inside", pts: [A, { x: CX + 2.2 * ps, y: LOS + 1 }, { x: CX + 1.2 * ps, y: LOS + 6.5 }] },
+      ]
+    : [
+        { name: "BANG", why: "the A gap opens, hit it", pts: [A, { x: A.x + 0.2 * ps, y: LOS + 2.5 }, { x: A.x + 0.3 * ps, y: LOS + 7 }] },
+        { name: "BEND", why: "the defense overflows, cut it back", pts: [A, { x: CX - 0.9 * ps, y: LOS + 1 }, { x: CX - 1.4 * ps, y: LOS + 6.5 }] },
+        { name: "BOUNCE", why: "everything inside is closed, take it outside", pts: [A, { x: A.x + 1.6 * ps, y: LOS - 0.3 }, { x: CX + 6.5 * ps, y: LOS + 5.5 }] },
+      ];
+  const which = Math.max(0, branches.findIndex((br) => br.name === branch.toUpperCase()));
+  const k = t;
+  const b = branches[which];
+  demoBanner(ctx, cam, k < 1.2 ? (wide ? "Press the outside leg of the tight end" : "Press the play-side A gap") : `${b.name}: ${b.why}`);
+  ring(ctx, A, 0.8 + 0.12 * Math.sin(t * 6), DEMO.track);
+  demoTag(ctx, cam, A.x + (wide ? 3.2 : 2.6) * ps, A.y - 1.2, wide ? "AIM: OUTSIDE LEG OF THE TE" : "AIM: PLAY-SIDE A GAP", DEMO.track);
+  artLine(ctx, press, DEMO.track, { arrow: false });
+  // Every option faint; the one being shown bright.
+  branches.forEach((br, i) => {
+    ctx.globalAlpha = i === which ? 1 : 0.28;
+    artLine(ctx, br.pts, i === which ? "#F6A21D" : DEMO.track, { dash: i === which ? null : [0.35, 0.3] });
+    ctx.globalAlpha = 1;
+    const end = br.pts[br.pts.length - 1];
+    demoTag(ctx, cam, end.x, end.y + 1.2, br.name, i === which ? "#F6A21D" : DEMO.track, i === which ? 1 : 0.45);
+  });
+  // The ghost back: press for 1.2s, then the option.
+  const g = k < 1.2 ? along(press, ease(k / 1.2)) : along(b.pts, ease((k - 1.2) / 1.4));
+  dot(ctx, g, DEMO.ghost, 0.5);
 }

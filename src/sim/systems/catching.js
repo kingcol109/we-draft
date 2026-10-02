@@ -47,6 +47,9 @@ export function resolveCatch(world) {
   if (b.state !== "air") return null;
   const C = TUNING.catch;
   if (b.z > C.maxHeight || b.z < C.minHeight) return null;
+  // A touch / lofted ball isn't catchable until it comes down where it was
+  // thrown (ball.js catchWindow) — it's over everyone's heads till then.
+  if (b.catchFrom != null && world.t < b.catchFrom) return null;
 
   const cands = [];
   for (const p of world.players) {

@@ -1,9 +1,10 @@
 // src/components/DynastyHub.js
 // ── Dynasty mode's front office (/sim): pick your franchise, browse any
 // team's 53-man roster and depth chart, open a player's full ratings, pick
-// an opponent and go play a drive. Rosters are the league defaults
-// (src/sim/dynasty/defaultRosters.json); team branding comes from the
-// Firestore `nfl` collection. ──
+// an opponent and go play a drive. NFL: rosters are the league defaults
+// (src/sim/dynasty/defaultRosters.json), branding the Firestore `nfl`
+// collection. College: the Power 4 + Notre Dame from `schools`, rosters
+// generated the same way. Everything is themed in the team's own colors. ──
 
 import { useMemo, useState } from "react";
 import { ATTR_LABELS, ATTR_SHORT, POSITION_ATTRS, POSITION_ORDER, heightLabel } from "../sim/dynasty/attributes";
@@ -19,7 +20,31 @@ function logoUrl(b) {
   const t = u.trim();
   return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
-const teamName = (abbr, b) => (b ? `${b.City} ${b.Team}` : abbr);
+// NFL docs have City + Team; schools have School (+ Mascot).
+const teamName = (abbr, b) => (!b ? abbr : b.City ? `${b.City} ${b.Team}` : `${b.School}${b.Mascot ? ` ${b.Mascot}` : ""}`);
+const shortName = (abbr, b) => (b && (b.Abbreviation || b.Short)) || (b && b.School) || abbr;
+const groupOf = (b) => [b.Conference, b.Division].filter(Boolean).join(" ") || "League";
+// A team id is everything before the last "-NN" (college slugs have dashes).
+const teamOf = (playerId) => playerId.slice(0, playerId.lastIndexOf("-"));
+
+// ── Team theme: the team's primary color for fills, and whichever of its
+// two colors reads on the dark menus for text and highlights. ──
+function luminance(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return 0;
+  const n = parseInt(m[1], 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+export function teamTheme(b) {
+  const c1 = (b && b.Color1) || "#0055A5";
+  const c2 = (b && b.Color2) || ORANGE;
+  const accent = luminance(c1) > 0.12 ? c1 : luminance(c2) > 0.12 ? c2 : "#e2e8f0";
+  return { c1, c2, accent, onC1: luminance(c1) > 0.45 ? "#0b1224" : "#ffffff" };
+}
 
 // Rating colors: elite → poor.
 export function ratingColor(v) {
@@ -58,21 +83,22 @@ const tabBtn = (active, color = ORANGE) => ({
 function TeamPicker({ league, branding, onPick, current }) {
   const groups = {};
   for (const abbr of Object.keys(league.teams)) {
-    const b = branding[abbr] || {};
-    const key = `${b.Conference || ""} ${b.Division || ""}`.trim() || "League";
+    const key = groupOf(branding[abbr] || {});
     (groups[key] = groups[key] || []).push(abbr);
   }
   const keys = Object.keys(groups).sort();
   return (
     <div>
-      <div style={{ fontWeight: 900, fontSize: 20, color: ORANGE, letterSpacing: "0.04em" }}>CHOOSE YOUR FRANCHISE</div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>Every team has a generated 53-man roster. OFF / DEF are the starters' average overall.</div>
+      <div style={{ fontWeight: 900, fontSize: 20, color: ORANGE, letterSpacing: "0.04em" }}>{league.college ? "CHOOSE YOUR PROGRAM" : "CHOOSE YOUR FRANCHISE"}</div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+        {league.college ? "The ACC, Big Ten, Big 12, SEC and Notre Dame. Every program has a generated roster." : "Every team has a generated 53-man roster."} OFF / DEF are the starters' average overall.
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 12, marginTop: 12 }}>
         {keys.map((k) => (
           <div key={k}>
             <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", color: "#94a3b8", marginBottom: 5 }}>{k.toUpperCase()}</div>
             <div style={{ display: "grid", gap: 6 }}>
-              {groups[k].sort().map((abbr) => {
+              {groups[k].sort((x, y) => teamName(x, branding[x]).localeCompare(teamName(y, branding[y]))).map((abbr) => {
                 const b = branding[abbr];
                 const r = teamRatings(league.teams[abbr]);
                 return (
@@ -81,8 +107,9 @@ function TeamPicker({ league, branding, onPick, current }) {
                     onClick={() => onPick(abbr)}
                     style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
-                      background: PANEL, color: "#e2e8f0", textAlign: "left",
-                      border: `1px solid ${abbr === current ? ORANGE : LINE}`, borderLeft: `4px solid ${(b && b.Color1) || "#475569"}`,
+                      color: "#e2e8f0", textAlign: "left",
+                      border: `1px solid ${abbr === current ? teamTheme(b).accent : LINE}`, borderLeft: `4px solid ${(b && b.Color1) || "#475569"}`,
+                      background: abbr === current ? `${teamTheme(b).c1}33` : PANEL,
                     }}
                   >
                     <Logo b={b} size={30} />
@@ -103,7 +130,7 @@ function TeamPicker({ league, branding, onPick, current }) {
 }
 
 // ── One player's full card. ──
-function PlayerCard({ p, b, onClose }) {
+function PlayerCard({ p, b, college, onClose }) {
   const attrs = POSITION_ATTRS[p.pos];
   return (
     <div
@@ -114,9 +141,9 @@ function PlayerCard({ p, b, onClose }) {
         onClick={(e) => e.stopPropagation()}
         style={{ width: "min(560px, 100%)", maxHeight: "100%", overflowY: "auto", background: "#0b1224", border: `1px solid ${LINE}`, borderRadius: 10 }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: (b && b.Color1) || "#1e293b" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: (b && b.Color1) || "#1e293b", borderBottom: `3px solid ${(b && b.Color2) || ORANGE}` }}>
           <Logo b={b} size={40} />
-          <div style={{ flex: 1, color: "#fff" }}>
+          <div style={{ flex: 1, color: teamTheme(b).onC1 }}>
             <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>#{p.number} · {p.pos}</div>
             <div style={{ fontSize: 20, fontWeight: 900 }}>{fullName(p)}</div>
           </div>
@@ -126,7 +153,11 @@ function PlayerCard({ p, b, onClose }) {
           <span>Height <b>{heightLabel(p.height)}</b></span>
           <span>Weight <b>{p.weight}</b></span>
           <span>Age <b>{p.age}</b></span>
-          <span>Exp <b>{p.exp === 0 ? "Rookie" : `${p.exp} yr`}</b></span>
+          {college ? (
+            <span>Class <b>{["Fr", "So", "Jr", "Sr", "Gr"][Math.min(4, p.exp)]}</b></span>
+          ) : (
+            <span>Exp <b>{p.exp === 0 ? "Rookie" : `${p.exp} yr`}</b></span>
+          )}
           <span>Depth <b>{p.pos}{p.depth}</b></span>
         </div>
         <div style={{ padding: "10px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px" }}>
@@ -151,7 +182,7 @@ function PlayerCard({ p, b, onClose }) {
 }
 
 // ── Roster table, filtered by position. ──
-function RosterTable({ team, onOpen }) {
+function RosterTable({ team, onOpen, accent = ORANGE }) {
   const [pos, setPos] = useState("QB");
   const players = team.players.filter((p) => p.pos === pos).sort((a, b) => a.depth - b.depth);
   const attrs = POSITION_ATTRS[pos];
@@ -161,7 +192,7 @@ function RosterTable({ team, onOpen }) {
     <div>
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
         {POSITION_ORDER.map((k) => (
-          <button key={k} onClick={() => setPos(k)} style={{ ...tabBtn(k === pos), padding: "4px 9px" }}>
+          <button key={k} onClick={() => setPos(k)} style={{ ...tabBtn(k === pos, accent), padding: "4px 9px" }}>
             {k} <span style={{ opacity: 0.6, fontWeight: 700 }}>{team.players.filter((p) => p.pos === k).length}</span>
           </button>
         ))}
@@ -205,7 +236,7 @@ function RosterTable({ team, onOpen }) {
 }
 
 // ── Who's on the field: the sim's slots for this team. ──
-function DepthChart({ team, onOpen }) {
+function DepthChart({ team, onOpen, accent = ORANGE }) {
   const off = offenseLineup(team);
   const def43 = defenseLineup(team, "4-3");
   const def34 = defenseLineup(team, "3-4");
@@ -224,7 +255,7 @@ function DepthChart({ team, onOpen }) {
   );
   const col = (title, map) => (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", color: ORANGE, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", color: accent, marginBottom: 6 }}>{title}</div>
       <div style={{ display: "grid", gap: 4 }}>
         {Object.entries(map).map(([slot, p]) => <Slot key={slot} slot={slot} p={p} />)}
       </div>
@@ -279,10 +310,17 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
   const shown = viewing || team;
   const b = branding[shown];
   const opp = branding[opponent];
+  // The menus wear the colors of the team on screen.
+  const th = teamTheme(b);
   const oppOptions = useMemo(() => Object.keys(league.teams).filter((k) => k !== team).sort(), [league, team]);
 
   return (
-    <div style={{ position: "absolute", inset: 0, background: "rgba(2,6,23,0.96)", borderRadius: 6, padding: "14px 16px", overflowY: "auto", zIndex: 5 }}>
+    <div
+      style={{
+        position: "absolute", inset: 0, borderRadius: 6, padding: "14px 16px", overflowY: "auto", zIndex: 5,
+        background: team && !changing ? `linear-gradient(180deg, ${th.c1}40 0px, rgba(2,6,23,0.97) 260px), rgba(2,6,23,0.97)` : "rgba(2,6,23,0.96)",
+      }}
+    >
       {changing || !team ? (
         <>
           <TeamPicker
@@ -304,11 +342,11 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
       ) : (
         <>
           {/* Franchise header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, background: `linear-gradient(90deg, ${(b && b.Color1) || "#1e293b"}, ${(b && b.Color2) || "#0f172a"})` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, background: `linear-gradient(90deg, ${th.c1}, ${th.c1} 60%, ${th.c2})`, borderBottom: `4px solid ${th.c2}` }}>
             <Logo b={b} size={52} />
-            <div style={{ flex: 1, minWidth: 180, color: "#fff" }}>
+            <div style={{ flex: 1, minWidth: 180, color: th.onC1 }}>
               <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", opacity: 0.85 }}>
-                {viewing ? "VIEWING" : "YOUR FRANCHISE"}{b && b.Conference ? ` · ${b.Conference} ${b.Division}` : ""}
+                {viewing ? "VIEWING" : league.college ? "YOUR PROGRAM" : "YOUR FRANCHISE"}{b && b.Conference ? ` · ${groupOf(b)}` : ""}
               </div>
               <div style={{ fontSize: 22, fontWeight: 900 }}>{teamName(shown, b)}</div>
               {b && b.HeadCoach && <div style={{ fontSize: 11, opacity: 0.85 }}>HC {b.HeadCoach}</div>}
@@ -316,7 +354,7 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
             {(() => {
               const r = teamRatings(league.teams[shown]);
               return (
-                <div style={{ display: "flex", gap: 8, alignItems: "center", color: "#fff", fontSize: 11, fontWeight: 900 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", color: th.onC1, fontSize: 11, fontWeight: 900 }}>
                   <span>OFF <Ovr v={r.off} /></span>
                   <span>DEF <Ovr v={r.def} /></span>
                   <span>OVR <Ovr v={r.ovr} /></span>
@@ -327,8 +365,8 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
 
           {/* Matchup + actions */}
           {!viewing && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10, padding: "8px 10px", background: PANEL, border: `1px solid ${LINE}`, borderRadius: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 900, color: "#94a3b8", letterSpacing: "0.06em" }}>OPPONENT</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10, padding: "8px 10px", background: PANEL, border: `1px solid ${th.c1}`, borderRadius: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: th.accent, letterSpacing: "0.06em" }}>OPPONENT</span>
               <Logo b={opp} size={24} />
               <select
                 value={opponent || ""}
@@ -340,14 +378,14 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
                 ))}
               </select>
               <div style={{ flex: 1 }} />
-              <button onClick={() => setChanging(true)} style={tabBtn(false)}>Change team</button>
+              <button onClick={() => setChanging(true)} style={tabBtn(false)}>{league.college ? "Change program" : "Change team"}</button>
               {onClose && <button onClick={onClose} style={tabBtn(false)}>Back to drive</button>}
               <button
                 onClick={onPlay}
                 disabled={!opponent}
-                style={{ background: ORANGE, color: "#0b1224", border: "none", borderRadius: 6, padding: "8px 16px", fontWeight: 900, fontSize: 13, cursor: "pointer", letterSpacing: "0.04em" }}
+                style={{ background: th.c1, color: th.onC1, border: `2px solid ${th.c2}`, borderRadius: 6, padding: "8px 16px", fontWeight: 900, fontSize: 13, cursor: "pointer", letterSpacing: "0.04em" }}
               >
-                ▶ PLAY A DRIVE vs {opponent}
+                ▶ PLAY A DRIVE vs {shortName(opponent, opp)}
               </button>
             </div>
           )}
@@ -359,12 +397,12 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
 
           <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
             {[["roster", "Roster"], ["depth", "Depth chart"], ["league", "League"]].map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} style={tabBtn(tab === k)}>{l}</button>
+              <button key={k} onClick={() => setTab(k)} style={tabBtn(tab === k, th.accent)}>{l}</button>
             ))}
           </div>
           <div style={{ marginTop: 12 }}>
-            {tab === "roster" && <RosterTable key={shown} team={league.teams[shown]} onOpen={setCard} />}
-            {tab === "depth" && <DepthChart team={league.teams[shown]} onOpen={setCard} />}
+            {tab === "roster" && <RosterTable key={shown} team={league.teams[shown]} onOpen={setCard} accent={th.accent} />}
+            {tab === "depth" && <DepthChart team={league.teams[shown]} onOpen={setCard} accent={th.accent} />}
             {tab === "league" && (
               <LeagueTable
                 league={league}
@@ -378,7 +416,7 @@ export default function DynastyHub({ league, branding, team, opponent, onPickTea
           </div>
         </>
       )}
-      {card && <PlayerCard p={card} b={branding[card.id.split("-")[0]]} onClose={() => setCard(null)} />}
+      {card && <PlayerCard p={card} b={branding[teamOf(card.id)]} college={league.college} onClose={() => setCard(null)} />}
     </div>
   );
 }

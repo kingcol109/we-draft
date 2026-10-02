@@ -164,7 +164,10 @@ export function carrierControl(p, world, input) {
   const intensity = 1 - Math.exp(-d / 6);
   const speed = ph.top * (0.18 + 0.82 * Math.pow(intensity, 1.4));
 
-  const best = bestLane(p, world, intentDir, 42);
+  // (A scripted autopilot run — Learn's bang / bend / bounce — holds its
+  // line: it's demonstrating that track, not looking for a better one.)
+  const scripted = world.autopilot && world.autopilot.run && world.autopilot.run !== "read";
+  const best = bestLane(p, world, intentDir, scripted ? 12 : 42);
   p.desired = { dir: best.dir, speed, face: null };
   const bend = best.bend;
   p.intent = {

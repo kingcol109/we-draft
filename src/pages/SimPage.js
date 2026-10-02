@@ -1,8 +1,9 @@
 // src/pages/SimPage.js
-// ── /sim — Football Simulation Lab (admin-only prototype, V2).
+// ── /sim — Football Simulation Lab (admin + beta-tester prototype, V2).
 //
-// Routed behind AdminRoute (App.js), reached only from the Admin panel's
-// "Football Sim" section, noindexed here and disallowed in robots.txt.
+// Routed behind SimRoute (App.js): admins, reached from the Admin panel's
+// "Football Sim" section, and users granted simBeta, reached from their
+// profile. Noindexed here and disallowed in robots.txt.
 // Runs entirely in the browser. Nothing is written to Firestore; Dynasty
 // mode reads team branding from the `nfl` collection (rosters are the
 // bundled league defaults, src/sim/dynasty/defaultRosters.json).
@@ -17,26 +18,46 @@ import { Helmet } from "react-helmet-async";
 import { SimEngine } from "../sim/engine";
 import { OFFENSE_PLAYS, COVERAGES, FORMATIONS, FRONTS, coveragesFor } from "../sim/playbook";
 import { TUNING } from "../sim/config";
-import { createCamera, updateCamera, renderFrame, toField } from "../sim/render";
+import { createCamera, updateCamera, renderFrame, toField, demoLength } from "../sim/render";
 import { newDrive, applyResult, downLabel, spotLabel, driveSummary } from "../sim/drive";
 import SimPlayCall from "../components/SimPlayCall";
 import { buildRecap } from "../sim/recap";
 import DynastyHub from "../components/DynastyHub";
+import SimHelp from "../components/SimHelp";
+import { LessonList, LessonArticle } from "../components/SimLearn";
+import { LESSONS } from "../sim/lessons";
 import { offenseLineup, defenseLineup } from "../sim/dynasty/lineup";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { generateLeague, namePools } from "../sim/dynasty/generate";
 import { db } from "../firebase";
+import { useAuth } from "../context/AuthContext";
 
 const DYNASTY_KEY = "simDynasty"; // this browser's franchise + opponent pick
-function loadDynastyPick() {
+const COLLEGE_KEY = "simCollege"; // …and in College mode
+// College mode: the Power 4 conferences (as the schools collection names
+// them) and Notre Dame (an independent).
+const COLLEGE_CONFERENCES = ["ACC", "Big 10", "Big 12", "SEC"];
+const COLLEGE_SEED = 2027;
+// A logo / wordmark field as a usable URL (some are stored without https://).
+const assetUrl = (u) => {
+  const t = String(u || "").trim();
+  return !t ? "" : /^https?:\/\//i.test(t) ? t : `https://${t}`;
+};
+// The home team's field: its logo at midfield, its end zones in its primary
+// color with its dark wordmark (render.js drawField).
+const homeFieldOf = (b) => (b ? { logo: assetUrl(b.Logo1 || b.Logo2), wordmark: assetUrl(b.WordmarkDark || b.Wordmark), color: b.Color1 || null } : undefined);
+const HELP_SEEN_KEY = "simHelpSeen"; // help overlay already shown once here
+const LEARN_SPOT = 85; // Learn mode snaps from the far 25 (absolute field y: opponent's goal line is 110)
+function loadDynastyPick(key = DYNASTY_KEY) {
   try {
-    return JSON.parse(localStorage.getItem(DYNASTY_KEY)) || {};
+    return JSON.parse(localStorage.getItem(key)) || {};
   } catch {
     return {};
   }
 }
-function saveDynastyPick(v) {
+function saveDynastyPick(v, key = DYNASTY_KEY) {
   try {
-    localStorage.setItem(DYNASTY_KEY, JSON.stringify(v));
+    localStorage.setItem(key, JSON.stringify(v));
   } catch {
     /* private mode etc. - the pick just isn't remembered */
   }
@@ -82,6 +103,8 @@ function Bar({ value, color }) {
 }
 
 export default function SimPage() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const maskRef = useRef(null);
@@ -104,10 +127,37 @@ export default function SimPage() {
   const [dyn, setDyn] = useState(null);
   const [hubOpen, setHubOpen] = useState(false);
   const [dynError, setDynError] = useState(null);
+  // Learn: a lesson per concept (src/sim/lessons.js) beside the live field.
+  // lessonActive = the demo / scenario on the field ("d:2:0", "s:3:1").
+  const [lessonId, setLessonId] = useState(null);
+  const [lessonActive, setLessonActive] = useState(null);
+  const demoRun = useRef(0); // bumped on every ▶ — restarts the demo's clock
+  const demoRotate = useRef(null); // { list, i } (a rotating demo) or { next } (Try it) — a new setup each rep
+  // Learn's "Try it": the field is playable — the lesson's plays and the
+  // fronts, each picked or rotating rep to rep.
+  const [tryOn, setTryOn] = useState(false);
+  const [trySel, setTrySel] = useState({ play: "rotate", front: "rotate" });
+  const tryRef = useRef(false);
+  tryRef.current = tryOn;
+  const trySelRef = useRef(trySel);
+  const tryAt = useRef({ p: 0, f: 0 }); // where each rotation is
+  const lessonIdRef = useRef(null);
+  lessonIdRef.current = lessonId;
+  const applySetupRef = useRef(null);
   const dynRef = useRef(dyn);
   dynRef.current = dyn;
   const hubRef = useRef(hubOpen);
   hubRef.current = hubOpen;
+  // "? Help" overlay — opens on its own the first time this browser visits.
+  const [helpOpen, setHelpOpen] = useState(() => {
+    try { return !localStorage.getItem(HELP_SEEN_KEY); } catch { return false; }
+  });
+  const closeHelp = useCallback(() => {
+    setHelpOpen(false);
+    try { localStorage.setItem(HELP_SEEN_KEY, "1"); } catch { /* storage blocked */ }
+  }, []);
+  const helpRef = useRef(helpOpen);
+  helpRef.current = helpOpen;
   const modeRef = useRef(mode);
   const driveRef = useRef(drive);
   const pickingRef = useRef(picking);
@@ -125,7 +175,8 @@ export default function SimPage() {
     engineRef.current.setConfig(config);
   }, [config]);
   useEffect(() => {
-    engineRef.current.autoReset = mode === "lab" && ui.autoReset;
+    // (Learn always resets — its demos loop.)
+    engineRef.current.autoReset = mode === "learn" || (mode === "lab" && ui.autoReset);
     camRef.current.zoom = ui.zoom;
   }, [ui.autoReset, ui.zoom, mode]);
 
@@ -176,29 +227,148 @@ export default function SimPage() {
   };
   const exitDrive = () => {
     setMode("lab");
+    setLessonId(null);
+    setTryOn(false);
+    setLessonActive(null);
+    update({ demo: null, speed: 1, demoFrontBar: false });
+    engineRef.current.autopilot = null;
+    demoRotate.current = null;
     setDrive(null);
     setPicking(false);
     setRecap(null);
     setHubOpen(false);
     engineRef.current.onFinished = null;
-    setConfig((c) => ({ ...c, ballOn: undefined, lineToGain: undefined, variance: labVariance.current, lineup: undefined }));
+    setConfig((c) => ({ ...c, ballOn: undefined, lineToGain: undefined, variance: labVariance.current, lineup: undefined, seed: undefined, fits: undefined, juice: undefined, homeField: undefined }));
     camRef.current.y = 68;
+  };
+
+  // ── Learn: a concept's lesson (src/sim/lessons.js). Every field change
+  // goes through applySetup — a fresh config object, so the play rebuilds
+  // back to pre-snap even when nothing in it changed (a "Show me" mid-rep
+  // tees it back up). Variance stays off so a rep plays the same way twice. ──
+  const applySetup = (setup) => {
+    setConfig((c) => {
+      const next = { ...c, ballOn: LEARN_SPOT, lineToGain: undefined, lineup: undefined, variance: false, seed: undefined, fits: undefined, juice: undefined, ...setup };
+      if (!OFFENSE_PLAYS[next.play].formations.includes(next.formation)) next.formation = OFFENSE_PLAYS[next.play].formations[0];
+      const calls = coveragesFor(next.front);
+      if (!calls.includes(next.coverage)) next.coverage = calls[0];
+      return next;
+    });
+  };
+  applySetupRef.current = applySetup;
+  // Run a section's demo ("d:<section>:<i>"): set the field up, and from
+  // then on it loops by itself — the overlay plays out pre-snap, the play
+  // snaps and runs on autopilot, auto-reset tees it back up (see the frame
+  // loop). demoRun restarts the overlay's clock.
+  const showDemo = (id, si, i) => {
+    const sec = LESSONS[id].sections[si];
+    const d = sec.demos[i];
+    // A rotating demo (a list of setups — say, one front per rep) starts on
+    // the first; the frame loop moves to the next after each rep.
+    setTryOn(false);
+    // Demos are juiced toward the side of the ball the lesson teaches.
+    const juice = LESSONS[id].side === "defense" ? "D" : "O";
+    demoRotate.current = d.rotate ? { list: d.rotate, i: 0, run: d.run, juice } : null;
+    const { run, ...first } = d.rotate ? d.rotate[0] : d.setup || {};
+    applySetup({ ...first, juice });
+    engineRef.current.autopilot = { run: run || d.run || "read" };
+    demoRun.current += 1;
+    setLessonActive(`d:${si}:${i}`);
+    // The section's heading and the demo's `watch` line caption the field;
+    // the front bar names what the offense is blocking.
+    update({ demo: d.demo, demoKicker: sec.heading, demoWatch: d.watch || null, demoFrontBar: true });
+  };
+  const openLesson = (id) => {
+    setLessonId(id);
+    lessonIdRef.current = id;
+    setTryOn(false);
+    const opening = { ...LESSONS[id].setup };
+    delete opening.run; // (a rotation rep's run isn't part of the field)
+    applySetup({ readEnd: "random", ...opening });
+    camRef.current.y = LEARN_SPOT + 8;
+    // Open on the first section's demo.
+    const si = LESSONS[id].sections.findIndex((s) => s.demos && s.demos.length);
+    if (si >= 0) showDemo(id, si, 0);
+    else {
+      setLessonActive(null);
+      update({ demo: null });
+    }
+  };
+  // ── Try it: the next rep's setup — the picked play / front, or the next
+  // one in each rotation (advance) — with a fresh coverage and read each
+  // rep, and no pinned seed or scripted fits: the real thing. ──
+  const nextTrySetup = (advance) => {
+    const { plays, front: lockedFront } = LESSONS[lessonIdRef.current].tryIt;
+    const fronts = Object.keys(FRONTS);
+    const at = tryAt.current;
+    const sel = trySelRef.current;
+    if (advance) {
+      if (sel.play === "rotate") at.p = (at.p + 1) % plays.length;
+      if (sel.front === "rotate") at.f = (at.f + 1) % fronts.length;
+    }
+    const p = plays[sel.play === "rotate" ? at.p : sel.play];
+    // (A defense lesson's Try it is always against its own front.)
+    const front = lockedFront || (sel.front === "rotate" ? fronts[at.f] : sel.front);
+    const calls = coveragesFor(front);
+    return { play: p.play, formation: p.formation, front, coverage: calls[Math.floor(Math.random() * calls.length)], readEnd: "random" };
+  };
+  const startTry = () => {
+    setTryOn(true);
+    tryAt.current = { p: 0, f: 0 };
+    engineRef.current.autopilot = null;
+    demoRotate.current = { next: () => nextTrySetup(true) };
+    applySetup(nextTrySetup(false));
+    setLessonActive("try");
+    update({ demo: null, demoWatch: null, demoFrontBar: true, speed: 1, paused: false });
+  };
+  const pickTry = (patch) => {
+    const sel = { ...trySelRef.current, ...patch };
+    trySelRef.current = sel;
+    setTrySel(sel);
+    applySetup(nextTrySetup(false));
+  };
+  const enterLearn = () => {
+    labVariance.current = config.variance;
+    setMode("learn");
+    setDrive(null);
+    setPicking(false);
+    setRecap(null);
+    engineRef.current.onFinished = null;
+    update({ speed: 0.5, paused: false }); // demos at half speed, easier to follow
+    openLesson(Object.keys(LESSONS)[0]);
   };
 
   // ── Dynasty: load the league (bundled rosters) and branding (Firestore),
   // open the front office. ──
-  const enterDynasty = async () => {
+  // college: the Power 4 + Notre Dame from `schools`, rosters generated
+  // here (seeded, so every visit is the same league) from the NFL rosters'
+  // generated name pool — nobody real.
+  const enterDynasty = async (college = false) => {
+    if (!isAdmin) return;
     setDynError(null);
     try {
-      const [mod, snap] = await Promise.all([import("../sim/dynasty/defaultRosters.json"), getDocs(collection(db, "nfl"))]);
-      const league = mod.default || mod;
+      const [mod, snap] = await Promise.all([
+        import("../sim/dynasty/defaultRosters.json"),
+        college ? getDocs(query(collection(db, "schools"), where("Conference", "in", [...COLLEGE_CONFERENCES, "Independent"]))) : getDocs(collection(db, "nfl")),
+      ]);
+      const nfl = mod.default || mod;
       const branding = {};
-      snap.docs.forEach((d) => (branding[d.id] = d.data()));
-      const saved = loadDynastyPick();
+      let league = nfl;
+      if (college) {
+        for (const d of snap.docs) {
+          const s = d.data();
+          if (s.Conference === "Independent" && s.School !== "Notre Dame") continue;
+          branding[s.Slug || d.id] = s;
+        }
+        const names = namePools(Object.values(nfl.teams).flatMap((t) => t.players));
+        league = generateLeague({ teams: Object.keys(branding), names, seed: COLLEGE_SEED, college: true });
+      } else snap.docs.forEach((d) => (branding[d.id] = d.data()));
+      const saved = loadDynastyPick(college ? COLLEGE_KEY : DYNASTY_KEY);
       const team = league.teams[saved.team] ? saved.team : null;
       const opponent = league.teams[saved.opponent] && saved.opponent !== team ? saved.opponent : null;
       labVariance.current = config.variance;
-      setDyn({ league, branding, team, opponent });
+      setDyn({ league, branding, team, opponent, college });
+      if (team) setConfig((c) => ({ ...c, homeField: homeFieldOf(branding[team]) }));
       setMode("dynasty");
       setDrive(null);
       setPicking(false);
@@ -208,7 +378,7 @@ export default function SimPage() {
       setHubOpen(true);
     } catch (e) {
       console.error(e);
-      setDynError("Couldn't load Dynasty (team branding from Firestore).");
+      setDynError(college ? "Couldn't load College (schools from Firestore)." : "Couldn't load Dynasty (team branding from Firestore).");
     }
   };
   const pickDynasty = (patch) => {
@@ -219,9 +389,11 @@ export default function SimPage() {
         const ks = Object.keys(next.league.teams).sort();
         next.opponent = ks[(ks.indexOf(next.team) + 1) % ks.length];
       }
-      saveDynastyPick({ team: next.team, opponent: next.opponent });
+      saveDynastyPick({ team: next.team, opponent: next.opponent }, next.college ? COLLEGE_KEY : DYNASTY_KEY);
       return next;
     });
+    // Your home field: your logo at midfield, your end zones.
+    if (patch.team) setConfig((c) => ({ ...c, homeField: homeFieldOf(dyn && dyn.branding[patch.team]) }));
   };
   // A fresh drive for your offense against the opponent's defense.
   const playDynastyDrive = () => {
@@ -308,10 +480,40 @@ export default function SimPage() {
     let last = performance.now();
     let acc = 0;
     let lastSnap = 0;
+    // Learn demos: seconds this rep has sat pre-snap (the overlay's clock);
+    // when the overlay has played out, the play snaps itself.
+    let demoT = 0;
+    let demoSeen = demoRun.current;
+    let lastState = engine.state;
     const frame = (now) => {
       const u = uiRef.current;
       const real = Math.min(0.1, (now - last) / 1000);
       last = now;
+      // A rep just ended and teed back up: a rotating demo moves on to its
+      // next setup (the next front).
+      const rot = demoRotate.current;
+      if (rot && lastState === "PLAY_END" && engine.state === "PRE_SNAP") {
+        if (rot.next) applySetupRef.current(rot.next());
+        else {
+          rot.i = (rot.i + 1) % rot.list.length;
+          // (A rep can say how the back takes it — `run` — over the demo's.)
+          const { run, ...next } = rot.list[rot.i];
+          engine.autopilot = { ...engine.autopilot, run: run || rot.run || "read" };
+          applySetupRef.current({ ...next, juice: rot.juice });
+        }
+      }
+      lastState = engine.state;
+      if (u.demo && engine.autopilot) {
+        if (demoSeen !== demoRun.current || engine.state !== "PRE_SNAP") demoT = 0;
+        else if (!u.paused) demoT += real;
+        demoSeen = demoRun.current;
+        // (engine.t ≥ 2: the players' pre-snap read of the defense has
+        // settled, so the pinned seed plays the same at any speed.)
+        if (engine.state === "PRE_SNAP" && demoT > demoLength(u.demo) + 0.5 && engine.t >= 2) {
+          engine.snap();
+          demoT = 0;
+        }
+      }
       if (!u.paused) {
         acc += real * u.speed;
         let n = 0;
@@ -326,8 +528,8 @@ export default function SimPage() {
       updateCamera(cam, engine, cam.W, cam.H, cam.dpr);
       // Carrying the ball, the cursor is a joystick: it stays put on screen
       // as the camera follows him, so it keeps pointing where you meant.
-      if (engine.runnerControlled() && engine.input.screen) engine.input.mouse = toField(cam, engine.input.screen.x, engine.input.screen.y);
-      renderFrame(ctx, mctx, cam, engine, u, now);
+      if (!engine.autopilot && engine.runnerControlled() && engine.input.screen) engine.input.mouse = toField(cam, engine.input.screen.x, engine.input.screen.y);
+      renderFrame(ctx, mctx, cam, engine, u.demo ? { ...u, demoT } : u, now);
       if (now - lastSnap > (u.debug ? 150 : 400)) {
         lastSnap = now;
         setSnap(engine.snapshot());
@@ -344,8 +546,14 @@ export default function SimPage() {
     const typing = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
     const down = (e) => {
       if (typing(e)) return;
-      if (pickingRef.current || hubRef.current) return; // the play-call screen / front office is up
+      if (pickingRef.current || hubRef.current || helpRef.current) return; // the play-call screen / front office / help is up
       const k = e.key.toLowerCase();
+      // Learn: the demos run themselves — only the viewing keys work
+      // (pause / step, debug, vision mask, play art).
+      if (modeRef.current === "learn" && !tryRef.current && !["p", ".", "b", "v", "z", "x"].includes(k)) {
+        if (k === " ") e.preventDefault();
+        return;
+      }
       if (["w", "a", "s", "d"].includes(k)) {
         // Carrying the ball: A / D are hard cuts (left / right), W bursts
         // downhill.
@@ -419,10 +627,11 @@ export default function SimPage() {
       update({ selectedId: best ? best.id : null });
       return;
     }
+    if (modeRef.current === "learn" && !tryRef.current) return; // demos aren't playable (Try it is)
     engine.beginThrow(performance.now());
   };
   const onUp = (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || (modeRef.current === "learn" && !tryRef.current)) return;
     engineRef.current.releaseThrow(performance.now());
   };
 
@@ -436,14 +645,14 @@ export default function SimPage() {
   return (
     <>
       <Helmet>
-        <title>Football Sim Lab | We-Draft Admin</title>
+        <title>Football Sim Lab | We-Draft</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
       <div style={{ minHeight: "100vh", background: "#0b1220", color: "#e2e8f0", fontFamily: "Arial, sans-serif", padding: "10px 14px" }}>
         {/* Controls */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-          <Link to="/admin" style={{ color: "#94a3b8", fontWeight: 700, fontSize: "12px", textDecoration: "none", marginRight: "6px" }}>
-            ← Admin
+          <Link to={isAdmin ? "/admin" : "/profile"} style={{ color: "#94a3b8", fontWeight: 700, fontSize: "12px", textDecoration: "none", marginRight: "6px" }}>
+            {isAdmin ? "← Admin" : "← Profile"}
           </Link>
           <div style={{ fontWeight: 900, letterSpacing: "0.06em", color: ORANGE, marginRight: "10px" }}>FOOTBALL SIM LAB</div>
           {mode === "lab" && (
@@ -512,28 +721,31 @@ export default function SimPage() {
               {callRef.current && <span style={{ color: "#cbd5e1", fontSize: "12px" }}>Call: {callRef.current.name}</span>}
             </div>
           )}
-          {mode !== "lab" && !picking && !hubOpen && snap && snap.state === "PRE_SNAP" && (
+          {(mode === "drive" || mode === "dynasty") && !picking && !hubOpen && snap && snap.state === "PRE_SNAP" && (
             <button style={btn(false)} onClick={blurAfter(() => setPicking(true))}>Play call</button>
           )}
-          <button
+          {mode !== "learn" && <button
             style={btn(config.variance)}
             title="Off (vanilla): every player is exactly average, so a play runs the same way every time. On: each rep every player gets his own form — usually around average, sometimes quick or slow, now and then exceptional."
             onClick={blurAfter(() => setConfig((c) => ({ ...c, variance: !c.variance })))}
           >
             {config.variance ? "Variance: on" : "Variance: off (vanilla)"}
-          </button>
-          <button
+          </button>}
+          {(mode !== "learn" || tryOn) && <button
             style={{ ...btn(false), background: BLUE, borderColor: BLUE, color: "#fff", opacity: picking ? 0.4 : 1 }}
             disabled={picking}
             onClick={blurAfter(() => engineRef.current.snap())}
           >
             Snap (Space)
-          </button>
+          </button>}
           {mode === "lab" && <button style={btn(false)} onClick={blurAfter(() => engineRef.current.reset())}>Reset (R)</button>}
           {mode === "lab" ? (
             <>
+              <button style={btn(false)} onClick={blurAfter(() => enterLearn())}>{"\u{1F4D6}"} Learn</button>
               <button style={btn(false)} onClick={blurAfter(() => enterDrive())}>{"\u{1F3C8}"} Drive mode</button>
-              <button style={btn(false)} onClick={blurAfter(() => enterDynasty())}>{"\u{1F3C6}"} Dynasty</button>
+              {/* Dynasty is admin-only — beta testers (simBeta) get the Lab + Drive mode. */}
+              {isAdmin && <button style={btn(false)} onClick={blurAfter(() => enterDynasty())}>{"\u{1F3C6}"} Dynasty</button>}
+              {isAdmin && <button style={btn(false)} onClick={blurAfter(() => enterDynasty(true))}>{"\u{1F393}"} College</button>}
             </>
           ) : (
             <>
@@ -541,12 +753,13 @@ export default function SimPage() {
                 <button style={btn(hubOpen)} onClick={blurAfter(() => setHubOpen(true))}>Front office</button>
               )}
               <button style={btn(true)} onClick={blurAfter(() => exitDrive())}>
-                {mode === "dynasty" ? "Exit dynasty" : "Exit drive mode"}
+                {mode === "dynasty" ? (dyn && dyn.college ? "Exit college" : "Exit dynasty") : mode === "learn" ? "Exit lessons" : "Exit drive mode"}
               </button>
             </>
           )}
           {dynError && <span style={{ color: "#f87171", fontSize: "12px", fontWeight: 700 }}>{dynError}</span>}
           <span style={{ width: "10px" }} />
+          <button style={btn(helpOpen)} onClick={blurAfter(() => setHelpOpen(true))}>? Help</button>
           <button style={btn(ui.debug)} onClick={blurAfter(() => update({ debug: !ui.debug }))}>Debug (B)</button>
           <button style={btn(ui.mask)} onClick={blurAfter(() => update({ mask: !ui.mask }))}>Vision mask (V)</button>
           <button style={btn(ui.paused)} onClick={blurAfter(() => update({ paused: !ui.paused }))}>{ui.paused ? "Resume" : "Pause"} (P)</button>
@@ -569,7 +782,19 @@ export default function SimPage() {
         </div>
 
         <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
-          <div ref={wrapRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
+          {mode === "learn" && lessonId && (
+            <>
+              <LessonList current={lessonId} onPick={openLesson} />
+              <LessonArticle
+                id={lessonId}
+                active={lessonActive}
+                onDemo={(si, i) => showDemo(lessonId, si, i)}
+                tryIt={{ on: tryOn, sel: trySel, onStart: startTry, onSelect: pickTry }}
+              />
+            </>
+          )}
+          {/* In Learn the field stays put while the article scrolls. */}
+          <div ref={wrapRef} style={{ flex: 1, minWidth: 0, position: mode === "learn" ? "sticky" : "relative", top: mode === "learn" ? "10px" : undefined }}>
             <canvas
               ref={canvasRef}
               onMouseMove={onMove}
@@ -601,11 +826,12 @@ export default function SimPage() {
                 onClose={callRef.current && snap && snap.state === "PRE_SNAP" ? () => setPicking(false) : null}
               />
             )}
-            <div style={{ fontSize: "11px", color: "#64748b", marginTop: "6px" }}>
+            {helpOpen && <SimHelp onClose={closeHelp} />}
+            {mode !== "learn" && <div style={{ fontSize: "11px", color: "#64748b", marginTop: "6px" }}>
               Hold Z pre-snap for the offense's play art, X for the defense's. Passes: WASD moves the QB, the mouse is his eyes and chest; hold and release click to throw (quick tap = bullet, long hold = lofted).
               Inside Zone (read): the mouse is the RB's intent — direction, and distance for aggression; A / D = hard cut left / right, W = burst downhill; during the ride you see through the QB's eyes — it's a give unless you hit SPACE to pull it. On the RPO, click (hold and release) during the ride to pull it and throw at the cursor; after a give the mouse steers the RB. Speed option: the QB has it from the snap and attacks the pitch key (move the mouse to take him over); SPACE pitches to the back. GT Counter Read: SPACE pulls it on the backside end. QB Draw: he shows pass, then runs — the mouse takes him. Debug: click a player to inspect what he
               perceives; P pauses, “.” steps one frame while paused.
-            </div>
+            </div>}
           </div>
 
           {ui.debug && snap && (

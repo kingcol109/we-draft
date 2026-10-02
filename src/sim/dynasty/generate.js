@@ -118,7 +118,9 @@ export function namePools(people) {
   return { firsts: [...firsts].sort(), lasts: [...lasts].sort(), real };
 }
 
-export function generateLeague({ teams, names, measurables = DEFAULT_MEASURABLES, seed = 2026 }) {
+// college: ages 18–23 and years in the program (Fr → Sr) instead of an NFL
+// career.
+export function generateLeague({ teams, names, measurables = DEFAULT_MEASURABLES, seed = 2026, college = false }) {
   const rng = mulberry32(seed);
   const taken = new Set();
   const newName = () => {
@@ -159,8 +161,16 @@ export function generateLeague({ teams, names, measurables = DEFAULT_MEASURABLES
         }
         // Age: backups skew young (rookies, second-years), starters are in
         // their prime, a few veterans hang on.
-        const age = Math.round(clamp((slot < shape.starters ? 27 : 24.5) + 2.6 * gauss(rng), 21, pos === "K" || pos === "P" || pos === "LS" ? 40 : 36));
-        const exp = Math.max(0, Math.min(age - 21, Math.round(age - 22.5 + gauss(rng))));
+        let age;
+        let exp;
+        if (college) {
+          // Starters are upperclassmen more often than not.
+          exp = Math.round(clamp((slot < shape.starters ? 2.4 : 1.1) + 1.1 * gauss(rng), 0, 4));
+          age = 18 + exp + (rng() < 0.35 ? 1 : 0);
+        } else {
+          age = Math.round(clamp((slot < shape.starters ? 27 : 24.5) + 2.6 * gauss(rng), 21, pos === "K" || pos === "P" || pos === "LS" ? 40 : 36));
+          exp = Math.max(0, Math.min(age - 21, Math.round(age - 22.5 + gauss(rng))));
+        }
         const { first, last } = newName();
         group.push({
           id: `${abbr}-${String(++n).padStart(2, "0")}`,
@@ -174,5 +184,5 @@ export function generateLeague({ teams, names, measurables = DEFAULT_MEASURABLES
     }
     out[abbr] = { abbr, talent: +teamZ.toFixed(2), players };
   }
-  return { version: 1, seed, generatedAt: new Date().toISOString(), teams: out };
+  return { version: 1, seed, college, generatedAt: new Date().toISOString(), teams: out };
 }

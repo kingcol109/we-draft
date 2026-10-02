@@ -10,8 +10,12 @@
 //     owns everything outside him). He blocks that man.
 //   • Two linemen owning the same DL = a combo (a head-up nose between
 //     center and guard, say).
-//   • Uncovered: double the playside neighbour's DL if he's close, else the
-//     backside neighbour's; nobody close → climb straight to a linebacker.
+//   • Uncovered: help the playside teammate first — double his DL — then
+//     climb off it. A lineman whose playside neighbour isn't covered (or
+//     who is the playside-most man) climbs straight to a linebacker.
+//   • Areas are re-checked just after the snap: if a defender slants out
+//     of one lineman's area into another's, who's covered changes and the
+//     jobs are re-made from where everyone is now (once per play).
 //   • Every combo has a linebacker: the playside-most one not already
 //     accounted for, taken in order from the playside combo back. One of the
 //     pair comes off to him — which one is decided live, from how the DL and
@@ -30,7 +34,6 @@ import { timeToReach } from "../systems/kinematics.js";
 
 const FRONT_DEPTH = 2.5; // on the line of scrimmage
 const HEADUP = 0.4; // how far backside of his nose a lineman's area starts
-const COMBO_REACH = 2.6;
 
 // What the line sees of the front: men on the line, and box linebackers
 // (out to a gap outside the tackles — a linebacker walked out past that,
@@ -38,8 +41,9 @@ const COMBO_REACH = 2.6;
 function readFront(world, ol) {
   const seen = [];
   for (const d of world.defense) {
-    const m = lineRead(world, d.id);
-    if (m) seen.push({ id: d.id, x: m.x, dep: depthOf(m.y) });
+    // Alignment is read where he actually is — the man across from you
+    // isn't a guess, and a few tenths off flips who's covered.
+    if (lineRead(world, d.id)) seen.push({ id: d.id, x: d.x, dep: depthOf(d.y) });
   }
   const front = seen.filter((d) => d.dep < FRONT_DEPTH && Math.abs(d.x - CX) < 9);
   const boxHalf = Math.max(...ol.map((o) => Math.abs(o.home.x - CX))) + 3;
@@ -90,7 +94,40 @@ function formCombos(ol, jobs, P) {
   return combos;
 }
 
-export function buildZoneCall(world, { silent = false } = {}) {
+// Covered: a defender between the lineman's PLAYSIDE SHOULDER and the NOSE
+// of the next lineman playside (head-up on that next man counts — he's at
+// his nose). The playside-most lineman's area runs from his playside
+// shoulder outward. So a man head-up or on a lineman's inside (backside)
+// half is NOT his: he covers the next lineman backside. Off-ball men and
+// the read / kick man aren't in anyone's area. `ol` is playside first,
+// and `x` is where each defender actually is.
+const SHOULDER = 0.42; // half a lineman's shoulder width (config body.width)
+const NOSE_BAND = 0.2; // within this of a lineman's nose is "head-up on him"
+function areaOwners(ol, blockable, P, draw) {
+  const owner = {};
+  ol.forEach((o, i) => {
+    // (On the draw and outside zone the backside tackle also owns the end
+    // outside him.)
+    const lo = draw && i === ol.length - 1 ? -Infinity : P(o.home.x) + SHOULDER;
+    // Up to (and including) head-up on the next man; his own playside half
+    // up to his shoulder is a no-man's strip that goes to the nearer nose.
+    const hi = i === 0 ? Infinity : P(ol[i - 1].home.x) + NOSE_BAND;
+    for (const d of blockable) if (P(d.x) > lo && P(d.x) <= hi) (owner[o.id] = owner[o.id] || []).push(d);
+  });
+  // A man shaded just playside of a lineman's nose (inside his shoulder,
+  // past head-up) is in nobody's strip by the letter of the rule — give him
+  // to that lineman, the one he's actually lined up on.
+  for (const d of blockable) {
+    if (Object.values(owner).some((ds) => ds.includes(d))) continue;
+    const on = ol.find((o) => P(d.x) > P(o.home.x) + NOSE_BAND && P(d.x) <= P(o.home.x) + SHOULDER);
+    if (on) (owner[on.id] = owner[on.id] || []).push(d);
+  }
+  return owner;
+}
+
+// keep: an earlier call this one re-makes after the snap — the read /
+// kick / pitch key stay exactly who they were (the end has moved by then).
+export function buildZoneCall(world, { silent = false, keep = null } = {}) {
   const ol = world.offense.filter((o) => o.role === "OL");
   if (ol[0].assignment.scheme === "power") return buildPowerCall(world, silent);
   const ps = ol[0].assignment.playside || 1;
@@ -104,33 +141,30 @@ export function buildZoneCall(world, { silent = false } = {}) {
   const byP = front.slice().sort((a, b) => P(a.x) - P(b.x));
   // QB draw: nobody is read — everyone on the line gets blocked.
   const draw = play.qbRun === "draw";
-  const read = draw ? null : (play.option ? byP[byP.length - 1] : byP[0]) || null;
-  const blockable = front.filter((d) => d !== read);
+  // Outside zone (not the option): the back's running away from the
+  // backside end, so the backside tackle cuts him off — nobody is left
+  // unblocked on the line, the backside linebacker is outrun instead.
+  const cutoff = play.zone === "outside" && !play.option;
+  const keptId = keep && (keep.readId || keep.kickId || keep.optionKeyId || keep.endId);
+  const read = keep ? (keptId ? { id: keptId } : null) : draw || cutoff ? null : (play.option ? byP[byP.length - 1] : byP[0]) || null;
+  const blockable = front.filter((d) => !read || d.id !== read.id);
 
-  // Covered / uncovered.
+  // Covered: block the man in your area (the one nearest you if two are).
   const jobs = {};
-  ol.forEach((o, i) => {
-    // (On the draw the backside tackle also owns the end outside him.)
-    const lo = draw && i === ol.length - 1 ? -Infinity : P(o.home.x) - HEADUP;
-    const hi = i === 0 ? Infinity : P(ol[i - 1].home.x) - HEADUP;
-    const mine = blockable
-      .filter((d) => P(d.x) >= lo && P(d.x) < hi)
-      .sort((a, b) => Math.abs(a.x - o.home.x) - Math.abs(b.x - o.home.x));
+  const owners = areaOwners(ol, blockable, P, draw || cutoff);
+  ol.forEach((o) => {
+    const mine = (owners[o.id] || []).sort((a, b) => Math.abs(a.x - o.home.x) - Math.abs(b.x - o.home.x));
     jobs[o.id] = mine.length ? { kind: "base", dl: mine[0].id } : { kind: "uncovered" };
   });
-  const dlX = Object.fromEntries(blockable.map((d) => [d.id, d.x]));
 
-  // Uncovered linemen double a neighbour's man, playside first.
+  // Uncovered: help the playside teammate if he's covered (a combo — one
+  // of the two climbs off it later), else climb straight to the second
+  // level.
+  const covered = Object.fromEntries(ol.map((o) => [o.id, jobs[o.id].kind === "base"]));
   ol.forEach((o, i) => {
     if (jobs[o.id].kind !== "uncovered") return;
-    for (const n of [ol[i - 1], ol[i + 1]]) {
-      const nj = n && jobs[n.id];
-      if (nj && nj.kind === "base" && Math.abs(dlX[nj.dl] - o.home.x) < COMBO_REACH) {
-        jobs[o.id] = { kind: "base", dl: nj.dl };
-        return;
-      }
-    }
-    jobs[o.id] = { kind: "climb" };
+    const n = ol[i - 1];
+    jobs[o.id] = n && covered[n.id] ? { kind: "base", dl: jobs[n.id].dl } : { kind: "climb" };
   });
 
   const combos = formCombos(ol, jobs, P);
@@ -173,6 +207,9 @@ export function buildZoneCall(world, { silent = false } = {}) {
     leadLB,
     jobs, combos, stalk,
     scheme: ol[0].assignment.scheme || "inside",
+    // Who was in whose area when this call was made (the post-snap re-check
+    // compares against it).
+    areas: Object.fromEntries(Object.entries(owners).map(([id, ds]) => [id, ds.map((d) => d.id).sort().join(",")])),
   };
   if (!silent) world.log(world.byId.C, "Zone call", describe(call));
   return call;
@@ -286,6 +323,19 @@ export function updateZone(world) {
   const z = world.zone;
   const ps = z.ps;
 
+  // Just after the snap: if a defender has slanted out of one lineman's
+  // area into another's, who's covered has changed — re-make the jobs from
+  // where everyone is now. Once a play, and early, before the combos start
+  // coming off to the linebackers.
+  if (!z.rechecked && z.areas && world.sinceSnap > 0.25 && world.sinceSnap < 0.5) {
+    const fresh = buildZoneCall(world, { silent: true, keep: z });
+    const ids = new Set([...Object.keys(fresh.areas), ...Object.keys(z.areas)]);
+    if ([...ids].some((id) => (fresh.areas[id] || "") !== (z.areas[id] || ""))) {
+      Object.assign(z, { jobs: fresh.jobs, combos: fresh.combos, areas: fresh.areas, rechecked: true });
+      world.log(world.byId.C, "Zone re-check", `a defender changed areas — ${describe(z)}`);
+    }
+  }
+
   // Playside combos first: each one's linebacker is whichever unclaimed LB
   // shows where the pair can get to him first — not necessarily the one
   // named at the snap (he may have flowed to the next combo).
@@ -296,18 +346,32 @@ export function updateZone(world) {
   }
   if (z.leadLB) claimedLB.add(z.leadLB); // power: H has him
   for (const c of z.combos) if (c.climber && c.lb) claimedLB.add(c.lb);
+  // Linebackers the other combos still have their eyes on (named at the
+  // snap and still there) — not up for grabs.
+  const eyesOn = new Set(z.combos.filter((c) => !c.climber && c.lb).map((c) => c.lb));
   for (const c of z.combos) {
     if (c.climber || world.sinceSnap < 0.35) continue;
-    let best = null;
-    const wrMen = new Set(Object.values(z.stalk));
-    for (const d of world.defense) {
-      if (d.role !== "LB" || claimedLB.has(d.id) || wrMen.has(d.id)) continue;
-      const m = lineRead(world, d.id);
-      if (!m || depthOf(m.y) > 8) continue;
-      const t = Math.min(timeToReach(world.byId[c.play], m.x, m.y), timeToReach(world.byId[c.back], m.x, m.y));
-      if (!best || t < best.t) best = { id: d.id, t };
+    // Keep the linebacker this combo was given at the snap while he's still
+    // over it; only if he's flowed off (3½ yards from the DL) look for
+    // whoever the pair can now get to first.
+    const cur = c.lb && !claimedLB.has(c.lb) ? lineRead(world, c.lb) : null;
+    const D0 = lineRead(world, c.dl);
+    if (!(cur && D0 && Math.abs(cur.x - D0.x) < 3.5)) {
+      let best = null;
+      const wrMen = new Set(Object.values(z.stalk));
+      for (const d of world.defense) {
+        if (d.role !== "LB" || claimedLB.has(d.id) || wrMen.has(d.id) || (d.id !== c.lb && eyesOn.has(d.id))) continue;
+        const m = lineRead(world, d.id);
+        if (!m || depthOf(m.y) > 8) continue;
+        const t = Math.min(timeToReach(world.byId[c.play], m.x, m.y), timeToReach(world.byId[c.back], m.x, m.y));
+        if (!best || t < best.t) best = { id: d.id, t };
+      }
+      if (best) {
+        eyesOn.delete(c.lb);
+        c.lb = best.id;
+        eyesOn.add(c.lb);
+      }
     }
-    if (best) c.lb = best.id;
     if (!c.lb) continue;
     const D = lineRead(world, c.dl);
     const L = lineRead(world, c.lb);
@@ -321,7 +385,10 @@ export function updateZone(world) {
     // (favours the backside man).
     const s = clamp(ps * (L.x + L.vx * 0.4 - D.x) - 0.6 * ps * D.vx, -2, 2);
     const spot = { x: L.x + L.vx * 0.4, y: L.y + L.vy * 0.4 };
-    const cost = (id, sign) => timeToReach(world.byId[id], spot.x, spot.y) - sign * 0.15 * s;
+    // Outside zone leans on the overtake: the uncovered (backside) man takes
+    // the DL over at the line so the covered (playside) man can climb.
+    const overtake = z.scheme === "outside" ? 0.35 : 0;
+    const cost = (id, sign) => timeToReach(world.byId[id], spot.x, spot.y) - sign * 0.15 * s - (sign > 0 ? overtake : 0);
     const climberId = cost(c.play, 1) <= cost(c.back, -1) ? c.play : c.back;
     const stayerId = climberId === c.play ? c.back : c.play;
     // Nobody comes off until the man staying has (or is on) the DL.

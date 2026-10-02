@@ -7,6 +7,7 @@ import { HelmetProvider, Helmet } from "react-helmet-async";
 // loads, so these stay eagerly bundled rather than lazy.
 import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
+import SimRoute from "./components/SimRoute";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
@@ -66,7 +67,7 @@ const MyFeed = lazy(() => import("./pages/MyFeed"));
 // Admin — the single biggest chunk to keep out of everyone else's download
 // (TipTap editor + extensions, html2canvas, and every admin manager panel).
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
-// Football Sim Lab — admin-only prototype, reached from the Admin panel;
+// Football Sim Lab — admins + beta users (users/{uid}.simBeta, see SimRoute.js);
 // noindexed, disallowed in robots.txt, never linked publicly.
 const SimPage = lazy(() => import("./pages/SimPage"));
 
@@ -107,7 +108,7 @@ function App() {
           <Routes>
             {/* Standalone — no navbar, no padding */}
             <Route path="/draft-tracker" element={<DraftTracker />} />
-            <Route path="/sim" element={<AdminRoute><SimPage /></AdminRoute>} />
+            <Route path="/sim" element={<SimRoute><SimPage /></SimRoute>} />
 
             {/* All other routes — wrapped with Navbar */}
             <Route path="*" element={<MainLayout />} />
