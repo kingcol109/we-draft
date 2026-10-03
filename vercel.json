@@ -1,0 +1,8 @@
+{
+  "crons": [
+    { "path": "/api/live-ingest", "schedule": "* * * * *" }
+  ],
+  "functions": {
+    "api/live-ingest.js": { "maxDuration": 300 }
+  }
+}

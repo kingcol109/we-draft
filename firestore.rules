@@ -256,6 +256,44 @@ service cloud.firestore {
     match /traits/{doc} { allow read, write: if true; }
     match /config/{doc} { allow read, write: if true; }
     match /playerStats/{doc} { allow read, write: if true; }
+    // ── We-Draft Live — written only by the central ingester
+    // (server/live/*, admin SDK, not subject to these rules). Public
+    // read-only so no visitor can alter scores/plays; admins may write to
+    // correct data (hide a play, fix a player link, override a game). ──
+    match /liveSlate/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /liveGames/{gameId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /plays/{playId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+      match /box/{doc} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+      // Ingester bookkeeping (play hashes) — nothing public needs it.
+      match /private/{doc} {
+        allow read, write: if isAdmin();
+      }
+    }
+    // Provider (CFBD) player identities — every college player CFBD knows,
+    // most of whom have no We-Draft profile. wedraftPlayerId is an optional
+    // link (mappingStatus none | suggested | verified | rejected).
+    match /cfbdPlayers/{athleteId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /games/{gameId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+    match /liveMeta/{doc} {
+      allow read, write: if isAdmin();
+    }
     // Page-view counters — written server-side only, by
     // scripts/syncGoogleAnalytics.js (via the admin SDK, which isn't
     // subject to these rules at all); read by AdminPanel.js's Analytics tab.

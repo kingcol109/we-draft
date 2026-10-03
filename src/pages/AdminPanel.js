@@ -9867,6 +9867,10 @@ const BLANK_GAME_FORM = {
   // be Featured most weeks and additionally called out as THE game some weeks.
   Featured: false, GameOfWeek: false, Final: false, Notes: "",
   KeyPlayersHome: [], KeyPlayersAway: [], KeyPlayerNotes: {},
+  // CollegeFootballData game id — links this game to We-Draft Live data
+  // (liveGames/{id}). Normally filled by scripts/mapCfbdGames.js; editing
+  // it here marks the mapping manual so that script never overrides it.
+  CFBDGameId: "",
   // Score picks (GamePage.js's "Make Your Pick") normally unlock the Monday
   // before the game's own week and lock again once it's Final — this lets
   // an admin override that and open picks early for a specific game.
@@ -10242,6 +10246,7 @@ function CFBScheduleSection() {
       KeyPlayerNotes: g.KeyPlayerNotes || {},
       PicksForceOpen: !!g.PicksForceOpen,
       RankedDisqualified: !!g.RankedDisqualified,
+      CFBDGameId: g.CFBDGameId != null ? String(g.CFBDGameId) : "",
     });
     setSaveMessage("");
   };
@@ -10334,6 +10339,37 @@ function CFBScheduleSection() {
         payload.Channel = deleteField();
         channelCleared = true;
       }
+      // Kickoff and final score are normally filled in automatically by
+      // We-Draft Live (server/live/scheduleSync.js). An admin actually
+      // changing either here takes ownership of that group ("manual"), which
+      // the automation never overwrites — saving a game for some other edit
+      // (notes, key players) leaves it automated.
+      if (!isNew) {
+        const kickoffChanged = (formState.Time || "") !== (selectedGame.Time || "") || (formState.Date || "") !== toDateInputValue(selectedGame.Date);
+        const prevScore = (v) => (v != null ? String(v) : "");
+        const scoreChanged = formState.HomeScore.trim() !== prevScore(selectedGame.HomeScore)
+          || formState.AwayScore.trim() !== prevScore(selectedGame.AwayScore)
+          || !!formState.Final !== !!selectedGame.Final;
+        if (kickoffChanged) payload.KickoffSource = "manual";
+        if (scoreChanged) payload.ScoreSource = "manual";
+      }
+      // CFBD game link — only written when the admin actually changed it,
+      // so ordinary saves leave an auto mapping as auto. A change (including
+      // clearing it) is recorded as manual, which scripts/mapCfbdGames.js
+      // never overwrites.
+      const cfbdIdInput = (formState.CFBDGameId || "").trim();
+      const prevCfbdId = selectedGame?.CFBDGameId != null ? String(selectedGame.CFBDGameId) : "";
+      let cfbdChanged = false;
+      if (cfbdIdInput !== prevCfbdId) {
+        if (cfbdIdInput && !/^\d+$/.test(cfbdIdInput)) {
+          setSaveMessage("Failed: CFBD Game ID must be a number.");
+          setSaving(false);
+          return;
+        }
+        payload.CFBDGameId = cfbdIdInput ? Number(cfbdIdInput) : (isNew ? null : deleteField());
+        payload.CFBDMatch = { method: "manual", matchedAt: new Date() };
+        cfbdChanged = true;
+      }
       // Blank scores are simply omitted on a brand-new doc (Firestore
       // rejects `undefined` outright, and there's nothing to remove yet).
       // On an EXISTING doc, though, omitting the key is not the same as
@@ -10379,8 +10415,12 @@ function CFBScheduleSection() {
           if (awayScoreCleared) delete merged.AwayScore;
           if (timeCleared) { delete merged.Time; delete merged.KickoffAt; }
           if (channelCleared) delete merged.Channel;
+          if (cfbdChanged && !cfbdIdInput) delete merged.CFBDGameId;
           return merged;
         }));
+        // Keep the selected game's CFBD id current so a second save without
+        // further edits doesn't read as another change.
+        if (cfbdChanged) setSelectedGame((prev) => (prev ? { ...prev, CFBDGameId: cfbdIdInput ? Number(cfbdIdInput) : undefined } : prev));
         setSaveMessage("Saved.");
       }
       if (payload.Week !== selectedWeek) setSelectedWeek(payload.Week);
@@ -10566,6 +10606,14 @@ function CFBScheduleSection() {
               <div>
                 <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Home Score</div>
                 <input type="number" value={formState.HomeScore} onChange={(e) => setFormState((p) => ({ ...p, HomeScore: e.target.value }))} placeholder="—" style={inputStyle} />
+              </div>
+              <div>
+                {/* We-Draft Live link — auto-filled by scripts/mapCfbdGames.js;
+                    only edit to correct a wrong/missing match. */}
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>
+                  CFBD Game ID{selectedGame?.CFBDMatch?.method === "manual" ? " (manual)" : ""}
+                </div>
+                <input value={formState.CFBDGameId} onChange={(e) => setFormState((p) => ({ ...p, CFBDGameId: e.target.value }))} placeholder="—" inputMode="numeric" style={inputStyle} />
               </div>
             </div>
 
