@@ -379,11 +379,22 @@ const etOffsetMinutesAt = (ms) => {
 // Time is optional in the admin form and there's no hour to lock at
 // without one (isPickable falls back to Final-only locking in that case,
 // same as before kickoff-locking existed).
+//
+// KickoffAt (the exact UTC instant — written by AdminPanel's save and the
+// CFBD schedule sync, and what firestore.rules enforces) wins when set.
+// The Date+Time fallback uses Date's calendar day, not its raw instant:
+// many docs store Date at ET midnight (04:00/05:00 UTC) rather than UTC
+// midnight, and adding the ET time to that raw instant locked picks 4-5
+// hours after the actual kickoff.
 const kickoffMs = (g) => {
+  const at = toMs(g.KickoffAt);
+  if (at) return at;
   const dateMs = toMs(g.Date);
   const mins = timeToMinutes(g.Time);
   if (!dateMs || mins == null) return null;
-  return dateMs + mins * 60000 - etOffsetMinutesAt(dateMs) * 60000;
+  const d = new Date(dateMs);
+  const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return day + mins * 60000 - etOffsetMinutesAt(day) * 60000;
 };
 
 // A game is open for picks once its own week's Monday (00:00 UTC) has

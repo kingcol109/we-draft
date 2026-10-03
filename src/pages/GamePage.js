@@ -261,10 +261,17 @@ const etOffsetMinutesAt = (ms) => {
 // Kickoff Time is optional in the admin form and there's no hour to lock at
 // without one (picksLocked below falls back to Final-only locking then,
 // same as before kickoff-locking existed).
+//
+// Uses Date's calendar day, not its raw instant: many docs store Date at ET
+// midnight (04:00/05:00 UTC) rather than UTC midnight, and adding the ET
+// time to that raw instant locked picks 4-5 hours after the real kickoff.
+// Callers prefer the stored KickoffAt instant when there is one.
 const kickoffMsFromDate = (dateMs, time) => {
   const mins = timeToMinutes(time);
   if (!dateMs || mins == null) return null;
-  return dateMs + mins * 60000 - etOffsetMinutesAt(dateMs) * 60000;
+  const d = new Date(dateMs);
+  const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return day + mins * 60000 - etOffsetMinutesAt(day) * 60000;
 };
 
 // Score picks unlock at 00:00 UTC on the Monday of the game's own week —
@@ -1308,7 +1315,9 @@ export default function GamePage() {
   // week, same as isFinal already did for a game once it's over.
   const picksOpenAtMs = gameDateMs ? mondayOfWeekUtc(gameDateMs) : 0;
   const picksDateReached = !gameDateMs || Date.now() >= picksOpenAtMs;
-  const kickoffAtMs = kickoffMsFromDate(gameDateMs, game.Time);
+  // KickoffAt = the exact instant (admin save / CFBD schedule sync) — the
+  // same value firestore.rules locks picks against.
+  const kickoffAtMs = toMs(game.KickoffAt) || kickoffMsFromDate(gameDateMs, game.Time);
   const kickoffPassed = kickoffAtMs != null && Date.now() >= kickoffAtMs;
   const picksLocked = !isFinal && (kickoffPassed || (game.Week !== "Week 0" && !game.PicksForceOpen && !picksDateReached));
   const myPick = user ? picks.find((p) => p.id === user.uid) : null;
