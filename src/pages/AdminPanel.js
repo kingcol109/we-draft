@@ -529,6 +529,15 @@ function PlayerDataSection() {
   // state rather than part of formState since it isn't a normal editable
   // player field and clears itself the moment the decision is saved.
   const [portalNewSchool, setPortalNewSchool] = useState("");
+  // We-Draft.com Select — an admin hand-picked top comp, shown first on
+  // the player's Comparison page with the WD mark instead of a match %
+  // (see Comparison.js's selectRecord). Stored as players/{id}.WeDraftSelect
+  // = { id: historical doc id, label }. The picker searches that position's
+  // `historical` rows, read lazily (one query per position, cached) the
+  // first time the search box is used.
+  const [selectQuery, setSelectQuery] = useState("");
+  const [selectPool, setSelectPool] = useState({}); // position -> historical rows
+  const selectPoolLoading = useRef({});
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -1071,6 +1080,52 @@ function PlayerDataSection() {
     }
   };
 
+  const selectPosition = formState?.Position || selectedPlayer?.Position || "";
+  const loadSelectPool = (position) => {
+    if (!position || selectPool[position] || selectPoolLoading.current[position]) return;
+    selectPoolLoading.current[position] = true;
+    getDocs(query(collection(db, "historical"), where("Position", "==", position)))
+      .then((snap) => setSelectPool((prev) => ({ ...prev, [position]: snap.docs.map((d) => ({ id: d.id, ...d.data() })) })))
+      .catch((e) => console.error("Admin We-Draft Select pool error:", e))
+      .finally(() => { selectPoolLoading.current[position] = false; });
+  };
+  const selectMatches = useMemo(() => {
+    const q = selectQuery.trim().toLowerCase();
+    const rows = selectPool[selectPosition] || [];
+    if (!q) return [];
+    return rows
+      .filter((r) => `${r.First || ""} ${r.Last || ""} ${r.Player || ""} ${r.School || ""} ${r.Year || ""}`.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.Year) - Number(a.Year))
+      .slice(0, 12);
+  }, [selectQuery, selectPool, selectPosition]);
+  const historicalLabel = (r) => `${(r.First || r.Last) ? `${r.First || ""} ${r.Last || ""}`.trim() : r.Player || ""} · ${r.Year} ${r.Position} · ${r.School || ""}`;
+
+  // Writes straight away, like the portal buttons — not part of formState.
+  const handleSetSelect = async (rec) => {
+    if (!selectedPlayer || isNew) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const value = rec ? { id: rec.id, label: historicalLabel(rec) } : null;
+      await updateDoc(doc(db, "players", selectedPlayer.id), { WeDraftSelect: value ? value : deleteField() });
+      const apply = (p) => {
+        if (p.id !== selectedPlayer.id) return p;
+        const next = { ...p };
+        if (value) next.WeDraftSelect = value; else delete next.WeDraftSelect;
+        return next;
+      };
+      setAllPlayers((prev) => prev.map(apply));
+      setSelectedPlayer((prev) => apply(prev));
+      setSelectQuery("");
+      setSaveMessage(value ? "We-Draft.com Select set." : "We-Draft.com Select removed.");
+    } catch (e) {
+      console.error("Admin We-Draft Select save error:", e);
+      setSaveMessage("Failed to update — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Backs out of a portal move made by mistake — leaves School/PriorSchool
   // untouched, just clears the in-portal state itself.
   const handleCancelPortal = async () => {
@@ -1209,6 +1264,7 @@ function PlayerDataSection() {
           { key: "players", label: "Players" },
           { key: "recruits", label: "Recruits" },
           { key: "historical", label: "Historical" },
+          { key: "comps", label: "Comps" },
           { key: "traits", label: "Traits" },
           { key: "dummy", label: "Dummy Content" },
         ].map((t) => (
@@ -1231,6 +1287,8 @@ function PlayerDataSection() {
         <RecruitsSection />
       ) : playerDataTab === "historical" ? (
         <HistoricalSection />
+      ) : playerDataTab === "comps" ? (
+        <CompsSection />
       ) : playerDataTab === "traits" ? (
         <TraitsSection />
       ) : playerDataTab === "dummy" ? (
@@ -1640,6 +1698,63 @@ function PlayerDataSection() {
                     >
                       🔄 Move to Transfer Portal
                     </button>
+                  )}
+                </FieldRow>
+              )}
+              {!isNew && (
+                <FieldRow label="We-Draft.com Select">
+                  {selectedPlayer?.WeDraftSelect ? (
+                    <div style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "10px", background: "#fffaf0", display: "flex", alignItems: "center", gap: "10px" }}>
+                      <img src="/wd-icon-512.png" alt="" style={{ width: "28px", height: "28px", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: "12px", fontWeight: 900, color: BLUE }}>{selectedPlayer.WeDraftSelect.label}</div>
+                      <button
+                        type="button"
+                        onClick={() => handleSetSelect(null)}
+                        disabled={saving}
+                        style={{
+                          background: "#fff", color: "#999", border: "2px solid #ddd", borderRadius: "6px", padding: "6px 10px",
+                          fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: saving ? "default" : "pointer",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        value={selectQuery}
+                        onFocus={() => loadSelectPool(selectPosition)}
+                        onChange={(e) => { loadSelectPool(selectPosition); setSelectQuery(e.target.value); }}
+                        placeholder={selectPosition ? `Search drafted ${selectPosition}s by name, school or year…` : "Set a position first"}
+                        disabled={!selectPosition}
+                        style={inputStyle}
+                      />
+                      <div style={{ fontSize: "11px", color: "#888", marginTop: "4px" }}>
+                        Hand-picked top comp — shown first on their comparison page with the We-Draft.com mark instead of a match %. Keep it rare. Saves immediately.
+                      </div>
+                      {selectQuery.trim() && (
+                        <div style={{ border: "1px solid #eee", borderRadius: "6px", marginTop: "6px", maxHeight: "220px", overflowY: "auto" }}>
+                          {!selectPool[selectPosition] ? (
+                            <div style={{ padding: "8px 10px", fontSize: "12px", color: "#999" }}>Loading…</div>
+                          ) : selectMatches.length === 0 ? (
+                            <div style={{ padding: "8px 10px", fontSize: "12px", color: "#999" }}>No drafted {selectPosition}s match.</div>
+                          ) : selectMatches.map((r) => (
+                            <div
+                              key={r.id}
+                              onClick={() => { if (!saving) handleSetSelect(r); }}
+                              style={{ padding: "8px 10px", fontSize: "12px", fontWeight: 800, color: BLUE, cursor: saving ? "default" : "pointer", borderBottom: "1px solid #f3f3f3" }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+                            >
+                              {historicalLabel(r)}
+                              {!((r.Strengths || []).length && (r.Weaknesses || []).length) && (
+                                <span style={{ color: "#c0392b", fontWeight: 700 }}> · no traits yet</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </FieldRow>
               )}
@@ -2342,6 +2457,8 @@ function HistoricalSection() {
   const [selectedRounds, setSelectedRounds] = useState([]);
   // "" = all, "added" = at least one Strength, "missing" = none yet.
   const [strengthsFilter, setStrengthsFilter] = useState("");
+  // "" = all, "yes" = Extended, "no" = not, "double" = Double Extended.
+  const [extendedFilter, setExtendedFilter] = useState("");
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -2353,6 +2470,12 @@ function HistoricalSection() {
         if (!strengthsFilter) return true;
         const has = (r.Strengths || []).length > 0;
         return strengthsFilter === "added" ? has : !has;
+      })
+      .filter((r) => {
+        if (!extendedFilter) return true;
+        if (extendedFilter === "double") return r.DoubleExtended === true;
+        if (extendedFilter === "select") return r.SelectOnly === true;
+        return (extendedFilter === "yes") === (r.Extended === true);
       })
       .filter((r) => !flaggedOnly || (flagsById[r.id]?.length > 0))
       .filter((r) => {
@@ -2366,7 +2489,7 @@ function HistoricalSection() {
         if (yearDiff !== 0) return yearDiff;
         return (Number(a.Pick) || 9999) - (Number(b.Pick) || 9999);
       });
-  }, [records, searchQuery, selectedYears, selectedPositions, selectedRounds, strengthsFilter, flaggedOnly, flagsById]);
+  }, [records, searchQuery, selectedYears, selectedPositions, selectedRounds, strengthsFilter, extendedFilter, flaggedOnly, flagsById]);
 
   // Selecting a specific draft class should show that *entire* class, not
   // a truncated slice of it — the RESULT_LIMIT cap only makes sense as a
@@ -2413,6 +2536,28 @@ function HistoricalSection() {
     setSaveMessage("");
     setConfirmDelete(false);
     setGradesExpanded(true);
+  };
+
+  // Extended (historical/{id}.Extended) — eligible as a comp in the 5
+  // classes past the We-Draft Recommended 10-class window. DoubleExtended —
+  // eligible from any class before those 15, but only for a round 1-2
+  // prospect (see recommendedCompWindow in utils/historicalStats.js).
+  // Toggled straight from the list, not the edit panel, so a class can be
+  // swept quickly; handleSave's updateDoc never touches either. Takes
+  // effect on the public page after the next comp snapshot rebuild.
+  const [savingExtendedId, setSavingExtendedId] = useState(null);
+  const handleToggleExtended = async (r, field) => {
+    const next = r[field] !== true;
+    setSavingExtendedId(r.id);
+    try {
+      await updateDoc(doc(db, "historical", r.id), { [field]: next });
+      setRecords((prev) => prev.map((x) => (x.id === r.id ? { ...x, [field]: next } : x)));
+    } catch (e) {
+      console.error("Admin historical Extended toggle error:", e);
+      alert("Failed to update — check console.");
+    } finally {
+      setSavingExtendedId(null);
+    }
   };
 
   const handleSave = async () => {
@@ -2532,7 +2677,7 @@ function HistoricalSection() {
   // these same already-loaded records — no second fetch).
   const viewTabs = (
     <div style={{ display: "flex", gap: "6px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
-      {[{ key: "records", label: "Records" }, { key: "stats", label: "Stats" }, { key: "comps", label: "Comps" }].map((t) => (
+      {[{ key: "records", label: "Records" }, { key: "stats", label: "Stats" }].map((t) => (
         <button
           key={t.key}
           onClick={() => setView(t.key)}
@@ -2552,7 +2697,6 @@ function HistoricalSection() {
   );
 
   if (view === "stats") return <>{viewTabs}<HistoricalStatsView records={records} /></>;
-  if (view === "comps") return <>{viewTabs}<HistoricalCompsView records={records} /></>;
 
   return (
     <>
@@ -2589,6 +2733,13 @@ function HistoricalSection() {
             <option value="added">Strengths added</option>
             <option value="missing">No strengths yet</option>
           </select>
+          <select value={extendedFilter} onChange={(e) => setExtendedFilter(e.target.value)} style={{ ...inputStyle, width: "130px" }}>
+            <option value="">All Extended</option>
+            <option value="yes">Extended</option>
+            <option value="no">Not extended</option>
+            <option value="double">Double extended</option>
+            <option value="select">Select only</option>
+          </select>
           {/* Combine data doesn't make sense for every field (see
               historicalFlagsFor) — flagged, not auto-corrected, since a
               human needs to decide the true value. This is the only way to
@@ -2598,10 +2749,10 @@ function HistoricalSection() {
             <input type="checkbox" checked={flaggedOnly} onChange={(e) => setFlaggedOnly(e.target.checked)} />
             🚩 Flagged only
           </label>
-          <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "10px", marginTop: "4px" }}>
-            <FilterBar label="Year" options={years} selected={selectedYears} setSelected={setSelectedYears} />
-            <FilterBar label="Position" options={positions} selected={selectedPositions} setSelected={setSelectedPositions} />
-            <FilterBar label="Round" options={rounds} selected={selectedRounds} setSelected={setSelectedRounds} />
+          <div style={{ width: "100%", display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+            <DropdownChecklist title="Year" options={years} selected={selectedYears} setSelected={setSelectedYears} />
+            <DropdownChecklist title="Position" options={positions} selected={selectedPositions} setSelected={setSelectedPositions} />
+            <DropdownChecklist title="Round" options={rounds} selected={selectedRounds} setSelected={setSelectedRounds} />
           </div>
         </div>
 
@@ -2632,9 +2783,32 @@ function HistoricalSection() {
                       {flagged && <span title="Data looks off — see the edit panel for details" style={{ flexShrink: 0, fontSize: "12px" }}>🚩</span>}
                       <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{(r.First || r.Last) ? `${r.First || ""} ${r.Last || ""}`.trim() : (r.Player || "(no name)")}</div>
                     </div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#999", flexShrink: 0 }}>
-                      {r.Year}{r.Round ? ` · Rd ${r.Round}` : ""}{r.Pick ? `, Pick ${r.Pick}` : ""}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: "#999" }}>
+                        {r.Year}{r.Round ? ` · Rd ${r.Round}` : ""}{r.Pick ? `, Pick ${r.Pick}` : ""}
+                      </span>
+                      {[
+                        { field: "Extended", label: "Ext", title: "Extended — eligible as a comp in the 5 classes past the recommended 10-class window" },
+                        { field: "DoubleExtended", label: "2x", title: "Double Extended — eligible as a comp from any class before the 15-class window, for round 1-2 prospects only" },
+                        { field: "SelectOnly", label: "Sel", title: "Select only — never a model comp; graded only so it can be picked as a We-Draft.com Select" },
+                      ].map(({ field, label, title }) => (
+                        <label
+                          key={field}
+                          onClick={(e) => e.stopPropagation()}
+                          title={title}
+                          style={{ display: "flex", alignItems: "center", gap: "3px", fontSize: "10px", fontWeight: 900, color: r[field] ? GOLD : "#bbb", cursor: "pointer", textTransform: "uppercase" }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={r[field] === true}
+                            disabled={savingExtendedId === r.id}
+                            onChange={() => handleToggleExtended(r, field)}
+                            style={{ accentColor: GOLD, margin: 0 }}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
                     {r.School || "—"}{r.Position ? ` · ${r.Position}` : ""}{r["NFL Team"] ? ` → ${r["NFL Team"]}` : ""}
@@ -3419,6 +3593,36 @@ function zColor(z) {
   return "#c0392b";
 }
 
+// Player Data → Comps: the admin comp calculator on its own tab (it used to
+// be a sub-view of Historical). Reads `historical` once per visit — the
+// same full read HistoricalSection does — for the comp pool.
+function CompsSection() {
+  const [records, setRecords] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getDocs(collection(db, "historical"))
+      .then((snap) => { if (!cancelled) setRecords(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); })
+      .catch((e) => { console.error("Admin comps historical fetch error:", e); if (!cancelled) setRecords([]); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!records) return <LoadingSpinner label="Loading" size={28} minHeight="100px" />;
+  return <HistoricalCompsView records={records} />;
+}
+
+// Recruits for the comp calculator's "Load Recruit" picker — admin-entered
+// Strengths/Weaknesses live right on recruits/{id}. Once per admin session.
+let compRecruitsPromise = null;
+function fetchCompRecruits() {
+  if (!compRecruitsPromise) {
+    compRecruitsPromise = getDocs(collection(db, "recruits"))
+      .then((snap) => snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => `${a.Last || ""} ${a.First || ""}`.localeCompare(`${b.Last || ""} ${b.First || ""}`)))
+      .catch((e) => { compRecruitsPromise = null; throw e; });
+  }
+  return compRecruitsPromise;
+}
+
 function HistoricalCompsView({ records }) {
   const { pool } = useHistoricalPool(records);
   const [position, setPosition] = useState("WR");
@@ -3434,6 +3638,12 @@ function HistoricalCompsView({ records }) {
   const [loadedPlayerId, setLoadedPlayerId] = useState("");
   const [traitSource, setTraitSource] = useState("community");
   const [loadStatus, setLoadStatus] = useState(""); // "Loading…" / what got filled in
+  // "players" (2027-29 prospects, traits from evaluations) or "recruits"
+  // (high-school recruits, traits = the admin-entered Strengths/Weaknesses
+  // on the recruit record itself).
+  const [loadFrom, setLoadFrom] = useState("players");
+  const [recruits, setRecruits] = useState(null);
+  const [loadedRecruitId, setLoadedRecruitId] = useState("");
   // Guards against a slow earlier load finishing after a newer pick and
   // overwriting it.
   const loadSeq = useRef(0);
@@ -3445,6 +3655,48 @@ function HistoricalCompsView({ records }) {
       .catch((e) => console.error("Admin comps active players fetch error:", e));
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (loadFrom !== "recruits" || recruits) return;
+    let cancelled = false;
+    fetchCompRecruits()
+      .then((rows) => { if (!cancelled) setRecruits(rows); })
+      .catch((e) => { console.error("Admin comps recruits fetch error:", e); if (!cancelled) setRecruits([]); });
+    return () => { cancelled = true; };
+  }, [loadFrom, recruits]);
+
+  const recruitOptions = useMemo(() => {
+    const q = playerSearch.trim().toLowerCase();
+    const byClass = {};
+    (recruits || [])
+      .filter((r) => !q || `${r.First || ""} ${r.Last || ""} ${r.HighSchool || ""} ${r.Commitment || ""}`.toLowerCase().includes(q))
+      .forEach((r) => { (byClass[r.RecruitClass || "—"] || (byClass[r.RecruitClass || "—"] = [])).push(r); });
+    return Object.keys(byClass).sort().map((c) => ({ year: c, players: byClass[c] }));
+  }, [recruits, playerSearch]);
+
+  // Recruit: measurements (height/weight, whatever's on file) + their
+  // admin-entered traits, all from the one already-loaded record.
+  const loadRecruit = (recruitId) => {
+    setLoadedRecruitId(recruitId);
+    loadSeq.current += 1;
+    if (!recruitId) { setLoadStatus(""); return; }
+    const r = (recruits || []).find((x) => x.id === recruitId);
+    if (!r) return;
+    const nextInputs = {};
+    STAT_METRICS.forEach((m) => {
+      const { value } = readMetric(r, m);
+      if (value != null) nextInputs[m.key] = String(value);
+    });
+    const s = (r.Strengths || []).slice(0, 5);
+    const w = (r.Weaknesses || []).filter((t) => !s.includes(t)).slice(0, 5);
+    if (r.Position) setPosition(r.Position);
+    setInputs(nextInputs);
+    setStrengths(s);
+    setWeaknesses(w);
+    setSubmitted(null);
+    const filled = STAT_METRICS.filter((m) => nextInputs[m.key] != null).map((m) => m.label);
+    setLoadStatus(`${filled.join(", ") || "No measurements"} · ${s.length} strengths / ${w.length} weaknesses (admin, recruit record)`);
+  };
 
   const playerOptions = useMemo(() => {
     const q = playerSearch.trim().toLowerCase();
@@ -3670,31 +3922,66 @@ function HistoricalCompsView({ records }) {
         </div>
         <div style={{ padding: "14px" }}>
           <div style={{ marginBottom: "14px", paddingBottom: "14px", borderBottom: "1px solid #eee" }}>
-            <div style={sectionStyle}>Load Player ({ACTIVE_YEARS[0]}–{ACTIVE_YEARS[ACTIVE_YEARS.length - 1]})</div>
+            <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+              {[{ key: "players", label: `Players (${ACTIVE_YEARS[0]}–${ACTIVE_YEARS[ACTIVE_YEARS.length - 1]})` }, { key: "recruits", label: "Recruits" }].map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => { setLoadFrom(t.key); setPlayerSearch(""); }}
+                  style={{
+                    flex: 1, padding: "5px 8px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
+                    border: "2px solid " + BLUE, borderRadius: "6px", cursor: "pointer",
+                    background: loadFrom === t.key ? BLUE : "#fff", color: loadFrom === t.key ? "#fff" : BLUE,
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
             <input
               value={playerSearch}
               onChange={(e) => setPlayerSearch(e.target.value)}
               placeholder="Search name or school..."
               style={{ ...inputStyle, marginBottom: "6px" }}
             />
-            <select value={loadedPlayerId} onChange={(e) => loadPlayer(e.target.value, traitSource)} style={{ ...inputStyle, marginBottom: "6px" }}>
-              <option value="">{activePlayers.length ? "— Select a player —" : "Loading players…"}</option>
-              {playerOptions.map(({ year, players }) => (
-                <optgroup key={year} label={year}>
-                  {players.map((p) => (
-                    <option key={p.id} value={p.id}>{p.First} {p.Last} · {p.Position} · {p.School}</option>
+            {loadFrom === "recruits" ? (
+              <>
+                <select value={loadedRecruitId} onChange={(e) => loadRecruit(e.target.value)} style={{ ...inputStyle, marginBottom: "6px" }}>
+                  <option value="">{recruits ? "— Select a recruit —" : "Loading recruits…"}</option>
+                  {recruitOptions.map(({ year, players }) => (
+                    <optgroup key={year} label={`Class of ${year}`}>
+                      {players.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.First} {r.Last} · {r.Position} · {r.HighSchool || r.State || ""}{(r.Strengths || []).length + (r.Weaknesses || []).length ? "" : " (no traits)"}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
-                </optgroup>
-              ))}
-            </select>
-            <div style={{ ...labelStyle, color: "#888" }}>Traits from</div>
-            <select
-              value={traitSource}
-              onChange={(e) => { setTraitSource(e.target.value); if (loadedPlayerId) loadPlayer(loadedPlayerId, e.target.value); }}
-              style={inputStyle}
-            >
-              {TRAIT_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+                </select>
+                <div style={{ fontSize: "11px", color: "#888" }}>Traits come from the Strengths/Weaknesses entered on the recruit in Player Data → Recruits.</div>
+              </>
+            ) : (
+              <>
+                <select value={loadedPlayerId} onChange={(e) => loadPlayer(e.target.value, traitSource)} style={{ ...inputStyle, marginBottom: "6px" }}>
+                  <option value="">{activePlayers.length ? "— Select a player —" : "Loading players…"}</option>
+                  {playerOptions.map(({ year, players }) => (
+                    <optgroup key={year} label={year}>
+                      {players.map((p) => (
+                        <option key={p.id} value={p.id}>{p.First} {p.Last} · {p.Position} · {p.School}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <div style={{ ...labelStyle, color: "#888" }}>Traits from</div>
+                <select
+                  value={traitSource}
+                  onChange={(e) => { setTraitSource(e.target.value); if (loadedPlayerId) loadPlayer(loadedPlayerId, e.target.value); }}
+                  style={inputStyle}
+                >
+                  {TRAIT_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </>
+            )}
             {loadStatus && (
               <div style={{ fontSize: "11px", fontWeight: 700, marginTop: "4px", color: "#888" }}>{loadStatus}</div>
             )}

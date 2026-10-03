@@ -33,10 +33,11 @@ import MarginAds from "../components/MarginAds";
 import { usePlayerSidebarData, PlayerVideosCard, PlayerNewsCard } from "../components/PlayerSidebars";
 import { WatchButton } from "./PlayerProfile";
 import { Helmet } from "react-helmet-async";
+import WdWordmark from "../assets/Logo1.png";
 import {
   STAT_METRICS, readMetric, computePositionStats, findComps, isGraded,
   communityTraits, draftedPlayersAsHistorical, TRAIT_WEIGHT, TRAIT_MATCH_TARGET, percentileOf,
-  decodeCompSnapshotRows, COMP_SNAPSHOT_VERSION,
+  decodeCompSnapshotRows, COMP_SNAPSHOT_VERSION, recommendedCompWindow, inRecommendedWindow, doubleExtendedFor,
 } from "../utils/historicalStats";
 
 const BLUE = "#0055a5";
@@ -419,23 +420,25 @@ function compCutoffYear(player) {
   return Number.isFinite(y) ? y : null;
 }
 
-// Draft Classes range. Only classes that actually have graded players
-// (Strengths AND Weaknesses — the only eligible comps, see findComps'
-// requireTraits) are offered, oldest first; that list grows on its own as
-// older classes get retro-graded. The default "from" is DEFAULT_FROM_YEAR,
-// or the earliest graded class if grading hasn't reached back that far yet
-// — so today (2022+ graded) the default is every graded class, and once
-// 2016 is graded it settles at 2016 onward, with anything earlier opt-in.
-// "To" defaults to the latest graded class. Blank select state ("") means
+// Draft Classes. The default is "We-Draft Recommended" (classMode
+// "recommended" — see recommendedCompWindow: the last 10 classes, plus
+// Extended-only players from the 5 before that, plus Double Extended
+// players from any earlier class for a round 1-2 subject). "Custom" opens a From/To
+// range that takes everyone in it, Extended or not. Only classes that
+// actually have graded players (Strengths AND Weaknesses — the only
+// eligible comps, see findComps' requireTraits) are offered, oldest first.
+// A custom range's "from" starts at the recommended window's first full
+// class (or the earliest graded class, if grading hasn't reached back that
+// far); "to" at the latest graded class. Blank select state ("") means
 // "use the default", resolved against the pool at search time.
-const DEFAULT_FROM_YEAR = 2016;
 function gradedClassYears(pool, beforeYear) {
   return [...new Set((pool || [])
-    .filter((r) => isGraded(r) && r.Year && (beforeYear == null || Number(r.Year) < beforeYear))
+    .filter((r) => isGraded(r) && r.SelectOnly !== true && r.Year && (beforeYear == null || Number(r.Year) < beforeYear))
     .map((r) => String(r.Year)))].sort();
 }
-function defaultFromYear(years) {
-  return years.find((y) => Number(y) >= DEFAULT_FROM_YEAR) || years[years.length - 1] || "";
+function defaultFromYear(years, win) {
+  const from = win ? win.coreFrom : 0;
+  return years.find((y) => Number(y) >= from) || years[years.length - 1] || "";
 }
 
 // 1 -> "1st", 22 -> "22nd", 88 -> "88th" (11-13 -> "th").
@@ -553,6 +556,46 @@ function fetchActivePlayersLive() {
       .sort((a, b) => `${a.Last || ""} ${a.First || ""}`.localeCompare(`${b.Last || ""} ${b.First || ""}`)));
 }
 
+const COMP_DISCLAIMER = "Comparisons are computed using pre-draft measurables and grades, and should be treated as such rather than a projection of career trajectory.";
+
+// Small "i" next to a heading — hover (mouse) or tap (touch) shows the text
+// in a bubble underneath. Rendered inline so it sits right after the text.
+function InfoTip({ text, color }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-block", verticalAlign: "middle", marginLeft: "8px" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-label="About these comparisons"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onBlur={() => setOpen(false)}
+        style={{
+          width: "18px", height: "18px", borderRadius: "50%", border: `1.5px solid ${color}`, background: "#fff",
+          color, fontSize: "11px", fontWeight: 900, fontStyle: "italic", fontFamily: "Georgia, serif",
+          lineHeight: "15px", padding: 0, cursor: "pointer", textTransform: "none",
+        }}
+      >
+        i
+      </button>
+      {open && (
+        <span role="tooltip" style={{
+          position: "absolute", top: "calc(100% + 8px)", right: "-8px", zIndex: 20,
+          width: "min(280px, 80vw)", padding: "10px 12px", borderRadius: "8px",
+          background: NAVY, color: "#fff", boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+          fontSize: "12px", fontWeight: 600, lineHeight: 1.45, letterSpacing: "normal", textTransform: "none", textAlign: "left",
+        }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
 const cardStyle = { background: "#fff", borderRadius: "16px", boxShadow: "0 2px 18px rgba(0,40,80,0.10)", overflow: "hidden" };
 const labelStyle = { fontSize: "10px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#888", marginBottom: "5px" };
 const sectionStyle = { fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "10px" };
@@ -593,6 +636,7 @@ export default function Comparison() {
   const [traitGroups, setTraitGroups] = useState({});
   const [heightWindow, setHeightWindow] = useState("1");
   const [traitWeight, setTraitWeight] = useState(String(TRAIT_WEIGHT));
+  const [classMode, setClassMode] = useState("recommended"); // "recommended" | "custom"
   const [fromYear, setFromYear] = useState("");
   const [toYear, setToYear] = useState("");
   const [loadStatus, setLoadStatus] = useState("");
@@ -679,7 +723,8 @@ export default function Comparison() {
 
   const cutoffYear = compCutoffYear(loadedPlayer);
   const years = useMemo(() => gradedClassYears(pool, cutoffYear), [pool, cutoffYear]);
-  const effectiveFromYear = fromYear || defaultFromYear(years);
+  const recWindow = useMemo(() => recommendedCompWindow(pool, cutoffYear), [pool, cutoffYear]);
+  const effectiveFromYear = fromYear || defaultFromYear(years, recWindow);
   const effectiveToYear = toYear || years[years.length - 1] || "";
 
   // Loaded prospect's own school colors — same schools/{School} source
@@ -737,6 +782,23 @@ export default function Comparison() {
     return () => { cancelled = true; };
   }, [loadedPlayer?.Slug, loadedPlayer?.Eligible]);
 
+  // ── We-Draft.com Select — an admin hand-picked top comp (players/{id}.
+  // WeDraftSelect = { id: historical doc id, label }, set from the admin
+  // Player Data editor). Rare by design: most prospects don't have one.
+  // When set it always leads the results as card #1, shows the We-Draft
+  // mark instead of a match %, and is fetched straight from `historical`
+  // (one read) since the comp snapshots carry no doc ids.
+  const [selectRecord, setSelectRecord] = useState(null);
+  const selectId = loadedPlayer?.WeDraftSelect?.id || "";
+  useEffect(() => {
+    if (!selectId) { setSelectRecord(null); return; }
+    let cancelled = false;
+    getDoc(doc(db, "historical", selectId))
+      .then((snap) => { if (!cancelled) setSelectRecord(snap.exists() ? { id: snap.id, ...snap.data() } : null); })
+      .catch((e) => { console.error("Comparison We-Draft Select fetch error:", e); if (!cancelled) setSelectRecord(null); });
+    return () => { cancelled = true; };
+  }, [selectId]);
+
   const heroColor1 = (drafted?.branding?.Color1) || schoolBranding?.Color1 || BLUE;
   const heroColor2 = (drafted?.branding?.Color2) || schoolBranding?.Color2 || GOLD;
 
@@ -784,7 +846,8 @@ export default function Comparison() {
         values: Object.fromEntries(Object.entries(nextInputs).map(([k, v]) => [k, Number(v)])),
         strengths: t.strengths, weaknesses: t.weaknesses, traitCounts: t.counts,
         heightWindowSd: heightWindow ? Number(heightWindow) : null, traitWeight: Number(traitWeight),
-        fromYear, toYear, beforeYear: compCutoffYear(player), subjectRound: round,
+        classMode, fromYear, toYear, beforeYear: compCutoffYear(player), subjectRound: round,
+        selectFor: player.WeDraftSelect?.id || null,
       });
       setCalcOpen(false);
     } catch (e) {
@@ -883,27 +946,49 @@ export default function Comparison() {
   const hasTraits = Number(traitWeight) > 0 && strengths.length + weaknesses.length > 0;
   const canSearch = !hasError && (filledCount > 0 || hasTraits);
 
-  // Year range is snapshotted into `submitted` (like every other input) so
-  // results only change on an explicit search, not live as the selects move.
-  // A blank from/to resolves to the default range here (see
-  // gradedClassYears/defaultFromYear), against the pool as it is now.
-  // The class range only narrows the *candidates*: the SDs that score them
-  // come from every drafted player before the prospect's class, so picking
-  // a narrower range never changes how a measurement difference is scored.
+  // Class mode/range is snapshotted into `submitted` (like every other
+  // input) so results only change on an explicit search, not live as the
+  // selects move. Recommended resolves its window here; a custom range's
+  // blank from/to resolves to its defaults (see gradedClassYears/
+  // defaultFromYear), against the pool as it is now. Either way the class
+  // choice only narrows the *candidates*: the SDs that score them come from
+  // every drafted player before the prospect's class, so picking a narrower
+  // range never changes how a measurement difference is scored.
   const results = useMemo(() => {
     if (!submitted || !resultsPool) return [];
     const before = submitted.beforeYear;
     const statsPool = before == null ? resultsPool : resultsPool.filter((r) => Number(r.Year) < before);
-    const classYears = gradedClassYears(resultsPool, before);
-    const from = Number(submitted.fromYear || defaultFromYear(classYears) || 0);
-    const to = Number(submitted.toYear || classYears[classYears.length - 1] || 9999);
-    const candidates = statsPool.filter((r) => Number(r.Year) >= from && Number(r.Year) <= to);
-    return findComps(
-      { position: submitted.position, values: submitted.values, strengths: submitted.strengths, weaknesses: submitted.weaknesses, traitCounts: submitted.traitCounts },
-      candidates, computePositionStats(statsPool),
+    const win = recommendedCompWindow(resultsPool, before);
+    let candidates;
+    if (submitted.classMode === "custom") {
+      const classYears = gradedClassYears(resultsPool, before);
+      const from = Number(submitted.fromYear || defaultFromYear(classYears, win) || 0);
+      const to = Number(submitted.toYear || classYears[classYears.length - 1] || 9999);
+      candidates = statsPool.filter((r) => Number(r.Year) >= from && Number(r.Year) <= to);
+    } else {
+      const allowDoubleExtended = doubleExtendedFor(submitted.subjectRound);
+      candidates = statsPool.filter((r) => inRecommendedWindow(r, win, { allowDoubleExtended }));
+    }
+    const input = { position: submitted.position, values: submitted.values, strengths: submitted.strengths, weaknesses: submitted.weaknesses, traitCounts: submitted.traitCounts };
+    const stats = computePositionStats(statsPool);
+    const comps = findComps(input, candidates, stats,
       { heightWindowSd: submitted.heightWindowSd, traitWeight: submitted.traitWeight, limit: 10, subjectRound: submitted.subjectRound }
     );
-  }, [submitted, resultsPool]);
+    // We-Draft.com Select leads, whatever the model thinks — scored the
+    // same way only so its card's detail face has measurements and shared
+    // traits to show (no height window or class range: it was hand-picked).
+    // Only for the prospect it was picked for, at their own position.
+    if (!selectRecord || !submitted.selectFor || submitted.selectFor !== selectRecord.id || selectRecord.Position !== submitted.position) return comps;
+    const scored = findComps(input, [selectRecord], stats, { heightWindowSd: null, traitWeight: submitted.traitWeight, limit: 1, requireTraits: false, allowSelectOnly: true })[0];
+    const values = Object.fromEntries(STAT_METRICS.map((m) => [m.key, readMetric(selectRecord, m).value]));
+    const select = {
+      ...(scored || { record: selectRecord, values }),
+      select: true,
+      traits: scored?.traits || { strengths: selectRecord.Strengths || [], weaknesses: selectRecord.Weaknesses || [], sharedStrengths: [], sharedWeaknesses: [] },
+    };
+    const sameAsSelect = (r) => recordName(r.record) === recordName(selectRecord) && String(r.record.Year) === String(selectRecord.Year);
+    return [select, ...comps.filter((r) => !sameAsSelect(r))].slice(0, 10);
+  }, [submitted, resultsPool, selectRecord]);
 
   // Each result's actual NFL team colors/logo (nfl/{abbr}) — the top-3
   // cards' color treatment and the 4-10 table's logos. Fetched lazily per
@@ -934,7 +1019,7 @@ export default function Comparison() {
 
   const runSearch = () => {
     if (!canSearch) return;
-    setSubmitted({ position, values, strengths, weaknesses, traitCounts, heightWindowSd: heightWindow ? Number(heightWindow) : null, traitWeight: Number(traitWeight), fromYear, toYear, beforeYear: cutoffYear, subjectRound: loadedPlayer ? subjectRound : null });
+    setSubmitted({ position, values, strengths, weaknesses, traitCounts, heightWindowSd: heightWindow ? Number(heightWindow) : null, traitWeight: Number(traitWeight), classMode, fromYear, toYear, beforeYear: cutoffYear, subjectRound: loadedPlayer ? subjectRound : null, selectFor: loadedPlayer?.WeDraftSelect?.id || null });
     setCalcOpen(false);
   };
   const clearAll = () => {
@@ -1172,6 +1257,13 @@ export default function Comparison() {
     <div style={{ background: "#f4f7fb", minHeight: "70vh", paddingBottom: "60px" }}>
       <style>{`
         @keyframes wdCompFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+        /* We-Draft.com Select card — slow gold glow, a rotating gold ring
+           around the WD mark, and a shine that sweeps the ribbon. */
+        @keyframes wdSelectGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(244,166,30,0.0), 0 6px 26px rgba(0,48,92,0.22); } 50% { box-shadow: 0 0 22px 2px rgba(244,166,30,0.55), 0 6px 26px rgba(0,48,92,0.22); } }
+        @keyframes wdSelectSpin { to { transform: rotate(360deg); } }
+        @keyframes wdSelectShine { 0% { transform: translateX(-120%) skewX(-20deg); } 60%, 100% { transform: translateX(260%) skewX(-20deg); } }
+        .wd-comp-card.wd-select-card { animation: wdCompFadeUp 0.4s ease both, wdSelectGlow 3.2s ease-in-out 0.4s infinite; }
+        @media (prefers-reduced-motion: reduce) { .wd-select-card, .wd-select-ring, .wd-select-shine { animation: none !important; } }
         @keyframes wdCompSlideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
         .wd-comp-card { animation: wdCompFadeUp 0.35s ease both; }
         .wd-comp-form { animation: wdCompSlideDown 0.2s ease both; }
@@ -1472,6 +1564,7 @@ export default function Comparison() {
         {seoName && (
           <h2 style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 900, color: heroColor1, textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", margin: "0 0 14px" }}>
             {seoHeading}
+            <InfoTip color={heroColor1} text={COMP_DISCLAIMER} />
           </h2>
         )}
 
@@ -1588,7 +1681,11 @@ export default function Comparison() {
                 {top3.map((r, i) => {
                   const abbr = resolveNflAbbr(r.record["NFL Team"]);
                   const team = abbr ? nflBranding[abbr] : null;
-                  const tier = matchTier(r.similarity);
+                  // We-Draft.com Select (see selectRecord): hand-picked, so
+                  // it carries no match % — the WD mark stands in for the
+                  // wheel, and the card gets a gold frame, glow and ribbon.
+                  const isSelect = !!r.select;
+                  const tier = isSelect ? { color: GOLD } : matchTier(r.similarity);
                   const fill = team?.Color1 || NAVY;
                   // Resting stroke + wheel: team color, falling back to the
                   // match tier's color until/unless the team doc resolves.
@@ -1621,7 +1718,8 @@ export default function Comparison() {
                   return (
                     <div
                       key={r.record.id || i}
-                      className="wd-comp-card"
+                      className={isSelect ? "wd-comp-card wd-select-card" : "wd-comp-card"}
+                      title={isSelect ? "We-Draft.com Select — hand-picked by our analysts" : undefined}
                       onPointerDown={(e) => { lastPointerType.current = e.pointerType; }}
                       onPointerEnter={(e) => { if (e.pointerType === "mouse") setActiveCard(i); }}
                       onPointerLeave={(e) => { if (e.pointerType === "mouse") setActiveCard((a) => (a === i ? null : a)); }}
@@ -1637,10 +1735,26 @@ export default function Comparison() {
                         ...cardStyle, display: "grid", textAlign: "center", cursor: profileSlug ? "pointer" : "default",
                         animationDelay: `${i * 0.08}s`,
                         background: active ? fill : "#fff",
-                        border: `2px solid ${active ? fill : accent}`,
+                        border: isSelect ? `3px solid ${GOLD}` : `2px solid ${active ? fill : accent}`,
                         transition: "background 0.25s ease, border-color 0.25s ease",
+                        position: "relative",
                       }}
                     >
+                      {isSelect && (
+                        <div style={{
+                          position: "absolute", top: 0, left: 0, right: 0, height: "19px", zIndex: 2, overflow: "hidden",
+                          background: `linear-gradient(90deg, ${NAVY}, ${BLUE}, ${NAVY})`, borderBottom: `2px solid ${GOLD}`,
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: "7px", pointerEvents: "none",
+                        }}>
+                          <img src={WdWordmark} alt="We-Draft.com" style={{ height: "10px", width: "auto", filter: "brightness(0) invert(1)" }} />
+                          <span style={{ color: GOLD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.16em" }}>SELECT</span>
+                          <span className="wd-select-shine" style={{
+                            position: "absolute", top: 0, bottom: 0, left: 0, width: "40%",
+                            background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)",
+                            animation: "wdSelectShine 3.6s ease-in-out infinite",
+                          }} />
+                        </div>
+                      )}
                       {/* Resting face — name leads (big, top of the card),
                           then the match wheel, draft line, and the NFL
                           team's wordmark pinned to the bottom. */}
@@ -1649,17 +1763,36 @@ export default function Comparison() {
                         <div style={{ fontSize: "clamp(24px, 2.6vw, 30px)", fontWeight: 900, color: nameColor, lineHeight: 1.02, textTransform: "uppercase", letterSpacing: "0.01em", marginBottom: "6px" }}>
                           {recordNameParts(r.record).filter(Boolean).map((part, pi) => <div key={pi}>{part}</div>)}
                         </div>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", marginBottom: "16px" }}>{r.record.Position} · {r.record.School}</div>
-                        <div style={{
-                          width: "124px", height: "124px", borderRadius: "50%", margin: "0 auto 16px",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          background: `conic-gradient(${accent} ${r.similarity * 3.6}deg, #eef1f6 0deg)`,
-                        }}>
-                          <div style={{ width: "100px", height: "100px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <div style={{ fontSize: "28px", fontWeight: 900, color: accent, letterSpacing: "-0.01em" }}>{r.similarity.toFixed(0)}%</div>
+                        <div style={{ fontSize: "15px", fontWeight: 800, color: "#777", marginBottom: "16px" }}>{r.record.Position} · {r.record.School}</div>
+                        {isSelect ? (
+                          <div style={{ position: "relative", width: "124px", height: "124px", margin: "0 auto 16px" }}>
+                            <div className="wd-select-ring" style={{
+                              position: "absolute", inset: 0, borderRadius: "50%",
+                              background: `conic-gradient(${GOLD}, #ffe39a, ${GOLD}, ${NAVY}, ${GOLD})`,
+                              animation: "wdSelectSpin 7s linear infinite",
+                            }} />
+                            <div style={{ position: "absolute", inset: "12px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <img src="/wd-icon-512.png" alt="We-Draft.com Select" style={{ width: "88px", height: "88px", objectFit: "contain" }} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{
+                            width: "124px", height: "124px", borderRadius: "50%", margin: "0 auto 16px",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            background: `conic-gradient(${accent} ${r.similarity * 3.6}deg, #eef1f6 0deg)`,
+                          }}>
+                            <div style={{ width: "100px", height: "100px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <div style={{ fontSize: "28px", fontWeight: 900, color: accent, letterSpacing: "-0.01em" }}>{r.similarity.toFixed(0)}%</div>
+                            </div>
+                          </div>
+                        )}
+                        {/* Draft year on its own line, round/pick underneath. */}
+                        <div style={{ marginBottom: "14px", color: BLUE, lineHeight: 1.1 }}>
+                          <div style={{ fontSize: "24px", fontWeight: 900, letterSpacing: "0.02em" }}>{r.record.Year}</div>
+                          <div style={{ fontSize: "14px", fontWeight: 800, marginTop: "2px" }}>
+                            Round {parseInt(r.record.Round, 10)}{r.record.Pick ? ` · Pick ${r.record.Pick}` : ""}
                           </div>
                         </div>
-                        <div style={{ fontSize: "12px", fontWeight: 800, color: BLUE, marginBottom: "14px" }}>{draftLine}</div>
                         {/* Wordmark — sized by width, not height: it
                             bleeds 12px into the card's side padding (8px
                             short of the border) and takes whatever height
@@ -1711,7 +1844,11 @@ export default function Comparison() {
                             <div style={{ fontSize: "17px", fontWeight: 900, lineHeight: 1.15 }}>{recordName(r.record)}</div>
                             <div style={{ fontSize: "11px", fontWeight: 700, color: onFillMuted }}>{draftLine}</div>
                           </div>
-                          <div style={{ fontSize: "16px", fontWeight: 900, flexShrink: 0 }}>{r.similarity.toFixed(0)}%</div>
+                          {isSelect ? (
+                            <img src="/wd-icon-512.png" alt="We-Draft.com Select" style={{ width: "34px", height: "34px", flexShrink: 0 }} />
+                          ) : (
+                            <div style={{ fontSize: "16px", fontWeight: 900, flexShrink: 0 }}>{r.similarity.toFixed(0)}%</div>
+                          )}
                         </div>
 
                         {measured.length > 0 && (
@@ -1854,7 +1991,7 @@ export default function Comparison() {
                 <span style={{ background: GOLD, color: "#fff", fontWeight: 900, fontSize: "11px", padding: "4px 10px", borderRadius: "999px" }}>{position}</span>
                 <span style={{ fontSize: "12px", fontWeight: 700, color: "#666" }}>
                   {filledCount} measurement{filledCount === 1 ? "" : "s"} · {strengths.length} strength{strengths.length === 1 ? "" : "s"} · {weaknesses.length} weakness{weaknesses.length === 1 ? "" : "es"}
-                  {effectiveFromYear && ` · ${effectiveFromYear}–${effectiveToYear}`}
+                  {classMode === "recommended" ? " · We-Draft Recommended" : effectiveFromYear && ` · ${effectiveFromYear}–${effectiveToYear}`}
                 </span>
               </div>
             )}
@@ -1894,20 +2031,32 @@ export default function Comparison() {
                 </div>
               </div>
 
-              {/* Draft Classes — right under the measurements. Only graded
-                  classes are offered (see gradedClassYears); the default
-                  range is DEFAULT_FROM_YEAR (or the earliest graded class)
-                  through the latest. */}
+              {/* Draft Classes — right under the measurements. We-Draft
+                  Recommended by default (see recommendedCompWindow);
+                  Custom opens a From/To range over the graded classes
+                  (see gradedClassYears/defaultFromYear). */}
               <div style={sectionStyle}>Draft Classes</div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "20px", flexWrap: "wrap" }}>
-                <select value={effectiveFromYear} onChange={(e) => setFromYear(e.target.value)} style={{ ...inputStyle, width: "110px" }}>
-                  {years.filter((y) => !effectiveToYear || y <= effectiveToYear).map((y) => <option key={y} value={y}>{y}</option>)}
+                <select value={classMode} onChange={(e) => setClassMode(e.target.value)} style={{ ...inputStyle, width: "210px" }}>
+                  <option value="recommended">We-Draft Recommended</option>
+                  <option value="custom">Custom range</option>
                 </select>
-                <span style={{ color: "#bbb", fontWeight: 900 }}>—</span>
-                <select value={effectiveToYear} onChange={(e) => setToYear(e.target.value)} style={{ ...inputStyle, width: "110px" }}>
-                  {years.filter((y) => !effectiveFromYear || y >= effectiveFromYear).map((y) => <option key={y} value={y}>{y}</option>)}
-                </select>
-                <span style={{ fontSize: "11px", fontWeight: 700, color: "#999" }}>Which draft classes to pull comps from</span>
+                {classMode === "custom" ? (
+                  <>
+                    <select value={effectiveFromYear} onChange={(e) => setFromYear(e.target.value)} style={{ ...inputStyle, width: "110px" }}>
+                      {years.filter((y) => !effectiveToYear || y <= effectiveToYear).map((y) => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <span style={{ color: "#bbb", fontWeight: 900 }}>—</span>
+                    <select value={effectiveToYear} onChange={(e) => setToYear(e.target.value)} style={{ ...inputStyle, width: "110px" }}>
+                      {years.filter((y) => !effectiveFromYear || y >= effectiveFromYear).map((y) => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </>
+                ) : recWindow && (
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#999" }}>
+                    {recWindow.coreFrom}–{recWindow.to}, plus select players from {recWindow.extFrom}–{recWindow.coreFrom - 1}
+                    {loadedPlayer && doubleExtendedFor(subjectRound) && ` and select all-time greats from before ${recWindow.extFrom}`}
+                  </span>
+                )}
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "22px", marginBottom: "10px" }}>

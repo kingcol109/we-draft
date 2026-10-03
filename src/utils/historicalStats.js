@@ -323,7 +323,10 @@ function traitMatch(input, record) {
 }
 
 export function findComps(input, pool, stats, opts = {}) {
-  const { heightWindowSd = 0.5, weights = {}, traitWeight = TRAIT_WEIGHT, requireTraits = true, limit = 25, subjectRound = null } = opts;
+  // allowSelectOnly: records flagged SelectOnly (graded only so they can be
+  // hand-picked as a We-Draft.com Select) never surface as model comps —
+  // only the Select scoring path passes this.
+  const { heightWindowSd = 0.5, weights = {}, traitWeight = TRAIT_WEIGHT, requireTraits = true, limit = 25, subjectRound = null, allowSelectOnly = false } = opts;
   const posStats = stats[input.position];
   if (!posStats) return [];
   const values = input.values || {};
@@ -341,6 +344,7 @@ export function findComps(input, pool, stats, opts = {}) {
   pool.forEach((r) => {
     if (r.Position !== input.position || !isDrafted(r)) return;
     if (requireTraits && !isGraded(r)) return;
+    if (r.SelectOnly === true && !allowSelectOnly) return;
     const vals = {};
     STAT_METRICS.forEach((m) => { vals[m.key] = readMetric(r, m).value; });
 
@@ -396,9 +400,13 @@ export function findComps(input, pool, stats, opts = {}) {
 // plus, for graded players only (the only ones that can surface as comps),
 //   { F, L } or { P } (name), sc: School, pk: Pick, t: NFL Team,
 //   S: Strengths, W: Weaknesses, sl: player-page Slug (latest-class rows
-//   only — they still live in `players`; historical rows have no page)
+//   only — they still live in `players`; historical rows have no page),
+//   x: 1 when the record is Extended, dx: 1 when Double Extended (see
+//   recommendedCompWindow), so: 1 when SelectOnly (see findComps)
 // Values are stored post-readMetric, so out-of-bounds data is already null.
-export const COMP_SNAPSHOT_VERSION = 1;
+// v2 added `x`/`dx` — a v1 doc has neither flag, so the page falls back to
+// live reads until the snapshots are rebuilt.
+export const COMP_SNAPSHOT_VERSION = 2;
 
 export function encodeCompSnapshotRows(records) {
   return records.filter(isDrafted).map((r) => {
@@ -415,6 +423,9 @@ export function encodeCompSnapshotRows(records) {
       row.S = r.Strengths;
       row.W = r.Weaknesses;
       if (r.Slug) row.sl = r.Slug;
+      if (r.Extended === true) row.x = 1;
+      if (r.DoubleExtended === true) row.dx = 1;
+      if (r.SelectOnly === true) row.so = 1;
     }
     return row;
   });
@@ -435,9 +446,49 @@ export function decodeCompSnapshotRows(rows, position) {
       rec.Strengths = row.S;
       rec.Weaknesses = row.W || [];
       if (row.sl) rec.Slug = row.sl;
+      if (row.x) rec.Extended = true;
+      if (row.dx) rec.DoubleExtended = true;
+      if (row.so) rec.SelectOnly = true;
     }
     return rec;
   });
+}
+
+// ── We-Draft Recommended comp window ──
+//
+// A prospect pulls every player from the COMP_CORE_CLASSES drafted classes
+// right before their own, plus — reaching back COMP_EXTENDED_CLASSES more —
+// only players marked Extended (historical/{id}.Extended, set per record in
+// the admin Historical list). "Before their own" is capped at the latest
+// drafted class in the pool, so every undrafted class (2027, 2028, 2029)
+// shares the same window until the next draft lands; a custom entry
+// (beforeYear null) uses that same latest-class window.
+//
+// Double Extended (historical/{id}.DoubleExtended) adds high-profile
+// players from *before* that 15-class window, with no year limit — but only
+// for a prospect graded/drafted in round 1 or 2 (doubleExtendedFor). Inside
+// the 15 classes it changes nothing: a Double Extended player there is
+// treated exactly by the rules above (so flagging a recent player now just
+// readies them for when they age out of the window).
+export const COMP_CORE_CLASSES = 10;
+export const COMP_EXTENDED_CLASSES = 5;
+export const DOUBLE_EXTENDED_MAX_ROUND = 2;
+export function doubleExtendedFor(subjectRound) {
+  return subjectRound >= 1 && subjectRound <= DOUBLE_EXTENDED_MAX_ROUND;
+}
+export function recommendedCompWindow(pool, beforeYear) {
+  const years = (pool || []).map((r) => Number(r.Year)).filter((y) => y && (beforeYear == null || y < beforeYear));
+  if (!years.length) return null;
+  const to = Math.max(...years);
+  const coreFrom = to - COMP_CORE_CLASSES + 1;
+  return { to, coreFrom, extFrom: coreFrom - COMP_EXTENDED_CLASSES };
+}
+export function inRecommendedWindow(r, win, { allowDoubleExtended = false } = {}) {
+  const y = Number(r.Year);
+  if (!win || !y || y > win.to) return false;
+  if (y >= win.coreFrom) return true;
+  if (y >= win.extFrom) return r.Extended === true;
+  return allowDoubleExtended && r.DoubleExtended === true;
 }
 
 // ── Compact percentile tables ──
