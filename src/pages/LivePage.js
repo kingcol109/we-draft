@@ -151,11 +151,6 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-mu-ghost { position: absolute; top: 50%; width: clamp(180px, 22vw, 340px); height: clamp(180px, 22vw, 340px); object-fit: contain; opacity: 0.09; transform: translateY(-50%); pointer-events: none; }
 .wdl-mu-team.away .wdl-mu-ghost { left: calc(-1 * clamp(70px, 8vw, 130px)); }
 .wdl-mu-team.home .wdl-mu-ghost { right: calc(-1 * clamp(70px, 8vw, 130px)); }
-/* a wordmark is huge and faded: it fills its team's half of the header
-   (and bleeds off the edge — the header clips it) */
-.wdl-mu-ghost.wm { width: clamp(560px, 58vw, 1150px); height: auto; max-height: none; opacity: 0.15; filter: saturate(1.1); }
-.wdl-mu-team.away .wdl-mu-ghost.wm { left: calc(-1 * clamp(120px, 12vw, 260px)); }
-.wdl-mu-team.home .wdl-mu-ghost.wm { right: calc(-1 * clamp(120px, 12vw, 260px)); }
 .wdl-mu-name { position: relative; font-weight: 900; font-size: clamp(16px, 1.6vw, 26px); color: #fff; letter-spacing: 0.02em; text-shadow: 0 2px 8px rgba(0,0,0,0.5); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding-bottom: 4px; }
 .wdl-mu-name.ball::after { content: ""; position: absolute; left: 15%; right: 15%; bottom: 0; height: 3px; border-radius: 2px; background: ${GOLD}; box-shadow: 0 0 10px ${GOLD}; }
 .wdl-mu-rank { color: rgba(255,255,255,0.65); font-size: 0.7em; margin-right: 6px; }
@@ -192,7 +187,6 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .wdl-mu { grid-template-columns: 1fr auto auto auto 1fr; gap: 6px; padding: 14px 10px; min-height: 0; }
   .wdl-mu-logo { width: 44px; height: 44px; }
   .wdl-mu-ghost { display: none; }
-  .wdl-mu-ghost.wm { display: block; width: 95vw; opacity: 0.13; }
   .wdl-mu-name { font-size: 13px; }
   .wdl-mu-score b { font-size: 40px; }
   .wdl-mu-fb { font-size: 13px; }
@@ -269,7 +263,6 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .wdl-compact .wdl-mu { grid-template-columns: 1fr auto auto auto 1fr; gap: 10px; padding: 10px 14px; min-height: 0; }
   .wdl-compact .wdl-mu-logo { width: 52px; height: 52px; }
   .wdl-compact .wdl-mu-score b { font-size: 46px; }
-  .wdl-compact .wdl-mu-ghost.wm { opacity: 0.12; }
   .wdl-compact .lpc { padding: 10px 14px; }
 }
 `;
@@ -554,7 +547,7 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
           const hasBall = isLive && g.possession === side;
           return (
             <div className={`wdl-mu-team ${side}${loser === side ? " lose" : ""}${loser && loser !== side ? " win" : ""}`}>
-              {(t.wordmark || logo) && <img className={`wdl-mu-ghost${t.wordmark ? " wm" : ""}`} src={t.wordmark || logo} alt="" aria-hidden="true" />}
+              {logo && <img className="wdl-mu-ghost" src={logo} alt="" aria-hidden="true" />}
               {logo && <img className="wdl-mu-logo" src={logo} alt="" />}
               <div className={`wdl-mu-name${hasBall ? " ball" : ""}`}>
                 {t.rank ? <span className="wdl-mu-rank">#{t.rank}</span> : null}{teamName(t)}
