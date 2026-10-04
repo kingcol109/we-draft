@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { collection, getDocs, doc, setDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
@@ -44,11 +45,6 @@ const gradeScale = {
   "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
 };
 
-const gradeLabels = {
-  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
-};
 
 const gradeDisplay = (g) => {
   const map = {
@@ -866,25 +862,13 @@ export default function CommunityBoard() {
         setPlayers(basePlayers);
         setLoading(false);
 
-        // Phase 2 — fill in community grades in the background.
-        const withGrades = await Promise.all(
-          basePlayers.map(async (p) => {
-            try {
-              const evalsSnap = await getDocs(collection(db, "players", p.id, "evaluations"));
-              const grades = [];
-              evalsSnap.forEach((d) => {
-                const g = d.data().grade;
-                if (g && gradeScale[g]) grades.push(gradeScale[g]);
-              });
-              p.CommunityGrade = grades.length > 0
-                ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                : "-";
-            } catch {
-              p.CommunityGrade = "-";
-            }
-            return p;
-          })
-        );
+        // Phase 2 — community grades: one snapshot read for the whole class
+        // (utils/communityGrades.js), not one evaluations query per player.
+        const avgs = await averageGradesFor(basePlayers.map((p) => p.id));
+        const withGrades = basePlayers.map((p) => {
+          p.CommunityGrade = gradeLabel(avgs[p.id]) || "-";
+          return p;
+        });
 
         if (cancelled) return;
         setPlayers(withGrades);

@@ -1,12 +1,14 @@
 // src/components/LiveGameStats.js
 //
 // A game's Stats tab on /live. Team stats are computed from the
-// play-by-play (utils/liveStats.js) live and after; player lines come from
+// play-by-play (utils/liveStats.mjs — by the ingester, read here as one doc,
+// liveGames/{id}/box/live; older games without it fall back to loading the
+// plays and computing here) live and after; player lines come from
 // the play-by-play while the game is on and switch to CFBD's official box
 // score once the game is final and its box score is in. CFBD's live
 // advanced metrics (success rate, EPA...) show when the ingester has them.
 import { useMemo } from "react";
-import { useLiveGame } from "../hooks/useLiveGame";
+import { useLiveGame, useLiveStats } from "../hooks/useLiveGame";
 import { computeGameStats, boxPlayers } from "../utils/liveStats";
 import { teamShort } from "../utils/live";
 
@@ -129,8 +131,10 @@ function Table({ def, lines, team }) {
 
 // theme "light": the regular game page (white cards) instead of /live's dark.
 export default function LiveGameStats({ gameId, game, theme = "dark" }) {
-  const { plays, box } = useLiveGame(gameId, { plays: "all", box: true });
-  const computed = useMemo(() => computeGameStats(plays), [plays]);
+  const { stats, ready: statsReady } = useLiveStats(gameId);
+  // The full play list only for an older game with no stats doc.
+  const { plays, box } = useLiveGame(gameId, { plays: statsReady && !stats ? "all" : "none", box: true });
+  const computed = useMemo(() => stats || computeGameStats(plays), [stats, plays]);
   const official = game.status === "final" && box?.teams?.length;
   const players = official ? boxPlayers(box) : computed.players;
   // Final + box score in: passing/rushing totals from the official box
@@ -153,7 +157,8 @@ export default function LiveGameStats({ gameId, game, theme = "dark" }) {
   const away = game.away || {};
   const home = game.home || {};
 
-  if (!plays.length) return <div className={`lgs-empty-all${theme === "light" ? " lgs-light" : ""}`}>Stats will appear once the game is underway.</div>;
+  if (!statsReady) return null;
+  if (!stats && !plays.length) return <div className={`lgs-empty-all${theme === "light" ? " lgs-light" : ""}`}>Stats will appear once the game is underway.</div>;
   return (
     <div className={theme === "light" ? "lgs-light" : undefined} style={{ "--ac": away.color || "#4d9fff", "--hc2": home.color || GOLD }}>
       <div className="lgs-src">

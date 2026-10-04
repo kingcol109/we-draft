@@ -6,6 +6,7 @@
 //   liveGames/{providerGameId}                 normalized game state + We-Draft enrichment
 //   liveGames/{id}/plays/{playId}              one doc per play (doc id = provider play id)
 //   liveGames/{id}/box/players                 box score (per-player stat lines)
+//   liveGames/{id}/box/live                    stats computed from the play-by-play (live)
 //   liveGames/{id}/private/ingest              ingester bookkeeping (play hashes) — admin only
 //   liveSlate/current                          ONE compact doc every /live viewer listens to
 //   cfbdPlayers/{athleteId}                    provider player identity (+ optional We-Draft link)
@@ -208,6 +209,9 @@ async function saveBox(db, game, box) {
       startDate: game.startDate ?? null,
       team: p.team,
       opponent: p.side === "home" ? game.away?.name : game.home?.name,
+      // The player page's game log shows the opponent's logo + short name.
+      opponentShort: (p.side === "home" ? game.away?.short : game.home?.short) || null,
+      opponentLogo: (p.side === "home" ? game.away?.logo : game.home?.logo) || null,
       // Final score from this team's side (the player page's W/L).
       teamPoints: (p.side === "home" ? game.home?.points : game.away?.points) ?? null,
       opponentPoints: (p.side === "home" ? game.away?.points : game.home?.points) ?? null,
@@ -230,9 +234,57 @@ async function saveBox(db, game, box) {
   return { players: all.length, suggested };
 }
 
+// liveGames/{id}/box/live — stats computed from the play-by-play
+// (src/utils/liveStats.mjs computeGameStats: { teams, players }). Rewritten
+// only when the numbers changed.
+async function saveLiveStats(db, providerGameId, stats) {
+  const data = JSON.parse(JSON.stringify(stats));
+  const ref = db.collection("liveGames").doc(gameKey(providerGameId)).collection("box").doc("live");
+  const h = hash(data);
+  if ((await ref.get()).data()?.hash === h) return false;
+  await ref.set({ ...data, hash: h, updatedAt: FieldValue.serverTimestamp() });
+  return true;
+}
+
+// ── Team records ───────────────────────────────────────────────────────
+// liveMeta/records: each team's W-L from every completed game this season
+// BEFORE the current week (built from the season sync's /games rows — no
+// extra CFBD calls). The slate adds the current week's result on top once a
+// game is final, so a record ticks over the moment the game ends.
+
+const weekKey = (wk) => `${wk.season}-${wk.seasonType}-${wk.week}`;
+
+async function saveRecordsBase(db, wk, rows) {
+  const byTeam = {};
+  for (const g of rows) {
+    if (!g.completed || g.homePoints == null || g.awayPoints == null || g.homePoints === g.awayPoints) continue;
+    if (g.season === wk.season && g.seasonType === wk.seasonType && g.week === wk.week) continue;
+    const homeWon = g.homePoints > g.awayPoints;
+    for (const [id, won] of [[g.homeId, homeWon], [g.awayId, !homeWon]]) {
+      if (id == null) continue;
+      const r = (byTeam[id] ||= [0, 0]);
+      r[won ? 0 : 1]++;
+    }
+  }
+  await db.collection("liveMeta").doc("records").set({ key: weekKey(wk), byTeam, updatedAt: FieldValue.serverTimestamp() });
+}
+
+// "5-1" for one side of a slate game: the base record plus this game's
+// result when it's final. null when the team has no record on file.
+function recordFor(base, g, side) {
+  const t = g[side];
+  const r = base?.[t?.providerTeamId];
+  const other = g[side === "home" ? "away" : "home"];
+  let [w, l] = r || [0, 0];
+  if (g.status === "final" && t?.points != null && other?.points != null && t.points !== other.points) {
+    if (t.points > other.points) w++; else l++;
+  }
+  return r || g.status === "final" ? `${w}-${l}` : null;
+}
+
 // ── Slate ──────────────────────────────────────────────────────────────
 
-const teamSummary = (t = {}) => ({
+const teamSummary = (t = {}, record = null) => ({
   name: t.name || null,
   school: t.school || null,
   short: t.short || null,
@@ -242,16 +294,18 @@ const teamSummary = (t = {}) => ({
   rank: t.rank ?? null,
   points: t.points ?? null,
   providerTeamId: t.providerTeamId ?? null,
+  record,
 });
 
 // rosters (optional): { home, away } CFBD rosters, so the last play shows
-// full player names like the play feeds do.
-function slateGame(id, g, rosters) {
+// full player names like the play feeds do. records: liveMeta/records byTeam.
+function slateGame(id, g, rosters, records) {
   return {
     id,
     slug: g.slug || null,
     status: g.status || "scheduled",
     startDate: g.startDate || null,
+    startTimeTBD: !!g.startTimeTBD,
     period: g.period ?? null,
     clock: g.clock ?? null,
     possession: g.possession ?? null,
@@ -268,8 +322,8 @@ function slateGame(id, g, rosters) {
     wedraftGameId: g.wedraftGameId || null,
     wedraftWeek: g.wedraftWeek || null,
     gameOfWeek: !!g.gameOfWeek,
-    home: teamSummary(g.home),
-    away: teamSummary(g.away),
+    home: teamSummary(g.home, records ? recordFor(records, g, "home") : null),
+    away: teamSummary(g.away, records ? recordFor(records, g, "away") : null),
   };
 }
 
@@ -338,7 +392,9 @@ function slateBigPlay(gameId, g, p) {
 // qualify (e.g. wiped out by a flag) or deleted outright. A revised play
 // that still qualifies just comes back in newBigPlays and replaces its
 // entry (same key), keeping its original place in the feed.
-async function writeSlate(db, { season, week, seasonType, games, newBigPlays = [], removeKeys = [], rostersById = new Map() }) {
+// nextWeekAt: when the next week takes over the slate (ms) — /live shows
+// it during review.
+async function writeSlate(db, { season, week, seasonType, nextWeekAt = null, games, newBigPlays = [], removeKeys = [], rostersById = new Map() }) {
   const ref = db.collection("liveSlate").doc("current");
   const prev = (await ref.get()).data() || {};
   const sameWeek = prev.season === season && prev.week === week && prev.seasonType === seasonType;
@@ -350,19 +406,45 @@ async function writeSlate(db, { season, week, seasonType, games, newBigPlays = [
   for (const b of merged) byKey.set(b.key, b);
   const bigPlays = [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, MAX_SLATE_BIG_PLAYS);
 
-  const gamesOut = [...games.entries()].map(([id, g]) => slateGame(id, g, rostersById.get(id)))
+  const rec = (await db.collection("liveMeta").doc("records").get()).data();
+  const records = rec?.key === weekKey({ season, week, seasonType }) ? rec.byTeam : null;
+  const gamesOut = [...games.entries()].map(([id, g]) => slateGame(id, g, rostersById.get(id), records))
     .sort((a, b) => (Date.parse(a.startDate) || 0) - (Date.parse(b.startDate) || 0));
-  await ref.set({ season, week, seasonType, games: gamesOut, bigPlays, updatedAt: FieldValue.serverTimestamp() });
+  // liveSlate/performances — the week's top stat lines across every game
+  // (/live's Top Performances tab, the only reader). Rewritten only when
+  // it changes; its hash rides on the slate doc so checking costs no read.
+  const performances = slatePerformances(games);
+  const perfHash = hash(performances);
   // liveSlate/status — just the number of games in progress, for the
   // site-wide navbar LIVE button (every page listens to it, so it stays
-  // tiny and is only rewritten when the count changes).
+  // tiny and is only rewritten when the count changes). The count is kept
+  // on the slate doc too — this set() replaces the whole doc, so it has to
+  // be written here or it reads as changed every time.
   const liveCount = gamesOut.filter((g) => g.status === "in_progress").length;
-  const prevLive = sameWeek ? (prev.games || []).filter((g) => g.status === "in_progress").length : -1;
-  if (liveCount !== prevLive || prev.statusLiveCount !== liveCount) {
+  await ref.set({ season, week, seasonType, nextWeekAt, games: gamesOut, bigPlays, statusLiveCount: liveCount, perfHash, updatedAt: FieldValue.serverTimestamp() });
+  if (!sameWeek || prev.statusLiveCount !== liveCount) {
     await db.collection("liveSlate").doc("status").set({ liveCount, updatedAt: FieldValue.serverTimestamp() });
-    await ref.update({ statusLiveCount: liveCount });
+  }
+  if (!sameWeek || prev.perfHash !== perfHash) {
+    await db.collection("liveSlate").doc("performances").set({ season, week, seasonType, ...performances, updatedAt: FieldValue.serverTimestamp() });
   }
   return { games: gamesOut.length, bigPlays: bigPlays.length };
+}
+
+// Every game's statLeaders merged into the week's top MAX_PERFORMANCES per
+// category, each tagged with its game id (the page joins teams and the
+// live score from liveSlate/current).
+const MAX_PERFORMANCES = 15;
+const PERF_CATS = ["passing", "rushing", "receiving", "defense"];
+function slatePerformances(games) {
+  const out = {};
+  for (const cat of PERF_CATS) {
+    out[cat] = [...games.entries()]
+      .flatMap(([gameId, g]) => (g.statLeaders?.[cat] || []).map((e) => ({ ...e, gameId })))
+      .sort((a, b) => b.v - a.v)
+      .slice(0, MAX_PERFORMANCES);
+  }
+  return out;
 }
 
 // ── The Feed ───────────────────────────────────────────────────────────
@@ -459,4 +541,4 @@ function finalFeedEntry(gameId, g, at = Date.now()) {
   };
 }
 
-module.exports = { gameKey, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed };
+module.exports = { gameKey, weekKey, saveRecordsBase, saveLiveStats, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed };

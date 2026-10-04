@@ -266,9 +266,11 @@ for (const doc of allTeams) {
     { path: "/boards", priority: 0.8, lastmod: today },
     { path: "/comparison", priority: 0.7, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
-    { path: "/we-pick", priority: 0.8, lastmod: today },
-    { path: "/we-pick/standings", priority: 0.7, lastmod: today },
-    { path: "/we-pick/stats", priority: 0.6, lastmod: today },
+    // We-Pick lives inside We-Draft Live now (/live/we-pick…); the old
+    // /we-pick URLs just redirect there, so only the new ones are listed.
+    { path: "/live/we-pick", priority: 0.8, lastmod: today },
+    { path: "/live/we-pick/standings", priority: 0.7, lastmod: today },
+    { path: "/live/we-pick/stats", priority: 0.6, lastmod: today },
     // Legal — low priority (utility pages, not content anyone searches for)
     // but still worth Google actually crawling/indexing, same reasoning as
     // every other static page here.

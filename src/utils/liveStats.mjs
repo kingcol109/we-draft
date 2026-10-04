@@ -1,9 +1,15 @@
-// src/utils/liveStats.js
+// src/utils/liveStats.mjs
 //
 // Game stats computed from the play-by-play (each play's `presentation`,
 // see server/live/playParser.js) — what /live's Stats tab shows while a
 // game is in progress, and the team side of it after (player lines switch
 // to CFBD's official box score once the game is final and it's ingested).
+//
+// Shared by both sides — that's why it's .mjs with no imports: the
+// ingester (server/live/ingest.js, CommonJS) loads it with import() and
+// writes the result to liveGames/{id}/box/live after every play update, so
+// viewers read one small doc instead of the whole play list. The frontend
+// only computes it itself for older games stored before that doc existed.
 // Plays wiped out by a penalty (NO PLAY) count only as the penalty.
 // College convention (matches CFBD's box score): a sack is a rushing
 // attempt for the QB and its loss comes off rushing yards.
@@ -158,4 +164,47 @@ export function boxPlayers(box) {
     }
   }
   return out;
+}
+
+// ── Top performances ──
+// Ranking value per category: yards for passing / rushing / receiving; for
+// defense (the play-by-play has no tackles) an impact score — interceptions
+// 3, sacks / forced fumbles / recoveries 2.
+export const LEADER_CATS = ["passing", "rushing", "receiving", "defense"];
+const leaderValue = {
+  passing: (s) => (s.att ? s.yds || 0 : 0),
+  rushing: (s) => (s.car ? s.yds || 0 : 0),
+  receiving: (s) => (s.rec ? s.yds || 0 : 0),
+  defense: (s) => (s.sacks || 0) * 2 + (s.int || 0) * 3 + (s.ff || 0) * 2 + (s.fr || 0) * 2,
+};
+
+// One game's best lines per category ({ passing: [{ id, name, slug, side,
+// stats, v }], ... }) — kept on the game doc (statLeaders) by the ingester,
+// which merges every game's into liveSlate/performances.
+export function gameLeaders(stats, n = 5) {
+  const out = {};
+  for (const cat of LEADER_CATS) {
+    out[cat] = ["home", "away"]
+      .flatMap((side) => (stats.players?.[side] || []).filter((l) => l.stats[cat]).map((l) => ({
+        id: l.key, name: l.name, slug: l.slug || null, side, stats: l.stats[cat], v: leaderValue[cat](l.stats[cat]),
+      })))
+      .filter((e) => e.v > 0)
+      .sort((a, b) => b.v - a.v)
+      .slice(0, n);
+  }
+  return out;
+}
+
+const n1 = (n) => (Number.isInteger(n) ? n : n.toFixed(1));
+// One category's line, e.g. "24/31 · 312 YDS · 3 TD · 1 INT". Empty when
+// there's nothing to show.
+export function statLine(cat, s) {
+  if (!s) return "";
+  const parts = {
+    passing: () => (s.att ? [`${s.cmp || 0}/${s.att}`, `${s.yds || 0} YDS`, s.td && `${s.td} TD`, s.int && `${s.int} INT`] : []),
+    rushing: () => (s.car ? [`${s.car} CAR`, `${s.yds || 0} YDS`, s.td && `${s.td} TD`, s.long > 0 && `LONG ${s.long}`] : []),
+    receiving: () => (s.rec ? [`${s.rec} REC`, `${s.yds || 0} YDS`, s.td && `${s.td} TD`, s.long > 0 && `LONG ${s.long}`] : []),
+    defense: () => [s.sacks && `${n1(s.sacks)} SACK${s.sacks === 1 ? "" : "S"}`, s.int && `${s.int} INT`, s.ff && `${s.ff} FF`, s.fr && `${s.fr} FR`],
+  }[cat];
+  return parts ? parts().filter(Boolean).join(" · ") : "";
 }

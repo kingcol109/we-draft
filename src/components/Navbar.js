@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { wePickHref } from "../utils/wePickRoutes";
 import { useAuth } from "../context/AuthContext";
 import { useEffect, useRef, useState } from "react";
 import Logo2 from "../assets/Logo2.png";
@@ -466,7 +467,7 @@ export default function Navbar() {
               </div>
             )}
 
-            <Link to="/we-pick" style={baseStyle}>We-Pick</Link>
+            <Link to={wePickHref()} style={baseStyle}>We-Pick</Link>
 
             {/* ── CFB DROPDOWN ── */}
             <div
@@ -598,7 +599,7 @@ export default function Navbar() {
                 page itself now (its own mobile dropdowns), not here. */}
             {[
               { path: "/community", label: "Community Board" },
-              { path: "/we-pick", label: "We-Pick" },
+              { path: wePickHref(), label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
               { path: "/mocks", label: "Mock Drafts" },
               { path: "/watch", label: "▶ Watch" },

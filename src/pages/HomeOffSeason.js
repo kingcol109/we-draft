@@ -19,6 +19,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { topProspects, gradeLabel } from "../utils/communityGrades";
+import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -85,7 +87,16 @@ function TopDraftBoard({ isMobile, year }) {
   useEffect(() => {
     const fetchPlayers = async () => {
       try {
-        const snap = await getDocs(collection(db, "players"));
+        // The precomputed top list (utils/communityGrades.js) — 1 read
+        // instead of every player + every player's evaluations.
+        const top = await topProspects([year]);
+        if (top) {
+          setPlayers(top.slice(0, 10).map((p) => ({
+            ...p, commGradeScore: Math.round(p.avgGrade), commGrade: gradeLabel(p.avgGrade),
+          })));
+          return;
+        }
+        const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", year)));
         const all = await Promise.all(
           snap.docs.map(async (docSnap) => {
             const p = { id: docSnap.id, ...docSnap.data() };
@@ -351,34 +362,9 @@ export default function HomeOffSeason() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const playersSnap = await getDocs(collection(db, "players"));
-        const evalPromises = [];
-        playersSnap.forEach((playerDoc) => {
-          const pd = playerDoc.data();
-          if (pd.Live === false || pd.Live === null || pd.Live === 0 || pd.Live === "false" || pd.Live === "no") return;
-          const q = query(collection(db, "players", playerDoc.id, "evaluations"), orderBy("updatedAt", "desc"), limit(2));
-          evalPromises.push(
-            getDocs(q).then((snap) =>
-              snap.docs.map((d) => ({
-                ...d.data(),
-                playerId: playerDoc.id,
-                playerName: `${pd.First || ""} ${pd.Last || ""}`.trim(),
-                playerSlug: pd.Slug || playerDoc.id,
-              }))
-            )
-          );
-        });
-        const results = await Promise.all(evalPromises);
-        const allEvals = results.flat();
-        const publicEvals = allEvals
-          // Dummy evaluations (AdminPanel.js's Dummy Content tab) count
-          // toward everything else an eval touches on purpose — Community
-          // Grade, the Public Evaluations feed — but this homepage "Recent
-          // Evals" feed is meant to surface genuine community activity, so
-          // it's the one place they're deliberately excluded.
-          .filter((e) => e.visibility === "public" && e.evaluation?.trim() && !e.isDummy)
-          .sort((a, b) => (b.updatedAt?.toDate?.()?.getTime?.() || 0) - (a.updatedAt?.toDate?.()?.getTime?.() || 0))
-          .slice(0, 6);
+        // Newest public evaluations — one collection-group query (see
+        // utils/recentEvaluations.js), not a scan of every player.
+        const publicEvals = await fetchRecentPublicEvals(6);
 
         const uniqueUids = [...new Set(publicEvals.map((ev) => ev.uid))];
         const userDocs = await Promise.all(uniqueUids.map((uid) => getDoc(doc(db, "users", uid))));

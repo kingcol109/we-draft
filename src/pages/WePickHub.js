@@ -11,11 +11,17 @@
 // separate save button, a status line just reports whether the current
 // starred set satisfies the week's requirement (1 Game of the Week, at
 // least 2 Featured, 6 total) and what's still missing.
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { wePickHref, useWePickRoute } from "../utils/wePickRoutes";
+import { scrollActiveTabIntoView } from "../utils/live";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import { db } from "../firebase";
+// Pick scoring (pickedSideOf / isGameFinal / hasScorePick / scoreGamePick)
+// lives in utils/wePickScoring.js, shared with /live's Your Week.
+import { pickedSideOf, isGameFinal, hasScorePick, scoreGamePick, compareStandingsEntries } from "../utils/wePickScoring";
+import { toMs, mondayOfWeekUtc, timeToMinutes, kickoffMs, isPickable } from "../utils/wePickLocks";
 import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch, query, where, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
@@ -118,22 +124,13 @@ async function fetchVerifiedByUid(uids) {
 // Season standings = the sum of every qualified week's total (more weeks
 // played well is strictly better, same as a real season), shown alongside
 // points-per-qualified-week as a secondary "Avg/Wk" stat — informational
-// only, nothing is ranked by it. See compareStandingsEntries below for how
-// ties in the summed total get broken.
-
-// Tiebreak for two entries with an equal points total: most correct
-// winners wins first (rewards prediction skill even when a different mix
-// of winner-calls vs. score-accuracy produced the same sum), then lowest
-// cumulative score differential as a fine-grained last resort — that's a
+// only, nothing is ranked by it. Ties in the summed total are broken by
+// compareStandingsEntries (utils/wePickScoring.js): most correct winners
+// first (rewards prediction skill even when a different mix of
+// winner-calls vs. score-accuracy produced the same sum), then lowest
+// cumulative score differential as a fine-grained last resort — a
 // real-valued sum of raw |actual - predicted| across every graded pick, so
 // it essentially never ties itself the way the by-10s points total can.
-function compareStandingsEntries(a, b) {
-  const points = (b.points ?? 0) - (a.points ?? 0);
-  if (points !== 0) return points;
-  const correct = (b.correct ?? 0) - (a.correct ?? 0);
-  if (correct !== 0) return correct;
-  return (a.diffTotal ?? Infinity) - (b.diffTotal ?? Infinity);
-}
 
 // ── Live week standings — a not-yet-graded week's board no longer just
 // sits empty until scripts/gradeWePickWeek.js's weekly Sunday run: this
@@ -210,11 +207,16 @@ async function computeLiveWeekStandings(week) {
   return entries;
 }
 
-const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const PAGE_BG = "linear-gradient(180deg, #06162c, #0d2544)";
-const CARD_BG = "rgba(255,255,255,0.05)";
-const CARD_BORDER = "rgba(255,255,255,0.18)";
+// /live's palette (LivePage.js) — We-Pick renders as a /live tab, so its
+// panels, lines and inputs match the rest of the page. PAGE_BG above is
+// only the exported share card's branded background now.
+const PANEL = "#111a2b";
+const LINE = "#1d2840";
+const FIELD = "#0c1220";
+const CARD_BG = PANEL;
+const CARD_BORDER = LINE;
 
 function sanitizeUrl(url) {
   if (!url) return "";
@@ -222,24 +224,6 @@ function sanitizeUrl(url) {
   if (!/^https?:\/\//i.test(u)) return `https://${u}`;
   return u;
 }
-
-const toMs = (ts) => {
-  if (!ts) return 0;
-  if (ts?.toDate) return ts.toDate().getTime();
-  if (ts instanceof Date) return ts.getTime();
-  const parsed = Date.parse(ts);
-  return isNaN(parsed) ? 0 : parsed;
-};
-
-// Same "Monday-to-Sunday, computed in UTC" boundary math as GamePage.js's
-// own mondayOfWeekUtc — duplicated per this codebase's convention of not
-// importing small shared helpers cross-page.
-const mondayOfWeekUtc = (ms) => {
-  const d = new Date(ms);
-  const utcDay = d.getUTCDay(); // 0=Sun..6=Sat
-  const diffToMonday = (utcDay === 0 ? -6 : 1) - utcDay;
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diffToMonday, 0, 0, 0, 0);
-};
 
 const ordinal = (n) => {
   const v = n % 100;
@@ -257,20 +241,6 @@ const formatOpensDate = (ms) => {
   const month = d.toLocaleDateString(undefined, { month: "long", timeZone: "UTC" });
   return `${month} ${ordinal(d.getUTCDate())}`;
 };
-
-// Which side a pick calls to win — same fallback-to-score-comparison shape
-// as GamePage.js's own pickedSideOf, for picks written before the explicit
-// pickedTeam field existed.
-const pickedSideOf = (p) => {
-  if (p.pickedTeam === "away" || p.pickedTeam === "home") return p.pickedTeam;
-  if (p.awayScore == null || p.homeScore == null) return null;
-  if (p.awayScore > p.homeScore) return "away";
-  if (p.homeScore > p.awayScore) return "home";
-  return null;
-};
-
-const isGameFinal = (g) => g.Final && g.HomeScore != null && g.AwayScore != null;
-const hasScorePick = (p) => !!p && p.awayScore != null && p.homeScore != null;
 
 // ── My Stats — per-user performance tracking ──
 // Winner/loser accuracy (both ranked and unranked) is fully derivable from
@@ -314,19 +284,6 @@ function tallyAccuracy(rows) {
   return { correct, incorrect, total: correct + incorrect };
 }
 
-// The Ranked Standings scoring formula (see the spec further up), applied
-// to one pick — 0 for a wrong winner, otherwise 100 plus up to 200 more
-// for how close the final score was on each side.
-function scoreGamePick(pick, game) {
-  if (!game || !isGameFinal(game) || !hasScorePick(pick)) return 0;
-  const side = pickedSideOf(pick);
-  const actualWinner = game.AwayScore > game.HomeScore ? "away" : game.HomeScore > game.AwayScore ? "home" : null;
-  if (!actualWinner || side !== actualWinner) return 0;
-  const awayAcc = Math.max(0, 100 - 10 * Math.abs(game.AwayScore - pick.awayScore));
-  const homeAcc = Math.max(0, 100 - 10 * Math.abs(game.HomeScore - pick.homeScore));
-  return 100 + awayAcc + homeAcc;
-}
-
 // The single highest-scoring pick (by scoreGamePick) among a set of games —
 // "your best call of the week" for a Report Card, regardless of whether
 // that particular pick happened to be starred Ranked. Games with no score
@@ -341,83 +298,6 @@ function bestPickOf(games, myPicksById) {
   });
   return best;
 }
-
-// Minutes-since-midnight, for actually chronological sorting — a game's
-// Date field is UTC midnight regardless of kickoff, so every game on the
-// same calendar day ties on Date alone; Time has to be the real tiebreaker,
-// and comparing formatted 12-hour strings ("10:00 PM" < "12:00 PM" < "7:00
-// PM" alphabetically) sorts them wrong.
-const timeToMinutes = (t) => {
-  if (!t) return null;
-  const [h, m] = t.split(":").map(Number);
-  return isNaN(h) || isNaN(m) ? null : h * 60 + m;
-};
-
-// Admin enters Kickoff Time as a plain "HH:MM" with no timezone attached —
-// CFB kickoffs are always quoted in US Eastern (see AdminPanel.js's
-// "Kickoff Time" field), so that's the zone assumed here. Reads the actual
-// UTC offset for America/New_York on the game's own date via Intl (rather
-// than hardcoding UTC-5) so this stays correct across the EDT/EST switch
-// partway through the season instead of drifting an hour on one side of it.
-const ET_OFFSET_FALLBACK_MIN = -300; // EST — only used if Intl's parse ever fails
-const etOffsetMinutesAt = (ms) => {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(ms));
-    const tz = parts.find((p) => p.type === "timeZoneName")?.value || "";
-    const m = /GMT([+-]\d+)(?::(\d+))?/.exec(tz);
-    if (!m) return ET_OFFSET_FALLBACK_MIN;
-    const h = parseInt(m[1], 10);
-    const mins = m[2] ? parseInt(m[2], 10) : 0;
-    return h * 60 + (h < 0 ? -mins : mins);
-  } catch {
-    return ET_OFFSET_FALLBACK_MIN;
-  }
-};
-
-// The actual UTC instant a game kicks off, combining Date (UTC midnight)
-// with Time (ET wall-clock) — null when either is missing, since Kickoff
-// Time is optional in the admin form and there's no hour to lock at
-// without one (isPickable falls back to Final-only locking in that case,
-// same as before kickoff-locking existed).
-//
-// KickoffAt (the exact UTC instant — written by AdminPanel's save and the
-// CFBD schedule sync, and what firestore.rules enforces) wins when set.
-// The Date+Time fallback uses Date's calendar day, not its raw instant:
-// many docs store Date at ET midnight (04:00/05:00 UTC) rather than UTC
-// midnight, and adding the ET time to that raw instant locked picks 4-5
-// hours after the actual kickoff.
-const kickoffMs = (g) => {
-  const at = toMs(g.KickoffAt);
-  if (at) return at;
-  const dateMs = toMs(g.Date);
-  const mins = timeToMinutes(g.Time);
-  if (!dateMs || mins == null) return null;
-  const d = new Date(dateMs);
-  const day = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return day + mins * 60000 - etOffsetMinutesAt(day) * 60000;
-};
-
-// A game is open for picks once its own week's Monday (00:00 UTC) has
-// passed, or an admin has force-opened it — same rule GamePage.js enforces
-// for the single-game pick form. Week 0 is opened unconditionally instead
-// of waiting on its own Monday — it kicks off before every other week and
-// has no games flagged Game of the Week/Featured to build a normal Ranked
-// 6 around (see rankedStatus's own Week 0 branch below), so there's no
-// reason to make people wait on the calendar for it specifically. None of
-// that overrides kickoff, though — once the ball's in the air, picks lock
-// for good regardless of PicksForceOpen or which week this is (Final only
-// covers a game *after* it's over; kickoff is what actually stops new or
-// changed picks on a live one).
-const isPickable = (g) => {
-  if (isGameFinal(g)) return false;
-  const kickoff = kickoffMs(g);
-  if (kickoff != null && Date.now() >= kickoff) return false;
-  if (g.PicksForceOpen) return true;
-  if (g.Week === "Week 0") return true;
-  const dateMs = toMs(g.Date);
-  if (!dateMs) return true;
-  return Date.now() >= mondayOfWeekUtc(dateMs);
-};
 
 // Same "extract the leading number" used everywhere else in this codebase
 // that sorts Week labels ("Week 0", "Week 12", ...) — AdminPanel.js's own
@@ -451,8 +331,16 @@ const weekNumber = (w) => {
 // The auto kickoff-based logic above is solid most of the time, but it's
 // still a guess (Time-field typos, a Thursday opener, a bye-heavy week),
 // and admin needs a plain manual escape hatch rather than having to reason
-// about kickoff math to fix a wrong default for everyone. ──
-function pickCurrentWeek(games, weeks, override) {
+// about kickoff math to fix a wrong default for everyone.
+//
+// `liveWeek` — the week We-Draft Live's slate is on (LiveWeekContext below).
+// We-Pick follows /live's turnover: through the weekend it's the week that
+// just ended (its results), and when /live rolls to the next week — Monday
+// 6 AM ET — We-Pick moves with it. Ahead of the admin override, which is
+// only the fallback for when /live has no slate (then the kickoff walk
+// below). ──
+function pickCurrentWeek(games, weeks, override, liveWeek) {
+  if (liveWeek && weeks.includes(liveWeek)) return liveWeek;
   if (override && weeks.includes(override)) return override;
   const nowMs = Date.now();
   const startMs = (g) => kickoffMs(g) ?? toMs(g.Date);
@@ -519,19 +407,19 @@ function rankedStatus(rankedGames, week) {
   return { isQualified, text: `Still need: ${needs.join(", ")}.` };
 }
 
-export default function WePickHub() {
+// /live's week + phase, from LivePage.js: { week: "Week 6", phase:
+// "preview" | "live" | "gameday" | "review", nextWeekAt }.
+const LiveWeekContext = createContext(null);
+
+// Rendered by LivePage.js as /live's We-Pick tab (view=wepick). Tabs and
+// the standings week come from the URL (utils/wePickRoutes.js), so each is
+// still deep-linkable/shareable.
+export default function WePickHub({ liveWeek = null, livePhase = null, nextWeekAt = null }) {
   const { user } = useAuth();
-  const location = useLocation();
-  // Path-based — lets /we-pick/standings (and /we-pick/standings/:week) or
-  // /we-pick/stats deep-link straight into the tab instead of always
-  // landing on My Picks.
-  const activeTab = location.pathname.startsWith("/we-pick/standings")
-    ? "standings"
-    : location.pathname.startsWith("/we-pick/stats")
-    ? "stats"
-    : location.pathname.startsWith("/we-pick/friends")
-    ? "friends"
-    : "picks";
+  const live = useMemo(() => ({ week: liveWeek, phase: livePhase, nextWeekAt }), [liveWeek, livePhase, nextWeekAt]);
+  const { tab: activeTab } = useWePickRoute();
+  const wpTabsRef = useRef(null);
+  useEffect(() => { scrollActiveTabIntoView(wpTabsRef.current); }, [activeTab]);
 
   // Pending incoming friend request count — shown as a sticker on the
   // Friends tab below. Lives up here (not inside FriendsSection itself) so
@@ -555,10 +443,11 @@ export default function WePickHub() {
     ? `${TAB_TITLES[activeTab]} | We-Pick | We-Draft`
     : "We-Pick | Predict College Football Scores & Build Your Ranked 6";
   const pageDescription = "Make your picks, see how they stack up against your friends and the community, and track them throughout the season with We-Draft's We-Pick.";
-  const canonicalUrl = `https://we-draft.com${location.pathname}`;
+  const canonicalUrl = `https://we-draft.com${wePickHref(activeTab)}`;
 
   return (
-    <div style={{ maxWidth: "900px", margin: "0 auto", padding: "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+    <LiveWeekContext.Provider value={live}>
+    <div className="wdl-wp">
       <Helmet>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
@@ -573,67 +462,40 @@ export default function WePickHub() {
         <meta name="twitter:description" content={pageDescription} />
       </Helmet>
 
-      <div
-        style={{
-          background: PAGE_BG, border: `2px solid ${BLUE}`, borderRadius: "16px",
-          padding: "22px 22px 30px", boxShadow: "0 10px 32px rgba(0,0,0,0.35)",
-        }}
-      >
-        <div style={{ marginBottom: "18px" }}>
-          <div style={{ fontSize: "30px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em", textShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>
-            🔮 We-Pick
-          </div>
-          <div style={{ fontSize: "14px", fontWeight: 700, color: "rgba(255,255,255,0.65)", marginTop: "2px" }}>
-            Predict scores, build your Ranked 6, and see where you stack up.
-          </div>
-        </div>
-
-        {/* Tab bar — My Picks (default), Standings, and My Stats, each its
-            own URL so any of them is deep-linkable/shareable rather than
-            living behind in-page-only tab state. */}
-        <div style={{ display: "flex", gap: "8px", marginBottom: "20px", borderBottom: "2px solid rgba(255,255,255,0.15)", flexWrap: "wrap" }}>
-          {[
-            { key: "picks", label: "My Picks", to: "/we-pick" },
-            { key: "standings", label: "🏆 Ranked Standings", to: "/we-pick/standings" },
-            { key: "stats", label: "📊 My Stats", to: "/we-pick/stats" },
-            { key: "friends", label: "👥 Friends", to: "/we-pick/friends", badge: pendingFriendRequests },
-          ].map((tab) => (
-            <Link
-              key={tab.key}
-              to={tab.to}
-              style={{
-                display: "flex", alignItems: "center", gap: "6px",
-                padding: "10px 20px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
-                color: activeTab === tab.key ? "#fff" : "rgba(255,255,255,0.55)",
-                borderBottom: activeTab === tab.key ? `3px solid ${GOLD}` : "3px solid transparent",
-                marginBottom: "-2px", textDecoration: "none",
-              }}
-            >
-              {tab.label}
-              {!!tab.badge && (
-                <span style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
-                  background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900,
-                }}>
-                  {tab.badge > 99 ? "99+" : tab.badge}
-                </span>
-              )}
-            </Link>
-          ))}
-        </div>
-
-        {activeTab === "standings" ? <StandingsSection />
-          : activeTab === "stats" ? <MyStatsSection />
-          : activeTab === "friends" ? <FriendsSection />
-          : <MyPicksSection />}
+      <div className="wdl-wp-head">
+        <div className="wdl-h" style={{ margin: 0 }}>🔮 We-Pick</div>
+        <div className="wdl-wp-sub">Predict scores, build your Ranked 6, and see where you stack up.</div>
       </div>
+
+      {/* Tabs — My Picks (default), Standings, My Stats, Friends, each its
+          own URL (utils/wePickRoutes.js) so any of them is deep-linkable.
+          Styled by LivePage.js's .wdl-wp-* rules. */}
+      <nav className="wdl-wp-tabs" ref={wpTabsRef}>
+        {[
+          { key: "picks", label: "My Picks", to: wePickHref("picks") },
+          { key: "standings", label: "🏆 Ranked Standings", to: wePickHref("standings") },
+          { key: "stats", label: "📊 My Stats", to: wePickHref("stats") },
+          { key: "friends", label: "👥 Friends", to: wePickHref("friends"), badge: pendingFriendRequests },
+        ].map((tab) => (
+          <Link key={tab.key} to={tab.to} className={`wdl-wp-tab${activeTab === tab.key ? " on" : ""}`}>
+            {tab.label}
+            {!!tab.badge && <span className="wdl-wp-badge">{tab.badge > 99 ? "99+" : tab.badge}</span>}
+          </Link>
+        ))}
+      </nav>
+
+      {activeTab === "standings" ? <StandingsSection />
+        : activeTab === "stats" ? <MyStatsSection />
+        : activeTab === "friends" ? <FriendsSection />
+        : <MyPicksSection />}
     </div>
+    </LiveWeekContext.Provider>
   );
 }
 
 function MyPicksSection() {
   const { user, profile, login } = useAuth();
+  const live = useContext(LiveWeekContext);
   const [loading, setLoading] = useState(true);
   const [allGames, setAllGames] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
@@ -766,7 +628,7 @@ function MyPicksSection() {
     ? [
         `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
         ...shareModal.rows.map(formatShareRow),
-        "we-draft.com/we-pick",
+        "we-draft.com/live/we-pick",
       ].join("\n")
     : "";
 
@@ -780,7 +642,7 @@ function MyPicksSection() {
         `${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`,
         ...shareModal.rows.map(formatShareRow),
         "Make Your Picks",
-        "we-draft.com/we-pick",
+        "we-draft.com/live/we-pick",
         ...(myFriendCode ? [`Add me using my friend code ${myFriendCode}`] : []),
       ].join("\n")
     : "";
@@ -820,7 +682,7 @@ function MyPicksSection() {
         // AdminPanel's We-Pick Current Week control has pinned one.
         const weeks = Array.from(new Set(games.map((g) => g.Week).filter(Boolean))).sort((a, b) => weekNumber(a) - weekNumber(b));
         const weekOverride = weekConfigSnap.exists() ? weekConfigSnap.data().currentWeekOverride : null;
-        const current = pickCurrentWeek(games, weeks, weekOverride);
+        const current = pickCurrentWeek(games, weeks, weekOverride, live?.week);
         setSelectedWeek(current);
         setCurrentWeek(current);
       } catch (e) {
@@ -830,6 +692,9 @@ function MyPicksSection() {
       }
     };
     fetchAll();
+  // /live's week (live.week) is read once, for the default week on load —
+  // it's set before this tab can render, and re-running would refetch the schedule.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // Whether the currently-selected week has already been submitted, and
@@ -868,7 +733,9 @@ function MyPicksSection() {
   // own comment further down for why a *pinned* recap is needed at all
   // (separate from the dynamic per-selectedWeek Report Card just below it).
   const currentWeekIdx = weekOptions.indexOf(currentWeek);
-  const recapWeek = currentWeekIdx > 0 ? weekOptions[currentWeekIdx - 1] : null;
+  // None while the current week is the one /live is reviewing: it *is* the
+  // recap then (its own Report Card below), so the week before would be old news.
+  const recapWeek = !(live?.phase === "review" && currentWeek === live.week) && currentWeekIdx > 0 ? weekOptions[currentWeekIdx - 1] : null;
 
   const gamesForWeek = useMemo(
     () => allGames
@@ -1187,13 +1054,13 @@ function MyPicksSection() {
 
   if (!user) {
     return (
-      <div style={{ textAlign: "center", padding: "60px 20px", border: `2px solid ${CARD_BORDER}`, borderRadius: "12px", background: CARD_BG }}>
+      <div style={{ textAlign: "center", padding: "60px 20px", border: `1px solid ${LINE}`, borderRadius: "12px", background: CARD_BG }}>
         <div style={{ fontSize: "15px", fontWeight: 700, color: "rgba(255,255,255,0.8)", marginBottom: "16px" }}>
           Sign in to make and manage your picks.
         </div>
         <button
           onClick={login}
-          style={{ background: GOLD, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "11px 28px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
+          style={{ background: GOLD, color: "#121212", border: "none", borderRadius: "8px", padding: "11px 28px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
         >
           Sign In
         </button>
@@ -1369,252 +1236,32 @@ function MyPicksSection() {
         .wd-wepick-no-spinner { -moz-appearance: textfield; }
       `}</style>
 
-      {/* Same "How Ranked Works" explainer StandingsSection opens with —
-          copied verbatim so the rules are visible right where picks are
-          actually made, not just on the board that grades them. */}
-      <div style={{ border: "2px dashed rgba(246,162,29,0.5)", borderRadius: "12px", padding: "14px 16px", marginBottom: "18px", background: "rgba(246,162,29,0.08)" }}>
-        <div style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
-          🏆 How Ranked Works
-        </div>
-        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "7px" }}>
-          {[
-            ["⭐", "Star 6 picks", " each week to build your Ranked 6 — the Game of the Week plus at least 2 Featured games (Week 0: any 6, no restrictions)."],
-            ["🎯", "Call the winner", " — bank 100 points for the right team, 0 for the wrong one, no matter how close the final score was."],
-            ["🔟", "Nail the score", " — once you've got the winner, earn up to 100 more points per side, losing 10 for every point you're off."],
-            ["🔒", "Qualify before kickoff", " and your Ranked 6 locks in automatically — your season score is the sum of every week you qualify."],
-          ].map(([icon, lead, rest], i) => (
-            <li key={i} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
-              <span style={{ flexShrink: 0 }}>{icon}</span>
-              <span><span style={{ color: "#fff", fontWeight: 900 }}>{lead}</span>{rest}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
       {weekOptions.length > 0 && (
         <div style={{ marginBottom: "18px" }}>
           <select
             value={selectedWeek}
             onChange={(e) => setSelectedWeek(e.target.value)}
-            style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "10px 14px", fontWeight: 900, fontSize: "14px", color: "#fff", outline: "none", background: "rgba(0,0,0,0.3)" }}
+            style={{ border: `1px solid #2a3753`, borderRadius: "8px", padding: "10px 14px", fontWeight: 900, fontSize: "14px", color: "#fff", outline: "none", background: FIELD, colorScheme: "dark", fontFamily: "inherit", cursor: "pointer" }}
           >
-            {weekOptions.map((w) => <option key={w} value={w} style={{ color: "#000" }}>{w}</option>)}
+            {weekOptions.map((w) => <option key={w} value={w} style={{ color: "#eef2f8", background: FIELD }}>{w}</option>)}
           </select>
         </div>
       )}
 
-      {/* Pinned recap of recapWeek — see showRecap's own comment above for
-          why this exists separately from the dynamic Report Card below
-          (which only covers whichever week is currently selected). Smaller/
-          plainer than that one on purpose ("the little recap scorecard")
-          — no Share button, this is just a standing reminder of how it
-          went, not something meant to be posted. */}
-      {showRecap && (
-        <div style={{ marginBottom: "18px", border: `2px solid ${GOLD}`, borderRadius: "10px", overflow: "hidden", background: "rgba(0,0,0,0.2)" }}>
-          <div style={{ background: "rgba(246,162,29,0.18)", padding: "8px 14px" }}>
-            <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              🏆 {recapWeek} Recap
-            </div>
-          </div>
-          <div style={{ padding: "12px 14px", display: "flex", gap: "20px", flexWrap: "wrap", alignItems: "center" }}>
-            {recapRankedTally.total > 0 && (
-              <div>
-                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Ranked</div>
-                <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
-                  {recapRankedTally.correct}-{recapRankedTally.incorrect}
-                  <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", marginLeft: "5px" }}>
-                    ({Math.round((recapRankedTally.correct / recapRankedTally.total) * 100)}%)
-                  </span>
-                </div>
-              </div>
-            )}
-            {recapUnrankedTally.total > 0 && (
-              <div>
-                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Unranked</div>
-                <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
-                  {recapUnrankedTally.correct}-{recapUnrankedTally.incorrect}
-                </div>
-              </div>
-            )}
-            <div>
-              <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Placement</div>
-              <div style={{ fontSize: "16px", fontWeight: 900, color: recapPlacement ? GOLD : "rgba(255,255,255,0.5)" }}>
-                {recapPlacement ? `#${recapPlacement.rank} of ${recapPlacement.outOf}` : "Pending"}
-              </div>
-            </div>
-            {recapBestPick && (
-              <div>
-                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
-                <div style={{ fontSize: "13px", fontWeight: 800, color: "#fff" }}>
-                  {recapBestPick.game.Away} @ {recapBestPick.game.Home}
-                  <span style={{ fontSize: "11px", color: GOLD, marginLeft: "6px" }}>{recapBestPick.points} pts</span>
-                </div>
-              </div>
-            )}
-          </div>
+      {/* In step with /live: while it's in review, so is We-Pick — the week
+          that just ended, with its results (see LiveWeekContext). */}
+      {live?.phase === "review" && selectedWeek === live.week && (
+        <div className="wdl-wp-review">
+          <b>🏁 {live.week} in review</b>
+          <span>Your final results for the week. {live.week.replace(/\d+/, (n) => Number(n) + 1)} takes over Monday at 6 AM ET — or get ahead from the week menu.</span>
         </div>
       )}
 
-      {weekIsPast ? (
-        /* Report Card — every game's Final, so the pickable/composition/
-           Submit UI (below) no longer applies. Doubles as something meant
-           to be posted publicly (see handleShareReportCard), so — unlike
-           the "Sample Data" tags used elsewhere in this file — placement
-           is never faked here: weekPlacement stays null and shows
-           "pending" until a real STANDINGS_COLLECTION doc exists for this
-           week, since sharing a made-up rank would actively mislead
-           whoever it's shared with. */
-        <div style={{ marginBottom: "24px", border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden", background: "linear-gradient(160deg, rgba(246,162,29,0.12), rgba(0,0,0,0.25))" }}>
-          <div style={{ background: GOLD, padding: "10px 16px" }}>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              🏆 We-Pick Report Card — {selectedWeek}
-            </div>
-          </div>
-          <div style={{ padding: "16px" }}>
-            {weekRankedTally.total === 0 && weekUnrankedTally.total === 0 ? (
-              <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.75)" }}>
-                No picks on record for {selectedWeek}.
-              </div>
-            ) : (
-              <>
-                <div style={{ fontSize: "15px", fontWeight: 900, color: "#fff", marginBottom: "12px" }}>
-                  {profile?.username?.trim() || "Anonymous Fan"}
-                </div>
-                <div style={{ display: "flex", gap: "24px", flexWrap: "wrap", marginBottom: "14px" }}>
-                  {weekRankedTally.total > 0 && (
-                    <div>
-                      <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🏆 Ranked</div>
-                      <div style={{ fontSize: "20px", fontWeight: 900, color: "#fff" }}>
-                        {weekRankedTally.correct}-{weekRankedTally.incorrect}
-                        <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", marginLeft: "6px" }}>
-                          ({Math.round((weekRankedTally.correct / weekRankedTally.total) * 100)}%)
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {weekUnrankedTally.total > 0 && (
-                    <div>
-                      <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Unranked</div>
-                      <div style={{ fontSize: "20px", fontWeight: 900, color: "#fff" }}>
-                        {weekUnrankedTally.correct}-{weekUnrankedTally.incorrect}
-                        <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", marginLeft: "6px" }}>
-                          ({Math.round((weekUnrankedTally.correct / weekUnrankedTally.total) * 100)}%)
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <div>
-                    <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Placement</div>
-                    <div style={{ fontSize: "20px", fontWeight: 900, color: weekPlacement ? GOLD : "rgba(255,255,255,0.5)" }}>
-                      {weekPlacement ? `#${weekPlacement.rank} of ${weekPlacement.outOf}` : "Pending"}
-                    </div>
-                  </div>
-                </div>
-                {weekBestPick && (
-                  <div style={{ marginBottom: "14px" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
-                    <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>
-                      {weekBestPick.game.Away} @ {weekBestPick.game.Home}
-                      <span style={{ fontSize: "12px", color: GOLD, marginLeft: "8px" }}>{weekBestPick.points} pts</span>
-                    </div>
-                  </div>
-                )}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "12px" }}>
-                  <div style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    We-Draft.com
-                  </div>
-                  <button
-                    onClick={handleShareReportCard}
-                    style={{ background: GOLD, color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
-                  >
-                    🔗 Share
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* Ranked status — stars still save instantly with no batch step, but
-           counting toward the leaderboard now needs an explicit Submit once
-           qualified (see handleSubmitForRanking); a "not open yet" message
-           covers a future week instead. */
-        <div style={{ marginBottom: "24px", border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
-          <div style={{ background: GOLD, padding: "10px 16px" }}>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              🏆 Ranked — {selectedWeek || "—"}
-            </div>
-          </div>
-          <div style={{ padding: "14px 16px", background: "rgba(0,0,0,0.25)" }}>
-            {!weekOpen ? (
-              <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>
-                {selectedWeek} Ranked opens {formatOpensDate(weekMonday)}.
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "10px" }}>
-                  <CompositionChip label="Total" value={`${rankedGames.length}/6`} ok={rankedGames.length >= 6} />
-                  {/* Week 0 has no Game of the Week/Featured requirement — any
-                      6 ranked games qualify (see rankedStatus's own Week 0
-                      branch), so these two chips would just be permanently
-                      unmet noise on that week's board. */}
-                  {selectedWeek !== "Week 0" && (
-                    <>
-                      <CompositionChip label="Game of the Week" value={`${rankedGames.filter((g) => g.GameOfWeek).length}/1`} ok={rankedGames.some((g) => g.GameOfWeek)} />
-                      <CompositionChip label="Featured" value={`${rankedGames.filter((g) => g.Featured).length}/2`} ok={rankedGames.filter((g) => g.Featured).length >= 2} />
-                    </>
-                  )}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 800, color: status.isQualified ? "#8ef0a5" : "rgba(255,255,255,0.85)" }}>
-                    {/* No more "now go submit it" — qualifying locks it in on
-                        its own (see the earlyRankedStatus effect above), so
-                        this just confirms that already happened instead of
-                        asking for a separate action. */}
-                    {status.isQualified
-                      ? (alreadySubmitted ? `${status.text} 🔒 Locked in.` : `${status.text} Locking in…`)
-                      : status.text}
-                  </div>
-                  {status.isQualified && (
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      {/* Bragging rights before kickoff — see
-                          handleSharePicks. Shown as soon as the Ranked 6
-                          qualifies — no separate submit step to wait on
-                          anymore, qualifying and locking in happen together. */}
-                      <button
-                        onClick={handleSharePicks}
-                        style={{
-                          flexShrink: 0, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "9px 18px",
-                          fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
-                          background: "rgba(246,162,29,0.12)", color: GOLD, cursor: "pointer",
-                        }}
-                      >
-                        🔗 Share Picks
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {/* Hard-to-miss confirmation that the auto-lock-in actually
-                    went through — fades away on its own; the status line
-                    above ("🔒 Locked in.") carries the ongoing state after
-                    this clears. */}
-                {submitFeedback !== "idle" && (
-                  <div style={{
-                    marginTop: "10px", fontSize: "13px", fontWeight: 800, padding: "9px 12px", borderRadius: "8px",
-                    background: submitFeedback === "success" ? "rgba(142,240,165,0.15)" : "rgba(255,138,122,0.15)",
-                    color: submitFeedback === "success" ? "#8ef0a5" : "#ff8a7a",
-                  }}>
-                    {submitFeedback === "success"
-                      ? `✅ Locked in! Your Ranked 6 for ${selectedWeek} is submitted.`
-                      : "⚠️ Something went wrong locking in your picks — check your connection and try changing a pick to retrigger it."}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
+      {/* Desktop: the week's games on the left, its Report Card (or Ranked
+          status), recap and the rules in a sticky column on the right
+          (LivePage.js .wdl-wp-grid); stacked on phones. */}
+      <div className="wdl-wp-grid">
+      <div className="wdl-wp-main">
       {rankedGames.length > 0 && (
         <div style={{ marginBottom: "20px" }}>
           <SectionHeader label={weekIsPast ? "🏆 Ranked — Results" : "🏆 Ranked"} />
@@ -1725,6 +1372,245 @@ function MyPicksSection() {
         </div>
       )}
 
+      </div>
+      <aside className="wdl-wp-side">
+      {weekIsPast ? (
+        /* Report Card — every game's Final, so the pickable/composition/
+           Submit UI (below) no longer applies. Doubles as something meant
+           to be posted publicly (see handleShareReportCard), so — unlike
+           the "Sample Data" tags used elsewhere in this file — placement
+           is never faked here: weekPlacement stays null and shows
+           "pending" until a real STANDINGS_COLLECTION doc exists for this
+           week, since sharing a made-up rank would actively mislead
+           whoever it's shared with. */
+        <div style={{ marginBottom: "24px", border: `1px solid ${LINE}`, borderRadius: "12px", overflow: "hidden", background: "linear-gradient(160deg, rgba(246,162,29,0.10), #111a2b)" }}>
+          <div style={{ background: GOLD, padding: "10px 16px" }}>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              🏆 We-Pick Report Card — {selectedWeek}
+            </div>
+          </div>
+          <div style={{ padding: "16px" }}>
+            {weekRankedTally.total === 0 && weekUnrankedTally.total === 0 ? (
+              <div style={{ fontSize: "14px", fontWeight: 800, color: "rgba(255,255,255,0.75)" }}>
+                No picks on record for {selectedWeek}.
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: "15px", fontWeight: 900, color: "#fff", marginBottom: "12px" }}>
+                  {profile?.username?.trim() || "Anonymous Fan"}
+                </div>
+                <div style={{ display: "flex", gap: "24px", flexWrap: "wrap", marginBottom: "14px" }}>
+                  {weekRankedTally.total > 0 && (
+                    <div>
+                      <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🏆 Ranked</div>
+                      <div style={{ fontSize: "20px", fontWeight: 900, color: "#fff" }}>
+                        {weekRankedTally.correct}-{weekRankedTally.incorrect}
+                        <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", marginLeft: "6px" }}>
+                          ({Math.round((weekRankedTally.correct / weekRankedTally.total) * 100)}%)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {weekUnrankedTally.total > 0 && (
+                    <div>
+                      <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Unranked</div>
+                      <div style={{ fontSize: "20px", fontWeight: 900, color: "#fff" }}>
+                        {weekUnrankedTally.correct}-{weekUnrankedTally.incorrect}
+                        <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.55)", marginLeft: "6px" }}>
+                          ({Math.round((weekUnrankedTally.correct / weekUnrankedTally.total) * 100)}%)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Placement</div>
+                    <div style={{ fontSize: "20px", fontWeight: 900, color: weekPlacement ? GOLD : "rgba(255,255,255,0.5)" }}>
+                      {weekPlacement ? `#${weekPlacement.rank} of ${weekPlacement.outOf}` : "Pending"}
+                    </div>
+                  </div>
+                </div>
+                {weekBestPick && (
+                  <div style={{ marginBottom: "14px" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
+                    <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>
+                      {weekBestPick.game.Away} @ {weekBestPick.game.Home}
+                      <span style={{ fontSize: "12px", color: GOLD, marginLeft: "8px" }}>{weekBestPick.points} pts</span>
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "12px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    We-Draft.com
+                  </div>
+                  <button
+                    onClick={handleShareReportCard}
+                    style={{ background: GOLD, color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
+                  >
+                    🔗 Share
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Ranked status — stars still save instantly with no batch step, but
+           counting toward the leaderboard now needs an explicit Submit once
+           qualified (see handleSubmitForRanking); a "not open yet" message
+           covers a future week instead. */
+        <div style={{ marginBottom: "24px", border: `1px solid ${LINE}`, borderRadius: "12px", overflow: "hidden" }}>
+          <div style={{ background: GOLD, padding: "10px 16px" }}>
+            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              🏆 Ranked — {selectedWeek || "—"}
+            </div>
+          </div>
+          <div style={{ padding: "14px 16px", background: PANEL }}>
+            {!weekOpen ? (
+              <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>
+                {selectedWeek} Ranked opens {formatOpensDate(weekMonday)}.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "10px" }}>
+                  <CompositionChip label="Total" value={`${rankedGames.length}/6`} ok={rankedGames.length >= 6} />
+                  {/* Week 0 has no Game of the Week/Featured requirement — any
+                      6 ranked games qualify (see rankedStatus's own Week 0
+                      branch), so these two chips would just be permanently
+                      unmet noise on that week's board. */}
+                  {selectedWeek !== "Week 0" && (
+                    <>
+                      <CompositionChip label="Game of the Week" value={`${rankedGames.filter((g) => g.GameOfWeek).length}/1`} ok={rankedGames.some((g) => g.GameOfWeek)} />
+                      <CompositionChip label="Featured" value={`${rankedGames.filter((g) => g.Featured).length}/2`} ok={rankedGames.filter((g) => g.Featured).length >= 2} />
+                    </>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: status.isQualified ? "#8ef0a5" : "rgba(255,255,255,0.85)" }}>
+                    {/* No more "now go submit it" — qualifying locks it in on
+                        its own (see the earlyRankedStatus effect above), so
+                        this just confirms that already happened instead of
+                        asking for a separate action. */}
+                    {status.isQualified
+                      ? (alreadySubmitted ? `${status.text} 🔒 Locked in.` : `${status.text} Locking in…`)
+                      : status.text}
+                  </div>
+                  {status.isQualified && (
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {/* Bragging rights before kickoff — see
+                          handleSharePicks. Shown as soon as the Ranked 6
+                          qualifies — no separate submit step to wait on
+                          anymore, qualifying and locking in happen together. */}
+                      <button
+                        onClick={handleSharePicks}
+                        style={{
+                          flexShrink: 0, border: `1px solid ${GOLD}`, borderRadius: "8px", padding: "9px 18px",
+                          fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em",
+                          background: "rgba(246,162,29,0.12)", color: GOLD, cursor: "pointer",
+                        }}
+                      >
+                        🔗 Share Picks
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {/* Hard-to-miss confirmation that the auto-lock-in actually
+                    went through — fades away on its own; the status line
+                    above ("🔒 Locked in.") carries the ongoing state after
+                    this clears. */}
+                {submitFeedback !== "idle" && (
+                  <div style={{
+                    marginTop: "10px", fontSize: "13px", fontWeight: 800, padding: "9px 12px", borderRadius: "8px",
+                    background: submitFeedback === "success" ? "rgba(142,240,165,0.15)" : "rgba(255,138,122,0.15)",
+                    color: submitFeedback === "success" ? "#8ef0a5" : "#ff8a7a",
+                  }}>
+                    {submitFeedback === "success"
+                      ? `✅ Locked in! Your Ranked 6 for ${selectedWeek} is submitted.`
+                      : "⚠️ Something went wrong locking in your picks — check your connection and try changing a pick to retrigger it."}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Pinned recap of recapWeek — see showRecap's own comment above for
+          why this exists separately from the dynamic Report Card below
+          (which only covers whichever week is currently selected). Smaller/
+          plainer than that one on purpose ("the little recap scorecard")
+          — no Share button, this is just a standing reminder of how it
+          went, not something meant to be posted. */}
+      {showRecap && (
+        <div style={{ marginBottom: "18px", border: `1px solid ${LINE}`, borderRadius: "10px", overflow: "hidden", background: PANEL }}>
+          <div style={{ background: "rgba(246,162,29,0.18)", padding: "8px 14px" }}>
+            <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              🏆 {recapWeek} Recap
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", display: "flex", gap: "20px", flexWrap: "wrap", alignItems: "center" }}>
+            {recapRankedTally.total > 0 && (
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Ranked</div>
+                <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
+                  {recapRankedTally.correct}-{recapRankedTally.incorrect}
+                  <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.55)", marginLeft: "5px" }}>
+                    ({Math.round((recapRankedTally.correct / recapRankedTally.total) * 100)}%)
+                  </span>
+                </div>
+              </div>
+            )}
+            {recapUnrankedTally.total > 0 && (
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Unranked</div>
+                <div style={{ fontSize: "16px", fontWeight: 900, color: "#fff" }}>
+                  {recapUnrankedTally.correct}-{recapUnrankedTally.incorrect}
+                </div>
+              </div>
+            )}
+            <div>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Placement</div>
+              <div style={{ fontSize: "16px", fontWeight: 900, color: recapPlacement ? GOLD : "rgba(255,255,255,0.5)" }}>
+                {recapPlacement ? `#${recapPlacement.rank} of ${recapPlacement.outOf}` : "Pending"}
+              </div>
+            </div>
+            {recapBestPick && (
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.04em" }}>🎯 Best Pick</div>
+                <div style={{ fontSize: "13px", fontWeight: 800, color: "#fff" }}>
+                  {recapBestPick.game.Away} @ {recapBestPick.game.Home}
+                  <span style={{ fontSize: "11px", color: GOLD, marginLeft: "6px" }}>{recapBestPick.points} pts</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Same "How Ranked Works" explainer StandingsSection opens with —
+          copied verbatim so the rules are visible right where picks are
+          actually made, not just on the board that grades them. */}
+      <div style={{ border: "2px dashed rgba(246,162,29,0.5)", borderRadius: "12px", padding: "14px 16px", marginBottom: "18px", background: "rgba(246,162,29,0.08)" }}>
+        <div style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
+          🏆 How Ranked Works
+        </div>
+        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "7px" }}>
+          {[
+            ["⭐", "Star 6 picks", " each week to build your Ranked 6 — the Game of the Week plus at least 2 Featured games (Week 0: any 6, no restrictions)."],
+            ["🎯", "Call the winner", " — bank 100 points for the right team, 0 for the wrong one, no matter how close the final score was."],
+            ["🔟", "Nail the score", " — once you've got the winner, earn up to 100 more points per side, losing 10 for every point you're off."],
+            ["🔒", "Qualify before kickoff", " and your Ranked 6 locks in automatically — your season score is the sum of every week you qualify."],
+          ].map(([icon, lead, rest], i) => (
+            <li key={i} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>{icon}</span>
+              <span><span style={{ color: "#fff", fontWeight: 900 }}>{lead}</span>{rest}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      </aside>
+      </div>
+
       {/* ===== Hidden Share Card ===== */}
       {/* Off-screen, only rendered while the share modal is open — the
           modal's own effect (above) captures this to a PNG the instant it
@@ -1810,7 +1696,7 @@ function MyPicksSection() {
             <div style={{ height: "3px", background: GOLD }} />
             <div style={{ padding: "18px 28px", textAlign: "center", background: "rgba(0,0,0,0.2)" }}>
               <div style={{ color: GOLD, fontSize: "22px", fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                we-draft.com/we-pick
+                we-draft.com/live/we-pick
               </div>
             </div>
           </div>
@@ -1825,7 +1711,7 @@ function MyPicksSection() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: "#151a22", border: `2px solid ${GOLD}`, borderRadius: "14px", maxWidth: "420px", width: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
+            style={{ background: PANEL, border: "1px solid #2a3753", borderRadius: "14px", maxWidth: "420px", width: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
               <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Share</div>
@@ -1869,7 +1755,7 @@ function MyPicksSection() {
               <button
                 onClick={handleSaveShareImage}
                 disabled={!shareImageUrl}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: GOLD, border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", cursor: shareImageUrl ? "pointer" : "default", opacity: shareImageUrl ? 1 : 0.6 }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: GOLD, border: "none", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", cursor: shareImageUrl ? "pointer" : "default", opacity: shareImageUrl ? 1 : 0.6 }}
               >
                 💾 Save Image
               </button>
@@ -1894,7 +1780,8 @@ function MyPicksSection() {
 // rather than relying on MyPicksSection's.
 function StandingsSection() {
   const { user, profile } = useAuth();
-  const { week: weekParam } = useParams();
+  const live = useContext(LiveWeekContext);
+  const { week: weekParam } = useWePickRoute();
   const navigate = useNavigate();
   // Defaults to "week" regardless of whether a :week param is on the URL —
   // the by-week board is the one most people land on this tab wanting to
@@ -1953,12 +1840,15 @@ function StandingsSection() {
           .sort((a, b) => weekNumber(a) - weekNumber(b));
         setWeekOptions(weeks);
         const weekOverride = weekConfigSnap.exists() ? weekConfigSnap.data().currentWeekOverride : null;
-        setSelectedWeek((prev) => prev || pickCurrentWeek(games, weeks, weekOverride));
+        setSelectedWeek((prev) => prev || pickCurrentWeek(games, weeks, weekOverride, live?.week));
       } catch (e) {
         console.error("We-Pick standings week-list error:", e);
       }
     };
     loadWeeks();
+  // /live's week (live.week) is read once, for the default week on load —
+  // it's set before this tab can render, and re-running would refetch the schedule.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // A week param arriving/changing (e.g. via browser back/forward, or a
@@ -2119,8 +2009,8 @@ function StandingsSection() {
     return () => { cancelled = true; };
   }, [visibleUidsKey, myEntry, scope, friendUids, user]);
 
-  const goSeason = () => { setView("season"); navigate("/we-pick/standings"); };
-  const goWeek = (w) => { setView("week"); setSelectedWeek(w); navigate(w ? `/we-pick/standings/${w}` : "/we-pick/standings"); };
+  const goSeason = () => { setView("season"); navigate(wePickHref("standings")); };
+  const goWeek = (w) => { setView("week"); setSelectedWeek(w); navigate(wePickHref("standings", w || null)); };
 
   return (
     <>
@@ -2170,14 +2060,14 @@ function StandingsSection() {
           <select
             value={selectedWeek}
             onChange={(e) => goWeek(e.target.value)}
-            style={{ border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 12px", fontWeight: 900, fontSize: "13px", color: "#fff", outline: "none", background: "rgba(0,0,0,0.3)" }}
+            style={{ border: `1px solid #2a3753`, borderRadius: "8px", padding: "8px 12px", fontWeight: 900, fontSize: "13px", color: "#fff", outline: "none", background: FIELD, colorScheme: "dark", fontFamily: "inherit", cursor: "pointer" }}
           >
-            {weekOptions.map((w) => <option key={w} value={w} style={{ color: "#000" }}>{w}</option>)}
+            {weekOptions.map((w) => <option key={w} value={w} style={{ color: "#eef2f8", background: FIELD }}>{w}</option>)}
           </select>
         )}
       </div>
 
-      <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
+      <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", overflow: "hidden" }}>
         <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             🏆 {scope === "friends" ? "Friend " : ""}{view === "season" ? "2026 Season Standings" : `${selectedWeek || "Weekly"} Standings`}
@@ -2191,7 +2081,7 @@ function StandingsSection() {
               title="Computed live from scores as games finish — becomes official once this week is fully graded."
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", gap: "4px",
-                background: "rgba(0,0,0,0.25)", color: "#fff", fontSize: "10px", fontWeight: 900,
+                background: PANEL, color: "#fff", fontSize: "10px", fontWeight: 900,
                 padding: "3px 9px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.05em",
               }}
             >
@@ -2200,7 +2090,7 @@ function StandingsSection() {
             </span>
           )}
         </div>
-        <div style={{ background: "rgba(0,0,0,0.25)" }}>
+        <div style={{ background: PANEL }}>
           {scope === "friends" && !user ? (
             <div style={{ padding: "36px 20px", textAlign: "center" }}>
               <div style={{ fontSize: "26px", marginBottom: "8px" }}>👥</div>
@@ -2238,7 +2128,7 @@ function StandingsSection() {
                       You haven't qualified for {selectedWeek} yet.
                     </div>
                     <Link
-                      to="/we-pick"
+                      to={wePickHref()}
                       style={{ background: GOLD, color: "#06162c", border: "none", borderRadius: "6px", padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none", whiteSpace: "nowrap" }}
                     >
                       Make Picks →
@@ -2286,7 +2176,7 @@ function StandingsSection() {
                       <div style={{ fontSize: "12px", fontWeight: 700, color: "rgba(255,255,255,0.55)", marginBottom: "6px" }}>
                         Add friends to see their picks here too.
                       </div>
-                      <Link to="/we-pick/friends" style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
+                      <Link to={wePickHref("friends")} style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
                         Add Friends →
                       </Link>
                     </div>
@@ -2360,10 +2250,10 @@ function StandingsSection() {
           )}
         </div>
         {!loading && !(scope === "friends" && friendsLoading) && sortedEntries.length > limits.default && (
-          <div style={{ background: "rgba(0,0,0,0.25)", borderTop: "1px solid rgba(255,255,255,0.1)", padding: "10px 16px", textAlign: "center" }}>
+          <div style={{ background: PANEL, borderTop: "1px solid rgba(255,255,255,0.1)", padding: "10px 16px", textAlign: "center" }}>
             <button
               onClick={() => setExpanded((v) => !v)}
-              style={{ background: "none", border: `2px solid ${GOLD}`, borderRadius: "8px", color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 16px", cursor: "pointer" }}
+              style={{ background: "none", border: `1px solid ${GOLD}`, borderRadius: "8px", color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 16px", cursor: "pointer" }}
             >
               {expanded ? "Show Top 10" : `Show Top ${Math.min(limits.max, sortedEntries.length)}`}
             </button>
@@ -2412,9 +2302,9 @@ function StandingsSubTab({ active, label, onClick }) {
     <button
       onClick={onClick}
       style={{
-        border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "8px 16px",
-        fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
-        background: active ? GOLD : "transparent", color: "#fff", cursor: "pointer",
+        border: `1px solid ${active ? GOLD : "#26324a"}`, borderRadius: "999px", padding: "6px 14px",
+        fontWeight: 800, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+        background: active ? GOLD : "transparent", color: active ? "#121212" : "#9fb0c8", cursor: "pointer", fontFamily: "inherit",
       }}
     >
       {label}
@@ -2741,7 +2631,7 @@ function FriendsSection() {
 
   if (!user) {
     return (
-      <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", padding: "40px 20px", textAlign: "center" }}>
+      <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", padding: "40px 20px", textAlign: "center" }}>
         <div style={{ fontSize: "26px", marginBottom: "10px" }}>👥</div>
         <div style={{ fontSize: "15px", fontWeight: 800, color: "#fff", marginBottom: "14px" }}>
           Sign in to add friends and see how you stack up against them.
@@ -2759,7 +2649,7 @@ function FriendsSection() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
       {/* Your Friend Code */}
-      <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", padding: "16px 20px", textAlign: "center" }}>
+      <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", padding: "16px 20px", textAlign: "center" }}>
         <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "8px" }}>
           Your Friend Code
         </div>
@@ -2772,7 +2662,7 @@ function FriendsSection() {
             </div>
             <button
               onClick={handleCopyCode}
-              style={{ marginTop: "8px", background: "none", border: `2px solid ${GOLD}`, borderRadius: "8px", color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 16px", cursor: "pointer" }}
+              style={{ marginTop: "8px", background: "none", border: `1px solid ${GOLD}`, borderRadius: "8px", color: GOLD, fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 16px", cursor: "pointer" }}
             >
               {codeCopied ? "Copied!" : "Copy Code"}
             </button>
@@ -2784,7 +2674,7 @@ function FriendsSection() {
       </div>
 
       {/* Add a Friend */}
-      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", padding: "16px 20px" }}>
+      <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", padding: "16px 20px" }}>
         <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "10px" }}>
           Add A Friend
         </div>
@@ -2795,13 +2685,13 @@ function FriendsSection() {
             onKeyDown={(e) => { if (e.key === "Enter") handleSendRequest(); }}
             placeholder="Enter friend code..."
             maxLength={6}
-            style={{ flex: "1 1 160px", border: `2px solid ${BLUE}`, borderRadius: "8px", padding: "10px 12px", fontWeight: 900, fontSize: "16px", letterSpacing: "0.1em", fontFamily: "'Courier New', monospace", textTransform: "uppercase", background: "rgba(0,0,0,0.25)", color: "#fff", outline: "none" }}
+            style={{ flex: "1 1 160px", border: `1px solid ${LINE}`, borderRadius: "8px", padding: "10px 12px", fontWeight: 900, fontSize: "16px", letterSpacing: "0.1em", fontFamily: "'Courier New', monospace", textTransform: "uppercase", background: PANEL, color: "#fff", outline: "none" }}
           />
           <button
             onClick={handleSendRequest}
             disabled={addSaving || !inputCode.trim()}
             style={{
-              background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px",
+              background: GOLD, color: "#121212", border: "none", borderRadius: "8px",
               padding: "10px 22px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.04em",
               cursor: addSaving || !inputCode.trim() ? "default" : "pointer", opacity: addSaving || !inputCode.trim() ? 0.6 : 1,
             }}
@@ -2818,13 +2708,13 @@ function FriendsSection() {
 
       {/* Requests — incoming needs a response, outgoing is just "sent". */}
       {!requestsLoading && (incoming.length > 0 || outgoing.length > 0) && (
-        <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", overflow: "hidden" }}>
           <div style={{ background: GOLD, padding: "10px 16px" }}>
             <div style={{ color: "#06162c", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               📥 Friend Requests
             </div>
           </div>
-          <div style={{ background: "rgba(0,0,0,0.25)" }}>
+          <div style={{ background: PANEL }}>
             {incoming.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
                 <div style={{ fontSize: "14px", fontWeight: 800, color: "#fff" }}>{r.name}</div>
@@ -2868,13 +2758,13 @@ function FriendsSection() {
           candidate survives the pending-request filter. 3 at a time, "View
           More" reveals the rest in the same +3 batches. */}
       {!recsLoading && recommendations.length > 0 && (
-        <div style={{ border: `2px solid ${GOLD}`, borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", overflow: "hidden" }}>
           <div style={{ background: GOLD, padding: "10px 16px" }}>
             <div style={{ color: "#06162c", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
               🤝 People You May Know
             </div>
           </div>
-          <div style={{ background: "rgba(0,0,0,0.25)" }}>
+          <div style={{ background: PANEL }}>
             {recommendations.slice(0, visibleRecsCount).map((r) => (
               <div key={r.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
                 <div>
@@ -2888,7 +2778,7 @@ function FriendsSection() {
                     onClick={() => handleSendRequestToRecommendation(r.uid, r.name)}
                     disabled={sendingRecUid === r.uid}
                     style={{
-                      background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "6px",
+                      background: GOLD, color: "#121212", border: "none", borderRadius: "6px",
                       padding: "6px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
                       cursor: sendingRecUid === r.uid ? "default" : "pointer", opacity: sendingRecUid === r.uid ? 0.6 : 1,
                     }}
@@ -2929,8 +2819,8 @@ function FriendsSection() {
       )}
 
       {/* Friends list */}
-      <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
-        <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ border: `1px solid ${LINE}`, borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{ background: FIELD, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             👥 Your Friends
           </div>
@@ -2938,7 +2828,7 @@ function FriendsSection() {
             {friends.length}
           </div>
         </div>
-        <div style={{ background: "rgba(0,0,0,0.25)" }}>
+        <div style={{ background: PANEL }}>
           {friendsLoading ? (
             <LoadingSpinner label="Loading" size={24} minHeight="80px" />
           ) : friends.length === 0 ? (
@@ -2964,7 +2854,7 @@ function FriendsSection() {
         </div>
         {friends.length > 0 && (
           <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}>
-            <Link to="/we-pick/standings" style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
+            <Link to={wePickHref("standings")} style={{ fontSize: "12px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
               🏆 See Friend Standings →
             </Link>
           </div>
@@ -3059,13 +2949,13 @@ function MyStatsSection() {
 
   if (!user) {
     return (
-      <div style={{ textAlign: "center", padding: "60px 20px", border: `2px solid ${CARD_BORDER}`, borderRadius: "12px", background: CARD_BG }}>
+      <div style={{ textAlign: "center", padding: "60px 20px", border: `1px solid ${LINE}`, borderRadius: "12px", background: CARD_BG }}>
         <div style={{ fontSize: "15px", fontWeight: 700, color: "rgba(255,255,255,0.8)", marginBottom: "16px" }}>
           Sign in to track your We-Pick performance.
         </div>
         <button
           onClick={login}
-          style={{ background: GOLD, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "8px", padding: "11px 28px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
+          style={{ background: GOLD, color: "#121212", border: "none", borderRadius: "8px", padding: "11px 28px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
         >
           Sign In
         </button>
@@ -3192,7 +3082,7 @@ function LegendDot({ color, label }) {
 
 function StatTile({ icon, label, value, sub }) {
   return (
-    <div style={{ flex: "1 1 220px", border: `2px solid ${GOLD}`, borderRadius: "12px", padding: "16px 18px", background: "rgba(0,0,0,0.25)" }}>
+    <div style={{ flex: "1 1 220px", border: `1px solid ${LINE}`, borderRadius: "12px", padding: "16px 18px", background: PANEL }}>
       <div style={{ fontSize: "11px", fontWeight: 900, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
         {icon} {label}
       </div>
@@ -3401,8 +3291,8 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
           className="wd-wepick-no-spinner"
           style={{
             flexShrink: 0, width: "42px", textAlign: "center", fontSize: "16px", fontWeight: 900,
-            border: `2px solid ${BLUE}`, borderRadius: "6px", padding: "4px", color: BLUE, outline: "none",
-            background: "#fff", pointerEvents: "auto",
+            border: "1px solid #2a3753", borderRadius: "6px", padding: "4px", color: "#fff", outline: "none",
+            background: FIELD, pointerEvents: "auto",
           }}
         />
       ) : hasScorePick(pick) ? (
@@ -3501,8 +3391,13 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
   // one (that used to both wipe the score and un-rank the game).
   const canPickWinner = showInputs && !saving && !hasScorePick(pick) && typeof onPickWinner === "function";
 
+  // Clicking a game opens its We-Draft Live game page (a future week's game
+  // there is built from the schedule until /live ingests it). Only a game
+  // with no CFBD match falls back to its public /game page.
+  const liveHref = game.CFBDGameId != null ? `/live?view=game&game=${game.CFBDGameId}` : null;
+
   return (
-    <div style={{ position: "relative", border: `2px solid ${CARD_BORDER}`, borderRadius: "10px", overflow: "hidden", background: CARD_BG }}>
+    <div style={{ position: "relative", border: `1px solid ${LINE}`, borderRadius: "10px", overflow: "hidden", background: CARD_BG }}>
       {/* Stretched-link background, but only across the right two-thirds of
           the card — the left third is where the score inputs/logos sit, so
           a click meant for one of those (but just off-target) no longer
@@ -3510,7 +3405,7 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
           affect any individual input/button elsewhere on the card, which
           already sit above this (pointerEvents: "auto") regardless of
           where this box ends. */}
-      <Link to={`/game/${game.Slug}`} aria-label={`${game.Away} at ${game.Home}`} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: "33.333%", zIndex: 0 }} />
+      <Link to={liveHref || `/game/${game.Slug}`} aria-label={`${game.Away} at ${game.Home}`} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: "33.333%", zIndex: 0 }} />
 
       <div style={{ position: "relative", zIndex: 1, padding: "8px 12px", pointerEvents: "none" }}>
         {(hasTags || showStar) && (
@@ -3584,7 +3479,7 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
               placeholder="Why do you like this pick? (optional)"
               rows={2}
               style={{
-                width: "100%", boxSizing: "border-box", resize: "vertical", border: `2px solid ${BLUE}`,
+                width: "100%", boxSizing: "border-box", resize: "vertical", border: `1px solid ${LINE}`,
                 borderRadius: "6px", padding: "6px 8px", fontFamily: "inherit", fontSize: "12px", fontWeight: 600,
                 color: "#222", outline: "none", lineHeight: 1.4,
               }}

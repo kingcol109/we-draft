@@ -18,17 +18,61 @@ export const periodLabel = (p) => {
   return p === 5 ? "OT" : `${p - 4}OT`;
 };
 
-export const kickoffLabel = (startDate) => {
+// "3:30 PM" today, "Sat 3:30 PM" any other day, "Sat TBD" when the time
+// isn't set yet.
+// "Sat 10/10 3:30 PM" — just the time for a game today.
+const shortDate = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+export const kickoffLabel = (startDate, tbd = false) => {
   if (!startDate) return "";
   const d = new Date(startDate);
   if (isNaN(d)) return "";
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const day = d.toDateString() === new Date().toDateString() ? "" : `${d.toLocaleDateString([], { weekday: "short" })} ${shortDate(d)} `;
+  return tbd ? `${day || "Today "}TBD` : `${day}${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 };
 
-// "Q3 8:42" | "FINAL" | "FINAL/OT" | "7:30 PM"
+// My Feed only matters while games are on: it opens an hour before the
+// first kickoff of the day (the viewer's day) and stays open until all of
+// that day's games are final — and while any game is live, so a late game
+// running past midnight keeps it. Returns { open, opensAt } — opensAt (ms)
+// when it's closed but opens later today, else null.
+export const FEED_EARLY_MS = 3600e3;
+export function myFeedWindow(games, now = Date.now()) {
+  if (!games?.length) return { open: false, opensAt: null };
+  if (games.some((g) => g.status === "in_progress")) return { open: true, opensAt: null };
+  const today = new Date(now).toDateString();
+  const todays = games.filter((g) => g.startDate && new Date(g.startDate).toDateString() === today);
+  // Still to be played today (a game 6+ hours past kickoff that never
+  // started — postponed — doesn't count).
+  const pending = todays.filter((g) => g.status !== "final" && !(g.status === "scheduled" && Date.parse(g.startDate) < now - 6 * 3600e3));
+  if (!pending.length) return { open: false, opensAt: null };
+  const opensAt = Math.min(...todays.map((g) => Date.parse(g.startDate))) - FEED_EARLY_MS;
+  return now >= opensAt ? { open: true, opensAt: null } : { open: false, opensAt };
+}
+
+// Where the slate is in its week (server/live/ingest.js keeps a week as the
+// slate until Monday 6 AM ET after its games):
+//   "preview"  nothing has kicked off yet — next week's matchups
+//   "live"     a game is in progress
+//   "gameday"  some games done, more still to come, none on right now
+//   "review"   everything's over — catch up until the next week takes over
+// A game more than 6 hours past its kickoff that never started (postponed,
+// canceled) doesn't hold the week out of review.
+export function slatePhase(games, now = Date.now()) {
+  if (!games?.length) return "preview";
+  if (games.some((g) => g.status === "in_progress")) return "live";
+  if (!games.some((g) => g.status === "final")) return "preview";
+  const upcoming = games.some((g) => g.status === "scheduled" && (Date.parse(g.startDate) || 0) > now - 6 * 3600e3);
+  return upcoming ? "gameday" : "review";
+}
+
+// "Q3 8:42" | "FINAL · 10/3" | "FINAL/OT · 10/3" | "Sat 10/10 7:30 PM" —
+// dates on everything but a live game.
 export function statusLabel(g) {
   if (!g) return "";
-  if (g.status === "final") return g.period > 4 ? "FINAL/OT" : "FINAL";
+  if (g.status === "final") {
+    const d = g.startDate ? new Date(g.startDate) : null;
+    return `${g.period > 4 ? "FINAL/OT" : "FINAL"}${d && !isNaN(d) ? ` · ${shortDate(d)}` : ""}`;
+  }
   if (g.status === "in_progress") {
     if (!g.period) return "LIVE";
     // Overtime has no game clock (CFBD reports 0:00) — just "OT" / "2OT".
@@ -46,7 +90,7 @@ export function statusLabel(g) {
     }
     return `${periodLabel(g.period)}${g.clock ? ` ${g.clock}` : ""}`;
   }
-  return kickoffLabel(g.startDate);
+  return kickoffLabel(g.startDate, g.startTimeTBD);
 }
 
 // downLabel(2) → "2nd Down"; downLabel(1, 10) → "1st & 10"
@@ -77,7 +121,7 @@ const SCRIMMAGE = new Set(["rush", "pass", "incomplete", "sack", "fumble"]);
 // or PAT just happened → kickoff next, halftime handled as a break), else
 //   { offense, down, distance, ytg, clock, period, brk?, flag?, approx? }
 // where distance is a number or "Goal", ytg may be null (spot unknown),
-// brk = { label, detail } for a timeout / end of quarter / halftime, flag =
+// brk = { label, detail } for an end of quarter / halftime, flag =
 // penalty text, approx = true when part of it came from CFBD's live state.
 export function nextSituation(plays, game) {
   if (!game || game.status !== "in_progress" || !plays?.length) return null;
@@ -86,8 +130,10 @@ export function nextSituation(plays, game) {
 
   // A break: timeout or end of a quarter. The coming snap is whatever the
   // last real play left; halftime (end of Q2) means a kickoff is next.
+  // A timeout is NOT a break here: its own card is already at the top of the
+  // feed, so the next-play card just shows the coming snap (showing
+  // "TIMEOUT" there too made every timeout appear twice).
   let brk = null;
-  if (topType === "timeout") brk = { label: "TIMEOUT", detail: top.presentation?.detail || "" };
   if (topType === "period") {
     if (top.period === 2 || /HALF/.test(top.presentation?.headline || "")) return { brk: { label: "HALFTIME", detail: "" } };
     // Still live after the 4th (or an OT period) → overtime, fresh possessions.
@@ -100,7 +146,7 @@ export function nextSituation(plays, game) {
   const t = pr.type;
 
   // Scores / PATs / safeties → a kickoff (or free kick) is next.
-  if (pr.touchdown || t === "conversion" || t === "safety" || (t === "field_goal" && /^FIELD GOAL$/.test(pr.headline || ""))) return brk?.label === "TIMEOUT" ? { brk } : null;
+  if (pr.touchdown || t === "conversion" || t === "safety" || (t === "field_goal" && /^FIELD GOAL$/.test(pr.headline || ""))) return null;
 
   const clock = (() => {
     // Prefer the live game clock only when it's consistent with the last play.
@@ -219,9 +265,11 @@ export function playerIdSet(players) {
 // (server/live/store.js feedKinds: "score" | "turnover" | "big").
 // teamPlays / playerPlays: "big" = the Feed's big plays from followed
 // teams' games / by followed players; "all" = every play.
+// games.close: big plays from ANY game that's within one score (8) in the
+// 4th quarter or overtime — see isCloseLatePlay.
 export const FEED_PREFS_KEY = "wdLive.feedPrefs";
 export const DEFAULT_FEED_PREFS = {
-  games: { all: false, wepick: false, myTeams: true, featured: false },
+  games: { all: false, wepick: false, myTeams: true, featured: false, close: false },
   players: true,
   strip: "all", // top scoreboard: "all" games, or "mine" (followed teams/players, We-Pick, featured)
   teamPlays: "big",
@@ -251,6 +299,57 @@ export function loadFeedPrefs() {
   }
 }
 export const saveFeedPrefs = (prefs) => write(FEED_PREFS_KEY, prefs);
+
+// A Feed entry from a close game late: 4th quarter or OT, within one score
+// (8) after the play. Final-score entries don't count — big plays only.
+export const isCloseLatePlay = (b) => (b.period || 0) >= 4 && !(b.kinds || []).includes("final")
+  && b.homeScore != null && b.awayScore != null && Math.abs(b.homeScore - b.awayScore) <= 8;
+
+// ── This week ──
+// A layer over My Teams / My Players for the current slate week only: it
+// starts as exactly your follows, and you can add or drop teams/players
+// just for this week. Stored as the changes ({ key, addTeams, dropTeams,
+// addPlayers, dropPlayers }) — so following someone for good shows up here
+// too — and a new week's key starts it over from your follows.
+export const WEEK_FOLLOWS_KEY = "wdLive.week";
+export const slateWeekKey = (slate) => (slate?.week != null ? `${slate.season}-${slate.seasonType}-${slate.week}` : null);
+const emptyWeek = (key) => ({ key, addTeams: [], dropTeams: [], addPlayers: [], dropPlayers: [] });
+export function normalizeWeek(saved, key) {
+  if (!saved || !key || saved.key !== key) return emptyWeek(key);
+  return { key, addTeams: saved.addTeams || [], dropTeams: saved.dropTeams || [], addPlayers: saved.addPlayers || [], dropPlayers: (saved.dropPlayers || []).map(String) };
+}
+export function loadWeekFollows() {
+  try { return JSON.parse(localStorage.getItem(WEEK_FOLLOWS_KEY) || "null"); } catch { return null; }
+}
+export const saveWeekFollows = (w) => write(WEEK_FOLLOWS_KEY, w);
+// The teams / players the Feed uses this week.
+export function weekTeams(teams, w) {
+  const drop = new Set(w.dropTeams);
+  return [...teams, ...w.addTeams.filter((id) => !teams.includes(id))].filter((id) => !drop.has(id));
+}
+export function weekPlayers(players, w) {
+  const drop = new Set(w.dropPlayers);
+  const have = new Set(players.map((p) => String(p.id)));
+  return [...players, ...w.addPlayers.filter((p) => !have.has(String(p.id)))].filter((p) => !drop.has(String(p.id)));
+}
+// Turn a team on/off for this week only.
+export function toggleWeekTeam(w, teams, id) {
+  const on = weekTeams(teams, w).includes(id);
+  if (on) {
+    return w.addTeams.includes(id) ? { ...w, addTeams: w.addTeams.filter((x) => x !== id) } : { ...w, dropTeams: [...w.dropTeams, id] };
+  }
+  return w.dropTeams.includes(id) ? { ...w, dropTeams: w.dropTeams.filter((x) => x !== id) } : { ...w, addTeams: [...w.addTeams, id] };
+}
+export function toggleWeekPlayer(w, players, p) {
+  const id = String(p.id);
+  const on = weekPlayers(players, w).some((x) => String(x.id) === id);
+  const added = w.addPlayers.some((x) => String(x.id) === id);
+  if (on) {
+    return added ? { ...w, addPlayers: w.addPlayers.filter((x) => String(x.id) !== id) } : { ...w, dropPlayers: [...w.dropPlayers, id] };
+  }
+  if (w.dropPlayers.includes(id)) return { ...w, dropPlayers: w.dropPlayers.filter((x) => x !== id) };
+  return { ...w, addPlayers: [...w.addPlayers, { id: p.id, name: p.name, ...(p.teamId != null ? { teamId: p.teamId, team: p.team || null, position: p.position || null } : {}) }] };
+}
 
 // Every athlete on a play — CFBD's links plus the ones the parser resolved
 // from rosters. Mirrors server/live/store.js mergeAthletes.
@@ -308,4 +407,12 @@ export function feedItemFromPlay(gameId, g, p) {
     presentation: p.presentation || null,
     at: Date.parse(p.wallClock) || p.sortAt || 0,
   };
+}
+
+// Phones scroll a tab row sideways — keep the active tab in view.
+export function scrollActiveTabIntoView(nav) {
+  const on = nav?.querySelector(".on");
+  if (!on || nav.scrollWidth <= nav.clientWidth) return;
+  const left = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
+  nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
 }

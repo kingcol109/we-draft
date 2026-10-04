@@ -5,6 +5,7 @@ import {
   doc, Timestamp, query, where,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { getAuth } from "firebase/auth";
 import { useAuth } from "../context/AuthContext";
 import { useParams } from "react-router-dom";
@@ -214,16 +215,16 @@ export default function CreateMock() {
         const live = d.data().Live;
         return live !== false && live !== 0 && live !== "false" && live !== "no" && live !== null;
       });
-      const data = await Promise.all(liveDocs.map(async (docSnap) => {
+      // Community grades: one snapshot read for the whole class
+      // (utils/communityGrades.js), not one evaluations query per player.
+      const avgs = await averageGradesFor(liveDocs.map((d) => d.id));
+      const data = liveDocs.map((docSnap) => {
         const p = { id: docSnap.id, ...docSnap.data() };
-        let community = [];
-        const evalSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-        evalSnap.forEach((e) => { const g = e.data().grade; if (g && gradeScale[g]) community.push(gradeScale[g]); });
-        p.CommunityGrade = community.length > 0 ? gradeLabels[Math.round(community.reduce((a, b) => a + b, 0) / community.length)] : "-";
+        p.CommunityGrade = gradeLabel(avgs[p.id]) || "-";
         const ug = userGrades[p.id];
         p.UserGrade = ug && gradeScale[ug] ? ug : "-";
         return p;
-      }));
+      });
       setPlayers(data); setBankLoading(false);
     };
     loadPlayers();

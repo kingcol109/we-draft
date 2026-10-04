@@ -4,6 +4,12 @@ import { useParams, Link } from "react-router-dom";
 import { collection, getDocs, getDoc, doc, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
+import TeamRoster from "../components/TeamRoster";
+import { FollowLiveButton } from "../components/PlayerLiveCard";
+import { useAuth } from "../context/AuthContext";
+import { isLiveTeamFollowed, setLiveTeamFollow } from "../utils/liveFollowSync";
+import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
+import TeamStats, { playersWithStats } from "../components/TeamStats";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { Helmet } from "react-helmet-async";
 import EliteFlair from "../assets/elite.png";
@@ -67,17 +73,6 @@ const HERO_STYLE = `
 `;
 const VIDEO_INITIAL_COUNT = 3;
 const VIDEO_MAX_TOTAL = 9;
-
-const gradeScale = {
-  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
-  "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
-  "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
-};
-const gradeLabels = {
-  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
-};
 
 const gradeDisplay = (g) => {
   const map = {
@@ -742,6 +737,20 @@ function MainContent({
 }) {
   const totalArchive = archivePlayers.length + historicalPlayers.length;
 
+  // Full CFBD roster (scripts/syncCfbdRosters.js) — one doc, keyed by the
+  // school's CFBD team id. No doc → no Roster tab.
+  const [roster, setRoster] = useState(null);
+  const cfbdTeamId = school?.CFBDTeamId;
+  useEffect(() => {
+    let cancelled = false;
+    setRoster(null);
+    if (cfbdTeamId == null) return undefined;
+    getDoc(doc(db, "cfbRosters", String(cfbdTeamId)))
+      .then((snap) => { if (!cancelled && snap.exists() && snap.data().players?.length) setRoster(snap.data()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [cfbdTeamId]);
+
   // ── Prospect table sorting — default is We-Draft (community) grade,
   // ascending (best grade first), same as before this became clickable. ──
   const [prospectSortKey, setProspectSortKey] = useState("CommGrade");
@@ -812,6 +821,28 @@ function MainContent({
         }}>
           Prospects ({totalProspects})
         </button>
+        {roster && (
+          <button onClick={() => setActiveTab("roster")} style={{
+            padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
+            fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+            border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+            background: activeTab === "roster" ? color1 : "#fff",
+            color: activeTab === "roster" ? "#fff" : color1,
+          }}>
+            Roster ({roster.players.length})
+          </button>
+        )}
+        {roster && playersWithStats(roster).length > 0 && (
+          <button onClick={() => setActiveTab("stats")} style={{
+            padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
+            fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+            border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+            background: activeTab === "stats" ? color1 : "#fff",
+            color: activeTab === "stats" ? "#fff" : color1,
+          }}>
+            Stats
+          </button>
+        )}
         <button onClick={() => setActiveTab("archive")} style={{
           padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
           fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
@@ -876,6 +907,16 @@ function MainContent({
           </div>
         );
       })()}
+
+      {/* ── ROSTER TAB ── */}
+      {activeTab === "roster" && roster && (
+        <TeamRoster roster={roster} color1={color1} color2={color2} isMobile={isMobile} />
+      )}
+
+      {/* ── STATS TAB ── */}
+      {activeTab === "stats" && roster && (
+        <TeamStats roster={roster} color1={color1} color2={color2} isMobile={isMobile} />
+      )}
 
       {/* ── ARCHIVE TAB ── */}
       {activeTab === "archive" && (() => {
@@ -1029,10 +1070,9 @@ export default function TeamPage() {
             color1: schoolData.Color1 || BLUE,
             color2: schoolData.Color2 || GOLD,
             logo1: schoolData.Logo1 || "",
-            depthChart: schoolData.DepthChart || "",
           });
         } else {
-          setBranding({ color1: BLUE, color2: GOLD, logo1: "", depthChart: "" });
+          setBranding({ color1: BLUE, color2: GOLD, logo1: "" });
         }
 
         const resolvedSchool = schoolData?.School || slugFallback;
@@ -1192,29 +1232,15 @@ export default function TeamPage() {
                   seenProspectSlugs.add(slug);
                   return true;
                 });
-                const players = await Promise.all(
-                  dedupedDocs.map(async (docSnap) => {
-                    const p = { id: docSnap.id, ...docSnap.data() };
-                    try {
-                      const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-                      const grades = [];
-                      evalsSnap.forEach((e) => {
-                        const g = e.data().grade;
-                        if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                      });
-                      p.commGrade = grades.length > 0
-                        ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                        : null;
-                      p.commGradeScore = grades.length > 0
-                        ? grades.reduce((a, b) => a + b, 0) / grades.length
-                        : 999;
-                    } catch {
-                      p.commGrade = null;
-                      p.commGradeScore = 999;
-                    }
-                    return p;
-                  })
-                );
+                // Community grades from one snapshot read
+                // (utils/communityGrades.js), not a query per player.
+                const avgs = await averageGradesFor(dedupedDocs.map((d) => d.id));
+                const players = dedupedDocs.map((docSnap) => {
+                  const p = { id: docSnap.id, ...docSnap.data() };
+                  p.commGrade = gradeLabel(avgs[p.id]);
+                  p.commGradeScore = avgs[p.id] ?? 999;
+                  return p;
+                });
                 players.sort((a, b) => a.commGradeScore - b.commGradeScore);
                 prospectResults[yr] = players;
               })
@@ -1238,27 +1264,13 @@ export default function TeamPage() {
               return true;
             });
 
-            const players = await Promise.all(
-              dedupedArchiveDocs
-                .filter((docSnap) => !!dMap[docSnap.data().Slug])
-                .map(async (docSnap) => {
-                  const p = { id: docSnap.id, ...docSnap.data() };
-                  try {
-                    const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-                    const grades = [];
-                    evalsSnap.forEach((e) => {
-                      const g = e.data().grade;
-                      if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                    });
-                    p.commGrade = grades.length > 0
-                      ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-                      : null;
-                  } catch {
-                    p.commGrade = null;
-                  }
-                  return p;
-                })
-            );
+            const draftedDocs = dedupedArchiveDocs.filter((docSnap) => !!dMap[docSnap.data().Slug]);
+            const archiveAvgs = await averageGradesFor(draftedDocs.map((d) => d.id));
+            const players = draftedDocs.map((docSnap) => {
+              const p = { id: docSnap.id, ...docSnap.data() };
+              p.commGrade = gradeLabel(archiveAvgs[p.id]);
+              return p;
+            });
             players.sort((a, b) => {
               const aDraft = dMap[a.Slug];
               const bDraft = dMap[b.Slug];
@@ -2111,13 +2123,48 @@ export default function TeamPage() {
 // stacked as two bold lines ("CLEMSON" / "TIGERS") — no separate
 // foreground wordmark image and no conference label competing with it;
 // the wordmark's only appearance is the big background watermark.
+// Follow this team on We-Draft Live — the same follow as /live's ★ and its
+// Customize page (utils/liveFollowSync.js): saved to the account when
+// signed in, this browser otherwise. Needs the school's CFBD team id.
+function TeamFollowButton({ teamId, color2, isMobile }) {
+  const { user, authReady } = useAuth();
+  const uid = user?.uid || null;
+  const [followed, setFollowed] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!authReady) return undefined;
+    isLiveTeamFollowed(uid, teamId).then((v) => { if (alive) setFollowed(v); }).catch(() => { if (alive) setFollowed(false); });
+    return () => { alive = false; };
+  }, [uid, teamId, authReady]);
+  if (followed == null) return null;
+  const toggle = async () => {
+    if (busy) return;
+    const next = !followed;
+    setFollowed(next);
+    setBusy(true);
+    try { await setLiveTeamFollow(uid, teamId, next); } catch { setFollowed(!next); } finally { setBusy(false); }
+  };
+  return (
+    <button onClick={toggle} title={followed ? "Following on We-Draft Live — click to unfollow" : "Follow on We-Draft Live"} style={{
+      flexShrink: 0, background: followed ? "#fff" : color2, color: followed ? "#1d2733" : "#fff",
+      border: "2px solid #fff", borderRadius: isMobile ? "6px" : "8px",
+      padding: isMobile ? "6px 10px" : "10px 20px", cursor: "pointer",
+      fontWeight: 900, fontSize: isMobile ? "10px" : "13px",
+      textTransform: "uppercase", letterSpacing: isMobile ? "0.04em" : "0.06em",
+      whiteSpace: "nowrap", boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
+    }}>
+      {followed ? "★ Following" : "☆ Follow"}
+    </button>
+  );
+}
+
 function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile, ownCurrentRank }) {
   const heroLogo = school?.LogoDark || branding?.logo1 || "";
   // Oversized and faded — no logo fallback, since a wordmark is what's
   // meant to read as a soft background graphic; without one, the hero
   // just has no watermark.
   const watermarkWordmark = school?.WordmarkDark || school?.Wordmark || "";
-  const depthChartHref = branding?.depthChart ? sanitizeUrl(branding.depthChart) : "";
 
   return (
     <div style={{
@@ -2186,23 +2233,13 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile,
             </div>
           )}
         </div>
-        {depthChartHref && (
-          <a
-            href={depthChartHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              flexShrink: 0, background: color2, color: "#fff",
-              border: "2px solid #fff", borderRadius: isMobile ? "6px" : "8px",
-              padding: isMobile ? "6px 10px" : "10px 20px",
-              fontWeight: 900, fontSize: isMobile ? "10px" : "13px",
-              textTransform: "uppercase", letterSpacing: isMobile ? "0.04em" : "0.06em",
-              textDecoration: "none", whiteSpace: "nowrap",
-              boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
-            }}
-          >
-            {isMobile ? "Depth ↗" : "Depth Chart ↗"}
-          </a>
+        {/* Where the old Depth Chart link was: Follow (We-Draft Live), plus
+            a pulsing "Follow Live" into /live while this team is playing. */}
+        {canonicalSchool && (
+          <div style={{ flexShrink: 0, display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-end" : "center", gap: isMobile ? "6px" : "10px" }}>
+            <FollowLiveButton school={canonicalSchool} size={isMobile ? undefined : "lg"} />
+            {school?.CFBDTeamId != null && <TeamFollowButton teamId={school.CFBDTeamId} color2={color2} isMobile={isMobile} />}
+          </div>
         )}
       </div>
     </div>

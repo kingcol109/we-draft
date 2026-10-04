@@ -1,18 +1,22 @@
 name: Sync CFBD Player Stats
 
-# Runs daily at 9:00 UTC (5am ET / 4am EST — GitHub Actions schedules
-# always run in UTC, see sync-analytics.yml's own comment). Refreshes the
-# 2026 season totals on every CFBD player linked to a We-Draft profile —
-# the player page's "2026 Stats" card — with one CFBD call (see
-# scripts/syncCfbdPlayerStats.js). Game logs are written by the live
-# ingester as games end, so this only needs the totals. Idempotent; also
-# runnable on demand via workflow_dispatch.
+# Runs weekly, Sunday at 10:00 UTC (6am EDT / 5am EST — GitHub Actions
+# schedules always run in UTC, see sync-analytics.yml's own comment), after
+# Saturday's games have all finished. Two steps, ~10 CFBD calls a week:
+#   - scripts/syncCfbdPlayerStats.js — 2026 season totals on every CFBD
+#     player linked to a We-Draft profile (the player page's "2026 Stats"
+#     card). 1 call. Game logs are written by the live ingester as games
+#     end, so this only needs the totals.
+#   - scripts/syncCfbdRosters.js — full team rosters, recruiting stars and
+#     season stats for the CFB team page's Roster and Stats tabs. 9 calls.
+# Idempotent; also runnable on demand via workflow_dispatch (e.g. after a
+# weekday game).
 #
 # Needs repo secrets GOOGLE_SERVICE_ACCOUNT_KEY (already used by the other
 # workflows) and CFBD_API_KEY.
 on:
   schedule:
-    - cron: "0 9 * * *"
+    - cron: "0 10 * * 0"
   workflow_dispatch: {}
 
 jobs:
@@ -32,6 +36,14 @@ jobs:
 
       - name: Sync season player stats
         run: node scripts/syncCfbdPlayerStats.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+
+      # Full team rosters for the CFB team page's Roster tab — one CFBD call
+      # for every team (see scripts/syncCfbdRosters.js).
+      - name: Sync team rosters
+        run: node scripts/syncCfbdRosters.js
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}

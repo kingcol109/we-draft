@@ -52,17 +52,17 @@
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://we-draft.com/we-pick</loc>
+    <loc>https://we-draft.com/live/we-pick</loc>
     <lastmod>2026-10-04</lastmod>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://we-draft.com/we-pick/standings</loc>
+    <loc>https://we-draft.com/live/we-pick/standings</loc>
     <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://we-draft.com/we-pick/stats</loc>
+    <loc>https://we-draft.com/live/we-pick/stats</loc>
     <lastmod>2026-10-04</lastmod>
     <priority>0.6</priority>
   </url>
@@ -1978,7 +1978,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/anthony-evans-iii-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -2123,7 +2123,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/austin-simmons-2027-qb</loc>
-    <lastmod>2026-09-12</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -2678,7 +2678,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cayden-lee-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -2723,7 +2723,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/charlie-becker-2027-wr</loc>
-    <lastmod>2026-09-13</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -2873,7 +2873,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/cj-carr-2027-qb</loc>
-    <lastmod>2026-09-20</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -2958,7 +2958,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/colton-joseph-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3033,7 +3033,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/daeden-hopkins-2028-edge</loc>
-    <lastmod>2026-09-27</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3283,7 +3283,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/dejuan-lane-2027-db</loc>
-    <lastmod>2026-09-17</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -3523,12 +3523,12 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/dj-crowther-2027-rb</loc>
-    <lastmod>2026-10-02</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://we-draft.com/player/dj-lagway-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4158,7 +4158,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/gio-lopez-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4193,7 +4193,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/gunner-stockton-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4433,7 +4433,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/jacob-harris-2027-te</loc>
-    <lastmod>2026-09-27</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4543,7 +4543,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/jahkeem-stewart-2028-dl</loc>
-    <lastmod>2026-08-24</lastmod>
+    <lastmod>2026-10-04</lastmod>
     <priority>0.7</priority>
   </url>
   <url>

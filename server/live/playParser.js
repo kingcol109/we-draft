@@ -438,7 +438,8 @@ function presentPlay(play, ctx = {}) {
       break;
     }
     case "timeout": {
-      m = /Timeout\s+(.+?),/i.exec(s);
+      // "Timeout Tulsa, clock 08:05" — overtime ones have no clock: "Timeout Tulsa".
+      m = /Timeout\s+(.+?)(?:,|$)/i.exec(s);
       out.headline = "TIMEOUT";
       out.emphasis = "muted";
       out.detail = m ? m[1] : "";

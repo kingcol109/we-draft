@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
+import { wePickHref } from "../utils/wePickRoutes";
 import {
   doc,
   getDoc,
@@ -892,7 +893,7 @@ function FriendsPanel({ isMobile }) {
         </div>
         {friends.length > 0 && (
           <div style={{ textAlign: "center", marginTop: "10px" }}>
-            <Link to="/we-pick/standings" style={{ fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
+            <Link to={wePickHref("standings")} style={{ fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.04em", textDecoration: "none" }}>
               🏆 See Friend Standings →
             </Link>
           </div>

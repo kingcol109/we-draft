@@ -3,6 +3,6 @@
     { "path": "/api/live-ingest", "schedule": "* * * * *" }
   ],
   "functions": {
-    "api/live-ingest.js": { "maxDuration": 300 }
+    "api/live-ingest.js": { "maxDuration": 300, "includeFiles": "src/utils/liveStats.mjs" }
   }
 }

@@ -17,9 +17,12 @@ import { db } from "../firebase";
 import logo from "../assets/Logo2.png";
 import verifiedBadge from "../assets/verified.png";
 import { Link } from "react-router-dom";
+import { wePickHref } from "../utils/wePickRoutes";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { topProspects, gradeLabel } from "../utils/communityGrades";
+import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -105,7 +108,16 @@ function TopDraftBoard({ isMobile, yearsCsv, title, boardLink, compact }) {
   useEffect(() => {
     const fetchPlayers = async () => {
       try {
-        const snap = await getDocs(collection(db, "players"));
+        // The precomputed top list (utils/communityGrades.js) — 1 read
+        // instead of every player + every player's evaluations.
+        const top = await topProspects(years);
+        if (top) {
+          setPlayers(top.slice(0, compact ? 5 : 10).map((p) => ({
+            ...p, commGradeScore: Math.round(p.avgGrade), commGrade: gradeLabel(p.avgGrade),
+          })));
+          return;
+        }
+        const snap = await getDocs(query(collection(db, "players"), where("Eligible", "in", years)));
         const all = await Promise.all(
           snap.docs.map(async (docSnap) => {
             const p = { id: docSnap.id, ...docSnap.data() };
@@ -467,34 +479,9 @@ export default function HomeInSeason() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const playersSnap = await getDocs(collection(db, "players"));
-        const evalPromises = [];
-        playersSnap.forEach((playerDoc) => {
-          const pd = playerDoc.data();
-          if (pd.Live === false || pd.Live === null || pd.Live === 0 || pd.Live === "false" || pd.Live === "no") return;
-          const q = query(collection(db, "players", playerDoc.id, "evaluations"), orderBy("updatedAt", "desc"), limit(2));
-          evalPromises.push(
-            getDocs(q).then((snap) =>
-              snap.docs.map((d) => ({
-                ...d.data(),
-                playerId: playerDoc.id,
-                playerName: `${pd.First || ""} ${pd.Last || ""}`.trim(),
-                playerSlug: pd.Slug || playerDoc.id,
-              }))
-            )
-          );
-        });
-        const results = await Promise.all(evalPromises);
-        const allEvals = results.flat();
-        const publicEvals = allEvals
-          // Dummy evaluations (AdminPanel.js's Dummy Content tab) count
-          // toward everything else an eval touches on purpose — Community
-          // Grade, the Public Evaluations feed — but this homepage "Recent
-          // Evals" feed is meant to surface genuine community activity, so
-          // it's the one place they're deliberately excluded.
-          .filter((e) => e.visibility === "public" && e.evaluation?.trim() && !e.isDummy)
-          .sort((a, b) => (b.updatedAt?.toDate?.()?.getTime?.() || 0) - (a.updatedAt?.toDate?.()?.getTime?.() || 0))
-          .slice(0, 6);
+        // Newest public evaluations — one collection-group query (see
+        // utils/recentEvaluations.js), not a scan of every player.
+        const publicEvals = await fetchRecentPublicEvals(6);
 
         const uniqueUids = [...new Set(publicEvals.map((ev) => ev.uid))];
         const userDocs = await Promise.all(uniqueUids.map((uid) => getDoc(doc(db, "users", uid))));
@@ -548,7 +535,7 @@ export default function HomeInSeason() {
     { label: "NFL Teams", to: "/nfl", icon: "🏟️" },
     { label: "Colleges", to: "/cfb", icon: "🎓" },
     { label: "News", to: "/news", icon: "📰" },
-    { label: "We-Pick", to: "/we-pick", icon: "🔮" },
+    { label: "We-Pick", to: wePickHref(), icon: "🔮" },
   ];
 
   return (
@@ -611,7 +598,7 @@ export default function HomeInSeason() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "280px", maxWidth: "420px", alignSelf: "stretch" }}>
               {[
                 { label: "Evaluate Players", sub: "Grade every prospect", to: "/community", icon: "📋" },
-                { label: "We-Pick", sub: "Predict this week's games", to: "/we-pick", icon: "🔮" },
+                { label: "We-Pick", sub: "Predict this week's games", to: wePickHref(), icon: "🔮" },
                 { label: "Create Mock Drafts", sub: "Build and share your mock", to: "/mocks", icon: "🏈" },
                 { label: "Draft News", sub: "Latest prospect analysis", to: "/news", icon: "📰" },
               ].map(({ label, sub, to, icon }) => (
@@ -746,7 +733,7 @@ export default function HomeInSeason() {
                 </div>
               </div>
 
-              <Link to="/we-pick" style={{
+              <Link to={wePickHref()} style={{
                 display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                 borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
@@ -1005,7 +992,7 @@ export default function HomeInSeason() {
                 chip grid above. -- */}
             <div>
               <SectionTitle>We-Pick</SectionTitle>
-              <Link to="/we-pick" style={{
+              <Link to={wePickHref()} style={{
                 display: "flex", flexDirection: "column", gap: "8px", textDecoration: "none",
                 background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
                 border: `2px solid ${GOLD}`, borderRadius: "10px", padding: "18px 16px",

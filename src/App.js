@@ -1,6 +1,7 @@
 // src/App.js
 import { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { wePickHref } from "./utils/wePickRoutes";
 import { Analytics } from "@vercel/analytics/react";
 import { HelmetProvider, Helmet } from "react-helmet-async";
 // Components — small and needed on every route regardless of which page
@@ -64,6 +65,12 @@ const WatchPage = lazy(() => import("./pages/WatchPage"));
 const GamePage = lazy(() => import("./pages/GamePage"));
 // We-Draft Live — full-screen "second screen" scoreboard, standalone like
 // /draft-tracker (no navbar) so it can live on a TV.
+// Old /we-pick URLs → We-Pick inside We-Draft Live.
+function WePickRedirect({ tab = "picks" }) {
+  const { week } = useParams();
+  return <Navigate to={wePickHref(tab, week || null)} replace />;
+}
+
 const LivePage = lazy(() => import("./pages/LivePage"));
 const MyFeed = lazy(() => import("./pages/MyFeed"));
 
@@ -78,7 +85,6 @@ const SimPage = lazy(() => import("./pages/SimPage"));
 const MyDraftClass = lazy(() => import("./pages/MyDraftClass"));
 
 // We-Pick
-const WePickHub = lazy(() => import("./pages/WePickHub"));
 
 // Legal — standalone, static content pages, linked from Footer.js and the
 // signup/login modal (AuthModal.jsx).
@@ -111,7 +117,10 @@ function App() {
           <Routes>
             {/* Standalone — no navbar, no padding */}
             <Route path="/draft-tracker" element={<DraftTracker />} />
-            <Route path="/live" element={<LivePage />} />
+            {/* /live/* — /live itself plus We-Pick's own paths (/live/we-pick…,
+                see utils/wePickRoutes.js), one route so moving between them
+                never remounts the page. */}
+            <Route path="/live/*" element={<LivePage />} />
             <Route path="/sim" element={<SimRoute><SimPage /></SimRoute>} />
 
             {/* All other routes — wrapped with Navbar */}
@@ -179,17 +188,14 @@ function MainLayout() {
             <Route path="/videos" element={<VideosPage />} />
             <Route path="/watch" element={<WatchPage />} />
             <Route path="/game/:slug" element={<GamePage />} />
-            <Route path="/we-pick" element={<WePickHub />} />
-            {/* Standings — same page component, tab + optional week param
-                (see WePickHub.js's own activeTab/useParams handling). */}
-            <Route path="/we-pick/standings" element={<WePickHub />} />
-            <Route path="/we-pick/standings/:week" element={<WePickHub />} />
-            {/* My Stats — same page component, third tab (see WePickHub.js's
-                own activeTab handling). */}
-            <Route path="/we-pick/stats" element={<WePickHub />} />
-            {/* Friends — fourth tab: friend code, add-by-code, requests,
-                friend list (see WePickHub.js's own activeTab handling). */}
-            <Route path="/we-pick/friends" element={<WePickHub />} />
+            {/* We-Pick lives in We-Draft Live now (/live/we-pick — see
+                utils/wePickRoutes.js); the old URLs redirect there, tab and
+                standings week included. */}
+            <Route path="/we-pick" element={<WePickRedirect />} />
+            <Route path="/we-pick/standings" element={<WePickRedirect tab="standings" />} />
+            <Route path="/we-pick/standings/:week" element={<WePickRedirect tab="standings" />} />
+            <Route path="/we-pick/stats" element={<WePickRedirect tab="stats" />} />
+            <Route path="/we-pick/friends" element={<WePickRedirect tab="friends" />} />
             <Route path="/terms" element={<TermsOfService />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/guidelines" element={<CommunityGuidelines />} />

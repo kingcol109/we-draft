@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { topProspects as fetchTopProspectsSnapshot } from "../utils/communityGrades";
 import PlayersMentionedList from "./PlayersMentionedList";
 // Breakout/On Fire trend icons — same custom images PlayerProfile.js's
 // version of this widget uses now instead of the ⚡/🔥 emoji glyphs (Up
@@ -193,6 +194,10 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
 
     const fetchTopProspects = async () => {
       try {
+        // Precomputed top list (utils/communityGrades.js) — 1 read instead
+        // of the class + every player's evaluations.
+        const top = await fetchTopProspectsSnapshot(["2027"]);
+        if (top) { setTopProspects(top.slice(0, 10)); return; }
         const q = query(collection(db, "players"), where("Eligible", "==", "2027"));
         const snap = await getDocs(q);
         const list = await Promise.all(

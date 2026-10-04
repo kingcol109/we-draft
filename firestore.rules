@@ -294,6 +294,12 @@ service cloud.firestore {
     match /liveMeta/{doc} {
       allow read, write: if isAdmin();
     }
+    // Full CFBD team rosters for the CFB team page's Roster tab — written
+    // by scripts/syncCfbdRosters.js (admin SDK). Public read-only.
+    match /cfbRosters/{teamId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Page-view counters — written server-side only, by
     // scripts/syncGoogleAnalytics.js (via the admin SDK, which isn't
     // subject to these rules at all); read by AdminPanel.js's Analytics tab.

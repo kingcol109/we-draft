@@ -84,6 +84,12 @@ const CONFIG = {
   SEASON_SYNC_MS: 12 * 3600 * 1000,
   // Feed entries kept on each game doc (liveGames/{id}.feedPlays).
   MAX_GAME_FEED: 40,
+  // The internal clock: a week stays the slate after its games, in REVIEW
+  // (finals, big plays, top performances to catch up on), until Monday
+  // 6:00 AM Eastern — then the next week takes over (its preview). CFBD
+  // weeks end Monday 2:59 AM local time, so that's 3 hours 1 minute after
+  // a week ends (in local time, so it holds across daylight saving).
+  REVIEW_MS: 3 * 3600 * 1000 + 60 * 1000,
 };
 
 const metaRef = (db) => db.collection("liveMeta").doc("ingest");
@@ -121,13 +127,18 @@ function tierFromInfo(info, now) {
   };
 }
 
+// The slate week. Each calendar week is shifted by REVIEW_MS, so a week
+// keeps the slate through its review window and the next one starts on
+// Monday morning. nextWeekAt: when this one hands over.
 function currentWeek(calendar, now) {
+  const t = now - CONFIG.REVIEW_MS;
   const weeks = (calendar || []).map((w) => ({ ...w, start: Date.parse(w.startDate), end: Date.parse(w.endDate) }));
-  const cur = weeks.find((w) => w.start <= now && now <= w.end);
-  if (cur) return cur;
+  const withFlip = (w) => ({ ...w, nextWeekAt: w.end + CONFIG.REVIEW_MS });
+  const cur = weeks.find((w) => w.start <= t && t <= w.end);
+  if (cur) return withFlip(cur);
   // Between calendar weeks: use the next one if it starts within 3 days.
-  const next = weeks.filter((w) => w.start > now).sort((a, b) => a.start - b.start)[0];
-  return next && next.start - now < 3 * 86400e3 ? next : null;
+  const next = weeks.filter((w) => w.start > t).sort((a, b) => a.start - b.start)[0];
+  return next && next.start - t < 3 * 86400e3 ? withFlip(next) : null;
 }
 
 const isFbsGame = (g) => g.homeClassification === "fbs" || g.awayClassification === "fbs";
@@ -162,7 +173,8 @@ const clockSecs = (c) => { const m = /^(\d+):(\d+)/.exec(c || ""); return m ? Nu
 const progressOf = (g) => (g?.period ? g.period * 10000 + (900 - Math.min(900, clockSecs(g.clock) ?? 900)) : null);
 const totalPoints = (g) => (g?.home?.points ?? 0) + (g?.away?.points ?? 0);
 
-function withoutStaleState(prev, next) {
+// source: "plays" (/live/plays) or "scoreboard" — see the score-drop rule below.
+function withoutStaleState(prev, next, { source } = {}) {
   if (!prev) return next;
   const out = { ...next };
   const dropLive = () => {
@@ -184,7 +196,19 @@ function withoutStaleState(prev, next) {
   // and the game freezes. Points going up always means newer.
   const prevAtZero = clockSecs(prev.clock) === 0 && prev.status !== "final";
   const behindClock = p0 != null && p1 != null && p1 < p0 && !prevAtZero && !aheadScore;
-  if (behindClock || behindScore) dropLive();
+  // Points coming OFF the board — a touchdown called back on review, a
+  // score wiped out by a flag. Trusted when the clock isn't behind: from the
+  // play-by-play (what CFBD corrects first) at the same point in the game or
+  // later, from the scoreboard only once the clock has moved on. Anything
+  // else is a stale snapshot. (Before this, a lower score was always read as
+  // stale, so a called-back TD stayed up until more points were scored.)
+  const scoreTakenOff = behindScore && p0 != null && p1 != null && (source === "plays" ? p1 >= p0 : p1 > p0);
+  // ...and a stale snapshot that still has those points mustn't put them
+  // back: the same score from no later in the game than where it came off.
+  const r = prev.scoreRevoked;
+  const revived = hasScore && r && out.home.points === r.home && out.away.points === r.away && (p1 == null || p1 <= r.at);
+  if (behindClock || (behindScore && !scoreTakenOff) || revived) { dropLive(); return out; }
+  if (scoreTakenOff) out.scoreRevoked = { home: prev.home.points, away: prev.away.points, at: p0 };
   return out;
 }
 
@@ -233,13 +257,23 @@ async function enrich(db, games) {
   }
   const schools = await schoolsByTeamId(db);
   // We-Draft's own Top 25 for each game's week (rankings/{Week}; Week 0
-  // shares Week 1's poll — same rule as src/utils/rankings.js). A frozen
-  // schedule26 HomeRank/AwayRank (set when an admin finalizes) wins.
+  // shares Week 1's poll — same rule as src/utils/rankings.js). A week whose
+  // poll isn't published yet (next week's games) uses the most recent poll
+  // before it. A frozen schedule26 HomeRank/AwayRank (set when an admin
+  // finalizes) wins.
   const rankMaps = new Map();
-  for (const w of new Set([...sched.values()].map((s) => s.Week).filter(Boolean))) {
-    const key = w.trim().toLowerCase() === "week 0" ? "Week 1" : w.trim();
-    const top = (await db.collection("rankings").doc(key).get()).data()?.Top25 || [];
-    rankMaps.set(w, new Map(top.filter((e) => e?.School && e?.Rank).map((e) => [e.School, e.Rank])));
+  const weeksNeeded = [...new Set([...sched.values()].map((s) => s.Week).filter(Boolean))];
+  if (weeksNeeded.length) {
+    const wkNum = (w) => { const m = /(\d+)/.exec(w || ""); return m ? Number(m[1]) : -1; };
+    const polls = (await db.collection("rankings").get()).docs
+      .map((d) => ({ n: wkNum(d.id), map: new Map((d.data().Top25 || []).filter((e) => e?.School && e?.Rank).map((e) => [e.School, e.Rank])) }))
+      .filter((p) => p.map.size)
+      .sort((a, b) => a.n - b.n);
+    for (const w of weeksNeeded) {
+      const n = Math.max(1, wkNum(w)); // Week 0 → Week 1's poll
+      const poll = polls.find((p) => p.n === n) || [...polls].reverse().find((p) => p.n < n) || polls[polls.length - 1];
+      rankMaps.set(w, poll ? poll.map : new Map());
+    }
   }
   const rankOf = (s, side) => (side === "home" ? s?.HomeRank : s?.AwayRank) ?? rankMaps.get(s?.Week)?.get(side === "home" ? s?.Home : s?.Away) ?? null;
   const team = (t, rank) => {
@@ -313,10 +347,18 @@ async function storePlays(db, game, plays, playStats, { complete, rosterBudget }
   // each game's whole history, not just what's still in the slate's
   // rolling cross-game list.
   const gid = S.gameKey(game.providerGameId);
+  // Live box score (team + player stat lines from the play-by-play) — one
+  // small doc the Stats tab and player pages read instead of every play.
+  const { computeGameStats, gameLeaders } = await import("../../src/utils/liveStats.mjs");
+  const stats = computeGameStats(ordered);
+  await S.saveLiveStats(db, game.providerGameId, stats);
   const feedPlays = S.dedupeFeed(ordered.filter(S.feedWorthy).map((p) => S.slateBigPlay(gid, game, p)).reverse()).slice(0, CONFIG.MAX_GAME_FEED);
   await S.setGameFields(db, game.providerGameId, {
     playCount: ordered.length,
     scoringPlays,
+    // This game's best stat lines — merged across the slate into
+    // liveSlate/performances (Top Performances) by writeSlate.
+    statLeaders: JSON.parse(JSON.stringify(gameLeaders(stats))),
     feedPlays,
     ...(last ? { lastPlayId: last.id, ...(game.lastPlayText ? {} : { lastPlayText: last.text }) } : {}),
   });
@@ -454,7 +496,7 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
         const rows = await cfbd.scoreboard({ classification: "fbs" });
         const sb = rows.map(P.gameFromScoreboard)
           .filter((g) => games.has(S.gameKey(g.providerGameId)))
-          .map((g) => withoutStaleState(games.get(S.gameKey(g.providerGameId)), g))
+          .map((g) => withoutStaleState(games.get(S.gameKey(g.providerGameId)), g, { source: "scoreboard" }))
           .map((g) => JSON.parse(JSON.stringify(g)));
         const res = await S.upsertGames(db, sb, games);
         res.changed.forEach((id) => changed.add(id));
@@ -484,7 +526,7 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
           newBig.push(...res.big);
           dropKeys.push(...(res.dropKeys || []));
           const state = liveStateFromPlays(live, res.last);
-          const fresh = withoutStaleState(games.get(id), state);
+          const fresh = withoutStaleState(games.get(id), state, { source: "plays" });
           if (fresh.period != null || fresh.status === "final") {
             const up = await S.upsertGames(db, [JSON.parse(JSON.stringify(fresh))], games);
             up.changed.forEach((x) => changed.add(x));
@@ -544,7 +586,10 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
         res.log.forEach((l) => log(l));
       });
     }
-    if (now - (meta.lastSeasonSyncAt || 0) >= CONFIG.SEASON_SYNC_MS && !outOfTime()) {
+    // Also runs as soon as the week changes, so team records (built from the
+    // same rows) never miss last week's results.
+    const weekKey = S.weekKey(wk);
+    if ((now - (meta.lastSeasonSyncAt || 0) >= CONFIG.SEASON_SYNC_MS || meta.recordsWeek !== weekKey) && !outOfTime()) {
       await step("season sync", async () => {
         const rows = [
           ...(await cfbd.games({ year: CONFIG.SEASON, seasonType: "regular" })),
@@ -553,14 +598,18 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
         const res = await syncSchedule(db, rows.map((g) => P.gameFromCfbdGame(g, now)));
         summary.seasonSync = { kickoffs: res.kickoffs, finals: res.finals, corrections: res.corrections };
         res.log.forEach((l) => log(l));
+        await S.saveRecordsBase(db, wk, rows);
         metaUpdate.lastSeasonSyncAt = now;
+        metaUpdate.recordsWeek = weekKey;
       });
     }
 
     // 6. Slate doc — only rewritten when something visible changed.
     summary.changedGames = changed.size;
     summary.newBigPlays = newBig.length;
-    if (changed.size || newBig.length || dropKeys.length || !sameWeek || summary.postgame.length) {
+    // (Also right after the season sync rebuilt team records, so the slate
+    // picks them up even when no game changed — e.g. a week in review.)
+    if (changed.size || newBig.length || dropKeys.length || !sameWeek || summary.postgame.length || slate.nextWeekAt !== wk.nextWeekAt || metaUpdate.recordsWeek) {
       const fresh = summary.postgame.length || summary.liveFetches ? await loadWeekGames(db, wk) : games;
       // Rosters for live games' last-play lines (full names) — cached
       // copies only, never a new CFBD call here.
@@ -568,7 +617,7 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
       await Promise.all([...fresh.entries()].filter(([, g]) => g.status === "in_progress" && g.lastPlayText).map(async ([id, g]) => {
         rostersById.set(id, await rostersForGame(db, g, { left: 0 }).catch(() => undefined));
       }));
-      await S.writeSlate(db, { season: wk.season, week: wk.week, seasonType: wk.seasonType, games: fresh, newBigPlays: newBig, removeKeys: dropKeys, rostersById });
+      await S.writeSlate(db, { season: wk.season, week: wk.week, seasonType: wk.seasonType, nextWeekAt: wk.nextWeekAt, games: fresh, newBigPlays: newBig, removeKeys: dropKeys, rostersById });
     }
 
     const calls = getCallCount() - callsAtStart;
@@ -602,4 +651,4 @@ async function ingestOneGame(db, providerGameId) {
   return ingestFinalGame(db, game, game.status === "final" ? (level === "live" ? "live" : "free") : level);
 }
 
-module.exports = { CONFIG, runTick, ingestOneGame, withoutStaleState, enrich, storePlays };
+module.exports = { CONFIG, currentWeek, runTick, ingestOneGame, withoutStaleState, enrich, storePlays };

@@ -119,6 +119,7 @@ async function run() {
               providerGameId: box.id, season: SEASON, week, seasonType: "regular",
               startDate: meta.startDate || null, team: t.team,
               opponent: home ? meta.awayTeam || null : meta.homeTeam || null,
+              opponentLogo: (home ? meta.awayId : meta.homeId) != null ? `https://cdn.collegefootballdata.com/logos/500/${home ? meta.awayId : meta.homeId}.png` : null,
               homeAway: home ? "home" : "away",
               teamPoints: t.points ?? null,
               opponentPoints: home ? meta.awayPoints ?? null : meta.homePoints ?? null,

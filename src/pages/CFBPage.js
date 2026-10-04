@@ -283,8 +283,8 @@ export default function CFBPage() {
            than alongside it. Slower/calmer than an early GamePage.js pass
            at this same fire-toned glow, which read as too frantic there. */
         @keyframes wdGotwRowGlow {
-          0%, 100% { box-shadow: inset 0 0 0 2px rgba(255,69,0,0.35); }
-          50% { box-shadow: inset 0 0 0 2px rgba(255,69,0,0.7); }
+          0%, 100% { box-shadow: inset 0 0 0 2px rgba(124,58,237,0.35); }
+          50% { box-shadow: inset 0 0 0 2px rgba(124,58,237,0.7); }
         }
         .wd-schedule-row-gotw {
           animation: wdGotwRowGlow 3.4s ease-in-out infinite;
@@ -616,20 +616,20 @@ export default function CFBPage() {
                           {g.GameOfWeek ? (
                             <span style={{
                               display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
-                              background: "linear-gradient(90deg, #ff4500, #ffb347)", color: "#3a0f00",
+                              background: "#7c3aed", color: "#fff",
                               fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
                               textTransform: "uppercase", letterSpacing: "0.05em",
                             }}>
-                              🔥 Game of the Week
+                              GOTW
                             </span>
                           ) : g.Featured && (
                             <span style={{
                               display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
-                              background: "linear-gradient(90deg, #f6a21d, #ffd35c)", color: "#3a2900",
+                              background: "#f6a21d", color: "#fff",
                               fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
                               textTransform: "uppercase", letterSpacing: "0.05em",
                             }}>
-                              ⭐ Featured
+                              Featured
                             </span>
                           )}
                           {s.live || s.liveFinal ? (

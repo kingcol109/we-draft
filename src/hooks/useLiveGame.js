@@ -55,3 +55,23 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
 
   return { game, plays, box, ready };
 }
+
+// The ingester's live stats doc (liveGames/{id}/box/live: { teams, players },
+// computed from the play-by-play — see src/utils/liveStats.mjs). One doc,
+// so it costs one read per update instead of the whole play list.
+// { stats: doc data or null, ready } — ready && !stats = an older game
+// stored before the doc existed.
+export function useLiveStats(liveGameId) {
+  const [state, setState] = useState({ stats: null, ready: false });
+  const id = liveGameId != null ? String(liveGameId) : null;
+  useEffect(() => {
+    setState({ stats: null, ready: false });
+    if (!id) return undefined;
+    return onSnapshot(
+      doc(db, "liveGames", id, "box", "live"),
+      (s) => setState({ stats: s.exists() ? s.data() : null, ready: true }),
+      () => setState({ stats: null, ready: true }),
+    );
+  }, [id]);
+  return state;
+}

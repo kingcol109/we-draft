@@ -38,7 +38,21 @@
 //   _ads                    Homage margin ads (PlayerProfile.js,
 //                           MarginAds.js).
 //   _draftTicker            Navbar ticker's draft-pick lines.
+//   _grades                 Every player's community grade + traits: rows
+//                           { [playerId]: [avg, count, "s1|s2|s3",
+//                           "w1|w2|w3"] } (graded players only; top 3
+//                           traits each, "|"-joined since Firestore has no
+//                           arrays inside arrays) — read through
+//                           utils/communityGrades.js instead of one
+//                           evaluations query per player.
+//   _top                    Top TOP_PER_CLASS graded Live prospects per
+//                           active class, best first: years { [Eligible]:
+//                           [{ i, F, L, P, S, E, sl, g }] } — the home page
+//                           boards and the margin sidebar's leaderboard.
 //   _meta                   Summary for the admin panel.
+// _grades and _top are also rebuilt on their own, more often, by
+// scripts/buildGradeSnapshots.mjs (buildGradeSnapshotDocs below) so
+// community grades don't wait for the weekly full build.
 import {
   COMP_SNAPSHOT_VERSION, encodeCompSnapshotRows, draftedPlayersAsHistorical,
   communityTraits, isGraded, positionPercentileTables,
@@ -70,6 +84,44 @@ export function rankByGrade(list, gradeOf = (x) => x.avgGrade) {
     if (!aV && bV) return 1;
     return 0;
   });
+}
+
+const TOP_PER_CLASS = 25;
+// Live values the home page boards have always treated as hidden.
+const HIDDEN_LIVE = [false, null, 0, "false", "no"];
+
+/**
+ * The two grade docs (_grades, _top) on their own — shared by the full
+ * build below and scripts/buildGradeSnapshots.mjs.
+ * @param {object} input
+ * @param {object[]} input.players          every players doc, { id, ...data }
+ * @param {object}   input.evalsByPlayerId  { [playerId]: evaluation data[] }
+ * @param {string[]} input.activeYears      e.g. ["2027","2028","2029"]
+ */
+export function buildGradeSnapshotDocs({ players, evalsByPlayerId, activeYears }) {
+  const version = COMP_SNAPSHOT_VERSION;
+  const rows = {};
+  const avgById = {};
+  players.forEach((p) => {
+    const evals = evalsByPlayerId[p.id] || [];
+    const avg = averageGrade(evals);
+    if (avg == null) return;
+    avgById[p.id] = avg;
+    const { strengths, weaknesses } = communityTraits(evals);
+    rows[p.id] = [Math.round(avg * 1000) / 1000, evals.filter((e) => GRADE_SCALE[e.grade]).length, strengths.slice(0, 3).join("|"), weaknesses.slice(0, 3).join("|")];
+  });
+  const years = {};
+  activeYears.forEach((yr) => {
+    const graded = [...players].sort(byDocId)
+      .filter((p) => String(p.Eligible) === String(yr) && !HIDDEN_LIVE.includes(p.Live) && p.Slug && avgById[p.id] != null);
+    years[yr] = rankByGrade(graded, (p) => avgById[p.id]).slice(0, TOP_PER_CLASS).map((p) => ({
+      i: p.id, F: p.First || "", L: p.Last || "", P: p.Position || "", S: p.School || "", E: String(p.Eligible), sl: p.Slug, g: avgById[p.id],
+    }));
+  });
+  return [
+    { id: "_grades", data: { version, rows } },
+    { id: "_top", data: { version, years } },
+  ];
 }
 
 // Firestore returns documents in ascending document-ID order (byte-wise);
@@ -217,6 +269,8 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
       parts.push(p.Selection ? `PICK ${p.Pick}: ${p.Team} ${p.Selection.toUpperCase()}` : `PICK ${p.Pick}: ${p.Team}`);
     });
   docs.push({ id: "_draftTicker", data: { version, parts } });
+
+  docs.push(...buildGradeSnapshotDocs({ players, evalsByPlayerId, activeYears }));
 
   const gradedComps = Object.values(positionSummary).reduce((a, s) => a + s.graded, 0);
   docs.push({

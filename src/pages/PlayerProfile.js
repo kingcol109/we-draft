@@ -20,6 +20,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { cfbdPlayerFor, setLivePlayerFollow } from "../utils/liveFollowSync";
 import { getSiteSnapshot, fetchAds } from "../utils/siteSnapshots";
 import { STAT_METRICS, readMetric, percentileFromTable } from "../utils/historicalStats";
 import { useAuth } from "../context/AuthContext";
@@ -2972,7 +2973,8 @@ useEffect(() => {
     fetch();
   }, [player, user]);
 
-  // ── Toggle follow: writes/deletes users/{uid}/follows/{playerId}, denormalizing
+  // ── Toggle follow: writes/deletes users/{uid}/follows/{playerId} (and the
+  // matching We-Draft Live follow), denormalizing
   // just enough display fields (name/school/position/eligible year) for MyFeed.js
   // and BoardsMarginSidebars.js to list a user's follows without re-fetching each
   // player doc. Optimistic UI, reverted on write failure. ──
@@ -2997,6 +2999,11 @@ useEffect(() => {
       } else {
         await deleteDoc(ref);
       }
+      // Also follow/unfollow him on We-Draft Live (his linked CFBD player —
+      // utils/liveFollowSync.js); no-op when he has no CFBD link.
+      cfbdPlayerFor(player.id)
+        .then((cp) => cp && setLivePlayerFollow(user.uid, cp, next))
+        .catch(() => {});
     } catch (e) {
       console.error(e);
       setFollowing(!next);
@@ -4584,7 +4591,9 @@ useEffect(() => {
         style={
           isMobile
             ? { padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
-            : { maxWidth: "1600px", margin: "0 auto", padding: "24px 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
+            // Pulled up under the navbar: the gap above the columns was ~64px
+            // (body's navbar padding + the layout's 25px + this padding) — now ~16px.
+            : { maxWidth: "1600px", margin: "-24px auto 0", padding: "0 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
         }
       >
 

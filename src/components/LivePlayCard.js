@@ -90,6 +90,17 @@ export const PLAY_CARD_STYLE = `
 .lpc-win-score span { font-weight: 900; color: rgba(255,255,255,0.5); font-size: 1.4em; }
 .lpc-win-score .lpc-win-over { font-size: clamp(14px, 1.2vw, 18px); color: rgba(255,255,255,0.75); font-weight: 800; }
 @media (prefers-reduced-motion: reduce) { .lpc-win, .lpc-win::after { animation: none; } }
+.lpc-to { display: flex; align-items: center; gap: 12px; margin: 2px 0 10px; padding: 8px 18px; border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--tc) 60%, #2a3753);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 20%, #0c1220), #0c1220 75%);
+  font-weight: 900; font-variant-numeric: tabular-nums; }
+.lpc-to-icon { font-size: 15px; color: color-mix(in srgb, var(--tc) 55%, #fff); }
+.lpc-to-label { font-size: clamp(12px, 0.95vw, 14px); letter-spacing: 0.16em; color: #c9d5e6; }
+.lpc-to-team { display: inline-flex; align-items: center; gap: 7px; font-size: clamp(14px, 1.1vw, 17px); color: #eef2f8; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lpc-to-team img { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
+.lpc-to-clock { margin-left: auto; font-size: clamp(13px, 1vw, 16px); color: #9fb0c8; white-space: nowrap; }
+.lpc-to.lpc-fresh { animation: lpc-arrive 0.6s ease-out; }
+.lpc-to.lpc-focus { outline: 3px solid ${GOLD}; outline-offset: 2px; }
 .lpc-click { cursor: pointer; }
 .lpc-click:hover { border-color: #3a4a6a; }
 .lpc-focus { outline: 3px solid ${GOLD}; outline-offset: 2px; animation: lpc-focus 2.4s ease-out; }
@@ -337,7 +348,25 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
   // Detailed (single-game feed): the play on the left, game situation —
   // clock, quarter, down & distance, and the score after a scoring play —
   // in its own column on the right, readable from across the room.
-  const isBreak = pres.type === "period" || pres.type === "timeout";
+  // A timeout isn't a play: a slim pill in the calling team's color, not a card.
+  if (pres.type === "timeout") {
+    const name = team ? team.school || team.name || team.short : pres.detail;
+    return (
+      <div className={`lpc-to${state}`} style={{ "--tc": team?.color || "#8a6cff" }} title={play.text || undefined}>
+        {justNow && <span className="lpc-justnow-tag">JUST NOW</span>}
+        <span className="lpc-to-icon" aria-hidden="true">⏸</span>
+        <span className="lpc-to-label">TIMEOUT</span>
+        {name && (
+          <span className="lpc-to-team">
+            {team && (team.logoDark || team.logo) && <img src={team.logoDark || team.logo} alt="" />}{name}
+          </span>
+        )}
+        <span className="lpc-to-clock">{play.period > 4 ? periodLabel(play.period) : [periodLabel(play.period), play.clock].filter(Boolean).join(" ")}</span>
+      </div>
+    );
+  }
+
+  const isBreak = pres.type === "period";
   const down = isBreak ? "" : downLabel(play.down, play.distance);
   return (
     // Raw CFBD text stays reachable as a hover tooltip — no on-screen clutter.

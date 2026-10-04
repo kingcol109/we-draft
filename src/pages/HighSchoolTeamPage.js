@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
@@ -83,16 +84,6 @@ const NEWS_LIMIT = 8;
 
 // Same grade scale/labels/display map TeamPage.js's own Prospects list
 // uses — duplicated here per this codebase's per-file convention.
-const gradeScale = {
-  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
-  "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
-  "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
-};
-const gradeLabels = {
-  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
-};
 const gradeDisplay = (g) => {
   const map = {
     "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
@@ -217,17 +208,9 @@ export default function HighSchoolTeamPage() {
 
         // Community grade per prospect — same average-and-round-to-nearest-
         // label math as TeamPage.js's own Prospects list.
-        const evalSnaps = await Promise.all(
-          activeProspects.map((p) => getDocs(collection(db, "players", p.id, "evaluations")))
-        );
-        activeProspects.forEach((p, i) => {
-          const grades = [];
-          evalSnaps[i].forEach((d) => {
-            const g = d.data().grade;
-            if (g && gradeScale[g]) grades.push(gradeScale[g]);
-          });
-          p.commGrade = grades.length > 0 ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)] : null;
-        });
+        // One snapshot read (utils/communityGrades.js), not a query per player.
+        const avgs = await averageGradesFor(activeProspects.map((p) => p.id));
+        activeProspects.forEach((p) => { p.commGrade = gradeLabel(avgs[p.id]); });
         if (cancelled) return;
         setProspects(activeProspects);
 

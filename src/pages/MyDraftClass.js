@@ -3,6 +3,7 @@ import {
   collection, getDocs, getDoc, doc, setDoc, serverTimestamp, query, where, limit,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
@@ -112,28 +113,7 @@ export default function MyDraftClass() {
               if (!pSnap.empty) {
                 const pd = pSnap.docs[0];
                 player = { id: pd.id, ...pd.data() };
-                try {
-                  const evalsSnap = await getDocs(collection(db, "players", pd.id, "evaluations"));
-                  const grades = [];
-                  const gradeScale = {
-                    "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
-                    "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
-                    "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
-                  };
-                  const gradeLabels = {
-                    1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-                    4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-                    7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
-                  };
-                  evalsSnap.forEach((d) => {
-                    const g = d.data().grade;
-                    if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                  });
-                  if (grades.length > 0) {
-                    const avg = Math.round(grades.reduce((a, b) => a + b, 0) / grades.length);
-                    commGrade = gradeLabels[avg];
-                  }
-                } catch {}
+                commGrade = gradeLabel((await averageGradesFor([pd.id]))[pd.id]);
               }
             } catch {}
             return { ...pick, player, commGrade };

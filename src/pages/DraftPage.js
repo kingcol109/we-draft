@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { collection, onSnapshot, getDoc, doc, getDocs, query, where, limit } from "firebase/firestore";
 import { db } from "../firebase";
+import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
@@ -27,12 +28,6 @@ const gradeDisplay = (g) => {
     "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
   };
   return map[g] || null;
-};
-
-const gradeLabels = {
-  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
 };
 
 const gradeScale = {
@@ -94,18 +89,7 @@ async function enrichPick(pick) {
       if (!snap.empty) {
         const pd = snap.docs[0];
         player = { id: pd.id, ...pd.data() };
-        try {
-          const evalsSnap = await getDocs(collection(db, "players", pd.id, "evaluations"));
-          const grades = [];
-          evalsSnap.forEach((d) => {
-            const g = d.data().grade;
-            if (g && gradeScale[g]) grades.push(gradeScale[g]);
-          });
-          if (grades.length > 0) {
-            const avg = Math.round(grades.reduce((a, b) => a + b, 0) / grades.length);
-            commGrade = gradeLabels[avg];
-          }
-        } catch {}
+        commGrade = gradeLabel((await averageGradesFor([pd.id]))[pd.id]);
       }
     } catch {}
   }

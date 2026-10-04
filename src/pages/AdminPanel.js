@@ -11,6 +11,7 @@ import { CSS } from "@dnd-kit/utilities";
 import ArticlesManager from "../components/ArticlesManager";
 import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
+import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
@@ -190,6 +191,10 @@ const STATE_ABBR = {
   "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
   "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
 };
+
+// "TX" → "Texas" — CFB Universe adds (CfbUniverseSearch.js) store a
+// player's home state the way the Player Data form does, by full name.
+const STATE_NAME_BY_ABBR = Object.fromEntries(Object.entries(STATE_ABBR).map(([name, abbr]) => [abbr, name]));
 
 // High school team page slugs (/hs/buford-ga) — deterministic from Name +
 // State rather than a stored field, so a rename (see
@@ -1262,6 +1267,7 @@ function PlayerDataSection() {
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
         {[
           { key: "players", label: "Players" },
+          { key: "universe", label: "CFB Universe" },
           { key: "recruits", label: "Recruits" },
           { key: "historical", label: "Historical" },
           { key: "comps", label: "Comps" },
@@ -1283,7 +1289,14 @@ function PlayerDataSection() {
           </button>
         ))}
       </div>
-      {playerDataTab === "recruits" ? (
+      {playerDataTab === "universe" ? (
+        <CfbUniverseSearch
+          allPlayers={allPlayers}
+          generateSlug={generateSlug}
+          stateNames={STATE_NAME_BY_ABBR}
+          onAdded={(newPlayer) => setAllPlayers((prev) => [...prev, newPlayer].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")))}
+        />
+      ) : playerDataTab === "recruits" ? (
         <RecruitsSection />
       ) : playerDataTab === "historical" ? (
         <HistoricalSection />

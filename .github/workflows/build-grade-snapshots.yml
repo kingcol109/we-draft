@@ -1,0 +1,37 @@
+name: Build Grade Snapshots
+
+# Every 3 hours. Rebuilds compSnapshots/_grades (every player's community
+# grade) and compSnapshots/_top (top prospects per class) — what the home
+# page boards, Community Board, team pages and sidebars read instead of one
+# evaluations query per player. ~3k reads a run (see
+# scripts/buildGradeSnapshots.mjs). The weekly build-site-snapshots.yml
+# rebuilds these too, along with everything else. Also runnable on demand
+# via workflow_dispatch.
+#
+# Needs repo secret GOOGLE_SERVICE_ACCOUNT_KEY.
+on:
+  schedule:
+    - cron: "15 */3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      # Node 22, same as build-site-snapshots.yml: the script imports the
+      # app's own ESM builder directly.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build grade snapshots
+        run: node scripts/buildGradeSnapshots.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
