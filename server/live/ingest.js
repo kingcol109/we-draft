@@ -175,8 +175,15 @@ function withoutStaleState(prev, next) {
   if (out.status === "final") return out;
   const p0 = progressOf(prev);
   const p1 = progressOf(out);
-  const behindClock = p0 != null && p1 != null && p1 < p0;
-  const behindScore = out.home?.points != null && out.away?.points != null && totalPoints(out) < totalPoints(prev);
+  const hasScore = out.home?.points != null && out.away?.points != null;
+  const behindScore = hasScore && totalPoints(out) < totalPoints(prev);
+  const aheadScore = hasScore && totalPoints(out) > totalPoints(prev);
+  // A clock at 0:00 that never turned into a final (CFBD sometimes inserts
+  // an early "End of 4th quarter" play mid-quarter) is not trusted as a
+  // high-water mark — otherwise every real update after it looks "behind"
+  // and the game freezes. Points going up always means newer.
+  const prevAtZero = clockSecs(prev.clock) === 0 && prev.status !== "final";
+  const behindClock = p0 != null && p1 != null && p1 < p0 && !prevAtZero && !aheadScore;
   if (behindClock || behindScore) dropLive();
   return out;
 }

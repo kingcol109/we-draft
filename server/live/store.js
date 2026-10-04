@@ -372,11 +372,22 @@ async function writeSlate(db, { season, week, seasonType, games, newBigPlays = [
 // rule as the frontend's big-play styling (src/components/LivePlayCard.js
 // HYPE_YARDS). Nullified (NO PLAY) and admin-hidden plays never qualify.
 const FEED_BIG_YARDS = 20;
+// `scoring` on a live play is inferred from the score changing since the
+// play before it — and CFBD lists live plays out of order often enough that
+// the change lands on a timeout, an end-of-quarter marker or an incomplete
+// pass. Only a play that can actually score counts: a touchdown, a field
+// goal, a safety (PATs/two-point tries ride along with their TD).
+const SCORE_TYPES = new Set(["field_goal", "safety"]);
+function isRealScore(p) {
+  const pr = p.presentation || {};
+  if (!p.scoring || pr.type === "conversion") return false;
+  return !!pr.touchdown || SCORE_TYPES.has(pr.type) || /TOUCHDOWN|SAFETY/i.test(p.text || "");
+}
 function feedKinds(p) {
   const pr = p.presentation || {};
   if (p.hidden || pr.nullified) return [];
   const kinds = [];
-  if (p.scoring && pr.type !== "conversion") kinds.push("score");
+  if (isRealScore(p)) kinds.push("score");
   if (pr.turnover) kinds.push("turnover");
   if ((pr.type === "pass" || pr.type === "rush") && pr.yards >= FEED_BIG_YARDS) kinds.push("big");
   // Turnover on downs makes the Feed only when it matters most: the 4th

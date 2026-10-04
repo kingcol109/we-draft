@@ -271,7 +271,10 @@ export function feedItemFromPlay(gameId, g, p) {
   const creditSide = p.presentation?.creditSide || p.offense;
   const creditTeam = side(creditSide);
   const kinds = [];
-  if (p.presentation?.touchdown || p.scoring) kinds.push("score");
+  // Same rule as server/live/store.js isRealScore: a timeout or quarter
+  // marker that happens to carry a score change is not a score.
+  if (p.scoring && p.presentation?.type !== "conversion"
+    && (p.presentation?.touchdown || ["field_goal", "safety"].includes(p.presentation?.type) || /TOUCHDOWN|SAFETY/i.test(p.text || ""))) kinds.push("score");
   if (p.presentation?.turnover) kinds.push("turnover");
   return {
     key: `${gameId}:${p.id}`,

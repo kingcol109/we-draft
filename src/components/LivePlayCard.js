@@ -291,7 +291,8 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
           {pres.detail}
           {pres.firstDown && <span className="lpc-chip">1ST DOWN</span>}
           {pres.upset && <span className="lpc-chip warn">UPSET</span>}
-          <PatChip pat={pres.pat} short={!detailed} />
+          {/* PAT / two-point result: game feed only — the side Feed keeps to the score itself */}
+          {detailed && <PatChip pat={pres.pat} short={false} />}
           {pres.penaltyText && <span className="lpc-chip warn">FLAG · {pres.penaltyText}</span>}
         </div>
       )}

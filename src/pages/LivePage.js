@@ -237,8 +237,14 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-compact .wdl-main.compact .wdl-rail { order: 0; max-height: none; overflow: visible; border-bottom: 0; padding: 0; position: static; }
 .wdl-back { background: #111a2b; color: #eef2f8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 14px; font-weight: 800; font-size: 14px; cursor: pointer; margin-bottom: 12px; font-family: inherit; }
 .wdl-solo { max-width: 900px; margin: 0 auto; }
-@media (min-width: 760px) {
-  .wdl-compact .wdl-feedcols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
+.wdl-rotate { display: none; }
+/* Sideways: opening a game asks to turn upright (the game view is built
+   for portrait) — tries to lock portrait where the browser allows it,
+   else this hint shows. */
+@media (orientation: landscape) {
+  .wdl-compact .wdl-rotate { display: flex; align-items: center; gap: 8px; background: #111a2b; border: 1px solid #2a3753; border-radius: 10px;
+    padding: 7px 12px; margin-bottom: 10px; font-size: 13px; font-weight: 800; color: #9fb0c8; }
+  .wdl-compact .wdl-rotate b { font-size: 18px; color: ${GOLD}; }
 }
 /* Tablets: a bit more room than a phone. */
 @media (min-width: 701px) {
@@ -735,6 +741,15 @@ function FeedCustomize({ prefs, onChange, onClose, signedIn, rankedCount, teamCo
 // Phones (either way up) and tablets: no side rail. /live opens on the Feed
 // — scores on top, the Feed below — and picking a game shows just that game,
 // scoreboard on top and its plays underneath.
+// Ask for portrait when a game opens. Only some browsers allow it (mostly
+// Android, often only in full screen); everywhere else it quietly does
+// nothing and the rotate hint covers it.
+function tryPortrait() {
+  try { const p = window.screen?.orientation?.lock?.("portrait"); if (p?.catch) p.catch(() => {}); } catch { /* not supported */ }
+}
+function unlockOrientation() {
+  try { window.screen?.orientation?.unlock?.(); } catch { /* not supported */ }
+}
 const COMPACT_QUERY = "(max-width: 1149px), (max-height: 540px), (pointer: coarse) and (max-width: 1366px)";
 function useCompact() {
   const get = () => typeof window !== "undefined" && !!window.matchMedia?.(COMPACT_QUERY).matches;
@@ -991,6 +1006,7 @@ export default function LivePage() {
   const selectFeedPlay = (b) => {
     setSelectedFeedKey(b.key);
     setParams({ view: "feed", game: b.gameId });
+    if (compact) tryPortrait();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -1013,7 +1029,7 @@ export default function LivePage() {
         <div className="wdl-h" style={{ margin: 0 }}>Feed <span className="wdl-railsub">{sourceSummary}</span></div>
         <button className="wdl-iconbtn" onClick={() => setView("customize")}>⚙ Customize</button>
       </div>
-      {followsNothing && (
+      {followsNothing && !compact && (
         <div className="wdl-feed-nudge">Showing the whole slate. <button onClick={() => setView("customize")}>Follow teams and players</button> to make this your Feed.</div>
       )}
       {myFeed.length
@@ -1043,7 +1059,8 @@ export default function LivePage() {
   else if (view === "game" && gameParam) body = <GameView gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} />;
   else if (compact && (view === "game" || onFeed) && gameParam) body = (
     <div className="wdl-solo">
-      <button className="wdl-back" onClick={() => { setParams({ view: "feed" }); window.scrollTo(0, 0); }}>← Feed</button>
+      <button className="wdl-back" onClick={() => { unlockOrientation(); setParams({ view: "feed" }); window.scrollTo(0, 0); }}>← Feed</button>
+      <div className="wdl-rotate"><b>↻</b> Turn your device upright for the full game view</div>
       <GameView key={gameParam} gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} />
     </div>
   );
@@ -1121,7 +1138,7 @@ export default function LivePage() {
       <AuthModal />
       {slate && view !== "all" && (
         <ScoreStrip games={stripGames} current={onFeed && !compact ? feedGameId : gameParam}
-          onPick={(id) => { if (onFeed) setParams({ view: "feed", game: id }); else openGame(id); if (compact) window.scrollTo(0, 0); }} />
+          onPick={(id) => { if (onFeed) setParams({ view: "feed", game: id }); else openGame(id); if (compact) { tryPortrait(); window.scrollTo(0, 0); } }} />
       )}
       <main className={`wdl-main${split ? " split" : ""}${onFeed ? " feed" : ""}${compact ? " compact" : ""}`}>
         <section>{body}</section>
