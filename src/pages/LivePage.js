@@ -238,6 +238,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-back { background: #111a2b; color: #eef2f8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 14px; font-weight: 800; font-size: 14px; cursor: pointer; margin-bottom: 12px; font-family: inherit; }
 .wdl-solo { max-width: 900px; margin: 0 auto; }
 .wdl-rotate { display: none; }
+.wdl-fs { border-color: #3a4a68; color: #eef2f8; }
 /* Sideways: opening a game asks to turn upright (the game view is built
    for portrait) — tries to lock portrait where the browser allows it,
    else this hint shows. */
@@ -744,12 +745,36 @@ function FeedCustomize({ prefs, onChange, onClose, signedIn, rankedCount, teamCo
 // Ask for portrait when a game opens. Only some browsers allow it (mostly
 // Android, often only in full screen); everywhere else it quietly does
 // nothing and the rotate hint covers it.
+// Full screen (hides the browser bars) — standard API with the WebKit
+// prefix as a fallback. iPhone Safari offers neither for a page, so the
+// button only shows where it works (Android, iPad, desktop browsers).
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+const fsEnabled = () => typeof document !== "undefined" && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+function toggleFullscreen() {
+  try {
+    if (fsElement()) { const r = (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); if (r?.catch) r.catch(() => {}); return; }
+    const el = document.documentElement;
+    const r = (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+    if (r?.catch) r.catch(() => {});
+  } catch { /* not allowed here */ }
+}
+function useFullscreen() {
+  const [on, setOn] = useState(() => typeof document !== "undefined" && !!fsElement());
+  useEffect(() => {
+    const sync = () => setOn(!!fsElement());
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
+    return () => { document.removeEventListener("fullscreenchange", sync); document.removeEventListener("webkitfullscreenchange", sync); };
+  }, []);
+  return on;
+}
 function tryPortrait() {
   try { const p = window.screen?.orientation?.lock?.("portrait"); if (p?.catch) p.catch(() => {}); } catch { /* not supported */ }
 }
 function unlockOrientation() {
   try { window.screen?.orientation?.unlock?.(); } catch { /* not supported */ }
 }
+const LIVE_URL = "https://we-draft.com/live";
 const COMPACT_QUERY = "(max-width: 1149px), (max-height: 540px), (pointer: coarse) and (max-width: 1366px)";
 function useCompact() {
   const get = () => typeof window !== "undefined" && !!window.matchMedia?.(COMPACT_QUERY).matches;
@@ -768,6 +793,8 @@ function useCompact() {
 export default function LivePage() {
   const [params, setParams] = useSearchParams();
   const compact = useCompact();
+  const canFullscreen = fsEnabled();
+  const isFullscreen = useFullscreen();
   // My Teams / My Players live inside Customize now — old links land there.
   const rawView = params.get("view");
   const view = rawView === "teams" || rawView === "players" ? "customize" : rawView === "big" ? "feed" : rawView || (compact ? "feed" : "all");
@@ -1113,11 +1140,68 @@ export default function LivePage() {
 
   const split = !compact && (view === "all" || view === "game" || onFeed);
 
+  // ── SEO ── one canonical /live page (views and picked games are just
+  // state on it). The title names the open game when there is one; the
+  // structured data lists the slate as SportsEvents.
+  const seo = (() => {
+    const openId = gameParam || null;
+    const og = openId ? games.find((g) => g.id === openId) : null;
+    const title = og
+      ? `${og.away.school || og.away.name} vs ${og.home.school || og.home.name} Live Score & Play-by-Play | We-Draft Live`
+      : `College Football Live Scores, Play-by-Play & Big Plays${slate?.week ? ` — Week ${slate.week}` : ""} | We-Draft Live`;
+    const description = og
+      ? `Follow ${og.away.school || og.away.name} vs ${og.home.school || og.home.name} live: score, play-by-play, drive-by-drive updates and game stats on We-Draft Live.`
+      : `Live college football scores, play-by-play, scoring plays, turnovers and big plays across the FBS slate${liveCount ? ` — ${liveCount} game${liveCount === 1 ? "" : "s"} live now` : ""}. Follow your teams and players on We-Draft Live.`;
+    const statusOf = (g) => (g.status === "final" ? "https://schema.org/EventCompleted" : "https://schema.org/EventScheduled");
+    const team = (t) => ({ "@type": "SportsTeam", name: t.school || t.name });
+    const events = games.slice(0, 60).map((g) => ({
+      "@type": "SportsEvent",
+      name: `${g.away.school || g.away.name} vs ${g.home.school || g.home.name}`,
+      sport: "American football",
+      startDate: g.startDate || undefined,
+      eventStatus: statusOf(g),
+      eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+      awayTeam: team(g.away),
+      homeTeam: team(g.home),
+      competitor: [team(g.away), team(g.home)],
+      url: g.slug ? `https://we-draft.com/game/${g.slug}` : `${LIVE_URL}?view=game&game=${g.id}`,
+    }));
+    const jsonLd = {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebPage",
+          "@id": LIVE_URL,
+          url: LIVE_URL,
+          name: "We-Draft Live — College Football Live Scores & Play-by-Play",
+          description,
+          isPartOf: { "@type": "WebSite", name: "We-Draft", url: "https://we-draft.com/" },
+          about: { "@type": "Thing", name: "College football" },
+        },
+        ...(events.length ? [{ "@type": "ItemList", name: slate?.week ? `Week ${slate.week} college football games` : "College football games", itemListElement: events.map((e, i) => ({ "@type": "ListItem", position: i + 1, item: e })) }] : []),
+      ],
+    };
+    return { title, description, jsonLd };
+  })();
+
   return (
     <div className={`wdl${compact ? " wdl-compact" : ""}`}>
       <Helmet>
-        <title>We-Draft Live — College Football Scores, Plays & Big Plays</title>
-        <meta name="description" content="Live college football scores, play-by-play and big plays across the FBS slate — a second screen for Saturdays from We-Draft." />
+        <title>{seo.title}</title>
+        <meta name="description" content={seo.description} />
+        <link rel="canonical" href={LIVE_URL} />
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="We-Draft" />
+        <meta property="og:title" content={seo.title} />
+        <meta property="og:description" content={seo.description} />
+        <meta property="og:url" content={LIVE_URL} />
+        <meta property="og:image" content="https://we-draft.com/logo512.png" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content={seo.title} />
+        <meta name="twitter:description" content={seo.description} />
+        <meta name="twitter:image" content="https://we-draft.com/logo512.png" />
+        <script type="application/ld+json">{JSON.stringify(seo.jsonLd)}</script>
       </Helmet>
       <style>{STYLE}</style>
       <header className="wdl-top">
@@ -1126,6 +1210,11 @@ export default function LivePage() {
           {tabs.map((t) => (
             <button key={t.key} className={`wdl-tab${view === t.key ? " on" : ""}`} onClick={() => (t.key === "game" ? null : setView(t.key))}>{t.label}</button>
           ))}
+          {compact && canFullscreen && (
+            <button className="wdl-tab wdl-fs" onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit full screen" : "Full screen"}>
+              {isFullscreen ? "✕ Exit full screen" : "⛶ Full screen"}
+            </button>
+          )}
         </nav>
         <div className="wdl-meta">
           {updatedAgo != null && <span>Updated {updatedAgo === 0 ? "just now" : `${updatedAgo}m ago`}</span>}

@@ -4,6 +4,10 @@
 // live score + clock and a "Follow Live" button into that game's feed on
 // /live. One listener on liveSlate/current (useLiveSlate) — renders
 // nothing when the team isn't playing right now.
+//
+// variant="button": just a pulsing red "Follow Live" pill — what phones show
+// (next to Show Bio) instead of the scoreboard card. wrap: pad it as its own
+// row, for a player page with no bio to sit beside.
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useLiveSlate } from "../hooks/useLiveSlate";
@@ -11,11 +15,29 @@ import { statusLabel, teamShort } from "../utils/live";
 
 const LIVE_RED = "#d62828";
 
-export default function PlayerLiveCard({ player }) {
+export default function PlayerLiveCard({ player, variant, wrap }) {
   const byId = useLiveSlate(!!player?.School);
   const game = useMemo(() => [...byId.values()].find((g) => g.status === "in_progress"
     && (g.home?.school === player?.School || g.away?.school === player?.School)), [byId, player?.School]);
   if (!game) return null;
+
+  if (variant === "button") {
+    const pill = (
+      <Link to={`/live?view=game&game=${game.id}`} className="plc-btn" title={`${teamShort(game.away)} ${game.away?.points ?? ""} – ${teamShort(game.home)} ${game.home?.points ?? ""} · ${statusLabel(game)}`}>
+        <span className="plc-dot" />Follow Live
+        <style>{`
+          .plc-btn { display: inline-flex; align-items: center; gap: 7px; background: ${LIVE_RED}; color: #fff; font-weight: 900; font-size: 13px;
+            letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 14px; border-radius: 6px; text-decoration: none; white-space: nowrap;
+            box-shadow: 0 0 0 0 rgba(214,40,40,0.6); animation: plc-ring 1.8s ease-out infinite; }
+          .plc-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: plc-pulse 1.2s ease-in-out infinite; }
+          @keyframes plc-ring { 0% { box-shadow: 0 0 0 0 rgba(214,40,40,0.6); } 70% { box-shadow: 0 0 0 10px rgba(214,40,40,0); } 100% { box-shadow: 0 0 0 0 rgba(214,40,40,0); } }
+          @keyframes plc-pulse { 50% { opacity: 0.25; } }
+          @media (prefers-reduced-motion: reduce) { .plc-btn, .plc-dot { animation: none; } }
+        `}</style>
+      </Link>
+    );
+    return wrap ? <div className="bg-white" style={{ padding: "8px 16px" }}>{pill}</div> : pill;
+  }
 
   const row = (side) => {
     const t = game[side] || {};

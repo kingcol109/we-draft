@@ -5127,20 +5127,26 @@ useEffect(() => {
             </div>
           )}
 
+          {!player.Bio && isMobile && <PlayerLiveCard player={player} variant="button" wrap />}
           {player.Bio && (
             <div className="bg-white" style={{ padding: bioOpen ? (isMobile ? "14px 16px" : "20px 32px") : (isMobile ? "8px 16px" : "10px 32px") }}>
               <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
                 {/* No "Bio" heading and tight padding while collapsed — the
                     whole point of hiding the bio is to get the Community
                     Scouting Report on screen without scrolling. */}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: bioOpen ? "12px" : 0 }}>
                 <button
                   type="button"
                   onClick={() => setBioOpen(o => !o)}
                   aria-expanded={bioOpen}
-                  style={{ background: color1, color: "#fff", border: "none", borderRadius: "6px", padding: isMobile ? "8px 14px" : "9px 18px", fontSize: isMobile ? "13px" : "14px", fontWeight: 700, cursor: "pointer", marginBottom: bioOpen ? "12px" : 0 }}
+                  style={{ background: color1, color: "#fff", border: "none", borderRadius: "6px", padding: isMobile ? "8px 14px" : "9px 18px", fontSize: isMobile ? "13px" : "14px", fontWeight: 700, cursor: "pointer" }}
                 >
                   {bioOpen ? "Hide Bio" : "Show Bio"}
                 </button>
+                {/* Phones: a pulsing Follow Live button here instead of the
+                    Playing Now scoreboard card (only while the team plays). */}
+                {isMobile && <PlayerLiveCard player={player} variant="button" />}
+                </div>
                 {/* Same colored pull-quote treatment "Scout's Take" uses in
                     evaluations — a team-color accent border + tinted card
                     gives the bio some visual weight instead of just
@@ -6040,7 +6046,6 @@ useEffect(() => {
         {/* ===== RIGHT COLUMN: Videos + Stats + In The News ===== */}
         {isMobile ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <PlayerLiveCard player={player} />
             {playerVideos.length > 0 && VideosSidebar}
             <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
             {NewsSidebar}

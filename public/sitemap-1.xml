@@ -27,6 +27,11 @@
     <priority>0.65</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/live</loc>
+    <lastmod>2026-10-04</lastmod>
+    <priority>0.75</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/community</loc>
     <lastmod>2026-10-04</lastmod>
     <priority>0.8</priority>
@@ -4994,11 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/jesse-legree-2029-wr</loc>
     <lastmod>2026-10-03</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jesse-perry-2027-ol</loc>
-    <lastmod>2026-09-24</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>
