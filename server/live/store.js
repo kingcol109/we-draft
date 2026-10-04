@@ -353,6 +353,15 @@ async function writeSlate(db, { season, week, seasonType, games, newBigPlays = [
   const gamesOut = [...games.entries()].map(([id, g]) => slateGame(id, g, rostersById.get(id)))
     .sort((a, b) => (Date.parse(a.startDate) || 0) - (Date.parse(b.startDate) || 0));
   await ref.set({ season, week, seasonType, games: gamesOut, bigPlays, updatedAt: FieldValue.serverTimestamp() });
+  // liveSlate/status — just the number of games in progress, for the
+  // site-wide navbar LIVE button (every page listens to it, so it stays
+  // tiny and is only rewritten when the count changes).
+  const liveCount = gamesOut.filter((g) => g.status === "in_progress").length;
+  const prevLive = sameWeek ? (prev.games || []).filter((g) => g.status === "in_progress").length : -1;
+  if (liveCount !== prevLive || prev.statusLiveCount !== liveCount) {
+    await db.collection("liveSlate").doc("status").set({ liveCount, updatedAt: FieldValue.serverTimestamp() });
+    await ref.update({ statusLiveCount: liveCount });
+  }
   return { games: gamesOut.length, bigPlays: bigPlays.length };
 }
 

@@ -13,6 +13,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { doc as fsDoc, onSnapshot as fsOnSnapshot } from "firebase/firestore";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 
 const FALLBACK_MESSAGE =
@@ -54,6 +55,15 @@ export default function Navbar() {
   // pattern — it's what catches the count dropping after accepting/
   // declining a request on the Profile or We-Pick Friends page.
   const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
+  // Games in progress right now (liveSlate/status — a tiny doc the live
+  // ingester only rewrites when the count changes). >0 shows the pulsing
+  // LIVE button next to the logo.
+  const [liveCount, setLiveCount] = useState(0);
+  useEffect(() => fsOnSnapshot(
+    fsDoc(db, "liveSlate", "status"),
+    (snap) => setLiveCount(snap.exists() ? snap.data().liveCount || 0 : 0),
+    () => setLiveCount(0),
+  ), []);
 
   /* ======================
      MOBILE DETECTION
@@ -321,10 +331,29 @@ export default function Navbar() {
             zIndex: 10001,
           }}
         >
-          {/* LOGO */}
-          <Link to="/">
-            <img src={Logo2} alt="We-Draft.com" style={{ height: 42 }} />
-          </Link>
+          {/* LOGO (+ LIVE button while games are on) */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px" }}>
+            <Link to="/">
+              <img src={Logo2} alt="We-Draft.com" style={{ height: 42 }} />
+            </Link>
+            {liveCount > 0 && (
+              <Link to="/live" className="wd-live-btn" title={`${liveCount} game${liveCount === 1 ? "" : "s"} live — open We-Draft Live`}>
+                <span className="wd-live-dot" />LIVE
+                {!isMobile && <span className="wd-live-count">{liveCount}</span>}
+              </Link>
+            )}
+            <style>{`
+              .wd-live-btn { display: inline-flex; align-items: center; gap: 7px; background: #d62828; color: #fff; font-weight: 900;
+                font-size: 13px; letter-spacing: 0.12em; padding: 6px 12px 6px 10px; border-radius: 999px; text-decoration: none;
+                box-shadow: 0 0 0 0 rgba(214,40,40,0.6); animation: wd-live-ring 1.8s ease-out infinite; }
+              .wd-live-btn:hover { background: #b81f1f; }
+              .wd-live-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: wd-live-blink 1.2s ease-in-out infinite; }
+              .wd-live-count { background: rgba(255,255,255,0.22); border-radius: 999px; padding: 1px 7px; font-size: 11px; letter-spacing: 0; }
+              @keyframes wd-live-ring { 0% { box-shadow: 0 0 0 0 rgba(214,40,40,0.6); } 70% { box-shadow: 0 0 0 10px rgba(214,40,40,0); } 100% { box-shadow: 0 0 0 0 rgba(214,40,40,0); } }
+              @keyframes wd-live-blink { 50% { opacity: 0.3; } }
+              @media (prefers-reduced-motion: reduce) { .wd-live-btn, .wd-live-dot { animation: none; } }
+            `}</style>
+          </div>
 
           {/* DESKTOP NAV */}
           <div

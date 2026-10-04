@@ -18,7 +18,6 @@
 
 const { initializeApp, getApps, cert } = require("firebase-admin/app");
 const { getFirestore: getFirestoreService } = require("firebase-admin/firestore");
-const { getAuth: getAuthService } = require("firebase-admin/auth");
 const { loadServiceAccount } = require("./googleAuth");
 
 let app = null;
@@ -44,7 +43,11 @@ function getFirestore() {
   return getFirestoreService(getApp());
 }
 
+// Auth is loaded only when asked for: it pulls in jwks-rsa → jose (an
+// ES module), which Vercel's function bundling can't require(). Firestore-
+// only callers (the live ingester, api/live-ingest.js) never load it.
 function getAuth() {
+  const { getAuth: getAuthService } = require("firebase-admin/auth");
   return getAuthService(getApp());
 }
 
