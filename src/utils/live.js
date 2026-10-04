@@ -57,7 +57,7 @@ export function downLabel(down, distance) {
   return distance != null ? `${ORD[down]} & ${distance}` : ORD[down];
 }
 
-const clockSecs = (c) => { const m = /^(\d+):(\d+)/.exec(c || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+export const clockSecs = (c) => { const m = /^(\d+):(\d+)/.exec(c || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 
 // "UCF 39" / "BAMA 12" / "50" — where the ball is, from the offense's
 // yards-to-goal (CFBD convention: distance to the opponent's end zone).
@@ -205,27 +205,104 @@ export const FOLLOW_PLAYERS_KEY = "wdLive.players";
 export const loadFollows = (key) => read(key);
 export const saveFollows = (key, list) => write(key, list);
 
+// A Set of followed player ids that matches either spelling — CFBD ids
+// arrive as numbers from some sources and strings from others.
+export function playerIdSet(players) {
+  const s = new Set();
+  for (const p of players) { s.add(p.id); s.add(String(p.id)); if (/^\d+$/.test(String(p.id))) s.add(Number(p.id)); }
+  return s;
+}
+
 // ── My Feed preferences (per browser) ──
 // games.all overrides the individual game sources; otherwise the feed is
 // the union of the checked sources. types filter by a feed entry's `kinds`
 // (server/live/store.js feedKinds: "score" | "turnover" | "big").
+// teamPlays / playerPlays: "big" = the Feed's big plays from followed
+// teams' games / by followed players; "all" = every play.
 export const FEED_PREFS_KEY = "wdLive.feedPrefs";
 export const DEFAULT_FEED_PREFS = {
-  games: { all: true, wepick: false, myTeams: false, featured: false },
+  games: { all: false, wepick: false, myTeams: true, featured: false },
   players: true,
+  strip: "all", // top scoreboard: "all" games, or "mine" (followed teams/players, We-Pick, featured)
+  teamPlays: "big",
+  playerPlays: "big",
   types: { score: true, big: true, turnover: true, final: true },
 };
+// Fills in anything missing from saved prefs (older saves, or an account's
+// copy) — always the same key order, so two copies compare equal as JSON.
+export function normalizeFeedPrefs(saved) {
+  if (!saved) return DEFAULT_FEED_PREFS;
+  return {
+    games: { ...DEFAULT_FEED_PREFS.games, ...saved.games },
+    players: saved.players ?? DEFAULT_FEED_PREFS.players,
+    strip: saved.strip === "mine" ? "mine" : "all",
+    teamPlays: saved.teamPlays === "all" ? "all" : "big",
+    playerPlays: saved.playerPlays === "all" ? "all" : "big",
+    types: { ...DEFAULT_FEED_PREFS.types, ...saved.types },
+  };
+}
 export function loadFeedPrefs() {
   try {
     const saved = JSON.parse(localStorage.getItem(FEED_PREFS_KEY) || "null");
     if (!saved) return DEFAULT_FEED_PREFS;
-    return {
-      games: { ...DEFAULT_FEED_PREFS.games, ...saved.games },
-      players: saved.players ?? DEFAULT_FEED_PREFS.players,
-      types: { ...DEFAULT_FEED_PREFS.types, ...saved.types },
-    };
+    return normalizeFeedPrefs(saved);
   } catch {
     return DEFAULT_FEED_PREFS;
   }
 }
 export const saveFeedPrefs = (prefs) => write(FEED_PREFS_KEY, prefs);
+
+// Every athlete on a play — CFBD's links plus the ones the parser resolved
+// from rosters. Mirrors server/live/store.js mergeAthletes.
+export function playAthletes(p) {
+  const byId = new Map((p.athletes || []).map((a) => [String(a.id), { id: a.id, name: a.name }]));
+  for (const v of Object.values(p.presentation?.players || {})) {
+    for (const pl of Array.isArray(v) ? v : [v]) if (pl?.cfbdId && !byId.has(String(pl.cfbdId))) byId.set(String(pl.cfbdId), { id: pl.cfbdId, name: pl.name });
+  }
+  return [...byId.values()];
+}
+
+// A liveGames/{id}/plays doc as a Feed entry (same shape the server writes
+// for the slate's Feed — server/live/store.js slateBigPlay), for the
+// "every play" Feed modes. g is the slate game.
+export function feedItemFromPlay(gameId, g, p) {
+  const side = (s) => (s && g ? g[s] : null);
+  const offenseTeam = side(p.offense);
+  const creditSide = p.presentation?.creditSide || p.offense;
+  const creditTeam = side(creditSide);
+  const kinds = [];
+  if (p.presentation?.touchdown || p.scoring) kinds.push("score");
+  if (p.presentation?.turnover) kinds.push("turnover");
+  return {
+    key: `${gameId}:${p.id}`,
+    gameId,
+    playId: p.id,
+    every: true,
+    slug: g?.slug || null,
+    period: p.period,
+    clock: p.clock,
+    down: p.down ?? null,
+    yardsToGoal: p.yardsToGoal ?? null,
+    distance: p.distance ?? null,
+    text: p.text,
+    label: p.bigPlay?.label || p.presentation?.headline || p.type,
+    tags: p.bigPlay?.tags || [],
+    kinds,
+    offense: p.offense,
+    offenseName: offenseTeam?.school || offenseTeam?.name || p.offenseName || null,
+    offenseLogo: offenseTeam?.logoDark || offenseTeam?.logo || null,
+    teamName: creditTeam?.short || creditTeam?.school || creditTeam?.name || null,
+    teamLogo: creditTeam?.logoDark || creditTeam?.logo || null,
+    teamColor: creditTeam?.color || null,
+    creditSide: creditSide || null,
+    homeLogo: g?.home?.logoDark || g?.home?.logo || null,
+    awayLogo: g?.away?.logoDark || g?.away?.logo || null,
+    homeShort: g?.home?.short || g?.home?.school || g?.home?.name || null,
+    awayShort: g?.away?.short || g?.away?.school || g?.away?.name || null,
+    homeScore: p.homeScore,
+    awayScore: p.awayScore,
+    athletes: playAthletes(p),
+    presentation: p.presentation || null,
+    at: Date.parse(p.wallClock) || p.sortAt || 0,
+  };
+}

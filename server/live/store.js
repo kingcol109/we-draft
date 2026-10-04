@@ -277,8 +277,8 @@ const MAX_SLATE_BIG_PLAYS = 60;
 
 // The fields the slate's feeds render — keeps liveSlate/current small.
 function compactPresentation(pr) {
-  const { v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat } = pr;
-  return JSON.parse(JSON.stringify({ v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat }));
+  const { v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat, downsTurnover } = pr;
+  return JSON.parse(JSON.stringify({ v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat, downsTurnover }));
 }
 
 function mergeAthletes(p) {
@@ -379,6 +379,9 @@ function feedKinds(p) {
   if (p.scoring && pr.type !== "conversion") kinds.push("score");
   if (pr.turnover) kinds.push("turnover");
   if ((pr.type === "pass" || pr.type === "rush") && pr.yards >= FEED_BIG_YARDS) kinds.push("big");
+  // Turnover on downs makes the Feed only when it matters most: the 4th
+  // quarter or overtime.
+  if (pr.downsTurnover && (p.period || 0) >= 4 && !kinds.includes("turnover")) kinds.push("turnover");
   return kinds;
 }
 const feedWorthy = (p) => feedKinds(p).length > 0;

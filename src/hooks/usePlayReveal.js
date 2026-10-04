@@ -16,6 +16,9 @@
 //   listed      plays to show in the list (everything not queued / in the slot)
 //   slot        the play currently held in the top slot, or null
 //   justListed  id of the play that just dropped from the slot (for its slide-in)
+//   queued      ids still waiting to be revealed (the rest of the page holds
+//               these back too — Feed entries, the header score — so
+//               nothing gets ahead of the game feed)
 import { useEffect, useMemo, useState } from "react";
 
 const HOLD_MS = 18 * 1000;
@@ -75,6 +78,7 @@ export function usePlayReveal(plays, resetKey) {
       listed: plays.filter((p) => !hidden.has(p.id)),
       slot: s.slot ? plays.find((p) => p.id === s.slot) || null : null,
       justListed: s.justListed,
+      queued: s.queue,
     };
   }, [plays, s]);
 }

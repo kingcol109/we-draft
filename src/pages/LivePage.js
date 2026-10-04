@@ -16,22 +16,24 @@
 // and play types). Follows are
 // per-browser (src/utils/live.js) and keyed by provider ids, so they work
 // for every team/player, with or without a We-Draft profile.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { useLiveGame } from "../hooks/useLiveGame";
-import { useLiveGameDocs, useRankedSixIds } from "../hooks/useLiveFeed";
+import { useLiveGameDocs, useRankedSixIds, useGamePlays, useCfbdSchools, searchCfbdPlayers } from "../hooks/useLiveFeed";
 import { usePlayReveal } from "../hooks/usePlayReveal";
 import { useAuth } from "../context/AuthContext";
+import AuthModal from "../components/AuthModal";
+import Logo2 from "../assets/Logo2.png";
 import LivePlayCard, { PLAY_CARD_STYLE, PendingPlayCard, TwoPointCard, FinalCard, playSummary } from "../components/LivePlayCard";
 import confetti from "canvas-confetti";
 import LiveGameStats, { LIVE_STATS_STYLE } from "../components/LiveGameStats";
 import {
-  statusLabel, teamShort, teamName, nextSituation, downLabel, spotLabel, clutchHeat, dedupeFeed,
+  statusLabel, teamShort, teamName, nextSituation, downLabel, spotLabel, clutchHeat, clockSecs, dedupeFeed,
   FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows, saveFollows,
-  loadFeedPrefs, saveFeedPrefs,
+  loadFeedPrefs, saveFeedPrefs, normalizeFeedPrefs, playerIdSet, feedItemFromPlay,
 } from "../utils/live";
 
 const GOLD = "#f6a21d";
@@ -92,8 +94,11 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl a { color: inherit; }
 .wdl-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 14px clamp(16px, 2.4vw, 36px); background: rgba(10,15,26,0.94); border-bottom: 1px solid #1d2840; backdrop-filter: blur(6px); }
-.wdl-brand { font-weight: 900; letter-spacing: 0.08em; font-size: clamp(18px, 1.6vw, 26px); text-decoration: none; white-space: nowrap; }
-.wdl-brand span { color: ${GOLD}; }
+.wdl-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 900; letter-spacing: 0.1em; font-size: clamp(14px, 1.2vw, 19px); text-decoration: none; white-space: nowrap; }
+.wdl-brand img { height: clamp(22px, 2vw, 32px); width: auto; display: block; }
+.wdl-brand span { color: #121212; background: ${GOLD}; border-radius: 6px; padding: 2px 7px; line-height: 1.2; }
+.wdl-auth { flex-shrink: 0; background: ${GOLD}; color: #121212; border: 0; border-radius: 999px; padding: 7px 16px; font-weight: 900; font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.wdl-auth.on { background: transparent; color: #7ddc9a; border: 1px solid #2c5a3c; cursor: default; font-weight: 800; }
 .wdl-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .wdl-tab { background: transparent; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 16px;
   font-weight: 800; font-size: clamp(13px, 1vw, 16px); cursor: pointer; }
@@ -172,7 +177,11 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 /* Phones — last, so it overrides the rules above. */
 @media (max-width: 700px) {
   .wdl-top { gap: 8px 12px; padding: 10px 12px; }
-  .wdl-brand { font-size: 17px; }
+  .wdl-brand { font-size: 12px; gap: 6px; }
+  .wdl-brand img { height: 20px; }
+  .wdl-auth { padding: 5px 12px; font-size: 12px; }
+  .wdl-meta { margin-left: 0; }
+  .wdl-top > .wdl-auth { margin-left: auto; }
   .wdl-tabs { order: 3; width: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .wdl-tabs::-webkit-scrollbar { display: none; }
   .wdl-tab { white-space: nowrap; padding: 6px 12px; font-size: 13px; }
@@ -195,6 +204,66 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .lpc-line { font-size: 19px; }
   .lpc.hype .lpc-line { font-size: 22px; }
   .lpc-detail { font-size: 15px; }
+}
+/* Follow search + Customize tab */
+.wdl-search { margin-bottom: 16px; max-width: 640px; }
+.wdl-search input { width: 100%; box-sizing: border-box; background: #0c1220; border: 1px solid #2a3753; color: #eef2f8; border-radius: 12px; padding: 12px 14px; font-size: 16px; font-weight: 700; font-family: inherit; outline: none; }
+.wdl-search input:focus { border-color: ${GOLD}; }
+.wdl-search-list { margin-top: 6px; background: #111a2b; border: 1px solid #2a3753; border-radius: 12px; overflow: hidden; }
+.wdl-search-hit { display: flex; align-items: center; gap: 12px; width: 100%; background: transparent; border: 0; border-bottom: 1px solid #1d2840; color: #eef2f8; padding: 9px 14px; cursor: pointer; text-align: left; font-family: inherit; }
+.wdl-search-hit:last-child { border-bottom: 0; }
+.wdl-search-hit:hover { background: #16213a; }
+.wdl-search-hit img, .wdl-search-noimg { width: 30px; height: 30px; object-fit: contain; flex-shrink: 0; }
+.wdl-search-pos { width: 34px; flex-shrink: 0; font-size: 12px; font-weight: 900; color: #9fb0c8; text-align: center; background: #1a2438; border-radius: 6px; padding: 4px 0; }
+.wdl-search-name { flex: 1; font-weight: 800; font-size: 15px; min-width: 0; }
+.wdl-search-name small { display: block; font-size: 12px; font-weight: 700; color: #6f819c; }
+.wdl-search-hit b { font-size: 12px; font-weight: 900; color: ${GOLD}; white-space: nowrap; }
+.wdl-search-hit.on b { color: #9fb0c8; }
+.wdl-search-none { padding: 12px 14px; color: #6f819c; font-weight: 700; font-size: 14px; }
+.wdl-chip { display: inline-flex; align-items: center; gap: 6px; }
+.wdl-chip img { width: 16px; height: 16px; object-fit: contain; }
+.wdl-chip-sub { color: #6f819c; font-weight: 700; }
+.wdl-custpage { max-width: 640px; }
+.wdl-cust-sub { font-size: 13px; font-weight: 800; color: #9fb0c8; margin: 8px 2px 6px; }
+.wdl-seg { display: inline-flex; background: #0c1220; border: 1px solid #26324a; border-radius: 999px; padding: 3px; margin-bottom: 4px; }
+.wdl-seg button { background: transparent; border: 0; color: #9fb0c8; font-weight: 800; font-size: 14px; padding: 6px 14px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+.wdl-seg button.on { background: ${GOLD}; color: #121212; }
+.wdl-seg.dim { opacity: 0.4; }
+.wdl-seg.dim button { cursor: default; }
+.wdl-follow-sec { margin-bottom: 18px; }
+.wdl-feed-nudge { background: #111a2b; border: 1px dashed #2a3753; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; font-weight: 700; color: #9fb0c8; }
+.wdl-feed-nudge button { background: none; border: 0; padding: 0; color: ${GOLD}; font-weight: 900; cursor: pointer; font-family: inherit; font-size: inherit; }
+/* Compact (phones + tablets): the Feed is the page, a picked game stands alone. */
+.wdl-compact .wdl-main.compact .wdl-rail { order: 0; max-height: none; overflow: visible; border-bottom: 0; padding: 0; position: static; }
+.wdl-back { background: #111a2b; color: #eef2f8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 14px; font-weight: 800; font-size: 14px; cursor: pointer; margin-bottom: 12px; font-family: inherit; }
+.wdl-solo { max-width: 900px; margin: 0 auto; }
+@media (min-width: 760px) {
+  .wdl-compact .wdl-feedcols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
+}
+/* Tablets: a bit more room than a phone. */
+@media (min-width: 701px) {
+  .wdl-compact .wdl-main { padding: 16px 20px 36px; }
+}
+/* Phones held sideways: short screen — slim header and strip, nothing sticky
+   eating the height, a tighter scoreboard. */
+@media (max-height: 540px) and (orientation: landscape) {
+  .wdl-compact .wdl-top { position: static; padding: 6px 14px; gap: 6px 12px; flex-wrap: nowrap; }
+  .wdl-compact .wdl-brand { font-size: 11px; }
+  .wdl-compact .wdl-brand img { height: 18px; }
+  .wdl-compact .wdl-auth { padding: 4px 11px; font-size: 12px; }
+  .wdl-compact .wdl-tabs { order: 0; width: auto; flex: 1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .wdl-compact .wdl-tabs::-webkit-scrollbar { display: none; }
+  .wdl-compact .wdl-tab { white-space: nowrap; padding: 4px 11px; font-size: 12px; }
+  .wdl-compact .wdl-meta { display: none; }
+  .wdl-compact .wdl-strip { padding: 6px 14px; gap: 8px; }
+  .wdl-compact .wdl-strip-game { min-width: 118px; padding: 5px 8px; }
+  .wdl-compact .wdl-main { padding: 10px 14px 28px; }
+  .wdl-compact .wdl-back { padding: 5px 12px; font-size: 13px; margin-bottom: 8px; }
+  .wdl-compact .wdl-mu { grid-template-columns: 1fr auto auto auto 1fr; gap: 10px; padding: 10px 14px; min-height: 0; }
+  .wdl-compact .wdl-mu-logo { width: 52px; height: 52px; }
+  .wdl-compact .wdl-mu-score b { font-size: 46px; }
+  .wdl-compact .wdl-mu-ghost.wm { opacity: 0.12; }
+  .wdl-compact .lpc { padding: 10px 14px; }
 }
 `;
 
@@ -272,13 +341,45 @@ function GameTile({ game, followedTeams, onToggleTeam, onOpen }) {
   );
 }
 
+// Not worth a Feed card even in "every play" mode.
+const EVERY_SKIP = new Set(["timeout", "period"]);
+
+// How far along a live game is, in game seconds (OT counts past the 4th).
+const gameProgress = (g) => (g.period || 0) * 900 - Math.min(900, clockSecs(g.clock) ?? 900);
+const gameMargin = (g) => Math.abs((g.home?.points ?? 0) - (g.away?.points ?? 0));
+// Live games closest to finishing first — those in the 4th quarter / OT
+// ordered by the closest score — then every final of the week, most recent
+// kickoff first.
+function stripOrder(games) {
+  const live = games.filter((g) => g.status === "in_progress");
+  const late = live.filter((g) => (g.period || 0) >= 4).sort((a, b) => gameMargin(a) - gameMargin(b) || gameProgress(b) - gameProgress(a));
+  const early = live.filter((g) => (g.period || 0) < 4).sort((a, b) => gameProgress(b) - gameProgress(a));
+  const finals = games.filter((g) => g.status === "final").sort((a, b) => (Date.parse(b.startDate) || 0) - (Date.parse(a.startDate) || 0));
+  return [...late, ...early, ...finals];
+}
+
 // A row of live scores (then all of the week's finals) for views that aren't the
-// All Games grid — click one to open it. Close 4th-quarter games glow.
+// All Games grid — click one to open it. Close 4th-quarter games glow. The
+// order is set when the page loads and then holds — scores update in place
+// and games only move on a refresh. Games that start later join the end of
+// the live ones; games that go final later join the end of the row.
 function ScoreStrip({ games, onPick, current }) {
-  const list = games.filter((g) => g.status === "in_progress")
-    .sort((a, b) => clutchHeat(b) - clutchHeat(a))
-    // then every final of the week, most recent kickoff first
-    .concat(games.filter((g) => g.status === "final").sort((a, b) => (Date.parse(b.startDate) || 0) - (Date.parse(a.startDate) || 0)));
+  const order = useRef(null);
+  const shown = games.filter((g) => g.status === "in_progress" || g.status === "final");
+  if (!order.current && shown.length) order.current = stripOrder(shown).map((g) => g.id);
+  if (order.current) {
+    const known = new Set(order.current);
+    const fresh = shown.filter((g) => !known.has(g.id));
+    if (fresh.length) {
+      const firstFinal = order.current.findIndex((id) => shown.find((g) => g.id === id)?.status === "final");
+      const at = firstFinal < 0 ? order.current.length : firstFinal;
+      const liveIds = fresh.filter((g) => g.status === "in_progress").map((g) => g.id);
+      const finalIds = fresh.filter((g) => g.status === "final").map((g) => g.id);
+      order.current = [...order.current.slice(0, at), ...liveIds, ...order.current.slice(at), ...finalIds];
+    }
+  }
+  const byId = new Map(shown.map((g) => [g.id, g]));
+  const list = (order.current || []).map((id) => byId.get(id)).filter(Boolean);
   if (!list.length) return null;
   return (
     <div className="wdl-strip">
@@ -323,7 +424,7 @@ function FeedList({ items, render }) {
 // One Feed entry — clicking it opens the play in My Feed's left-hand game
 // feed (onSelect), or elsewhere opens that game's view.
 function BigPlayItem({ play, followedPlayers, onTogglePlayer, onOpenGame, onSelect, selected }) {
-  const followedIds = new Set(followedPlayers.map((p) => p.id));
+  const followedIds = playerIdSet(followedPlayers);
   return (
     <LivePlayCard
       variant="compact"
@@ -342,14 +443,35 @@ function BigPlayItem({ play, followedPlayers, onTogglePlayer, onOpenGame, onSele
   );
 }
 
-function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPlayId, scrollToPlayId }) {
+function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPlayId, scrollToPlayId, onQueueChange }) {
   // Jumping to a specific play (from the Feed) loads the full play list so
   // an older play can be found; otherwise just the newest plays.
   const { game: live, plays, ready } = useLiveGame(gameId, { plays: focusPlayId ? "all" : "recent", box: false });
-  const g = live || slateGame;
+  const gLive = live || slateGame;
   // New plays are revealed through the top slot one at a time (each held
   // ~10s before it drops into the list) — see hooks/usePlayReveal.js.
-  const { listed, slot, justListed } = usePlayReveal(plays, gameId);
+  const { listed, slot, justListed, queued } = usePlayReveal(plays, gameId);
+  // Tell the page which plays are still queued, so the Feed rail holds
+  // them back until the game feed has shown them.
+  const queuedKey = queued.join(",");
+  useEffect(() => {
+    onQueueChange?.(gameId, queued);
+    return () => onQueueChange?.(gameId, []); // leaving this game: nothing held back
+  }, [gameId, queuedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While plays are queued, the header shows the game as of the last play
+  // revealed — score, quarter, clock — and catches up as they play out.
+  const g = useMemo(() => {
+    if (!gLive || !queued.length) return gLive;
+    const shownNewest = slot || listed[listed.length - 1];
+    if (!shownNewest || shownNewest.homeScore == null) return gLive;
+    return {
+      ...gLive,
+      home: { ...gLive.home, points: shownNewest.homeScore },
+      away: { ...gLive.away, points: shownNewest.awayScore },
+      period: shownNewest.period ?? gLive.period,
+      clock: shownNewest.clock ?? gLive.clock,
+    };
+  }, [gLive, queuedKey, slot, listed]); // eslint-disable-line react-hooks/exhaustive-deps
   const newestListed = useMemo(() => [...listed].reverse(), [listed]);
 
   // Scroll the play picked in the Feed into view — once per pick. (It
@@ -383,7 +505,7 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
 
   if (!g) return <div className="wdl-empty">{ready ? "This game isn't on the current slate." : "Loading…"}</div>;
   const isLive = g.status === "in_progress";
-  const followedIds = new Set(followedPlayers.map((p) => p.id));
+  const followedIds = playerIdSet(followedPlayers);
   const cardProps = (p) => ({
     play: p,
     // Badge = team credited with the play (defense on a sack/pick); the
@@ -499,6 +621,71 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
 }
 
 // My Feed's settings panel (opened by the rail's Customize button).
+// Follow a team: search every school linked to a CFBD team (by school,
+// mascot or abbreviation) and tap to follow / unfollow.
+function TeamSearch({ schools, followed, onToggle }) {
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const hits = needle.length < 2 ? [] : schools.filter((t) =>
+    [t.name, t.short, t.mascot, t.alt, `${t.name} ${t.mascot}`].some((v) => v && v.toLowerCase().includes(needle))).slice(0, 8);
+  return (
+    <div className="wdl-search">
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search teams to follow — e.g. Ohio State, Ducks, LSU" aria-label="Search teams" />
+      {needle.length >= 2 && (
+        <div className="wdl-search-list">
+          {hits.length ? hits.map((t) => {
+            const on = followed.includes(t.id);
+            return (
+              <button key={t.id} className={`wdl-search-hit${on ? " on" : ""}`} onClick={() => onToggle(t.id)}>
+                {t.logo ? <img src={t.logo} alt="" /> : <span className="wdl-search-noimg" />}
+                <span className="wdl-search-name">{t.name}<small>{[t.mascot, t.conference].filter(Boolean).join(" · ")}</small></span>
+                <b>{on ? "★ Following" : "+ Follow"}</b>
+              </button>
+            );
+          }) : <div className="wdl-search-none">{schools.length ? "No teams match." : "Loading teams…"}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Follow a player: name search over every player CFBD knows (cfbdPlayers),
+// most recent roster first.
+function PlayerSearch({ followedIds, onToggle }) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const text = q.trim();
+    if (text.length < 2) { setHits([]); setBusy(false); return undefined; }
+    let alive = true;
+    setBusy(true);
+    const t = setTimeout(() => {
+      searchCfbdPlayers(text).then((r) => { if (alive) { setHits(r); setBusy(false); } }).catch(() => { if (alive) setBusy(false); });
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q]);
+  return (
+    <div className="wdl-search">
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search players to follow — e.g. Julian Sayin" aria-label="Search players" />
+      {q.trim().length >= 2 && (
+        <div className="wdl-search-list">
+          {hits.length ? hits.map((p) => {
+            const on = followedIds.has(p.id);
+            return (
+              <button key={p.id} className={`wdl-search-hit${on ? " on" : ""}`} onClick={() => onToggle(p)}>
+                <span className="wdl-search-pos">{p.position || "—"}</span>
+                <span className="wdl-search-name">{p.name}<small>{[p.team, p.jersey != null && `#${p.jersey}`].filter(Boolean).join(" · ")}</small></span>
+                <b>{on ? "★ Following" : "+ Follow"}</b>
+              </button>
+            );
+          }) : <div className="wdl-search-none">{busy ? "Searching…" : "No players match."}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FeedCustomize({ prefs, onChange, onClose, signedIn, rankedCount, teamCount, playerCount }) {
   const setGames = (k, v) => onChange({ ...prefs, games: { ...prefs.games, [k]: v } });
   const setType = (k, v) => onChange({ ...prefs, types: { ...prefs.types, [k]: v } });
@@ -509,6 +696,15 @@ function FeedCustomize({ prefs, onChange, onClose, signedIn, rankedCount, teamCo
       <span>{label}{note && <small>{note}</small>}</span>
     </label>
   );
+  // Big plays only, or every play — for followed teams' games and for
+  // followed players.
+  const Choice = ({ value, onPick, disabled, options = [["big", "Big plays"], ["all", "Every play"]] }) => (
+    <div className={`wdl-seg${disabled ? " dim" : ""}`}>
+      {options.map(([k, l]) => (
+        <button key={k} type="button" disabled={disabled} className={value === k ? "on" : ""} onClick={() => onPick(k)}>{l}</button>
+      ))}
+    </div>
+  );
   return (
     <div className="wdl-cust">
       <div className="wdl-cust-h">Games</div>
@@ -517,26 +713,59 @@ function FeedCustomize({ prefs, onChange, onClose, signedIn, rankedCount, teamCo
         note={signedIn ? `${rankedCount} game${rankedCount === 1 ? "" : "s"} in your Ranked 6` : "Sign in to use your Ranked 6"} />
       <Row disabled={allGames} checked={prefs.games.myTeams} onToggle={(v) => setGames("myTeams", v)} label="My teams" note={`${teamCount} followed`} />
       <Row disabled={allGames} checked={prefs.games.featured} onToggle={(v) => setGames("featured", v)} label="Featured & Game of the Week" />
+      <div className="wdl-cust-sub">From my teams' games</div>
+      <Choice value={prefs.teamPlays} disabled={allGames || !prefs.games.myTeams} onPick={(v) => onChange({ ...prefs, teamPlays: v })} />
       <div className="wdl-cust-h">Players</div>
       <Row checked={prefs.players} onToggle={(v) => onChange({ ...prefs, players: v })} label="Plays by players I follow" note={`${playerCount} followed`} />
-      <div className="wdl-cust-h">Plays</div>
+      <div className="wdl-cust-sub">From my players</div>
+      <Choice value={prefs.playerPlays} disabled={!prefs.players} onPick={(v) => onChange({ ...prefs, playerPlays: v })} />
+      <div className="wdl-cust-h">Big plays include</div>
       <Row checked={prefs.types.score} onToggle={(v) => setType("score", v)} label="Scoring plays" />
       <Row checked={prefs.types.big} onToggle={(v) => setType("big", v)} label="Big plays (20+ yards)" />
       <Row checked={prefs.types.turnover} onToggle={(v) => setType("turnover", v)} label="Turnovers" note="Interceptions & fumbles" />
       <Row checked={prefs.types.final} onToggle={(v) => setType("final", v)} label="Final scores" note="When your games end" />
+      <div className="wdl-cust-h">Scoreboard</div>
+      <div className="wdl-cust-sub">Scores along the top</div>
+      <Choice value={prefs.strip} options={[["all", "All games"], ["mine", "My games"]]} onPick={(v) => onChange({ ...prefs, strip: v })} />
       <button className="wdl-cust-done" onClick={onClose}>Done</button>
     </div>
   );
 }
 
+// Phones (either way up) and tablets: no side rail. /live opens on the Feed
+// — scores on top, the Feed below — and picking a game shows just that game,
+// scoreboard on top and its plays underneath.
+const COMPACT_QUERY = "(max-width: 1149px), (max-height: 540px), (pointer: coarse) and (max-width: 1366px)";
+function useCompact() {
+  const get = () => typeof window !== "undefined" && !!window.matchMedia?.(COMPACT_QUERY).matches;
+  const [compact, setCompact] = useState(get);
+  useEffect(() => {
+    const mq = window.matchMedia?.(COMPACT_QUERY);
+    if (!mq) return undefined;
+    const on = () => setCompact(mq.matches);
+    on();
+    if (mq.addEventListener) mq.addEventListener("change", on); else mq.addListener(on);
+    return () => { if (mq.removeEventListener) mq.removeEventListener("change", on); else mq.removeListener(on); };
+  }, []);
+  return compact;
+}
+
 export default function LivePage() {
   const [params, setParams] = useSearchParams();
-  const view = params.get("view") || "all";
+  const compact = useCompact();
+  // My Teams / My Players live inside Customize now — old links land there.
+  const rawView = params.get("view");
+  const view = rawView === "teams" || rawView === "players" ? "customize" : rawView === "big" ? "feed" : rawView || (compact ? "feed" : "all");
   const gameParam = params.get("game");
   const [slate, setSlate] = useState(null);
   const [error, setError] = useState(false);
   const [followedTeams, setFollowedTeams] = useState(() => loadFollows(FOLLOW_TEAMS_KEY));
   const [followedPlayers, setFollowedPlayers] = useState(() => loadFollows(FOLLOW_PLAYERS_KEY));
+  const { user, login } = useAuth();
+  const uid = user?.uid || null;
+  const uidRef = useRef(uid);
+  uidRef.current = uid;
+  const synced = useRef({ uid: null, json: null, ready: false });
   const now = useNow(15000);
   useWakeLock();
   useEffect(() => {
@@ -565,31 +794,100 @@ export default function LivePage() {
   const openGame = (id) => setView("game", { game: id });
   const toggleTeam = (id) => setFollowedTeams((prev) => {
     const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-    saveFollows(FOLLOW_TEAMS_KEY, next);
+    if (!uidRef.current) saveFollows(FOLLOW_TEAMS_KEY, next);
     return next;
   });
   const togglePlayer = (a) => setFollowedPlayers((prev) => {
-    const next = prev.some((p) => p.id === a.id) ? prev.filter((p) => p.id !== a.id) : [...prev, { id: a.id, name: a.name }];
-    saveFollows(FOLLOW_PLAYERS_KEY, next);
+    const same = (p) => String(p.id) === String(a.id);
+    const next = prev.some(same) ? prev.filter((p) => !same(p))
+      : [...prev, { id: a.id, name: a.name, ...(a.teamId != null ? { teamId: a.teamId, team: a.team || null, position: a.position || null } : {}) }];
+    if (!uidRef.current) saveFollows(FOLLOW_PLAYERS_KEY, next);
     return next;
   });
+  // Players followed from a play card come without their team — look it up
+  // once (cfbdPlayers), so "every play" can find their games.
+  useEffect(() => {
+    const missing = followedPlayers.filter((p) => p.teamId == null && !p.lookedUp);
+    if (!missing.length) return undefined;
+    let alive = true;
+    Promise.all(missing.map((p) => getDoc(doc(db, "cfbdPlayers", String(p.id)))
+      .then((snap) => [String(p.id), snap.exists() ? snap.data() : null]).catch(() => [String(p.id), null])))
+      .then((rows) => {
+        if (!alive) return;
+        const info = new Map(rows);
+        setFollowedPlayers((prev) => {
+          const next = prev.map((p) => {
+            if (!info.has(String(p.id))) return p;
+            const d = info.get(String(p.id));
+            return { ...p, lookedUp: true, ...(d ? { teamId: d.teamId ?? null, team: d.team || null, position: d.position || null } : {}) };
+          });
+          if (!uidRef.current) saveFollows(FOLLOW_PLAYERS_KEY, next);
+          return next;
+        });
+      });
+    return () => { alive = false; };
+  }, [followedPlayers]);
 
   const games = useMemo(() => [...(slate?.games || [])].sort(sortGames), [slate]);
   const bigPlays = useMemo(() => slate?.bigPlays || [], [slate]);
   const liveCount = games.filter((g) => g.status === "in_progress").length;
   const updatedAgo = slate?.updatedAt?.toMillis ? Math.max(0, Math.round((now - slate.updatedAt.toMillis()) / 60000)) : null;
 
-  const myTeamGames = games.filter((g) => followedTeams.includes(g.home.providerTeamId) || followedTeams.includes(g.away.providerTeamId));
-  const followedIds = useMemo(() => new Set(followedPlayers.map((p) => p.id)), [followedPlayers]);
-  const myPlayerPlays = bigPlays.filter((b) => (b.athletes || []).some((a) => followedIds.has(a.id)));
+  const schools = useCfbdSchools(view === "customize");
+  // A followed team's name and logo — from the school list, else the slate.
+  const teamInfo = (id) => {
+    const sc = schools.find((t) => t.id === id);
+    if (sc) return { name: sc.name, logo: sc.logo };
+    const g = games.find((x) => x.home.providerTeamId === id || x.away.providerTeamId === id);
+    const t = g ? (g.home.providerTeamId === id ? g.home : g.away) : null;
+    return { name: t ? (t.school || t.name) : `Team ${id}`, logo: t ? (t.logoDark || t.logo) : null };
+  };
+  const followedIds = useMemo(() => playerIdSet(followedPlayers), [followedPlayers]);
 
   // ── My Feed ──
-  const { user } = useAuth();
   const [feedPrefs, setFeedPrefs] = useState(loadFeedPrefs);
-  const [customizing, setCustomizing] = useState(false);
-  const updatePrefs = (next) => { setFeedPrefs(next); saveFeedPrefs(next); };
+  const updatePrefs = (next) => { setFeedPrefs(next); if (!uidRef.current) saveFeedPrefs(next); };
+
+  // ── Account sync ──
+  // Signed in: follows + Feed settings live on the account
+  // (users/{uid}/liveSettings/main, owner-only) and follow you across
+  // devices. The first sign-in keeps what you picked as a guest. Signed
+  // out: this browser's copy, as before.
+  useEffect(() => {
+    synced.current = { uid, json: null, ready: false };
+    if (!uid) {
+      setFollowedTeams(loadFollows(FOLLOW_TEAMS_KEY));
+      setFollowedPlayers(loadFollows(FOLLOW_PLAYERS_KEY));
+      setFeedPrefs(loadFeedPrefs());
+      return undefined;
+    }
+    const ref = doc(db, "users", uid, "liveSettings", "main");
+    return onSnapshot(ref, (snap) => {
+      if (!snap.exists()) {
+        setDoc(ref, {
+          teams: loadFollows(FOLLOW_TEAMS_KEY), players: loadFollows(FOLLOW_PLAYERS_KEY),
+          feedPrefs: loadFeedPrefs(), updatedAt: serverTimestamp(),
+        }).catch(() => { synced.current.ready = true; });
+        return;
+      }
+      const d = snap.data();
+      const next = { teams: d.teams || [], players: d.players || [], feedPrefs: normalizeFeedPrefs(d.feedPrefs) };
+      synced.current = { uid, json: JSON.stringify(next), ready: true };
+      setFollowedTeams(next.teams);
+      setFollowedPlayers(next.players);
+      setFeedPrefs(next.feedPrefs);
+    }, () => { synced.current.ready = true; });
+  }, [uid]);
+  useEffect(() => {
+    if (!uid || !synced.current.ready || synced.current.uid !== uid) return;
+    const next = { teams: followedTeams, players: followedPlayers, feedPrefs };
+    const json = JSON.stringify(next);
+    if (json === synced.current.json) return;
+    synced.current.json = json;
+    setDoc(doc(db, "users", uid, "liveSettings", "main"), { ...next, updatedAt: serverTimestamp() }).catch(() => {});
+  }, [uid, followedTeams, followedPlayers, feedPrefs]);
   const onFeed = view === "feed";
-  const rankedIds = useRankedSixIds(onFeed ? user?.uid : null, games.map((g) => g.wedraftWeek));
+  const rankedIds = useRankedSixIds(onFeed || feedPrefs.strip === "mine" ? user?.uid : null, games.map((g) => g.wedraftWeek));
   const rankedGames = games.filter((g) => g.wedraftGameId && rankedIds.has(g.wedraftGameId));
   // Games the feed follows (unless "All games"): union of the checked sources.
   const feedGameIds = useMemo(() => {
@@ -604,17 +902,61 @@ export default function LivePage() {
   }, [feedPrefs, games, rankedIds, followedTeams]);
   // Each followed game's complete Feed list (liveGames/{id}.feedPlays).
   const feedDocs = useLiveGameDocs(onFeed ? feedGameIds : []);
+  // "Every play" modes (Customize): the full play-by-play of followed
+  // teams' games, and every play a followed player is in.
+  const teamEvery = !feedPrefs.games.all && feedPrefs.games.myTeams && feedPrefs.teamPlays === "all";
+  const playerEvery = feedPrefs.players && feedPrefs.playerPlays === "all" && followedPlayers.length > 0;
+  const everyGameIds = useMemo(() => {
+    const teamGame = (g) => followedTeams.includes(g.home.providerTeamId) || followedTeams.includes(g.away.providerTeamId);
+    const playerTeams = new Set(followedPlayers.map((p) => p.teamId).filter((x) => x != null).map(String));
+    const playerGame = (g) => playerTeams.has(String(g.home.providerTeamId)) || playerTeams.has(String(g.away.providerTeamId));
+    return games
+      .filter((g) => (g.status === "in_progress" || g.status === "final") && ((teamEvery && teamGame(g)) || (playerEvery && playerGame(g))))
+      .sort((a, b) => (a.status === "in_progress" ? 0 : 1) - (b.status === "in_progress" ? 0 : 1))
+      .map((g) => g.id);
+  }, [games, followedTeams, followedPlayers, teamEvery, playerEvery]);
+  const everyPlays = useGamePlays(onFeed ? everyGameIds : []);
+  // Nothing to follow yet → the whole slate's Feed, with a nudge to follow.
+  const followsNothing = !feedPrefs.games.all && !feedGameIds.length && !(feedPrefs.players && followedPlayers.length);
   const myFeed = useMemo(() => {
-    const typeOn = (b) => !b.kinds?.length || b.kinds.some((k) => feedPrefs.types[k]);
+    const typeOn = (b) => b.every || !b.kinds?.length || b.kinds.some((k) => feedPrefs.types[k]);
+    if (followsNothing) return dedupeFeed(bigPlays.filter(typeOn));
+    // Every-play entries first, so a play that's also a Feed big play keeps
+    // the Feed's version (it carries the big-play kinds).
+    const every = [];
+    const gameById = new Map(games.map((g) => [g.id, g]));
+    for (const [gid, plays] of everyPlays) {
+      const g = gameById.get(gid);
+      if (!g) continue;
+      const wholeGame = teamEvery && (followedTeams.includes(g.home.providerTeamId) || followedTeams.includes(g.away.providerTeamId));
+      for (const p of plays) {
+        if (p.removed || EVERY_SKIP.has(p.presentation?.type)) continue;
+        const item = feedItemFromPlay(gid, g, p);
+        if (wholeGame || (playerEvery && item.athletes.some((a) => followedIds.has(a.id)))) every.push(item);
+      }
+    }
     // Followed games: each one's plays plus its FINAL entry once it ends.
     let items = feedPrefs.games.all ? bigPlays
       : [...feedDocs.values()].flatMap((d) => [...(d.feedPlays || []), ...(d.finalFeed ? [d.finalFeed] : [])]);
     if (!feedPrefs.games.all && feedPrefs.players) {
       items = items.concat(bigPlays.filter((b) => (b.athletes || []).some((a) => followedIds.has(a.id))));
     }
-    const byKey = new Map(items.filter(typeOn).map((b) => [b.key, b]));
+    const byKey = new Map([...every, ...items.filter(typeOn)].map((b) => [b.key, b]));
     return dedupeFeed([...byKey.values()].sort((a, b) => b.at - a.at));
-  }, [feedPrefs, bigPlays, feedDocs, followedIds]);
+  }, [feedPrefs, bigPlays, feedDocs, followedIds, followsNothing, everyPlays, games, teamEvery, playerEvery, followedTeams]);
+  const feedMax = teamEvery || playerEvery ? 80 : 30;
+  // Top scoreboard (Customize): every game, or just "my games" — followed
+  // teams, followed players' teams, the We-Pick Ranked 6, and featured games
+  // when the Feed includes them. Nothing of yours on → every game.
+  const stripGames = useMemo(() => {
+    if (feedPrefs.strip !== "mine") return games;
+    const playerTeams = new Set(followedPlayers.map((p) => p.teamId).filter((x) => x != null).map(String));
+    const mine = games.filter((g) => followedTeams.includes(g.home.providerTeamId) || followedTeams.includes(g.away.providerTeamId)
+      || playerTeams.has(String(g.home.providerTeamId)) || playerTeams.has(String(g.away.providerTeamId))
+      || (g.wedraftGameId && rankedIds.has(g.wedraftGameId))
+      || (feedPrefs.games.featured && (g.featured || g.gameOfWeek)));
+    return mine.length ? mine : games;
+  }, [feedPrefs, games, followedTeams, followedPlayers, rankedIds]);
   // Left side of My Feed: the game picked from the feed, else the newest
   // feed item's game, else the first live game the feed follows.
   const feedGameId = gameParam
@@ -624,13 +966,11 @@ export default function LivePage() {
   // Pin the first pick into the URL so the center game only changes when
   // the user picks one — not every time a new big play tops the feed.
   useEffect(() => {
-    if (onFeed && !gameParam && feedGameId) setParams({ view: "feed", game: feedGameId }, { replace: true });
-  }, [onFeed, gameParam, feedGameId, setParams]);
+    if (!compact && onFeed && !gameParam && feedGameId) setParams({ view: "feed", game: feedGameId }, { replace: true });
+  }, [compact, onFeed, gameParam, feedGameId, setParams]);
   const focusPlay = onFeed ? params.get("play") : null;
-  // Scrolling to a play only ever follows a click in this visit. A play id
-  // left in the URL from before (a refresh, a bookmarked TV link) is
-  // dropped on load, so opening /live never jumps into the middle of a feed.
-  const [scrollTarget, setScrollTarget] = useState(null);
+  // A play id left in the URL from an older link is dropped on load, so
+  // opening /live never jumps into the middle of a feed.
   useEffect(() => {
     if (params.get("play")) {
       const next = new URLSearchParams(params);
@@ -640,17 +980,24 @@ export default function LivePage() {
     // on first load only
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Clicking a Feed play opens its game at the top of the page (no jump to
+  // the play itself); the Feed card stays highlighted as the pick.
+  const [selectedFeedKey, setSelectedFeedKey] = useState(null);
+  // Plays the open game's feed hasn't revealed yet — kept out of the Feed
+  // rail until it has, so the rail never gets ahead of the game feed.
+  const [queuedPlays, setQueuedPlays] = useState({ gameId: null, ids: [] });
+  const onQueueChange = useCallback((gameId, ids) => setQueuedPlays({ gameId, ids }), []);
+  const notYetShown = (p) => p.gameId === queuedPlays.gameId && queuedPlays.ids.includes(p.playId);
   const selectFeedPlay = (b) => {
-    setScrollTarget(b.playId);
-    setParams({ view: "feed", game: b.gameId, play: b.playId });
+    setSelectedFeedKey(b.key);
+    setParams({ view: "feed", game: b.gameId });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const tabs = [
     { key: "all", label: `All Games${liveCount ? ` · ${liveCount} live` : ""}` },
     { key: "feed", label: "My Feed" },
-    { key: "teams", label: "My Teams" },
-    { key: "players", label: "My Players" },
-    { key: "big", label: "Big Plays" },
+    { key: "customize", label: "⚙ Customize" },
     ...(view === "game" ? [{ key: "game", label: "Game" }] : []),
   ];
 
@@ -664,17 +1011,16 @@ export default function LivePage() {
     <aside className="wdl-rail">
       <div className="wdl-railhead">
         <div className="wdl-h" style={{ margin: 0 }}>Feed <span className="wdl-railsub">{sourceSummary}</span></div>
-        <button className={`wdl-iconbtn${customizing ? " on" : ""}`} onClick={() => setCustomizing((v) => !v)}>⚙ Customize</button>
+        <button className="wdl-iconbtn" onClick={() => setView("customize")}>⚙ Customize</button>
       </div>
-      {customizing && (
-        <FeedCustomize prefs={feedPrefs} onChange={updatePrefs} onClose={() => setCustomizing(false)}
-          signedIn={!!user} rankedCount={rankedGames.length} teamCount={followedTeams.length} playerCount={followedPlayers.length} />
+      {followsNothing && (
+        <div className="wdl-feed-nudge">Showing the whole slate. <button onClick={() => setView("customize")}>Follow teams and players</button> to make this your Feed.</div>
       )}
       {myFeed.length
-        ? <FeedList items={myFeed.slice(0, 30)} render={(p) => (
+        ? <div className="wdl-feedcols"><FeedList items={myFeed.filter((p) => !notYetShown(p)).slice(0, feedMax)} render={(p) => (
           <BigPlayItem play={p} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer}
-            onSelect={selectFeedPlay} selected={p.playId === focusPlay && p.gameId === feedGameId} />
-        )} />
+            onSelect={selectFeedPlay} selected={p.key === selectedFeedKey && p.gameId === feedGameId} />
+        )} /></div>
         : <div className="wdl-empty">{feedPrefs.games.all || feedGameIds.length
           ? "Scoring plays, turnovers and big gains from your games show up here."
           : "Pick games for your feed with ⚙ Customize — your We-Pick games, teams you follow, or featured games."}</div>}
@@ -683,7 +1029,7 @@ export default function LivePage() {
     <aside className="wdl-rail">
       <div className="wdl-h">Feed</div>
       {bigPlays.length
-        ? <FeedList items={bigPlays.slice(0, 12)} render={(p) => <BigPlayItem play={p} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onOpenGame={openGame} />} />
+        ? <FeedList items={bigPlays.filter((p) => !notYetShown(p)).slice(0, 12)} render={(p) => <BigPlayItem play={p} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onOpenGame={openGame} />} />
         : <div className="wdl-empty">Touchdowns, turnovers and explosive plays from across the slate show up here.</div>}
     </aside>
   );
@@ -694,30 +1040,51 @@ export default function LivePage() {
 
   let body;
   if (!slate) body = <div className="wdl-empty">{error ? "We-Draft Live is temporarily unavailable." : "Loading the slate…"}</div>;
-  else if (view === "game" && gameParam) body = <GameView gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} />;
-  else if (onFeed) body = feedGameId
-    ? <GameView key={feedGameId} gameId={feedGameId} slateGame={games.find((g) => g.id === feedGameId)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} focusPlayId={focusPlay} scrollToPlayId={scrollTarget} />
-    : <div className="wdl-empty">Your feed's games will play out here. Use ⚙ Customize on the right to choose them.</div>;
-  else if (view === "big") body = bigPlays.length
-    ? <div><FeedList items={bigPlays} render={(p) => <BigPlayItem play={p} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onOpenGame={openGame} />} /></div>
-    : <div className="wdl-empty">No big plays yet this week.</div>;
-  else if (view === "teams") body = (
-    <div>
-      <div className="wdl-h">My teams</div>
-      {grid(myTeamGames, followedTeams.length ? "None of your teams play this week." : "Tap ★ next to any team in All Games to follow it.")}
+  else if (view === "game" && gameParam) body = <GameView gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} />;
+  else if (compact && (view === "game" || onFeed) && gameParam) body = (
+    <div className="wdl-solo">
+      <button className="wdl-back" onClick={() => { setParams({ view: "feed" }); window.scrollTo(0, 0); }}>← Feed</button>
+      <GameView key={gameParam} gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} />
     </div>
   );
-  else if (view === "players") body = (
-    <div>
-      <div className="wdl-h">My players</div>
-      {followedPlayers.length > 0 && (
-        <div className="wdl-athletes" style={{ marginBottom: 18 }}>
-          {followedPlayers.map((p) => <button key={p.id} className="wdl-ath on" onClick={() => togglePlayer(p)} title="Unfollow">★ {p.name}</button>)}
-        </div>
-      )}
-      {myPlayerPlays.length
-        ? myPlayerPlays.map((p) => <BigPlayItem key={p.key} play={p} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onOpenGame={openGame} />)
-        : <div className="wdl-empty">{followedPlayers.length ? "No big plays from your players yet this week." : "Tap + next to any player in Big Plays or a game feed to follow them."}</div>}
+  else if (compact && onFeed) body = feedRail;
+  else if (onFeed) body = feedGameId
+    ? <GameView key={feedGameId} gameId={feedGameId} slateGame={games.find((g) => g.id === feedGameId)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} focusPlayId={focusPlay} onQueueChange={onQueueChange} />
+    : <div className="wdl-empty">Your feed's games will play out here. Use ⚙ Customize on the right to choose them.</div>;
+  else if (view === "customize") body = (
+    <div className="wdl-custpage">
+      <div className="wdl-h">Customize your Feed</div>
+      <div className="wdl-follow-sec">
+        <div className="wdl-cust-h">Teams I follow</div>
+        <TeamSearch schools={schools} followed={followedTeams} onToggle={toggleTeam} />
+        {followedTeams.length > 0 ? (
+          <div className="wdl-athletes">
+            {followedTeams.map((id) => {
+              const t = teamInfo(id);
+              return (
+                <button key={id} className="wdl-ath on wdl-chip" onClick={() => toggleTeam(id)} title="Unfollow">
+                  {t.logo && <img src={t.logo} alt="" />}★ {t.name} ✕
+                </button>
+              );
+            })}
+          </div>
+        ) : <div className="wdl-cust-sub">None yet — search above, or tap ★ next to a team in All Games.</div>}
+      </div>
+      <div className="wdl-follow-sec">
+        <div className="wdl-cust-h">Players I follow</div>
+        <PlayerSearch followedIds={followedIds} onToggle={togglePlayer} />
+        {followedPlayers.length > 0 ? (
+          <div className="wdl-athletes">
+            {followedPlayers.map((p) => (
+              <button key={p.id} className="wdl-ath on" onClick={() => togglePlayer(p)} title="Unfollow">
+                ★ {p.name}{p.team && <span className="wdl-chip-sub"> {[p.position, p.team].filter(Boolean).join(" · ")}</span>} ✕
+              </button>
+            ))}
+          </div>
+        ) : <div className="wdl-cust-sub">None yet — search above, or tap + next to a player in any play.</div>}
+      </div>
+      <FeedCustomize prefs={feedPrefs} onChange={updatePrefs} onClose={() => setView("feed")}
+        signedIn={!!user} rankedCount={rankedGames.length} teamCount={followedTeams.length} playerCount={followedPlayers.length} />
     </div>
   );
   else body = (
@@ -727,17 +1094,17 @@ export default function LivePage() {
     </div>
   );
 
-  const split = view === "all" || view === "teams" || view === "game" || onFeed;
+  const split = !compact && (view === "all" || view === "game" || onFeed);
 
   return (
-    <div className="wdl">
+    <div className={`wdl${compact ? " wdl-compact" : ""}`}>
       <Helmet>
         <title>We-Draft Live — College Football Scores, Plays & Big Plays</title>
         <meta name="description" content="Live college football scores, play-by-play and big plays across the FBS slate — a second screen for Saturdays from We-Draft." />
       </Helmet>
       <style>{STYLE}</style>
       <header className="wdl-top">
-        <Link to="/" className="wdl-brand">WE-DRAFT <span>LIVE</span></Link>
+        <Link to="/" className="wdl-brand" aria-label="We-Draft.com home"><img src={Logo2} alt="We-Draft.com" /><span>LIVE</span></Link>
         <nav className="wdl-tabs">
           {tabs.map((t) => (
             <button key={t.key} className={`wdl-tab${view === t.key ? " on" : ""}`} onClick={() => (t.key === "game" ? null : setView(t.key))}>{t.label}</button>
@@ -747,12 +1114,16 @@ export default function LivePage() {
           {updatedAgo != null && <span>Updated {updatedAgo === 0 ? "just now" : `${updatedAgo}m ago`}</span>}
           <button className="wdl-iconbtn" onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch?.(() => {})}>⛶ Full screen</button>
         </div>
+        {user
+          ? <span className="wdl-auth on" title="Your follows and Feed settings are saved to your account">✓ Signed in</span>
+          : <button className="wdl-auth" onClick={login} title="Log in to save your teams, players and Feed to your account">Log in</button>}
       </header>
+      <AuthModal />
       {slate && view !== "all" && (
-        <ScoreStrip games={games} current={onFeed ? feedGameId : gameParam}
-          onPick={(id) => (onFeed ? setParams({ view: "feed", game: id }) : openGame(id))} />
+        <ScoreStrip games={stripGames} current={onFeed && !compact ? feedGameId : gameParam}
+          onPick={(id) => { if (onFeed) setParams({ view: "feed", game: id }); else openGame(id); if (compact) window.scrollTo(0, 0); }} />
       )}
-      <main className={`wdl-main${split ? " split" : ""}${onFeed ? " feed" : ""}`}>
+      <main className={`wdl-main${split ? " split" : ""}${onFeed ? " feed" : ""}${compact ? " compact" : ""}`}>
         <section>{body}</section>
         {split && slate && feedRail}
       </main>

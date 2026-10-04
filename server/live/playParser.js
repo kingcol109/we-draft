@@ -20,7 +20,7 @@
 // CFBD roster (server/live/rosters.js). A We-Draft profile slug rides along
 // only when that CFBD player has a suggested/verified link.
 
-const PARSER_VERSION = 7; // 2: full names for identified players; 3: creditSide; 4: "St. Clair"-style surnames; 5: penalty team, PAT/2-pt on TDs; 6: two-word surnames, scoring-summary text; 7: lead/sub names, TD called back, halftime, penalty yards, endSpot
+const PARSER_VERSION = 8; // 2: full names for identified players; 3: creditSide; 4: "St. Clair"-style surnames; 5: penalty team, PAT/2-pt on TDs; 6: two-word surnames, scoring-summary text; 7: lead/sub names, TD called back, halftime, penalty yards, endSpot; 8: turnover on downs
 
 // "#3 A.Evans III", "#28 C.O'Neal", "#16 J.Overton, Jr.", "#19 C.McDonald III"
 const NAME = String.raw`#(\d+)\s+((?:[A-Z][A-Za-z]*\.)+\s?(?:(?:De|Del|Della|Da|Di|Du|La|Le|Van|Von|Mac)\s)?[A-Z][A-Za-z'’-]+(?:,?\s(?:Jr|Sr)\.?|\s(?:II|III|IV|V)\b)?)`;
@@ -467,6 +467,18 @@ function presentPlay(play, ctx = {}) {
     || ((type === "punt" || type === "kickoff") && td);
   out.creditSide = defensive ? defense : offense;
   if (type === "penalty" && out.penaltySide) out.creditSide = out.penaltySide;
+
+  // Turnover on downs: a 4th-down snap (run, pass, sack) that came up short
+  // — the ball goes over. Labeled as such and credited to the defense.
+  if (play.down === 4 && ["rush", "pass", "incomplete", "sack"].includes(type) && !nullified && !td && !firstDown
+      && !out.turnover && (play.distance == null || (yards ?? 0) < play.distance)) {
+    out.downsTurnover = true;
+    out.creditSide = defense;
+    out.headline = "TURNOVER ON DOWNS";
+    out.emphasis = "turnover";
+    const stop = play.distance != null ? `Stopped on 4th & ${play.distance}` : "Stopped on 4th down";
+    out.detail = out.detail ? `${out.detail} · ${stop}` : stop;
+  }
 
   // The try after a touchdown — CFBD folds it into the TD's own text
   // ("... TOUCHDOWN, clock 03:26 #80 K.Ferrie kick attempt good (H: ...)").

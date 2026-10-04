@@ -551,6 +551,11 @@ service cloud.firestore {
                         && request.resource.data.get("verified", null) == resource.data.get("verified", null)
                         && request.resource.data.get("simBeta", null) == resource.data.get("simBeta", null));
       allow delete: if isAdmin();
+      // We-Draft Live follows + Feed settings (LivePage.js) — private to
+      // the account (the users doc itself is public-read).
+      match /liveSettings/{doc} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
       match /evaluations/{playerId} {
         // isAdmin() bypass — same Dummy Content reasoning as
         // players/{id}/evaluations/{uid} above; this is that same write's
