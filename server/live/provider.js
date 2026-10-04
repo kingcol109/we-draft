@@ -182,7 +182,16 @@ function fromLivePlays(live, homeName) {
     game.home = { providerTeamId: homeT.teamId, name: homeT.team, points: homeT.points ?? null, lineScores: homeT.lineScores || null };
     game.away = { providerTeamId: awayT.teamId, name: awayT.team, points: awayT.points ?? null, lineScores: awayT.lineScores || null };
   }
-  return { game, plays };
+  // CFBD's live advanced team metrics, kept for the Stats tab.
+  const adv = (t) => (t ? {
+    plays: t.plays ?? null, drives: t.drives ?? null,
+    scoringOpportunities: t.scoringOpportunities ?? null, pointsPerOpportunity: t.pointsPerOpportunity ?? null,
+    successRate: t.successRate ?? null, explosiveness: t.explosiveness ?? null,
+    epaPerPlay: t.epaPerPlay ?? null, epaPerPass: t.epaPerPass ?? null, epaPerRush: t.epaPerRush ?? null,
+    lineYardsPerRush: t.lineYardsPerRush ?? null,
+  } : null);
+  const advanced = homeT && awayT ? { home: adv(homeT), away: adv(awayT) } : null;
+  return { game, plays, advanced };
 }
 
 // Game order: quarter, then game clock counting down, then sequence. Pure

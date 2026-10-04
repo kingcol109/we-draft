@@ -4,6 +4,9 @@ import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
+// We-Draft Live scores for in-progress / just-finished games (one listener
+// on liveSlate/current — see hooks/useLiveSlate.js).
+import { useLiveSlate, scheduleScore } from "../hooks/useLiveSlate";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -65,6 +68,7 @@ export default function CFBPage() {
   // source of truth for a not-yet-played game, regardless of which week
   // it's actually in.
   const currentRankMap = useCurrentRankMap();
+  const liveById = useLiveSlate();
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
@@ -554,11 +558,13 @@ export default function CFBPage() {
                   {visibleGames.map((g, i) => {
                     const d = g.Date?.toDate?.();
                     const timeStr = formatTime12h(g.Time);
-                    const played = g.Final && g.HomeScore != null && g.AwayScore != null;
+                    // Admin final if set, else the live score (if any).
+                    const s = scheduleScore(g, liveById);
+                    const played = s.scored;
                     const away = schoolsByName[g.Away];
                     const home = schoolsByName[g.Home];
-                    const awayWon = played && g.AwayScore > g.HomeScore;
-                    const homeWon = played && g.HomeScore > g.AwayScore;
+                    const awayWon = s.awayWon;
+                    const homeWon = s.homeWon;
 
                     const awayColor = away?.Color1 || "#ccc";
                     const homeColor = home?.Color1 || "#ccc";
@@ -574,12 +580,12 @@ export default function CFBPage() {
                             {(school || "?").charAt(0)}
                           </div>
                         )}
-                        <span style={{ fontWeight: 900, fontSize: "15px", color: played ? (won ? "#222" : "#999") : "#222" }}>
+                        <span style={{ fontWeight: 900, fontSize: "15px", color: played && !s.live ? (won ? "#222" : "#999") : "#222" }}>
                           {rank && <span style={{ color: "#aaa" }}>#{rank} </span>}
                           {school}
                         </span>
                         {played && (
-                          <span style={{ marginLeft: "auto", fontWeight: 900, fontSize: "18px", color: won ? SITE_BLUE : "#bbb" }}>{score}</span>
+                          <span style={{ marginLeft: "auto", fontWeight: 900, fontSize: "18px", color: s.live ? "#222" : won ? SITE_BLUE : "#bbb", fontVariantNumeric: "tabular-nums" }}>{score}</span>
                         )}
                       </div>
                     );
@@ -603,8 +609,8 @@ export default function CFBPage() {
                         }}
                       >
                         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
-                          <TeamRow school={g.Away} data={away} score={g.AwayScore} won={awayWon} rank={awayRank} />
-                          <TeamRow school={g.Home} data={home} score={g.HomeScore} won={homeWon} rank={homeRank} />
+                          <TeamRow school={g.Away} data={away} score={s.away} won={awayWon} rank={awayRank} />
+                          <TeamRow school={g.Home} data={home} score={s.home} won={homeWon} rank={homeRank} />
                         </div>
                         <div style={{ fontSize: "12px", fontWeight: 700, color: "#aaa", flexShrink: 0, textAlign: "right" }}>
                           {g.GameOfWeek ? (
@@ -626,10 +632,19 @@ export default function CFBPage() {
                               ⭐ Featured
                             </span>
                           )}
-                          <div style={{ fontSize: "16px", fontWeight: 900, color: "#555", lineHeight: 1.25 }}>
-                            {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD"}
-                            {timeStr && <div>{timeStr}</div>}
-                          </div>
+                          {s.live || s.liveFinal ? (
+                            // Live: quarter + clock in red; provider-final
+                            // (not yet admin-finalized): FINAL.
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px", fontSize: "15px", fontWeight: 900, color: s.live ? "#d62828" : "#555", lineHeight: 1.25, fontVariantNumeric: "tabular-nums" }}>
+                              {s.live && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#d62828", display: "inline-block" }} />}
+                              {s.label}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: "16px", fontWeight: 900, color: "#555", lineHeight: 1.25 }}>
+                              {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD"}
+                              {timeStr && <div>{timeStr}</div>}
+                            </div>
+                          )}
                           {channelShort && (
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb", marginTop: "3px" }}>
                               📺 {channelShort}

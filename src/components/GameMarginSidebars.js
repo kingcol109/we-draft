@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { useLiveSlate, scheduleScore } from "../hooks/useLiveSlate";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -59,6 +60,18 @@ function currentWeekBoundsUtc() {
   return { start: monday, end: sunday };
 }
 
+// "● Q3 8:42" under a live game's rows, "FINAL" under a live-final one
+// that hasn't been admin-finalized yet; nothing otherwise.
+function LiveStatusLine({ s }) {
+  if (!s.live && !s.liveFinal) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "10px", fontWeight: 900, color: s.live ? "#d62828" : "#888", marginTop: "3px", letterSpacing: "0.04em", fontVariantNumeric: "tabular-nums" }}>
+      {s.live && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#d62828", display: "inline-block" }} />}
+      {s.label}
+    </div>
+  );
+}
+
 // A visibly solid card (site-standard 2px blue border, same language as
 // every other bordered card on the site) with a light, grounded shadow
 // rather than a heavy "floating" one — paired with anchoring the whole
@@ -93,6 +106,11 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
   const [newsItems, setNewsItems] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
   const [channelsByName, setChannelsByName] = useState({});
+  // Live scores (We-Draft Live) for both game cards — an in-progress game
+  // shows its running score + quarter/clock; a finished one shows the live
+  // final until an admin marks the schedule26 doc Final, after which the
+  // admin-entered score takes over as before.
+  const liveById = useLiveSlate(!isMobile);
   // This component renders after (below, in DOM order) the main content it
   // measures — anchorRef marks *this* component's own position so the
   // sidebar cards, positioned absolute beneath it, can be offset by the
@@ -292,11 +310,12 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
             </div>
             <div style={{ height: "3px", background: GOLD }} />
             {weekSlate.map((g, i) => {
-              const played = g.Final && g.HomeScore != null && g.AwayScore != null;
+              const s = scheduleScore(g, liveById);
+              const played = s.scored;
               const away = schoolsByName[g.Away];
               const home = schoolsByName[g.Home];
-              const awayWon = played && g.AwayScore > g.HomeScore;
-              const homeWon = played && g.HomeScore > g.AwayScore;
+              const awayWon = s.awayWon;
+              const homeWon = s.homeWon;
               const dateMs = toMs(g.Date);
               const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
               const timeStr = formatTime12h(g.Time);
@@ -315,12 +334,12 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                     ) : (
                       <span style={{ width: "16px", height: "16px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
                     )}
-                    <span style={{ fontSize: "11px", fontWeight: 900, color: played ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 900, color: played && !s.live ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {short || school}
                     </span>
                   </div>
                   {played && (
-                    <span style={{ fontSize: "15px", fontWeight: 900, color: won ? BLUE : "#bbb", flexShrink: 0 }}>{score}</span>
+                    <span style={{ fontSize: "15px", fontWeight: 900, color: s.live ? "#222" : won ? BLUE : "#bbb", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{score}</span>
                   )}
                 </div>
               );
@@ -333,8 +352,9 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                   onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                 >
-                  {bugRow(away?.Short, g.Away, away?.Logo1, g.AwayScore, awayWon)}
-                  {bugRow(home?.Short, g.Home, home?.Logo1, g.HomeScore, homeWon)}
+                  {bugRow(away?.Short, g.Away, away?.Logo1, s.away, awayWon)}
+                  {bugRow(home?.Short, g.Home, home?.Logo1, s.home, homeWon)}
+                  <LiveStatusLine s={s} />
                   {!played && (
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
                       {dateLabel}{timeStr ? ` · ${timeStr}` : ""}{channelShort ? ` · ${channelShort}` : ""}
@@ -378,11 +398,12 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
             </div>
             <div style={{ height: "3px", background: GOLD }} />
             {featuredGames.map((g, i) => {
-              const played = g.Final && g.HomeScore != null && g.AwayScore != null;
+              const s = scheduleScore(g, liveById);
+              const played = s.scored;
               const away = schoolsByName[g.Away];
               const home = schoolsByName[g.Home];
-              const awayWon = played && g.AwayScore > g.HomeScore;
-              const homeWon = played && g.HomeScore > g.AwayScore;
+              const awayWon = s.awayWon;
+              const homeWon = s.homeWon;
               const dateMs = toMs(g.Date);
               const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
               const timeStr = formatTime12h(g.Time);
@@ -396,12 +417,12 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                     ) : (
                       <span style={{ width: "18px", height: "18px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
                     )}
-                    <span style={{ fontSize: "12px", fontWeight: 900, color: played ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 900, color: played && !s.live ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em" }}>
                       {short || school}
                     </span>
                   </div>
                   {played && (
-                    <span style={{ fontSize: "18px", fontWeight: 900, color: won ? BLUE : "#bbb", flexShrink: 0 }}>{score}</span>
+                    <span style={{ fontSize: "18px", fontWeight: 900, color: s.live ? "#222" : won ? BLUE : "#bbb", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{score}</span>
                   )}
                 </div>
               );
@@ -419,8 +440,9 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
                       🔥 Game of the Week
                     </div>
                   )}
-                  {bugRow(away?.Short, g.Away, away?.Logo1, g.AwayScore, awayWon)}
-                  {bugRow(home?.Short, g.Home, home?.Logo1, g.HomeScore, homeWon)}
+                  {bugRow(away?.Short, g.Away, away?.Logo1, s.away, awayWon)}
+                  {bugRow(home?.Short, g.Home, home?.Logo1, s.home, homeWon)}
+                  <LiveStatusLine s={s} />
                   {!played && (
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
                       {dateLabel}{timeStr ? ` · ${timeStr}` : ""}{channelShort ? ` · ${channelShort}` : ""}

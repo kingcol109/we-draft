@@ -27,6 +27,10 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { getAnonId } from "../utils/anonId";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
+// 2026 season stats + game log from the linked CFBD player (right column).
+import PlayerStatsCard from "../components/PlayerStatsCard";
+// "Playing now" + Follow Live while the player's team is on the field.
+import PlayerLiveCard from "../components/PlayerLiveCard";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
@@ -2054,7 +2058,8 @@ export default function PlayerProfile() {
   const [draftInfo, setDraftInfo] = useState(null);
   const [playerNews, setPlayerNews] = useState([]);
   const [playerVideos, setPlayerVideos] = useState([]);
-  const [visibleVideoCount, setVisibleVideoCount] = useState(3);
+  // Videos sidebar shows one video until "Show More Videos" (then +3 a click).
+  const [visibleVideoCount, setVisibleVideoCount] = useState(1);
   // ── Measurement pill percentiles — same hover treatment as the
   // comparison page's chips (Comparison.js): hover (tap on touch) fills the
   // pill with color1 and swaps the value for its percentile among every
@@ -2620,7 +2625,7 @@ export default function PlayerProfile() {
 
         if (vids.length > 0) {
           setPlayerVideos(vids);
-          setVisibleVideoCount(3);
+          setVisibleVideoCount(1);
           return;
         }
 
@@ -2653,7 +2658,7 @@ export default function PlayerProfile() {
           .sort((a, b) => toMs(b.date) - toMs(a.date))
           .slice(0, 3);
         setPlayerVideos(fallback);
-        setVisibleVideoCount(3);
+        setVisibleVideoCount(1);
       } catch(e) { setPlayerVideos([]); setWatchClips([]); }
     };
     fetch();
@@ -6032,15 +6037,19 @@ useEffect(() => {
         </div>
         {/* ===== END MAIN COLUMN ===== */}
 
-        {/* ===== RIGHT COLUMN: Videos + In The News ===== */}
+        {/* ===== RIGHT COLUMN: Videos + Stats + In The News ===== */}
         {isMobile ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            <PlayerLiveCard player={player} />
             {playerVideos.length > 0 && VideosSidebar}
+            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
             {NewsSidebar}
           </div>
         ) : (
           <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            <PlayerLiveCard player={player} />
             {playerVideos.length > 0 && VideosSidebar}
+            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
             {NewsSidebar}
           </div>
         )}

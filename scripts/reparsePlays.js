@@ -13,9 +13,9 @@
 
 const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
-const { presentPlay } = require("../server/live/playParser");
+const { presentPlay, learnSpotAbbrs } = require("../server/live/playParser");
 const { rostersForGame } = require("../server/live/rosters");
-const { slateBigPlay, feedWorthy, MAX_SLATE_BIG_PLAYS: MAX_SLATE_FEED } = require("../server/live/store");
+const { slateBigPlay, feedWorthy, dedupeFeed, MAX_SLATE_BIG_PLAYS: MAX_SLATE_FEED } = require("../server/live/store");
 const { comparePlays } = require("../server/live/provider");
 const { CONFIG } = require("../server/live/ingest");
 
@@ -46,9 +46,10 @@ async function main() {
     totals.games++;
     const rosters = await rostersForGame(db, game, budget);
     const ops = [];
+    const abbrs = learnSpotAbbrs(snap.docs.map((d) => d.data()));
     for (const d of snap.docs) {
       const p = d.data();
-      const pres = presentPlay(p, { athletes: p.athletes, rosters });
+      const pres = presentPlay(p, { athletes: p.athletes, rosters, abbrs });
       totals.plays++;
       if (pres.confidence === "fallback") totals.fallback++;
       const people = Object.values(pres.players).flat();
@@ -63,7 +64,7 @@ async function main() {
     // re-parsed plays — same rule and builder as the ingester.
     const gid = String(game.providerGameId);
     const reparsed = snap.docs.map((d) => ({ ...d.data(), presentation: byKey.get(`${id}:${d.id}`).pres })).sort(comparePlays);
-    const feed = reparsed.filter(feedWorthy).map((p) => slateBigPlay(gid, game, p));
+    const feed = dedupeFeed(reparsed.filter(feedWorthy).map((p) => slateBigPlay(gid, game, p)));
     allFeed.push(...feed, ...(game.finalFeed ? [game.finalFeed] : []));
     ops.push((b) => b.update(gameRef, { feedPlays: [...feed].reverse().slice(0, MAX_GAME_FEED) }));
     if (!DRY) {
@@ -78,7 +79,7 @@ async function main() {
   // The slate's cross-game Feed (liveSlate/current.bigPlays): the newest
   // entries across every re-parsed game.
   if (!DRY && args.includes("--slate")) {
-    const bigPlays = allFeed.sort((a, b) => b.at - a.at).slice(0, MAX_SLATE_FEED);
+    const bigPlays = dedupeFeed(allFeed.sort((a, b) => b.at - a.at)).slice(0, MAX_SLATE_FEED);
     await slateRef.update({ bigPlays });
     console.log(`Slate feed rebuilt: ${bigPlays.length} entries`);
   }

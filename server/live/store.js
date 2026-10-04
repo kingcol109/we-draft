@@ -208,6 +208,9 @@ async function saveBox(db, game, box) {
       startDate: game.startDate ?? null,
       team: p.team,
       opponent: p.side === "home" ? game.away?.name : game.home?.name,
+      // Final score from this team's side (the player page's W/L).
+      teamPoints: (p.side === "home" ? game.home?.points : game.away?.points) ?? null,
+      opponentPoints: (p.side === "home" ? game.away?.points : game.home?.points) ?? null,
       homeAway: p.side,
       wedraftGameSlug: game.slug ?? null,
       stats: p.stats,
@@ -274,8 +277,8 @@ const MAX_SLATE_BIG_PLAYS = 60;
 
 // The fields the slate's feeds render — keeps liveSlate/current small.
 function compactPresentation(pr) {
-  const { v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide } = pr;
-  return JSON.parse(JSON.stringify({ v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide }));
+  const { v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat } = pr;
+  return JSON.parse(JSON.stringify({ v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat }));
 }
 
 function mergeAthletes(p) {
@@ -300,6 +303,7 @@ function slateBigPlay(gameId, g, p) {
     period: p.period,
     clock: p.clock,
     down: p.down ?? null,
+    yardsToGoal: p.yardsToGoal ?? null, // ball spot before the snap (offense's yards to goal)
     distance: p.distance ?? null,
     text: p.text,
     label: p.bigPlay?.label || p.presentation?.headline || p.type,
@@ -311,6 +315,8 @@ function slateBigPlay(gameId, g, p) {
     offenseLogo: offenseTeam?.logoDark || offenseTeam?.logo || null,
     teamName: creditTeam?.short || creditTeam?.school || creditTeam?.name || null,
     teamLogo: creditTeam?.logoDark || creditTeam?.logo || null,
+    teamColor: creditTeam?.color || null,
+    creditSide: creditSide || null,
     // Logos for the Feed card's mini scoreboard.
     homeLogo: g.home?.logoDark || g.home?.logo || null,
     awayLogo: g.away?.logoDark || g.away?.logo || null,
@@ -339,6 +345,9 @@ async function writeSlate(db, { season, week, seasonType, games, newBigPlays = [
   const byKey = new Map((sameWeek ? prev.bigPlays || [] : []).map((b) => [b.key, b]));
   for (const b of newBigPlays) byKey.set(b.key, byKey.has(b.key) ? { ...b, at: byKey.get(b.key).at } : b);
   for (const k of removeKeys) byKey.delete(k);
+  const merged = dedupeFeed([...byKey.values()].sort((a, b) => b.at - a.at));
+  byKey.clear();
+  for (const b of merged) byKey.set(b.key, b);
   const bigPlays = [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, MAX_SLATE_BIG_PLAYS);
 
   const gamesOut = [...games.entries()].map(([id, g]) => slateGame(id, g, rostersById.get(id)))
@@ -364,6 +373,21 @@ function feedKinds(p) {
   return kinds;
 }
 const feedWorthy = (p) => feedKinds(p).length > 0;
+
+// CFBD sometimes re-issues a play under a new id (a revision) while the old
+// one lingers. Two entries for the same game, quarter, clock and kind of
+// play are the same play: keep only the first one given (callers pass
+// newest first, so the most recent version wins).
+function dedupeFeed(entries) {
+  const seen = new Set();
+  return entries.filter((e) => {
+    if (e.clock == null) return true; // FINAL entries etc.
+    const sig = `${e.gameId}|${e.period}|${e.clock}|${e.presentation?.type || e.label}|${(e.kinds || []).join(",")}`;
+    if (seen.has(sig)) return false;
+    seen.add(sig);
+    return true;
+  });
+}
 
 // The Feed entry posted when a game goes final (kind "final"). Same shape as
 // a play entry (slateBigPlay) so every feed renders it with no special data
@@ -412,4 +436,4 @@ function finalFeedEntry(gameId, g, at = Date.now()) {
   };
 }
 
-module.exports = { gameKey, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry };
+module.exports = { gameKey, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed };

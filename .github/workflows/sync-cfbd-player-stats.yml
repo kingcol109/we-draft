@@ -1,0 +1,37 @@
+name: Sync CFBD Player Stats
+
+# Runs daily at 9:00 UTC (5am ET / 4am EST — GitHub Actions schedules
+# always run in UTC, see sync-analytics.yml's own comment). Refreshes the
+# 2026 season totals on every CFBD player linked to a We-Draft profile —
+# the player page's "2026 Stats" card — with one CFBD call (see
+# scripts/syncCfbdPlayerStats.js). Game logs are written by the live
+# ingester as games end, so this only needs the totals. Idempotent; also
+# runnable on demand via workflow_dispatch.
+#
+# Needs repo secrets GOOGLE_SERVICE_ACCOUNT_KEY (already used by the other
+# workflows) and CFBD_API_KEY.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Sync season player stats
+        run: node scripts/syncCfbdPlayerStats.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}

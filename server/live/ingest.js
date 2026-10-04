@@ -29,7 +29,7 @@ const P = require("./provider");
 const { detectBigPlays } = require("./bigPlays");
 const S = require("./store");
 const { syncSchedule } = require("./scheduleSync");
-const { presentPlay } = require("./playParser");
+const { presentPlay, learnSpotAbbrs } = require("./playParser");
 const { rostersForGame } = require("./rosters");
 
 const CONFIG = {
@@ -208,7 +208,7 @@ function liveStateFromPlays(live, lastPlay) {
 let schoolsCache = null;
 async function schoolsByTeamId(db) {
   if (schoolsCache && Date.now() - schoolsCache.at < 6 * 3600e3) return schoolsCache.map;
-  const snap = await db.collection("schools").select("School", "Short", "Logo1", "LogoDark", "Color1", "CFBDTeamId").get();
+  const snap = await db.collection("schools").select("School", "Short", "Logo1", "LogoDark", "Color1", "WordmarkDark", "Wordmark", "CFBDTeamId").get();
   const map = new Map();
   snap.docs.forEach((d) => { const s = d.data(); if (s.CFBDTeamId != null) map.set(s.CFBDTeamId, s); });
   schoolsCache = { at: Date.now(), map };
@@ -244,6 +244,9 @@ async function enrich(db, games) {
       short: s?.Short || null,
       logo: s?.Logo1 || `https://cdn.collegefootballdata.com/logos/500/${t.providerTeamId}.png`,
       logoDark: s?.LogoDark || null,
+      // Dark-background wordmark (falls back to the regular one) — /live's
+      // matchup header uses it as each side's faded backdrop.
+      wordmark: s?.WordmarkDark || s?.Wordmark || null,
       color: s?.Color1 || null,
       rank: rank ?? null,
     };
@@ -280,7 +283,10 @@ async function storePlays(db, game, plays, playStats, { complete, rosterBudget }
   detectBigPlays(ordered);
   // Display layer on top of the raw text (which is kept as-is in `text`).
   const rosters = await rostersForGame(db, game, rosterBudget).catch(() => ({ home: [], away: [] }));
-  for (const p of ordered) p.presentation = presentPlay(p, { athletes: p.athletes, rosters });
+  // Team abbreviations the play text uses ("WKU"), learned from this
+  // game's own ball spots — tells the parser whose penalty a flag is.
+  const abbrs = learnSpotAbbrs(ordered);
+  for (const p of ordered) p.presentation = presentPlay(p, { athletes: p.athletes, rosters, abbrs });
   const res = await S.savePlays(db, game.providerGameId, ordered, { complete });
   const last = ordered[ordered.length - 1];
   // Compact scoring summary on the game doc itself, so a game page can show
@@ -300,7 +306,7 @@ async function storePlays(db, game, plays, playStats, { complete, rosterBudget }
   // each game's whole history, not just what's still in the slate's
   // rolling cross-game list.
   const gid = S.gameKey(game.providerGameId);
-  const feedPlays = ordered.filter(S.feedWorthy).map((p) => S.slateBigPlay(gid, game, p)).reverse().slice(0, CONFIG.MAX_GAME_FEED);
+  const feedPlays = S.dedupeFeed(ordered.filter(S.feedWorthy).map((p) => S.slateBigPlay(gid, game, p)).reverse()).slice(0, CONFIG.MAX_GAME_FEED);
   await S.setGameFields(db, game.providerGameId, {
     playCount: ordered.length,
     scoringPlays,
@@ -328,7 +334,9 @@ async function ingestFinalGame(db, game, tierLevel, rosterBudget = { left: 2 }) 
   const id = game.providerGameId;
   let plays;
   if (tierLevel === "live") {
-    plays = P.fromLivePlays(await cfbd.livePlays(id), game.home?.name).plays;
+    const liveData = P.fromLivePlays(await cfbd.livePlays(id), game.home?.name);
+    plays = liveData.plays;
+    if (liveData.advanced) await S.setGameFields(db, id, { advanced: JSON.parse(JSON.stringify(liveData.advanced)) });
   } else {
     const rows = await cfbd.plays({ year: game.season, week: game.week, seasonType: game.seasonType, team: game.home?.name });
     plays = rows.filter((p) => p.gameId === id).map(P.playFromHistorical);
@@ -464,6 +472,7 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
         if (outOfTime()) return;
         await step(`live plays ${id}`, async () => {
           const live = P.fromLivePlays(await cfbd.livePlays(g.providerGameId), g.home?.name);
+          if (live.advanced) await S.setGameFields(db, g.providerGameId, { advanced: JSON.parse(JSON.stringify(live.advanced)) });
           const res = await storePlays(db, g, live.plays, null, { complete: true, rosterBudget });
           newBig.push(...res.big);
           dropKeys.push(...(res.dropKeys || []));
@@ -586,4 +595,4 @@ async function ingestOneGame(db, providerGameId) {
   return ingestFinalGame(db, game, game.status === "final" ? (level === "live" ? "live" : "free") : level);
 }
 
-module.exports = { CONFIG, runTick, ingestOneGame, withoutStaleState };
+module.exports = { CONFIG, runTick, ingestOneGame, withoutStaleState, enrich, storePlays };

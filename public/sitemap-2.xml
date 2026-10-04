@@ -162,6 +162,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/jonaz-walton-2029-rb</loc>
+    <lastmod>2026-10-03</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/jondarius-morgan-2026-ol</loc>
     <lastmod>2026-10-03</lastmod>
     <priority>0.7</priority>
@@ -593,7 +598,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/keelon-russell-2028-qb</loc>
-    <lastmod>2026-09-20</lastmod>
+    <lastmod>2026-10-03</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -1653,7 +1658,7 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/nathaniel-staehling-2027-lb</loc>
-    <lastmod>2026-09-14</lastmod>
+    <lastmod>2026-10-03</lastmod>
     <priority>0.7</priority>
   </url>
   <url>
@@ -4994,11 +4999,6 @@
   <url>
     <loc>https://we-draft.com/comparison/dillon-thieneman-2026-db</loc>
     <lastmod>2026-08-26</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/dillon-wade-2026-ol</loc>
-    <lastmod>2026-10-03</lastmod>
     <priority>0.6</priority>
   </url>
 </urlset>

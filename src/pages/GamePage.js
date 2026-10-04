@@ -22,6 +22,12 @@ import GameOfWeekBadge from "../assets/weekgame.png";
 import FeaturedGameBadge from "../assets/featgame.png";
 import confetti from "canvas-confetti";
 import { useCurrentRankMap, ranksForGame, withRank } from "../utils/rankings";
+// We-Draft Live — real-time score/status written by the central ingester
+// (server/live/*), linked through this game's CFBDGameId. The play-by-play
+// itself lives on /live (see the hero's "Follow Live" button).
+import { useLiveGame } from "../hooks/useLiveGame";
+import { statusLabel } from "../utils/live";
+import LiveGameStats, { LIVE_STATS_STYLE } from "../components/LiveGameStats";
 
 // Same flair badge assets/config as PlayerProfile.js's hero (duplicated
 // rather than imported cross-page, matching this codebase's own convention
@@ -652,6 +658,22 @@ export default function GamePage() {
   const contentRef = useRef(null);
   const pickFormRef = useRef(null);
   const communityPicksRef = useRef(null);
+
+  // Live score/status only — one doc listener, no plays or box score here.
+  const liveGame = useLiveGame(game?.CFBDGameId, { plays: "none", box: false }).game;
+  // Game Stats card: mounted only once it scrolls near the viewport — a
+  // finished game's stats read its whole play list, so pages that are
+  // never scrolled that far don't pay for it.
+  const statsRef = useRef(null);
+  const [statsInView, setStatsInView] = useState(false);
+  useEffect(() => { setStatsInView(false); }, [slug]);
+  useEffect(() => {
+    const el = statsRef.current;
+    if (!el || statsInView || typeof IntersectionObserver === "undefined") return undefined;
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) setStatsInView(true); }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  });
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 900);
@@ -1289,6 +1311,17 @@ export default function GamePage() {
 
   const isFinal = game.Final && game.HomeScore != null && game.AwayScore != null;
   const { homeRank, awayRank } = ranksForGame(game, currentRankMap);
+  // Live sides follow this page's Home/Away — CFBDMatch.swapped marks a
+  // game whose provider record lists them the other way round.
+  const liveHomeSide = game.CFBDMatch?.swapped ? "away" : "home";
+  const liveAwaySide = game.CFBDMatch?.swapped ? "home" : "away";
+  const liveHome = liveGame?.[liveHomeSide];
+  const liveAway = liveGame?.[liveAwaySide];
+  const liveInProgress = liveGame?.status === "in_progress";
+  // Only with real points — the free CFBD plan reports a game as started
+  // before it reports any score, and a fake 0-0 would be worse than the
+  // normal pregame "at" badge.
+  const showLiveScore = (liveInProgress || liveGame?.status === "final") && liveHome?.points != null && liveAway?.points != null;
   const gameDateMs = game.Date?.toDate ? game.Date.toDate().getTime() : (game.Date ? new Date(game.Date).getTime() : 0);
   // Date-only field is stored as UTC midnight — format in UTC too, or a
   // viewer west of it sees the game roll back a calendar day.
@@ -1859,6 +1892,38 @@ export default function GamePage() {
                     <span style={{ fontSize: isMobile ? "14px" : "20px", fontWeight: 900, color: "rgba(255,255,255,0.3)" }}>–</span>
                     <span style={{ fontSize: isMobile ? "28px" : "52px", fontWeight: 900, color: homeWon ? "#fff" : "rgba(255,255,255,0.45)", lineHeight: 1 }}>{game.HomeScore}</span>
                   </div>
+                ) : showLiveScore ? (
+                  // Live (or live-final before an admin finalizes the
+                  // schedule26 doc) — same box as the final score above,
+                  // plus a status pill and a possession marker.
+                  <div>
+                    <div style={{
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? "8px" : "14px",
+                      background: "rgba(0,0,0,0.32)", border: `2px solid ${liveInProgress ? "#ff4d4d" : "rgba(255,255,255,0.25)"}`,
+                      borderRadius: "14px", padding: isMobile ? "8px 14px" : "14px 26px",
+                      boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
+                      width: "fit-content", margin: "0 auto",
+                    }}>
+                      <span style={{ fontSize: isMobile ? "28px" : "52px", fontWeight: 900, color: "#fff", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                        {liveAwaySide === liveGame.possession && liveInProgress && <span style={{ fontSize: isMobile ? "11px" : "16px", verticalAlign: "middle", marginRight: "6px" }}>🏈</span>}
+                        {liveAway?.points ?? 0}
+                      </span>
+                      <span style={{ fontSize: isMobile ? "14px" : "20px", fontWeight: 900, color: "rgba(255,255,255,0.3)" }}>–</span>
+                      <span style={{ fontSize: isMobile ? "28px" : "52px", fontWeight: 900, color: "#fff", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                        {liveHome?.points ?? 0}
+                        {liveHomeSide === liveGame.possession && liveInProgress && <span style={{ fontSize: isMobile ? "11px" : "16px", verticalAlign: "middle", marginLeft: "6px" }}>🏈</span>}
+                      </span>
+                    </div>
+                    <div style={{
+                      margin: "8px auto 0", width: "fit-content", display: "flex", alignItems: "center", gap: "6px",
+                      background: liveInProgress ? "#d62828" : "rgba(0,0,0,0.4)", color: "#fff",
+                      fontSize: isMobile ? "10px" : "12px", fontWeight: 900, letterSpacing: "0.08em",
+                      padding: "3px 10px", borderRadius: "12px", fontVariantNumeric: "tabular-nums",
+                    }}>
+                      {liveInProgress && <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#fff", display: "inline-block" }} />}
+                      {statusLabel(liveGame)}
+                    </div>
+                  </div>
                 ) : (
                   <div style={{
                     width: isMobile ? "48px" : "88px", height: isMobile ? "48px" : "88px", borderRadius: "50%",
@@ -1874,6 +1939,27 @@ export default function GamePage() {
                 )}
                 {game.Neutral && (
                   <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "8px" }}>Neutral Site</div>
+                )}
+                {/* Follow Live → this game's play-by-play on /live. Shown
+                    once We-Draft Live is tracking the game (its week's slate,
+                    i.e. game week) until it's final. */}
+                {liveGame && liveGame.status !== "final" && (
+                  <Link
+                    to={`/live?view=game&game=${game.CFBDGameId}`}
+                    style={{
+                      marginTop: "12px", marginLeft: "auto", marginRight: "auto",
+                      width: "fit-content", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px",
+                      background: liveInProgress ? "#d62828" : "rgba(0,0,0,0.32)",
+                      border: `2px solid ${liveInProgress ? "#ff6b6b" : "rgba(255,255,255,0.35)"}`,
+                      borderRadius: "20px", padding: isMobile ? "6px 12px" : "7px 16px",
+                      color: "#fff", fontWeight: 900, fontSize: isMobile ? "11px" : "13px",
+                      textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.05em",
+                      boxShadow: liveInProgress ? "0 4px 14px rgba(214,40,40,0.45)" : "0 4px 10px rgba(0,0,0,0.3)",
+                    }}
+                  >
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: liveInProgress ? "#fff" : "#ff4d4d", display: "inline-block" }} />
+                    Follow Live
+                  </Link>
                 )}
                 {/* Broadcasting channel — set via CFB Schedule's "TV Channel"
                     field, logo managed in Misc Branding (see channelLogo's
@@ -2003,6 +2089,28 @@ export default function GamePage() {
 
           {/* Body */}
           <div style={{ background: "#fff", padding: isMobile ? "20px 16px" : "32px 32px" }}>
+
+            {/* Game Stats — player + team stats once the game has kicked
+                off (live from the play-by-play, official box score once
+                final). Same stats as /live's Stats tab, light theme. */}
+            {liveGame && liveGame.status !== "scheduled" && liveGame.playCount > 0 && (
+              <div ref={statsRef} style={{ marginBottom: "28px" }}>
+                <style>{LIVE_STATS_STYLE}</style>
+                <div style={{ border: `2px solid ${BLUE}`, borderRadius: "12px", overflow: "hidden" }}>
+                  <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                    <h2 style={{ margin: 0, color: GOLD, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                      📊 {liveGame.status === "in_progress" ? "Live Game Stats" : "Game Stats"}
+                    </h2>
+                  </div>
+                  <div style={{ height: "3px", background: GOLD }} />
+                  <div style={{ padding: isMobile ? "14px 12px" : "18px 22px", background: "#f7f9fc", minHeight: "120px" }}>
+                    {statsInView
+                      ? <LiveGameStats gameId={game.CFBDGameId} game={liveGame} theme="light" />
+                      : <div style={{ color: "#7a8597", fontWeight: 700 }}>Loading stats…</div>}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Make Your Pick — predict the score, optionally leave a note,
                 public or private. Locked pre-Monday (or once Final) unless

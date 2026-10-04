@@ -62,6 +62,9 @@ const ArticlePage = lazy(() => import("./pages/ArticlePage"));
 const VideosPage = lazy(() => import("./pages/VideosPage"));
 const WatchPage = lazy(() => import("./pages/WatchPage"));
 const GamePage = lazy(() => import("./pages/GamePage"));
+// We-Draft Live — full-screen "second screen" scoreboard, standalone like
+// /draft-tracker (no navbar) so it can live on a TV.
+const LivePage = lazy(() => import("./pages/LivePage"));
 const MyFeed = lazy(() => import("./pages/MyFeed"));
 
 // Admin — the single biggest chunk to keep out of everyone else's download
@@ -108,6 +111,7 @@ function App() {
           <Routes>
             {/* Standalone — no navbar, no padding */}
             <Route path="/draft-tracker" element={<DraftTracker />} />
+            <Route path="/live" element={<LivePage />} />
             <Route path="/sim" element={<SimRoute><SimPage /></SimRoute>} />
 
             {/* All other routes — wrapped with Navbar */}

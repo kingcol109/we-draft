@@ -20,10 +20,10 @@
 // CFBD roster (server/live/rosters.js). A We-Draft profile slug rides along
 // only when that CFBD player has a suggested/verified link.
 
-const PARSER_VERSION = 4; // 2: full names for identified players; 3: creditSide; 4: "St. Clair"-style surnames
+const PARSER_VERSION = 7; // 2: full names for identified players; 3: creditSide; 4: "St. Clair"-style surnames; 5: penalty team, PAT/2-pt on TDs; 6: two-word surnames, scoring-summary text; 7: lead/sub names, TD called back, halftime, penalty yards, endSpot
 
 // "#3 A.Evans III", "#28 C.O'Neal", "#16 J.Overton, Jr.", "#19 C.McDonald III"
-const NAME = String.raw`#(\d+)\s+((?:[A-Z][A-Za-z]*\.)+\s?[A-Z][A-Za-z'’-]+(?:,?\s(?:Jr|Sr)\.?|\s(?:II|III|IV|V)\b)?)`;
+const NAME = String.raw`#(\d+)\s+((?:[A-Z][A-Za-z]*\.)+\s?(?:(?:De|Del|Della|Da|Di|Du|La|Le|Van|Von|Mac)\s)?[A-Z][A-Za-z'’-]+(?:,?\s(?:Jr|Sr)\.?|\s(?:II|III|IV|V)\b)?)`;
 const nameRe = (g = "") => new RegExp(NAME, g);
 
 const FORMATION = /^(?:(?:No Huddle|Shotgun|Pistol|Under Center|Wildcat|Empty)[\s-]*)+/i;
@@ -75,6 +75,10 @@ function resolvePlayer(token, side, ctx = {}) {
     if (hits.length === 1) {
       player.cfbdId = hits[0].id;
       player.source = "inferred";
+      if (!player.side) {
+        player.side = (ctx.rosters?.home || []).some((r) => r.id === hits[0].id) ? "home"
+          : (ctx.rosters?.away || []).some((r) => r.id === hits[0].id) ? "away" : null;
+      }
     }
   }
   if (player.cfbdId) {
@@ -93,6 +97,26 @@ function resolvePlayer(token, side, ctx = {}) {
 }
 
 const tok = (m) => (m ? { jersey: m[1], raw: m[2] } : null);
+
+function resolveFullName(full, side, ctx = {}) {
+  const name = (full || "").replace(/,/g, "").trim();
+  if (!name) return null;
+  const parts = name.split(/\s+/);
+  const first = parts[0];
+  const last = normLast(parts.slice(1).join(" "));
+  const player = { name, jersey: null, side: side || null, cfbdId: null, source: null, wedraftSlug: null };
+  const pools = side ? [[side, ctx.rosters?.[side] || []]] : [["home", ctx.rosters?.home || []], ["away", ctx.rosters?.away || []]];
+  const hits = [];
+  for (const [sd, list] of pools) {
+    for (const r of list) if (normLast(r.last) === last && normLast(r.first) === normLast(first)) hits.push([sd, r]);
+  }
+  if (hits.length === 1) {
+    const [sd, r] = hits[0];
+    Object.assign(player, { cfbdId: r.id, source: "inferred", side: player.side || sd, jersey: r.jersey ?? null });
+    if (r.slug && (r.status === "verified" || r.status === "suggested")) player.wedraftSlug = r.slug;
+  }
+  return player;
+}
 const firstName = (s) => tok(nameRe().exec(s || ""));
 const allNames = (s) => [...(s || "").matchAll(nameRe("g"))].map(tok);
 
@@ -205,10 +229,49 @@ function presentPlay(play, ctx = {}) {
     fallbackText: null,
   };
   const playerTok = (p) => (p ? { player: p } : null);
+  // On defensive plays (sacks, picks, recoveries) and big returns, the
+  // defender/returner leads — bigger on the card — and the offensive
+  // player trails smaller.
+  const leadTok = (p) => (p ? { player: p, lead: true } : null);
+  const subTok = (p) => (p ? { player: p, sub: true } : null);
   const txt = (t) => ({ text: t });
   let m;
 
-  switch (type) {
+  // ESPN scoring-summary form some live scores arrive in:
+  //   "TK King 15 Yd pass from Adam Damante (Ilya Uvaydov Kick)"
+  //   "Jadan Baugh 4 Yd Run (Patrick Durkin Kick)", "X 45 Yd Field Goal"
+  const sum = /^([A-Z][\w'’.-]*(?: [A-Z][\w'’.-]*)*?) (\d+) Yd (pass from|Run|Rush|Interception Return|Fumble Return|Fumble Recovery|Punt Return|Kickoff Return|Kick Return|Field Goal)(?: ([^(]+?))?\s*(?:\(.*\))?\s*$/i.exec(s);
+  const F = (name, side) => resolveFullName(name, side, c);
+  if (sum) {
+    const kind = sum[3].toLowerCase();
+    const yd = Number(sum[2]);
+    if (out.yards == null || out.yards === 0) out.yards = yd;
+    if (kind === "pass from") {
+      const receiver = F(sum[1], offense);
+      const passer = F(sum[4], offense);
+      Object.assign(out.players, { passer, receiver });
+      Object.assign(out, { type: "pass", headline: "TOUCHDOWN", line: [playerTok(passer), txt("→"), playerTok(receiver)].filter(Boolean), detail: `${yd}-yard TD pass` });
+    } else if (kind === "run" || kind === "rush") {
+      const rusher = F(sum[1], offense);
+      Object.assign(out.players, { rusher });
+      Object.assign(out, { type: "rush", headline: "TOUCHDOWN", line: [playerTok(rusher)], detail: `${yd}-yard TD run` });
+    } else if (kind === "field goal") {
+      const kicker = F(sum[1], offense);
+      Object.assign(out.players, { kicker });
+      Object.assign(out, { type: "field_goal", headline: "FIELD GOAL", emphasis: "score", line: [playerTok(kicker)], detail: `${yd}-yard field goal`, yards: yd, touchdown: false });
+    } else {
+      const returner = F(sum[1], defense);
+      const isInt = kind === "interception return";
+      const isFum = kind.startsWith("fumble");
+      Object.assign(out.players, isInt ? { interceptor: returner } : { returner });
+      Object.assign(out, {
+        type: isInt ? "interception" : isFum ? "fumble" : kind.startsWith("punt") ? "punt" : "kickoff",
+        headline: isInt ? "PICK-SIX" : isFum ? "FUMBLE RETURN TD" : kind.startsWith("punt") ? "PUNT RETURN TD" : "KICK RETURN TD",
+        emphasis: "td", turnover: isInt || isFum, interception: isInt, fumble: isFum,
+        line: [playerTok(returner)], detail: `${yd}-yard ${isInt ? "interception return" : "return"} TD`,
+      });
+    }
+  } else switch (type) {
     case "pass": {
       m = new RegExp(`${NAME}\\s+pass complete.*?\\bto\\s+${NAME}`).exec(main);
       const passer = m ? P({ jersey: m[1], raw: m[2] }, offense) : P(firstName(main), offense);
@@ -249,7 +312,7 @@ function presentPlay(play, ctx = {}) {
       out.headline = "SACK";
       out.emphasis = "negative";
       out.line = sackers.length
-        ? [...sackers.flatMap((p, i) => (i ? [txt("&"), playerTok(p)] : [playerTok(p)])), txt(sackers.length > 1 ? "sack" : "sacks"), playerTok(passer)].filter(Boolean)
+        ? [...sackers.flatMap((p, i) => (i ? [txt("&"), leadTok(p)] : [leadTok(p)])), txt(sackers.length > 1 ? "sack" : "sacks"), subTok(passer)].filter(Boolean)
         : [playerTok(passer), txt("sacked")].filter(Boolean);
       out.detail = loss != null ? `-${plural(loss)}` : "";
       if (/fumble by/i.test(main)) { out.fumble = true; out.detail += out.detail ? " · Fumble" : "Fumble"; }
@@ -264,7 +327,7 @@ function presentPlay(play, ctx = {}) {
       out.turnover = true;
       out.headline = td ? "PICK-SIX" : "INTERCEPTION";
       out.emphasis = td ? "td" : "turnover";
-      out.line = interceptor ? [playerTok(interceptor), txt("intercepts"), playerTok(passer)].filter(Boolean) : [playerTok(passer)].filter(Boolean);
+      out.line = interceptor ? [leadTok(interceptor), txt("intercepts"), subTok(passer)].filter(Boolean) : [playerTok(passer)].filter(Boolean);
       out.detail = td ? `${yardsWord(ret ?? 0)} interception return TD` : ret ? `Returned ${plural(ret)}` : "";
       if (!interceptor) out.confidence = "partial";
       break;
@@ -281,8 +344,13 @@ function presentPlay(play, ctx = {}) {
       out.turnover = lost;
       out.headline = td ? "FUMBLE RETURN TD" : lost ? "FUMBLE LOST" : "FUMBLE";
       out.emphasis = td ? "td" : lost ? "turnover" : "negative";
-      out.line = [playerTok(fumbler), txt("fumbles")].filter(Boolean);
-      out.detail = recoverer ? `Recovered by ${recoverer.name}` : "";
+      if (lost && recoverer) {
+        out.line = [leadTok(recoverer), txt("recovers"), subTok(fumbler), txt("fumble")].filter(Boolean);
+        out.detail = forced ? `Forced by ${forced.name}` : "";
+      } else {
+        out.line = [playerTok(fumbler), txt("fumbles")].filter(Boolean);
+        out.detail = recoverer ? `Recovered by ${recoverer.name}` : "";
+      }
       if (!fumbler) out.confidence = "partial";
       break;
     }
@@ -308,8 +376,16 @@ function presentPlay(play, ctx = {}) {
       Object.assign(out.players, { punter, returner });
       out.headline = td ? "PUNT RETURN TD" : /muffed/i.test(main) ? "MUFFED PUNT" : "PUNT";
       out.emphasis = td ? "td" : /muffed/i.test(main) ? "turnover" : "muted";
-      out.line = [playerTok(punter)].filter(Boolean);
-      out.detail = [dist ? `${yardsWord(dist)} punt` : "", rt ? `${returner?.name} return ${plural(Number(rt[3]))}` : fc ? `Fair catch by ${returner?.name}` : /touchback/i.test(main) ? "Touchback" : ""].filter(Boolean).join(" · ");
+      const retYds = rt ? Number(rt[3]) : 0;
+      if (!td && rt && retYds >= 10) {
+        out.headline = "PUNT RETURN";
+        out.emphasis = retYds >= 20 ? "big" : "normal";
+        out.line = [leadTok(returner)].filter(Boolean);
+        out.detail = [`${yardsWord(retYds)} return`, dist ? `${yardsWord(dist)} punt by ${punter?.name || "the punter"}` : ""].filter(Boolean).join(" · ");
+      } else {
+        out.line = td && returner ? [leadTok(returner)] : [playerTok(punter)].filter(Boolean);
+        out.detail = [dist ? `${yardsWord(dist)} punt` : "", rt ? `${returner?.name} return ${plural(retYds)}` : fc ? `Fair catch by ${returner?.name}` : /touchback/i.test(main) ? "Touchback" : ""].filter(Boolean).join(" · ");
+      }
       break;
     }
     case "kickoff": {
@@ -319,7 +395,9 @@ function presentPlay(play, ctx = {}) {
       Object.assign(out.players, { kicker, returner });
       out.headline = td ? "KICK RETURN TD" : "KICKOFF";
       out.emphasis = td ? "td" : "muted";
-      out.line = td && returner ? [playerTok(returner)] : [playerTok(kicker)].filter(Boolean);
+      const kRet = rt ? Number(rt[3]) : 0;
+      if (!td && rt && kRet >= 30) { out.headline = "KICK RETURN"; out.emphasis = "big"; }
+      out.line = (td || kRet >= 30) && returner ? [leadTok(returner)] : [playerTok(kicker)].filter(Boolean);
       out.detail = td ? `${yardsWord(Number(rt[3]))} return TD` : rt ? `${returner?.name} return ${plural(Number(rt[3]))}` : /touchback/i.test(main) ? "Touchback" : "";
       break;
     }
@@ -334,6 +412,7 @@ function presentPlay(play, ctx = {}) {
       out.detail = pm ? `${pm[1]} ${pm[2].replace(/\s+on\s*$/, "")} · ${plural(Number(pm[4]))}${nullified ? " · No play" : ""}` : declined ? "Declined" : "";
       if (!pm && !declined) { out.confidence = "fallback"; out.fallbackText = s; }
       out.teamPenalty = !who;
+      out.penaltySide = (pm && ctx.abbrs?.[pm[1].toUpperCase()]) || who?.side || null;
       break;
     }
     case "safety": {
@@ -367,7 +446,7 @@ function presentPlay(play, ctx = {}) {
     }
     case "period": {
       m = /End of (\d)(?:st|nd|rd|th) quarter/i.exec(s);
-      out.headline = m ? `END OF Q${m[1]}` : /half/i.test(s) ? "HALFTIME" : (play.type || "END OF PERIOD").toUpperCase();
+      out.headline = (m && m[1] === "2") || /half/i.test(s) ? "HALFTIME" : m ? `END OF Q${m[1]}` : (play.type || "END OF PERIOD").toUpperCase();
       out.emphasis = "muted";
       break;
     }
@@ -387,13 +466,66 @@ function presentPlay(play, ctx = {}) {
     || (type === "field_goal" && /BLOCKED/i.test(main))
     || ((type === "punt" || type === "kickoff") && td);
   out.creditSide = defensive ? defense : offense;
+  if (type === "penalty" && out.penaltySide) out.creditSide = out.penaltySide;
+
+  // The try after a touchdown — CFBD folds it into the TD's own text
+  // ("... TOUCHDOWN, clock 03:26 #80 K.Ferrie kick attempt good (H: ...)").
+  // A kick rides along on the TD card; a two-point try gets its own card
+  // on the frontend (pat.type "two").
+  if (td && !nullified) {
+    const scorer = out.creditSide;
+    const kick = new RegExp(`${NAME}\\s+kick attempt\\s+(good|failed|missed|blocked|no good)`, "i").exec(s);
+    const twoAt = s.search(/two.?point|2.?pt\b|2 point/i);
+    if (twoAt >= 0) {
+      const twoText = s.slice(twoAt);
+      const who = firstName(twoText);
+      out.pat = {
+        type: "two",
+        good: !/fail|no good|unsuccessful|incomplete|intercept/i.test(twoText),
+        player: who ? P(who, scorer) : null,
+        text: twoText.replace(/\s*\(H:[^)]*\)/, "").trim().slice(0, 160),
+      };
+    } else if (kick) {
+      out.pat = { type: "kick", good: /^good$/i.test(kick[3]), kicker: P({ jersey: kick[1], raw: kick[2] }, scorer) };
+    } else {
+      const pk = /\(([^()]*?)\s*(?:Kick|PAT)\b([^()]*)\)/i.exec(s);
+      if (pk) {
+        const name = pk[1].trim();
+        out.pat = { type: "kick", good: !/fail|miss|block|no good/i.test(pk[1] + pk[2]), kicker: name && !/^(kick|pat)$/i.test(name) ? F(name, scorer) : null };
+      }
+    }
+  }
 
   // Penalty on an otherwise-parsed play: note it, don't lose it.
   if (type !== "penalty" && out.penalty) {
-    const pm = /PENALTY\s+(\S+)\s+(.+?)(?:\s+\(#|\s+\d+\s+yards?|$)/.exec(s);
-    if (pm) out.penaltyText = `${pm[1]} ${pm[2]}`.trim();
+    const pm = /PENALTY\s+(\S+)\s+(.+?)(?:\s+\((#\d+[^)]*)\))?\s+(\d+)\s+yards?/.exec(s)
+      || /PENALTY\s+(\S+)\s+(.+?)(?:\s+\(#|\s+declined|[.,]|$)/i.exec(s);
+    if (pm) {
+      const yds = pm[4] ? ` · ${plural(Number(pm[4]))}` : "";
+      out.penaltyText = `${pm[1]} ${pm[2].replace(/\s+on\s*$/, "")}`.replace(/\s+/g, " ").trim() + (/declined/i.test(s) ? " · declined" : yds);
+      out.penaltyTextSide = ctx.abbrs?.[pm[1].toUpperCase()] || null;
+    }
+  }
+  if (td && nullified) {
+    out.headline = "TD CALLED BACK";
+    out.emphasis = "negative";
+    out.detail = "Penalty — no touchdown";
+    out.calledBack = true;
   }
   if (out.touchdown && out.emphasis === "normal") out.emphasis = "td";
+
+  // Where the ball ended up (last "to the XXX21" / "at XXX43" in the play),
+  // as { side, yardLine } — side resolved from the game's abbreviations.
+  // Lets the next snap be placed after possession changes (returns,
+  // turnovers) without waiting on CFBD's live state.
+  {
+    const spots = [...main.matchAll(/(?:to the|at the|at)\s+([A-Za-z][A-Za-z&.]*)\s?(\d{1,2})\b/g)];
+    const last = spots[spots.length - 1];
+    if (last) {
+      const side = ctx.abbrs?.[last[1].toUpperCase()];
+      if (side) out.endSpot = { side, yardLine: Number(last[2]) };
+    } else if (/\bto the 50\b|at the 50\b/.test(main)) out.endSpot = { side: null, yardLine: 50 };
+  }
   if (out.emphasis === "normal" && play.bigPlay?.priority >= 2) out.emphasis = "big";
   // No individual named (team kneel, team penalty): show the team instead.
   if (out.line.length === 0 && play.offenseName && (type === "rush" || type === "pass" || type === "sack")) out.line = [txt(play.offenseName)];
@@ -413,4 +545,24 @@ const presentationAthleteIds = (pres) => {
   return [...ids];
 };
 
-module.exports = { PARSER_VERSION, presentPlay, presentationAthleteIds, typeFrom };
+function learnSpotAbbrs(plays) {
+  const votes = {};
+  for (const p of plays) {
+    if (!p.offense || p.yardsToGoal == null || !Number.isFinite(p.yards)) continue;
+    const m = /to the ([A-Za-z][A-Za-z&.]*)\s?(\d{1,2})\b/.exec(p.text || "");
+    if (!m) continue;
+    const yardLine = Number(m[2]);
+    const after = p.yardsToGoal - p.yards; // offense's yards-to-goal after the play
+    if (yardLine === 50 || after <= 0 || after >= 100) continue;
+    // In the opponent's half the marker names the defense, else the offense.
+    const side = after < 50 ? (p.offense === "home" ? "away" : "home") : p.offense;
+    if (Math.abs((after < 50 ? after : 100 - after) - yardLine) > 1) continue; // sanity: spot must agree
+    const abbr = m[1].toUpperCase();
+    (votes[abbr] ||= { home: 0, away: 0 })[side]++;
+  }
+  const out = {};
+  for (const [abbr, v] of Object.entries(votes)) if (v.home !== v.away) out[abbr] = v.home > v.away ? "home" : "away";
+  return out;
+}
+
+module.exports = { PARSER_VERSION, presentPlay, presentationAthleteIds, typeFrom, learnSpotAbbrs };
