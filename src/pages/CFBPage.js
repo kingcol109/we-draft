@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
+import CfbLeaders from "../components/CfbLeaders";
 import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
 // We-Draft Live scores for in-progress / just-finished games (one listener
 // on liveSlate/current — see hooks/useLiveSlate.js).
@@ -47,13 +48,14 @@ const gameSortMs = (g) => {
 };
 
 export default function CFBPage() {
-  // Tab lives in the URL (/cfb vs /cfb/schedule[/:week]) instead of local
+  // Tab lives in the URL (/cfb, /cfb/schedule[/:week], /cfb/stats[/:cat]) instead of local
   // state, so it survives a reload and is actually linkable/shareable —
   // it used to always reset back to Teams on navigation.
   const location = useLocation();
   const navigate = useNavigate();
-  const { week: weekParam } = useParams();
-  const activeTab = location.pathname.startsWith("/cfb/schedule") ? "schedule" : "teams";
+  const { week: weekParam, cat: statCat } = useParams();
+  const activeTab = location.pathname.startsWith("/cfb/schedule") ? "schedule"
+    : location.pathname.startsWith("/cfb/stats") ? "stats" : "teams";
   const [schools, setSchools] = useState([]);
   const [schoolsByName, setSchoolsByName] = useState({});
   // Channel name (schedule26's own game.Channel, set via CFB Schedule's "TV
@@ -302,7 +304,7 @@ export default function CFBPage() {
             marginBottom: "6px",
           }}
         >
-          College Football Teams
+          College Football
         </div>
         <div
           style={{
@@ -326,12 +328,13 @@ export default function CFBPage() {
         {[
           { key: "teams", label: "Teams", to: "/cfb" },
           { key: "schedule", label: "Full Schedule", to: "/cfb/schedule" },
+          { key: "stats", label: "Stats", to: "/cfb/stats" },
         ].map((tab) => (
           <Link
             key={tab.key}
             to={tab.to}
             style={{
-              border: `2px solid ${SITE_BLUE}`, borderRadius: "8px", padding: "10px 20px",
+              border: `2px solid ${SITE_BLUE}`, borderRadius: "8px", padding: isMobile ? "10px 12px" : "10px 20px", whiteSpace: "nowrap",
               fontWeight: 900, fontSize: isMobile ? "12px" : "13px", textTransform: "uppercase", letterSpacing: "0.04em",
               background: activeTab === tab.key ? SITE_BLUE : "#fff", color: activeTab === tab.key ? "#fff" : SITE_BLUE,
               cursor: "pointer", textDecoration: "none", display: "inline-block",
@@ -503,6 +506,11 @@ export default function CFBPage() {
           </div>
         );
       })}
+
+      {/* ===== Stat Leaders ===== */}
+      {activeTab === "stats" && (
+        <CfbLeaders schoolsByName={schoolsByName} catKey={statCat} isMobile={isMobile} />
+      )}
 
       {/* ===== Full Schedule ===== */}
       {activeTab === "schedule" && (

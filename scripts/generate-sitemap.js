@@ -261,6 +261,7 @@ for (const doc of allTeams) {
     { path: "/videos", priority: 0.8, lastmod: today },
     { path: "/cfb", priority: 0.7, lastmod: today },
     { path: "/cfb/schedule", priority: 0.65, lastmod: today },
+    { path: "/cfb/stats", priority: 0.65, lastmod: today },
     { path: "/live", priority: 0.75, lastmod: today },
     { path: "/community", priority: 0.8, lastmod: today },
     { path: "/boards", priority: 0.8, lastmod: today },

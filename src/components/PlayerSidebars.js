@@ -218,11 +218,18 @@ export function usePlayerSidebarData(player) {
 }
 
 // Same shell as PlayerProfile.js's SidebarCard.
-function SidebarCard({ title, children }) {
+// `to`: makes the header a link (Videos → /videos).
+function SidebarCard({ title, children, to }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${SITE_BLUE}` }}>
       <div style={{ backgroundColor: SITE_BLUE, padding: "12px 14px", textAlign: "center" }}>
-        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>{title}</h2>
+        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
+          {to ? (
+            <Link to={to} title={`All ${title.toLowerCase()}`} style={{ color: "#fff", textDecoration: "none" }}>
+              {title} <span style={{ color: SITE_GOLD, fontSize: "16px" }}>→</span>
+            </Link>
+          ) : title}
+        </h2>
       </div>
       <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
       <div style={{ background: "#fff" }}>{children}</div>
@@ -241,7 +248,7 @@ export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
   useEffect(() => { setVisibleCount(3); }, [videos]);
   if (!videos.length) return null;
   return (
-    <SidebarCard title="Videos">
+    <SidebarCard title="Videos" to="/videos">
       <style>{`
         .wd-video-card:hover .wd-video-thumb { transform: scale(1.08); }
         .wd-video-card:hover .wd-video-play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -293,14 +300,6 @@ export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
           Show More Videos ▾
         </button>
       )}
-      <Link
-        to="/videos"
-        style={{ ...footerButtonStyle, borderTop: "1px solid rgba(255,255,255,0.15)" }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
-      >
-        View More Videos →
-      </Link>
     </SidebarCard>
   );
 }

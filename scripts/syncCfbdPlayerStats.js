@@ -11,6 +11,10 @@
 // match exactly one We-Draft player (same rule as the live ingester);
 // a "rejected" link is never touched.
 //
+// Each linked FBS player also gets his national (FBS) rank in every
+// RANKED_STATS stat he has — cfbdPlayers/{id}.seasonRanks.{year}.{category}.{statType},
+// "12" or "T-12" on a tie — shown on hover over the player page's stat tiles.
+//
 // Game logs for games ingested live are written by the ingester
 // (store.js saveBox) as each game ends; --weeks backfills earlier weeks
 // from CFBD's weekly box scores (1 call per week + 1 for the schedule).
@@ -21,7 +25,7 @@
 //   add --dry to report without writing
 
 const { getFirestore } = require("./firebaseAdmin");
-const { FieldValue } = require("firebase-admin/firestore");
+const { FieldPath, FieldValue } = require("firebase-admin/firestore");
 const { cfbd, getCallCount } = require("../server/live/cfbdClient");
 const { wedraftPlayerIndex, normName } = require("../server/live/store");
 
@@ -34,6 +38,21 @@ const WEEKS = args.includes("--weeks") && weeksArg
   : [];
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : v; };
+
+// FBS — the CFB page's Teams-tab conferences (season stats include FCS).
+const FBS_CONFS = new Set(["ACC", "Big 10", "Big 12", "SEC", "Pac 12", "Independent", "AAC", "CUSA", "MAC", "Mountain West", "Sun Belt"]);
+// Counting stats ranked nationally — the player page's season tiles
+// (PlayerStatsCard.js seasonTiles). Rate stats (Cmp %, YPC, punt avg) aren't
+// ranked: they'd need a per-game minimum.
+const RANKED_STATS = {
+  passing: ["YDS", "TD"],
+  rushing: ["YDS", "TD"],
+  receiving: ["REC", "YDS", "TD"],
+  defensive: ["TOT", "TFL", "SACKS", "PD"],
+  interceptions: ["INT"],
+  kicking: ["FGM", "LONG", "XPM", "PTS"],
+  punting: ["NO", "In 20", "LONG"],
+};
 
 async function commit(db, ops) {
   if (DRY) return;
@@ -48,9 +67,14 @@ async function run() {
   const db = getFirestore();
 
   // CFBD team name → CFBD team id, from the mapped schools.
-  const schools = await db.collection("schools").select("CFBDName", "CFBDTeamId").get();
+  const schools = await db.collection("schools").select("CFBDName", "CFBDTeamId", "Conference").get();
   const teamIdByName = new Map();
-  schools.docs.forEach((d) => { const s = d.data(); if (s.CFBDName && s.CFBDTeamId != null) teamIdByName.set(s.CFBDName, s.CFBDTeamId); });
+  const fbsTeams = new Set();
+  schools.docs.forEach((d) => {
+    const s = d.data();
+    if (s.CFBDName && s.CFBDTeamId != null) teamIdByName.set(s.CFBDName, s.CFBDTeamId);
+    if (s.CFBDName && FBS_CONFS.has(s.Conference)) fbsTeams.add(s.CFBDName);
+  });
 
   // Already-linked CFBD players (and any explicitly rejected).
   const linkedSnap = await db.collection("cfbdPlayers").where("mappingStatus", "in", ["suggested", "verified", "rejected"]).select("mappingStatus").get();
@@ -66,6 +90,34 @@ async function run() {
     (byPlayer.get(r.playerId).stats[r.category] ||= {})[r.statType] = num(r.stat);
   }
 
+  // National ranks: per stat, value → its rank among FBS players ("T-" when
+  // shared). Only non-zero values are ranked.
+  const rankOf = {};
+  for (const [cat, types] of Object.entries(RANKED_STATS)) {
+    for (const type of types) {
+      const vals = [];
+      for (const p of byPlayer.values()) {
+        const v = Number(p.stats[cat]?.[type]) || 0;
+        if (v > 0 && fbsTeams.has(p.team)) vals.push(v);
+      }
+      vals.sort((a, b) => b - a);
+      const byVal = new Map();
+      vals.forEach((v, i) => { const e = byVal.get(v); if (e) e.count++; else byVal.set(v, { rank: i + 1, count: 1 }); });
+      (rankOf[cat] ||= {})[type] = byVal;
+    }
+  }
+  const ranksFor = (p) => {
+    if (!fbsTeams.has(p.team)) return null;
+    const out = {};
+    for (const [cat, types] of Object.entries(RANKED_STATS)) {
+      for (const type of types) {
+        const e = rankOf[cat][type].get(Number(p.stats[cat]?.[type]) || 0);
+        if (e) (out[cat] ||= {})[type] = `${e.count > 1 ? "T-" : ""}${e.rank}`;
+      }
+    }
+    return out;
+  };
+
   const ops = [];
   const linkedIds = new Set();
   let suggested = 0;
@@ -77,6 +129,9 @@ async function run() {
       name: p.name, team: p.team, teamId, position: p.position || null, provider: "cfbd",
       seasons: { [SEASON]: p.stats }, seasonStatsAt: FieldValue.serverTimestamp(),
     };
+    const ranks = ranksFor(p);
+    // Replaced whole each run (not merged) so a stale rank never lingers.
+    const rankOps = (b) => b.update(db.collection("cfbdPlayers").doc(id), new FieldPath("seasonRanks", String(SEASON)), ranks || FieldValue.delete());
     if (!st) {
       const hits = teamId != null ? index.get(`${normName(p.name)}|${teamId}`) || [] : [];
       if (hits.length !== 1) continue; // no We-Draft profile → not written
@@ -85,6 +140,7 @@ async function run() {
     }
     linkedIds.add(id);
     ops.push((b) => b.set(db.collection("cfbdPlayers").doc(id), doc, { merge: true }));
+    ops.push(rankOps);
   }
   await commit(db, ops);
   console.log(`${DRY ? "[dry] " : ""}season ${SEASON}: ${byPlayer.size} CFBD players, ${linkedIds.size} linked to We-Draft written (${suggested} newly suggested).`);

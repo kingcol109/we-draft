@@ -147,6 +147,8 @@ function MainLayout() {
                 resets to Teams on every reload/navigation. */}
             <Route path="/cfb/schedule" element={<CFBPage />} />
             <Route path="/cfb/schedule/:week" element={<CFBPage />} />
+            <Route path="/cfb/stats" element={<CFBPage />} />
+            <Route path="/cfb/stats/:cat" element={<CFBPage />} />
             <Route path="/nfl" element={<NFLPage />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />

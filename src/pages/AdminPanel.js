@@ -12,6 +12,7 @@ import ArticlesManager from "../components/ArticlesManager";
 import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
+import AdminTransferPortal from "../components/AdminTransferPortal";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
@@ -1268,6 +1269,7 @@ function PlayerDataSection() {
         {[
           { key: "players", label: "Players" },
           { key: "universe", label: "CFB Universe" },
+          { key: "portal", label: "Transfer Portal" },
           { key: "recruits", label: "Recruits" },
           { key: "historical", label: "Historical" },
           { key: "comps", label: "Comps" },
@@ -1296,6 +1298,8 @@ function PlayerDataSection() {
           stateNames={STATE_NAME_BY_ABBR}
           onAdded={(newPlayer) => setAllPlayers((prev) => [...prev, newPlayer].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")))}
         />
+      ) : playerDataTab === "portal" ? (
+        <AdminTransferPortal allPlayers={allPlayers} setAllPlayers={setAllPlayers} nextFebFirstUTC={nextFebFirstUTC} />
       ) : playerDataTab === "recruits" ? (
         <RecruitsSection />
       ) : playerDataTab === "historical" ? (

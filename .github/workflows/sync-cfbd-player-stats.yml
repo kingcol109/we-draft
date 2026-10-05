@@ -8,7 +8,8 @@ name: Sync CFBD Player Stats
 #     card). 1 call. Game logs are written by the live ingester as games
 #     end, so this only needs the totals.
 #   - scripts/syncCfbdRosters.js — full team rosters, recruiting stars and
-#     season stats for the CFB team page's Roster and Stats tabs. 9 calls.
+#     season stats for the CFB team page's Roster and Stats tabs, plus the
+#     national stat leaders for the CFB page's Stats tab. 9 calls.
 # Idempotent; also runnable on demand via workflow_dispatch (e.g. after a
 # weekday game).
 #

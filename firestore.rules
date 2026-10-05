@@ -279,6 +279,15 @@ service cloud.firestore {
       match /private/{doc} {
         allow read, write: if isAdmin();
       }
+      // Live chat (components/LiveChat.js). Public read; messages are
+      // written only by api/live-chat.js (admin SDK — signed-in check,
+      // slur/sexual filter, rate limit), so no client create. Admins can
+      // remove a message.
+      match /chat/{msgId} {
+        allow read: if true;
+        allow create, update: if false;
+        allow delete: if isAdmin();
+      }
     }
     // Provider (CFBD) player identities — every college player CFBD knows,
     // most of whom have no We-Draft profile. wedraftPlayerId is an optional
@@ -294,11 +303,27 @@ service cloud.firestore {
     match /liveMeta/{doc} {
       allow read, write: if isAdmin();
     }
+    // Live chat rate limit (api/live-chat.js, admin SDK) — nothing public.
+    match /liveChatRate/{uid} {
+      allow read, write: if isAdmin();
+    }
     // Full CFBD team rosters for the CFB team page's Roster tab — written
     // by scripts/syncCfbdRosters.js (admin SDK). Public read-only.
     match /cfbRosters/{teamId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+    // National stat leaders for the CFB page's Stats tab — one doc,
+    // cfbLeaders/current, written by scripts/syncCfbdRosters.js. Public read-only.
+    match /cfbLeaders/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // Transfer portal sync (server/portal/sync.js, run from the admin
+    // panel) — transferPortal/{year} meta + {year}_{n} entry chunks. Admin
+    // only both ways; the admin tab writes `dismissed` on the meta doc.
+    match /transferPortal/{docId} {
+      allow read, write: if isAdmin();
     }
     // Page-view counters — written server-side only, by
     // scripts/syncGoogleAnalytics.js (via the admin SDK, which isn't
@@ -531,7 +556,8 @@ service cloud.firestore {
       // access or a fake verified badge by writing straight to the SDK,
       // bypassing the app's own UI entirely. create blocks setting either
       // field at all; update requires them to stay exactly as they already
-      // are, unless the requester is already an admin. "simBeta" (Football
+      // are, unless the requester is already an admin. "chatBanned" (live chat,
+      // api/live-chat.js) gets the same protection. "simBeta" (Football
       // Sim beta access, see SimRoute.js) gets the same protection.
       // isAdmin() bypass added for AdminPanel.js's Dummy Content tab, which
       // creates a companion users/{dummyUid} doc (username only, never
@@ -543,7 +569,8 @@ service cloud.firestore {
       allow create: if isAdmin()
                     || (request.auth != null && request.auth.uid == uid
                         && !("role" in request.resource.data) && !("verified" in request.resource.data)
-                        && !("simBeta" in request.resource.data));
+                        && !("simBeta" in request.resource.data)
+                        && !("chatBanned" in request.resource.data));
       // .get(field, default) rather than plain dot access — almost every
       // existing user doc predates this rule and has no `role`/`verified`
       // field at all, and dot-accessing a missing map key errors out the
@@ -555,7 +582,8 @@ service cloud.firestore {
                     || (request.auth != null && request.auth.uid == uid
                         && request.resource.data.get("role", null) == resource.data.get("role", null)
                         && request.resource.data.get("verified", null) == resource.data.get("verified", null)
-                        && request.resource.data.get("simBeta", null) == resource.data.get("simBeta", null));
+                        && request.resource.data.get("simBeta", null) == resource.data.get("simBeta", null)
+                        && request.resource.data.get("chatBanned", null) == resource.data.get("chatBanned", null));
       allow delete: if isAdmin();
       // We-Draft Live follows + Feed settings (LivePage.js) — private to
       // the account (the users doc itself is public-read).

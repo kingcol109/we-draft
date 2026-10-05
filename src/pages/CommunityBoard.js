@@ -18,6 +18,9 @@ const ACTIVE_YEARS = ["2027", "2028", "2029"];
 const SIDEBAR_NEWS_LIMIT = 8;
 const SIDEBAR_VIDEO_LIMIT = 10;
 
+// Board position → its CFB stat table (/cfb/stats/:group).
+const STATS_GROUP = { QB: "passing", RB: "rushing", WR: "receiving", TE: "receiving", EDGE: "defense", DL: "defense", DT: "defense", DE: "defense", LB: "defense", DB: "defense", CB: "defense", S: "defense" };
+
 const POSITION_LABELS = {
   QB: "Quarterback", RB: "Running Back", WR: "Wide Receiver", TE: "Tight End",
   OL: "Offensive Line", OT: "Offensive Tackle", OG: "Offensive Guard", C: "Center",
@@ -1023,6 +1026,24 @@ export default function CommunityBoard() {
   // Mobile-only: Kicker/Punter dropped so the chip row fits one line on a
   // narrow screen. Desktop keeps the full allPositions list unchanged.
   const mobilePositions = allPositions.filter((pos) => pos !== "K" && pos !== "P");
+  // Stats button (left of School): the selected position(s)' national stat
+  // table on the CFB page (/cfb/stats/:group, components/CfbLeaders.js),
+  // filtered to this class. Only when every selected position maps to the
+  // same table, and only for classes still in college (2027+).
+  const statsGroup = (() => {
+    const groups = new Set(selectedPositions.map((pos) => STATS_GROUP[pos]));
+    if (groups.size !== 1 || groups.has(undefined) || Number(eligibleYear) < 2027) return null;
+    return [...groups][0];
+  })();
+  const statsButton = statsGroup && (
+    <Link to={`/cfb/stats/${statsGroup}?class=${eligibleYear}`} style={{
+      padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
+      color: "#fff", background: BLUE, border: "2px solid " + GOLD, borderRadius: "8px", whiteSpace: "nowrap",
+      textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
+    }}>
+      📊 Stats
+    </Link>
+  );
   const allSchools = [...new Set(players.map((p) => p.School).filter(Boolean))].sort();
 
   // Until community grades are in, the page chrome (header, filters,
@@ -1256,6 +1277,7 @@ export default function CommunityBoard() {
                 {/* Position moved up to its own full chip bar (see
                     PositionFilterBar above) — Year takes this slot instead. */}
                 <YearDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
+                {statsButton}
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
                 <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />
@@ -1295,6 +1317,7 @@ export default function CommunityBoard() {
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
+              {statsButton}
               <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
               <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
               <DropdownChecklist title="Comm Grade" options={commGradeOrder} selected={selectedCommGrades} setSelected={setSelectedCommGrades} ordered />

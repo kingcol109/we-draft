@@ -239,7 +239,7 @@ function liveStateFromPlays(live, lastPlay) {
 let schoolsCache = null;
 async function schoolsByTeamId(db) {
   if (schoolsCache && Date.now() - schoolsCache.at < 6 * 3600e3) return schoolsCache.map;
-  const snap = await db.collection("schools").select("School", "Short", "Logo1", "LogoDark", "Color1", "WordmarkDark", "Wordmark", "CFBDTeamId").get();
+  const snap = await db.collection("schools").select("School", "Short", "Logo1", "LogoDark", "Color1", "Color2", "Mascot", "WordmarkDark", "Wordmark", "CFBDTeamId").get();
   const map = new Map();
   snap.docs.forEach((d) => { const s = d.data(); if (s.CFBDTeamId != null) map.set(s.CFBDTeamId, s); });
   schoolsCache = { at: Date.now(), map };
@@ -289,6 +289,9 @@ async function enrich(db, games) {
       // matchup header uses it as each side's faded backdrop.
       wordmark: s?.WordmarkDark || s?.Wordmark || null,
       color: s?.Color1 || null,
+      // Second color — the scoreboard takeover's accents (HeaderTakeover.js).
+      color2: s?.Color2 || null,
+      mascot: s?.Mascot || null,
       rank: rank ?? null,
     };
   };

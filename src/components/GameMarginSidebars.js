@@ -13,6 +13,7 @@ import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useLiveSlate, scheduleScore } from "../hooks/useLiveSlate";
+import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -60,15 +61,98 @@ function currentWeekBoundsUtc() {
   return { start: monday, end: sunday };
 }
 
-// "● Q3 8:42" under a live game's rows, "FINAL" under a live-final one
-// that hasn't been admin-finalized yet; nothing otherwise.
-function LiveStatusLine({ s }) {
-  if (!s.live && !s.liveFinal) return null;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "10px", fontWeight: 900, color: s.live ? "#d62828" : "#888", marginTop: "3px", letterSpacing: "0.04em", fontVariantNumeric: "tabular-nums" }}>
-      {s.live && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#d62828", display: "inline-block" }} />}
-      {s.label}
+// Both cards' rows (GameBug): a two-tone team-color stripe down the left
+// edge, ranks, the winner's score in blue (loser dimmed), a pulsing red live line while it's on, and — on the Top Games
+// card — a purple Game of the Week / gold Featured tag. Hover nudges a ›.
+const SIDEBAR_STYLE = `
+.gms-row { display: block; position: relative; text-decoration: none; transition: background 0.15s ease; }
+.gms-row:hover { background: #f0f5ff !important; }
+.gms-row:hover .gms-go { opacity: 1; transform: translateX(0); }
+.gms-go { position: absolute; right: 5px; top: 50%; margin-top: -8px; font-size: 13px; font-weight: 900; color: ${BLUE}; opacity: 0; transform: translateX(-4px); transition: opacity 0.15s ease, transform 0.15s ease; }
+.gms-live { background: linear-gradient(90deg, rgba(214,40,40,0.08), #fff 75%); }
+.gms-gotw { background: linear-gradient(135deg, #f4edff, #fff 65%); animation: gmsGlow 3.4s ease-in-out infinite; }
+@keyframes gmsGlow { 0%, 100% { box-shadow: inset 0 0 0 2px rgba(124,58,237,0.22); } 50% { box-shadow: inset 0 0 0 2px rgba(124,58,237,0.6); } }
+@keyframes gmsPulse { 0% { box-shadow: 0 0 0 0 rgba(214,40,40,0.6); } 70% { box-shadow: 0 0 0 6px rgba(214,40,40,0); } 100% { box-shadow: 0 0 0 0 rgba(214,40,40,0); } }
+.gms-dot { width: 7px; height: 7px; border-radius: 50%; background: #d62828; display: inline-block; flex-shrink: 0; animation: gmsPulse 1.6s infinite; }
+`;
+
+function GameBug({ g, s, away, home, ranks, channelShort, big, showTag, last }) {
+  const played = s.scored;
+  const final = played && !s.live;
+  const gotw = showTag && g.GameOfWeek;
+  const logoSize = big ? "22px" : "18px";
+  const dateMs = toMs(g.Date);
+  const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
+  const timeStr = formatTime12h(g.Time);
+  const team = (data, school, score, won, rank) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+        {data?.Logo1 ? (
+          <img src={sanitizeUrl(data.Logo1)} alt="" loading="lazy" style={{ width: logoSize, height: logoSize, objectFit: "contain", flexShrink: 0, opacity: final && !won ? 0.55 : 1 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        ) : (
+          <span style={{ width: logoSize, height: logoSize, flexShrink: 0, borderRadius: "50%", background: "#e5e9f0", display: "inline-block" }} />
+        )}
+        <span style={{ fontSize: big ? "13px" : "12px", fontWeight: 900, color: final && !won ? "#a3abb8" : "#1d2733", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {rank && <span style={{ fontSize: "10px", color: final && !won ? "#c3c9d3" : "#8a95a5", marginRight: "3px" }}>#{rank}</span>}
+          {data?.Short || school}
+        </span>
+      </div>
+      {played && (
+        <span style={{ fontSize: big ? "20px" : "17px", fontWeight: 900, color: s.live ? "#1d2733" : won ? BLUE : "#b8bfca", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{score}</span>
+      )}
     </div>
+  );
+  return (
+    <Link
+      to={`/game/${g.Slug}`}
+      className={`gms-row${gotw ? " gms-gotw" : s.live ? " gms-live" : ""}`}
+      style={{
+        padding: big ? "10px 14px 10px 15px" : "9px 13px 9px 13px",
+        background: gotw || s.live ? undefined : "#fff",
+        borderBottom: last ? "none" : "1px solid #eef1f5",
+      }}
+    >
+      <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", background: `linear-gradient(to bottom, ${away?.Color1 || "#cfd6e0"} 50%, ${home?.Color1 || "#cfd6e0"} 50%)` }} />
+      {showTag && (g.GameOfWeek || g.Featured) && (
+        <span style={{
+          display: "inline-block", marginBottom: "5px", padding: "2px 7px", borderRadius: "20px",
+          fontSize: "8.5px", fontWeight: 900, letterSpacing: "0.07em", textTransform: "uppercase", color: "#fff",
+          background: g.GameOfWeek ? "linear-gradient(90deg, #7c3aed, #a855f7)" : GOLD,
+        }}>
+          {g.GameOfWeek ? "🔥 Game of the Week" : "★ Featured"}
+        </span>
+      )}
+      {team(away, g.Away, s.away, s.awayWon, ranks.awayRank)}
+      {team(home, g.Home, s.home, s.homeWon, ranks.homeRank)}
+      <div style={{
+        display: "flex", alignItems: "center", gap: "5px", marginTop: "4px", fontSize: "10px", fontWeight: 900, letterSpacing: "0.04em", fontVariantNumeric: "tabular-nums",
+        color: s.live ? "#d62828" : final ? "#7a8597" : "#5b6b7f",
+      }}>
+        {s.live && <span className="gms-dot" />}
+        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {s.live ? s.label : final ? "FINAL" : `${dateLabel}${timeStr ? ` · ${timeStr}` : ""}`}
+        </span>
+        {!final && channelShort && <span style={{ marginLeft: "auto", flexShrink: 0, padding: "1px 5px", borderRadius: "4px", background: "#eef2f8", color: "#5b6b7f", fontWeight: 800 }}>{channelShort}</span>}
+      </div>
+      <span className="gms-go">›</span>
+    </Link>
+  );
+}
+
+// Card header: blue with a gold label, plus a pulsing count of live games.
+function CardHead({ label, liveCount }) {
+  return (
+    <>
+      <div style={{ background: `linear-gradient(135deg, ${BLUE}, #003a7a)`, padding: "9px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>{label}</div>
+        {liveCount > 0 && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "9px", fontWeight: 900, color: "#fff", background: "#d62828", padding: "2px 6px", borderRadius: "20px", letterSpacing: "0.05em", flexShrink: 0 }}>
+            <span className="gms-dot" style={{ background: "#fff", width: "5px", height: "5px" }} />{liveCount} LIVE
+          </span>
+        )}
+      </div>
+      <div style={{ height: "3px", background: GOLD }} />
+    </>
   );
 }
 
@@ -111,6 +195,7 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
   // final until an admin marks the schedule26 doc Final, after which the
   // admin-entered score takes over as before.
   const liveById = useLiveSlate(!isMobile);
+  const currentRankMap = useCurrentRankMap();
   // This component renders after (below, in DOM order) the main content it
   // measures — anchorRef marks *this* component's own position so the
   // sidebar cards, positioned absolute beneath it, can be offset by the
@@ -220,9 +305,8 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     fetch();
   }, [isMobile, gameWeek, excludeGameId]);
 
-  // Right — Game of the Week and Featured games happening THIS calendar
-  // week (Mon–Sun UTC), so the label is actually true rather than just an
-  // approximation from sorting by time-proximity. Two separate queries
+  // Right — this calendar week's (Mon–Sun UTC) Game of the Week, then its
+  // Featured games — whatever week the open game is in. Two separate queries
   // (Firestore can't OR across two different boolean fields in one query)
   // merged and de-duped — a game marked both just needs to not appear
   // twice — then sorted with Game of the Week first: it's the site's
@@ -293,76 +377,26 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
     };
   };
 
+  // Left card rows: games in progress first, then kickoff order.
+  const leftRows = weekSlate.map((g) => ({ g, s: scheduleScore(g, liveById) }))
+    .sort((a, b) => (b.s.live ? 1 : 0) - (a.s.live ? 1 : 0));
+
   return (
     <div ref={anchorRef} style={{ position: "relative", height: 0 }}>
       {(!layout.show || isMobile) ? null : (
       <>
+      <style>{SIDEBAR_STYLE}</style>
       {/* ===== Left: This Week's Slate (every other game in the current
           game's own Week) ===== */}
       {weekSlate.length > 0 && (
         <div style={positionStyle("left")}>
           {weekSlate.length > 0 && (
           <div style={cardShell}>
-            <div style={{ background: BLUE, padding: "8px 12px" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-                {gameWeek ? `${gameWeek} Slate` : "This Week's Slate"}
-              </div>
-            </div>
-            <div style={{ height: "3px", background: GOLD }} />
-            {weekSlate.map((g, i) => {
-              const s = scheduleScore(g, liveById);
-              const played = s.scored;
-              const away = schoolsByName[g.Away];
-              const home = schoolsByName[g.Home];
-              const awayWon = s.awayWon;
-              const homeWon = s.homeWon;
-              const dateMs = toMs(g.Date);
-              const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
-              const timeStr = formatTime12h(g.Time);
-              const channelShort = g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : "";
-
-              // Same stacked "bug" row (one line per team, logo+code fixed
-              // on the left, score fixed on the right) as the Featured
-              // Games card below — a single "away @ home" line squeezed
-              // both teams' logos/codes/scores into one row and nothing
-              // lined up between games of different name lengths.
-              const bugRow = (short, school, logo, score, won) => (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
-                    {logo ? (
-                      <img src={sanitizeUrl(logo)} alt="" loading="lazy" style={{ width: "16px", height: "16px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                    ) : (
-                      <span style={{ width: "16px", height: "16px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
-                    )}
-                    <span style={{ fontSize: "11px", fontWeight: 900, color: played && !s.live ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {short || school}
-                    </span>
-                  </div>
-                  {played && (
-                    <span style={{ fontSize: "15px", fontWeight: 900, color: s.live ? "#222" : won ? BLUE : "#bbb", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{score}</span>
-                  )}
-                </div>
-              );
-
-              return (
-                <Link
-                  key={g.id}
-                  to={`/game/${g.Slug}`}
-                  style={{ display: "block", padding: "9px 10px", textDecoration: "none", borderBottom: i < weekSlate.length - 1 ? "1px solid #f0f0f0" : "none" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-                >
-                  {bugRow(away?.Short, g.Away, away?.Logo1, s.away, awayWon)}
-                  {bugRow(home?.Short, g.Home, home?.Logo1, s.home, homeWon)}
-                  <LiveStatusLine s={s} />
-                  {!played && (
-                    <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
-                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}{channelShort ? ` · ${channelShort}` : ""}
-                    </div>
-                  )}
-                </Link>
-              );
-            })}
+            <CardHead label={gameWeek ? `${gameWeek} Slate` : "This Week's Slate"} liveCount={leftRows.filter((x) => x.s.live).length} />
+            {leftRows.map(({ g, s: sc }, i) => (
+              <GameBug key={g.id} g={g} s={sc} away={schoolsByName[g.Away]} home={schoolsByName[g.Home]} ranks={ranksForGame(g, currentRankMap)}
+                channelShort={g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : ""} last={i === leftRows.length - 1 && !weekSlateUrl} />
+            ))}
             {weekSlateUrl && (
               <Link
                 to={weekSlateUrl}
@@ -391,66 +425,11 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
         <div style={positionStyle("right")}>
           {featuredGames.length > 0 && (
           <div style={cardShell}>
-            <div style={{ background: BLUE, padding: "8px 12px" }}>
-              <div style={{ color: GOLD, fontWeight: 900, fontSize: "10px", letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-                ⭐ This Week's Top Games
-              </div>
-            </div>
-            <div style={{ height: "3px", background: GOLD }} />
-            {featuredGames.map((g, i) => {
-              const s = scheduleScore(g, liveById);
-              const played = s.scored;
-              const away = schoolsByName[g.Away];
-              const home = schoolsByName[g.Home];
-              const awayWon = s.awayWon;
-              const homeWon = s.homeWon;
-              const dateMs = toMs(g.Date);
-              const dateLabel = dateMs ? new Date(dateMs).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD";
-              const timeStr = formatTime12h(g.Time);
-              const channelShort = g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : "";
-
-              const bugRow = (short, school, logo, score, won) => (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
-                    {logo ? (
-                      <img src={sanitizeUrl(logo)} alt="" loading="lazy" style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                    ) : (
-                      <span style={{ width: "18px", height: "18px", flexShrink: 0, borderRadius: "3px", background: "#ddd", display: "inline-block" }} />
-                    )}
-                    <span style={{ fontSize: "12px", fontWeight: 900, color: played && !s.live ? (won ? "#222" : "#999") : "#333", letterSpacing: "0.02em" }}>
-                      {short || school}
-                    </span>
-                  </div>
-                  {played && (
-                    <span style={{ fontSize: "18px", fontWeight: 900, color: s.live ? "#222" : won ? BLUE : "#bbb", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{score}</span>
-                  )}
-                </div>
-              );
-
-              return (
-                <Link
-                  key={g.id}
-                  to={`/game/${g.Slug}`}
-                  style={{ display: "block", padding: "10px 12px", textDecoration: "none", borderBottom: i < featuredGames.length - 1 ? "1px solid #f0f0f0" : "none" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-                >
-                  {g.GameOfWeek && (
-                    <div style={{ fontSize: "9px", fontWeight: 900, color: "#c2680a", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "3px" }}>
-                      🔥 Game of the Week
-                    </div>
-                  )}
-                  {bugRow(away?.Short, g.Away, away?.Logo1, s.away, awayWon)}
-                  {bugRow(home?.Short, g.Home, home?.Logo1, s.home, homeWon)}
-                  <LiveStatusLine s={s} />
-                  {!played && (
-                    <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "3px" }}>
-                      {dateLabel}{timeStr ? ` · ${timeStr}` : ""}{channelShort ? ` · ${channelShort}` : ""}
-                    </div>
-                  )}
-                </Link>
-              );
-            })}
+            <CardHead label="⭐ This Week's Top Games" liveCount={featuredGames.filter((g) => scheduleScore(g, liveById).live).length} />
+            {featuredGames.map((g, i) => (
+              <GameBug key={g.id} g={g} s={scheduleScore(g, liveById)} away={schoolsByName[g.Away]} home={schoolsByName[g.Home]} ranks={ranksForGame(g, currentRankMap)}
+                channelShort={g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : ""} big showTag last={i === featuredGames.length - 1} />
+            ))}
           </div>
           )}
 

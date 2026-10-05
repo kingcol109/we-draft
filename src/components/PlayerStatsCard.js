@@ -34,20 +34,22 @@ const groupOf = (pos) => {
 const n = (v) => (v == null || v === "" ? 0 : Number(v) || 0);
 const fix1 = (v) => (Number.isFinite(v) ? v.toFixed(1) : "–");
 
-// Big-number tiles for the season, by position group: [label, value] or
-// [label, value, [hoverLabel, hoverValue]] — the third swaps in on hover/tap.
+// Big-number tiles for the season, by position group:
+// [label, value, alt, rank] — alt ([hoverLabel, hoverValue]) swaps in on
+// hover/tap; rank ([category, statType]) instead shows the player's national
+// FBS rank on hover (cfbdPlayers.seasonRanks, scripts/syncCfbdPlayerStats.js).
 function seasonTiles(group, s) {
   const pass = s.passing || {}, rush = s.rushing || {}, rec = s.receiving || {}, def = s.defensive || {}, ints = s.interceptions || {}, k = s.kicking || {}, pnt = s.punting || {};
   switch (group) {
-    case "qb": return [["Pass yds", n(pass.YDS)], ["TD", n(pass.TD)], ["INT", n(pass.INT)], ["Cmp %", pass.ATT ? `${Math.round((100 * n(pass.COMPLETIONS)) / n(pass.ATT))}%` : "–", ["Cmp/Att", `${n(pass.COMPLETIONS)}/${n(pass.ATT)}`]]];
-    case "rb": return [["Rushes", n(rush.CAR)], ["Rush yds", n(rush.YDS), ["YPC", rush.CAR ? fix1(n(rush.YDS) / n(rush.CAR)) : "–"]], ["Rush TD", n(rush.TD)]];
-    case "rec": return [["Rec", n(rec.REC)], ["Yds", n(rec.YDS), ["Avg", rec.REC ? fix1(n(rec.YDS) / n(rec.REC)) : "–"]], ["TD", n(rec.TD)]];
-    case "k": return [["FG", `${n(k.FGM)}/${n(k.FGA)}`], ["Long", n(k.LONG)], ["XP", `${n(k.XPM)}/${n(k.XPA)}`], ["Pts", n(k.PTS)]];
-    case "p": return [["Punts", n(pnt.NO)], ["Avg", fix1(n(pnt.YPP))], ["In 20", n(pnt["In 20"])], ["Long", n(pnt.LONG)]];
+    case "qb": return [["Pass yds", n(pass.YDS), null, ["passing", "YDS"]], ["TD", n(pass.TD), null, ["passing", "TD"]], ["INT", n(pass.INT)], ["Cmp %", pass.ATT ? `${Math.round((100 * n(pass.COMPLETIONS)) / n(pass.ATT))}%` : "–", ["Cmp/Att", `${n(pass.COMPLETIONS)}/${n(pass.ATT)}`]]];
+    case "rb": return [["Rushes", n(rush.CAR), ["YPC", rush.CAR ? fix1(n(rush.YDS) / n(rush.CAR)) : "–"]], ["Rush yds", n(rush.YDS), null, ["rushing", "YDS"]], ["Rush TD", n(rush.TD), null, ["rushing", "TD"]]];
+    case "rec": return [["Rec", n(rec.REC), null, ["receiving", "REC"]], ["Yds", n(rec.YDS), null, ["receiving", "YDS"]], ["TD", n(rec.TD), null, ["receiving", "TD"]]];
+    case "k": return [["FG", `${n(k.FGM)}/${n(k.FGA)}`, null, ["kicking", "FGM"]], ["Long", n(k.LONG), null, ["kicking", "LONG"]], ["XP", `${n(k.XPM)}/${n(k.XPA)}`, null, ["kicking", "XPM"]], ["Pts", n(k.PTS), null, ["kicking", "PTS"]]];
+    case "p": return [["Punts", n(pnt.NO), null, ["punting", "NO"]], ["Avg", fix1(n(pnt.YPP))], ["In 20", n(pnt["In 20"]), null, ["punting", "In 20"]], ["Long", n(pnt.LONG), null, ["punting", "LONG"]]];
     case "ol": return [];
-    case "dl": return [["Tackles", n(def.TOT)], ["TFL", n(def.TFL)], ["Sacks", n(def.SACKS)]];
-    case "db": return [["Tackles", n(def.TOT)], ["PBU", n(def.PD)], ["INT", n(ints.INT)]];
-    default: return [["Tackles", n(def.TOT)], ["TFL", n(def.TFL)], ["Sacks", n(def.SACKS)], ["INT", n(ints.INT)]];
+    case "dl": return [["Tackles", n(def.TOT), null, ["defensive", "TOT"]], ["TFL", n(def.TFL), null, ["defensive", "TFL"]], ["Sacks", n(def.SACKS), null, ["defensive", "SACKS"]]];
+    case "db": return [["Tackles", n(def.TOT), null, ["defensive", "TOT"]], ["PBU", n(def.PD), null, ["defensive", "PD"]], ["INT", n(ints.INT), null, ["interceptions", "INT"]]];
+    default: return [["Tackles", n(def.TOT), null, ["defensive", "TOT"]], ["TFL", n(def.TFL), null, ["defensive", "TFL"]], ["Sacks", n(def.SACKS), null, ["defensive", "SACKS"]], ["INT", n(ints.INT), null, ["interceptions", "INT"]]];
   }
 }
 
@@ -79,12 +81,14 @@ function seasonExtra(group, s) {
 // grid, so a stat sits in the same spot on every game — a stat that's left
 // out for a game (a 0 TD, no carries) leaves its cell blank rather than
 // shifting the others. Sections with a head get a heading above them and a
-// thin line between them (a QB's Pass | Rush).
+// thin line between them (a QB's Pass | Rush). A `line` column (a QB's
+// C/Att — too wide for a grid cell, it ran into Yds) shows on its own line
+// under its section's stats, spanning that section's columns.
 const pos = (v) => (n(v) > 0 ? n(v) : null);
 const GAME_COLS = {
   qb: [
     { head: "Pass", cols: [
-      { label: "C/Att", w: 1.5, get: (s) => s.passing?.["C/ATT"] || null },
+      { label: "C/Att", line: true, get: (s) => s.passing?.["C/ATT"] || null },
       { label: "Yds", get: (s) => (s.passing?.["C/ATT"] ? n(s.passing.YDS) : null) },
       { label: "TD", get: (s) => (s.passing?.["C/ATT"] ? n(s.passing.TD) : null) },
       { label: "INT", get: (s) => pos(s.passing?.INT) },
@@ -144,10 +148,11 @@ const GAME_COLS = {
 // The grid template shared by the heading row and every game row: fixed-width
 // columns (shrinking if the card is narrow), centered in the row.
 const COL_W = 46;
-const gridOf = (sections) => sections.flatMap((sec) => sec.cols.map((c) => `minmax(0, ${Math.round(COL_W * (c.w || 1))}px)`)).join(" ");
+const gridCols = (sec) => sec.cols.filter((c) => !c.line);
+const gridOf = (sections) => sections.flatMap((sec) => gridCols(sec).map((c) => `minmax(0, ${Math.round(COL_W * (c.w || 1))}px)`)).join(" ");
 // With only a few columns, a spacer the logo's width on the right centers
 // the stats on the card instead of in the space beside the logo.
-const balanced = (sections) => sections.reduce((t, sec) => t + sec.cols.length, 0) <= 3;
+const balanced = (sections) => sections.reduce((t, sec) => t + gridCols(sec).length, 0) <= 3;
 const SECTION_LINE = "1px solid #dfe3e9";
 const LOGO_CELL = "44px";
 // A QB's interceptions show in red.
@@ -197,6 +202,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
   const season = data.cfbd.seasons?.[SEASON];
   const group = groupOf(player.Position || data.cfbd.position);
   const tiles = season ? seasonTiles(group, season) : [];
+  const ranks = data.cfbd.seasonRanks?.[SEASON];
   const extra = season ? seasonExtra(group, season) : "";
   const gameCols = GAME_COLS[group] || [];
   const gameGrid = gridOf(gameCols);
@@ -211,17 +217,22 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
       <div style={{ background: "#fff" }}>
         {tiles.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${tiles.length}, 1fr)`, borderBottom: "1px solid #eef1f5" }}>
-            {tiles.map(([label, value, alt], i) => {
-              const [shownLabel, shownValue] = alt && altTile === label ? alt : [label, value];
+            {tiles.map(([label, value, alt, rankKey], i) => {
+              // National rank ("12" / "T-12"), shown in place of the label.
+              const r = rankKey && ranks?.[rankKey[0]]?.[rankKey[1]];
+              const rankLabel = r ? `${String(r).startsWith("T") ? r : `#${r}`} in FBS` : null;
+              const hover = alt || (rankLabel ? [rankLabel, value] : null);
+              const hovered = hover && altTile === label;
+              const [shownLabel, shownValue] = hovered ? hover : [label, value];
               return (
                 <div key={label}
-                  onMouseEnter={alt ? () => setAltTile(label) : undefined}
-                  onMouseLeave={alt ? () => setAltTile(null) : undefined}
-                  onClick={alt ? () => setAltTile((t) => (t === label ? null : label)) : undefined}
-                  title={alt ? `${alt[0]}: ${alt[1]}` : undefined}
-                  style={{ textAlign: "center", padding: "12px 4px", borderLeft: i ? "1px solid #eef1f5" : "none", cursor: alt ? "help" : "default" }}>
+                  onMouseEnter={hover ? () => setAltTile(label) : undefined}
+                  onMouseLeave={hover ? () => setAltTile(null) : undefined}
+                  onClick={hover ? () => setAltTile((t) => (t === label ? null : label)) : undefined}
+                  title={alt ? `${alt[0]}: ${alt[1]}` : rankLabel || undefined}
+                  style={{ textAlign: "center", padding: "12px 4px", borderLeft: i ? "1px solid #eef1f5" : "none", cursor: hover ? "help" : "default" }}>
                   <div style={{ fontWeight: 900, fontSize: "22px", color: valueColor(group, shownLabel, shownValue, color1), lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>{shownValue}</div>
-                  <div style={{ fontWeight: 800, fontSize: "10px", color: "#7a8597", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "3px" }}>{shownLabel}</div>
+                  <div style={{ fontWeight: 800, fontSize: "10px", color: hovered && !alt ? color1 : "#7a8597", textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "3px", whiteSpace: "nowrap" }}>{shownLabel}</div>
                 </div>
               );
             })}
@@ -245,7 +256,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
                 <div style={{ width: LOGO_CELL, flexShrink: 0 }} />
                 <div style={{ flex: 1, display: "grid", gridTemplateColumns: gameGrid, justifyContent: "center" }}>
                   {gameCols.map((sec, si) => (
-                    <div key={si} style={{ gridColumn: `span ${sec.cols.length}`, textAlign: "center", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#1d2733", borderLeft: si ? SECTION_LINE : "none" }}>{sec.head}</div>
+                    <div key={si} style={{ gridColumn: `span ${gridCols(sec).length}`, textAlign: "center", fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#1d2733", borderLeft: si ? SECTION_LINE : "none" }}>{sec.head}</div>
                   ))}
                 </div>
                 {balanced(gameCols) && <div style={{ width: LOGO_CELL, flexShrink: 0 }} />}
@@ -263,7 +274,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "#8a95a5", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{dateLabel(g.startDate)}</div>
                   </div>
                   <div style={{ flex: 1, alignSelf: "stretch", display: "grid", gridTemplateColumns: gameGrid, justifyContent: "center" }}>
-                    {gameCols.flatMap((sec, si) => sec.cols.map((c, ci) => {
+                    {gameCols.flatMap((sec, si) => gridCols(sec).map((c, ci) => {
                       const value = c.get(st);
                       return (
                         <div key={`${si}-${c.label}`} style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", lineHeight: 1.05, borderLeft: si && !ci ? SECTION_LINE : "none" }}>
@@ -276,6 +287,21 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
                         </div>
                       );
                     }))}
+                    {/* Line columns: row 2, under their own section. */}
+                    {gameCols.map((sec, si) => {
+                      const start = gameCols.slice(0, si).reduce((t, x) => t + gridCols(x).length, 0) + 1;
+                      return sec.cols.filter((c) => c.line).map((c) => {
+                        const value = c.get(st);
+                        return (
+                          <div key={`${si}-line-${c.label}`} style={{
+                            gridRow: 2, gridColumn: `${start} / span ${gridCols(sec).length}`, textAlign: "center", marginTop: "3px",
+                            fontSize: "12px", fontWeight: 800, color: "#5b6b7f", fontVariantNumeric: "tabular-nums", borderLeft: si ? SECTION_LINE : "none",
+                          }}>
+                            {value != null && <>{value} <span style={{ fontSize: "9px", color: "#8a95a5", textTransform: "uppercase", letterSpacing: "0.04em" }}>{c.label}</span></>}
+                          </div>
+                        );
+                      });
+                    })}
                   </div>
                   {balanced(gameCols) && <div style={{ width: LOGO_CELL, flexShrink: 0 }} />}
                 </div>

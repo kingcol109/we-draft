@@ -2124,21 +2124,23 @@ export default function TeamPage() {
 // foreground wordmark image and no conference label competing with it;
 // the wordmark's only appearance is the big background watermark.
 // Follow this team on We-Draft Live — the same follow as /live's ★ and its
-// Customize page (utils/liveFollowSync.js): saved to the account when
-// signed in, this browser otherwise. Needs the school's CFBD team id.
+// Customize page (utils/liveFollowSync.js), saved to the account — signed
+// out, the button opens log in. Needs the school's CFBD team id.
 function TeamFollowButton({ teamId, color2, isMobile }) {
-  const { user, authReady } = useAuth();
+  const { user, authReady, login } = useAuth();
   const uid = user?.uid || null;
   const [followed, setFollowed] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let alive = true;
     if (!authReady) return undefined;
+    if (!uid) { setFollowed(false); return undefined; }
     isLiveTeamFollowed(uid, teamId).then((v) => { if (alive) setFollowed(v); }).catch(() => { if (alive) setFollowed(false); });
     return () => { alive = false; };
   }, [uid, teamId, authReady]);
   if (followed == null) return null;
   const toggle = async () => {
+    if (!uid) { login(); return; }
     if (busy) return;
     const next = !followed;
     setFollowed(next);

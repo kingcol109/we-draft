@@ -291,6 +291,8 @@ const teamSummary = (t = {}, record = null) => ({
   logo: t.logo || null,
   logoDark: t.logoDark || null,
   color: t.color || null,
+  color2: t.color2 || null,
+  mascot: t.mascot || null,
   rank: t.rank ?? null,
   points: t.points ?? null,
   providerTeamId: t.providerTeamId ?? null,

@@ -5,6 +5,8 @@
 // just We-Draft prospects. A player with a We-Draft profile has his name in
 // the team color, underlined, linking to it.
 // Sortable columns + an Offense / Defense / Special Teams filter.
+// Also /live's game Roster tabs (LivePage.js GameRoster): dark (its theme)
+// and hideStars (no recruiting stars column there).
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -37,7 +39,18 @@ const SORTS = {
   stars: (a, b) => (b.stars || 0) - (a.stars || 0) || (b.rating || 0) - (a.rating || 0),
 };
 
-export default function TeamRoster({ roster, color1, color2, isMobile }) {
+// Light (team page) and dark (/live) palettes.
+const THEMES = {
+  light: { frame: (c1) => `2px solid ${c1}`, bar: "#f8f9fb", barLine: "#eef1f5", pillOff: "#fff", pillOffText: (c1) => c1, pillBorder: (c1) => c1,
+    head: (c1) => `${c1}f5`, row: ["#fff", "#fafbfc"], rowLine: "#f0f0f0", text: "#1d2733", sub: "#444", muted: "#6b7685", num: (c1) => c1,
+    link: (c1) => c1, underline: (c1) => c1, chip: (c1) => c1, chipLine: "transparent", empty: "#fff", emptyText: "#888" },
+  dark: { frame: () => "1px solid #1d2840", bar: "#0c1220", barLine: "#1d2840", pillOff: "transparent", pillOffText: () => "#c9d5e6", pillBorder: () => "#26324a",
+    head: (c1) => `color-mix(in srgb, ${c1} 40%, #0c1220)`, row: ["#111a2b", "#0e1625"], rowLine: "#172238", text: "#eef2f8", sub: "#c9d5e6", muted: "#8193ad", num: () => "#9fb0c8",
+    link: () => "#fff", underline: (c1, c2) => c2, chip: (c1) => c1, chipLine: "rgba(255,255,255,0.25)", empty: "#111a2b", emptyText: "#6f819c" },
+};
+
+export default function TeamRoster({ roster, color1, color2, isMobile, dark = false, hideStars = false }) {
+  const th = THEMES[dark ? "dark" : "light"];
   const [unit, setUnit] = useState("all");
   const [sortKey, setSortKey] = useState("no");
   const [asc, setAsc] = useState(true);
@@ -58,7 +71,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
     { key: "name", label: "Player", flex: true },
     { key: "pos", label: "Pos", width: isMobile ? "44px" : "52px" },
     { key: "yr", label: "Class", width: isMobile ? "44px" : "56px" },
-    { key: "stars", label: "★", width: isMobile ? "34px" : "78px" },
+    ...(hideStars ? [] : [{ key: "stars", label: "★", width: isMobile ? "34px" : "78px" }]),
     { key: "ht", label: "Ht", width: isMobile ? "38px" : "48px" },
     // Phones drop weight and hometown so the name keeps room.
     ...(isMobile ? [] : [{ key: "wt", label: "Wt", width: "48px" }, { key: "home", label: "Hometown", width: "180px", left: true }]),
@@ -69,7 +82,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
   const pad = isMobile ? "0 10px" : "0 18px";
 
   return (
-    <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
+    <div style={{ border: th.frame(color1), borderRadius: "10px", overflow: "hidden" }}>
       <div style={{ background: color1, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
           {roster?.season} Roster ({players.length})
@@ -77,7 +90,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
       </div>
       <div style={{ height: "3px", background: color2 }} />
 
-      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "10px 12px", background: "#f8f9fb", borderBottom: "1px solid #eef1f5" }}>
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "10px 12px", background: th.bar, borderBottom: `1px solid ${th.barLine}` }}>
         {FILTERS.map(([key, label]) => {
           const count = key === "all" ? players.length : players.filter((p) => UNIT[key].includes(p.pos)).length;
           const on = unit === key;
@@ -85,7 +98,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
             <button key={key} onClick={() => setUnit(key)} style={{
               padding: "5px 12px", borderRadius: "999px", cursor: "pointer", fontWeight: 900, fontSize: "11px",
               textTransform: "uppercase", letterSpacing: "0.06em",
-              border: `1.5px solid ${color1}`, background: on ? color1 : "#fff", color: on ? "#fff" : color1,
+              border: `1.5px solid ${on ? color1 : th.pillBorder(color1)}`, background: on ? color1 : th.pillOff, color: on ? "#fff" : th.pillOffText(color1),
             }}>
               {label} <span style={{ opacity: 0.7 }}>{count}</span>
             </button>
@@ -95,7 +108,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
 
       <div style={{
         position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", gap, padding: pad, height: "36px",
-        background: `${color1}f5`, borderBottom: `3px solid ${color2}`,
+        background: th.head(color1), borderBottom: `3px solid ${color2}`,
       }}>
         {cols.map((c) => {
           const active = sortKey === c.key;
@@ -113,16 +126,16 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: "28px 16px", textAlign: "center", background: "#fff", fontSize: "13px", fontWeight: 700, color: "#888" }}>No players.</div>
+        <div style={{ padding: "28px 16px", textAlign: "center", background: th.empty, fontSize: "13px", fontWeight: 700, color: th.emptyText }}>No players.</div>
       ) : rows.map((p, i) => {
         const inner = (
           <>
-            <div style={{ ...cellBox(col.no), textAlign: "center", fontSize: isMobile ? "14px" : "16px", fontWeight: 900, color: color1, fontVariantNumeric: "tabular-nums" }}>
+            <div style={{ ...cellBox(col.no), textAlign: "center", fontSize: isMobile ? "14px" : "16px", fontWeight: 900, color: th.num(color1), fontVariantNumeric: "tabular-nums" }}>
               {p.no ?? "–"}
             </div>
-            <div style={{ ...cellBox(col.name), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: isMobile ? "15px" : "17px", color: "#1d2733" }}>
+            <div style={{ ...cellBox(col.name), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: isMobile ? "15px" : "17px", color: th.text }}>
               {p.slug ? (
-                <Link to={`/player/${p.slug}`} style={{ color: color1, textDecoration: "underline", textUnderlineOffset: "2px" }}>
+                <Link to={`/player/${p.slug}`} style={{ color: th.link(color1), textDecoration: "underline", textDecorationColor: th.underline(color1, color2), textUnderlineOffset: "2px" }}>
                   <span style={{ fontWeight: 600 }}>{p.first}</span> <span style={{ fontWeight: 900 }}>{p.last}</span>
                 </Link>
               ) : (
@@ -131,26 +144,28 @@ export default function TeamRoster({ roster, color1, color2, isMobile }) {
             </div>
             <div style={{ ...cellBox(col.pos), display: "flex", justifyContent: "center" }}>
               {p.pos && (
-                <span style={{ background: color1, color: "#fff", fontSize: isMobile ? "10px" : "11px", fontWeight: 900, padding: "3px 0", borderRadius: "4px", width: "100%", textAlign: "center" }}>{p.pos}</span>
+                <span style={{ background: th.chip(color1), boxShadow: `inset 0 0 0 1px ${th.chipLine}`, color: "#fff", fontSize: isMobile ? "10px" : "11px", fontWeight: 900, padding: "3px 0", borderRadius: "4px", width: "100%", textAlign: "center" }}>{p.pos}</span>
               )}
             </div>
-            <div style={{ ...cellBox(col.yr), textAlign: "center", fontSize: "13px", fontWeight: 800, color: "#444" }}>{classOf(p.yr)}</div>
-            <div title={recruitTip(p) || undefined} style={{ ...cellBox(col.stars), textAlign: "center", whiteSpace: "nowrap", color: STAR_GOLD, fontSize: isMobile ? "12px" : "13px", fontWeight: 900, letterSpacing: isMobile ? 0 : "1px" }}>
-              {p.stars ? (isMobile ? `${p.stars}★` : "★".repeat(p.stars)) : <span style={{ color: "#ccd2da" }}>–</span>}
-            </div>
-            <div style={{ ...cellBox(col.ht), textAlign: "center", fontSize: "13px", fontWeight: 700, color: "#444", fontVariantNumeric: "tabular-nums" }}>{heightOf(p.ht)}</div>
+            <div style={{ ...cellBox(col.yr), textAlign: "center", fontSize: "13px", fontWeight: 800, color: th.sub }}>{classOf(p.yr)}</div>
+            {!hideStars && (
+              <div title={recruitTip(p) || undefined} style={{ ...cellBox(col.stars), textAlign: "center", whiteSpace: "nowrap", color: STAR_GOLD, fontSize: isMobile ? "12px" : "13px", fontWeight: 900, letterSpacing: isMobile ? 0 : "1px" }}>
+                {p.stars ? (isMobile ? `${p.stars}★` : "★".repeat(p.stars)) : <span style={{ color: "#ccd2da" }}>–</span>}
+              </div>
+            )}
+            <div style={{ ...cellBox(col.ht), textAlign: "center", fontSize: "13px", fontWeight: 700, color: th.sub, fontVariantNumeric: "tabular-nums" }}>{heightOf(p.ht)}</div>
             {!isMobile && (
-              <div style={{ ...cellBox(col.wt), textAlign: "center", fontSize: "13px", fontWeight: 700, color: "#444", fontVariantNumeric: "tabular-nums" }}>{p.wt || ""}</div>
+              <div style={{ ...cellBox(col.wt), textAlign: "center", fontSize: "13px", fontWeight: 700, color: th.sub, fontVariantNumeric: "tabular-nums" }}>{p.wt || ""}</div>
             )}
             {!isMobile && (
-              <div style={{ ...cellBox(col.home), fontSize: "12px", fontWeight: 600, color: "#6b7685", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.home || ""}</div>
+              <div style={{ ...cellBox(col.home), fontSize: "12px", fontWeight: 600, color: th.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.home || ""}</div>
             )}
           </>
         );
         return (
           <div key={p.id} style={{
             display: "flex", alignItems: "center", gap, padding: isMobile ? "9px 10px" : "10px 18px",
-            background: i % 2 ? "#fafbfc" : "#fff", borderBottom: "1px solid #f0f0f0",
+            background: th.row[i % 2], borderBottom: `1px solid ${th.rowLine}`,
           }}>
             {inner}
           </div>

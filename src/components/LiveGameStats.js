@@ -114,11 +114,16 @@ const TABLES = [
 const DEFENSE_LIVE = { cat: "defense", title: "Defense", cols: [["SACK", (s) => +(s.sacks || 0).toFixed(1)], ["INT", (s) => s.int || 0], ["FF", (s) => s.ff || 0], ["FR", (s) => s.fr || 0]], sort: (s) => (s.sacks || 0) * 2 + (s.int || 0) * 3 + (s.fr || 0) * 2 + (s.ff || 0), max: 6 };
 const DEFENSE_BOX = { cat: "defense", title: "Defense", cols: [["TOT", (s) => s.tot || 0], ["SACK", (s) => s.sacks || 0], ["TFL", (s) => s.tfl || 0], ["INT", (s) => s.int || 0]], sort: (s) => (s.tot || 0) + (s.sacks || 0) * 3 + (s.int || 0) * 3, max: 6 };
 
-function Table({ def, lines, team }) {
+// A team's logo for this theme: on the light page the logos sit on white
+// (the caption's circle, the comparison header), so the regular Logo1
+// (`logo`) first; on /live's dark cards the dark variant first.
+const logoFor = (team, light) => (light ? team?.logo || team?.logoDark : team?.logoDark || team?.logo);
+
+function Table({ def, lines, team, light }) {
   const rows = lines.filter((l) => l.stats[def.cat]).sort((x, y) => def.sort(y.stats[def.cat]) - def.sort(x.stats[def.cat])).slice(0, def.max || 5);
   return (
     <table className="lgs-table" style={{ "--tc": team?.color || "#0055a5" }}>
-      <caption>{(team?.logoDark || team?.logo) && <img src={team.logoDark || team.logo} alt="" />}{teamShort(team)} {def.title}</caption>
+      <caption>{logoFor(team, light) && <img src={logoFor(team, light)} alt="" />}{teamShort(team)} {def.title}</caption>
       <thead><tr><th>Player</th>{def.cols.map(([h]) => <th key={h}>{h}</th>)}</tr></thead>
       <tbody>
         {rows.length ? rows.map((l) => (
@@ -131,6 +136,7 @@ function Table({ def, lines, team }) {
 
 // theme "light": the regular game page (white cards) instead of /live's dark.
 export default function LiveGameStats({ gameId, game, theme = "dark" }) {
+  const light = theme === "light";
   const { stats, ready: statsReady } = useLiveStats(gameId);
   // The full play list only for an older game with no stats doc.
   const { plays, box } = useLiveGame(gameId, { plays: statsReady && !stats ? "all" : "none", box: true });
@@ -167,17 +173,17 @@ export default function LiveGameStats({ gameId, game, theme = "dark" }) {
       {[...TABLES, official ? DEFENSE_BOX : DEFENSE_LIVE].map((def) => (
         <div key={def.cat} className="lgs-box">
           <div className="lgs-cols">
-            <Table def={def} lines={players.away} team={away} />
-            <Table def={def} lines={players.home} team={home} />
+            <Table light={light} def={def} lines={players.away} team={away} />
+            <Table light={light} def={def} lines={players.home} team={home} />
           </div>
         </div>
       ))}
       <div className="lgs-sec">Team stats</div>
       <div className="lgs-box">
         <div className="lgs-head">
-          <span className="t">{(away.logoDark || away.logo) && <img src={away.logoDark || away.logo} alt="" />}{teamShort(away)}</span>
+          <span className="t">{logoFor(away, light) && <img src={logoFor(away, light)} alt="" />}{teamShort(away)}</span>
           <span />
-          <span className="t home">{teamShort(home)}{(home.logoDark || home.logo) && <img src={home.logoDark || home.logo} alt="" />}</span>
+          <span className="t home">{teamShort(home)}{logoFor(home, light) && <img src={logoFor(home, light)} alt="" />}</span>
         </div>
         <Row label="Total yards" away={A.totalYds} home={H.totalYds} a={A.totalYds} h={H.totalYds} />
         <Row label="Passing" away={`${A.passYds} (${A.passCmp}/${A.passAtt})`} home={`${H.passYds} (${H.passCmp}/${H.passAtt})`} a={A.passYds} h={H.passYds} />

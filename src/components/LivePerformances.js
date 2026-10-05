@@ -8,6 +8,10 @@
 // already has. Numbers are from the play-by-play (src/utils/liveStats.mjs),
 // so defense is sacks / interceptions / forced fumbles / recoveries — no
 // tackles.
+//
+// Also /live's Last Week tab (preview phase): pass `perf` — built from last
+// week's liveGames docs with performancesFromGames — and the games it came
+// from, instead of listening to the current week.
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
@@ -41,13 +45,33 @@ export const PERF_STYLE = `
 .lpf-game .wdl-dot { width: 6px; height: 6px; margin-right: 5px; }
 .lpf-val { text-align: right; font-weight: 900; font-size: clamp(22px, 1.8vw, 28px); color: #fff; line-height: 1; font-variant-numeric: tabular-nums; }
 .lpf-val small { display: block; font-size: 10px; letter-spacing: 0.12em; color: #6f819c; margin-top: 3px; }
+.lpf-more { display: block; width: 100%; background: none; border: 0; border-top: 1px solid #172238; color: ${GOLD}; font: inherit; font-weight: 900; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; padding: 10px 4px; cursor: pointer; }
+.lpf-more:hover { color: #fff; }
 .lpf-empty { color: #6f819c; font-weight: 700; padding: 10px 4px 14px; }
 `;
 
-export default function LivePerformances({ games, onOpenGame, followedIds, onTogglePlayer }) {
-  const [perf, setPerf] = useState(null);
+// The week's top lines from its games' own statLeaders — the same merge as
+// the ingester's slatePerformances (server/live/store.js).
+const MAX_PERFORMANCES = 15;
+export function performancesFromGames(games) {
+  const out = {};
+  for (const cat of LEADER_CATS) {
+    out[cat] = games
+      .flatMap((g) => (g.statLeaders?.[cat] || []).map((e) => ({ ...e, gameId: g.id })))
+      .sort((a, b) => b.v - a.v)
+      .slice(0, MAX_PERFORMANCES);
+  }
+  return out;
+}
+
+// `initial`: rows shown per board until "Show more" (up to the
+// MAX_PERFORMANCES stored); without it, a fixed SHOW rows.
+export default function LivePerformances({ games, onOpenGame, followedIds, onTogglePlayer, perf: given, title, initial }) {
+  const [snap, setSnap] = useState(null);
+  const [expanded, setExpanded] = useState({}); // category → showing all
   const [liveOnly, setLiveOnly] = useState(false);
-  useEffect(() => onSnapshot(doc(db, "liveSlate", "performances"), (s) => setPerf(s.exists() ? s.data() : {}), () => setPerf({})), []);
+  useEffect(() => (given ? undefined : onSnapshot(doc(db, "liveSlate", "performances"), (s) => setSnap(s.exists() ? s.data() : {}), () => setSnap({}))), [given]);
+  const perf = given || snap;
 
   if (!perf) return <div className="wdl-empty">Loading…</div>;
   const byId = new Map(games.map((g) => [String(g.id), g]));
@@ -57,18 +81,22 @@ export default function LivePerformances({ games, onOpenGame, followedIds, onTog
   return (
     <div>
       <div className="lpf-top">
-        <div className="wdl-h" style={{ margin: 0 }}>Top performances · this week</div>
-        <div className="wdl-seg">
-          <button type="button" className={!liveOnly ? "on" : ""} onClick={() => setLiveOnly(false)}>All games</button>
-          <button type="button" className={liveOnly ? "on" : ""} onClick={() => setLiveOnly(true)} disabled={!anyLive}>Live now</button>
-        </div>
+        <div className="wdl-h" style={{ margin: 0 }}>{title || "Top performances · this week"}</div>
+        {!given && (
+          <div className="wdl-seg">
+            <button type="button" className={!liveOnly ? "on" : ""} onClick={() => setLiveOnly(false)}>All games</button>
+            <button type="button" className={liveOnly ? "on" : ""} onClick={() => setLiveOnly(true)} disabled={!anyLive}>Live now</button>
+          </div>
+        )}
       </div>
       <div className="lpf-grid">
         {LEADER_CATS.map((cat) => {
-          const rows = (perf[cat] || [])
+          const all = (perf[cat] || [])
             .map((e) => ({ e, g: byId.get(String(e.gameId)) }))
-            .filter(({ g }) => g && (!liveOnly || g.status === "in_progress"))
-            .slice(0, SHOW);
+            .filter(({ g }) => g && (!liveOnly || g.status === "in_progress"));
+          const limit = initial ? (expanded[cat] ? MAX_PERFORMANCES : initial) : SHOW;
+          const rows = all.slice(0, limit);
+          const canToggle = initial && all.length > initial;
           return (
             <section key={cat} className="lpf-board">
               <div className="lpf-h">{TITLES[cat]}</div>
@@ -106,6 +134,11 @@ export default function LivePerformances({ games, onOpenGame, followedIds, onTog
                   </div>
                 );
               }) : <div className="lpf-empty">{liveOnly ? "Nothing live right now." : anyStarted ? "No stats in yet." : "Shows up once games kick off."}</div>}
+              {canToggle && (
+                <button type="button" className="lpf-more" onClick={() => setExpanded((x) => ({ ...x, [cat]: !x[cat] }))}>
+                  {expanded[cat] ? "Show less" : `Show top ${Math.min(all.length, MAX_PERFORMANCES)}`}
+                </button>
+              )}
             </section>
           );
         })}

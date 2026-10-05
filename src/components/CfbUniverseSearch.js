@@ -11,9 +11,9 @@
 //
 // Adding a player:
 //   - players doc from the roster row: name, school, position (CFBD →
-//     We-Draft, editable per row), draft class (from his class year,
-//     editable), height/weight, home state. Live: true, same as a new
-//     player made by hand. Slug via the panel's own generateSlug, de-duped
+//     We-Draft, editable per row), draft class (recruiting-class rule,
+//     editable), height/weight, home state. Live per row (checked by
+//     default, same as a new player made by hand). Slug via the panel's own generateSlug, de-duped
 //     (-1, -2, ...) like a manual create.
 //   - cfbdPlayers/{id} linked to it (mappingStatus "verified", source
 //     "admin") — his stats card, game log and Live follows pick it up.
@@ -42,14 +42,13 @@ const POS_MAP = {
   DB: "DB", CB: "DB", S: "DB", FS: "DB", SS: "DB",
   K: "K", PK: "K", P: "P", LS: "LS",
 };
-// Draft class from CFBD's class year this season: seniors and juniors are
-// next spring's class, sophomores the year after, freshmen (and newly added
-// recruits, whose "year" is their recruiting class) three drafts out.
-// Redshirts can't be told apart — adjust per row.
-const eligibleFor = (yr) => {
-  const y = yr == null ? 1 : yr > 1000 ? 1 : yr;
-  return String(SEASON + 1 + Math.max(0, 3 - y));
-};
+// Draft class from the recruiting class — the same rule as the CFB stat
+// tables (scripts/syncCfbdRosters.js draftClassOf): 2026 signees are the
+// 2029 class, 2025's the 2028 class, everyone else 2027 (also when in
+// doubt — no recruiting record). rc is the roster row's recruiting class;
+// a newly added freshman's CFBD "year" is their class too. Adjust per row.
+const BY_SIGNING = { [SEASON]: SEASON + 3, [SEASON - 1]: SEASON + 2 };
+const eligibleFor = (p) => String(BY_SIGNING[p.rc] || BY_SIGNING[p.yr] || SEASON + 1);
 const ELIGIBLE_CHOICES = [SEASON + 1, SEASON + 2, SEASON + 3, SEASON + 4].map(String);
 const CLASS = (yr) => (yr == null ? "" : yr > 1000 ? "FR" : ["", "FR", "SO", "JR", "SR"][yr] || "GR");
 const heightOf = (ht) => (ht ? `${Math.floor(ht / 12)}'${ht % 12}"` : "");
@@ -95,7 +94,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
       .slice(0, MAX_RESULTS);
   }, [universe, q, schoolFilter]);
 
-  const editOf = (p) => ({ pos: POS_MAP[p.pos] || "", eligible: eligibleFor(p.yr), ...edits[p.id] });
+  const editOf = (p) => ({ pos: POS_MAP[p.pos] || "", eligible: eligibleFor(p), live: true, ...edits[p.id] });
   const setEdit = (p, field, value) => setEdits((prev) => ({ ...prev, [p.id]: { ...editOf(p), ...prev[p.id], [field]: value } }));
 
   // Link cfbdPlayers/{id} to a We-Draft profile and stamp the roster row.
@@ -116,7 +115,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
   };
 
   const add = async (p) => {
-    const { pos, eligible } = editOf(p);
+    const { pos, eligible, live } = editOf(p);
     if (!pos || !eligible) { alert("Pick a position and draft class first."); return; }
     const base = generateSlug(p.first, p.last, pos, eligible);
     const taken = new Set(allPlayers.map((x) => x.Slug).filter(Boolean));
@@ -129,7 +128,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
         First: p.first, Last: p.last, HighSchool: "", State: stateNames[stateAbbr] || "",
         School: p.school || "", Position: pos, Eligible: eligible,
         Height: heightOf(p.ht), Weight: p.wt ? String(p.wt) : "",
-        Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
+        Bio: "", Flair: "", Live: live, AdminNotes: "", Flag: "",
         Slug: slug, updatedAt: serverTimestamp(),
       };
       const ref = await addDoc(collection(db, "players"), payload);
@@ -181,7 +180,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
             <thead style={{ background: BLUE }}>
               <tr>
                 <th style={th}>Player</th><th style={th}>School</th><th style={th}>CFBD</th><th style={th}>Class</th>
-                <th style={th}>Ht / Wt</th><th style={th}>★</th><th style={th}>Position</th><th style={th}>Draft class</th><th style={th} />
+                <th style={th}>Ht / Wt</th><th style={th}>Position</th><th style={th}>Draft class</th><th style={th}>Live</th><th style={th} />
               </tr>
             </thead>
             <tbody>
@@ -200,9 +199,8 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                     <td style={td}>{p.pos || "—"}</td>
                     <td style={td}>{CLASS(p.yr)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{[heightOf(p.ht), p.wt].filter(Boolean).join(" / ") || "—"}</td>
-                    <td style={{ ...td, color: "#e8a317", fontWeight: 900, whiteSpace: "nowrap" }}>{p.stars ? "★".repeat(p.stars) : ""}</td>
                     {slug ? (
-                      <td colSpan={3} style={{ ...td, textAlign: "right" }}>
+                      <td colSpan={4} style={{ ...td, textAlign: "right" }}>
                         <Link to={`/player/${slug}`} target="_blank" style={{ color: "#1f8a4c", fontWeight: 900, fontSize: "12px" }}>✓ On We-Draft ↗</Link>
                       </td>
                     ) : (
@@ -217,6 +215,9 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                           <select value={e.eligible} onChange={(ev) => setEdit(p, "eligible", ev.target.value)} style={sel}>
                             {ELIGIBLE_CHOICES.map((x) => <option key={x} value={x}>{x}</option>)}
                           </select>
+                        </td>
+                        <td style={{ ...td, textAlign: "center" }}>
+                          <input type="checkbox" checked={e.live} onChange={(ev) => setEdit(p, "live", ev.target.checked)} title="Live — shown on the site" />
                         </td>
                         <td style={{ ...td, textAlign: "right" }}>
                           {matches.length > 0 && !forceAdd[p.id] ? (

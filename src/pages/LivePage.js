@@ -10,13 +10,14 @@
 // ingester in server/live/*). The Game view adds that one game's listener
 // (useLiveGame). Nothing here calls CFBD, so viewers never add API calls.
 //
-// Views: All Games · My Feed · Top Performances · Customize · Game.
+// Views: All Games · My Feed · Top Performances (Last Week during preview) · Customize · Game.
 // My Feed = a game's play-by-play (left) + a personalized Feed (right,
 // ⚙ Customize: We-Pick Ranked 6 / my teams / featured / followed players,
 // and play types). Follows are
 // per-browser (src/utils/live.js) and keyed by provider ids, so they work
 // for every team/player, with or without a We-Draft profile.
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { wePickHref, isWePickPath } from "../utils/wePickRoutes";
 import { Helmet } from "react-helmet-async";
@@ -37,12 +38,18 @@ import Logo2 from "../assets/Logo2.png";
 import LivePlayCard, { PLAY_CARD_STYLE, PendingPlayCard, TwoPointCard, FinalCard, playSummary } from "../components/LivePlayCard";
 import confetti from "canvas-confetti";
 import LiveGameStats, { LIVE_STATS_STYLE } from "../components/LiveGameStats";
-import LivePerformances, { PERF_STYLE } from "../components/LivePerformances";
+import LivePerformances, { PERF_STYLE, performancesFromGames } from "../components/LivePerformances";
+import LiveChat, { LIVE_CHAT_STYLE } from "../components/LiveChat";
+import LiveField, { LIVE_FIELD_STYLE } from "../components/LiveField";
+import TeamRoster from "../components/TeamRoster";
+import { briefPlay } from "../utils/briefPlay";
+import HeaderTakeover, { TAKEOVER_STYLE, TAKEOVER_POINTS, takeoverForPlay, checkScorer } from "../components/HeaderTakeover";
+import ScoresWidget, { SCORES_WIDGET_STYLE, openPipWindow } from "../components/ScoresWidget";
 import {
-  statusLabel, teamShort, teamName, nextSituation, slatePhase, kickoffLabel, myFeedWindow, downLabel, spotLabel, clutchHeat, clockSecs, dedupeFeed,
-  FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows, saveFollows,
-  loadFeedPrefs, saveFeedPrefs, normalizeFeedPrefs, playerIdSet, feedItemFromPlay, isCloseLatePlay,
-  slateWeekKey, normalizeWeek, loadWeekFollows, saveWeekFollows, weekTeams, weekPlayers, toggleWeekTeam, toggleWeekPlayer,
+  statusLabel, teamShort, teamName, nextSituation, slatePhase, kickoffLabel, myFeedWindow, clutchHeat, clockSecs, dedupeFeed,
+  FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows,
+  loadFeedPrefs, normalizeFeedPrefs, DEFAULT_FEED_PREFS, playerIdSet, feedItemFromPlay, isCloseLatePlay,
+  slateWeekKey, normalizeWeek, loadWeekFollows, weekTeams, weekPlayers, toggleWeekTeam, toggleWeekPlayer,
   scrollActiveTabIntoView,
 } from "../utils/live";
 
@@ -53,7 +60,7 @@ const WePickHub = lazy(() => import("./WePickHub"));
 const GOLD = "#f6a21d";
 const LIVE_RED = "#ff4d4d";
 
-const STYLE = `${PLAY_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}
+const STYLE = `${PLAY_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}${LIVE_CHAT_STYLE}${LIVE_FIELD_STYLE}${TAKEOVER_STYLE}${SCORES_WIDGET_STYLE}
 .wdl-gtabs { display: flex; gap: 8px; margin: 22px 0 14px; }
 .wdl-gtab { background: transparent; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 18px; font-weight: 900; font-size: clamp(13px, 1vw, 15px); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
 .wdl-gtab.on { background: #eef2f8; color: #0a0f1a; border-color: #eef2f8; }
@@ -90,6 +97,36 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
    Game of the Week, gold Featured. */
 .wdl-strip-pill { display: inline-block; padding: 1px 6px; border-radius: 4px; color: #fff; font-size: 9px; font-weight: 900; letter-spacing: 0.08em; line-height: 1.5; text-transform: uppercase; vertical-align: middle; }
 .wdl-strip-pill.gotw { background: #7c3aed; }
+/* pop-out scores button, pinned to the strip's right end */
+.wdl-strip-pop { position: sticky; right: 0; flex-shrink: 0; align-self: center; width: 38px; height: 38px; padding: 9px; margin-left: auto; border-radius: 10px; cursor: pointer;
+  background: #111a2b; border: 1px solid #26324a; color: #9fb0c8; box-shadow: -14px 0 14px #0c1220; }
+.wdl-strip-pop:hover { color: #fff; border-color: ${GOLD}; }
+.wdl-strip-pop.on { color: ${GOLD}; border-color: ${GOLD}; }
+.wdl-strip-pop svg { width: 100%; height: 100%; display: block; }
+/* All Games: the same, as a labeled button */
+.wdl-sw-row { display: flex; justify-content: flex-end; padding: 10px clamp(16px, 2.4vw, 36px) 0; }
+.wdl-sw-btn { display: inline-flex; align-items: center; gap: 7px; background: #111a2b; border: 1px solid #26324a; color: #c9d5e6; border-radius: 999px; padding: 6px 13px;
+  font: inherit; font-weight: 800; font-size: 13px; cursor: pointer; }
+.wdl-sw-btn svg { width: 16px; height: 16px; }
+.wdl-sw-btn:hover { border-color: ${GOLD}; color: #fff; }
+.wdl-sw-btn.on { border-color: ${GOLD}; color: ${GOLD}; }
+/* its chooser */
+.wdl-swp { position: absolute; right: clamp(16px, 2.4vw, 36px); z-index: 60; width: 340px; margin-top: 6px; background: #0e1625; border: 1px solid #26324a; border-radius: 14px; padding: 12px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.55); display: flex; flex-direction: column; gap: 10px; }
+.wdl-swp-h { display: flex; align-items: center; justify-content: space-between; font-weight: 900; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: #eef2f8; }
+.wdl-swp-h button { background: none; border: 0; color: #8193ad; font-size: 15px; cursor: pointer; }
+.wdl-swp .wdl-seg { align-self: flex-start; margin: 0; }
+.wdl-swp-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; }
+.wdl-swp-list label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-weight: 800; font-size: 13px; color: #c9d5e6; }
+.wdl-swp-list label:hover { background: #16213a; }
+.wdl-swp-list label.on { color: #fff; }
+.wdl-swp-list input { accent-color: ${GOLD}; }
+.wdl-swp-list .m { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: uppercase; }
+.wdl-swp-list .m small { color: #8193ad; font-size: 10px; margin-right: 3px; }
+.wdl-swp-list .s { font-size: 11px; color: #6f819c; white-space: nowrap; }
+.wdl-swp-list .s.live { color: ${LIVE_RED}; }
+.wdl-swp-go { background: ${GOLD}; color: #121212; border: 0; border-radius: 999px; padding: 9px 14px; font-weight: 900; font-size: 13px; cursor: pointer; font-family: inherit; }
+.wdl-swp-go:disabled { opacity: 0.45; cursor: default; }
 .wdl-strip-pill.feat { background: ${GOLD}; }
 .wdl-strip-game.gotw { border-color: rgba(124,58,237,0.7); }
 .wdl-rec { color: #6f819c; font-size: 0.68em; font-weight: 800; margin-left: 8px; font-variant-numeric: tabular-nums; }
@@ -168,7 +205,35 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-weeknav button { background: #111a2b; border: 1px solid #26324a; color: #eef2f8; border-radius: 999px; width: 34px; height: 34px; font-size: 20px; font-weight: 900; line-height: 1; cursor: pointer; font-family: inherit; }
 .wdl-weeknav button:disabled { opacity: 0.3; cursor: default; }
 .wdl-weeknav button.now { width: auto; padding: 0 14px; font-size: 13px; background: ${GOLD}; color: #121212; border-color: ${GOLD}; }
-.wdl-mu-week { margin-top: 6px; background: rgba(10,15,26,0.5); border: 1px solid rgba(255,255,255,0.25); color: #fff; border-radius: 999px; padding: 4px 12px; font-weight: 900; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; font-family: inherit; }
+.wdl-mu-above { display: flex; gap: 8px; margin-bottom: 10px; }
+/* a game's roster tab: the team page's roster card */
+.wdl-roster { border-radius: 12px; overflow: hidden; }
+/* pop-out icon, bottom-right of the scoreboard (desktop only) */
+.wdl-mu-popicon { position: absolute; right: 10px; bottom: 10px; z-index: 5; width: 30px; height: 30px; padding: 6px; border-radius: 8px; cursor: pointer;
+  background: rgba(10,15,26,0.45); border: 1px solid rgba(255,255,255,0.22); color: rgba(255,255,255,0.75); transition: color 0.15s, border-color 0.15s, background 0.15s; }
+.wdl-mu-popicon:hover { color: #fff; border-color: ${GOLD}; background: rgba(10,15,26,0.7); }
+.wdl-mu-popicon.on { color: ${GOLD}; border-color: ${GOLD}; }
+.wdl-mu-popicon svg { width: 100%; height: 100%; display: block; }
+/* "rotate your phone" — only in portrait, in full screen */
+.wdl-mu-rotate { display: none; position: absolute; left: 50%; bottom: max(22px, calc(env(safe-area-inset-bottom) + 10px)); transform: translateX(-50%); z-index: 4;
+  align-items: center; gap: 8px; white-space: nowrap; padding: 8px 14px; border-radius: 999px; background: rgba(6,10,18,0.7); border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.85); font-weight: 800; font-size: 13px; }
+.wdl-mu-rotate svg { width: 20px; height: 20px; animation: wdl-rotate-hint 2.4s ease-in-out infinite; }
+@keyframes wdl-rotate-hint { 0%, 30% { transform: rotate(0); } 55%, 85% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
+@media (orientation: portrait) { .wdl-mu.full .wdl-mu-rotate { display: flex; } }
+/* full-screen scoreboard (phones / tablets) — the ✕ moves to the top corner */
+.wdl-mu.full { position: fixed; inset: 0; z-index: 10050; margin: 0; border: 0; border-radius: 0; min-height: 100vh; min-height: 100dvh; align-content: center;
+  padding-top: max(14px, env(safe-area-inset-top)); padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+.wdl-mu.full .wdl-mu-popicon.close { top: max(10px, env(safe-area-inset-top)); bottom: auto; width: 36px; height: 36px; padding: 8px; }
+/* the pop-out widget window: the scoreboard fills it, flush to the top */
+.wdl-widget { min-height: 100vh; background: #0a0f1a; }
+.wdl-widget .wdl-mu { min-height: 100vh; box-sizing: border-box; border: 0; border-radius: 0; padding-top: 6px; align-content: start; }
+/* the latest play — the board's last row */
+.wdl-mu-play { grid-column: 1 / -1; position: relative; z-index: 1; margin-top: 2px; padding: 8px 12px; border-radius: 10px; text-align: center;
+  background: rgba(6,10,18,0.55); border: 1px solid rgba(255,255,255,0.12); font-weight: 800; font-size: 14px; line-height: 1.35; color: #eef2f8;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5); animation: wdl-wplay-in 0.45s ease-out; }
+@keyframes wdl-wplay-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.wdl-mu-week { margin-top: 0; background: rgba(10,15,26,0.5); border: 1px solid rgba(255,255,255,0.25); color: #fff; border-radius: 999px; padding: 4px 12px; font-weight: 900; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; font-family: inherit; }
 .wdl-mu-week:hover { border-color: ${GOLD}; }
 /* Upcoming games: Preview (tale of the tape, prospects) + We-Pick card. */
 .wdl-pv-sec { margin-bottom: 22px; }
@@ -321,7 +386,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 @media (max-width: 640px) {
   .wdl-mu-full { display: none; }
   .wdl-mu-short { display: inline; }
-  .wdl-mu-week { font-size: 10px; padding: 3px 8px; margin-top: 2px; }
+  .wdl-mu-week { font-size: 10px; padding: 3px 8px; }
 }
 .wdl-mu-team.away { justify-self: start; }
 .wdl-mu-team.home { justify-self: end; }
@@ -333,7 +398,17 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-mu-score b { font-weight: 900; font-size: clamp(58px, 7.5vw, 120px); line-height: 1; color: #fff; text-shadow: 0 6px 22px rgba(0,0,0,0.55); animation: wdl-flash 1.6s ease-out; }
 .wdl-mu-score b.pre { color: rgba(255,255,255,0.35); }
 .wdl-mu-score.home { flex-direction: row-reverse; }
-.wdl-mu-fb { font-size: clamp(16px, 1.6vw, 26px); filter: drop-shadow(0 0 6px rgba(246,162,29,0.8)); }
+.wdl-mu-fb { width: clamp(30px, 2.8vw, 46px); height: auto; flex-shrink: 0; filter: drop-shadow(0 0 6px rgba(255,255,255,0.55)); }
+.wdl-mu-fb.away { transform: rotate(32deg); }
+.wdl-mu-fb.home { transform: rotate(-32deg); }
+/* Down & distance — a scoreboard readout: two lit cells. */
+/* themed by the team with the ball (--pc, its color) */
+.wdl-mu-dd { display: flex; border-radius: 10px; overflow: hidden; border: 2px solid rgba(255,255,255,0.85); background: linear-gradient(180deg, color-mix(in srgb, var(--pc) 88%, #fff), var(--pc) 55%, color-mix(in srgb, var(--pc) 75%, #000)); box-shadow: 0 0 16px color-mix(in srgb, var(--pc) 60%, transparent), 0 4px 14px rgba(0,0,0,0.45); }
+.wdl-mu-dd > div { display: flex; flex-direction: column; align-items: center; padding: 5px 14px 6px; min-width: 56px; }
+.wdl-mu-dd > div + div { border-left: 1px solid rgba(255,255,255,0.35); }
+.wdl-mu-dd span { font-size: 9px; font-weight: 900; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.75); text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.wdl-mu-dd b { font-weight: 900; font-size: clamp(20px, 1.8vw, 28px); line-height: 1.05; color: #fff; font-variant-numeric: tabular-nums; text-transform: uppercase; text-shadow: 0 2px 6px rgba(0,0,0,0.55); }
+.wdl-mu-dd b.goal { color: #fff; }
 .wdl-mu .lose { opacity: 0.5; }
 .wdl-mu-score.win b { text-shadow: 0 0 26px rgba(255,255,255,0.35), 0 6px 22px rgba(0,0,0,0.55); }
 .wdl-mu-mid { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
@@ -363,7 +438,10 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .wdl-mu-logo { width: 44px; height: 44px; }
   .wdl-mu-name { font-size: 13px; }
   .wdl-mu-score b { font-size: 40px; }
-  .wdl-mu-fb { font-size: 13px; }
+  .wdl-mu-fb { width: 22px; }
+  .wdl-mu-dd > div { padding: 3px 8px 4px; min-width: 40px; }
+  .wdl-mu-dd span { font-size: 8px; letter-spacing: 0.1em; }
+  .wdl-mu-dd b { font-size: 16px; }
   .wdl-mu-status { font-size: 12px; padding: 4px 9px; }
   .wdl-mu-next { font-size: 11px; white-space: normal; }
   .wdl-mu-link { display: none; }
@@ -570,12 +648,16 @@ function stripOrder(games) {
 // and games only move on a refresh. In review (the week's over, all finals)
 // the row is Top 25 first instead (byTop25). Ranks show before each name. Games that start later join the end of
 // the live ones; games that go final later join the end of the row.
-function ScoreStrip({ games, onPick, current, phase }) {
+// Before anything has kicked off (preview), it's the week's games in kickoff
+// order, with time and TV. onPopout: the pop-out scores button at its end.
+function ScoreStrip({ games, onPick, current, phase, onPopout, popped }) {
   const tvShort = useTvShort();
   const order = useRef(null);
   const orderPhase = useRef(phase);
   if (orderPhase.current !== phase) { orderPhase.current = phase; order.current = null; }
   const shown = games.filter((g) => g.status === "in_progress" || g.status === "final");
+  const upcoming = shown.length ? null
+    : games.filter((g) => g.status === "scheduled").sort((a, b) => (Date.parse(a.startDate) || 0) - (Date.parse(b.startDate) || 0));
   if (!order.current && shown.length) order.current = (phase === "review" ? [...shown].sort(byTop25) : stripOrder(shown)).map((g) => g.id);
   if (order.current) {
     const known = new Set(order.current);
@@ -589,7 +671,7 @@ function ScoreStrip({ games, onPick, current, phase }) {
     }
   }
   const byId = new Map(shown.map((g) => [g.id, g]));
-  const list = (order.current || []).map((id) => byId.get(id)).filter(Boolean);
+  const list = upcoming || (order.current || []).map((id) => byId.get(id)).filter(Boolean);
   if (!list.length) return null;
   return (
     <div className="wdl-strip">
@@ -607,13 +689,52 @@ function ScoreStrip({ games, onPick, current, phase }) {
               </span>
             ))}
             <span className="wdl-strip-status">
-              {live && <span className="wdl-dot" />}{statusLabel(g)}{live && g.tv && <span className="wdl-strip-tv">{tvShort(g.tv)}</span>}
+              {live && <span className="wdl-dot" />}{statusLabel(g)}{g.status !== "final" && g.tv && <span className="wdl-strip-tv">{tvShort(g.tv)}</span>}
               {g.gameOfWeek ? <span className="wdl-strip-tag" title="Game of the Week"><span className="wdl-strip-pill gotw">GOTW</span></span>
                 : g.featured ? <span className="wdl-strip-tag" title="Featured game"><span className="wdl-strip-pill feat">Featured</span></span> : null}
             </span>
           </button>
         );
       })}
+      {onPopout && (
+        <button type="button" className={`wdl-strip-pop${popped ? " on" : ""}`} onClick={onPopout} title={popped ? "Close the pop-out scores" : "Pop out scores — float them over your other windows"} aria-label="Pop out scores">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M9 3h8v8M17 3l-7.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// The scores pop-out's chooser: every game, or a picked set (kept in this
+// browser for next time).
+const SCORES_PICK_KEY = "wdLive.scoresPick";
+const loadScoresPick = () => { try { return JSON.parse(localStorage.getItem(SCORES_PICK_KEY) || "null") || { mode: "all", ids: [] }; } catch { return { mode: "all", ids: [] }; } };
+function ScoresPicker({ games, sel, onChange, onOpen, onClose }) {
+  const ids = new Set(sel.ids);
+  const listed = [...games].sort((a, b) => (a.status === "in_progress" ? 0 : a.status === "scheduled" ? 1 : 2) - (b.status === "in_progress" ? 0 : b.status === "scheduled" ? 1 : 2)
+    || (Date.parse(a.startDate) || 0) - (Date.parse(b.startDate) || 0));
+  const toggle = (id) => onChange({ ...sel, ids: ids.has(id) ? sel.ids.filter((x) => x !== id) : [...sel.ids, id] });
+  return (
+    <div className="wdl-swp" role="dialog" aria-label="Pop out scores">
+      <div className="wdl-swp-h">Pop out scores<button type="button" onClick={onClose} aria-label="Close">✕</button></div>
+      <div className="wdl-seg">
+        <button type="button" className={sel.mode === "all" ? "on" : ""} onClick={() => onChange({ ...sel, mode: "all" })}>All games</button>
+        <button type="button" className={sel.mode === "pick" ? "on" : ""} onClick={() => onChange({ ...sel, mode: "pick" })}>Pick games</button>
+      </div>
+      {sel.mode === "pick" && (
+        <div className="wdl-swp-list">
+          {listed.map((g) => (
+            <label key={g.id} className={ids.has(g.id) ? "on" : ""}>
+              <input type="checkbox" checked={ids.has(g.id)} onChange={() => toggle(g.id)} />
+              <span className="m">{g.away.rank ? <small>{g.away.rank}</small> : null}{teamShort(g.away)} @ {g.home.rank ? <small>{g.home.rank}</small> : null}{teamShort(g.home)}</span>
+              <span className={`s${g.status === "in_progress" ? " live" : ""}`}>{statusLabel(g)}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      <button type="button" className="wdl-swp-go" disabled={sel.mode === "pick" && !sel.ids.length} onClick={onOpen}>
+        ⧉ Pop out {sel.mode === "all" ? "all games" : `${sel.ids.length} game${sel.ids.length === 1 ? "" : "s"}`}
+      </button>
     </div>
   );
 }
@@ -851,7 +972,7 @@ function YourWeekGamePlayers({ game, players, onOpen }) {
   });
 }
 
-function YourWeek({ week, signedIn, login, rankedGames, rankedRows, standing, teamGames, players, games, grid, onOpen, onCustomize, onWePick }) {
+function YourWeek({ week, signedIn, login, rankedGames, rankedRows, standing, teamGames, players, games, grid, onOpen, onCustomize, onWePick, toggle }) {
   // Followed players grouped by their game this week.
   const byGame = new Map();
   const idle = [];
@@ -864,6 +985,7 @@ function YourWeek({ week, signedIn, login, rankedGames, rankedRows, standing, te
   const groups = [...byGame.values()].sort((a, b) => sortGames(a.game, b.game));
   return (
     <div>
+      {toggle}
       <div className="wdl-h">Your Week{week ? ` · Week ${week}` : ""}</div>
       <div className="wdl-yw-cols">
       <section className="wdl-yw-sec">
@@ -898,6 +1020,28 @@ function YourWeek({ week, signedIn, login, rankedGames, rankedRows, standing, te
       </div>
     </div>
   );
+}
+
+// Your Week for the previous week (the toggle on Your Week while the slate
+// is in preview or review): that week's games from liveGames (useWeekGames,
+// cached), your Ranked 6 for it, its final standing, and your followed
+// teams and players with that week's adds/drops applied.
+function YourLastWeek({ season, week, uid, followedTeams, followedPlayers, weekFollows, ...rest }) {
+  const loaded = useWeekGames(season, week > 0 ? week : null);
+  const games = useMemo(() => loaded || [], [loaded]);
+  const rankedIds = useRankedSixIds(uid, games.map((g) => g.wedraftWeek));
+  const rankedGames = games.filter((g) => g.wedraftGameId && rankedIds.has(g.wedraftGameId));
+  const rankedRows = useRankedPicks(uid, rankedGames.map((g) => g.wedraftGameId));
+  const wpWeek = useMemo(() => {
+    const n = {};
+    games.forEach((g) => { if (g.wedraftWeek) n[g.wedraftWeek] = (n[g.wedraftWeek] || 0) + 1; });
+    return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  }, [games]);
+  const standing = useWeekStanding(uid, wpWeek);
+  const teams = weekTeams(followedTeams, weekFollows);
+  const teamGames = games.filter((g) => teams.includes(g.home.providerTeamId) || teams.includes(g.away.providerTeamId));
+  return <YourWeek week={week} rankedGames={rankedGames} rankedRows={rankedRows} standing={standing}
+    teamGames={teamGames} players={weekPlayers(followedPlayers, weekFollows)} games={games} {...rest} />;
 }
 
 // ── Reviewed games ── a final game opens on Stats, its play-by-play folds
@@ -1189,7 +1333,8 @@ function GameRecap({ game, gameId, slateGame }) {
 }
 
 // ── Upcoming games ── a scheduled game opens on its Preview (tale of the
-// tape: records, ranks, each team's season leaders from cfbRosters) with a
+// tape: records, ranks, points scored / allowed per game, each team's
+// season leaders from cfbRosters) with a
 // Prospects tab (the We-Draft prospects on both sides, with grades and
 // community strengths/weaknesses); the right rail (or the top, on phones)
 // is the We-Pick card — your score pick, the community split and the
@@ -1208,6 +1353,35 @@ function useTeamRosters(homeId, awayId) {
     return () => { alive = false; };
   }, [homeId, awayId]);
   return rosters;
+}
+
+// Points per game scored and allowed this season, for each team — its
+// finished games in liveGames (as home and as away: four small queries).
+function useTeamScoring(homeId, awayId, season) {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    setState(null);
+    const load = async (id) => {
+      if (id == null) return null;
+      const snaps = await Promise.all(["home", "away"].map((side) => getDocs(query(collection(db, "liveGames"), where(`${side}.providerTeamId`, "==", id)))));
+      let pf = 0, pa = 0, n = 0;
+      snaps.forEach((snap, i) => snap.docs.forEach((d) => {
+        const g = d.data();
+        if (g.status !== "final" || (season && g.season !== season)) return;
+        const us = g[i === 0 ? "home" : "away"]?.points;
+        const them = g[i === 0 ? "away" : "home"]?.points;
+        if (us == null || them == null) return;
+        pf += us; pa += them; n += 1;
+      }));
+      return n ? { ppg: pf / n, papg: pa / n, games: n } : null;
+    };
+    Promise.all([load(homeId), load(awayId)])
+      .then(([home, away]) => { if (alive) setState({ home, away }); })
+      .catch(() => { if (alive) setState({ home: null, away: null }); });
+    return () => { alive = false; };
+  }, [homeId, awayId, season]);
+  return state;
 }
 
 // Each school's We-Draft prospects (active classes, Live), best community
@@ -1263,10 +1437,30 @@ function tapeOf(roster) {
   };
 }
 
+// A team's whole roster on a game (Preview, and live — not once it's
+// final): the team page's roster table (components/TeamRoster.js), from
+// cfbRosters/{teamId}. `roster` when the caller already has it (Preview).
+function GameRoster({ game, side, roster: given, loading }) {
+  const t = game[side] || {};
+  const fetched = useTeamRosters(given === undefined && side === "home" ? t.providerTeamId : null, given === undefined && side === "away" ? t.providerTeamId : null);
+  const roster = given !== undefined ? given : fetched?.[side];
+  const pending = given !== undefined ? loading : !fetched;
+  const narrow = typeof window !== "undefined" && window.innerWidth < 760;
+  if (pending) return <div className="wdl-empty">Loading the {teamShort(t)} roster…</div>;
+  if (!roster?.players?.length) return <div className="wdl-empty">No roster on file for {teamShort(t)} yet.</div>;
+  return (
+    <div className="wdl-roster">
+      <TeamRoster roster={roster} color1={t.color || "#1d2840"} color2={t.color2 || "#f6a21d"} isMobile={narrow} dark hideStars />
+    </div>
+  );
+}
+
 function PreviewView({ game, slateGame }) {
   const [tab, setTab] = useState("preview");
   const rosters = useTeamRosters(game.home?.providerTeamId, game.away?.providerTeamId);
   const pros = useSchoolProspects(game.home?.school, game.away?.school);
+  const scoring = useTeamScoring(game.home?.providerTeamId, game.away?.providerTeamId, game.season);
+  const avg = (x) => (x == null ? "—" : x.toFixed(1));
   const tape = { home: tapeOf(rosters?.home), away: tapeOf(rosters?.away) };
   const rec = (side) => slateGame?.[side]?.record || game[side]?.record || null;
   const leaderCell = (x, unit) => (x ? <>{x.v.toLocaleString()} {unit}<small>{x.p.first} {x.p.last}</small></> : <span style={{ color: "#6f819c" }}>—</span>);
@@ -1275,6 +1469,8 @@ function PreviewView({ game, slateGame }) {
   const rows = [
     ["Record", rec("away") || "—", rec("home") || "—", [false, false]],
     ["Rank", game.away?.rank ? `#${game.away.rank}` : "—", game.home?.rank ? `#${game.home.rank}` : "—", edge(game.away?.rank || null, game.home?.rank || null, true)],
+    ["Points / game", avg(scoring?.away?.ppg), avg(scoring?.home?.ppg), edge(scoring?.away?.ppg, scoring?.home?.ppg)],
+    ["Points allowed / game", avg(scoring?.away?.papg), avg(scoring?.home?.papg), edge(scoring?.away?.papg, scoring?.home?.papg, true)],
     ["Passing", leaderCell(tape.away.pass, "yds"), leaderCell(tape.home.pass, "yds"), edge(tape.away.pass?.v, tape.home.pass?.v)],
     ["Rushing", leaderCell(tape.away.rush, "yds"), leaderCell(tape.home.rush, "yds"), edge(tape.away.rush?.v, tape.home.rush?.v)],
     ["Receiving", leaderCell(tape.away.rec, "yds"), leaderCell(tape.home.rec, "yds"), edge(tape.away.rec?.v, tape.home.rec?.v)],
@@ -1319,8 +1515,12 @@ function PreviewView({ game, slateGame }) {
       <div className="wdl-gtabs">
         <button className={`wdl-gtab${tab === "preview" ? " on" : ""}`} onClick={() => setTab("preview")}>Preview</button>
         <button className={`wdl-gtab${tab === "prospects" ? " on" : ""}`} onClick={() => setTab("prospects")}>Prospects{pros ? ` · ${(pros.home?.length || 0) + (pros.away?.length || 0)}` : ""}</button>
+        {["away", "home"].map((side) => (
+          <button key={side} className={`wdl-gtab${tab === `roster-${side}` ? " on" : ""}`} onClick={() => setTab(`roster-${side}`)}>{teamShort(game[side])} roster</button>
+        ))}
       </div>
-      {tab === "preview" ? (
+      {tab.startsWith("roster-") ? <GameRoster game={game} side={tab.slice(7)} roster={rosters ? rosters[tab.slice(7)] || null : null} loading={!rosters} />
+        : tab === "preview" ? (
       <div className="wdl-pv-sec">
         <div className="wdl-h">Tale of the tape</div>
         <div className="wdl-tape">
@@ -1629,6 +1829,35 @@ function useWeekGames(season, week) {
   return games;
 }
 
+// Last Week (replaces Top Performances while next week is in preview): the
+// previous week's top performances and final scores, from its liveGames
+// docs (the same per-week load as WeekSlate, cached).
+function LastWeek({ season, week, grid, onOpenGame, followedIds, onTogglePlayer }) {
+  const games = useWeekGames(season, week > 0 ? week : null);
+  const perf = useMemo(() => (games ? performancesFromGames(games) : null), [games]);
+  const [tab, setTab] = useState("perf");
+  if (!(week > 0)) return <div className="wdl-empty">No previous week yet.</div>;
+  if (!games) return <div className="wdl-empty">Loading Week {week}…</div>;
+  const finals = games.filter((g) => g.status === "final").sort(byTop25);
+  return (
+    <div>
+      <div className="wdl-gtabs" style={{ marginTop: 0 }}>
+        <button className={`wdl-gtab${tab === "perf" ? " on" : ""}`} onClick={() => setTab("perf")}>Performances</button>
+        <button className={`wdl-gtab${tab === "scores" ? " on" : ""}`} onClick={() => setTab("scores")}>Scores</button>
+      </div>
+      {tab === "perf" ? (
+        <LivePerformances games={games} perf={perf} initial={5} title={`Top performances · Week ${week}`}
+          followedIds={followedIds} onTogglePlayer={onTogglePlayer} onOpenGame={onOpenGame} />
+      ) : (
+        <>
+          <div className="wdl-h">Week {week} scores · {finals.length} final{finals.length === 1 ? "" : "s"}</div>
+          {grid(finals, `No Week ${week} finals.`)}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ‹ Week N › — steps All Games between weeks; "This week" returns to the slate.
 function WeekNav({ week, current, onWeek }) {
   return (
@@ -1653,7 +1882,130 @@ function WeekSlate({ season, week, current, onWeek, grid }) {
   );
 }
 
+// School → { color2, mascot } for the given school names (two reads, once
+// per game) — for game docs written before the ingester carried them.
+function useSchoolExtras(names) {
+  const key = names.filter(Boolean).join("|");
+  const [map, setMap] = useState({});
+  useEffect(() => {
+    let alive = true;
+    if (!key) return undefined;
+    getDocs(query(collection(db, "schools"), where("School", "in", key.split("|"))))
+      .then((snap) => {
+        if (!alive) return;
+        const m = {};
+        snap.docs.forEach((d) => { const x = d.data(); if (x.School) m[x.School] = { color2: x.Color2 || null, mascot: x.Mascot || null }; });
+        setMap(m);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [key]);
+  return map;
+}
+
+// A scoreboard score: when it goes up it counts to the new total with a
+// pop in the team's second color (`bump`).
+function ScoreNum({ value, bump }) {
+  const [shown, setShown] = useState(value);
+  const [bumpKey, setBumpKey] = useState(0);
+  const prev = useRef(value);
+  useEffect(() => {
+    const from = prev.current;
+    prev.current = value;
+    if (from == null || value == null || value <= from) { setShown(value); return undefined; }
+    setBumpKey((k) => k + 1);
+    const steps = value - from;
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setShown(from + i);
+      if (i >= steps) clearInterval(id);
+    }, Math.max(40, Math.min(110, 700 / steps)));
+    return () => clearInterval(id);
+  }, [value]);
+  return <b key={bumpKey} className={bumpKey ? "wdl-score-bump" : undefined} style={{ "--bump": bump }}>{shown}</b>;
+}
+
+// Possession marker on the scoreboard: a plain white football, tipped up
+// and away from the middle (the away side's leans left, home's right).
+function FootballIcon({ side }) {
+  return (
+    <svg className={`wdl-mu-fb ${side}`} viewBox="0 0 28 16" role="img" aria-label="Possession">
+      <path d="M1 8 C5 -0.5 23 -0.5 27 8 C23 16.5 5 16.5 1 8 Z" fill="#fff" />
+    </svg>
+  );
+}
+
 function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPlayId, scrollToPlayId, onQueueChange, showRecap, onWeek }) {
+  // The scoreboard's big-moment takeover (components/HeaderTakeover.js).
+  // takeover: { kind, side, key, hold? } — hold is the score shown until it
+  // ends (the old score), then the new one counts up (ScoreNum).
+  const [takeover, setTakeover] = useState(null);
+  const clearTakeover = useCallback(() => setTakeover(null), []);
+  // Pop-out scoreboard (desktop Chrome / Edge): an always-on-top Document
+  // Picture-in-Picture window the scoreboard + a play line render into, so
+  // it can float over other apps and screens. The page's styles are copied in.
+  const canWidget = typeof window !== "undefined" && "documentPictureInPicture" in window;
+  const [widgetWin, setWidgetWin] = useState(null);
+  const openWidget = async () => {
+    try {
+      const win = await window.documentPictureInPicture.requestWindow({ width: 620, height: 330 });
+      document.querySelectorAll("style, link[rel='stylesheet']").forEach((n) => win.document.head.appendChild(n.cloneNode(true)));
+      win.document.title = "We-Draft Live";
+      // The site's body padding (index.css pt-20, for the fixed navbar) and
+      // scrollbars don't belong in the widget.
+      win.document.documentElement.style.cssText = "overflow:hidden;background:#0a0f1a;";
+      win.document.body.style.cssText = "margin:0;padding:0;overflow:hidden;background:#0a0f1a;";
+      win.addEventListener("pagehide", () => setWidgetWin(null));
+      // Its full-screen button: the pop-out itself goes full screen where the
+      // browser allows; otherwise the pop-out closes and the scoreboard goes
+      // full screen on the page.
+      win.document.addEventListener("click", (e) => {
+        if (!e.target.closest?.(".wdl-wfull")) return;
+        const d = win.document;
+        if (d.fullscreenElement) { d.exitFullscreen().catch(() => {}); return; }
+        const onPage = () => { win.close(); enterFull(); };
+        if (!d.documentElement.requestFullscreen) { onPage(); return; }
+        d.documentElement.requestFullscreen().catch(onPage);
+      });
+      setWidgetWin(win);
+    } catch { /* blocked or dismissed */ }
+  };
+  // Leaving the game closes it.
+  useEffect(() => () => { if (widgetWin && !widgetWin.closed) widgetWin.close(); }, [widgetWin]);
+  // Phones / tablets (or browsers without the pop-out): the same icon makes
+  // the scoreboard full screen instead — real fullscreen where the browser
+  // allows it on an element (Android, iPad), else it just covers the
+  // viewport (iPhone Safari).
+  const boardRef = useRef(null);
+  const [boardFull, setBoardFull] = useState(false);
+  const touchish = () => typeof window !== "undefined" && (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 1000);
+  const enterFull = () => {
+    setBoardFull(true);
+    const el = boardRef.current;
+    const req = el && (el.requestFullscreen || el.webkitRequestFullscreen);
+    if (req) Promise.resolve(req.call(el)).catch(() => {});
+  };
+  const exitFull = () => {
+    setBoardFull(false);
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+  };
+  useEffect(() => {
+    if (!boardFull) return undefined;
+    // Leaving browser fullscreen (Esc, back gesture) leaves our full screen too.
+    const onFs = () => { if (!(document.fullscreenElement || document.webkitFullscreenElement)) setBoardFull(false); };
+    document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("webkitfullscreenchange", onFs);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [boardFull]);
+  const lastPoints = useRef({ away: null, home: null });
   // Jumping to a specific play (from the Feed) loads the full play list so
   // an older play can be found, and so does a final game (its drive
   // summary needs every play); otherwise just the newest plays.
@@ -1664,6 +2016,9 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   const scheduled = useScheduledGame(ready && !live && !slateGame ? gameId : null);
   useEffect(() => { if (live?.status === "final") setFinalSeen(true); }, [live?.status]);
   const gLive = live || slateGame || scheduled || null;
+  // Each team's second color and mascot for the takeover — on the game doc
+  // once the ingester has written them, else read from its school.
+  const extras = useSchoolExtras([gLive?.away?.school, gLive?.home?.school]);
   // New plays are revealed through the top slot one at a time (each held
   // ~10s before it drops into the list) — see hooks/usePlayReveal.js.
   const { listed, slot, justListed, queued } = usePlayReveal(plays, gameId);
@@ -1693,20 +2048,22 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // Scroll the play picked in the Feed into view — once per pick. (It
   // waits for that play to be loaded, but new plays arriving afterwards
   // never scroll the page again.)
-  // Confetti in the winner's color when the game goes final while it's on
-  // screen (not when opening an already-finished game).
+  // Confetti in the winner's color, and the winner's takeover, when the
+  // game goes final while it's on screen (not when opening an
+  // already-finished game).
   const prevStatus = useRef(null);
   useEffect(() => {
     const st = live?.status;
     if (prevStatus.current === "in_progress" && st === "final" && live) {
       const winner = (live.home?.points ?? 0) >= (live.away?.points ?? 0) ? live.home : live.away;
       confetti({ particleCount: 180, spread: 100, origin: { y: 0.3 }, colors: [winner?.color || "#dfe6f0", "#ffffff"], disableForReducedMotion: true });
+      if (live.home?.points !== live.away?.points) setTakeover({ kind: "win", side: winner === live.home ? "home" : "away", key: "final" });
     }
     if (st) prevStatus.current = st;
   }, [live]);
 
-  // Play-by-Play | Stats. Jumping to a play always shows the plays; a
-  // final game lands on Stats (until the viewer picks a tab).
+  // Play-by-Play | Stats | Chat. Jumping to a play always shows the plays;
+  // a final game lands on Stats (until the viewer picks a tab).
   const [tab, setTab] = useState(slateGame?.status === "final" && !scrollToPlayId ? "stats" : "plays");
   const tabPicked = useRef(false);
   const pickTab = (t) => { tabPicked.current = true; setTab(t); };
@@ -1714,6 +2071,20 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   useEffect(() => {
     if (live?.status === "final" && !tabPicked.current && !scrollToPlayId) setTab("stats");
   }, [live?.status, scrollToPlayId]);
+
+  // Takeovers: a touchdown / field goal / safety / turnover as its play is
+  // revealed (the "just now" slot — never for plays already there when the
+  // game opened). The winner's takeover is with the final confetti below.
+  useEffect(() => {
+    if (!slot || gLive?.status !== "in_progress") return;
+    // The score change on the play decides the team (checkScorer).
+    const t = checkScorer(takeoverForPlay(slot), slot, lastPoints.current);
+    if (t?.side) setTakeover({ ...t, key: `play-${slot.id}`, hold: TAKEOVER_POINTS[t.kind] ? { ...lastPoints.current } : null });
+  }, [slot?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The last score shown (g lags the live doc while queued plays reveal) —
+  // a takeover holds it until it ends.
+  useEffect(() => { lastPoints.current = { away: g?.away?.points ?? null, home: g?.home?.points ?? null }; });
 
   const scrolledTo = useRef(null);
   useEffect(() => {
@@ -1744,29 +2115,31 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // show (not live, or a kickoff is next after a score).
   const shown = slot ? [slot, ...newestListed] : newestListed;
   const next = isLive ? nextSituation(shown, g) : null;
-  const nextOffense = next?.offense ? g[next.offense] : null;
-  const nextDefense = next?.offense ? g[next.offense === "home" ? "away" : "home"] : null;
-  const nextText = next?.down
-    ? `${downLabel(next.down, next.distance)}${next.ytg != null ? ` at ${spotLabel(next.ytg, nextOffense, nextDefense)}` : ""}`
-    : next?.brk?.label || "";
   const heat = clutchHeat(g);
   const isFinal = g.status === "final";
+  // The scoreboard's state.
+  const headG = g;
+  const headLive = isLive;
+  const headNext = next;
   // A two-point try is its own entity, right after its touchdown.
   const withTwo = (p) => (p.presentation?.pat?.type === "two"
     ? <TwoPointCard pat={p.presentation.pat} team={g[p.presentation.creditSide || p.offense]} /> : null);
-  return (
-    <div>
-      {/* Head-to-head header: each half in its team's color meeting at a
-          slanted seam, logos facing off from the edges, scores on either
-          side of the status medallion. */}
-      {(() => {
-        const hp = g.home?.points;
-        const ap = g.away?.points;
+  // Head-to-head header: each half in its team's color meeting at a
+  // slanted seam, logos facing off from the edges, scores on either side
+  // of the status medallion. One element: the page shows it, and so does
+  // the pop-out widget (inWidget: the latest play as the board's last row,
+  // no pop-out icon).
+  // The widget's play line: the latest play, in brief, then the next snap.
+  const latestPlay = slot || newestListed[0] || null;
+  const widgetPlay = latestPlay ? briefPlay(latestPlay, next) : "";
+  const renderBoard = (inWidget) => {
+        const hp = headG.home?.points;
+        const ap = headG.away?.points;
         const loser = isFinal && hp != null && ap != null && hp !== ap ? (hp > ap ? "away" : "home") : null;
         const team = (side) => {
-          const t = g[side] || {};
+          const t = headG[side] || {};
           const logo = t.logoDark || t.logo;
-          const hasBall = isLive && g.possession === side;
+          const hasBall = headLive && headG.possession === side;
           return (
             <div className={`wdl-mu-team ${side}${loser === side ? " lose" : ""}${loser && loser !== side ? " win" : ""}`}>
               {logo && <img className="wdl-mu-logo" src={logo} alt="" />}
@@ -1778,34 +2151,95 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
           );
         };
         const score = (side) => {
-          const t = g[side] || {};
+          const t = headG[side] || {};
           return (
             <div className={`wdl-mu-score ${side}${loser === side ? " lose" : ""}${loser && loser !== side ? " win" : ""}`}>
-              {isLive && g.possession === side && <span className="wdl-mu-fb" title="Possession">🏈</span>}
-              {t.points != null ? <b key={t.points}>{t.points}</b> : <b className="pre">–</b>}
+              {headLive && headG.possession === side && <FootballIcon side={side} />}
+              {t.points != null
+                ? <ScoreNum value={takeover?.hold?.[side] ?? t.points} bump={headG[side]?.color2 || extras[headG[side]?.school]?.color2 || "#fff"} />
+                : <b className="pre">–</b>}
             </div>
           );
         };
         return (
-          <div className={`wdl-mu${heat ? " clutch" : ""}${isFinal ? " final" : ""}`}
-            style={{ "--ac": g.away?.color || "#2a4a7a", "--hc": g.home?.color || "#7a2a2a", ...(heat ? { "--heat": heat.toFixed(2) } : {}) }}>
+          <div ref={inWidget ? undefined : boardRef} className={`wdl-mu${heat ? " clutch" : ""}${isFinal ? " final" : ""}${takeover ? ` tk-${takeover.side}` : ""}${!inWidget && boardFull ? " full" : ""}`}
+            style={{
+              // a takeover morphs both halves into the team's color
+              "--ac": (takeover && headG[takeover.side]?.color) || headG.away?.color || "#2a4a7a",
+              "--hc": (takeover && headG[takeover.side]?.color) || headG.home?.color || "#7a2a2a",
+              ...(heat ? { "--heat": heat.toFixed(2) } : {}),
+            }}>
             {team("away")}
             {score("away")}
             <div className="wdl-mu-mid">
-              <div className={`wdl-mu-status${isLive ? " live" : ""}`}>{isLive && <span className="wdl-dot" />}{statusLabel(g)}</div>
-              {nextText && !slot && isLive && <div className="wdl-mu-next">{nextText}</div>}
-              {!isFinal && g.tv && <div className="wdl-mu-tv">📺 {tvShort(g.tv)}</div>}
-              {(() => {
-                const wk = g.week ?? (g.wedraftWeek ? Number(/\d+/.exec(g.wedraftWeek)?.[0]) : null);
-                return wk != null && onWeek ? <button className="wdl-mu-week" onClick={() => onWeek(wk)}>Week {wk} slate ›</button> : null;
-              })()}
-              {g.slug && <Link to={`/game/${g.slug}`} className="wdl-mu-link">Game page →</Link>}
+              <div className={`wdl-mu-status${headLive ? " live" : ""}`}>{headLive && <span className="wdl-dot" />}{statusLabel(headG)}</div>
+              {/* Down & distance, scoreboard style (the spot is on the field
+                  strip below); a break (halftime …) as plain text. */}
+              {headLive && headNext?.down ? (
+                <div className="wdl-mu-dd" style={{ "--pc": headG[headNext.offense]?.color || "#1d2840" }}>
+                  <div><span>Down</span><b>{["", "1st", "2nd", "3rd", "4th"][headNext.down]}</b></div>
+                  <div><span>To go</span><b className={headNext.distance === "Goal" ? "goal" : ""}>{headNext.distance}</b></div>
+                </div>
+              ) : headLive && headNext?.brk?.label ? <div className="wdl-mu-next">{headNext.brk.label}</div> : null}
+              {!isFinal && headG.tv && <div className="wdl-mu-tv">📺 {tvShort(headG.tv)}</div>}
             </div>
             {score("home")}
             {team("home")}
+            {/* Field strip: where the ball is for the next snap. */}
+            {headLive && headNext?.offense && headNext.ytg != null && <LiveField game={headG} next={headNext} />}
+            {(inWidget || boardFull) && widgetPlay && <div key={widgetPlay} className="wdl-mu-play">{widgetPlay}</div>}
+            {!inWidget && boardFull && (
+              <div className="wdl-mu-rotate" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M10.5 18h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                Rotate your phone for the best view
+              </div>
+            )}
+            {inWidget && (
+              <button type="button" className="wdl-mu-popicon wdl-wfull" title="Full screen" aria-label="Full screen">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+            )}
+            {!inWidget && headLive && (() => {
+              if (boardFull) {
+                return (
+                  <button type="button" className="wdl-mu-popicon close" onClick={exitFull} title="Exit full screen" aria-label="Exit full screen">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+                  </button>
+                );
+              }
+              const pop = canWidget && !touchish();
+              return (
+                <button type="button" className={`wdl-mu-popicon${widgetWin ? " on" : ""}`}
+                  onClick={pop ? (widgetWin ? () => widgetWin.close() : openWidget) : enterFull}
+                  title={pop ? (widgetWin ? "Close the pop-out scoreboard" : "Pop out — float this scoreboard over your other windows") : "Full screen scoreboard"}
+                  aria-label={pop ? "Pop out scoreboard" : "Full screen scoreboard"}>
+                  {pop
+                    ? <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M9 3h8v8M17 3l-7.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    : <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </button>
+              );
+            })()}
+            {takeover && (
+              <HeaderTakeover key={takeover.key} kind={takeover.kind} side={takeover.side} onDone={clearTakeover} game={{
+                away: { ...headG.away, color2: headG.away?.color2 || extras[headG.away?.school]?.color2, mascot: headG.away?.mascot || extras[headG.away?.school]?.mascot },
+                home: { ...headG.home, color2: headG.home?.color2 || extras[headG.home?.school]?.color2, mascot: headG.home?.mascot || extras[headG.home?.school]?.mascot },
+              }} />
+            )}
           </div>
         );
+  };
+
+  return (
+    <div>
+      {(() => {
+        const wk = g.week ?? (g.wedraftWeek ? Number(/\d+/.exec(g.wedraftWeek)?.[0]) : null);
+        return wk != null && onWeek ? <div className="wdl-mu-above"><button className="wdl-mu-week" onClick={() => onWeek(wk)}>‹ Week {wk} slate</button></div> : null;
       })()}
+      {renderBoard(false)}
+      {widgetWin && createPortal(
+        <div className="wdl wdl-widget">{renderBoard(true)}</div>,
+        widgetWin.document.body,
+      )}
       {showRecap && isFinal && <div className="wdl-recap-inline"><div className="wdl-h">Game Recap</div><GameRecap game={g} gameId={gameId} slateGame={slateGame} /></div>}
       {g.status === "scheduled" && <>
         {showRecap && <div className="wdl-recap-inline"><PreviewPickCard game={g} /></div>}
@@ -1820,8 +2254,14 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
           <button className={`wdl-gtab${tab === "plays" ? " on" : ""}`} onClick={() => pickTab("plays")}>{isLive ? "Live play-by-play" : "Play-by-play"}</button>
           <button className={`wdl-gtab${tab === "stats" ? " on" : ""}`} onClick={() => pickTab("stats")}>{isLive ? "Live stats" : "Stats"}</button>
         </>}
+        <button className={`wdl-gtab${tab === "chat" ? " on" : ""}`} onClick={() => pickTab("chat")}>💬 Chat</button>
+        {!isFinal && ["away", "home"].map((side) => (
+          <button key={side} className={`wdl-gtab${tab === `roster-${side}` ? " on" : ""}`} onClick={() => pickTab(`roster-${side}`)}>{teamShort(g[side])} roster</button>
+        ))}
       </div>
-      {tab === "stats" ? <LiveGameStats gameId={gameId} game={g} />
+      {tab.startsWith("roster-") && !isFinal ? <GameRoster game={g} side={tab.slice(7)} />
+        : tab === "chat" ? <LiveChat gameId={gameId} game={g} />
+        : tab === "stats" ? <LiveGameStats gameId={gameId} game={g} />
         : isFinal && !focusPlayId ? <>
           <DriveSummary plays={plays} game={g} cardProps={cardProps} withTwo={withTwo} />
           <FinalCard game={g} />
@@ -2041,6 +2481,23 @@ export default function LivePage() {
     navigate(`/live${q ? `?${q}` : ""}`, opts);
   }, [onWePickPath, navigate, setSearchParams]);
   const compact = useCompact();
+  // Scores pop-out (desktop Chrome / Edge): the chooser, the selection
+  // (kept in this browser), and the open window.
+  const canScoresPop = typeof window !== "undefined" && "documentPictureInPicture" in window
+    && !window.matchMedia("(pointer: coarse)").matches && window.innerWidth >= 1000;
+  const [scoresPicker, setScoresPicker] = useState(false);
+  const [scoresSel, setScoresSel] = useState(loadScoresPick);
+  const [scoresWin, setScoresWin] = useState(null);
+  const pageTvShort = useTvShort();
+  const updateScoresSel = (next) => { setScoresSel(next); try { localStorage.setItem(SCORES_PICK_KEY, JSON.stringify(next)); } catch { /* private mode */ } };
+  const openScores = async () => {
+    const win = await openPipWindow({ width: 380, height: 560, title: "We-Draft Live · Scores", scroll: true });
+    if (!win) return;
+    win.addEventListener("pagehide", () => setScoresWin(null));
+    setScoresWin(win);
+    setScoresPicker(false);
+  };
+  useEffect(() => () => { if (scoresWin && !scoresWin.closed) scoresWin.close(); }, [scoresWin]);
   const canFullscreen = fsEnabled();
   const isFullscreen = useFullscreen();
   // My Teams / My Players live inside Customize now — old links land there.
@@ -2058,12 +2515,15 @@ export default function LivePage() {
   const view = asked === "feed" && slate && !feedWindow.open ? "all" : asked || (compact && feedWindow.open ? "feed" : "all");
   const gameParam = params.get("game");
   const [error, setError] = useState(false);
-  const [followedTeams, setFollowedTeams] = useState(() => loadFollows(FOLLOW_TEAMS_KEY));
-  const [followedPlayers, setFollowedPlayers] = useState(() => loadFollows(FOLLOW_PLAYERS_KEY));
+  // Follows, Feed settings and weekly adds need an account — a signed-out
+  // visitor has none (the whole slate) until they log in.
+  const [followedTeams, setFollowedTeams] = useState([]);
+  const [followedPlayers, setFollowedPlayers] = useState([]);
   // This week's changes to the follows (utils/live.js "This week") — kept
   // raw and matched to the slate's week when used, so last week's simply
   // reads as empty.
-  const [weekRaw, setWeekRaw] = useState(loadWeekFollows);
+  const [weekRaw, setWeekRaw] = useState(null);
+  const [prevWeekRaw, setPrevWeekRaw] = useState(null);
   const { user, login } = useAuth();
   const uid = user?.uid || null;
   const uidRef = useRef(uid);
@@ -2104,22 +2564,26 @@ export default function LivePage() {
     if (!onWePickPath && params.get("view") === "wepick") navigate(wePickHref(params.get("wp") || "picks", params.get("wk")), { replace: true });
   }, [onWePickPath, params, navigate]);
   const openGame = (id) => setView("game", { game: id });
-  const toggleTeam = (id) => setFollowedTeams((prev) => {
-    const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-    if (!uidRef.current) saveFollows(FOLLOW_TEAMS_KEY, next);
-    return next;
-  });
+  // Following needs an account: signed out, any follow opens log in.
+  const requireAccount = () => {
+    if (uidRef.current) return true;
+    login();
+    return false;
+  };
+  const toggleTeam = (id) => {
+    if (!requireAccount()) return;
+    setFollowedTeams((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
   const togglePlayer = (a) => {
+    if (!requireAccount()) return;
     // Signed in: mirror onto the player's We-Draft profile follow too
     // (utils/liveFollowSync.js), so his player page shows Following.
     const on = !followedPlayers.some((p) => String(p.id) === String(a.id));
-    if (uidRef.current) syncProfileFollow(uidRef.current, a.id, on).catch(() => {});
+    syncProfileFollow(uidRef.current, a.id, on).catch(() => {});
     setFollowedPlayers((prev) => {
       const same = (p) => String(p.id) === String(a.id);
-      const next = prev.some(same) ? prev.filter((p) => !same(p))
+      return prev.some(same) ? prev.filter((p) => !same(p))
         : [...prev, { id: a.id, name: a.name, ...(a.teamId != null ? { teamId: a.teamId, team: a.team || null, position: a.position || null } : {}) }];
-      if (!uidRef.current) saveFollows(FOLLOW_PLAYERS_KEY, next);
-      return next;
     });
   };
   // Players followed from a play card come without their team — look it up
@@ -2134,13 +2598,11 @@ export default function LivePage() {
         if (!alive) return;
         const info = new Map(rows);
         setFollowedPlayers((prev) => {
-          const next = prev.map((p) => {
+          return prev.map((p) => {
             if (!info.has(String(p.id))) return p;
             const d = info.get(String(p.id));
             return { ...p, lookedUp: true, ...(d ? { teamId: d.teamId ?? null, team: d.team || null, position: d.position || null } : {}) };
           });
-          if (!uidRef.current) saveFollows(FOLLOW_PLAYERS_KEY, next);
-          return next;
         });
       });
     return () => { alive = false; };
@@ -2149,7 +2611,19 @@ export default function LivePage() {
   const games = useMemo(() => [...(slate?.games || [])].sort(sortGames), [slate]);
   const bigPlays = useMemo(() => slate?.bigPlays || [], [slate]);
   const liveCount = games.filter((g) => g.status === "in_progress").length;
-  const updatedAgo = slate?.updatedAt?.toMillis ? Math.max(0, Math.round((now - slate.updatedAt.toMillis()) / 60000)) : null;
+  const updatedMs = slate?.updatedAt?.toMillis ? slate.updatedAt.toMillis() : null;
+  const updatedAgo = updatedMs != null ? Math.max(0, Math.round((now - updatedMs) / 60000)) : null;
+  // Minutes for the first hour; after that just the day ("today",
+  // "yesterday", else the date) — "347m ago" reads like something's broken.
+  const updatedLabel = (() => {
+    if (updatedAgo == null) return null;
+    if (updatedAgo === 0) return "just now";
+    if (updatedAgo < 60) return `${updatedAgo}m ago`;
+    const day = (ms) => new Date(ms).toDateString();
+    if (day(updatedMs) === day(now)) return "today";
+    if (day(updatedMs) === day(now - 86400000)) return "yesterday";
+    return new Date(updatedMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  })();
 
   const schools = useCfbdSchools(view === "customize");
   // A followed team's name and logo — from the school list, else the slate.
@@ -2163,21 +2637,22 @@ export default function LivePage() {
   const followedIds = useMemo(() => playerIdSet(followedPlayers), [followedPlayers]);
 
   // ── My Feed ──
-  const [feedPrefs, setFeedPrefs] = useState(loadFeedPrefs);
-  const updatePrefs = (next) => { setFeedPrefs(next); if (!uidRef.current) saveFeedPrefs(next); };
+  const [feedPrefs, setFeedPrefs] = useState(DEFAULT_FEED_PREFS);
+  const updatePrefs = (next) => { if (requireAccount()) setFeedPrefs(next); };
 
   // ── Account sync ──
-  // Signed in: follows + Feed settings live on the account
-  // (users/{uid}/liveSettings/main, owner-only) and follow you across
-  // devices. The first sign-in keeps what you picked as a guest. Signed
-  // out: this browser's copy, as before.
+  // Follows + Feed settings live on the account (users/{uid}/liveSettings/
+  // main, owner-only) and follow you across devices. Signed out: none — an
+  // account is required. The first sign-in brings over anything this
+  // browser saved back when guests could follow.
   useEffect(() => {
     synced.current = { uid, json: null, ready: false };
     if (!uid) {
-      setFollowedTeams(loadFollows(FOLLOW_TEAMS_KEY));
-      setFollowedPlayers(loadFollows(FOLLOW_PLAYERS_KEY));
-      setFeedPrefs(loadFeedPrefs());
-      setWeekRaw(loadWeekFollows());
+      setFollowedTeams([]);
+      setFollowedPlayers([]);
+      setFeedPrefs(DEFAULT_FEED_PREFS);
+      setWeekRaw(null);
+      setPrevWeekRaw(null);
       return undefined;
     }
     const ref = doc(db, "users", uid, "liveSettings", "main");
@@ -2185,27 +2660,28 @@ export default function LivePage() {
       if (!snap.exists()) {
         setDoc(ref, {
           teams: loadFollows(FOLLOW_TEAMS_KEY), players: loadFollows(FOLLOW_PLAYERS_KEY),
-          feedPrefs: loadFeedPrefs(), week: loadWeekFollows(), updatedAt: serverTimestamp(),
+          feedPrefs: loadFeedPrefs(), week: loadWeekFollows(), prevWeek: null, updatedAt: serverTimestamp(),
         }).catch(() => { synced.current.ready = true; });
         return;
       }
       const d = snap.data();
-      const next = { teams: d.teams || [], players: d.players || [], feedPrefs: normalizeFeedPrefs(d.feedPrefs), week: d.week || null };
+      const next = { teams: d.teams || [], players: d.players || [], feedPrefs: normalizeFeedPrefs(d.feedPrefs), week: d.week || null, prevWeek: d.prevWeek || null };
       synced.current = { uid, json: JSON.stringify(next), ready: true };
       setFollowedTeams(next.teams);
       setFollowedPlayers(next.players);
       setFeedPrefs(next.feedPrefs);
       setWeekRaw(next.week);
+      setPrevWeekRaw(next.prevWeek);
     }, () => { synced.current.ready = true; });
   }, [uid]);
   useEffect(() => {
     if (!uid || !synced.current.ready || synced.current.uid !== uid) return;
-    const next = { teams: followedTeams, players: followedPlayers, feedPrefs, week: weekRaw || null };
+    const next = { teams: followedTeams, players: followedPlayers, feedPrefs, week: weekRaw || null, prevWeek: prevWeekRaw || null };
     const json = JSON.stringify(next);
     if (json === synced.current.json) return;
     synced.current.json = json;
     setDoc(doc(db, "users", uid, "liveSettings", "main"), { ...next, updatedAt: serverTimestamp() }).catch(() => {});
-  }, [uid, followedTeams, followedPlayers, feedPrefs, weekRaw]);
+  }, [uid, followedTeams, followedPlayers, feedPrefs, weekRaw, prevWeekRaw]);
 
   // ── This week ── what the Feed actually follows: your teams and players
   // with this week's additions and drops applied.
@@ -2214,7 +2690,16 @@ export default function LivePage() {
   const feedTeams = useMemo(() => weekTeams(followedTeams, week), [followedTeams, week]);
   const feedPlayers = useMemo(() => weekPlayers(followedPlayers, week), [followedPlayers, week]);
   const feedPlayerIds = useMemo(() => playerIdSet(feedPlayers), [feedPlayers]);
-  const updateWeek = (next) => { setWeekRaw(next); if (!uidRef.current) saveWeekFollows(next); };
+  const updateWeek = (next) => {
+    if (!requireAccount()) return;
+    // The first change in a new week: the old week's set moves to prevWeek.
+    if (weekRaw?.key && weekRaw.key !== next.key) setPrevWeekRaw(weekRaw);
+    setWeekRaw(next);
+  };
+  // Last week's adds/drops (Your Week's Last week view): still in weekRaw
+  // if nothing's changed this week, else kept in prevWeek.
+  const lastWeekKey = slate?.week != null ? slateWeekKey({ ...slate, week: Number(slate.week) - 1 }) : null;
+  const lastWeekFollows = useMemo(() => normalizeWeek(weekRaw?.key === lastWeekKey ? weekRaw : prevWeekRaw, lastWeekKey), [weekRaw, prevWeekRaw, lastWeekKey]);
   const toggleWeekTeamId = (id) => updateWeek(toggleWeekTeam(week, followedTeams, id));
   const toggleWeekPlayerObj = (p) => updateWeek(toggleWeekPlayer(week, followedPlayers, p));
   const onFeed = view === "feed";
@@ -2228,6 +2713,8 @@ export default function LivePage() {
     return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   }, [games]);
   const weekStanding = useWeekStanding(view === "week" ? user?.uid : null, wePickWeek);
+  // Your Week's This week / Last week toggle.
+  const [ywWhich, setYwWhich] = useState("this");
   // Games the feed follows (unless "All games"): union of the checked sources.
   const feedGameIds = useMemo(() => {
     if (feedPrefs.games.all) return [];
@@ -2340,7 +2827,8 @@ export default function LivePage() {
   const tabs = [
     { key: "all", label: `All Games${liveCount ? ` · ${liveCount} live` : ""}` },
     ...(feedWindow.open ? [{ key: "feed", label: "My Feed" }] : []),
-    { key: "perf", label: "Top Performances" },
+    // While next week is in preview, last week's recap takes this spot.
+    phase === "preview" ? { key: "lastweek", label: "Last Week" } : { key: "perf", label: "Top Performances" },
     { key: "week", label: "Your Week" },
     { key: "wepick", label: "🔮 We-Pick" },
     { key: "customize", label: "⚙ Customize" },
@@ -2361,7 +2849,7 @@ export default function LivePage() {
         <button className="wdl-iconbtn" onClick={() => setView("customize")}>⚙ Customize</button>
       </div>
       {followsNothing && !compact && (
-        <div className="wdl-feed-nudge">Showing the whole slate. <button onClick={() => setView("customize")}>Follow teams and players</button> to make this your Feed.</div>
+        <div className="wdl-feed-nudge">Showing the whole slate. <button onClick={() => (user ? setView("customize") : login())}>{user ? "Follow teams and players" : "Log in to follow teams and players"}</button> to make this your Feed.</div>
       )}
       {myFeed.length
         ? <div className="wdl-feedcols"><FeedList items={myFeed.filter((p) => !notYetShown(p)).slice(0, feedMax)} render={(p) => (
@@ -2404,14 +2892,40 @@ export default function LivePage() {
       <WePickHub liveWeek={wePickWeek} livePhase={phase} nextWeekAt={slate.nextWeekAt || null} />
     </Suspense>
   );
-  else if (view === "week") body = (
-    <YourWeek week={slate.week} signedIn={!!user} login={login} rankedGames={rankedGames} rankedRows={rankedRows} standing={weekStanding}
+  else if (view === "week") {
+    // In preview / review, a This week | Last week toggle (This week first).
+    const lastWeek = Number(slate.week) - 1;
+    const canLast = (phase === "preview" || phase === "review") && lastWeek > 0;
+    const showLast = canLast && ywWhich === "last";
+    const toggle = canLast && (
+      <div className="wdl-gtabs" style={{ marginTop: 0 }}>
+        <button className={`wdl-gtab${!showLast ? " on" : ""}`} onClick={() => setYwWhich("this")}>This week · Week {slate.week}</button>
+        <button className={`wdl-gtab${showLast ? " on" : ""}`} onClick={() => setYwWhich("last")}>Last week · Week {lastWeek}</button>
+      </div>
+    );
+    const shared = { signedIn: !!user, login, grid, onOpen: openGame, onCustomize: () => setView("customize"), onWePick: () => setView("wepick"), toggle };
+    body = showLast
+      ? <YourLastWeek key={lastWeek} season={games.find((x) => x.season)?.season || new Date().getFullYear()} week={lastWeek} uid={user?.uid || null}
+          followedTeams={followedTeams} followedPlayers={followedPlayers} weekFollows={lastWeekFollows} {...shared} />
+      : (<YourWeek week={slate.week} signedIn={!!user} login={login} rankedGames={rankedGames} rankedRows={rankedRows} standing={weekStanding}
       teamGames={games.filter((g) => feedTeams.includes(g.home.providerTeamId) || feedTeams.includes(g.away.providerTeamId))}
-      players={feedPlayers} games={games} grid={grid} onOpen={openGame} onCustomize={() => setView("customize")} onWePick={() => setView("wepick")} />
+      players={feedPlayers} games={games} grid={grid} onOpen={openGame} onCustomize={() => setView("customize")} onWePick={() => setView("wepick")} toggle={toggle} />
   );
+  }
   else if (view === "perf") body = (
     <LivePerformances games={games} followedIds={followedIds} onTogglePlayer={togglePlayer}
       onOpenGame={(id) => { openGame(id); if (compact) tryPortrait(); window.scrollTo(0, 0); }} />
+  );
+  else if (view === "lastweek") body = (
+    <LastWeek season={games.find((x) => x.season)?.season || new Date().getFullYear()} week={Number(slate.week) - 1} grid={grid}
+      followedIds={followedIds} onTogglePlayer={togglePlayer}
+      onOpenGame={(id) => { openGame(id); if (compact) tryPortrait(); window.scrollTo(0, 0); }} />
+  );
+  else if (view === "customize" && !user) body = (
+    <div className="wdl-custpage">
+      <div className="wdl-h">Customize your Feed</div>
+      <div className="wdl-cust-sub"><button className="wdl-yw-cta" onClick={login}>Log in</button> to follow teams and players and build your own Feed. It's free.</div>
+    </div>
   );
   else if (view === "customize") body = (
     <div className="wdl-custpage">
@@ -2591,7 +3105,7 @@ export default function LivePage() {
           )}
         </nav>
         <div className="wdl-meta">
-          {updatedAgo != null && <span>Updated {updatedAgo === 0 ? "just now" : `${updatedAgo}m ago`}</span>}
+          {updatedLabel && <span>Updated {updatedLabel}</span>}
           <button className="wdl-iconbtn" onClick={() => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch?.(() => {})}>⛶ Full screen</button>
         </div>
         {user
@@ -2601,7 +3115,24 @@ export default function LivePage() {
       <AuthModal />
       {slate && view !== "all" && (
         <ScoreStrip games={stripGames} phase={phase} current={onFeed && !compact ? feedGameId : gameParam}
-          onPick={(id) => { if (onFeed) setParams({ view: "feed", game: id }); else openGame(id); if (compact) { tryPortrait(); window.scrollTo(0, 0); } }} />
+          onPick={(id) => { if (onFeed) setParams({ view: "feed", game: id }); else openGame(id); if (compact) { tryPortrait(); window.scrollTo(0, 0); } }}
+          onPopout={canScoresPop ? () => (scoresWin ? scoresWin.close() : setScoresPicker((v) => !v)) : undefined} popped={!!scoresWin} />
+      )}
+      {/* All Games has no score strip — its own pop-out scores button. */}
+      {slate && view === "all" && canScoresPop && (
+        <div className="wdl-sw-row">
+          <button type="button" className={`wdl-sw-btn${scoresWin ? " on" : ""}`} onClick={() => (scoresWin ? scoresWin.close() : setScoresPicker((v) => !v))}>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M9 3h8v8M17 3l-7.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            {scoresWin ? "Scores popped out · Close" : "Pop out scores"}
+          </button>
+        </div>
+      )}
+      {scoresPicker && slate && (
+        <ScoresPicker games={games} sel={scoresSel} onChange={updateScoresSel} onOpen={openScores} onClose={() => setScoresPicker(false)} />
+      )}
+      {scoresWin && slate && createPortal(
+        <ScoresWidget games={games} week={slate.week} picked={scoresSel.mode === "pick" ? scoresSel.ids : null} tvShort={pageTvShort} />,
+        scoresWin.document.body,
       )}
       {slate && (phase === "preview" || phase === "review") && ["all", "feed", "perf", "week"].includes(view) && !(compact && gameParam) && (
         <PhaseBanner phase={phase} slate={slate} games={games} setView={setView} />

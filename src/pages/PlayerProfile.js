@@ -312,12 +312,17 @@ const NFL_TEAM_ABBRS = [
 ];
 
 // ── Shared sidebar shell ──
-function SidebarCard({ title, color1, color2, children }) {
+// `to`: makes the header a link (Videos → /videos).
+function SidebarCard({ title, color1, color2, children, to }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${color1}` }}>
       <div style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
         <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
-          {title}
+          {to ? (
+            <Link to={to} title={`All ${title.toLowerCase()}`} style={{ color: "#fff", textDecoration: "none" }}>
+              {title} <span style={{ color: color2, fontSize: "16px" }}>→</span>
+            </Link>
+          ) : title}
         </h2>
       </div>
       <div style={{ height: "4px", backgroundColor: color2 }} />
@@ -4075,7 +4080,7 @@ useEffect(() => {
   // attached video; each row shows that video's per-slug title/thumb as a
   // full-width card (thumbnail on top, title overlaid in a gradient scrim). ──
   const VideosSidebar = (
-    <SidebarCard title="Videos" color1={SITE_BLUE} color2={SITE_GOLD}>
+    <SidebarCard title="Videos" color1={SITE_BLUE} color2={SITE_GOLD} to="/videos">
       {playerVideos.slice(0, visibleVideoCount).map((v, i, arr) => (
         <a
           key={v.id}
@@ -4153,23 +4158,6 @@ useEffect(() => {
           Show More Videos ▾
         </button>
       )}
-      {/* Always shown (not just once this player's own list is exhausted) —
-          the site-wide video feed, not more of this player's own videos. */}
-      <Link
-        to="/videos"
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-          padding: "10px 14px", textDecoration: "none",
-          background: SITE_BLUE, color: SITE_GOLD,
-          fontWeight: 900, fontSize: "12px",
-          textTransform: "uppercase", letterSpacing: "0.1em",
-          borderTop: "1px solid rgba(255,255,255,0.15)",
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
-      >
-        View More Videos →
-      </Link>
     </SidebarCard>
   );
 

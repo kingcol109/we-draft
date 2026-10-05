@@ -107,6 +107,8 @@ const cfbd = {
   // Season aggregates: [{ playerId, player, position, team, category, statType, stat }]
   seasonPlayerStats: (params) => get("/stats/player/season", params),
   roster: (params) => get("/roster", params),
+  // Transfer portal for one season: [{ season, firstName, lastName, position, origin, destination, transferDate, rating, stars, eligibility }] — no player id.
+  portal: (params) => get("/player/portal", params),
   // Recruits for one class: [{ id, athleteId, year, ranking, name, position, stars, rating, committedTo, ... }]
   recruits: (params) => get("/recruiting/players", params),
   // Live — Patreon Tier 1+ (scoreboard) / Tier 2+ (live plays).
