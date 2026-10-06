@@ -631,6 +631,12 @@ service cloud.firestore {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow write: if isAdmin();
       }
+      // Their chat votes per game ({ [msgId]: 1 | -1 }) — written only by
+      // api/live-chat.js alongside the message's up/down counts.
+      match /chatVotes/{gameId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
     }
     match /mockDrafts/{draftId} {
       allow read: if resource.data.visibility == 'public'

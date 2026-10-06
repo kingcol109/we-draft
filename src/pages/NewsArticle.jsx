@@ -12,6 +12,7 @@ import MarginAds from "../components/MarginAds";
 import EngagementSection, { useEngagement, LikeButton } from "../components/EngagementSection";
 import PlayersMentionedList from "../components/PlayersMentionedList";
 import TeamsMentionedList from "../components/TeamsMentionedList";
+import { scheduleGameHref } from "../utils/live";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -383,7 +384,7 @@ export default function NewsArticle() {
           return (
             <Link
               key={g.id}
-              to={`/game/${g.Slug}`}
+              to={scheduleGameHref(g)}
               className="wd-mentioned-player-link"
               style={{
                 display: "flex", alignItems: "center", gap: "12px", padding: "14px 16px",

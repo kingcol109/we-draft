@@ -14,6 +14,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useLiveSlate, scheduleScore } from "../hooks/useLiveSlate";
 import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
+import { scheduleGameHref } from "../utils/live";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -104,7 +105,7 @@ function GameBug({ g, s, away, home, ranks, channelShort, big, showTag, last }) 
   );
   return (
     <Link
-      to={`/game/${g.Slug}`}
+      to={scheduleGameHref(g)}
       className={`gms-row${gotw ? " gms-gotw" : s.live ? " gms-live" : ""}`}
       style={{
         padding: big ? "10px 14px 10px 15px" : "9px 13px 9px 13px",

@@ -233,6 +233,15 @@ export function dedupeFeed(entries) {
   });
 }
 
+// A game's page on We-Draft Live: /live/{slug} (e.g.
+// /live/clemson-vs-florida-state-10-10-2026 — the same slug as its old
+// /game/{slug} page), else the query form for a game with no slug.
+export const liveGameHref = (g) => (g?.slug ? `/live/${g.slug}` : `/live?view=game&game=${g?.id}`);
+// A schedule26 row's game page: /live/{Slug} once it's matched to a CFBD
+// game (every real game), else its old /game/{Slug} page (a "TBD vs …"
+// placeholder). null with no Slug.
+export const scheduleGameHref = (row) => (!row?.Slug ? null : row.CFBDGameId != null ? `/live/${row.Slug}` : `/game/${row.Slug}`);
+
 export const teamName = (t) => t?.school || t?.name || "";
 export const teamShort = (t) => t?.short || t?.school || t?.name || "";
 

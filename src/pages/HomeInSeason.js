@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import {
   getDoc, doc, getDocs, collection,
-  query, where, orderBy, limit,
+  query, where, orderBy, limit, Timestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import logo from "../assets/Logo2.png";
@@ -408,7 +408,9 @@ export default function HomeInSeason() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const snap = await getDocs(collection(db, "videos"));
+        // Newest 20 only (every video has a Timestamp Date) — room for the
+        // scheduled ones filtered out below to still leave 4.
+        const snap = await getDocs(query(collection(db, "videos"), orderBy("Date", "desc"), limit(20)));
         const vids = snap.docs
           .map((d) => {
             const data = d.data();
@@ -461,9 +463,12 @@ export default function HomeInSeason() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const snap = await getDocs(collection(db, "schedule26"));
+        // Just this rolling window's games (a Date range — every schedule26
+        // Date is a Timestamp), not all ~900.
         const now = Date.now();
         const weekMs = 7 * 24 * 60 * 60 * 1000;
+        const snap = await getDocs(query(collection(db, "schedule26"),
+          where("Date", ">=", Timestamp.fromMillis(now - weekMs)), where("Date", "<=", Timestamp.fromMillis(now + weekMs))));
         const upcoming = snap.docs.filter((d) => {
           const g = d.data();
           if (g.HomeScore != null && g.AwayScore != null) return false;

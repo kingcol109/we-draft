@@ -9654,7 +9654,7 @@ async function fetchComparisonRows() {
 }
 
 const CONTENT_ANALYTICS_CONFIG = {
-  game: { label: "Games", noun: "game", publicPrefix: "/game/", fetchRows: fetchGameRows },
+  game: { label: "Games", noun: "game", publicPrefix: "/live/", fetchRows: fetchGameRows },
   article: { label: "Articles", noun: "article", publicPrefix: "/news/", fetchRows: fetchArticleRows },
   comparison: { label: "Comparisons", noun: "comparison", publicPrefix: "/comparison/", fetchRows: fetchComparisonRows },
 };

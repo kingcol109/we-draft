@@ -32,6 +32,101 @@
     <priority>0.65</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/cfb/stats/passing</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/rushing</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/receiving</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/defense</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/specials</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/passYds</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/passTd</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/rushYds</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/rushTd</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/recYds</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/rec</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/recTd</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/tackles</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/sacks</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/tfl</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/ints</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/pbu</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/fgm</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/cfb/stats/kPts</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/cfb/stats/team-offense</loc>
     <lastmod>2026-10-06</lastmod>
     <priority>0.6</priority>
@@ -1927,6 +2022,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/amari-thomas-2029-rb</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/amarion-peterson-2026-rb</loc>
     <lastmod>2026-10-06</lastmod>
     <priority>0.7</priority>
@@ -3422,6 +3522,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/deuce-lawrence-2029-rb</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/devan-thompkins-2027-dl</loc>
     <lastmod>2026-09-26</lastmod>
     <priority>0.7</priority>
@@ -4817,6 +4922,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/javian-mallory-2029-rb</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/javian-osborne-2029-rb</loc>
     <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
@@ -4889,116 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/jaylen-mcclain-2027-db</loc>
     <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jaylin-carter-2028-rb</loc>
-    <lastmod>2026-09-17</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jaylon-guilbeau-2026-db</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jaylon-stone-2027-db</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jayvan-boggs-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jayvion-cole-2027-db</loc>
-    <lastmod>2026-08-22</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jc-davis-2026-ol</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jdan-burnett-2027-edge</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeff-caldwell-2026-wr</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeffrey-mba-2026-dl</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeffrey-overton-jr-2028-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jelani-mcdonald-2027-db</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jelani-thurman-2027-te</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-cobb-2027-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-hasley-2027-te</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-koger-2028-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-mcclellan-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-smith-2027-wr</loc>
-    <lastmod>2026-10-03</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-wilson-2026-db</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiah-wright-2026-ol</loc>
-    <lastmod>2026-10-06</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremiyah-love-2026-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jeremy-payne-2027-rb</loc>
-    <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/jermaine-bishop-jr-2029-wr</loc>
-    <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>

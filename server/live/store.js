@@ -50,6 +50,33 @@ const stateHash = (g) => hash(STATE_FIELDS.map((f) => g[f] ?? null));
 
 // Merge-writes the given games; returns the ids that actually changed.
 // `existing` is a Map(id → current doc data) when the caller already has it.
+// ── Chat markers ── a system message in a game's chat (liveGames/{id}/chat,
+// components/LiveChat.js) at each step of the game — kickoff, each quarter,
+// halftime, overtime, final — so the chat reads chronologically later
+// ("this was during the 3rd"). Emitted by upsertGames when the game moves
+// forward to a new step (chatMarkRank on the game doc keeps it one-way and
+// once-only), and only for a game happening now (kicked off within
+// CHAT_MARK_WINDOW_MS) — never for a backfilled old game.
+const CHAT_MARK_WINDOW_MS = 12 * 3600e3;
+const markClockSecs = (c) => { const m = /^(\d+):(\d+)/.exec(c || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+function chatMarkOf(g) {
+  if (g.status === "final") return { key: "final", rank: 1000 };
+  if (g.status !== "in_progress" || !g.period) return null;
+  const p = g.period;
+  if (p === 2 && markClockSecs(g.clock) === 0) return { key: "half", rank: 25 };
+  if (p > 4) return { key: `ot${p - 4}`, rank: 40 + p };
+  return { key: p === 1 ? "kickoff" : `q${p}`, rank: p * 10 };
+}
+function chatMarkText(key, g) {
+  const name = (t) => t?.short || t?.school || t?.name || "";
+  const score = `${name(g.away)} ${g.away?.points ?? 0} – ${name(g.home)} ${g.home?.points ?? 0}`;
+  if (key === "kickoff") return `🏈 Kickoff — ${g.away?.school || name(g.away)} at ${g.home?.school || name(g.home)}`;
+  if (key === "half") return `⏸ Halftime · ${score}`;
+  if (key === "final") return `🏁 Final · ${score}`;
+  if (key.startsWith("ot")) { const n = Number(key.slice(2)); return `🔥 ${n > 1 ? `${n}OT` : "Overtime"} · ${score}`; }
+  return `⏱ ${{ q2: "2nd", q3: "3rd", q4: "4th" }[key]} quarter${key === "q3" ? " — second half underway" : ""} · ${score}`;
+}
+
 async function upsertGames(db, games, existing) {
   const current = existing || new Map();
   if (!existing) {
@@ -68,8 +95,20 @@ async function upsertGames(db, games, existing) {
     const h = stateHash(merged);
     if (prev.stateHash === h) continue;
     changed.push(id);
-    current.set(id, { ...merged, stateHash: h });
-    ops.push((b) => b.set(db.collection("liveGames").doc(id), { ...g, stateHash: h, updatedAt: FieldValue.serverTimestamp() }, { merge: true }));
+    // A new step in the game → its chat marker (see chatMarkOf).
+    const mark = chatMarkOf(merged);
+    const started = Date.parse(merged.startDate || "");
+    const fresh = Number.isFinite(started) && Date.now() - started < CHAT_MARK_WINDOW_MS;
+    const newMark = mark && fresh && mark.rank > (prev.chatMarkRank || 0) ? mark : null;
+    const markFields = newMark ? { chatMark: newMark.key, chatMarkRank: newMark.rank } : {};
+    current.set(id, { ...merged, ...markFields, stateHash: h });
+    ops.push((b) => b.set(db.collection("liveGames").doc(id), { ...g, ...markFields, stateHash: h, updatedAt: FieldValue.serverTimestamp() }, { merge: true }));
+    if (newMark) {
+      ops.push((b) => b.set(db.collection("liveGames").doc(id).collection("chat").doc(), {
+        system: true, kind: newMark.key, text: chatMarkText(newMark.key, merged),
+        uid: "system", name: "We-Draft Live", at: FieldValue.serverTimestamp(), atMs: Date.now(),
+      }));
+    }
   }
   await commitInBatches(db, ops);
   return { changed, current };

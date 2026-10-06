@@ -30,6 +30,8 @@ import { communityFor, gradeLabel } from "../utils/communityGrades";
 import { fetchCurrentRankMap } from "../utils/rankings";
 import { isPickable, mondayOfWeekUtc, toMs } from "../utils/wePickLocks";
 import { pickedSideOf, isGameFinal, hasScorePick, scoreGamePick, compareStandingsEntries } from "../utils/wePickScoring";
+import { hasRankedRoom, loadWeekRanked, swapRanked, RANKED_SIZE } from "../utils/wePickRanked";
+import RankedSwap from "../components/RankedSwap";
 import { useLiveGameDocs, useRankedSixIds, useGamePlays, useCfbdSchools, searchCfbdPlayers } from "../hooks/useLiveFeed";
 import { usePlayReveal } from "../hooks/usePlayReveal";
 import { useAuth } from "../context/AuthContext";
@@ -50,7 +52,7 @@ import {
   FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows,
   loadFeedPrefs, normalizeFeedPrefs, DEFAULT_FEED_PREFS, playerIdSet, feedItemFromPlay, isCloseLatePlay,
   slateWeekKey, normalizeWeek, loadWeekFollows, weekTeams, weekPlayers, toggleWeekTeam, toggleWeekPlayer,
-  scrollActiveTabIntoView,
+  scrollActiveTabIntoView, liveGameHref,
 } from "../utils/live";
 
 // We-Pick (predictions, Ranked 6, standings, stats, friends) is a /live tab
@@ -61,6 +63,7 @@ const GOLD = "#f6a21d";
 const LIVE_RED = "#ff4d4d";
 
 const STYLE = `${PLAY_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}${LIVE_CHAT_STYLE}${LIVE_FIELD_STYLE}${TAKEOVER_STYLE}${SCORES_WIDGET_STYLE}
+.wdl-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .wdl-gtabs { display: flex; gap: 8px; margin: 22px 0 14px; }
 .wdl-gtab { background: transparent; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 18px; font-weight: 900; font-size: clamp(13px, 1vw, 15px); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
 .wdl-gtab.on { background: #eef2f8; color: #0a0f1a; border-color: #eef2f8; }
@@ -246,6 +249,14 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 @keyframes wdl-wplay-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .wdl-mu-week { margin-top: 0; background: rgba(10,15,26,0.5); border: 1px solid rgba(255,255,255,0.25); color: #fff; border-radius: 999px; padding: 4px 12px; font-weight: 900; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; font-family: inherit; }
 .wdl-mu-week:hover { border-color: ${GOLD}; }
+.wdl-share { position: relative; margin-left: auto; }
+.wdl-share-btn { display: inline-flex; align-items: center; gap: 6px; }
+.wdl-share-btn svg { width: 14px; height: 14px; }
+.wdl-share-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 160px; display: flex; flex-direction: column; padding: 6px;
+  background: #0c1220; border: 1px solid #3a4a6a; border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); }
+.wdl-share-menu a, .wdl-share-menu button { display: block; text-align: left; padding: 9px 12px; border-radius: 8px; color: #eef2f8; font: inherit; font-weight: 800; font-size: 14px;
+  text-decoration: none; background: none; border: 0; cursor: pointer; }
+.wdl-share-menu a:hover, .wdl-share-menu button:hover { background: #1d2840; }
 /* Upcoming games: Preview (tale of the tape, prospects) + We-Pick card. */
 .wdl-pv-sec { margin-bottom: 22px; }
 .wdl-tape { background: #111a2b; border: 1px solid #1d2840; border-radius: 14px; overflow: hidden; }
@@ -299,7 +310,43 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-pick-row input:focus { border-color: ${GOLD}; }
 .wdl-pick-save { margin-top: 4px; background: ${GOLD}; color: #121212; border: 0; border-radius: 10px; padding: 9px; font-weight: 900; font-size: 14px; cursor: pointer; font-family: inherit; }
 .wdl-pick-save:disabled { opacity: 0.6; cursor: default; }
+.wdl-rk { display: inline-block; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; background: #26324a; color: #c9d5e6; vertical-align: 1px; }
+.wdl-rk.on { background: rgba(246,162,29,0.18); color: ${GOLD}; }
+.wdl-rank-it { background: none; border: 0; padding: 0; color: ${GOLD}; font: inherit; font-weight: 900; cursor: pointer; }
+.wdl-rank-it:disabled { opacity: 0.6; cursor: default; }
 .wdl-pick-split { display: flex; height: 10px; border-radius: 999px; overflow: hidden; margin-top: 10px; background: #26324a; }
+/* The Community Pick block on the We-Pick card */
+.wdl-cp { margin-top: 14px; padding: 12px 12px 10px; border-radius: 12px; background: linear-gradient(160deg, rgba(124,58,237,0.22), rgba(17,26,43,0.9) 70%); border: 1px solid rgba(124,58,237,0.55); }
+.wdl-cp-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.wdl-cp-h span { font-size: 12px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; color: #c4b5fd; }
+.wdl-cp-h small { font-size: 11px; font-weight: 800; color: #8193ad; }
+.wdl-cp-board { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.wdl-cp-team { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; transition: opacity 0.2s; }
+.wdl-cp-team img { width: 38px; height: 38px; object-fit: contain; }
+.wdl-cp-team .nm { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; color: #eef2f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.wdl-cp-team.dog { opacity: 0.6; }
+.wdl-cp-team.fav .nm { color: ${GOLD}; }
+.wdl-cp-score { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.wdl-cp-score b { font-size: 34px; font-weight: 900; line-height: 1; color: #c9d5e6; }
+.wdl-cp-score b.fav { color: #fff; text-shadow: 0 0 14px rgba(246,162,29,0.45); }
+.wdl-cp-score span { font-size: 20px; font-weight: 900; color: #6f819c; }
+.wdl-cp-score.none { font-size: 12px; font-weight: 900; color: #6f819c; text-transform: uppercase; }
+/* ⓘ next to a We-Pick header, with its hover / focus bubble */
+.wdl-h-info { display: flex; align-items: center; gap: 8px; }
+.wdl-wpi { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; text-transform: none; letter-spacing: normal; }
+.wdl-h-info .wdl-wpi { margin-left: 0; }
+.wdl-wpi-btn { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #8193ad; background: transparent; color: #c9d5e6; font: italic 900 11px/1 Georgia, serif;
+  cursor: help; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.wdl-wpi:hover .wdl-wpi-btn, .wdl-wpi-btn:focus-visible { border-color: ${GOLD}; color: ${GOLD}; outline: none; }
+.wdl-wpi-tip { position: absolute; z-index: 30; top: calc(100% + 8px); left: -8px; width: min(280px, 80vw); padding: 12px 14px; border-radius: 10px;
+  background: #0c1220; border: 1px solid #3a4a6a; box-shadow: 0 12px 30px rgba(0,0,0,0.5); color: #c9d5e6; font-size: 13px; font-weight: 600; line-height: 1.45;
+  opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity 0.15s, transform 0.15s, visibility 0.15s; }
+.wdl-wpi-tip::before { content: ""; position: absolute; top: -12px; left: 0; right: 0; height: 12px; }
+.wdl-wpi:hover .wdl-wpi-tip, .wdl-wpi:focus-within .wdl-wpi-tip { opacity: 1; visibility: visible; transform: none; }
+.wdl-wpi-tip b { display: block; color: #fff; font-weight: 900; margin-bottom: 4px; }
+.wdl-wpi-tip b.inline { display: inline; margin: 0; color: #c4b5fd; }
+.wdl-wpi-tip .gap { display: block; height: 6px; }
+.wdl-wpi-tip .go { display: inline-block; margin-top: 8px; color: ${GOLD}; font-weight: 900; text-decoration: none; }
 .wdl-pick-split i { display: block; height: 100%; }
 .wdl-pick-legend { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; font-weight: 900; color: #c9d5e6; font-variant-numeric: tabular-nums; }
 .wdl-recap-headline { margin-top: 6px; font-weight: 800; font-size: clamp(16px, 1.25vw, 19px); line-height: 1.45; color: #dfe6f0; }
@@ -311,6 +358,14 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-wp-review span { font-size: 13px; font-weight: 700; color: #9fb0c8; }
 .wdl-wp-grid { display: grid; gap: 22px; grid-template-columns: minmax(0, 1fr); }
 .wdl-wp-main, .wdl-wp-side { min-width: 0; }
+/* Phones / tablets (one column): the side column's pick tracker (Ranked
+   status / Report Card + Share Picks) goes first on the tab, above the
+   games; its recap and rules stay after them. */
+@media (max-width: 1149px) {
+  .wdl-wp-side { display: contents; }
+  .wdl-wp-side > * { order: 1; }
+  .wdl-wp-side > .wdl-wp-tracker { order: -1; }
+}
 @media (min-width: 1150px) {
   .wdl-wp-grid { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); align-items: start; }
   .wdl-wp-side { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow-y: auto; }
@@ -430,6 +485,17 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-mu .lose { opacity: 0.5; }
 .wdl-mu-score.win b { text-shadow: 0 0 26px rgba(255,255,255,0.35), 0 6px 22px rgba(0,0,0,0.55); }
 .wdl-mu-mid { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+/* Before kickoff: team | game info | team — no score columns. */
+.wdl-mu.pre { grid-template-columns: 1fr minmax(0, auto) 1fr; }
+.wdl-mu-pre { gap: 6px; padding: 0 clamp(4px, 1vw, 16px); }
+.wdl-mu-tag { font-size: 10px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; color: #fff; }
+.wdl-mu-tag.gotw { background: #7c3aed; }
+.wdl-mu-tag.feat { background: ${GOLD}; color: #121212; }
+.wdl-mu-day { font-weight: 900; font-size: clamp(14px, 1.2vw, 18px); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.85); text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+.wdl-mu-day small { margin-left: 8px; font-size: 0.85em; color: rgba(255,255,255,0.6); }
+.wdl-mu-kick { font-weight: 900; font-size: clamp(30px, 3.4vw, 54px); line-height: 1; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; text-shadow: 0 4px 16px rgba(0,0,0,0.55); }
+.wdl-mu-count { font-weight: 800; font-size: clamp(12px, 1vw, 15px); color: ${GOLD}; text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+.wdl-mu-meta { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px; margin-top: 2px; font-size: clamp(11px, 0.9vw, 14px); font-weight: 800; color: rgba(255,255,255,0.7); }
 .wdl-mu-status { font-weight: 900; font-size: clamp(15px, 1.5vw, 24px); color: #eef2f8; background: rgba(10,15,26,0.75); border: 1px solid rgba(255,255,255,0.18);
   border-radius: 999px; padding: 6px 16px; font-variant-numeric: tabular-nums; white-space: nowrap; letter-spacing: 0.04em; }
 .wdl-mu-status.live { color: #fff; background: rgba(214,40,40,0.85); border-color: rgba(255,120,120,0.6); }
@@ -464,6 +530,11 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .wdl-mu-next { font-size: 11px; white-space: normal; }
   .wdl-mu-link { display: none; }
   .wdl-mu-rec { font-size: 11px; margin-top: -2px; }
+  .wdl-mu.pre { grid-template-columns: 1fr minmax(0, auto) 1fr; }
+  .wdl-mu-kick { font-size: 24px; }
+  .wdl-mu-day { font-size: 11px; letter-spacing: 0.08em; }
+  .wdl-mu-day small { display: block; margin: 2px 0 0; }
+  .wdl-mu-tag { font-size: 8px; padding: 2px 7px; letter-spacing: 0.08em; }
   .wdl-mu-tv { font-size: 10px; padding: 2px 6px; }
   .wdl-main.feed .wdl-rail { order: -1; max-height: 46vh; overflow-y: auto; border-bottom: 1px solid #1d2840; padding-bottom: 8px; }
   .lpc { padding: 12px 14px; }
@@ -1295,6 +1366,7 @@ function GameRecap({ game, gameId, slateGame }) {
       mine: mine && hasScorePick(mine) ? {
         home: swapped ? mine.awayScore : mine.homeScore, away: swapped ? mine.homeScore : mine.awayScore,
         points: scoreGamePick(mine, schedFinal),
+        ranked: mine.ranked === true,
       } : null,
     };
   }
@@ -1341,6 +1413,7 @@ function GameRecap({ game, gameId, slateGame }) {
                 {wp.mine && (
                   <div className="wdl-recap-sub" style={{ color: "#eef2f8" }}>
                     Your pick: {teamShort(game.away)} {wp.mine.away} – {teamShort(game.home)} {wp.mine.home} · <span style={{ color: wp.mine.points > 0 ? "#3ddc84" : "#ff6b6b" }}>{wp.mine.points} pts</span>
+                    {" "}{wp.mine.ranked ? <span className="wdl-rk on">⭐ Ranked</span> : <span className="wdl-rk">Unranked</span>}
                   </div>
                 )}
               </>}
@@ -1555,8 +1628,11 @@ function PreviewView({ game, slateGame }) {
         {["away", "home"].map((side) => (
           <button key={side} className={`wdl-gtab${tab === `roster-${side}` ? " on" : ""}`} onClick={() => setTab(`roster-${side}`)}>{teamShort(game[side])} roster</button>
         ))}
+        {/* Pregame chat — open from game week (components/LiveChat.js). */}
+        <button className={`wdl-gtab${tab === "chat" ? " on" : ""}`} onClick={() => setTab("chat")}>💬 Chat</button>
       </div>
-      {tab.startsWith("roster-") ? <GameRoster game={game} side={tab.slice(7)} roster={rosters ? rosters[tab.slice(7)] || null : null} loading={!rosters} />
+      {tab === "chat" ? <LiveChat gameId={String(game.id)} game={game} />
+        : tab.startsWith("roster-") ? <GameRoster game={game} side={tab.slice(7)} roster={rosters ? rosters[tab.slice(7)] || null : null} loading={!rosters} />
         : tab === "preview" ? (<>
       <div className="wdl-pv-sec">
         <div className="wdl-h">Tale of the tape</div>
@@ -1594,10 +1670,27 @@ function PreviewView({ game, slateGame }) {
   );
 }
 
+// ⓘ next to a We-Pick header: a short intro to We-Pick on hover (or tap /
+// keyboard focus — the bubble shows while the button has focus).
+function WePickInfo() {
+  return (
+    <span className="wdl-wpi">
+      <button type="button" className="wdl-wpi-btn" aria-label="What is We-Pick?">i</button>
+      <span className="wdl-wpi-tip" role="tooltip">
+        <b>What is We-Pick?</b>
+        We-Draft's free college football pick'em. Predict the final score of any game — picks open the Monday of game week and lock at kickoff.
+        <span className="gap" />
+        Your Ranked 6 picks each week are scored for the We-Pick standings. The <b className="inline">Community Pick</b> is every fan's prediction averaged together.
+        <Link to={wePickHref()} className="go">Play We-Pick →</Link>
+      </span>
+    </span>
+  );
+}
+
 // We-Pick on an upcoming game: your score pick (made or edited here — same
 // doc pair and fields as the game page's pick, see GamePage.js
 // handleSavePick) and the community's split + average predicted score.
-function PreviewPickCard({ game }) {
+function PreviewPickCard({ game, withInfo = false }) {
   const { user, profile, login } = useAuth();
   const data = useGamePicks(game?.wedraftGameId);
   const [vals, setVals] = useState({ away: "", home: "" });
@@ -1605,6 +1698,11 @@ function PreviewPickCard({ game }) {
   const [msg, setMsg] = useState("");
   const [mineLocal, setMineLocal] = useState(null);
   const [showAllPicks, setShowAllPicks] = useState(false);
+  // The Ranked 6 swap chooser (components/RankedSwap.js), open when this
+  // pick should be ranked but the week's 6 are full: { ranked } (the other
+  // ranked picks). swapBusy: the pick being swapped out / "rank" while ranking.
+  const [swap, setSwap] = useState(null);
+  const [swapBusy, setSwapBusy] = useState("");
   const swapped = !!data?.sched?.Home && data.sched.Home === game.away.school;
   const picks = (data?.picks || []).map((p) => (user && p.uid === user.uid && mineLocal ? { ...p, ...mineLocal } : p));
   if (user && mineLocal && !picks.some((p) => p.uid === user.uid)) picks.push({ uid: user.uid, ...mineLocal });
@@ -1634,12 +1732,52 @@ function PreviewPickCard({ game }) {
   const awayPct = sides.length ? Math.round((100 * sides.filter((x) => x === "away").length) / sides.length) : 0;
   const avg = (k) => Math.round(scored.reduce((t, p) => t + live(p)[k], 0) / (scored.length || 1));
 
+  const rankThis = async () => {
+    if (!user || !sched?.Week) return;
+    setSwapBusy("rank"); setMsg("");
+    try {
+      const { ranked } = await loadWeekRanked(user.uid, sched.Week);
+      const others = ranked.filter((r) => r.id !== game.wedraftGameId);
+      if (others.length < RANKED_SIZE) {
+        await swapRanked(user.uid, null, game.wedraftGameId);
+        setMineLocal((m) => ({ ...(m || mine), ranked: true }));
+        setMsg("Pick saved!");
+      } else {
+        setSwap({ ranked: others });
+      }
+    } catch {
+      setMsg("Couldn't update your Ranked 6 — try again.");
+    } finally {
+      setSwapBusy("");
+    }
+  };
+  const swapOut = async (outId) => {
+    setSwapBusy(outId);
+    try {
+      await swapRanked(user.uid, outId, game.wedraftGameId);
+      setMineLocal((m) => ({ ...(m || mine), ranked: true }));
+      setSwap(null);
+      setMsg("Swapped into your Ranked 6!");
+    } catch {
+      setMsg("Couldn't swap — try again.");
+    } finally {
+      setSwapBusy("");
+    }
+  };
+
   const save = async () => {
     if (!user) { login(); return; }
     if (vals.away.trim() === "" || vals.home.trim() === "") { setMsg("Enter a score for both teams."); return; }
     const a = Math.max(0, Math.min(99, Math.round(Number(vals.away)))), h = Math.max(0, Math.min(99, Math.round(Number(vals.home))));
     const awayScore = swapped ? h : a, homeScore = swapped ? a : h;
     const hadScore = hasScorePick(mine);
+    setSaving(true); setMsg("");
+    // A new score pick joins the Ranked 6 only while the week has room —
+    // a 7th ranked pick would disqualify the week (utils/wePickRanked.js).
+    let ranked = hadScore ? (mine.ranked ?? true) : false;
+    if (!hadScore && !sched?.RankedDisqualified) {
+      try { ranked = await hasRankedRoom(user.uid, sched?.Week, game.wedraftGameId); } catch { ranked = false; }
+    }
     const payload = {
       uid: user.uid,
       displayName: profile?.username?.trim() || "Anonymous Fan",
@@ -1647,11 +1785,10 @@ function PreviewPickCard({ game }) {
       pickedTeam: awayScore > homeScore ? "away" : homeScore > awayScore ? "home" : null,
       awayScore, homeScore,
       prediction: mine?.prediction || "",
-      ranked: hadScore ? (mine.ranked ?? true) : true,
+      ranked,
       visibility: mine?.visibility || "public",
       updatedAt: serverTimestamp(),
     };
-    setSaving(true); setMsg("");
     try {
       await Promise.all([
         setDoc(doc(db, "schedule26", game.wedraftGameId, "picks", user.uid), payload),
@@ -1682,7 +1819,7 @@ function PreviewPickCard({ game }) {
   return (
     <div className="lpc" style={{ "--tc": "#7c3aed" }}>
       <div className="lpc-head">
-        <span className="lpc-badge">🔮 WE-PICK</span>
+        <span className="lpc-badge">🔮 WE-PICK</span>{withInfo && <WePickInfo />}
         {game.gameOfWeek ? <span className="wdl-strip-pill gotw">GOTW</span> : game.featured ? <span className="wdl-strip-pill feat">Featured</span> : null}
       </div>
       {open ? (
@@ -1690,27 +1827,68 @@ function PreviewPickCard({ game }) {
           {row("away")}
           {row("home")}
           <button className="wdl-pick-save" disabled={saving} onClick={save}>{!user ? "Log in to pick" : saving ? "Saving…" : hasScorePick(mine) ? "Update my pick" : "Lock in my pick"}</button>
-          {msg && <div className="wdl-recap-sub" style={{ color: msg === "Pick saved!" ? "#3ddc84" : "#ff8a7a" }}>{msg}</div>}
-          {hasScorePick(mine) && <div className="wdl-recap-sub">{mine.ranked ? "⭐ Counts toward your Ranked 6" : "Not in your Ranked 6"} · <Link to={wePickHref()} style={{ color: GOLD }}>Manage in We-Pick</Link></div>}
+          {msg && <div className="wdl-recap-sub" style={{ color: /^(Pick saved|Swapped)/.test(msg) ? "#3ddc84" : "#ff8a7a" }}>{msg}</div>}
+          {hasScorePick(mine) && (
+            <div className="wdl-recap-sub">
+              {mine.ranked ? <span className="wdl-rk on">⭐ Ranked</span> : <span className="wdl-rk">Unranked</span>}
+              {mine.ranked ? " Counts toward your Ranked 6" : " Doesn't count toward your Ranked 6"}
+              {!mine.ranked && !sched?.RankedDisqualified && !swap && (
+                <> · <button type="button" className="wdl-rank-it" disabled={!!swapBusy} onClick={rankThis}>{swapBusy === "rank" ? "Ranking…" : "⭐ Rank it"}</button></>
+              )}
+              {" · "}<Link to={wePickHref()} style={{ color: GOLD }}>Manage in We-Pick</Link>
+            </div>
+          )}
+          {swap && sched && (
+            <div style={{ marginTop: 10 }}>
+              <RankedSwap week={sched.Week} inGame={{ id: game.wedraftGameId, ...sched }} ranked={swap.ranked}
+                busyId={swapBusy && swapBusy !== "rank" ? swapBusy : ""} onSwap={swapOut} onCancel={() => setSwap(null)} />
+            </div>
+          )}
         </div>
       ) : (
         <div className="wdl-recap-sub">
-          {hasScorePick(mine) ? `Your pick: ${teamShort(game.away)} ${live(mine).away} – ${teamShort(game.home)} ${live(mine).home}`
+          {hasScorePick(mine) ? <>Your pick: {teamShort(game.away)} {live(mine).away} – {teamShort(game.home)} {live(mine).home} {mine.ranked ? <span className="wdl-rk on">⭐ Ranked</span> : <span className="wdl-rk">Unranked</span>}</>
             : !data ? "Loading…"
               : notYet ? `Picks open ${new Date(opensAt).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}.`
                 : "Picks are locked."}
         </div>
       )}
-      {sides.length > 0 ? (
-        <>
-          <div className="wdl-pick-split">
-            <i style={{ width: `${awayPct}%`, background: game.away?.color || "#4d9fff" }} />
-            <i style={{ width: `${100 - awayPct}%`, background: game.home?.color || GOLD }} />
+      {sides.length > 0 ? (() => {
+        // The Community Pick: every fan's score pick averaged (the big
+        // score, the favorite lit up), over who they're picking to win.
+        const aAvg = scored.length ? avg("away") : null;
+        const hAvg = scored.length ? avg("home") : null;
+        const fav = aAvg != null && aAvg !== hAvg ? (aAvg > hAvg ? "away" : "home") : awayPct !== 50 ? (awayPct > 50 ? "away" : "home") : null;
+        const side = (sd) => {
+          const t = game[sd] || {};
+          return (
+            <div className={`wdl-cp-team ${sd}${fav === sd ? " fav" : fav ? " dog" : ""}`}>
+              {(t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
+              <span className="nm">{teamShort(t)}</span>
+            </div>
+          );
+        };
+        return (
+          <div className="wdl-cp">
+            <div className="wdl-cp-h"><span>Community Pick</span><small>{sides.length} pick{sides.length === 1 ? "" : "s"}</small></div>
+            <div className="wdl-cp-board">
+              {side("away")}
+              {aAvg != null ? (
+                <div className="wdl-cp-score">
+                  <b className={fav === "away" ? "fav" : ""}>{aAvg}</b><span>–</span><b className={fav === "home" ? "fav" : ""}>{hAvg}</b>
+                </div>
+              ) : <div className="wdl-cp-score none">vs</div>}
+              {side("home")}
+            </div>
+            <div className="wdl-pick-split">
+              <i style={{ width: `${awayPct}%`, background: game.away?.color || "#4d9fff" }} />
+              <i style={{ width: `${100 - awayPct}%`, background: game.home?.color || GOLD }} />
+            </div>
+            <div className="wdl-pick-legend"><span>{awayPct}% pick {teamShort(game.away)}</span><span>{100 - awayPct}% pick {teamShort(game.home)}</span></div>
+            {aAvg == null && <div className="wdl-recap-sub">No score picks yet — the average score shows once fans predict one.</div>}
           </div>
-          <div className="wdl-pick-legend"><span>{teamShort(game.away)} {awayPct}%</span><span>{sides.length} pick{sides.length === 1 ? "" : "s"}</span><span>{100 - awayPct}% {teamShort(game.home)}</span></div>
-          {scored.length > 0 && <div className="wdl-recap-sub">Fans predict: {teamShort(game.away)} {avg("away")} – {teamShort(game.home)} {avg("home")}</div>}
-        </>
-      ) : data && open && <div className="wdl-recap-sub">No picks yet — be the first.</div>}
+        );
+      })() : data && open && <div className="wdl-recap-sub">No picks yet — be the first.</div>}
       {publicPicks.length > 0 && (
         <div className="wdl-picklist">
           <div className="wdl-picklist-h">Public picks</div>
@@ -1721,7 +1899,7 @@ function PreviewPickCard({ game }) {
             const t = side ? game[side] : null;
             return (
               <div key={p.uid} className={`wdl-picklist-row${user && p.uid === user.uid ? " me" : ""}`}>
-                <span className="who">{p.displayName || "Anonymous Fan"}{user && p.uid === user.uid ? " (you)" : ""}</span>
+                <span className="who">{p.displayName || "Anonymous Fan"}{user && p.uid === user.uid ? " (you)" : ""}{p.ranked && hasScorePick(p) && <span title="In their Ranked 6"> ⭐</span>}</span>
                 <span className="pk">
                   {t && (t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
                   {sc ? `${sc.away}–${sc.home}` : t ? teamShort(t) : ""}
@@ -1756,7 +1934,7 @@ function GameRecapRail({ gameId, slateGame, fallback }) {
   if (game?.status === "scheduled") {
     return (
       <aside className="wdl-rail">
-        <div className="wdl-h">We-Pick</div>
+        <div className="wdl-h wdl-h-info">We-Pick <WePickInfo /></div>
         <PreviewPickCard game={game} />
       </aside>
     );
@@ -1983,6 +2161,54 @@ function FootballIcon({ side }) {
     <svg className={`wdl-mu-fb ${side}`} viewBox="0 0 28 16" role="img" aria-label="Possession">
       <path d="M1 8 C5 -0.5 23 -0.5 27 8 C23 16.5 5 16.5 1 8 Z" fill="#fff" />
     </svg>
+  );
+}
+
+// Share a game — "Follow Troy vs Southern Miss Live" + its /live/{slug}
+// link (the final score once it's over). Phones (and any browser with the
+// Web Share API) get the system share sheet — Messages, Mail, anything;
+// elsewhere a small menu: Text (sms:), Email (mailto:), Copy link.
+function ShareGame({ game }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  const a = teamName(game.away) || "Away";
+  const h = teamName(game.home) || "Home";
+  const url = `https://we-draft.com${liveGameHref(game)}`;
+  const text = game.status === "final"
+    ? `${a} ${game.away?.points ?? ""}, ${h} ${game.home?.points ?? ""} — final score, stats & recap`
+    : game.status === "in_progress" ? `Follow ${a} vs ${h} Live` : `Follow ${a} vs ${h} Live on We-Draft Live`;
+  const share = async () => {
+    if (navigator.share && window.matchMedia("(pointer: coarse)").matches) {
+      try { await navigator.share({ title: `${a} vs ${h} | We-Draft Live`, text, url }); } catch { /* dismissed */ }
+      return;
+    }
+    setOpen((v) => !v);
+  };
+  const body = `${text}\n${url}`;
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(`${text} ${url}`); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { /* blocked */ }
+  };
+  return (
+    <div className="wdl-share" ref={ref}>
+      <button type="button" className="wdl-mu-week wdl-share-btn" onClick={share} aria-haspopup="menu" aria-expanded={open}>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 6.5L10 2.5l4 4M4 10v6.5h12V10" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        Share
+      </button>
+      {open && (
+        <div className="wdl-share-menu" role="menu">
+          <a role="menuitem" href={`sms:?&body=${encodeURIComponent(body)}`} onClick={() => setOpen(false)}>💬 Text</a>
+          <a role="menuitem" href={`mailto:?subject=${encodeURIComponent(`${a} vs ${h} | We-Draft Live`)}&body=${encodeURIComponent(body)}`} onClick={() => setOpen(false)}>✉️ Email</a>
+          <button type="button" role="menuitem" onClick={copy}>{copied ? "✓ Copied" : "🔗 Copy link"}</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2224,8 +2450,35 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
             </div>
           );
         };
+        // Before kickoff: no scores yet, so instead of two "–" columns the
+        // middle shows the game's info — its tag, day and date, the kickoff
+        // time (local), a countdown, TV and the week.
+        const pregame = headG.status === "scheduled";
+        const preMid = pregame ? (() => {
+          const at = headG.startDate ? new Date(headG.startDate) : null;
+          const ok = at && !isNaN(at);
+          const ms = ok ? at.getTime() - Date.now() : null;
+          const count = ms == null || ms <= 0 ? null
+            : ms < 3600e3 ? `Kickoff in ${Math.max(1, Math.round(ms / 60e3))} min`
+              : ms < 86400e3 ? `Kickoff in ${Math.floor(ms / 3600e3)}h ${Math.round((ms % 3600e3) / 60e3)}m`
+                : `Kickoff in ${Math.round(ms / 86400e3)} day${Math.round(ms / 86400e3) === 1 ? "" : "s"}`;
+          const wk = headG.week ?? (headG.wedraftWeek ? Number(/\d+/.exec(headG.wedraftWeek)?.[0]) : null);
+          return (
+            <div className="wdl-mu-mid wdl-mu-pre">
+              {headG.gameOfWeek ? <span className="wdl-mu-tag gotw">Game of the Week</span> : headG.featured ? <span className="wdl-mu-tag feat">Featured</span> : null}
+              {ok && <div className="wdl-mu-day">{at.toLocaleDateString([], { weekday: "long" })}<small>{at.toLocaleDateString([], { month: "short", day: "numeric" })}</small></div>}
+              <div className="wdl-mu-kick">{ok && !headG.startTimeTBD ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "Time TBA"}</div>
+              {count && <div className="wdl-mu-count">{count}</div>}
+              <div className="wdl-mu-meta">
+                {headG.tv && <span className="wdl-mu-tv">📺 {tvShort(headG.tv)}</span>}
+                {wk != null && <span>Week {wk}</span>}
+                {headG.neutralSite && <span>Neutral site</span>}
+              </div>
+            </div>
+          );
+        })() : null;
         return (
-          <div ref={inWidget ? undefined : boardRef} className={`wdl-mu${heat ? " clutch" : ""}${isFinal ? " final" : ""}${takeover ? ` tk-${takeover.side}` : ""}${!inWidget && boardFull ? " full" : ""}`}
+          <div ref={inWidget ? undefined : boardRef} className={`wdl-mu${pregame ? " pre" : ""}${heat ? " clutch" : ""}${isFinal ? " final" : ""}${takeover ? ` tk-${takeover.side}` : ""}${!inWidget && boardFull ? " full" : ""}`}
             style={{
               // a takeover morphs both halves into the team's color
               "--ac": (takeover && headG[takeover.side]?.color) || headG.away?.color || "#2a4a7a",
@@ -2233,8 +2486,8 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
               ...(heat ? { "--heat": heat.toFixed(2) } : {}),
             }}>
             {team("away")}
-            {score("away")}
-            <div className="wdl-mu-mid">
+            {!pregame && score("away")}
+            {pregame ? preMid : <div className="wdl-mu-mid">
               <div className={`wdl-mu-status${headLive ? " live" : ""}`}>{headLive && <span className="wdl-dot" />}{statusLabel(headG)}</div>
               {/* Down & distance, scoreboard style (the spot is on the field
                   strip below); a break (halftime …) as plain text. */}
@@ -2245,8 +2498,8 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
                 </div>
               ) : headLive && headNext?.brk?.label ? <div className="wdl-mu-next">{headNext.brk.label}</div> : null}
               {!isFinal && headG.tv && <div className="wdl-mu-tv">📺 {tvShort(headG.tv)}</div>}
-            </div>
-            {score("home")}
+            </div>}
+            {!pregame && score("home")}
             {team("home")}
             {/* Field strip: where the ball is for the next snap. */}
             {headLive && headNext?.offense && headNext.ytg != null && <LiveField game={headG} next={headNext} />}
@@ -2331,7 +2584,12 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
     <div>
       {(() => {
         const wk = g.week ?? (g.wedraftWeek ? Number(/\d+/.exec(g.wedraftWeek)?.[0]) : null);
-        return wk != null && onWeek ? <div className="wdl-mu-above"><button className="wdl-mu-week" onClick={() => onWeek(wk)}>‹ Week {wk} slate</button></div> : null;
+        return (
+          <div className="wdl-mu-above">
+            {wk != null && onWeek && <button className="wdl-mu-week" onClick={() => onWeek(wk)}>‹ Week {wk} slate</button>}
+            <ShareGame game={g} />
+          </div>
+        );
       })()}
       {renderBoard(false)}
       {widgetWin && createPortal(
@@ -2347,7 +2605,7 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
       )}
       {showRecap && isFinal && <div className="wdl-recap-inline"><div className="wdl-h">Game Recap</div><GameRecap game={g} gameId={gameId} slateGame={slateGame} /></div>}
       {g.status === "scheduled" && <>
-        {showRecap && <div className="wdl-recap-inline"><PreviewPickCard game={g} /></div>}
+        {showRecap && <div className="wdl-recap-inline"><PreviewPickCard game={g} withInfo /></div>}
         <PreviewView game={g} slateGame={slateGame} />
       </>}
       {g.status !== "scheduled" && <>
@@ -2359,10 +2617,10 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
           <button className={`wdl-gtab${tab === "plays" ? " on" : ""}`} onClick={() => pickTab("plays")}>{isLive ? "Live play-by-play" : "Play-by-play"}</button>
           <button className={`wdl-gtab${tab === "stats" ? " on" : ""}`} onClick={() => pickTab("stats")}>{isLive ? "Live stats" : "Stats"}</button>
         </>}
-        <button className={`wdl-gtab${tab === "chat" ? " on" : ""}`} onClick={() => pickTab("chat")}>💬 Chat</button>
         {!isFinal && ["away", "home"].map((side) => (
           <button key={side} className={`wdl-gtab${tab === `roster-${side}` ? " on" : ""}`} onClick={() => pickTab(`roster-${side}`)}>{teamShort(g[side])} roster</button>
         ))}
+        <button className={`wdl-gtab${tab === "chat" ? " on" : ""}`} onClick={() => pickTab("chat")}>💬 Chat</button>
         {isLive && tab === "plays" && canWidget && !touchish() && (
           <button type="button" className={`wdl-gtab-pop${logWin ? " on" : ""}`} onClick={logWin ? () => logWin.close() : openLog}
             title={logWin ? "Close the pop-out play-by-play" : "Pop out the play-by-play — float it over your other windows"} aria-label="Pop out play-by-play">
@@ -2552,15 +2810,20 @@ export default function LivePage() {
   const [params, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
-  // We-Pick has its own path (/live/we-pick…, utils/wePickRoutes.js); every
-  // other view is /live?view=…. Leaving We-Pick for another view goes back
-  // to /live with that query.
+  // We-Pick has its own path (/live/we-pick…, utils/wePickRoutes.js), and
+  // so does each game (/live/{slug} — its own indexable page, the slug
+  // shared with its old /game/{slug} page); every other view is
+  // /live?view=…. Leaving either for another view goes back to /live with
+  // that query.
   const onWePickPath = isWePickPath(location.pathname);
+  const pathSlug = !onWePickPath && location.pathname.startsWith("/live/")
+    ? decodeURIComponent(location.pathname.slice("/live/".length).split("/")[0] || "") || null : null;
+  const onPath = onWePickPath || !!pathSlug;
   const setParams = useCallback((next, opts) => {
-    if (!onWePickPath) { setSearchParams(next, opts); return; }
+    if (!onPath) { setSearchParams(next, opts); return; }
     const q = new URLSearchParams(next).toString();
     navigate(`/live${q ? `?${q}` : ""}`, opts);
-  }, [onWePickPath, navigate, setSearchParams]);
+  }, [onPath, navigate, setSearchParams]);
   const compact = useCompact();
   // Scores pop-out (desktop Chrome / Edge): the chooser, the selection
   // (kept in this browser), and the open window.
@@ -2590,11 +2853,10 @@ export default function LivePage() {
   // from an hour before the day's first kickoff until the day's games end.
   // (Re-checked on every render — useNow below ticks every 15s.)
   const feedWindow = slate ? myFeedWindow(slate.games) : { open: false, opensAt: null };
-  const rawView = onWePickPath ? "wepick" : params.get("view");
+  const rawView = onWePickPath ? "wepick" : pathSlug ? "game" : params.get("view");
   const asked = rawView === "teams" || rawView === "players" ? "customize" : rawView === "big" ? "feed" : rawView;
   // Phones/tablets open on My Feed while it's open; otherwise All Games.
   const view = asked === "feed" && slate && !feedWindow.open ? "all" : asked || (compact && feedWindow.open ? "feed" : "all");
-  const gameParam = params.get("game");
   const [error, setError] = useState(false);
   // Follows, Feed settings and weekly adds need an account — a signed-out
   // visitor has none (the whole slate) until they log in.
@@ -2634,6 +2896,43 @@ export default function LivePage() {
     () => setError(true),
   ), []);
 
+  // /live/{slug}: the game — this week's from the slate, any other from one
+  // liveGames query by slug (a future week's not ingested yet: its schedule26
+  // row). slugGame.missing: no such game.
+  const slateSlugGame = pathSlug ? (slate?.games || []).find((g) => g.slug === pathSlug) : null;
+  const [slugGame, setSlugGame] = useState(null);
+  useEffect(() => {
+    if (!pathSlug || !slate || slateSlugGame) return undefined;
+    if (slugGame?.slug === pathSlug) return undefined;
+    let alive = true;
+    (async () => {
+      const snap = await getDocs(query(collection(db, "liveGames"), where("slug", "==", pathSlug), limit(1)));
+      if (!snap.empty) return { id: snap.docs[0].id, ...snap.docs[0].data() };
+      // Not ingested yet (a future week): its schedule26 row, if it has a
+      // CFBD match — GameView builds the preview from that id.
+      const row = (await getDocs(query(collection(db, "schedule26"), where("Slug", "==", pathSlug), limit(1)))).docs[0];
+      return row && row.data().CFBDGameId != null ? scheduledGameFrom(row.id, row.data(), {}) : null;
+    })()
+      .then((game) => { if (alive) setSlugGame(game ? { slug: pathSlug, game } : { slug: pathSlug, missing: true }); })
+      .catch(() => { if (alive) setSlugGame({ slug: pathSlug, missing: true }); });
+    return () => { alive = false; };
+  }, [pathSlug, slate, slateSlugGame, slugGame]);
+  const pathGame = pathSlug ? slateSlugGame || (slugGame?.slug === pathSlug ? slugGame.game : null) : null;
+  const pathMissing = !!pathSlug && !slateSlugGame && slugGame?.slug === pathSlug && !!slugGame.missing;
+  const gameParam = pathSlug ? (pathGame ? String(pathGame.id) : null) : params.get("game");
+  // Old links (/live?view=game&game=ID) move to the game's own path — the
+  // slug from the slate, else from its liveGames doc.
+  useEffect(() => {
+    if (pathSlug || params.get("view") !== "game" || !params.get("game")) return undefined;
+    const id = params.get("game");
+    const hit = (slate?.games || []).find((g) => String(g.id) === id);
+    if (hit?.slug) { navigate(liveGameHref(hit), { replace: true }); return undefined; }
+    if (!slate) return undefined;
+    let alive = true;
+    getDoc(doc(db, "liveGames", id)).then((d) => { const slug = d.exists() ? d.data().slug : null; if (alive && slug) navigate(`/live/${slug}`, { replace: true }); }).catch(() => {});
+    return () => { alive = false; };
+  }, [pathSlug, params, slate, navigate]);
+
   // Keep the active top tab visible when the row scrolls (phones).
   const tabsRef = useRef(null);
   useEffect(() => { scrollActiveTabIntoView(tabsRef.current); }, [view]);
@@ -2644,7 +2943,10 @@ export default function LivePage() {
   useEffect(() => {
     if (!onWePickPath && params.get("view") === "wepick") navigate(wePickHref(params.get("wp") || "picks", params.get("wk")), { replace: true });
   }, [onWePickPath, params, navigate]);
-  const openGame = (id) => setView("game", { game: id });
+  const openGame = (id) => {
+    const g = (slate?.games || []).find((x) => String(x.id) === String(id));
+    if (g?.slug) navigate(liveGameHref(g)); else setView("game", { game: id });
+  };
   // Following needs an account: signed out, any follow opens log in.
   const requireAccount = () => {
     if (uidRef.current) return true;
@@ -2956,6 +3258,9 @@ export default function LivePage() {
 
   let body;
   if (!slate) body = <div className="wdl-empty">{error ? "We-Draft Live is temporarily unavailable." : "Loading the slate…"}</div>;
+  else if (pathSlug && !gameParam) body = (
+    <div className="wdl-empty">{pathMissing ? <>We couldn't find that game. <Link to="/live" style={{ color: GOLD }}>See this week's games →</Link></> : "Loading the game…"}</div>
+  );
   else if (view === "game" && gameParam) body = <GameView gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} showRecap={compact} onWeek={goWeek} />;
   else if (compact && (view === "game" || onFeed) && gameParam) body = (
     <div className="wdl-solo">
@@ -3113,6 +3418,45 @@ export default function LivePage() {
   // state on it). The title names the open game when there is one; the
   // structured data lists the slate as SportsEvents.
   const seo = (() => {
+    // A game's own page (/live/{slug}): its title follows the game —
+    // preview, live score, final — and it's its own canonical.
+    if (pathSlug) {
+      const g = pathGame;
+      if (!g) return { title: pathMissing ? "Game not found | We-Draft Live" : "We-Draft Live", description: "", url: `${LIVE_URL}/${pathSlug}`, noindex: pathMissing, jsonLd: null };
+      const a = g.away?.school || g.away?.name || "Away";
+      const h = g.home?.school || g.home?.name || "Home";
+      const year = g.season || (g.startDate ? new Date(g.startDate).getFullYear() : "");
+      const when = g.startDate ? new Date(g.startDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "";
+      const final = g.status === "final";
+      const live = g.status === "in_progress";
+      const score = `${teamShort(g.away)} ${g.away?.points ?? 0}, ${teamShort(g.home)} ${g.home?.points ?? 0}`;
+      const title = final ? `${a} vs ${h} Final Score (${g.away?.points ?? 0}-${g.home?.points ?? 0}): Box Score & Stats ${year} | We-Draft Live`
+        : live ? `${a} vs ${h} Live Score & Play-by-Play | We-Draft Live`
+        : `${a} vs ${h} ${year} Preview & Prediction | We-Draft Live`;
+      const description = final ? `${a} vs ${h} final score: ${score}${when ? ` (${when})` : ""}. Box score, team and player stats, play-by-play, drive summary and game recap on We-Draft Live.`
+        : live ? `Follow ${a} vs ${h} live: ${score}, ${statusLabel(g)}. Live play-by-play, drive-by-drive updates, game stats and live chat on We-Draft Live.`
+        : `${a} vs ${h} preview${when ? ` — ${when}` : ""}: tale of the tape with team stats and national ranks, team leaders, NFL Draft prospects to watch and community picks. Live scores and play-by-play on game day.`;
+      const url = `${LIVE_URL}/${pathSlug}`;
+      const team = (t) => ({ "@type": "SportsTeam", name: t?.school || t?.name });
+      const jsonLd = {
+        "@context": "https://schema.org",
+        "@type": "SportsEvent",
+        name: `${a} vs ${h}`,
+        sport: "American football",
+        url,
+        description,
+        startDate: g.startDate || undefined,
+        eventStatus: final ? "https://schema.org/EventCompleted" : "https://schema.org/EventScheduled",
+        eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+        awayTeam: team(g.away),
+        homeTeam: team(g.home),
+        competitor: [team(g.away), team(g.home)],
+        ...(g.venue ? { location: { "@type": "Place", name: g.venue } } : {}),
+      };
+      // Link previews (texts, social): the home team's logo, else the away's.
+      const image = g.home?.logo || g.away?.logo || g.home?.logoDark || g.away?.logoDark || null;
+      return { title, description, url, jsonLd: { ...jsonLd, ...(image ? { image } : {}) }, image, h1: `${a} vs ${h}${final ? " Final Score" : live ? " Live Score" : " Preview"}` };
+    }
     const openId = gameParam || null;
     const og = openId ? games.find((g) => g.id === openId) : null;
     const title = og
@@ -3133,7 +3477,7 @@ export default function LivePage() {
       awayTeam: team(g.away),
       homeTeam: team(g.home),
       competitor: [team(g.away), team(g.home)],
-      url: g.slug ? `https://we-draft.com/game/${g.slug}` : `${LIVE_URL}?view=game&game=${g.id}`,
+      url: g.slug ? `${LIVE_URL}/${g.slug}` : `${LIVE_URL}?view=game&game=${g.id}`,
     }));
     const jsonLd = {
       "@context": "https://schema.org",
@@ -3150,29 +3494,41 @@ export default function LivePage() {
         ...(events.length ? [{ "@type": "ItemList", name: slate?.week ? `Week ${slate.week} college football games` : "College football games", itemListElement: events.map((e, i) => ({ "@type": "ListItem", position: i + 1, item: e })) }] : []),
       ],
     };
-    return { title, description, jsonLd };
+    return { title, description, jsonLd, url: LIVE_URL, h1: "College Football Live Scores & Play-by-Play" };
   })();
+
+  // Prerender: snapshot once the slate (and, on a game's page, the game)
+  // is in, with a moment for the game view to fill.
+  const seoReady = !!slate && (!pathSlug || !!pathGame || pathMissing);
+  useEffect(() => {
+    if (!seoReady) return undefined;
+    const t = setTimeout(() => { window.prerenderReady = true; }, pathSlug ? 2500 : 800);
+    return () => clearTimeout(t);
+  }, [seoReady, pathSlug]);
 
   return (
     <div className={`wdl${compact ? " wdl-compact" : ""}`}>
       <Helmet>
         <title>{seo.title}</title>
         <meta name="description" content={seo.description} />
-        <link rel="canonical" href={LIVE_URL} />
-        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <link rel="canonical" href={seo.url} />
+        <meta name="robots" content={seo.noindex ? "noindex, follow" : "index, follow, max-image-preview:large"} />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="We-Draft" />
         <meta property="og:title" content={seo.title} />
         <meta property="og:description" content={seo.description} />
-        <meta property="og:url" content={LIVE_URL} />
-        <meta property="og:image" content="https://we-draft.com/logo512.png" />
+        <meta property="og:url" content={seo.url} />
+        <meta property="og:image" content={seo.image || "https://we-draft.com/logo512.png"} />
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={seo.title} />
         <meta name="twitter:description" content={seo.description} />
-        <meta name="twitter:image" content="https://we-draft.com/logo512.png" />
-        <script type="application/ld+json">{JSON.stringify(seo.jsonLd)}</script>
+        <meta name="twitter:image" content={seo.image || "https://we-draft.com/logo512.png"} />
+        {seo.jsonLd && <script type="application/ld+json">{JSON.stringify(seo.jsonLd)}</script>}
       </Helmet>
       <style>{STYLE}</style>
+      {/* The page's H1 — screen-reader / crawler only (the board shows the
+          matchup visually). */}
+      {seo.h1 && <h1 className="wdl-sr">{seo.h1}</h1>}
       <header className="wdl-top">
         <Link to="/" className="wdl-brand" aria-label="We-Draft.com home"><img src={Logo2} alt="We-Draft.com" /><span>LIVE</span></Link>
         <nav className="wdl-tabs" ref={tabsRef}>

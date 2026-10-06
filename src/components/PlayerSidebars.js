@@ -36,6 +36,42 @@ const toTeamSlug = (school) => {
 };
 const toMs = (ts) => (ts?.toDate?.() ? ts.toDate().getTime() : typeof ts === "number" ? ts : Date.parse(ts) || 0);
 
+// A player page's Videos fallback when the player has no long-form videos
+// of their own: their current teammates' newest ones (same School, a draft
+// class still in college — the 2027 class from May 2026 on — so alumni
+// don't count). Up to `max`, newest first, each with that teammate's own
+// title/thumb override. One players query + one videos query per 30
+// teammates (array-contains-any's cap). [] when there are none.
+export async function fetchTeammateVideos(player, max = 3) {
+  if (!player?.School || !player?.id) return [];
+  const now = new Date();
+  const minClass = now.getFullYear() + (now.getMonth() >= 4 ? 1 : 0);
+  const mates = await getDocs(query(collection(db, "players"), where("School", "==", player.School)));
+  const ids = mates.docs.filter((d) => d.id !== player.id && Number(d.data().Eligible) >= minClass).map((d) => d.id);
+  if (!ids.length) return [];
+  const idSet = new Set(ids);
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+  const snaps = await Promise.all(chunks.map((c) => getDocs(query(collection(db, "videos"), where("playerIds", "array-contains-any", c)))));
+  const seen = new Set();
+  return snaps.flatMap((snap) => snap.docs)
+    .filter((d) => !seen.has(d.id) && seen.add(d.id))
+    .map((d) => {
+      const data = d.data();
+      const items = Array.isArray(data.items) ? data.items : [];
+      const mate = items.find((it) => idSet.has(it.playerId)) || null;
+      return {
+        id: d.id, video: data.Video || "", date: data.Date || null, short: data.Short === true,
+        title: mate?.title || items[0]?.title || data.GenTitle || "",
+        thumb: mate?.thumb || items[0]?.thumb || data.GenThumb || "",
+        tags: Array.isArray(data.Tags) ? data.Tags : [], publishAt: data.PublishAt || null,
+      };
+    })
+    .filter((v) => v.video && !v.short && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
+    .sort((a, b) => toMs(b.date) - toMs(a.date))
+    .slice(0, max);
+}
+
 function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
@@ -112,7 +148,8 @@ export function usePlayerSidebarData(player) {
   }, [slug, player?.id, player?.School]);
 
   // ── Videos + watchClips from one query — long-form videos for the
-  // sidebar (site-wide fallback when none), Shorts for the Watch button ──
+  // sidebar (teammates' newest when none, then site-wide), Shorts for the
+  // Watch button ──
   useEffect(() => {
     if (!player?.id) { setVideos([]); setWatchClips([]); return; }
     let cancelled = false;
@@ -185,6 +222,9 @@ export function usePlayerSidebarData(player) {
 
         const own = all.filter((v) => !v.short);
         if (own.length > 0) { if (!cancelled) setVideos(own); return; }
+        // None of their own: their teammates' newest, then site-wide.
+        const mates = await fetchTeammateVideos(player).catch(() => []);
+        if (mates.length > 0) { if (!cancelled) setVideos(mates); return; }
 
         // Newest VIDEO_FALLBACK_SCAN only, not the whole collection (which
         // grows with every upload — 230+ reads and climbing, per visit, for

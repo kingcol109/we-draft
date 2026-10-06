@@ -2,7 +2,7 @@ name: Sync CFBD Player Stats
 
 # Runs weekly, Sunday at 10:00 UTC (6am EDT / 5am EST — GitHub Actions
 # schedules always run in UTC, see sync-analytics.yml's own comment), after
-# Saturday's games have all finished. Three steps, ~13 CFBD calls a week:
+# Saturday's games have all finished. Four steps, ~14 CFBD calls a week:
 #   - scripts/syncCfbdPlayerStats.js — 2026 season totals on every CFBD
 #     player linked to a We-Draft profile (the player page's "2026 Stats"
 #     card). 1 call. Game logs are written by the live ingester as games
@@ -13,6 +13,8 @@ name: Sync CFBD Player Stats
 #   - scripts/syncCfbdTeamStats.js — FBS team yards / points per game,
 #     gained and allowed, with national ranks (the CFB page's Teams stats,
 #     Live's game previews). 3 calls.
+#   - scripts/flagFcsWePickGames.js — upcoming games with an FCS team are
+#     flagged Not Qualified for Ranked We-Pick. 1 call.
 # Idempotent; also runnable on demand via workflow_dispatch (e.g. after a
 # weekday game).
 #
@@ -56,6 +58,14 @@ jobs:
       # page's Teams stats and Live's game previews. 3 calls.
       - name: Sync team stats
         run: node scripts/syncCfbdTeamStats.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+
+      # Upcoming We-Pick games with an FCS team → Not Qualified for Ranked
+      # (before picks open Monday). 1 call.
+      - name: Flag FCS games for We-Pick
+        run: node scripts/flagFcsWePickGames.js
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}

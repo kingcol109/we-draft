@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
+import { cfbSeo } from "../utils/cfbSeo";
+import { scheduleGameHref } from "../utils/live";
 import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -72,6 +75,17 @@ export default function CFBPage() {
   const currentRankMap = useCurrentRankMap();
   const liveById = useLiveSlate();
   const [loading, setLoading] = useState(true);
+  // Prerender: hold the snapshot until the page's data is in (stats views
+  // signal their own — CfbLeaders.js), with a safety timeout.
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    window.prerenderReady = false;
+    const t = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(t);
+  }, [location.pathname]);
+  useEffect(() => {
+    if (!loading && activeTab !== "stats") window.prerenderReady = true;
+  }, [loading, activeTab]);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
   );
@@ -200,8 +214,25 @@ export default function CFBPage() {
     return acc;
   }, {});
 
+  // SEO: each view's own title / description / canonical (utils/cfbSeo.js)
+  // — static, so it's right from the first render, spinner included.
+  const seo = cfbSeo({ tab: activeTab, cat: statCat, week: weekParam });
+  const seoUrl = `https://we-draft.com${seo.path}`;
+  const seoHead = (
+    <Helmet>
+      <title>{seo.title}</title>
+      <meta name="description" content={seo.description} />
+      <link rel="canonical" href={seoUrl} />
+      <meta property="og:title" content={seo.title} />
+      <meta property="og:description" content={seo.description} />
+      <meta property="og:url" content={seoUrl} />
+      <meta property="og:type" content="website" />
+      <meta name="twitter:card" content="summary" />
+    </Helmet>
+  );
+
   if (loading) {
-    return <LoadingSpinner label="Loading Teams" size={56} minHeight="100vh" />;
+    return <>{seoHead}<LoadingSpinner label="Loading Teams" size={56} minHeight="100vh" /></>;
   }
 
   return (
@@ -213,6 +244,15 @@ export default function CFBPage() {
         fontFamily: "'Arial Black', Arial, sans-serif",
       }}
     >
+      {seoHead}
+      {/* The stats views' H1 is CfbLeaders' own visible heading; Teams and
+          Schedule have no visible page heading, so theirs is screen-reader /
+          crawler only. */}
+      {activeTab !== "stats" && (
+        <h1 style={{ position: "absolute", width: "1px", height: "1px", padding: 0, margin: "-1px", overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}>
+          {seo.h1}
+        </h1>
+      )}
       <style>{`
         .team-card {
           transition: box-shadow 0.18s ease;
@@ -601,7 +641,7 @@ export default function CFBPage() {
                     return (
                       <Link
                         key={g.id}
-                        to={g.Slug ? `/game/${g.Slug}` : "#"}
+                        to={scheduleGameHref(g) || "#"}
                         className={`wd-schedule-row${g.GameOfWeek ? " wd-schedule-row-gotw" : g.Featured ? " wd-schedule-row-featured" : ""}`}
                         style={{
                           display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px",

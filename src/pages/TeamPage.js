@@ -26,6 +26,7 @@ import Year2ContributorFlair from "../assets/y2contributor.png";
 import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
 import { fetchAllRankMaps, ranksForGame, currentRankMap, RANKINGS_LIMIT } from "../utils/rankings";
+import { scheduleGameHref } from "../utils/live";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -1775,7 +1776,7 @@ export default function TeamPage() {
             return (
               <Link
                 key={g.id || i}
-                to={`/game/${g.Slug}`}
+                to={scheduleGameHref(g)}
                 style={rowStyle2}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}

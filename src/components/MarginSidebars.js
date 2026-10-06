@@ -11,7 +11,7 @@
 // sidebar).
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { topProspects as fetchTopProspectsSnapshot } from "../utils/communityGrades";
 import PlayersMentionedList from "./PlayersMentionedList";
@@ -103,6 +103,7 @@ function formatRelativeTime(input) {
 // Sidebar column here is narrower than CommunityBoard.js's own Videos card,
 // so this stays shorter — same idea, fewer thumbnails.
 const SIDEBAR_VIDEO_LIMIT = 4;
+const VIDEO_SCAN = 30;
 
 // A visibly solid card (site-standard 2px blue border) with a light,
 // grounded shadow rather than a heavy "floating" one — paired with
@@ -251,12 +252,14 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
 
   // School name → { logo, logoDark, color1, color2 } — same shape
   // NewsArticle.jsx builds, for the "Top 2027 Prospects" chips
-  // (PlayersMentionedList.js, see below).
+  // (PlayersMentionedList.js, see below). Only the shown prospects'
+  // schools (one "in" query, ≤10 names), not the whole collection.
+  const prospectSchoolsKey = [...new Set(topProspects.map((p) => p.School).filter(Boolean))].sort().join("|");
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || !prospectSchoolsKey) return;
     const fetch = async () => {
       try {
-        const snap = await getDocs(collection(db, "schools"));
+        const snap = await getDocs(query(collection(db, "schools"), where("School", "in", prospectSchoolsKey.split("|").slice(0, 30))));
         const map = {};
         snap.docs.forEach((d) => {
           const data = d.data();
@@ -273,7 +276,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
       } catch (e) { /* logos are non-critical */ }
     };
     fetch();
-  }, [isMobile]);
+  }, [isMobile, prospectSchoolsKey]);
 
   // Videos card — same "videos" collection + Recruiting-tag/Short exclusion
   // as CommunityBoard.js's own Videos sidebar, so this reads as the exact
@@ -282,7 +285,9 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
     if (isMobile) return;
     const fetch = async () => {
       try {
-        const snap = await getDocs(collection(db, "videos"));
+        // Newest VIDEO_SCAN only (every video has a Timestamp Date) — room
+        // for the Shorts / Recruiting / scheduled ones filtered out below.
+        const snap = await getDocs(query(collection(db, "videos"), orderBy("Date", "desc"), limit(VIDEO_SCAN)));
         const vids = snap.docs
           .map((d) => {
             const data = d.data();
@@ -300,9 +305,12 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
               title: data.GenTitle || first?.title || "",
               thumb: data.GenThumb || first?.thumb || "",
               tags: Array.isArray(data.Tags) ? data.Tags : [],
+              publishAt: data.PublishAt || null,
             };
           })
-          .filter((v) => !!v.video && !v.short && !v.tags.includes("Recruiting"))
+          // publishAt: scheduled videos stay hidden until then (same as
+          // the player page's and home page's Videos).
+          .filter((v) => !!v.video && !v.short && !v.tags.includes("Recruiting") && (!v.publishAt || toMs(v.publishAt) <= Date.now()))
           .sort((a, b) => toMs(b.date) - toMs(a.date))
           .slice(0, SIDEBAR_VIDEO_LIMIT);
         setSidebarVideos(vids);

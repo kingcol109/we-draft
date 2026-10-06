@@ -14,7 +14,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { wePickHref, useWePickRoute } from "../utils/wePickRoutes";
-import { scrollActiveTabIntoView } from "../utils/live";
+import { scrollActiveTabIntoView, liveGameHref } from "../utils/live";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import { db } from "../firebase";
@@ -22,6 +22,8 @@ import { db } from "../firebase";
 // lives in utils/wePickScoring.js, shared with /live's Your Week.
 import { pickedSideOf, isGameFinal, hasScorePick, scoreGamePick, compareStandingsEntries } from "../utils/wePickScoring";
 import { toMs, mondayOfWeekUtc, timeToMinutes, kickoffMs, isPickable } from "../utils/wePickLocks";
+import { swapRanked } from "../utils/wePickRanked";
+import RankedSwap from "../components/RankedSwap";
 import { collection, getDocs, doc, getDoc, setDoc, addDoc, deleteDoc, writeBatch, query, where, serverTimestamp } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
@@ -512,6 +514,12 @@ function MyPicksSection() {
   // this one" regardless of which week the user is currently browsing.
   const [currentWeek, setCurrentWeek] = useState("");
   const [savingId, setSavingId] = useState("");
+  // The swap chooser (components/RankedSwap.js), open for this game's pick
+  // when its ⭐ is clicked with the Ranked 6 already full (a 7th pick saves
+  // unranked on its own — swapping it in is the user's call). swapBusyId:
+  // the ranked pick being swapped out.
+  const [swapFor, setSwapFor] = useState(null);
+  const [swapBusyId, setSwapBusyId] = useState("");
   const [removingId, setRemovingId] = useState("");
   // The week's locked-in Ranked 6, once submitted (see handleSubmitForRanking
   // and SUBMISSIONS_COLLECTION) — separate from the live star toggles above,
@@ -935,7 +943,7 @@ function MyPicksSection() {
     // both read the same stale pre-either-click count and both go
     // through, landing a 7th).
     if (next && rankedCountRef.current >= 6) {
-      alert("Your Ranked 6 is already full for this week — remove one before adding another.");
+      setSwapFor(gameId); // full — pick one to swap out instead
       return;
     }
     if (next) rankedCountRef.current += 1; else rankedCountRef.current -= 1;
@@ -953,6 +961,24 @@ function MyPicksSection() {
       if (next) rankedCountRef.current -= 1; else rankedCountRef.current += 1; // reservation didn't pan out — release it
     } finally {
       setSavingId("");
+    }
+  };
+
+  // The swap chooser's "Swap out": un-rank outId and rank swapFor together
+  // (one batch) — the count stays at 6, so rankedCountRef doesn't move.
+  const handleSwapRanked = async (outId) => {
+    if (!user || !swapFor) return;
+    const inId = swapFor;
+    setSwapBusyId(outId);
+    try {
+      await swapRanked(user.uid, outId, inId);
+      setMyPicks((prev) => prev.map((p) => (p.id === outId ? { ...p, ranked: false } : p.id === inId ? { ...p, ranked: true } : p)));
+      setSwapFor(null);
+    } catch (e) {
+      console.error("We-Pick ranked swap error:", e);
+      alert("Couldn't swap — try again.");
+    } finally {
+      setSwapBusyId("");
     }
   };
 
@@ -1260,6 +1286,17 @@ function MyPicksSection() {
       {/* Desktop: the week's games on the left, its Report Card (or Ranked
           status), recap and the rules in a sticky column on the right
           (LivePage.js .wdl-wp-grid); stacked on phones. */}
+      {swapFor && gamesForWeek.some((g) => g.id === swapFor) && (
+        <RankedSwap
+          modal
+          week={selectedWeek}
+          inGame={gamesForWeek.find((g) => g.id === swapFor)}
+          ranked={rankedGames.map((g) => ({ id: g.id, game: g, pick: myPicksById[g.id] }))}
+          busyId={swapBusyId}
+          onSwap={handleSwapRanked}
+          onCancel={() => { if (!swapBusyId) setSwapFor(null); }}
+        />
+      )}
       <div className="wdl-wp-grid">
       <div className="wdl-wp-main">
       {rankedGames.length > 0 && (
@@ -1374,6 +1411,9 @@ function MyPicksSection() {
 
       </div>
       <aside className="wdl-wp-side">
+      {/* The pick tracker (Report Card / Ranked status + Share Picks) —
+          first on the tab on phones (LivePage.js .wdl-wp-tracker). */}
+      <div className="wdl-wp-tracker">
       {weekIsPast ? (
         /* Report Card — every game's Final, so the pickable/composition/
            Submit UI (below) no longer applies. Doubles as something meant
@@ -1472,7 +1512,7 @@ function MyPicksSection() {
             ) : (
               <>
                 <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "10px" }}>
-                  <CompositionChip label="Total" value={`${rankedGames.length}/6`} ok={rankedGames.length >= 6} />
+                  <CompositionChip label="Total" value={`${rankedGames.length}/6`} ok={rankedGames.length === 6} />
                   {/* Week 0 has no Game of the Week/Featured requirement — any
                       6 ranked games qualify (see rankedStatus's own Week 0
                       branch), so these two chips would just be permanently
@@ -1533,6 +1573,7 @@ function MyPicksSection() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Pinned recap of recapWeek — see showRecap's own comment above for
           why this exists separately from the dynamic Report Card below
@@ -3189,11 +3230,8 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
   const [awayVal, setAwayVal] = useState(pick?.awayScore != null ? String(pick.awayScore) : "");
   const [homeVal, setHomeVal] = useState(pick?.homeScore != null ? String(pick.homeScore) : "");
   const [visibility, setVisibility] = useState(pick?.visibility || "public");
+  // No note input anymore — an existing note rides along unchanged on save.
   const [noteVal, setNoteVal] = useState(pick?.prediction || "");
-  // Collapsed by default (the + button below opens it) — starts open only
-  // if there's already a note on file, so an existing one isn't hidden
-  // behind an extra click every time this row mounts/re-renders.
-  const [notesOpen, setNotesOpen] = useState(!!pick?.prediction);
 
   useEffect(() => {
     setAwayVal(pick?.awayScore != null ? String(pick.awayScore) : "");
@@ -3309,10 +3347,15 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
           {scoreVal}
         </span>
       ) : null}
+      {/* Only the logo and the name itself pick a winner — the name no
+          longer stretches across the row, so the empty space after it is
+          the card's own link to the game page, not an accidental pick. */}
       {(schoolData?.LogoBlack || schoolData?.LogoDark || schoolData?.Logo1) && (
         <img
           src={sanitizeUrl(schoolData.LogoBlack || schoolData.LogoDark || schoolData.Logo1)} alt=""
-          style={{ width: "44px", height: "44px", objectFit: "contain", flexShrink: 0 }}
+          onClick={onPick}
+          title={onPick ? "Click to pick this team to win" : undefined}
+          style={{ width: "44px", height: "44px", objectFit: "contain", flexShrink: 0, cursor: onPick ? "pointer" : "default", pointerEvents: onPick ? "auto" : "inherit" }}
           onError={(e) => { e.currentTarget.style.display = "none"; }}
         />
       )}
@@ -3320,7 +3363,7 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
         onClick={onPick}
         title={onPick ? "Click to pick this team to win" : undefined}
         style={{
-          flex: "1 1 70px", minWidth: "70px", fontWeight: 900, fontSize: "16px",
+          flex: "0 1 auto", minWidth: "40px", maxWidth: "100%", fontWeight: 900, fontSize: "16px",
           color: final && won === false ? "rgba(255,255,255,0.5)" : picked ? GOLD : "#fff",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           cursor: onPick ? "pointer" : "default", pointerEvents: onPick ? "auto" : "inherit",
@@ -3330,6 +3373,7 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
         {name}
         {picked && <span style={{ marginLeft: "4px", fontSize: "11px" }}>✓</span>}
       </span>
+      <span style={{ flex: "1 1 0", minWidth: 0 }} />
       {trailing}
     </div>
   );
@@ -3340,19 +3384,6 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
   // own row below the grid, so these controls don't add height to the card.
   const actionButtons = showInputs ? (
     <div style={{ display: "flex", alignItems: "center", gap: "5px", flexShrink: 0, pointerEvents: "auto" }}>
-      {/* Opens the notes textarea below (see the grid's own trailing
-          content) — gold once a note actually exists so there's a hint
-          it's there even while collapsed, not just a bare "+". */}
-      <button
-        onClick={() => setNotesOpen((v) => !v)}
-        title={notesOpen ? "Hide note" : pick?.prediction ? "Edit your note" : "Add a note"}
-        style={{
-          background: "none", border: "none", cursor: "pointer", fontSize: "15px", padding: "1px", flexShrink: 0,
-          color: pick?.prediction ? GOLD : "rgba(255,255,255,0.55)", fontWeight: 900, lineHeight: 1,
-        }}
-      >
-        {notesOpen ? "–" : "+"}
-      </button>
       <button
         onClick={() => setVisibility((v) => (v === "public" ? "private" : "public"))}
         title={visibility === "public" ? "Public — click to make private" : "Private — click to make public"}
@@ -3394,18 +3425,16 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
   // Clicking a game opens its We-Draft Live game page (a future week's game
   // there is built from the schedule until /live ingests it). Only a game
   // with no CFBD match falls back to its public /game page.
-  const liveHref = game.CFBDGameId != null ? `/live?view=game&game=${game.CFBDGameId}` : null;
+  const liveHref = game.CFBDGameId != null ? liveGameHref({ slug: game.Slug, id: game.CFBDGameId }) : null;
 
   return (
     <div style={{ position: "relative", border: `1px solid ${LINE}`, borderRadius: "10px", overflow: "hidden", background: CARD_BG }}>
-      {/* Stretched-link background, but only across the right two-thirds of
-          the card — the left third is where the score inputs/logos sit, so
-          a click meant for one of those (but just off-target) no longer
-          accidentally navigates away instead of doing nothing. Doesn't
-          affect any individual input/button elsewhere on the card, which
-          already sit above this (pointerEvents: "auto") regardless of
-          where this box ends. */}
-      <Link to={liveHref || `/game/${game.Slug}`} aria-label={`${game.Away} at ${game.Home}`} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: "33.333%", zIndex: 0 }} />
+      {/* Stretched-link background across the whole card: anywhere that
+          isn't a control opens the game page. The score inputs, buttons,
+          star and each team's logo + name (the pick targets) sit above it
+          (pointerEvents: "auto"), so only those exact targets do anything
+          else. */}
+      <Link to={liveHref || `/game/${game.Slug}`} aria-label={`${game.Away} at ${game.Home}`} style={{ position: "absolute", inset: 0, zIndex: 0 }} />
 
       <div style={{ position: "relative", zIndex: 1, padding: "8px 12px", pointerEvents: "none" }}>
         {(hasTags || showStar) && (
@@ -3471,21 +3500,6 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
           </div>
         )}
 
-        {showInputs && notesOpen && (
-          <div style={{ marginTop: "6px", pointerEvents: "auto" }}>
-            <textarea
-              value={noteVal}
-              onChange={(e) => setNoteVal(e.target.value)}
-              placeholder="Why do you like this pick? (optional)"
-              rows={2}
-              style={{
-                width: "100%", boxSizing: "border-box", resize: "vertical", border: `1px solid ${LINE}`,
-                borderRadius: "6px", padding: "6px 8px", fontFamily: "inherit", fontSize: "12px", fontWeight: 600,
-                color: "#222", outline: "none", lineHeight: 1.4,
-              }}
-            />
-          </div>
-        )}
 
         {final && pick && (
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "8px", marginTop: "6px", flexWrap: "wrap" }}>

@@ -71,6 +71,11 @@ export default function Footer({ color1 = "#0055a5", color2 = "#f6a21d" }) {
       <p className="text-xs text-gray-500 italic">
         © {new Date().getFullYear()} We-Draft / King Cold Sports
       </p>
+
+      <p className="mt-2 mx-auto max-w-2xl text-[11px] leading-snug text-gray-400">
+        We-Draft is an independent football scouting and analysis platform, not affiliated with or endorsed by the NFL, NCAA,
+        or any team, conference, or league. Team names and logos are property of their respective owners.
+      </p>
     </footer>
   );
 }

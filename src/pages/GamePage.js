@@ -26,7 +26,9 @@ import { useCurrentRankMap, ranksForGame, withRank } from "../utils/rankings";
 // (server/live/*), linked through this game's CFBDGameId. The play-by-play
 // itself lives on /live (see the hero's "Follow Live" button).
 import { useLiveGame } from "../hooks/useLiveGame";
-import { statusLabel } from "../utils/live";
+import { statusLabel, liveGameHref } from "../utils/live";
+import { hasRankedRoom, loadWeekRanked, swapRanked } from "../utils/wePickRanked";
+import RankedSwap from "../components/RankedSwap";
 import LiveGameStats, { LIVE_STATS_STYLE } from "../components/LiveGameStats";
 
 // Same flair badge assets/config as PlayerProfile.js's hero (duplicated
@@ -620,6 +622,31 @@ export default function GamePage() {
   const [pickRemoving, setPickRemoving] = useState(false);
   const [pickMessage, setPickMessage] = useState("");
   const [rankedToggling, setRankedToggling] = useState(false);
+  // The Ranked 6 swap chooser (components/RankedSwap.js), open when this
+  // game's pick should be ranked but the week's 6 are full: { ranked }.
+  const [rankSwap, setRankSwap] = useState(null);
+  const [rankSwapBusy, setRankSwapBusy] = useState("");
+  const openRankSwap = async (gameId) => {
+    try {
+      const { ranked } = await loadWeekRanked(user.uid, game?.Week);
+      setRankSwap({ gameId, ranked: ranked.filter((r) => r.id !== gameId) });
+    } catch (e) { console.error("Ranked swap load error:", e); }
+  };
+  const handleRankSwap = async (outId) => {
+    if (!rankSwap) return;
+    setRankSwapBusy(outId);
+    try {
+      await swapRanked(user.uid, outId, rankSwap.gameId);
+      setPicks((prev) => prev.map((p) => (p.id === user.uid ? { ...p, ranked: true } : p)));
+      setRankSwap(null);
+      setPickMessage("Swapped into your Ranked 6!");
+    } catch (e) {
+      console.error("Ranked swap error:", e);
+      alert("Couldn't swap — try again.");
+    } finally {
+      setRankSwapBusy("");
+    }
+  };
   const [hypeUids, setHypeUids] = useState(new Set());
   const [hypeToggling, setHypeToggling] = useState(false);
   const [picksExpanded, setPicksExpanded] = useState(false);
@@ -992,6 +1019,13 @@ export default function GamePage() {
       // winner-only pick's forced `ranked: false` still gets the same
       // default-on treatment as a brand new pick.
       const hadScore = myPick?.awayScore != null && myPick?.homeScore != null;
+      // …but a brand new one only joins the Ranked 6 while the week has
+      // room — a 7th ranked pick would disqualify the week
+      // (utils/wePickRanked.js).
+      let ranked = hadScore ? (myPick.ranked ?? true) : false;
+      if (!hadScore && !game?.RankedDisqualified) {
+        try { ranked = await hasRankedRoom(user.uid, game?.Week, gameId); } catch { ranked = false; }
+      }
       payload = {
         uid: user.uid,
         displayName: profile?.username?.trim() || "Anonymous Fan",
@@ -1000,7 +1034,7 @@ export default function GamePage() {
         awayScore,
         homeScore,
         prediction: pickText.trim(),
-        ranked: hadScore ? (myPick.ranked ?? true) : true,
+        ranked,
         visibility: pickVisibility,
         updatedAt: serverTimestamp(),
       };
@@ -1063,6 +1097,12 @@ export default function GamePage() {
     if (!user || !myPick) return;
     if (myPick.awayScore == null || myPick.homeScore == null) {
       alert("Add a score to this pick before it can count toward Ranked.");
+      return;
+    }
+    // Turning it on needs room in the week's Ranked 6 — same cap and wording
+    // as My Picks (utils/wePickRanked.js).
+    if (!myPick.ranked && !(await hasRankedRoom(user.uid, game?.Week, gameId).catch(() => false))) {
+      openRankSwap(gameId); // full — pick one to swap out instead
       return;
     }
     const { id, ...rest } = myPick;
@@ -1388,7 +1428,10 @@ export default function GamePage() {
   const weekSlateUrl = game.Week ? `/cfb/schedule/${encodeURIComponent(game.Week)}` : "/cfb/schedule";
   const weekSlateLabel = game.Week ? `← ${game.Week} Slate` : "← Full Schedule";
 
-  const canonicalUrl = `https://we-draft.com/game/${game.Slug}`;
+  // Games live on We-Draft Live now: a game matched to CFBD points search
+  // engines at its /live/{slug} page (same slug) — only a "TBD vs …"
+  // placeholder is still its own canonical here.
+  const canonicalUrl = game.CFBDGameId != null ? `https://we-draft.com/live/${game.Slug}` : `https://we-draft.com/game/${game.Slug}`;
   const seoTitle = `${game.Away} vs ${game.Home} | Football Game Predictions, Where to Watch, and Key Players`;
   // The one visible H1 for this page (see the masthead below) — kept as its
   // own constant since it's also reused for structured data's own "name".
@@ -1945,7 +1988,7 @@ export default function GamePage() {
                     i.e. game week) until it's final. */}
                 {liveGame && liveGame.status !== "final" && (
                   <Link
-                    to={`/live?view=game&game=${game.CFBDGameId}`}
+                    to={liveGameHref({ slug: liveGame.slug || game.Slug, id: game.CFBDGameId })}
                     style={{
                       marginTop: "12px", marginLeft: "auto", marginRight: "auto",
                       width: "fit-content", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px",
@@ -2279,13 +2322,7 @@ export default function GamePage() {
                           ))}
                         </div>
                       )}
-                      <textarea
-                        value={pickText}
-                        onChange={(e) => setPickText(e.target.value)}
-                        placeholder="Why do you like this pick? Call out the key matchup, a player to watch, anything. (optional)"
-                        rows={4}
-                        style={{ width: "100%", border: "none", borderRadius: "10px", padding: "14px 16px", fontFamily: "inherit", fontSize: "14px", fontWeight: 600, marginBottom: "16px", boxSizing: "border-box", resize: "vertical", outline: "none", lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.3)" }}
-                      />
+                      <div style={{ height: "16px" }} />
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", background: "rgba(0,0,0,0.32)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "10px", padding: "14px 16px" }}>
                         <div>
                           <div style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Visibility</div>
@@ -2547,6 +2584,10 @@ export default function GamePage() {
         </div>
       </div>
 
+      {rankSwap && (
+        <RankedSwap modal week={game.Week} inGame={{ id: rankSwap.gameId, ...game }} ranked={rankSwap.ranked}
+          busyId={rankSwapBusy} onSwap={handleRankSwap} onCancel={() => { if (!rankSwapBusy) setRankSwap(null); }} />
+      )}
       <GameMarginSidebars contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} excludeGameId={game.id} gameWeek={game.Week} weekSlateUrl={weekSlateUrl} />
     </>
   );

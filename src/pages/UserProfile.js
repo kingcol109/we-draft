@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
 import { wePickHref } from "../utils/wePickRoutes";
@@ -18,8 +18,11 @@ import {
 import { db } from "../firebase";
 import Logo from "../assets/Logo1.png";
 import verifiedBadge from "../assets/verified.png";
-import ArticlesManager from "../components/ArticlesManager";
 import LoadingSpinner from "../components/LoadingSpinner";
+
+// The article editor (Tiptap, ~400 KB) loads only for writers who have the
+// My Articles section, not on every profile visit.
+const ArticlesManager = lazy(() => import("../components/ArticlesManager"));
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -436,7 +439,7 @@ export default function UserProfile() {
           <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginTop: "6px", marginBottom: "3px" }} />
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
         </div>
-        <ArticlesManager />
+        <Suspense fallback={<LoadingSpinner label="Loading Articles" size={32} minHeight="160px" />}><ArticlesManager /></Suspense>
       </div>
     )}
     </div>

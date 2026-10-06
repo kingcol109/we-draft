@@ -10,6 +10,12 @@
 //   - the game being in progress;
 //   - src/utils/chatFilter.mjs (slurs, sexual content, links, length);
 //   - one message per RATE_MS per user (liveChatRate/{uid}).
+//
+// POST { action: "vote", gameId, msgId, vote: 1 | -1 | 0 } up/down-votes a
+// message (0 clears the vote): the message's up / down counts change in the
+// same transaction as the voter's own record (users/{uid}/chatVotes/{gameId}
+// — { [msgId]: 1 | -1 }, readable only by them), so a vote can't double
+// count. Signed in, not chat-banned, not on your own message.
 
 const WEB_API_KEY = "AIzaSyCdxYPX6WjKEd_x8nKPqpXuqPAsE6k8op4"; // public web key (src/firebase.js)
 const RATE_MS = 4000;
@@ -22,6 +28,33 @@ async function uidFromToken(idToken) {
   return (await r.json()).users?.[0]?.localId || null;
 }
 
+async function vote(req, res, uid, gameId) {
+  const msgId = String(req.body?.msgId || "");
+  const v = Number(req.body?.vote);
+  if (!/^[A-Za-z0-9]{1,40}$/.test(msgId) || ![1, -1, 0].includes(v)) return res.status(400).json({ error: "Bad vote." });
+  const { getFirestore } = require("../scripts/firebaseAdmin");
+  const { FieldValue } = require("firebase-admin/firestore");
+  const db = getFirestore();
+  if ((await db.collection("users").doc(uid).get()).data()?.chatBanned) return res.status(403).json({ error: "You can't vote in chat." });
+  const msgRef = db.collection("liveGames").doc(gameId).collection("chat").doc(msgId);
+  const mineRef = db.collection("users").doc(uid).collection("chatVotes").doc(gameId);
+  const result = await db.runTransaction(async (tx) => {
+    const [msg, mine] = await Promise.all([tx.get(msgRef), tx.get(mineRef)]);
+    if (!msg.exists) return { status: 404, error: "That message is gone." };
+    if (msg.data().system) return { status: 400, error: "That's a game update." };
+    if (msg.data().uid === uid) return { status: 400, error: "You can't vote on your own message." };
+    const prev = mine.data()?.[msgId] || 0;
+    if (prev === v) return { status: 200 };
+    tx.update(msgRef, {
+      up: FieldValue.increment((v === 1 ? 1 : 0) - (prev === 1 ? 1 : 0)),
+      down: FieldValue.increment((v === -1 ? 1 : 0) - (prev === -1 ? 1 : 0)),
+    });
+    tx.set(mineRef, { [msgId]: v || FieldValue.delete() }, { merge: true });
+    return { status: 200 };
+  });
+  return res.status(result.status).json(result.error ? { error: result.error } : { ok: true });
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const token = (req.headers.authorization || "").replace(/^Bearer /, "");
@@ -31,8 +64,9 @@ module.exports = async function handler(req, res) {
     if (!uid) return res.status(401).json({ error: "Log in to chat." });
 
     const gameId = String(req.body?.gameId || "");
-    const text = String(req.body?.text || "").trim();
     if (!/^\d+$/.test(gameId)) return res.status(400).json({ error: "Unknown game." });
+    if (req.body?.action === "vote") return await vote(req, res, uid, gameId);
+    const text = String(req.body?.text || "").trim();
     const { chatProblem } = await import("../src/utils/chatFilter.mjs");
     const problem = chatProblem(text);
     if (problem) return res.status(400).json({ error: problem });
@@ -43,7 +77,12 @@ module.exports = async function handler(req, res) {
     const [userSnap, gameSnap] = await Promise.all([db.collection("users").doc(uid).get(), db.collection("liveGames").doc(gameId).get()]);
     const user = userSnap.data() || {};
     if (user.chatBanned) return res.status(403).json({ error: "You can't post in chat." });
-    if (gameSnap.data()?.status !== "in_progress") return res.status(400).json({ error: "Chat is open while the game is live." });
+    // Open from game week (the game's liveGames doc exists — /live is
+    // tracking it) through the final whistle: pregame and live.
+    const status = gameSnap.data()?.status;
+    if (status !== "scheduled" && status !== "in_progress") {
+      return res.status(400).json({ error: status === "final" ? "Chat is closed — this game is final." : "Chat opens game week." });
+    }
 
     // Rate limit + write together, so two quick sends can't both pass.
     const rateRef = db.collection("liveChatRate").doc(uid);

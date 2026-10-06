@@ -31,6 +31,10 @@ const groupOf = (pos) => {
   return "def";
 };
 
+// The CFB page's national stat table for a stat group (CfbLeaders.js
+// /cfb/stats/:group) — where the card's header links. OL has no group.
+const STATS_PAGE = { qb: "passing", rb: "rushing", rec: "receiving", dl: "defense", db: "defense", def: "defense", k: "specials", p: "specials" };
+
 const n = (v) => (v == null || v === "" ? 0 : Number(v) || 0);
 const fix1 = (v) => (Number.isFinite(v) ? v.toFixed(1) : "–");
 
@@ -211,7 +215,14 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${color1}` }}>
       <div style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
-        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>{SEASON} Stats</h2>
+        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
+          {/* The national leaders for his stat group on /cfb/stats. */}
+          <Link to={`/cfb/stats${STATS_PAGE[group] ? `/${STATS_PAGE[group]}` : ""}`} className="psc-head-link" title={`${SEASON} FBS stat leaders`}
+            style={{ color: "#fff", textDecoration: "none" }}>
+            {SEASON} Stats <span aria-hidden="true" style={{ fontSize: "16px" }}>→</span>
+          </Link>
+        </h2>
+        <style>{".psc-head-link:hover { text-decoration: underline !important; text-underline-offset: 4px; }"}</style>
       </div>
       <div style={{ height: "4px", backgroundColor: color2 }} />
       <div style={{ background: "#fff" }}>
@@ -307,7 +318,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
                 </div>
               );
               return g.wedraftGameSlug
-                ? <Link key={g.providerGameId} to={`/game/${g.wedraftGameSlug}`} style={{ display: "block", textDecoration: "none" }}>{row}</Link>
+                ? <Link key={g.providerGameId} to={`/live/${g.wedraftGameSlug}`} style={{ display: "block", textDecoration: "none" }}>{row}</Link>
                 : <div key={g.providerGameId}>{row}</div>;
             })}
             {data.games.length > GAME_LOG_SHOWN && (

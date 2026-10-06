@@ -7,8 +7,15 @@
 // any column (its headline stat by default) and shows the top TOP_ROWS
 // until "Show all". SECTIONS and StatTable are also the national tables on
 // the CFB page's Stats tab (CfbLeaders.js), which add a rank and team cell.
-import { useMemo, useState } from "react";
+//
+// Two sub headings: Player Stats (those tables) and Team Stats — the team's
+// points / yards / 3rd down / turnover margin per game, offense and
+// defense, with national FBS ranks (cfbLeaders/teams, written by
+// scripts/syncCfbdTeamStats.js — one read, only once Team Stats is opened).
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
 const TOP_ROWS = 8;
 const n = (v) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -156,23 +163,105 @@ export function StatTable({ section, players, color1, isMobile, topRows = TOP_RO
 // only when this is non-empty.
 export const playersWithStats = (roster) => (roster?.players || []).filter((p) => p.s);
 
+// Team Stats rows: [label, key in cfbLeaders/teams]. Per game unless noted.
+const TEAM_ROWS = {
+  Offense: [["Points / game", "ppg"], ["Total yards / game", "ypg"], ["Passing yards / game", "passYpg"], ["Rushing yards / game", "rushYpg"],
+    ["3rd down %", "thirdPct"], ["Turnover margin / game", "toMargin"]],
+  Defense: [["Points allowed / game", "papg"], ["Total yards allowed / game", "yapg"], ["Passing yards allowed / game", "passYapg"],
+    ["Rushing yards allowed / game", "rushYapg"], ["3rd down % allowed", "thirdPctA"]],
+};
+const fmtTeamStat = (k, v) => (v == null ? "—" : k === "toMargin" ? `${v > 0 ? "+" : ""}${v.toFixed(2)}` : k.startsWith("thirdPct") ? `${v.toFixed(1)}%` : v.toFixed(1));
+const rankNum = (r) => Number(String(r || "").replace("T-", "")) || null;
+
+// cfbLeaders/teams, read once per visit.
+let fbsTeamsDoc = null;
+function useFbsTeams(enabled) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    fbsTeamsDoc ||= getDoc(doc(db, "cfbLeaders", "teams")).then((d) => (d.exists() ? d.data() : {})).catch(() => { fbsTeamsDoc = null; return {}; });
+    fbsTeamsDoc.then((d) => { if (alive) setData(d); });
+    return () => { alive = false; };
+  }, [enabled]);
+  return data;
+}
+
+function TeamStatsPanel({ teamId, color1, color2, isMobile }) {
+  const data = useFbsTeams(true);
+  if (!data) return <div style={{ padding: "28px 16px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "#888" }}>Loading team stats…</div>;
+  const team = (data.teams || []).find((t) => Number(t.id) === Number(teamId));
+  if (!team) return <div style={{ padding: "28px 16px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "#888" }}>No FBS team stats for this team yet.</div>;
+  const total = data.teams.length;
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
+        {Object.entries(TEAM_ROWS).map(([side, rows], si) => (
+          <div key={side} style={{ borderLeft: !isMobile && si ? "1px solid #eef1f5" : "none", borderTop: isMobile && si ? "1px solid #eef1f5" : "none" }}>
+            <div style={{ padding: "10px 16px", fontSize: "12px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: color1, background: "#f3f5f8", borderBottom: "1px solid #e6e9ee" }}>
+              {side}
+            </div>
+            {rows.map(([label, k], i) => {
+              const r = team.r?.[k];
+              const rn = rankNum(r);
+              // Top 25 nationally in the team's second color, bottom 25 muted.
+              const tone = rn && rn <= 25 ? color2 : rn && rn > total - 25 ? "#b0b8c4" : "#6b7686";
+              return (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: "10px", padding: isMobile ? "10px 14px" : "11px 16px", background: i % 2 ? "#fafbfc" : "#fff", borderBottom: "1px solid #f0f0f0" }}>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: isMobile ? "13px" : "14px", fontWeight: 800, color: "#1d2733" }}>{label}</div>
+                  <div style={{ fontSize: isMobile ? "17px" : "19px", fontWeight: 900, color: color1, fontVariantNumeric: "tabular-nums" }}>{fmtTeamStat(k, team.v?.[k])}</div>
+                  <div style={{ width: "64px", flexShrink: 0, textAlign: "right", fontSize: "12px", fontWeight: 900, color: tone, fontVariantNumeric: "tabular-nums" }} title={r ? `${r} of ${total} FBS teams` : undefined}>
+                    {r ? r.replace(/^(T-)?/, "$1#") : "—"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "6px 12px", padding: "10px 16px", fontSize: "11px", fontWeight: 700, color: "#9aa5b4" }}>
+        <span>{team.g} games · ranks among all {total} FBS teams</span>
+        <Link to="/cfb/stats/team-offense" style={{ color: color1, fontWeight: 900, textDecoration: "none" }}>All FBS team stats →</Link>
+      </div>
+    </div>
+  );
+}
+
 export default function TeamStats({ roster, color1, color2, isMobile }) {
   const withStats = useMemo(() => playersWithStats(roster), [roster]);
   const sections = SECTIONS.map((sec) => ({ sec, players: withStats.filter((p) => sec.has(p.s)) })).filter((x) => x.players.length);
+  const [view, setView] = useState("players");
+  const subTab = (key, label) => (
+    <button key={key} type="button" onClick={() => setView(key)} style={{
+      background: "none", border: 0, cursor: "pointer", fontFamily: "inherit", padding: "8px 2px", marginBottom: "-2px",
+      borderBottom: `3px solid ${view === key ? color2 : "transparent"}`, color: view === key ? color1 : "#9aa5b4",
+      fontSize: isMobile ? "13px" : "15px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase",
+    }}>
+      {label}
+    </button>
+  );
 
   return (
-    <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-      <div style={{ background: color1, padding: "10px 16px" }}>
-        <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          {roster?.season} Season Stats
-        </div>
+    <div>
+      <div style={{ display: "flex", gap: isMobile ? "16px" : "24px", borderBottom: "2px solid #e6e9ee", marginBottom: "14px" }}>
+        {subTab("players", "Player Stats")}
+        {subTab("team", "Team Stats")}
       </div>
-      <div style={{ height: "3px", background: color2 }} />
-      {sections.length === 0 ? (
-        <div style={{ padding: "28px 16px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "#888" }}>No stats yet this season.</div>
-      ) : sections.map(({ sec, players }) => (
-        <StatTable key={sec.key} section={sec} players={players} color1={color1} isMobile={isMobile} />
-      ))}
+      <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+        <div style={{ background: color1, padding: "10px 16px" }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            {roster?.season} {view === "team" ? "Team Stats" : "Season Stats"}
+          </div>
+        </div>
+        <div style={{ height: "3px", background: color2 }} />
+        {view === "team" ? (
+          <TeamStatsPanel teamId={roster?.teamId} color1={color1} color2={color2} isMobile={isMobile} />
+        ) : sections.length === 0 ? (
+          <div style={{ padding: "28px 16px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "#888" }}>No stats yet this season.</div>
+        ) : sections.map(({ sec, players }) => (
+          <StatTable key={sec.key} section={sec} players={players} color1={color1} isMobile={isMobile} />
+        ))}
+      </div>
     </div>
   );
 }

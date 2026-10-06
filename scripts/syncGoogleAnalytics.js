@@ -34,6 +34,10 @@ const { FieldValue } = require("firebase-admin/firestore");
 const PAGE_TYPES = [
   { type: "player", prefix: "/player/" },
   { type: "game", prefix: "/game/" },
+  // Games moved to We-Draft Live (/live/{slug}, the same slug) — summed
+  // with the old /game/ views per game. Only game slugs (they end in the
+  // date, e.g. -9-5-2026), not /live/we-pick….
+  { type: "game", prefix: "/live/", match: (slug) => /-\d{1,2}-\d{1,2}-\d{4}$/.test(slug) },
   // Articles and plain news items share the /news/:id route (see
   // NewsArticle.jsx) — both are tracked under the same "article" type here
   // since there's no separate URL prefix to tell them apart by.
@@ -53,11 +57,12 @@ const FIRESTORE_BATCH_LIMIT = 500; // Firestore's hard cap on ops per batch
 // can skip it. ──
 function classifyPath(pagePath) {
   if (!pagePath) return null;
-  for (const { type, prefix } of PAGE_TYPES) {
+  for (const { type, prefix, match } of PAGE_TYPES) {
     if (!pagePath.startsWith(prefix)) continue;
     let slug = pagePath.slice(prefix.length);
     slug = slug.split("?")[0].split("#")[0];
     slug = slug.replace(/\/+$/, ""); // trailing slash(es)
+    if (match && !match(slug)) return null;
     return slug ? { type, slug } : null;
   }
   return null;

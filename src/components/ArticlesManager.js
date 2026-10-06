@@ -415,7 +415,7 @@ export default function ArticlesManager() {
           .map((docSnap) => {
             const d = docSnap.data();
             const dateMs = d.Date?.toDate ? d.Date.toDate().getTime() : (d.Date ? new Date(d.Date).getTime() : 0);
-            return { id: docSnap.id, slug: d.Slug, away: d.Away, home: d.Home, dateMs };
+            return { id: docSnap.id, slug: d.Slug, away: d.Away, home: d.Home, dateMs, cfbd: d.CFBDGameId ?? null };
           })
           .filter((g) => g.slug && g.away && g.home)
           .sort((a, b) => b.dateMs - a.dateMs));
@@ -539,7 +539,10 @@ export default function ArticlesManager() {
 
   const insertGame = (game) => {
     if (!editor) return;
-    editor.chain().focus().insertContent(`<a href="/game/${game.slug}" data-game-id="${game.id}">${gameLabel(game)}</a> `).run();
+    // The game's We-Draft Live page (/live/{slug}); a TBD placeholder with
+    // no CFBD match keeps its /game page.
+    const href = game.cfbd != null ? `/live/${game.slug}` : `/game/${game.slug}`;
+    editor.chain().focus().insertContent(`<a href="${href}" data-game-id="${game.id}">${gameLabel(game)}</a> `).run();
     addTaggedGame(game);
     setShowGamePicker(false);
   };

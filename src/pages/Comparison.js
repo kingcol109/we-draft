@@ -31,6 +31,9 @@ import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
 import { usePlayerSidebarData, PlayerVideosCard, PlayerNewsCard } from "../components/PlayerSidebars";
+// "Playing now" + Follow Live while the loaded prospect's team is on the
+// field — the same card / button as their player page.
+import PlayerLiveCard from "../components/PlayerLiveCard";
 import { WatchButton } from "./PlayerProfile";
 import { Helmet } from "react-helmet-async";
 import WdWordmark from "../assets/Logo1.png";
@@ -1276,6 +1279,7 @@ export default function Comparison() {
         .wd-comp-hero-btn { transition: opacity 0.15s ease; }
         .wd-comp-hero-btn:hover { opacity: 0.9; }
         .wd-comp-hero-school:hover { text-decoration: underline !important; }
+        .wd-comp-live:empty { display: none; }
         .wd-comp-row-link:hover { text-decoration: underline !important; }
         .wd-comp-more-row { transition: background 0.15s ease; }
         .wd-comp-more-row:hover { background: var(--wd-row-tint); }
@@ -1481,6 +1485,13 @@ export default function Comparison() {
                     <span style={{ color: "rgba(255,255,255,0.4)" }}>·</span>
                     <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 700, fontSize: isMobile ? "12px" : "19px" }}>{formatEligible(loadedPlayer.Eligible)}</span>
                   </div>
+                  {/* Phones / tablets (no right column up top): the pulsing
+                      Follow Live button while his team is playing. */}
+                  {isStacked && (
+                    <div className="wd-comp-live" style={{ display: "flex", justifyContent: "center", marginTop: "10px", pointerEvents: "auto" }}>
+                      <PlayerLiveCard player={loadedPlayer} variant="button" />
+                    </div>
+                  )}
                   {/* Drafted: "Round 1 · Pick 1" pill + drafting team, same
                       as the player page's drafted hero line. */}
                   {drafted && (
@@ -2154,7 +2165,8 @@ export default function Comparison() {
         )}
       </div>
       </div>
-      {/* Right column — Videos + In The News for the loaded prospect,
+      {/* Right column — Playing now (while his team is live), Videos + In
+          The News for the loaded prospect,
           same as PlayerProfile.js's right column (sticky on desktop,
           stacked under the main content on mobile). Empty column on
           desktop when nobody's loaded, so the center never shifts. */}
@@ -2169,6 +2181,7 @@ export default function Comparison() {
         <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
           {loadedPlayer && (
             <>
+              <PlayerLiveCard player={loadedPlayer} />
               <PlayerVideosCard videos={sidebarVideos} accentColor={heroColor1} />
               <PlayerNewsCard news={sidebarNews} />
             </>

@@ -19,6 +19,7 @@ import { db } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
 import LoadingSpinner from "./LoadingSpinner";
 import { SECTIONS, StatTable } from "./TeamStats";
+import { cfbSeo } from "../utils/cfbSeo";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -298,6 +299,9 @@ export default function CfbLeaders({ schoolsByName, catKey, isMobile }) {
       .then((d) => setTables(d.exists() ? d.data().tables || {} : {}))
       .catch((err) => { console.error("Error fetching CFB stat tables:", err); setTables({}); });
   }, [onGroup, tables]);
+  // Prerender: ready once this view's data is in (CFBPage.js holds it).
+  const viewReady = !loading && (!onTeams || !!teamData) && (!onGroup || !!tables);
+  useEffect(() => { if (viewReady) window.prerenderReady = true; }, [viewReady]);
   // Draft classes present in the tables, for the filter.
   const classes = useMemo(() => [...new Set(Object.values(tables || {}).flat().map((p) => p.dc).filter(Boolean))].sort(), [tables]);
 
@@ -314,7 +318,6 @@ export default function CfbLeaders({ schoolsByName, catKey, isMobile }) {
 
   const active = catKey && cats.find((c) => c.key === catKey);
   const updated = fmtUpdated(onTeams ? teamData?.updatedAt : data?.updatedAt);
-  const season = (onTeams ? teamData?.season : null) || data?.season || "";
   const groups = GROUPS.filter((g) => cats.some((c) => groupOf(c) === g));
   // The open group: the active category's, or one named in the URL.
   const group = active ? groupOf(active) : groups.find((g) => groupSlug(g) === catKey) || null;
@@ -331,9 +334,11 @@ export default function CfbLeaders({ schoolsByName, catKey, isMobile }) {
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "6px 12px", marginBottom: "14px" }}>
-        <div style={{ fontSize: isMobile ? "15px" : "18px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: SITE_BLUE }}>
-          {season} FBS {onTeams ? "Team Stats" : "Stat Leaders"}
-        </div>
+        {/* The page's H1 — the view's own (utils/cfbSeo.js), e.g. "2026
+            College Football Rushing Leaders". */}
+        <h1 style={{ margin: 0, fontSize: isMobile ? "15px" : "18px", fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", color: SITE_BLUE }}>
+          {cfbSeo({ tab: "stats", cat: catKey }).h1}
+        </h1>
         {updated && <div style={{ fontSize: "11px", fontWeight: 700, color: "#9aa5b4" }}>Regular season · updated {updated}</div>}
       </div>
 

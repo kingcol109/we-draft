@@ -31,7 +31,7 @@ import VerifiedNameBadge from "../components/VerifiedNameBadge";
 // 2026 season stats + game log from the linked CFBD player (right column).
 import PlayerStatsCard from "../components/PlayerStatsCard";
 // "Playing now" + Follow Live while the player's team is on the field.
-import PlayerLiveCard from "../components/PlayerLiveCard";
+import PlayerLiveCard, { LivePill, usePlayerLiveGame } from "../components/PlayerLiveCard";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
@@ -55,6 +55,7 @@ import ProvenFlair from "../assets/proven.png";
 // instead of the ⚡/🔥 emoji glyphs (Up keeps its ▲ triangle text). ──
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
+import { fetchTeammateVideos } from "../components/PlayerSidebars";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -2092,6 +2093,9 @@ export default function PlayerProfile() {
   const cfbLogoRef = useRef("");
   const schoolSlugRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  // Phones: his team's in-progress game, while there is one — the hero
+  // toolbar swaps Watch for Follow Live (and drops Evaluate) then.
+  const mobileLiveGame = usePlayerLiveGame(isMobile ? player : null);
   const [evalCount, setEvalCount] = useState(0);
   const [seoDataReady, setSeoDataReady] = useState(false);
   const [brandingReady, setBrandingReady] = useState(false);
@@ -2526,8 +2530,8 @@ export default function PlayerProfile() {
   // different popover treatment) and gameInfo (a CFB-tagged Short's linked
   // schedule26 game, resolved here into opponent/date/result so the popover
   // never needs its own extra fetch). If the player has no long-form videos
-  // of their own, fall back to the 3 most recently added CFB/Draft videos
-  // site-wide (same tag treatment as VideosPage.js, also Short-excluded),
+  // of their own, fall back to their current teammates' 3 newest, then the
+  // 3 most recently added CFB/Draft videos site-wide (same tag treatment as VideosPage.js, also Short-excluded),
   // using each video's own GenTitle/GenThumb rather than a per-player
   // override since none of these are actually tagged to this player. ──
   useEffect(() => {
@@ -2635,8 +2639,16 @@ export default function PlayerProfile() {
           return;
         }
 
-        // No long-form videos tagged to this player — show the 3 most
-        // recent CFB/Draft videos site-wide instead.
+        // No long-form videos tagged to this player — their current
+        // teammates' 3 newest (components/PlayerSidebars.js
+        // fetchTeammateVideos), else the 3 most recent CFB/Draft videos
+        // site-wide.
+        const mates = await fetchTeammateVideos(player).catch(() => []);
+        if (mates.length > 0) {
+          setPlayerVideos(mates);
+          setVisibleVideoCount(1);
+          return;
+        }
         // Newest 30 only, not the whole (ever-growing) videos collection —
         // plenty of room for the Shorts / non-CFB-or-Draft / unpublished
         // ones filtered out below to still leave 3. Every video has a
@@ -2668,7 +2680,7 @@ export default function PlayerProfile() {
       } catch(e) { setPlayerVideos([]); setWatchClips([]); }
     };
     fetch();
-  }, [player?.id]);
+  }, [player?.id, player?.School]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -4681,7 +4693,10 @@ useEffect(() => {
                   AdminPanel.js VideosSection the Videos sidebar uses — just
                   filtered to Short === true instead of excluding it). See
                   WatchButton above for the popover + auto-advance queue. */}
-              <WatchButton
+              {/* Phones while his team is playing: Follow Live takes Watch's
+                  spot (and Evaluate steps aside, below) — no room for the
+                  Playing Now scoreboard card on a phone. */}
+              {mobileLiveGame ? <LivePill game={mobileLiveGame} size="toolbar" /> : <WatchButton
                 clips={watchClips}
                 color1={color1}
                 color2={color2}
@@ -4694,7 +4709,7 @@ useEffect(() => {
                   school: player.School || "",
                   eligible: player.Eligible || "",
                 }}
-              />
+              />}
               {player.Link && String(player.Eligible) === "2026" && !draftedBy && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
                   className="text-white font-extrabold rounded-full transition hover:opacity-80"
@@ -4702,7 +4717,7 @@ useEffect(() => {
                   Film
                 </button>
               )}
-              {!draftedBy && (
+              {!draftedBy && !mobileLiveGame && (
                 <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
                   className="font-extrabold rounded-full transition hover:opacity-90"
                   style={{ backgroundColor:color2, border:"2px solid #fff", color:"#fff", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px", fontWeight:900 }}>
@@ -5124,7 +5139,6 @@ useEffect(() => {
             </div>
           )}
 
-          {!player.Bio && isMobile && <PlayerLiveCard player={player} variant="button" wrap />}
           {player.Bio && (
             <div className="bg-white" style={{ padding: bioOpen ? (isMobile ? "14px 16px" : "20px 32px") : (isMobile ? "8px 16px" : "10px 32px") }}>
               <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
@@ -5140,9 +5154,6 @@ useEffect(() => {
                 >
                   {bioOpen ? "Hide Bio" : "Show Bio"}
                 </button>
-                {/* Phones: a pulsing Follow Live button here instead of the
-                    Playing Now scoreboard card (only while the team plays). */}
-                {isMobile && <PlayerLiveCard player={player} variant="button" />}
                 </div>
                 {/* Same colored pull-quote treatment "Scout's Take" uses in
                     evaluations — a team-color accent border + tinted card

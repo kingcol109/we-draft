@@ -105,6 +105,7 @@ async function getAllGames() {
   return snapshot.docs;
 }
 async function generateSitemap() {
+  const { CFB_STAT_PATHS: cfbStatPaths } = await import("../src/utils/cfbSeo.mjs");
   const baseUrl = "https://we-draft.com";
   const today = new Date().toISOString().split("T")[0];
 
@@ -245,8 +246,11 @@ for (const doc of allTeams) {
         ? data.updatedAt.toDate().toISOString().split("T")[0]
         : today;
 
+    // A game's page is its We-Draft Live page (/live/{slug}) once it's
+    // matched to a CFBD game — every real game; a "TBD vs …" placeholder
+    // with no match keeps its old /game/{slug} page.
     gamePages.push({
-      path: `/game/${slug}`,
+      path: data.CFBDGameId != null ? `/live/${slug}` : `/game/${slug}`,
       priority: 0.6,
       lastmod,
     });
@@ -261,9 +265,9 @@ for (const doc of allTeams) {
     { path: "/videos", priority: 0.8, lastmod: today },
     { path: "/cfb", priority: 0.7, lastmod: today },
     { path: "/cfb/schedule", priority: 0.65, lastmod: today },
-    { path: "/cfb/stats", priority: 0.65, lastmod: today },
-    { path: "/cfb/stats/team-offense", priority: 0.6, lastmod: today },
-    { path: "/cfb/stats/team-defense", priority: 0.6, lastmod: today },
+    // Every /cfb/stats view — overview, player stat groups, leader
+    // categories, team offense / defense (src/utils/cfbSeo.mjs).
+    ...cfbStatPaths.map((path) => ({ path, priority: path === "/cfb/stats" ? 0.65 : 0.6, lastmod: today })),
     { path: "/live", priority: 0.75, lastmod: today },
     { path: "/community", priority: 0.8, lastmod: today },
     { path: "/boards", priority: 0.8, lastmod: today },
