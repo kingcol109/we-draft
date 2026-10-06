@@ -64,6 +64,17 @@ const STYLE = `${PLAY_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}${LIVE_CHAT_STY
 .wdl-gtabs { display: flex; gap: 8px; margin: 22px 0 14px; }
 .wdl-gtab { background: transparent; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 18px; font-weight: 900; font-size: clamp(13px, 1vw, 15px); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
 .wdl-gtab.on { background: #eef2f8; color: #0a0f1a; border-color: #eef2f8; }
+/* pop out the live play-by-play (desktop only), at the tabs' right end */
+.wdl-gtab-pop { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; background: transparent; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px;
+  padding: 7px 14px; font-weight: 900; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.wdl-gtab-pop:hover { color: #fff; border-color: ${GOLD}; }
+.wdl-gtab-pop.on { color: ${GOLD}; border-color: ${GOLD}; }
+.wdl-gtab-pop svg { width: 15px; height: 15px; display: block; }
+/* the play-by-play pop-out window: scoreboard pinned on top, the log scrolls */
+.wdl-logwin { min-height: 100vh; background: #0a0f1a; }
+.wdl-logwin-board { position: sticky; top: 0; z-index: 10; background: #0a0f1a; }
+.wdl-logwin-board .wdl-mu { border: 0; border-radius: 0; }
+.wdl-logwin-plays { padding: 12px 10px 20px; }
 .wdl, .wdl * { scrollbar-width: thin; scrollbar-color: #2e3d5c transparent; }
 .wdl ::-webkit-scrollbar { width: 8px; height: 8px; }
 .wdl ::-webkit-scrollbar-track { background: transparent; }
@@ -245,11 +256,18 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-tape-head img { width: 28px; height: 28px; object-fit: contain; }
 .wdl-tape-row { border-top: 1px solid #1a2438; }
 .wdl-tape-row:first-of-type { border-top: 0; }
-.wdl-tape-row .v { font-weight: 900; font-size: 15px; color: #eef2f8; font-variant-numeric: tabular-nums; min-width: 0; }
+.wdl-tape-row .v { font-weight: 900; font-size: clamp(18px, 1.5vw, 22px); line-height: 1.15; color: #eef2f8; font-variant-numeric: tabular-nums; min-width: 0; }
 .wdl-tape-row .v.home { text-align: right; }
-.wdl-tape-row .v small { display: block; font-size: 12px; font-weight: 700; color: #9fb0c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wdl-tape-row .v small { display: block; margin-top: 2px; font-size: 12px; letter-spacing: 0.02em; font-weight: 700; color: #9fb0c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wdl-tape-row .v.edge { color: ${GOLD}; }
-.wdl-tape-row .k { font-size: 11px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; color: #6f819c; text-align: center; white-space: nowrap; }
+.wdl-tape-row .v .u { font-size: 12px; font-weight: 800; color: #9fb0c8; text-transform: uppercase; letter-spacing: 0.04em; }
+.wdl-tape-row .v .nm { display: block; font-size: clamp(16px, 1.25vw, 19px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wdl-tape-row .v .nm a { color: inherit; text-decoration: none; }
+.wdl-tape-row .v .nm a:hover { color: ${GOLD}; }
+.wdl-tape-row .v small.stat { font-size: 14px; font-weight: 900; color: #eef2f8; text-transform: uppercase; letter-spacing: 0.03em; }
+.wdl-tape-row .v small.sub { margin-top: 0; font-size: 11px; color: #6f819c; }
+.wdl-tape-row .k { font-size: clamp(12px, 1vw, 14px); font-weight: 900; letter-spacing: 0.05em; line-height: 1.2; text-transform: uppercase; color: #c3cfe0; text-align: center; max-width: 150px; }
+@media (max-width: 520px) { .wdl-tape-row .k { max-width: 108px; } }
 .wdl-pros-cols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .wdl-pros-team { display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 14px; text-transform: uppercase; color: #fff; margin-bottom: 8px; }
 .wdl-pros-team img { width: 24px; height: 24px; object-fit: contain; }
@@ -1333,8 +1351,9 @@ function GameRecap({ game, gameId, slateGame }) {
 }
 
 // ── Upcoming games ── a scheduled game opens on its Preview (tale of the
-// tape: records, ranks, points scored / allowed per game, each team's
-// season leaders from cfbRosters) with a
+// tape: records, then points and yards (total / passing / rushing) per
+// game, gained and allowed, turnover margin and 3rd down %, with national
+// ranks) with a
 // Prospects tab (the We-Draft prospects on both sides, with grades and
 // community strengths/weaknesses); the right rail (or the top, on phones)
 // is the We-Pick card — your score pick, the community split and the
@@ -1355,33 +1374,24 @@ function useTeamRosters(homeId, awayId) {
   return rosters;
 }
 
-// Points per game scored and allowed this season, for each team — its
-// finished games in liveGames (as home and as away: four small queries).
-function useTeamScoring(homeId, awayId, season) {
-  const [state, setState] = useState(null);
+// Every FBS team's yards (total / passing / rushing) and points per game,
+// gained and allowed, with national ranks — cfbLeaders/teams, the CFB
+// page's Teams stats (scripts/syncCfbdTeamStats.js). One read, kept for the
+// visit; returns a Map of CFBD team id → { v, r } (values, ranks).
+let fbsTeamStats = null;
+// A team stat as shown: 3rd down as a %, turnover margin signed (+0.80).
+const fmtTeamStat = (k, v) => (k === "toMargin" ? `${v > 0 ? "+" : ""}${v.toFixed(2)}` : k.startsWith("thirdPct") ? `${v.toFixed(1)}%` : v.toFixed(1));
+function useFbsTeamStats() {
+  const [byId, setById] = useState(null);
   useEffect(() => {
     let alive = true;
-    setState(null);
-    const load = async (id) => {
-      if (id == null) return null;
-      const snaps = await Promise.all(["home", "away"].map((side) => getDocs(query(collection(db, "liveGames"), where(`${side}.providerTeamId`, "==", id)))));
-      let pf = 0, pa = 0, n = 0;
-      snaps.forEach((snap, i) => snap.docs.forEach((d) => {
-        const g = d.data();
-        if (g.status !== "final" || (season && g.season !== season)) return;
-        const us = g[i === 0 ? "home" : "away"]?.points;
-        const them = g[i === 0 ? "away" : "home"]?.points;
-        if (us == null || them == null) return;
-        pf += us; pa += them; n += 1;
-      }));
-      return n ? { ppg: pf / n, papg: pa / n, games: n } : null;
-    };
-    Promise.all([load(homeId), load(awayId)])
-      .then(([home, away]) => { if (alive) setState({ home, away }); })
-      .catch(() => { if (alive) setState({ home: null, away: null }); });
+    fbsTeamStats ||= getDoc(doc(db, "cfbLeaders", "teams"))
+      .then((d) => new Map((d.exists() ? d.data().teams || [] : []).map((t) => [Number(t.id), t])))
+      .catch(() => { fbsTeamStats = null; return new Map(); });
+    fbsTeamStats.then((m) => { if (alive) setById(m); });
     return () => { alive = false; };
-  }, [homeId, awayId, season]);
-  return state;
+  }, []);
+  return byId;
 }
 
 // Each school's We-Draft prospects (active classes, Live), best community
@@ -1425,16 +1435,23 @@ function seasonLine(s = {}, pos = "") {
   return parts.join(" · ");
 }
 
-// A team's tape numbers from its roster doc.
-function tapeOf(roster) {
-  const players = roster?.players || [];
-  const lead = (get) => players.map((p) => ({ p, v: get(p.s || {}) })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v)[0] || null;
-  return {
-    pass: lead((st) => sN(st.passing?.YDS)),
-    rush: lead((st) => sN(st.rushing?.YDS)),
-    rec: lead((st) => sN(st.receiving?.YDS)),
-    tkl: lead((st) => sN(st.defensive?.TOT)),
-  };
+// Each team's season leaders, from its roster doc's season stats (s):
+// label, unit, the stat, and a short line under the name.
+const TEAM_LEADERS = [
+  ["Passing", "yds", (st) => sN(st.passing?.YDS), (st) => `${sN(st.passing?.COMPLETIONS)}/${sN(st.passing?.ATT)}, ${sN(st.passing?.TD)} TD, ${sN(st.passing?.INT)} INT`],
+  ["Rushing", "yds", (st) => sN(st.rushing?.YDS), (st) => `${sN(st.rushing?.CAR)} car, ${sN(st.rushing?.TD)} TD`],
+  ["Receiving", "yds", (st) => sN(st.receiving?.YDS), (st) => `${sN(st.receiving?.REC)} rec, ${sN(st.receiving?.TD)} TD`],
+  ["Tackles", "tkl", (st) => sN(st.defensive?.TOT), (st) => `${sN(st.defensive?.TFL)} TFL`],
+  ["Sacks", "sk", (st) => sN(st.defensive?.SACKS), null],
+  ["Interceptions", "int", (st) => sN(st.interceptions?.INT), null],
+];
+function leaderOf(roster, get) {
+  let best = null;
+  for (const p of roster?.players || []) {
+    const v = get(p.s || {});
+    if (v > 0 && (!best || v > best.v)) best = { p, v };
+  }
+  return best;
 }
 
 // A team's whole roster on a game (Preview, and live — not once it's
@@ -1459,23 +1476,43 @@ function PreviewView({ game, slateGame }) {
   const [tab, setTab] = useState("preview");
   const rosters = useTeamRosters(game.home?.providerTeamId, game.away?.providerTeamId);
   const pros = useSchoolProspects(game.home?.school, game.away?.school);
-  const scoring = useTeamScoring(game.home?.providerTeamId, game.away?.providerTeamId, game.season);
-  const avg = (x) => (x == null ? "—" : x.toFixed(1));
-  const tape = { home: tapeOf(rosters?.home), away: tapeOf(rosters?.away) };
+  const teamStats = useFbsTeamStats();
+  const ts = { home: teamStats?.get(Number(game.home?.providerTeamId)), away: teamStats?.get(Number(game.away?.providerTeamId)) };
   const rec = (side) => slateGame?.[side]?.record || game[side]?.record || null;
-  const leaderCell = (x, unit) => (x ? <>{x.v.toLocaleString()} {unit}<small>{x.p.first} {x.p.last}</small></> : <span style={{ color: "#6f819c" }}>—</span>);
   // Gold = the better number on a row.
   const edge = (a, b, low = false) => (a == null || b == null || a === b ? [false, false] : low ? [a < b, b < a] : [a > b, b > a]);
+  // A per-game row: the label, both teams' averages over their national
+  // ranks, gold on the better one (low: fewer is better — yards / points
+  // allowed). An FCS team has no line.
+  const cell = (t, k) => (t?.v?.[k] == null ? <span style={{ color: "#6f819c" }}>—</span>
+    : <>{fmtTeamStat(k, t.v[k])}{t.r?.[k] && <small>{t.r[k].replace(/^(T-)?/, "$1#")} in FBS</small>}</>);
+  const stat = (label, k, low = false) => [label, cell(ts.away, k), cell(ts.home, k), edge(ts.away?.v?.[k], ts.home?.v?.[k], low)];
   const rows = [
     ["Record", rec("away") || "—", rec("home") || "—", [false, false]],
-    ["Rank", game.away?.rank ? `#${game.away.rank}` : "—", game.home?.rank ? `#${game.home.rank}` : "—", edge(game.away?.rank || null, game.home?.rank || null, true)],
-    ["Points / game", avg(scoring?.away?.ppg), avg(scoring?.home?.ppg), edge(scoring?.away?.ppg, scoring?.home?.ppg)],
-    ["Points allowed / game", avg(scoring?.away?.papg), avg(scoring?.home?.papg), edge(scoring?.away?.papg, scoring?.home?.papg, true)],
-    ["Passing", leaderCell(tape.away.pass, "yds"), leaderCell(tape.home.pass, "yds"), edge(tape.away.pass?.v, tape.home.pass?.v)],
-    ["Rushing", leaderCell(tape.away.rush, "yds"), leaderCell(tape.home.rush, "yds"), edge(tape.away.rush?.v, tape.home.rush?.v)],
-    ["Receiving", leaderCell(tape.away.rec, "yds"), leaderCell(tape.home.rec, "yds"), edge(tape.away.rec?.v, tape.home.rec?.v)],
-    ["Tackles", leaderCell(tape.away.tkl, "tkl"), leaderCell(tape.home.tkl, "tkl"), edge(tape.away.tkl?.v, tape.home.tkl?.v)],
+    stat("Points / game", "ppg"),
+    stat("Points allowed", "papg", true),
+    stat("Total yards / game", "ypg"),
+    stat("Total yards allowed", "yapg", true),
+    stat("Pass yards / game", "passYpg"),
+    stat("Pass yards allowed", "passYapg", true),
+    stat("Rush yards / game", "rushYpg"),
+    stat("Rush yards allowed", "rushYapg", true),
+    stat("Turnover margin / game", "toMargin"),
+    stat("3rd down %", "thirdPct"),
+    stat("3rd down % allowed", "thirdPctA", true),
   ];
+  // Leaders: the player's name as the header (a link when he has a
+  // We-Draft profile), then the stat and his line under it.
+  const leaderCell = (x, unit, line) => (!x ? <span style={{ color: "#6f819c" }}>—</span> : <>
+    <span className="nm">{x.p.slug ? <Link to={`/player/${x.p.slug}`}>{x.p.first} {x.p.last}</Link> : `${x.p.first} ${x.p.last}`}{x.p.pos && <span className="u"> {x.p.pos}</span>}</span>
+    <small className="stat">{Number.isInteger(x.v) ? x.v.toLocaleString() : x.v} {unit}</small>
+    {line && <small className="sub">{line(x.p.s || {})}</small>}
+  </>);
+  const leaderRows = TEAM_LEADERS.map(([label, unit, get, line]) => {
+    const a = leaderOf(rosters?.away, get);
+    const h = leaderOf(rosters?.home, get);
+    return [label, leaderCell(a, unit, line), leaderCell(h, unit, line)];
+  });
   const head = (side) => {
     const t = game[side] || {};
     return <span className={`t ${side}`}>{side === "away" && (t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}{teamShort(t)}{side === "home" && (t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}</span>;
@@ -1520,7 +1557,7 @@ function PreviewView({ game, slateGame }) {
         ))}
       </div>
       {tab.startsWith("roster-") ? <GameRoster game={game} side={tab.slice(7)} roster={rosters ? rosters[tab.slice(7)] || null : null} loading={!rosters} />
-        : tab === "preview" ? (
+        : tab === "preview" ? (<>
       <div className="wdl-pv-sec">
         <div className="wdl-h">Tale of the tape</div>
         <div className="wdl-tape">
@@ -1534,7 +1571,20 @@ function PreviewView({ game, slateGame }) {
           ))}
         </div>
       </div>
-      ) : (
+      <div className="wdl-pv-sec">
+        <div className="wdl-h">Leaders</div>
+        <div className="wdl-tape">
+          <div className="wdl-tape-head">{head("away")}<span className="k" style={{ color: "#6f819c", fontSize: 11 }}>vs</span>{head("home")}</div>
+          {!rosters ? <div className="wdl-empty">Loading leaders…</div> : leaderRows.map(([k, a, h]) => (
+            <div key={k} className="wdl-tape-row">
+              <span className="v">{a}</span>
+              <span className="k">{k}</span>
+              <span className="v home">{h}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      </>) : (
       <div className="wdl-pv-sec">
         <div className="wdl-h">Prospects to watch</div>
         <div className="wdl-pros-cols">{prospectCol("away")}{prospectCol("home")}</div>
@@ -1973,6 +2023,17 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   };
   // Leaving the game closes it.
   useEffect(() => () => { if (widgetWin && !widgetWin.closed) widgetWin.close(); }, [widgetWin]);
+  // Pop-out play-by-play: the same kind of window, taller and scrolling —
+  // the scoreboard pinned on top, the live log under it. (The browser allows
+  // one pop-out at a time, so opening it closes the scoreboard one.)
+  const [logWin, setLogWin] = useState(null);
+  const openLog = async () => {
+    const win = await openPipWindow({ width: 460, height: 720, title: "We-Draft Live · Play-by-play", scroll: true });
+    if (!win) return;
+    win.addEventListener("pagehide", () => setLogWin(null));
+    setLogWin(win);
+  };
+  useEffect(() => () => { if (logWin && !logWin.closed) logWin.close(); }, [logWin]);
   // Phones / tablets (or browsers without the pop-out): the same icon makes
   // the scoreboard full screen instead — real fullscreen where the browser
   // allows it on an element (Android, iPad), else it just covers the
@@ -2132,6 +2193,8 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // The widget's play line: the latest play, in brief, then the next snap.
   const latestPlay = slot || newestListed[0] || null;
   const widgetPlay = latestPlay ? briefPlay(latestPlay, next) : "";
+  // inWidget: "log" is the play-by-play pop-out's board (no play line or
+  // full-screen button — the log is right under it).
   const renderBoard = (inWidget) => {
         const hp = headG.home?.points;
         const ap = headG.away?.points;
@@ -2187,14 +2250,14 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
             {team("home")}
             {/* Field strip: where the ball is for the next snap. */}
             {headLive && headNext?.offense && headNext.ytg != null && <LiveField game={headG} next={headNext} />}
-            {(inWidget || boardFull) && widgetPlay && <div key={widgetPlay} className="wdl-mu-play">{widgetPlay}</div>}
+            {((inWidget && inWidget !== "log") || boardFull) && widgetPlay &&<div key={widgetPlay} className="wdl-mu-play">{widgetPlay}</div>}
             {!inWidget && boardFull && (
               <div className="wdl-mu-rotate" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M10.5 18h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                 Rotate your phone for the best view
               </div>
             )}
-            {inWidget && (
+            {inWidget && inWidget !== "log" && (
               <button type="button" className="wdl-mu-popicon wdl-wfull" title="Full screen" aria-label="Full screen">
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </button>
@@ -2229,6 +2292,41 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
         );
   };
 
+  // The live log: the top slot, then the plays newest first. The page's
+  // Play-by-play tab shows it, and so does the play-by-play pop-out.
+  const renderPlays = () => <>
+    {/* The top slot: one persistent box that is the "next play", turns
+        into the play that just happened (held ~10s, "JUST NOW"), then
+        goes back to the next play once that one drops into the list. */}
+    {/* A finished game opens with the winner — in place of the bare
+        "END OF Q4" play, which is left out of the list below. */}
+    {isFinal && <FinalCard game={g} />}
+    {(slot || next) && (
+      <div className="wdl-slot">
+        {slot ? (
+          <div key={`slot-${slot.id}`} className="wdl-slot-swap" id={`play-${slot.id}`}>
+            <LivePlayCard variant="detailed" justNow {...cardProps(slot)} />
+            {withTwo(slot)}
+          </div>
+        ) : (
+          <div key="slot-next" className="wdl-slot-swap">
+            <PendingPlayCard game={g} situation={next} />
+          </div>
+        )}
+      </div>
+    )}
+    {newestListed.length || slot ? newestListed.filter((p) => !(isFinal && p.presentation?.type === "period" && p.period >= 4)).map((p) => (
+      <div key={p.id} id={`play-${p.id}`}>
+        <LivePlayCard variant="detailed" highlight={p.id === focusPlayId} fresh={p.id === justListed} {...cardProps(p)} />
+        {withTwo(p)}
+      </div>
+    )) : (
+      <div className="wdl-empty">
+        {g.status === "scheduled" ? `Kickoff ${statusLabel(g)}. Plays will stream in here once it starts.` : "No plays available for this game yet."}
+      </div>
+    )}
+  </>;
+
   return (
     <div>
       {(() => {
@@ -2239,6 +2337,13 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
       {widgetWin && createPortal(
         <div className="wdl wdl-widget">{renderBoard(true)}</div>,
         widgetWin.document.body,
+      )}
+      {logWin && createPortal(
+        <div className="wdl wdl-logwin">
+          <div className="wdl-logwin-board">{renderBoard("log")}</div>
+          <div className="wdl-logwin-plays">{renderPlays()}</div>
+        </div>,
+        logWin.document.body,
       )}
       {showRecap && isFinal && <div className="wdl-recap-inline"><div className="wdl-h">Game Recap</div><GameRecap game={g} gameId={gameId} slateGame={slateGame} /></div>}
       {g.status === "scheduled" && <>
@@ -2258,6 +2363,13 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
         {!isFinal && ["away", "home"].map((side) => (
           <button key={side} className={`wdl-gtab${tab === `roster-${side}` ? " on" : ""}`} onClick={() => pickTab(`roster-${side}`)}>{teamShort(g[side])} roster</button>
         ))}
+        {isLive && tab === "plays" && canWidget && !touchish() && (
+          <button type="button" className={`wdl-gtab-pop${logWin ? " on" : ""}`} onClick={logWin ? () => logWin.close() : openLog}
+            title={logWin ? "Close the pop-out play-by-play" : "Pop out the play-by-play — float it over your other windows"} aria-label="Pop out play-by-play">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M9 3h8v8M17 3l-7.5 7.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            {logWin ? "Popped out" : "Pop out"}
+          </button>
+        )}
       </div>
       {tab.startsWith("roster-") && !isFinal ? <GameRoster game={g} side={tab.slice(7)} />
         : tab === "chat" ? <LiveChat gameId={gameId} game={g} />
@@ -2265,38 +2377,7 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
         : isFinal && !focusPlayId ? <>
           <DriveSummary plays={plays} game={g} cardProps={cardProps} withTwo={withTwo} />
           <FinalCard game={g} />
-        </> : <>
-      {/* The top slot: one persistent box that is the "next play", turns
-          into the play that just happened (held ~10s, "JUST NOW"), then
-          goes back to the next play once that one drops into the list. */}
-      {/* A finished game opens with the winner — in place of the bare
-          "END OF Q4" play, which is left out of the list below. */}
-      {isFinal && <FinalCard game={g} />}
-      {(slot || next) && (
-        <div className="wdl-slot">
-          {slot ? (
-            <div key={`slot-${slot.id}`} className="wdl-slot-swap" id={`play-${slot.id}`}>
-              <LivePlayCard variant="detailed" justNow {...cardProps(slot)} />
-              {withTwo(slot)}
-            </div>
-          ) : (
-            <div key="slot-next" className="wdl-slot-swap">
-              <PendingPlayCard game={g} situation={next} />
-            </div>
-          )}
-        </div>
-      )}
-      {newestListed.length || slot ? newestListed.filter((p) => !(isFinal && p.presentation?.type === "period" && p.period >= 4)).map((p) => (
-        <div key={p.id} id={`play-${p.id}`}>
-          <LivePlayCard variant="detailed" highlight={p.id === focusPlayId} fresh={p.id === justListed} {...cardProps(p)} />
-          {withTwo(p)}
-        </div>
-      )) : (
-        <div className="wdl-empty">
-          {g.status === "scheduled" ? `Kickoff ${statusLabel(g)}. Plays will stream in here once it starts.` : "No plays available for this game yet."}
-        </div>
-      )}
-      </>}
+        </> : renderPlays()}
       </>}
     </div>
   );

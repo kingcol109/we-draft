@@ -2,7 +2,7 @@ name: Sync CFBD Player Stats
 
 # Runs weekly, Sunday at 10:00 UTC (6am EDT / 5am EST — GitHub Actions
 # schedules always run in UTC, see sync-analytics.yml's own comment), after
-# Saturday's games have all finished. Two steps, ~10 CFBD calls a week:
+# Saturday's games have all finished. Three steps, ~13 CFBD calls a week:
 #   - scripts/syncCfbdPlayerStats.js — 2026 season totals on every CFBD
 #     player linked to a We-Draft profile (the player page's "2026 Stats"
 #     card). 1 call. Game logs are written by the live ingester as games
@@ -10,6 +10,9 @@ name: Sync CFBD Player Stats
 #   - scripts/syncCfbdRosters.js — full team rosters, recruiting stars and
 #     season stats for the CFB team page's Roster and Stats tabs, plus the
 #     national stat leaders for the CFB page's Stats tab. 9 calls.
+#   - scripts/syncCfbdTeamStats.js — FBS team yards / points per game,
+#     gained and allowed, with national ranks (the CFB page's Teams stats,
+#     Live's game previews). 3 calls.
 # Idempotent; also runnable on demand via workflow_dispatch (e.g. after a
 # weekday game).
 #
@@ -45,6 +48,14 @@ jobs:
       # for every team (see scripts/syncCfbdRosters.js).
       - name: Sync team rosters
         run: node scripts/syncCfbdRosters.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+
+      # FBS team stats + national ranks (cfbLeaders/teams) for the CFB
+      # page's Teams stats and Live's game previews. 3 calls.
+      - name: Sync team stats
+        run: node scripts/syncCfbdTeamStats.js
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}

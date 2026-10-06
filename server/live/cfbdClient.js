@@ -106,6 +106,8 @@ const cfbd = {
   gamePlayers: (params) => get("/games/players", params),
   // Season aggregates: [{ playerId, player, position, team, category, statType, stat }]
   seasonPlayerStats: (params) => get("/stats/player/season", params),
+  // Team season totals, one row per team per stat (opponents' too: "…Opponent").
+  seasonTeamStats: (params) => get("/stats/season", params),
   roster: (params) => get("/roster", params),
   // Transfer portal for one season: [{ season, firstName, lastName, position, origin, destination, transferDate, rating, stars, eligibility }] — no player id.
   portal: (params) => get("/player/portal", params),

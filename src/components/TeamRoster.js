@@ -39,6 +39,18 @@ const SORTS = {
   stars: (a, b) => (b.stars || 0) - (a.stars || 0) || (b.rating || 0) - (a.rating || 0),
 };
 
+// Relative luminance of a #rgb / #rrggbb color (null if it isn't one).
+const luminance = (hex) => {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return null;
+  const h = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => { const c = parseInt(h.slice(i, i + 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+// On the dark rows: the team's second color, else its first, if it shows
+// up there (black or navy doesn't), else a soft white.
+const visibleOnDark = (...colors) => colors.find((c) => (luminance(c) ?? 0) >= 0.08) || "rgba(255,255,255,0.55)";
+
 // Light (team page) and dark (/live) palettes.
 const THEMES = {
   light: { frame: (c1) => `2px solid ${c1}`, bar: "#f8f9fb", barLine: "#eef1f5", pillOff: "#fff", pillOffText: (c1) => c1, pillBorder: (c1) => c1,
@@ -46,7 +58,7 @@ const THEMES = {
     link: (c1) => c1, underline: (c1) => c1, chip: (c1) => c1, chipLine: "transparent", empty: "#fff", emptyText: "#888" },
   dark: { frame: () => "1px solid #1d2840", bar: "#0c1220", barLine: "#1d2840", pillOff: "transparent", pillOffText: () => "#c9d5e6", pillBorder: () => "#26324a",
     head: (c1) => `color-mix(in srgb, ${c1} 40%, #0c1220)`, row: ["#111a2b", "#0e1625"], rowLine: "#172238", text: "#eef2f8", sub: "#c9d5e6", muted: "#8193ad", num: () => "#9fb0c8",
-    link: () => "#fff", underline: (c1, c2) => c2, chip: (c1) => c1, chipLine: "rgba(255,255,255,0.25)", empty: "#111a2b", emptyText: "#6f819c" },
+    link: () => "#fff", underline: (c1, c2) => visibleOnDark(c2, c1), chip: (c1) => c1, chipLine: "rgba(255,255,255,0.25)", empty: "#111a2b", emptyText: "#6f819c" },
 };
 
 export default function TeamRoster({ roster, color1, color2, isMobile, dark = false, hideStars = false }) {
