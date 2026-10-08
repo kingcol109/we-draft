@@ -325,6 +325,22 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Stream Manager (admin → Stream Manager, api/stream-manager.js) —
+    // YouTube Live broadcast records and the connected-channel status.
+    // Admins read; every write goes through the API (admin SDK), never a client.
+    match /broadcasts/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /streamManager/{doc} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // The encrypted YouTube refresh token and OAuth state — server only,
+    // not even admins' clients.
+    match /streamManagerPrivate/{doc} {
+      allow read, write: if false;
+    }
     // Transfer portal sync (server/portal/sync.js, run from the admin
     // panel) — transferPortal/{year} meta + {year}_{n} entry chunks. Admin
     // only both ways; the admin tab writes `dismissed` on the meta doc.

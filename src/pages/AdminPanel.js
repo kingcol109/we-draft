@@ -13,6 +13,7 @@ import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
+import AdminStreamManager from "../components/AdminStreamManager";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
@@ -255,6 +256,7 @@ const SECTIONS = [
   { key: "requests", label: "Requests", icon: "📥", ready: true },
   { key: "users", label: "Users", icon: "👤", ready: true },
   { key: "sim", label: "Football Sim", icon: "🧪", ready: true },
+  { key: "streams", label: "Stream Manager", icon: "📡", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: false },
 ];
@@ -13733,7 +13735,12 @@ function TvChannelsManager() {
 
 export default function AdminPanel() {
   const { user } = useAuth();
-  const [activeSection, setActiveSection] = useState("players");
+  // ?section=<key> opens that section — Stream Manager's YouTube sign-in
+  // returns to /admin?section=streams.
+  const [activeSection, setActiveSection] = useState(() => {
+    const k = new URLSearchParams(window.location.search).get("section");
+    return SECTIONS.some((s) => s.key === k) ? k : "players";
+  });
   const [unreadRequestCount, setUnreadRequestCount] = useState(0);
 
   // ── Sidebar badge for the Requests section — lives up here (not inside
@@ -13792,6 +13799,7 @@ export default function AdminPanel() {
             {activeSection === "requests" && <RequestsSection />}
             {activeSection === "users" && <UsersSection />}
             {activeSection === "sim" && <SimLabPane />}
+            {activeSection === "streams" && <AdminStreamManager />}
             {activeSection === "sync" &&<ComingSoonPane label="Sync / System Status" />}
             {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
           </div>
