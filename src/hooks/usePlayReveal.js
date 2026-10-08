@@ -21,7 +21,7 @@
 //               nothing gets ahead of the game feed)
 import { useEffect, useMemo, useState } from "react";
 
-const HOLD_MS = 18 * 1000;
+export const HOLD_MS = 18 * 1000;
 const GAP_MS = 5 * 1000;
 const MAX_QUEUE = 3;
 

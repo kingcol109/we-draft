@@ -27,3 +27,7 @@ yarn-error.log*
 
 # scripts/replayInsights.js --preview output (local dev only)
 /public/dev-insights/
+
+# broadcast worker (server/broadcast-worker): its own deps and local test output
+/server/broadcast-worker/node_modules/
+/server/broadcast-worker/output/

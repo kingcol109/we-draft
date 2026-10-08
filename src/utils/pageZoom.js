@@ -78,6 +78,17 @@ export const unzoomTransform = (t) => (t && coordScale !== 1 ? { ...t, x: t.x / 
 export const viewportCssWidth = () => window.innerWidth / coordScale;
 export const viewportCssHeight = () => window.innerHeight / coordScale;
 
+// Turn auto-zoom off while a page that sizes itself exactly is mounted
+// (the broadcast renderer, /broadcast — a fixed 1920×1080 frame). Returns
+// the function that turns it back on.
+export function suspendPageZoom() {
+  if (typeof window === "undefined") return () => {};
+  suspended = true;
+  document.documentElement.style.zoom = "";
+  measure();
+  return () => { suspended = false; apply(); };
+}
+
 // Run an image export with zoom temporarily removed so the capture library
 // sees consistent geometry. Restores the zoom afterward.
 export async function withoutPageZoom(fn) {

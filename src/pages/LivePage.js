@@ -33,7 +33,7 @@ import { pickedSideOf, isGameFinal, hasScorePick, scoreGamePick, compareStanding
 import { hasRankedRoom, loadWeekRanked, swapRanked, RANKED_SIZE } from "../utils/wePickRanked";
 import RankedSwap from "../components/RankedSwap";
 import { useLiveGameDocs, useRankedSixIds, useGamePlays, useCfbdSchools, searchCfbdPlayers } from "../hooks/useLiveFeed";
-import { usePlayReveal } from "../hooks/usePlayReveal";
+import { useGameFeed } from "../hooks/useGameFeed";
 import { useInsightReveal, useDevInsights } from "../hooks/useInsightReveal";
 import { useAuth } from "../context/AuthContext";
 import AuthModal from "../components/AuthModal";
@@ -49,10 +49,10 @@ import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import LiveField, { LIVE_FIELD_STYLE } from "../components/LiveField";
 import TeamRoster from "../components/TeamRoster";
 import { briefPlay } from "../utils/briefPlay";
-import HeaderTakeover, { TAKEOVER_STYLE, TAKEOVER_POINTS, takeoverForPlay, checkScorer } from "../components/HeaderTakeover";
+import HeaderTakeover, { TAKEOVER_STYLE, TAKEOVER_POINTS } from "../components/HeaderTakeover";
 import ScoresWidget, { SCORES_WIDGET_STYLE, openPipWindow } from "../components/ScoresWidget";
 import {
-  statusLabel, teamShort, teamName, nextSituation, timeoutSide, slatePhase, kickoffLabel, myFeedWindow, clutchHeat, clockSecs, dedupeFeed,
+  statusLabel, teamShort, teamName, timeoutSide, slatePhase, kickoffLabel, myFeedWindow, clutchHeat, clockSecs, dedupeFeed,
   FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows,
   loadFeedPrefs, normalizeFeedPrefs, DEFAULT_FEED_PREFS, playerIdSet, feedItemFromPlay, isCloseLatePlay,
   slateWeekKey, normalizeWeek, loadWeekFollows, weekTeams, weekPlayers, toggleWeekTeam, toggleWeekPlayer,
@@ -65,7 +65,6 @@ const WePickHub = lazy(() => import("./WePickHub"));
 
 const GOLD = "#f6a21d";
 // No new play and no clock movement this long → a stoppage (GameView).
-const STALL_MS = 100 * 1000;
 const LIVE_RED = "#ff4d4d";
 
 // Bebas Neue — the scoreboard's athletic display face (team names).
@@ -2367,7 +2366,6 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
       document.body.style.overflow = prevOverflow;
     };
   }, [boardFull]);
-  const lastPoints = useRef({ away: null, home: null });
   // Jumping to a specific play (from the Feed) loads the full play list so
   // an older play can be found, and so does a final game (its drive
   // summary needs every play); otherwise just the newest plays.
@@ -2381,9 +2379,11 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // Each team's second color and mascot for the takeover — on the game doc
   // once the ingester has written them, else read from its school.
   const extras = useSchoolExtras([gLive?.away?.school, gLive?.home?.school]);
-  // New plays are revealed through the top slot one at a time (each held
-  // ~10s before it drops into the list) — see hooks/usePlayReveal.js.
-  const { listed, slot, justListed, queued } = usePlayReveal(plays, gameId);
+  // The game as of the plays on screen — the reveal pacing, the score held
+  // to the newest play shown, stoppages, the next snap, who has the ball
+  // and the slot play's takeover (hooks/useGameFeed.js, shared with the
+  // broadcast renderer so the two never disagree).
+  const { listed, slot, justListed, queued, queuedKey, g, newestListed, shown, next, snapNext, ballSide, prevPts, slotTk } = useGameFeed(gameId, gLive, plays);
   // Insight cards (server/live/insights.js, on the game doc): each shows a
   // beat after its play drops into the list, just above it.
   const devPreview = useDevInsights(gameId); // local preview only (null in production)
@@ -2402,49 +2402,10 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   const breakPick = useMemo(() => breakPickSummary(gLive, breakPicks, user), [gLive?.wedraftGameId, breakPicks, user]); // eslint-disable-line react-hooks/exhaustive-deps
   // Tell the page which plays are still queued, so the Feed rail holds
   // them back until the game feed has shown them.
-  const queuedKey = queued.join(",");
   useEffect(() => {
     onQueueChange?.(gameId, queued);
     return () => onQueueChange?.(gameId, []); // leaving this game: nothing held back
   }, [gameId, queuedKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // A live game's header score is always the score after the last play
-  // revealed — the game doc often gets a new score before its play lands,
-  // and the score must never change ahead of the play that caused it.
-  // While plays are queued the quarter and clock follow the reveal too.
-  const g = useMemo(() => {
-    if (!gLive || gLive.status !== "in_progress") return gLive;
-    const shownNewest = slot || listed[listed.length - 1];
-    if (!shownNewest || shownNewest.homeScore == null) return gLive;
-    return {
-      ...gLive,
-      home: { ...gLive.home, points: shownNewest.homeScore },
-      away: { ...gLive.away, points: shownNewest.awayScore },
-      ...(queued.length ? { period: shownNewest.period ?? gLive.period, clock: shownNewest.clock ?? gLive.clock } : {}),
-    };
-  }, [gLive, queuedKey, slot, listed]); // eslint-disable-line react-hooks/exhaustive-deps
-  const newestListed = useMemo(() => [...listed].reverse(), [listed]);
-
-  // Stoppage watch: no new play revealed and the game clock not moving for
-  // STALL_MS → play has stopped (a TV timeout, an injury, a review) and the
-  // next-play card reads "TIMEOUT" instead of waiting on a snap.
-  const newestShownId = (slot || newestListed[0])?.id ?? null;
-  const stall = useRef({ playId: null, playAt: 0, clock: null, clockAt: 0 });
-  const [tick, setTick] = useState(() => Date.now());
-  const liveNow = gLive?.status === "in_progress";
-  useEffect(() => {
-    if (!liveNow) return undefined;
-    const id = setInterval(() => setTick(Date.now()), 5000);
-    return () => clearInterval(id);
-  }, [liveNow]);
-  {
-    const st = stall.current;
-    const t = Date.now();
-    if (st.playId !== newestShownId) { st.playId = newestShownId; st.playAt = t; }
-    const clk = gLive ? `${gLive.period}|${gLive.clock}` : null;
-    if (st.clock !== clk) { st.clock = clk; st.clockAt = t; }
-  }
-  const stalled = liveNow && !queued.length && !slot
-    && tick - stall.current.playAt > STALL_MS && tick - stall.current.clockAt > STALL_MS;
 
   // Scroll the play picked in the Feed into view — once per pick. (It
   // waits for that play to be loaded, but new plays arriving afterwards
@@ -2476,15 +2437,9 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // Takeovers: a touchdown / field goal / safety / turnover as its play is
   // revealed (the "just now" slot — never for plays already there when the
   // game opened). The winner's takeover is with the final confetti below.
-  // The score before the play in the slot: the newest play under it.
-  const prevPts = useMemo(() => {
-    const p = [...listed].reverse().find((x) => x.homeScore != null);
-    return p ? { home: p.homeScore, away: p.awayScore } : { ...lastPoints.current };
-  }, [listed]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The takeover the slot's play calls for — known in the same render the
-  // play appears, so the score is held from the first frame (an effect
-  // alone let the new score flash up before the takeover started).
-  const slotTk = slot && gLive?.status === "in_progress" ? checkScorer(takeoverForPlay(slot), slot, prevPts) : null;
+  // slotTk (useGameFeed) is known in the same render the play appears, so
+  // the score is held from the first frame (an effect alone let the new
+  // score flash up before the takeover started).
   const slotKey = slot ? `play-${slot.id}` : null;
   useEffect(() => {
     if (slotTk?.side) setTakeover({ ...slotTk, key: slotKey, hold: TAKEOVER_POINTS[slotTk.kind] ? prevPts : null });
@@ -2492,9 +2447,6 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // The score on the board while a scoring takeover is pending or running.
   const holdPts = takeover?.hold
     || (slotTk?.side && TAKEOVER_POINTS[slotTk.kind] && !doneTakeovers.current.has(slotKey) && takeover?.key !== slotKey ? prevPts : null);
-
-  // The last score shown — the fallback "before" score when nothing is listed yet.
-  useEffect(() => { lastPoints.current = { away: g?.away?.points ?? null, home: g?.home?.points ?? null }; });
 
   const scrolledTo = useRef(null);
   useEffect(() => {
@@ -2521,12 +2473,9 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
     followedIds,
     onTogglePlayer,
   });
-  // The upcoming snap, inferred from the plays on screen (utils/live.js
-  // nextSituation) — so it always follows from what the viewer just saw.
-  // One object feeds the next-play card AND the header. null → nothing to
+  // next: the upcoming snap (useGameFeed → utils/live.js nextSituation) —
+  // one object feeds the next-play card AND the header. null → nothing to
   // show (not live, or a kickoff is next after a score).
-  const shown = slot ? [slot, ...newestListed] : newestListed;
-  const next = isLive ? nextSituation(shown, g, { stalled }) : null;
   // The break on right now: play stopped at the end of a period whose
   // summary is in (end of Q1, halftime, end of Q3).
   const activeBreak = isLive && !slot && next?.brk && shown[0]?.presentation?.type === "period"
@@ -2537,10 +2486,8 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   const headG = g;
   const headLive = isLive;
   const headNext = next;
-  // Who has the ball, as of the plays on screen (the game doc's possession
-  // runs ahead of them) — nobody during a break or after a score.
-  const snapNext = next && (!next.brk || next.brk.kind === "timeout") ? next : null;
-  const ballSide = !headLive ? null : !shown.length ? headG.possession : snapNext?.offense || null;
+  // ballSide (useGameFeed): who has the ball as of the plays on screen (the
+  // game doc's possession runs ahead of them) — nobody at a break or after a score.
   // A two-point try is its own entity, right after its touchdown.
   const withTwo = (p) => (p.presentation?.pat?.type === "two"
     ? <TwoPointCard pat={p.presentation.pat} team={g[p.presentation.creditSide || p.offense]} /> : null);

@@ -24,7 +24,7 @@ const SITE_BLUE = "#0055a5";
 // The site's round-grade badge colors (same map as DraftFeed.js /
 // PlayerProfile.js). No graded evaluations yet reads as Watchlist, as on
 // the profile.
-const GRADE_BADGE = {
+export const GRADE_BADGE = {
   "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
   "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
   "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },

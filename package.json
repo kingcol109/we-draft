@@ -41,7 +41,13 @@
     "eject": "react-scripts eject",
     "sync": "node sync.js",
     "generate-sitemap": "node scripts/generate-sitemap.js",
-    "deploy": "npm run generate-sitemap && firebase deploy"
+    "deploy": "npm run generate-sitemap && firebase deploy",
+    "broadcast-worker:install": "cd server/broadcast-worker && npm install",
+    "broadcast-worker": "node server/broadcast-worker/worker.js",
+    "broadcast-worker:test": "node server/broadcast-worker/test.js",
+    "broadcast-worker:faults": "node server/broadcast-worker/faults.js",
+    "broadcast-worker:docker-build": "docker build -t we-draft-broadcast-worker server/broadcast-worker",
+    "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js"
   },
   "eslintConfig": {
     "extends": [
