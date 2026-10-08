@@ -96,7 +96,7 @@ const CookiePolicy = lazy(() => import("./pages/CookiePolicy"));
 // Shared fallback while a route's chunk downloads — same full-page spinner
 // convention every page already uses for its own data loading, so a route
 // switch doesn't introduce a visually distinct new "loading" look.
-const RouteFallback = () => <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+const RouteFallback = () => <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
 function App() {
   return (

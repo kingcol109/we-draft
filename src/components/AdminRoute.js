@@ -16,7 +16,7 @@ export default function AdminRoute({ children }) {
   const { user, profile, authReady } = useAuth();
 
   if (!authReady) {
-    return <LoadingSpinner size={48} minHeight="60vh" />;
+    return <LoadingSpinner size={48} minHeight="calc(60vh / var(--pz, 1))" />;
   }
 
   const isAdmin = !!user && profile?.role === "admin";

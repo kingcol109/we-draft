@@ -23,6 +23,7 @@
 // .wdl-mu.tk-away / .tk-home class), so the moving logo reads as the same one.
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { teamShort } from "../utils/live";
+import { cssRect } from "../utils/pageZoom";
 
 const CALLS = {
   td: { word: "Touchdown", pts: "+6", ms: 5000 },
@@ -170,10 +171,10 @@ export default function HeaderTakeover({ kind, side, game, onDone }) {
     const el = ref.current;
     const board = el?.closest(".wdl-mu") || el?.parentElement;
     if (!el || !board) return;
-    const b = board.getBoundingClientRect();
+    const b = cssRect(board);
     if (!b.width) return;
     const logoEl = board.querySelector(`.wdl-mu-team.${side} .wdl-mu-logo`);
-    const r = logoEl?.getBoundingClientRect();
+    const r = logoEl && cssRect(logoEl);
     const w0 = r?.width || Math.min(110, b.height * 0.45);
     const x0 = r ? r.left - b.left + r.width / 2 : (side === "away" ? b.width * 0.1 : b.width * 0.9);
     const y0 = r ? r.top - b.top + r.height / 2 : b.height * 0.4;

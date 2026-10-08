@@ -51,7 +51,7 @@ export default function NFLPage() {
     });
   });
 
-  if (loading) return <LoadingSpinner label="Loading Teams" size={56} minHeight="100vh" />;
+  if (loading) return <LoadingSpinner label="Loading Teams" size={56} minHeight="calc(100vh / var(--pz, 1))" />;
 
   return (
     <>

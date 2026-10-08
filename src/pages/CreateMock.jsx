@@ -409,7 +409,7 @@ export default function CreateMock() {
     );
   }
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   /* ===================== VIEW MODE ===================== */
   const mock2026Locked = draftClass === "2026" && new Date() >= MOCK_LOCK_DATE;
@@ -708,7 +708,7 @@ export default function CreateMock() {
           </div>
           <div style={{ height: "3px", background: SITE_GOLD, flexShrink: 0 }} />
 
-          <div style={{ overflowY: "auto", maxHeight: isMobile ? "50vh" : "65vh" }}>
+          <div style={{ overflowY: "auto", maxHeight: isMobile ? "calc(50vh / var(--pz, 1))" : "calc(65vh / var(--pz, 1))" }}>
             {roundPicksEdit.map((pick, i) => {
               const team = teams[pick.currentTeam];
               const player = assignedPlayers[pick.pickNumber];
@@ -768,7 +768,7 @@ export default function CreateMock() {
 
         {/* ── PLAYER BANK ── */}
         {(!isMobile || showBank) && (
-          <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: isMobile ? "60vh" : "75vh" }}>
+          <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: isMobile ? "calc(60vh / var(--pz, 1))" : "calc(75vh / var(--pz, 1))" }}>
             <div style={{ background: SITE_BLUE, padding: "8px 14px", flexShrink: 0 }}>
               <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.1em" }}>Player Bank — {draftClass || "2026"}</div>
             </div>

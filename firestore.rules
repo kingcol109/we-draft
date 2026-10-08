@@ -319,6 +319,12 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Team trivia (admin Branding > Trivia) — rotated into We-Draft Live's
+    // break cards and timeouts. Public read; admins write.
+    match /teamTrivia/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Transfer portal sync (server/portal/sync.js, run from the admin
     // panel) — transferPortal/{year} meta + {year}_{n} entry chunks. Admin
     // only both ways; the admin tab writes `dismissed` on the meta doc.

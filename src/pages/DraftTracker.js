@@ -104,7 +104,7 @@ export default function DraftTracker() {
     <div style={{
       fontFamily: "'Arial Black', Arial, sans-serif",
       background: "#fff",
-      minHeight: "100vh",
+      minHeight: "calc(100vh / var(--pz, 1))",
       display: "flex",
       flexDirection: "column",
     }}>

@@ -10,7 +10,7 @@ const ORANGE = "#F6A21D";
 export function LessonList({ current, onPick }) {
   const head = { fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em", color: "#64748b", textTransform: "uppercase", padding: "6px 12px 4px" };
   return (
-    <div style={{ width: "180px", flexShrink: 0, maxHeight: "calc(100vh - 70px)", overflowY: "auto", background: "#0f172a", border: "1px solid #1f2937", borderRadius: "6px", padding: "8px 0" }}>
+    <div style={{ width: "180px", flexShrink: 0, maxHeight: "calc(100vh / var(--pz, 1) - 70px)", overflowY: "auto", background: "#0f172a", border: "1px solid #1f2937", borderRadius: "6px", padding: "8px 0" }}>
       {[["offense", "Offense"], ["defense", "Defense"]].map(([side, name], gi) => (
         <div key={side} style={{ marginBottom: "6px" }}>
           <div style={{ ...head, marginTop: gi ? "8px" : 0 }}>{name}</div>
@@ -58,7 +58,7 @@ export function LessonArticle({ id, active, onDemo, tryIt }) {
   if (!lesson) return null;
   const blur = (fn) => (e) => { fn(); e.currentTarget.blur(); };
   return (
-    <article style={{ width: "420px", flexShrink: 0, maxHeight: "calc(100vh - 70px)", overflowY: "auto", paddingRight: "6px" }}>
+    <article style={{ width: "420px", flexShrink: 0, maxHeight: "calc(100vh / var(--pz, 1) - 70px)", overflowY: "auto", paddingRight: "6px" }}>
       <div style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em", color: "#64748b", textTransform: "uppercase" }}>Concept</div>
       <h1 style={{ margin: "2px 0 4px", fontSize: "28px", fontWeight: 900, color: "#f8fafc" }}>{lesson.title}</h1>
       <p style={{ margin: "0 0 18px", fontSize: "15px", color: "#cbd5e1", lineHeight: 1.5 }}>{lesson.intro}</p>

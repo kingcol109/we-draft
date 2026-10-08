@@ -74,11 +74,16 @@ export function usePlayReveal(plays, resetKey) {
 
   return useMemo(() => {
     const hidden = new Set([...s.queue, ...(s.slot ? [s.slot] : [])]);
+    // A play that just arrived isn't queued until the effect above runs —
+    // keep it hidden for that render too, so its score (and the header's)
+    // never shows before its reveal.
+    const unseen = s.init ? plays.filter((p) => !s.known.has(p.id)).map((p) => p.id) : [];
+    unseen.forEach((id) => hidden.add(id));
     return {
       listed: plays.filter((p) => !hidden.has(p.id)),
       slot: s.slot ? plays.find((p) => p.id === s.slot) || null : null,
       justListed: s.justListed,
-      queued: s.queue,
+      queued: [...s.queue, ...unseen],
     };
   }, [plays, s]);
 }

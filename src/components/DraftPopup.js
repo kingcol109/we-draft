@@ -4,6 +4,7 @@ import { collection, onSnapshot, getDoc, doc, getDocs, query, where, limit } fro
 import { db } from "../firebase";
 import { Link } from "react-router-dom";
 import LoadingSpinner from "./LoadingSpinner";
+import { toCssPx, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -30,15 +31,15 @@ export default function DraftPopup({ onClose }) {
   // Dragging
   const popupRef = useRef(null);
   const dragOffset = useRef({ x: 0, y: 0 });
-  const [pos, setPos] = useState({ x: window.innerWidth - 260, y: 140 });
+  const [pos, setPos] = useState({ x: viewportCssWidth() - 260, y: 140 });
   const isDragging = useRef(false);
 
   const onMouseDown = (e) => {
     if (e.target.closest("a") || e.target.closest("button")) return;
     isDragging.current = true;
     dragOffset.current = {
-      x: e.clientX - pos.x,
-      y: e.clientY - pos.y,
+      x: toCssPx(e.clientX) - pos.x,
+      y: toCssPx(e.clientY) - pos.y,
     };
     e.preventDefault();
   };
@@ -46,8 +47,8 @@ export default function DraftPopup({ onClose }) {
   useEffect(() => {
     const onMouseMove = (e) => {
       if (!isDragging.current) return;
-      const newX = Math.max(0, Math.min(window.innerWidth - 240, e.clientX - dragOffset.current.x));
-      const newY = Math.max(0, Math.min(window.innerHeight - 100, e.clientY - dragOffset.current.y));
+      const newX = Math.max(0, Math.min(viewportCssWidth() - 240, toCssPx(e.clientX) - dragOffset.current.x));
+      const newY = Math.max(0, Math.min(viewportCssHeight() - 100, toCssPx(e.clientY) - dragOffset.current.y));
       setPos({ x: newX, y: newY });
     };
     const onMouseUp = () => { isDragging.current = false; };
@@ -65,8 +66,8 @@ export default function DraftPopup({ onClose }) {
     const touch = e.touches[0];
     isDragging.current = true;
     dragOffset.current = {
-      x: touch.clientX - pos.x,
-      y: touch.clientY - pos.y,
+      x: toCssPx(touch.clientX) - pos.x,
+      y: toCssPx(touch.clientY) - pos.y,
     };
   };
 
@@ -74,8 +75,8 @@ export default function DraftPopup({ onClose }) {
     const onTouchMove = (e) => {
       if (!isDragging.current) return;
       const touch = e.touches[0];
-      const newX = Math.max(0, Math.min(window.innerWidth - 240, touch.clientX - dragOffset.current.x));
-      const newY = Math.max(0, Math.min(window.innerHeight - 100, touch.clientY - dragOffset.current.y));
+      const newX = Math.max(0, Math.min(viewportCssWidth() - 240, toCssPx(touch.clientX) - dragOffset.current.x));
+      const newY = Math.max(0, Math.min(viewportCssHeight() - 100, toCssPx(touch.clientY) - dragOffset.current.y));
       setPos({ x: newX, y: newY });
       e.preventDefault();
     };

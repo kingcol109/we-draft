@@ -20,7 +20,7 @@
 // CFBD roster (server/live/rosters.js). A We-Draft profile slug rides along
 // only when that CFBD player has a suggested/verified link.
 
-const PARSER_VERSION = 8; // 2: full names for identified players; 3: creditSide; 4: "St. Clair"-style surnames; 5: penalty team, PAT/2-pt on TDs; 6: two-word surnames, scoring-summary text; 7: lead/sub names, TD called back, halftime, penalty yards, endSpot; 8: turnover on downs
+const PARSER_VERSION = 9; // 2: full names for identified players; 3: creditSide; 4: "St. Clair"-style surnames; 5: penalty team, PAT/2-pt on TDs; 6: two-word surnames, scoring-summary text; 7: lead/sub names, TD called back, halftime, penalty yards, endSpot; 8: turnover on downs; 9: flag as the story (flagStory)
 
 // "#3 A.Evans III", "#28 C.O'Neal", "#16 J.Overton, Jr.", "#19 C.McDonald III"
 const NAME = String.raw`#(\d+)\s+((?:[A-Z][A-Za-z]*\.)+\s?(?:(?:De|Del|Della|Da|Di|Du|La|Le|Van|Von|Mac)\s)?[A-Z][A-Za-z'’-]+(?:,?\s(?:Jr|Sr)\.?|\s(?:II|III|IV|V)\b)?)`;
@@ -402,7 +402,10 @@ function presentPlay(play, ctx = {}) {
       break;
     }
     case "penalty": {
-      const pm = /PENALTY\s+(\S+)\s+(.+?)(?:\s+\((#\d+[^)]*)\))?\s+(\d+)\s+yards?/.exec(s);
+      // "PENALTY UCF Holding (#70 B.Jones) 10 yards …", or the other
+      // feed's "UCF Penalty, Holding (10 Yards) to the UCF30".
+      const alt = /^(\S+) Penalty,\s*(.+?)\s*\((\d+) Yards?\)/i.exec(s);
+      const pm = /PENALTY\s+(\S+)\s+(.+?)(?:\s+\((#\d+[^)]*)\))?\s+(\d+)\s+yards?/.exec(s) || (alt && [alt[0], alt[1], alt[2], undefined, alt[3]]);
       const declined = /declined/i.exec(s);
       const who = pm?.[3] ? P(firstName(pm[3]), null) : null;
       Object.assign(out.players, { penalized: who });
@@ -413,6 +416,21 @@ function presentPlay(play, ctx = {}) {
       if (!pm && !declined) { out.confidence = "fallback"; out.fallbackText = s; }
       out.teamPenalty = !who;
       out.penaltySide = (pm && ctx.abbrs?.[pm[1].toUpperCase()]) || who?.side || null;
+      // An accepted flag leads with its name ("PASS INTERFERENCE"), yards
+      // for the offense signed, and the play it wiped out underneath.
+      if (pm && !declined) {
+        const sign = out.penaltySide && offense ? (out.penaltySide === offense ? "-" : "+") : "";
+        out.headline = pm[2].replace(/\s+on\s*$/, "").replace(/\s+/g, " ").trim().toUpperCase();
+        out.emphasis = "flag";
+        out.flagStory = true;
+        out.detail = [`${sign}${plural(Number(pm[4]))}`, nullified ? "No play" : ""].filter(Boolean).join(" · ");
+        const before = s.split(/\s*PENALTY\s/)[0];
+        if (nullified && before && !/^PENALTY/.test(s) && !["penalty", "other", "timeout", "period"].includes(typeFrom(null, before))) {
+          const wiped = presentPlay({ ...play, type: null, text: before }, ctx);
+          const was = [wiped.headline ? wiped.headline[0] + wiped.headline.slice(1).toLowerCase() : "", wiped.detail].filter(Boolean).join(" · ");
+          if (was) out.wasPlay = `Wiped out: ${was}`;
+        }
+      }
       break;
     }
     case "safety": {
@@ -517,6 +535,31 @@ function presentPlay(play, ctx = {}) {
       const yds = pm[4] ? ` · ${plural(Number(pm[4]))}` : "";
       out.penaltyText = `${pm[1]} ${pm[2].replace(/\s+on\s*$/, "")}`.replace(/\s+/g, " ").trim() + (/declined/i.test(s) ? " · declined" : yds);
       out.penaltyTextSide = ctx.abbrs?.[pm[1].toUpperCase()] || null;
+    }
+    // When the flag IS the story, it leads the card: the play was wiped out
+    // (NO PLAY), or it went nowhere (incomplete, no gain, a loss) and an
+    // accepted penalty moved the ball — "pass interference, 1st down", not
+    // "pass incomplete". A flag tacked onto a real gain stays a chip.
+    const accepted = pm && !/declined|off-?setting/i.test(s);
+    const went = type === "incomplete" || ((type === "rush" || type === "pass" || type === "sack") && (yards ?? 0) <= 0);
+    if (accepted && !td && (nullified || went)) {
+      const penYds = pm[4] ? Number(pm[4]) : null;
+      const onSide = out.penaltyTextSide || null;
+      const who = pm[3] ? P(firstName(pm[3]), onSide) : null;
+      const name = pm[2].replace(/\s+on\s*$/, "").replace(/\s+/g, " ").trim();
+      const was = [out.headline ? out.headline[0] + out.headline.slice(1).toLowerCase() : "", out.detail].filter(Boolean).join(" · ");
+      // Yards for the offense: + when the defense was flagged.
+      const sign = onSide && offense ? (onSide === offense ? "-" : "+") : "";
+      out.flagStory = true;
+      out.headline = name.toUpperCase();
+      out.emphasis = "flag";
+      if (who) { out.players.penalized = who; out.line = [playerTok(who)]; }
+      out.detail = [penYds != null ? `${sign}${plural(penYds)}` : "", nullified ? "No play" : ""].filter(Boolean).join(" · ");
+      out.wasPlay = was ? `${nullified ? "Wiped out: " : ""}${was}` : null;
+      out.penaltyText = null;
+      // The badge: the flagged team.
+      if (onSide) out.creditSide = onSide;
+      if (onSide && onSide !== offense) delete out.downsTurnover;
     }
   }
   if (td && nullified) {

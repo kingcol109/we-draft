@@ -10,9 +10,9 @@
 //                        quarter, possession and down & distance in a column
 //                        on the right.
 //
-// Player names: tap to follow (by CFBD athlete id — works for everyone);
-// the We-Draft circle logo opens the profile (new tab) when there is one.
-// Nothing requires a profile.
+// Player names are plain text — following happens in My Players /
+// Customize, never by tapping a name here (a followed player shows ★).
+// The We-Draft circle logo opens the profile (new tab) when there is one.
 import { useRef } from "react";
 import { periodLabel, downLabel, spotLabel } from "../utils/live";
 
@@ -54,6 +54,10 @@ export const PLAY_CARD_STYLE = `
 .lpc-justnow:not(.hype) { --hc: #4d9fff; }
 .lpc-justnow-tag { font-size: 11px; font-weight: 900; letter-spacing: 0.12em; color: #121212; background: #eef2f8; border-radius: 999px; padding: 2px 9px; animation: lpc-pulse 1.6s ease-in-out infinite; }
 @keyframes lpc-pulse { 50% { opacity: 0.55; } }
+.lpc.flag { --hc: #f2c94c; background: linear-gradient(100deg, rgba(242,201,76,0.16), #111a2b 60%); }
+.lpc.flag .lpc-badge { background: #f2c94c; color: #121212; padding: 4px 12px; border-radius: 999px; font-size: clamp(15px, 1.2vw, 19px); }
+.lpc.flag .lpc-detail { color: #fff; }
+.lpc-was { margin-top: 4px; font-weight: 800; font-size: clamp(13px, 1vw, 16px); color: #7f90aa; }
 .lpc.miss { --hc: #a04848; }
 .lpc.miss .lpc-badge { color: #e07a7a; }
 .lpc.miss .lpc-line { color: #aab4c4; }
@@ -141,7 +145,7 @@ button.lpc-score { cursor: pointer; }
 .lpc-line { margin-top: 6px; font-weight: 900; font-size: clamp(19px, 1.7vw, 28px); line-height: 1.2; color: #f4f7fb; display: flex; align-items: center; flex-wrap: wrap; gap: 0 10px; }
 .lpc.hype .lpc-line { margin-top: 10px; font-size: clamp(24px, 2.2vw, 36px); }
 .lpc-join { color: #6f819c; font-weight: 800; font-size: 0.8em; }
-.lpc-name { background: none; border: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.lpc-name { color: inherit; }
 .lpc-name.on { color: ${GOLD}; }
 .lpc-wd { display: inline-flex; margin-left: 6px; vertical-align: middle; border-radius: 50%; transition: transform 0.15s; }
 .lpc-wd:hover { transform: scale(1.15); }
@@ -172,7 +176,7 @@ button.lpc-score { cursor: pointer; }
 }
 `;
 
-const EMOJI = { td: "🔥 ", turnover: "🚨 ", big: "⚡ ", final: "🏁 " };
+const EMOJI = { td: "🔥 ", turnover: "🚨 ", big: "⚡ ", final: "🏁 ", flag: "🚩 " };
 
 // Big-play rule for the "exciting" treatment: touchdowns, turnovers, and
 // gains of HYPE_YARDS+ on a pass or run. (A nullified play never counts.)
@@ -184,7 +188,7 @@ const isHype = (pres) => !pres.nullified && (pres.touchdown || pres.turnover
 // the parser's other "big" calls (4th-down plays etc.) render as normal.
 function emphasisOf(pres) {
   const e = pres.emphasis || "normal";
-  if (e === "td" || e === "turnover" || e === "final") return e;
+  if (e === "td" || e === "turnover" || e === "final" || e === "flag") return e;
   if (pres.type === "incomplete") return "miss";
   if (isHype(pres)) return "big";
   return e === "big" ? "normal" : e;
@@ -192,18 +196,12 @@ function emphasisOf(pres) {
 
 // `short` (the Feed rail): first-initial form ("K. Taylor") — the play
 // text's own abbreviation, kept on identified players as player.short.
-function PlayerToken({ player, followedIds, onTogglePlayer, short }) {
+function PlayerToken({ player, followedIds, short }) {
   const on = player.cfbdId && followedIds.has(player.cfbdId);
-  const canFollow = !!(player.cfbdId && onTogglePlayer);
   const name = short ? player.short || player.name : player.name;
   return (
     <span>
-      {canFollow ? (
-        <button className={`lpc-name${on ? " on" : ""}`} title={on ? `Unfollow ${player.name}` : `Follow ${player.name}`}
-          onClick={(e) => { e.stopPropagation(); onTogglePlayer({ id: player.cfbdId, name: player.name }); }}>
-          {on ? "★ " : ""}{name}
-        </button>
-      ) : <span title={player.name}>{name}</span>}
+      <span className={`lpc-name${on ? " on" : ""}`} title={player.name}>{on ? "★ " : ""}{name}</span>
       {player.wedraftSlug && (
         <a className="lpc-wd" href={`/player/${player.wedraftSlug}`} target="_blank" rel="noopener noreferrer"
           title={`${player.name} — We-Draft scouting profile (opens in a new tab)`} onClick={(e) => e.stopPropagation()}>
@@ -214,14 +212,14 @@ function PlayerToken({ player, followedIds, onTogglePlayer, short }) {
   );
 }
 
-function Line({ pres, followedIds, onTogglePlayer, short }) {
+function Line({ pres, followedIds, short }) {
   if (!pres.line?.length) return null;
   const miss = pres.type === "incomplete";
   return (
     <div className="lpc-line">
       {pres.line.map((t, i) => {
         if (t.player) {
-          const tokenEl = <PlayerToken player={t.player} followedIds={followedIds} onTogglePlayer={onTogglePlayer} short={short} />;
+          const tokenEl = <PlayerToken player={t.player} followedIds={followedIds} short={short} />;
           return t.lead || t.sub ? <span key={i} className={t.lead ? "lpc-lead" : "lpc-sub"}>{tokenEl}</span> : <span key={i}>{tokenEl}</span>;
         }
         // An incomplete pass: the arrow is crossed out.
@@ -263,7 +261,7 @@ export function TwoPointCard({ pat, team }) {
  * @param scoreLabel e.g. "MSU 17 – 35 BAMA" (shown for scoring plays / big plays)
  * @param onScoreClick optional — makes the score chip a button (opens the game)
  */
-export default function LivePlayCard({ play, variant = "compact", team, possessionTeam, scoreLabel, scoreboard, onScoreClick, followedIds = new Set(), onTogglePlayer, onClick, highlight, fresh, justNow, teamColor }) {
+export default function LivePlayCard({ play, variant = "compact", team, possessionTeam, scoreLabel, scoreboard, onScoreClick, followedIds = new Set(), onClick, highlight, fresh, justNow, teamColor }) {
   const pres = play.presentation;
   const detailed = variant === "detailed";
   const ot = play.period > 4;
@@ -292,11 +290,11 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
       <div className="lpc-head">
         {justNow && <span className="lpc-justnow-tag">JUST NOW</span>}
         <span className="lpc-badge">{EMOJI[emph] || ""}{pres.headline}</span>
-        {team && (team.logoDark || team.logo) && (
+        {team && pres.type !== "period" && (team.logoDark || team.logo) && (
           <span className="lpc-team"><img src={team.logoDark || team.logo} alt="" />{team.short || team.school || team.name}</span>
         )}
       </div>
-      <Line pres={pres} followedIds={followedIds} onTogglePlayer={onTogglePlayer} short={!detailed} />
+      <Line pres={pres} followedIds={followedIds} short={!detailed} />
       {(pres.detail || pres.firstDown || pres.penaltyText || pres.pat) && (
         <div className="lpc-detail">
           {pres.detail}
@@ -307,6 +305,7 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
           {pres.penaltyText && <span className="lpc-chip warn">FLAG · {pres.penaltyText}</span>}
         </div>
       )}
+      {pres.wasPlay && <div className="lpc-was">{pres.wasPlay}</div>}
       {!pres.line?.length && pres.fallbackText && <div className="lpc-detail">{pres.fallbackText}</div>}
     </>
   );
@@ -349,8 +348,10 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
   // clock, quarter, down & distance, and the score after a scoring play —
   // in its own column on the right, readable from across the room.
   // A timeout isn't a play: a slim pill in the calling team's color, not a card.
+  // `team` is only set when the play names the caller — otherwise it just
+  // reads TIMEOUT (never guessed from who has the ball).
   if (pres.type === "timeout") {
-    const name = team ? team.school || team.name || team.short : pres.detail;
+    const name = team ? team.school || team.name || team.short : null;
     return (
       <div className={`lpc-to${state}`} style={{ "--tc": team?.color || "#8a6cff" }} title={play.text || undefined}>
         {justNow && <span className="lpc-justnow-tag">JUST NOW</span>}
@@ -407,19 +408,23 @@ function Upd({ v, children }) {
   return <span key={String(v)} className={v !== initial.current ? "lpc-upd" : undefined}>{children ?? v}</span>;
 }
 
-export function PendingPlayCard({ game, situation }) {
+// tip: during a timeout, one extra line (LiveBreakCard.js TimeoutTip).
+export function PendingPlayCard({ game, situation, tip = null }) {
   const s = situation;
   const brk = s.brk;
-  const offense = s.offense ? game[s.offense] : null;
-  const defense = s.offense ? game[s.offense === "home" ? "away" : "home"] : null;
-  const down = s.down ? downLabel(s.down, s.distance) : "";
-  const spot = s.ytg != null ? spotLabel(s.ytg, offense, defense) : "";
+  // At the end of a quarter / half nobody "has the ball" on this card; a
+  // timeout keeps the coming snap.
+  const showSnap = !brk || brk.kind === "timeout";
+  const offense = s.offense && showSnap ? game[s.offense] : null;
+  const defense = s.offense && showSnap ? game[s.offense === "home" ? "away" : "home"] : null;
+  const down = s.down && showSnap ? downLabel(s.down, s.distance) : "";
+  const spot = s.ytg != null && showSnap ? spotLabel(s.ytg, offense, defense) : "";
   return (
     <div className={`lpc lpc-detailed lpc-pending${brk ? " lpc-break" : ""}`}>
       <div className="lpc-body">
         <div className="lpc-head">
           {brk ? (
-            <span className="lpc-badge"><Upd v={brk.label} />{brk.detail && <span className="lpc-break-detail"> · <Upd v={brk.detail} /></span>}</span>
+            <span className="lpc-badge">{brk.kind === "timeout" ? "⏸ " : ""}<Upd v={brk.label} />{brk.detail && <span className="lpc-break-detail"> · <Upd v={brk.detail} /></span>}</span>
           ) : (
             <span className="lpc-badge">NEXT PLAY<span className="lpc-dots"><i /><i /><i /></span></span>
           )}
@@ -432,8 +437,8 @@ export function PendingPlayCard({ game, situation }) {
             </span>
           </div>
         ) : !brk ? <div className="lpc-line">Waiting for the snap</div> : null}
-        {s.downsTurnover && <div className="lpc-detail"><span className="lpc-chip warn" style={{ marginLeft: 0 }}>TURNOVER ON DOWNS</span></div>}
         {s.changeOfPossession && <div className="lpc-detail"><span className="lpc-chip warn" style={{ marginLeft: 0 }}>⇄ CHANGE OF POSSESSION</span></div>}
+        {brk?.kind === "timeout" && tip}
       </div>
       <div className="lpc-side">
         {(s.clock || s.period) && (

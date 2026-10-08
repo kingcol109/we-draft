@@ -1383,7 +1383,7 @@ export default function CommunityBoard() {
             <div style={{ height: "3px", background: GOLD }} />
 
             {isMobile ? (
-              <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
+              <div style={{ maxHeight: "calc(70vh / var(--pz, 1))", overflowY: "auto" }}>
                 {listLoading ? ListSpinner : sortedPlayers.length === 0 ? (
                   <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
                     No players match your filters.

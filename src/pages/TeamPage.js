@@ -27,6 +27,7 @@ import DevelopmentalFlair from "../assets/developmental.png";
 import ProvenFlair from "../assets/proven.png";
 import { fetchAllRankMaps, ranksForGame, currentRankMap, RANKINGS_LIMIT } from "../utils/rankings";
 import { scheduleGameHref } from "../utils/live";
+import { cssRect } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -502,7 +503,7 @@ function FilterButton({ label, options, panelKey, activeSet, onToggle, onClearGr
   // Recompute dropdown position whenever it opens
   useEffect(() => {
     if (isOpen && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
+      const rect = cssRect(btnRef.current);
       setDropdownStyle({
         position: "fixed",
         top: rect.bottom + 6,
@@ -1445,7 +1446,7 @@ export default function TeamPage() {
   // first query itself fails (loading flips false via the effect's own
   // finally without branding ever getting set), so a hard failure doesn't
   // strand this on a spinner forever.
-  if (!branding && loading) return <LoadingSpinner label="Loading Team" size={64} minHeight="100vh" />;
+  if (!branding && loading) return <LoadingSpinner label="Loading Team" size={64} minHeight="calc(100vh / var(--pz, 1))" />;
 
   const teamLabel = school?.Mascot ? `${canonicalSchool} ${school.Mascot}` : canonicalSchool;
 
@@ -2215,9 +2216,11 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile,
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
         )}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Sized to this box (cqi), not the window — the header sits between
+            sidebars, so viewport units overshoot and split long names. */}
+        <div style={{ flex: 1, minWidth: 0, containerType: "inline-size" }}>
           <div style={{
-            fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(36px, 4vw, 52px)", fontWeight: 900, color: "#fff",
+            fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(24px, 12cqi, 52px)", fontWeight: 900, color: "#fff",
             lineHeight: 1.05, letterSpacing: "0.02em",
             textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
           }}>
@@ -2228,7 +2231,7 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile,
           </div>
           {school?.Mascot && (
             <div style={{
-              fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(28px, 3.2vw, 42px)", fontWeight: 900,
+              fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(20px, 9.5cqi, 42px)", fontWeight: 900,
               color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em",
               textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
             }}>

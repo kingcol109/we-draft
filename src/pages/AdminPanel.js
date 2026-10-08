@@ -17,6 +17,7 @@ import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rank
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
 import verifiedBadge from "../assets/verified.png";
+import { unzoomTransform } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -6569,7 +6570,7 @@ function TrendBadge({ value }) {
 function SortableTrendRow({ trend, isSelected, onSelect }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: trend.id });
   const style = {
-    transform: CSS.Transform.toString(transform),
+    transform: CSS.Transform.toString(unzoomTransform(transform)),
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
@@ -11233,6 +11234,7 @@ function ColorHexField({ label, value, onChange, onCopy, copied }) {
 const BRANDING_TABS = [
   { key: "teams", label: "Teams" },
   { key: "misc", label: "Misc" },
+  { key: "trivia", label: "Trivia" },
 ];
 
 // "High School" sits alongside CFB/NFL in the same league toggle, but isn't
@@ -11300,6 +11302,140 @@ function BrandingSection() {
       )}
 
       {brandingTab === "misc" && <MiscBrandingSection />}
+      {brandingTab === "trivia" && <TriviaBrandingPane />}
+    </div>
+  );
+}
+
+// ── Branding > Trivia ── team trivia (teamTrivia, one doc per fact:
+// { teamId, school, text }) — rotated into We-Draft Live's halftime /
+// quarter break cards and timeouts for that team's games (the ingester
+// picks it up per game: server/live/breaks.js). Teams come from the
+// normalized `schools` list and are keyed by CFBD team id, the same id the
+// live system uses; picking a team lists its trivia.
+function TriviaBrandingPane() {
+  const [schools, setSchools] = useState(null);
+  const [teamId, setTeamId] = useState("");
+  const [filter, setFilter] = useState("");
+  const [items, setItems] = useState(null);
+  const [counts, setCounts] = useState({});
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      getDocs(collection(db, "schools")),
+      getDocs(collection(db, "teamTrivia")),
+    ]).then(([sc, tr]) => {
+      if (!alive) return;
+      setSchools(sc.docs.map((d) => d.data()).filter((x) => x.School && x.CFBDTeamId != null)
+        .map((x) => ({ id: Number(x.CFBDTeamId), school: x.School, logo: x.Logo1 || "" }))
+        .sort((a, b) => a.school.localeCompare(b.school)));
+      const c = {};
+      tr.docs.forEach((d) => { const t = d.data().teamId; c[t] = (c[t] || 0) + 1; });
+      setCounts(c);
+    }).catch((e) => { console.error("Trivia load error:", e); if (alive) setSchools([]); });
+    return () => { alive = false; };
+  }, []);
+
+  const load = async (id) => {
+    setItems(null);
+    if (id === "") return;
+    try {
+      const snap = await getDocs(query(collection(db, "teamTrivia"), where("teamId", "==", Number(id))));
+      const toMs = (t) => (t?.toMillis ? t.toMillis() : 0);
+      setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt)));
+    } catch (e) {
+      console.error("Trivia fetch error:", e);
+      setItems([]);
+    }
+  };
+  useEffect(() => { load(teamId); }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const team = schools?.find((x) => String(x.id) === String(teamId));
+  const shown = (schools || []).filter((x) => !filter || x.school.toLowerCase().includes(filter.toLowerCase()));
+
+  const add = async () => {
+    const t = text.trim();
+    if (!team || !t) return;
+    setBusy(true); setErr("");
+    try {
+      await addDoc(collection(db, "teamTrivia"), { teamId: team.id, school: team.school, text: t, createdAt: serverTimestamp() });
+      setText("");
+      setCounts((c) => ({ ...c, [team.id]: (c[team.id] || 0) + 1 }));
+      await load(team.id);
+    } catch (e) {
+      console.error("Trivia save error:", e);
+      setErr("Couldn't save — try again.");
+    }
+    setBusy(false);
+  };
+  const remove = async (item) => {
+    if (!window.confirm("Delete this trivia?")) return;
+    try {
+      await deleteDoc(doc(db, "teamTrivia", item.id));
+      setItems((list) => list.filter((x) => x.id !== item.id));
+      setCounts((c) => ({ ...c, [item.teamId]: Math.max(0, (c[item.teamId] || 1) - 1) }));
+    } catch (e) {
+      console.error("Trivia delete error:", e);
+    }
+  };
+
+  const box = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "16px" };
+  const label = { fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#666", marginBottom: "6px" };
+  if (!schools) return <LoadingSpinner />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px", maxWidth: "820px" }}>
+      <div style={box}>
+        <div style={label}>Team</div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter teams…"
+            style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: "6px", fontSize: "14px", width: "180px" }} />
+          <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
+            style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: "6px", fontSize: "14px", minWidth: "260px" }}>
+            <option value="">Select a team…</option>
+            {shown.map((x) => <option key={x.id} value={x.id}>{x.school}{counts[x.id] ? ` (${counts[x.id]})` : ""}</option>)}
+          </select>
+          {team?.logo && <img src={team.logo} alt="" style={{ width: "32px", height: "32px", objectFit: "contain" }} />}
+        </div>
+      </div>
+
+      {team && (
+        <div style={box}>
+          <div style={label}>Add trivia for {team.school}</div>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={400}
+            placeholder={`e.g. ${team.school} has ...`}
+            style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "6px", fontSize: "14px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px" }}>
+            <button onClick={add} disabled={busy || !text.trim()}
+              style={{ padding: "9px 20px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em", border: "none", borderRadius: "8px",
+                cursor: busy || !text.trim() ? "default" : "pointer", background: busy || !text.trim() ? "#9ca3af" : BLUE, color: "#fff" }}>
+              {busy ? "Saving…" : "Add trivia"}
+            </button>
+            <span style={{ fontSize: "12px", color: "#888" }}>{text.length}/400</span>
+            {err && <span style={{ fontSize: "12px", color: "#b91c1c" }}>{err}</span>}
+          </div>
+        </div>
+      )}
+
+      {team && (
+        <div style={box}>
+          <div style={label}>{team.school} trivia{items ? ` · ${items.length}` : ""}</div>
+          {!items ? <LoadingSpinner /> : !items.length ? (
+            <div style={{ fontSize: "14px", color: "#888" }}>No trivia for {team.school} yet.</div>
+          ) : items.map((item) => (
+            <div key={item.id} style={{ display: "flex", gap: "12px", alignItems: "flex-start", padding: "10px 0", borderTop: "1px solid #f0f0f0" }}>
+              <div style={{ flex: 1, fontSize: "14px", lineHeight: 1.45, color: "#222", whiteSpace: "pre-wrap" }}>{item.text}</div>
+              <button onClick={() => remove(item)}
+                style={{ padding: "5px 10px", fontSize: "12px", fontWeight: 800, border: "1px solid #fca5a5", background: "#fff", color: "#b91c1c", borderRadius: "6px", cursor: "pointer" }}>
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

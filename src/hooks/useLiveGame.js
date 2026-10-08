@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
 import { collection, doc, limit, onSnapshot, orderBy, query } from "firebase/firestore";
-import { comparePlays } from "../utils/live";
+import { orderPlays } from "../utils/live";
 
 const RECENT_PLAYS = 40;
 
@@ -42,7 +42,7 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
       : query(collection(db, "liveGames", id, "plays"), orderBy("seq", "desc"), limit(RECENT_PLAYS));
     return onSnapshot(
       q,
-      (s) => setPlays(s.docs.map((d) => d.data()).filter((p) => !p.hidden && !p.removed).sort(comparePlays)),
+      (s) => setPlays(orderPlays(s.docs.map((d) => d.data()).filter((p) => !p.hidden && !p.removed))),
       () => {},
     );
   }, [id, playsMode]);

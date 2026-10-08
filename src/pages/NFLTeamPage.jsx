@@ -11,6 +11,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { useAuth } from "../context/AuthContext";
 import { getAnonId } from "../utils/anonId";
+import { cssRect } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -641,7 +642,7 @@ export default function NFLTeamPage() {
   // that first fetch fails outright (loading flips false via the effect's
   // own early return without team ever getting set), so a bad teamId still
   // correctly reaches "Team not found" below instead of spinning forever.
-  if (!team && loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (!team && loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   if (!team) return (
     <div style={{ textAlign: "center", marginTop: 80, color: "red", fontWeight: 900 }}>Team not found</div>
@@ -1021,7 +1022,7 @@ export default function NFLTeamPage() {
               // regardless of result count, loading state, or how much a
               // filter narrows the list, instead of shrinking/growing
               // around whatever's currently inside it.
-              height: isMobile ? "80vh" : 640,
+              height: isMobile ? "calc(80vh / var(--pz, 1))" : 640,
               display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
             }}
           >
@@ -1303,7 +1304,7 @@ function ArchiveFilterButton({ label, options, panelKey, activeSet, onToggle, on
 
   useEffect(() => {
     if (isOpen && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
+      const rect = cssRect(btnRef.current);
       setDropdownStyle({
         position: "fixed", top: rect.bottom + 6, left: rect.left, zIndex: 99999,
         background: "#fff", border: `2px solid ${color1}`, borderRadius: 8,

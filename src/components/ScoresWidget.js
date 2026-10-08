@@ -13,7 +13,7 @@ const LIVE_RED = "#ff4d4d";
 const GOLD = "#f6a21d";
 
 export const SCORES_WIDGET_STYLE = `
-.sw { min-height: 100vh; background: #0a0f1a; color: #eef2f8; font-family: "Inter", "Segoe UI", Arial, sans-serif; display: flex; flex-direction: column; }
+.sw { min-height: calc(100vh / var(--pz, 1)); background: #0a0f1a; color: #eef2f8; font-family: "Inter", "Segoe UI", Arial, sans-serif; display: flex; flex-direction: column; }
 .sw-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; background: #0c1220; border-bottom: 1px solid #1d2840; position: sticky; top: 0; z-index: 2; }
 .sw-head b { font-weight: 900; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
 .sw-head b span { color: ${GOLD}; }

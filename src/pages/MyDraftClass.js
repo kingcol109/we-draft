@@ -10,6 +10,7 @@ import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import html2canvas from "html2canvas";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { withoutPageZoom } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -171,13 +172,13 @@ export default function MyDraftClass() {
     if (!exportRef.current) return;
     setExporting(true);
     try {
-      const canvas = await html2canvas(exportRef.current, {
+      const canvas = await withoutPageZoom(() => html2canvas(exportRef.current, {
         backgroundColor: "#ffffff",
         scale: 2,
         useCORS: true,
         allowTaint: true,
         logging: false,
-      });
+      }));
       const link = document.createElement("a");
       link.download = "my-2026-draft-class.png";
       link.href = canvas.toDataURL("image/png");
@@ -226,7 +227,7 @@ export default function MyDraftClass() {
       })
     : [];
 
-  if (loading) return <LoadingSpinner label="Loading Draft Data" size={56} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading Draft Data" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   return (
     <>

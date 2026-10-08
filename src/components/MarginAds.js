@@ -15,6 +15,7 @@ import { db } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
 import HomageLogo from "../assets/homagelogo.png";
 import { fetchAds } from "../utils/siteSnapshots";
+import { cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -97,11 +98,11 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
 
   const recomputeAdLayout = () => {
     if (isMobile || !contentRef.current) { setShowMarginAds(false); return; }
-    const rect = contentRef.current.getBoundingClientRect();
+    const rect = cssRect(contentRef.current);
     const visibleLeftEdge = rect.left + horizontalPadding;
     const visibleRightEdge = rect.right - horizontalPadding;
     const leftGutter = Math.max(0, visibleLeftEdge);
-    const rightGutter = Math.max(0, window.innerWidth - visibleRightEdge);
+    const rightGutter = Math.max(0, viewportCssWidth() - visibleRightEdge);
     const minGutter = Math.min(leftGutter, rightGutter);
     const MIN_USABLE_GUTTER = 160;
     if (minGutter < MIN_USABLE_GUTTER) { setShowMarginAds(false); return; }
@@ -135,12 +136,12 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     const AD_VIEWPORT_MARGIN = 20;
     const clampTop = (height) => {
       if (!height) return null;
-      const centered = (window.innerHeight - height) / 2;
-      return Math.max(AD_VIEWPORT_MARGIN, Math.min(centered, window.innerHeight - height - AD_VIEWPORT_MARGIN));
+      const centered = (viewportCssHeight() - height) / 2;
+      return Math.max(AD_VIEWPORT_MARGIN, Math.min(centered, viewportCssHeight() - height - AD_VIEWPORT_MARGIN));
     };
     const measure = () => {
-      if (leftAdRef.current) setLeftAdTop(clampTop(leftAdRef.current.getBoundingClientRect().height));
-      if (rightAdRef.current) setRightAdTop(clampTop(rightAdRef.current.getBoundingClientRect().height));
+      if (leftAdRef.current) setLeftAdTop(clampTop(cssRect(leftAdRef.current).height));
+      if (rightAdRef.current) setRightAdTop(clampTop(cssRect(rightAdRef.current).height));
     };
     measure();
     const ro = new ResizeObserver(measure);

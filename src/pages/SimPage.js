@@ -31,6 +31,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { generateLeague, namePools } from "../sim/dynasty/generate";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
+import { toCssPx } from "../utils/pageZoom";
 
 const DYNASTY_KEY = "simDynasty"; // this browser's franchise + opponent pick
 const COLLEGE_KEY = "simCollege"; // …and in College mode
@@ -599,13 +600,13 @@ export default function SimPage() {
   // ── Mouse: eyes / intent / throw ──
   const fieldPoint = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
-    return toField(camRef.current, e.clientX - r.left, e.clientY - r.top);
+    return toField(camRef.current, toCssPx(e.clientX - r.left), toCssPx(e.clientY - r.top));
   };
   const onMove = (e) => {
     const input = engineRef.current.input;
     const r = canvasRef.current.getBoundingClientRect();
-    const sx = e.clientX - r.left;
-    const sy = e.clientY - r.top;
+    const sx = toCssPx(e.clientX - r.left);
+    const sy = toCssPx(e.clientY - r.top);
     // How far the mouse has actually moved (after a catch, moving it is what
     // takes the runner back from "straight upfield").
     if (input.screen) input.moveAccum = (input.moveAccum || 0) + Math.hypot(sx - input.screen.x, sy - input.screen.y);
@@ -648,7 +649,7 @@ export default function SimPage() {
         <title>Football Sim Lab | We-Draft</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
-      <div style={{ minHeight: "100vh", background: "#0b1220", color: "#e2e8f0", fontFamily: "Arial, sans-serif", padding: "10px 14px" }}>
+      <div style={{ minHeight: "calc(100vh / var(--pz, 1))", background: "#0b1220", color: "#e2e8f0", fontFamily: "Arial, sans-serif", padding: "10px 14px" }}>
         {/* Controls */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
           <Link to={isAdmin ? "/admin" : "/profile"} style={{ color: "#94a3b8", fontWeight: 700, fontSize: "12px", textDecoration: "none", marginRight: "6px" }}>
@@ -835,7 +836,7 @@ export default function SimPage() {
           </div>
 
           {ui.debug && snap && (
-            <div style={{ width: "380px", flexShrink: 0, fontSize: "11px", maxHeight: "calc(100vh - 70px)", overflowY: "auto" }}>
+            <div style={{ width: "380px", flexShrink: 0, fontSize: "11px", maxHeight: "calc(100vh / var(--pz, 1) - 70px)", overflowY: "auto" }}>
               {selected && (
                 <div style={{ background: "#111827", border: "1px solid #334155", borderRadius: "6px", padding: "8px", marginBottom: "8px" }}>
                   <div style={{ fontWeight: 900, fontSize: "13px", color: selected.team === "O" ? "#93c5fd" : ORANGE }}>

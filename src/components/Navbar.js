@@ -353,19 +353,15 @@ export default function Navbar() {
               @keyframes wd-live-ring { 0% { box-shadow: 0 0 0 0 rgba(214,40,40,0.6); } 70% { box-shadow: 0 0 0 10px rgba(214,40,40,0); } 100% { box-shadow: 0 0 0 0 rgba(214,40,40,0); } }
               @keyframes wd-live-blink { 50% { opacity: 0.3; } }
               @media (prefers-reduced-motion: reduce) { .wd-live-btn, .wd-live-dot { animation: none; } }
+              /* Centered on wide screens; on laptop widths there isn't room to
+                 center without running into the logo, so it sits to its right. */
+              .wd-desktop-nav { position: absolute; left: 50%; transform: translateX(-50%); align-items: center; }
+              @media (max-width: 1440px) { .wd-desktop-nav { position: static; transform: none; margin-left: auto; } }
             `}</style>
           </div>
 
           {/* DESKTOP NAV */}
-          <div
-            className="hidden md:flex"
-            style={{
-              position: "absolute",
-              left: "50%",
-              transform: "translateX(-50%)",
-              alignItems: "center",
-            }}
-          >
+          <div className="hidden md:flex wd-desktop-nav">
 
             {/* ── COMMUNITY BOARD DROPDOWN ── */}
             <div

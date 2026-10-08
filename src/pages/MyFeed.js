@@ -105,7 +105,7 @@ export default function MyFeed() {
   const filteredFeed = feedItems.filter((item) => item.playerIds.some((pid) => yearFollowedIds.has(pid)));
 
   if (!user) return (
-    <div style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+    <div style={{ minHeight: "calc(70vh / var(--pz, 1))", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
       <div style={{ width: "100%", maxWidth: "520px", border: `2px solid ${GOLD}`, borderRadius: "14px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.14)" }}>
         <div style={{ background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`, padding: "28px 32px 24px", textAlign: "center", position: "relative", overflow: "hidden" }}>
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "repeating-linear-gradient(55deg, transparent, transparent 18px, rgba(246,162,29,0.06) 18px, rgba(246,162,29,0.06) 36px)", pointerEvents: "none" }} />
@@ -155,7 +155,7 @@ export default function MyFeed() {
     </div>
   );
 
-  if (followsLoading) return <LoadingSpinner label="Loading Feed" size={56} minHeight="100vh" />;
+  if (followsLoading) return <LoadingSpinner label="Loading Feed" size={56} minHeight="calc(100vh / var(--pz, 1))" />;
 
   return (
     <>

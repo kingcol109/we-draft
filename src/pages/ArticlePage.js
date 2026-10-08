@@ -30,7 +30,7 @@ export default function ArticlePage() {
     fetchArticle();
   }, [slug]);
 
-  if (!article) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (!article) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   return (
     <div style={{ maxWidth: "800px", margin: "0 auto", padding: "20px" }}>

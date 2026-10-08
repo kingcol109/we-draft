@@ -12,6 +12,57 @@ export const comparePlays = (a, b) =>
   || (a.clockSeconds != null && b.clockSeconds != null ? b.clockSeconds - a.clockSeconds : 0)
   || (a.seq || 0) - (b.seq || 0);
 
+const isTimeout = (p) => p.presentation?.type === "timeout" || /^Timeout$/i.test(p.type || "");
+// A timeout's own clock: the "clock 08:05" in its text when there is one
+// (CFBD's clock field on a timeout row can lag).
+const withTimeoutClock = (p) => {
+  const m = /clock (\d{1,2}):(\d{2})/i.exec(p.text || "");
+  return m ? { ...p, clock: `${Number(m[1])}:${m[2]}`, clockSeconds: Number(m[1]) * 60 + Number(m[2]) } : p;
+};
+
+// Plays in game order (comparePlays), with timeouts put where they
+// happened. CFBD logs a timeout with a later sequence than the snap that
+// followed it, so at the same clock a timeout goes before the play that
+// started there; a 0-second play at that clock (a pre-snap penalty) stays
+// ahead of it.
+export function orderPlays(plays) {
+  const sorted = plays.map((p) => (isTimeout(p) ? withTimeoutClock(p) : p)).sort(comparePlays);
+  const out = [];
+  for (let i = 0; i < sorted.length;) {
+    let j = i + 1;
+    const p0 = sorted[i];
+    while (j < sorted.length && sorted[j].period === p0.period && sorted[j].clockSeconds != null && sorted[j].clockSeconds === p0.clockSeconds) j++;
+    const run = sorted.slice(i, j);
+    const tos = run.filter(isTimeout);
+    const rest = run.filter((p) => !isTimeout(p));
+    if (!tos.length || !rest.length || p0.clockSeconds == null) out.push(...run);
+    else {
+      const last = rest[rest.length - 1];
+      const preSnap = last.presentation?.type === "penalty" || last.presentation?.nullified;
+      // Only a pre-snap flag so far → the timeout came after it.
+      if (rest.length === 1 && preSnap) out.push(last, ...tos);
+      else out.push(...rest.slice(0, -1), ...tos, last);
+    }
+    i = j;
+  }
+  return out;
+}
+
+// The team that called a timeout, from its text ("Timeout Tulsa, clock
+// 08:05") — never assumed from who has the ball. null when the text names
+// neither team (an official's / TV timeout, or text we can't place).
+const normTeam = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+export function timeoutSide(play, game) {
+  const who = normTeam(play?.presentation?.detail || /Timeout\s+(.+?)(?:,|$)/i.exec(play?.text || "")?.[1]);
+  if (!who || /^(official|officials|tv|media|injury|referee|television)/.test(who)) return null;
+  const hits = ["home", "away"].filter((side) => {
+    const t = game?.[side] || {};
+    return [t.school, t.name, t.short, t.abbreviation, t.mascot, t.alt].some((n) => n && normTeam(n) === who)
+      || [t.school, t.name].some((n) => n && normTeam(n).length > 3 && (normTeam(n).startsWith(who) || who.startsWith(normTeam(n))));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
 export const periodLabel = (p) => {
   if (!p) return "";
   if (p <= 4) return `Q${p}`;
@@ -123,17 +174,25 @@ const SCRIMMAGE = new Set(["rush", "pass", "incomplete", "sack", "fumble"]);
 // where distance is a number or "Goal", ytg may be null (spot unknown),
 // brk = { label, detail } for an end of quarter / halftime, flag =
 // penalty text, approx = true when part of it came from CFBD's live state.
-export function nextSituation(plays, game) {
+// opts.stalled: no new play for a while and the clock isn't running — a
+// stoppage we have no play for (TV / media timeout, injury, review). It
+// reads plain "TIMEOUT", with no reason, until a play says otherwise.
+export function nextSituation(plays, game, { stalled = false } = {}) {
   if (!game || game.status !== "in_progress" || !plays?.length) return null;
   const top = plays[0];
   const topType = top.presentation?.type;
 
-  // A break: timeout or end of a quarter. The coming snap is whatever the
-  // last real play left; halftime (end of Q2) means a kickoff is next.
-  // A timeout is NOT a break here: its own card is already at the top of the
-  // feed, so the next-play card just shows the coming snap (showing
-  // "TIMEOUT" there too made every timeout appear twice).
+  // A break: a timeout, a stoppage, or the end of a quarter. The coming
+  // snap is whatever the last real play left; halftime (end of Q2) means a
+  // kickoff is next. A timeout keeps the down & distance (kind "timeout");
+  // its team only when the play names one (timeoutSide).
   let brk = null;
+  if (topType === "timeout") {
+    const side = timeoutSide(top, game);
+    brk = { kind: "timeout", label: "TIMEOUT", detail: side ? teamName(game[side]) : "", side };
+  } else if (stalled && topType !== "period") {
+    brk = { kind: "timeout", label: "TIMEOUT", detail: "" };
+  }
   if (topType === "period") {
     if (top.period === 2 || /HALF/.test(top.presentation?.headline || "")) return { brk: { label: "HALFTIME", detail: "" } };
     // Still live after the 4th (or an OT period) → overtime, fresh possessions.
@@ -145,8 +204,9 @@ export function nextSituation(plays, game) {
   const pr = last.presentation || {};
   const t = pr.type;
 
-  // Scores / PATs / safeties → a kickoff (or free kick) is next.
-  if (pr.touchdown || t === "conversion" || t === "safety" || (t === "field_goal" && /^FIELD GOAL$/.test(pr.headline || ""))) return null;
+  // Scores / PATs / safeties → a kickoff (or free kick) is next — nothing
+  // to show unless play has stopped (the timeout after a score).
+  if (pr.touchdown || t === "conversion" || t === "safety" || (t === "field_goal" && /^FIELD GOAL$/.test(pr.headline || ""))) return brk ? { brk } : null;
 
   const clock = (() => {
     // Prefer the live game clock only when it's consistent with the last play.
@@ -164,7 +224,7 @@ export function nextSituation(plays, game) {
     : { offense: side, down: 1, distance: 10, ytg: null, approx: true });
 
   // Penalty (a flag on the play or an accepted penalty nullifying it).
-  if (t === "penalty" || pr.nullified || pr.penaltyText) {
+  if (t === "penalty" || pr.nullified || pr.penaltyText || pr.flagStory) {
     const flag = t === "penalty" ? pr.detail : pr.penaltyText;
     return { ...base, ...fromLive(game.possession || last.offense), flag: flag || "Penalty" };
   }
@@ -187,6 +247,15 @@ export function nextSituation(plays, game) {
     return { ...base, ...newSeries() };
   }
   if (t === "field_goal") return { ...base, ...newSeries(), changeOfPossession: true }; // missed/blocked FG
+
+  // Stopped on 4th down (the parser's call) — the other team's ball.
+  if (pr.downsTurnover) {
+    if (last.yardsToGoal != null) {
+      const flipped = Math.max(1, Math.min(99, 100 - (last.yardsToGoal - (t === "incomplete" ? 0 : last.yards || 0))));
+      return { ...base, offense: receiving, down: 1, distance: 10 >= flipped ? "Goal" : 10, ytg: flipped, downsTurnover: true };
+    }
+    return { ...base, ...fromLive(receiving), downsTurnover: true };
+  }
 
   // A play from scrimmage: next down from the gain.
   if (SCRIMMAGE.has(t) && last.down && last.distance != null && last.yardsToGoal != null) {
@@ -424,4 +493,35 @@ export function scrollActiveTabIntoView(nav) {
   if (!on || nav.scrollWidth <= nav.clientWidth) return;
   const left = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
   nav.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+}
+
+// ── Team colors side by side ──
+// "Redmean" distance between two hex colors (0 … ~765).
+function colorDistance(a, b) {
+  const rgb = (h) => {
+    const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((h || "").trim());
+    if (!m) return null;
+    const x = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
+    return [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16));
+  };
+  const p = rgb(a);
+  const q = rgb(b);
+  if (!p || !q) return Infinity;
+  const r = (p[0] + q[0]) / 2;
+  const [dr, dg, db] = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+  return Math.sqrt((2 + r / 256) * dr * dr + 4 * dg * dg + (2 + (255 - r) / 256) * db * db);
+}
+const SIMILAR = 150;
+// Two colors that can be told apart for an away/home pair (stat bars,
+// splits): each team's primary, unless they're too close — then the home
+// side switches to its second color, else the away side to its own, else
+// the home side to white / gold, whichever stands further from the away one.
+export function distinctTeamColors(away, home, fallback = ["#4d9fff", "#f6a21d"]) {
+  const a = away?.color || fallback[0];
+  const h = home?.color || fallback[1];
+  if (colorDistance(a, h) >= SIMILAR) return [a, h];
+  if (home?.color2 && colorDistance(a, home.color2) >= SIMILAR) return [a, home.color2];
+  if (away?.color2 && colorDistance(away.color2, h) >= SIMILAR) return [away.color2, h];
+  const alt = ["#ffffff", "#f6a21d", "#9fb0c8"].sort((x, y) => colorDistance(a, y) - colorDistance(a, x))[0];
+  return [a, alt];
 }

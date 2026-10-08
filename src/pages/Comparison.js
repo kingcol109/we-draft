@@ -42,6 +42,7 @@ import {
   communityTraits, draftedPlayersAsHistorical, TRAIT_WEIGHT, TRAIT_MATCH_TARGET, percentileOf,
   decodeCompSnapshotRows, COMP_SNAPSHOT_VERSION, recommendedCompWindow, inRecommendedWindow, doubleExtendedFor,
 } from "../utils/historicalStats";
+import { cssRect } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const NAVY = "#00305c";
@@ -891,7 +892,7 @@ export default function Comparison() {
     const measure = () => {
       const el = searchInputRef.current;
       if (!el) return;
-      const r = el.getBoundingClientRect();
+      const r = cssRect(el);
       setSearchRect({ top: r.bottom + 6, left: r.left, width: r.width });
     };
     measure();
@@ -1104,7 +1105,7 @@ export default function Comparison() {
   );
 
   if (featureChecked && !featureEnabled) return <Navigate to="/" replace />;
-  if (!featureChecked || Object.keys(poolByPos).length === 0) return <>{seoHead}<LoadingSpinner label="Loading" size={48} minHeight="60vh" /></>;
+  if (!featureChecked || Object.keys(poolByPos).length === 0) return <>{seoHead}<LoadingSpinner label="Loading" size={48} minHeight="calc(60vh / var(--pz, 1))" /></>;
 
   const metricByKey = Object.fromEntries(STAT_METRICS.map((m) => [m.key, m]));
   const submittedMetrics = submitted ? STAT_METRICS.filter((m) => submitted.values[m.key] != null) : [];
@@ -1257,7 +1258,7 @@ export default function Comparison() {
   const heroWatermark = schoolBranding ? (schoolBranding.WordmarkDark || schoolBranding.Wordmark || "") : "";
 
   return (
-    <div style={{ background: "#f4f7fb", minHeight: "70vh", paddingBottom: "60px" }}>
+    <div style={{ background: "#f4f7fb", minHeight: "calc(70vh / var(--pz, 1))", paddingBottom: "60px" }}>
       <style>{`
         @keyframes wdCompFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         /* We-Draft.com Select card — slow gold glow, a rotating gold ring

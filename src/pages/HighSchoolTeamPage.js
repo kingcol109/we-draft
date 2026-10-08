@@ -307,7 +307,7 @@ export default function HighSchoolTeamPage() {
   }, [currentRankMap]);
 
   if (school === null) {
-    return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+    return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
   }
 
   if (school === false) {

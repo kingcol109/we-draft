@@ -34,25 +34,29 @@ import { hasRankedRoom, loadWeekRanked, swapRanked, RANKED_SIZE } from "../utils
 import RankedSwap from "../components/RankedSwap";
 import { useLiveGameDocs, useRankedSixIds, useGamePlays, useCfbdSchools, searchCfbdPlayers } from "../hooks/useLiveFeed";
 import { usePlayReveal } from "../hooks/usePlayReveal";
+import { useInsightReveal, useDevInsights } from "../hooks/useInsightReveal";
 import { useAuth } from "../context/AuthContext";
 import AuthModal from "../components/AuthModal";
 import Logo2 from "../assets/Logo2.png";
 import LivePlayCard, { PLAY_CARD_STYLE, PendingPlayCard, TwoPointCard, FinalCard, playSummary } from "../components/LivePlayCard";
+import LiveInsightCard, { INSIGHT_CARD_STYLE } from "../components/LiveInsightCard";
+import LiveBreakCard, { BREAK_CARD_STYLE, TimeoutTip, pickTimeoutTip } from "../components/LiveBreakCard";
 import confetti from "canvas-confetti";
 import LiveGameStats, { LIVE_STATS_STYLE } from "../components/LiveGameStats";
 import LivePerformances, { PERF_STYLE, performancesFromGames } from "../components/LivePerformances";
 import LiveChat, { LIVE_CHAT_STYLE } from "../components/LiveChat";
+import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import LiveField, { LIVE_FIELD_STYLE } from "../components/LiveField";
 import TeamRoster from "../components/TeamRoster";
 import { briefPlay } from "../utils/briefPlay";
 import HeaderTakeover, { TAKEOVER_STYLE, TAKEOVER_POINTS, takeoverForPlay, checkScorer } from "../components/HeaderTakeover";
 import ScoresWidget, { SCORES_WIDGET_STYLE, openPipWindow } from "../components/ScoresWidget";
 import {
-  statusLabel, teamShort, teamName, nextSituation, slatePhase, kickoffLabel, myFeedWindow, clutchHeat, clockSecs, dedupeFeed,
+  statusLabel, teamShort, teamName, nextSituation, timeoutSide, slatePhase, kickoffLabel, myFeedWindow, clutchHeat, clockSecs, dedupeFeed,
   FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows,
   loadFeedPrefs, normalizeFeedPrefs, DEFAULT_FEED_PREFS, playerIdSet, feedItemFromPlay, isCloseLatePlay,
   slateWeekKey, normalizeWeek, loadWeekFollows, weekTeams, weekPlayers, toggleWeekTeam, toggleWeekPlayer,
-  scrollActiveTabIntoView, liveGameHref,
+  scrollActiveTabIntoView, liveGameHref, distinctTeamColors,
 } from "../utils/live";
 
 // We-Pick (predictions, Ranked 6, standings, stats, friends) is a /live tab
@@ -60,11 +64,18 @@ import {
 const WePickHub = lazy(() => import("./WePickHub"));
 
 const GOLD = "#f6a21d";
+// No new play and no clock movement this long → a stoppage (GameView).
+const STALL_MS = 100 * 1000;
 const LIVE_RED = "#ff4d4d";
 
-const STYLE = `${PLAY_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}${LIVE_CHAT_STYLE}${LIVE_FIELD_STYLE}${TAKEOVER_STYLE}${SCORES_WIDGET_STYLE}
+// Bebas Neue — the scoreboard's athletic display face (team names).
+// @import has to lead the stylesheet.
+const STYLE = `@import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap");
+${PLAY_CARD_STYLE}${INSIGHT_CARD_STYLE}${BREAK_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}${LIVE_CHAT_STYLE}${LIVE_FIELD_STYLE}${TAKEOVER_STYLE}${SCORES_WIDGET_STYLE}
 .wdl-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.wdl-gtabs { display: flex; gap: 8px; margin: 22px 0 14px; }
+.wdl-gtabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 14px; }
+/* phones: every tab (Chat included) stays on screen — they wrap, smaller */
+@media (max-width: 640px) { .wdl-gtabs { gap: 6px; } .wdl-gtab { padding: 6px 11px; font-size: 11px; letter-spacing: 0.04em; } }
 .wdl-gtab { background: transparent; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px; padding: 7px 18px; font-weight: 900; font-size: clamp(13px, 1vw, 15px); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
 .wdl-gtab.on { background: #eef2f8; color: #0a0f1a; border-color: #eef2f8; }
 /* pop out the live play-by-play (desktop only), at the tabs' right end */
@@ -74,7 +85,7 @@ const STYLE = `${PLAY_CARD_STYLE}${LIVE_STATS_STYLE}${PERF_STYLE}${LIVE_CHAT_STY
 .wdl-gtab-pop.on { color: ${GOLD}; border-color: ${GOLD}; }
 .wdl-gtab-pop svg { width: 15px; height: 15px; display: block; }
 /* the play-by-play pop-out window: scoreboard pinned on top, the log scrolls */
-.wdl-logwin { min-height: 100vh; background: #0a0f1a; }
+.wdl-logwin { min-height: calc(100vh / var(--pz, 1)); background: #0a0f1a; }
 .wdl-logwin-board { position: sticky; top: 0; z-index: 10; background: #0a0f1a; }
 .wdl-logwin-board .wdl-mu { border: 0; border-radius: 0; }
 .wdl-logwin-plays { padding: 12px 10px 20px; }
@@ -155,7 +166,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-slot-swap { animation: wdl-swap 0.45s ease-out; }
 @keyframes wdl-swap { 0% { opacity: 0; transform: scale(0.985); } 100% { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .wdl-slot-swap { animation: none; } }
-@media (min-width: 1150px) { .wdl-rail { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow-y: auto; padding-right: 4px; } }
+@media (min-width: 1150px) { .wdl-rail { position: sticky; top: 84px; max-height: calc(100vh / var(--pz, 1) - 100px); overflow-y: auto; padding-right: 4px; } }
 .wdl-railhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 12px; }
 .wdl-railsub { margin-left: 8px; color: #4f6080; letter-spacing: 0.04em; text-transform: none; font-weight: 800; }
 .wdl-iconbtn.on { border-color: ${GOLD}; color: ${GOLD}; }
@@ -167,7 +178,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-cust-row.dim { opacity: 0.4; cursor: default; }
 .wdl-cust-row input { width: 20px; height: 20px; accent-color: ${GOLD}; flex-shrink: 0; }
 .wdl-cust-done { margin-top: 10px; width: 100%; background: ${GOLD}; color: #121212; border: none; border-radius: 10px; padding: 9px; font-weight: 900; font-size: 14px; cursor: pointer; }
-.wdl { min-height: 100vh; background: #0a0f1a; color: #eef2f8; font-family: "Inter", "Segoe UI", Arial, sans-serif; }
+.wdl { min-height: calc(100vh / var(--pz, 1)); background: #0a0f1a; color: #eef2f8; font-family: "Inter", "Segoe UI", Arial, sans-serif; }
 .wdl * { box-sizing: border-box; }
 .wdl a { color: inherit; }
 .wdl-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
@@ -236,12 +247,12 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 @keyframes wdl-rotate-hint { 0%, 30% { transform: rotate(0); } 55%, 85% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
 @media (orientation: portrait) { .wdl-mu.full .wdl-mu-rotate { display: flex; } }
 /* full-screen scoreboard (phones / tablets) — the ✕ moves to the top corner */
-.wdl-mu.full { position: fixed; inset: 0; z-index: 10050; margin: 0; border: 0; border-radius: 0; min-height: 100vh; min-height: 100dvh; align-content: center;
+.wdl-mu.full { position: fixed; inset: 0; z-index: 10050; margin: 0; border: 0; border-radius: 0; min-height: calc(100vh / var(--pz, 1)); min-height: calc(100dvh / var(--pz, 1)); align-content: center;
   padding-top: max(14px, env(safe-area-inset-top)); padding-bottom: max(14px, env(safe-area-inset-bottom)); }
 .wdl-mu.full .wdl-mu-popicon.close { top: max(10px, env(safe-area-inset-top)); bottom: auto; width: 36px; height: 36px; padding: 8px; }
 /* the pop-out widget window: the scoreboard fills it, flush to the top */
-.wdl-widget { min-height: 100vh; background: #0a0f1a; }
-.wdl-widget .wdl-mu { min-height: 100vh; box-sizing: border-box; border: 0; border-radius: 0; padding-top: 6px; align-content: start; }
+.wdl-widget { min-height: calc(100vh / var(--pz, 1)); background: #0a0f1a; }
+.wdl-widget .wdl-mu { min-height: calc(100vh / var(--pz, 1)); box-sizing: border-box; border: 0; border-radius: 0; padding-top: 6px; align-content: start; }
 /* the latest play — the board's last row */
 .wdl-mu-play { grid-column: 1 / -1; position: relative; z-index: 1; margin-top: 2px; padding: 8px 12px; border-radius: 10px; text-align: center;
   background: rgba(6,10,18,0.55); border: 1px solid rgba(255,255,255,0.12); font-weight: 800; font-size: 14px; line-height: 1.35; color: #eef2f8;
@@ -306,7 +317,8 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-pick-row { display: flex; align-items: center; gap: 10px; font-weight: 900; color: #eef2f8; text-transform: uppercase; }
 .wdl-pick-row img { width: 26px; height: 26px; object-fit: contain; }
 .wdl-pick-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wdl-pick-row input { width: 64px; text-align: center; font: inherit; font-size: 20px; font-weight: 900; color: #fff; background: #0c1220; border: 1px solid #2a3753; border-radius: 8px; padding: 6px; outline: none; }
+.wdl-pick-row input::-webkit-outer-spin-button, .wdl-pick-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.wdl-pick-row input { -moz-appearance: textfield; appearance: textfield; width: 64px; text-align: center; font: inherit; font-size: 20px; font-weight: 900; color: #fff; background: #0c1220; border: 1px solid #2a3753; border-radius: 8px; padding: 6px; outline: none; }
 .wdl-pick-row input:focus { border-color: ${GOLD}; }
 .wdl-pick-save { margin-top: 4px; background: ${GOLD}; color: #121212; border: 0; border-radius: 10px; padding: 9px; font-weight: 900; font-size: 14px; cursor: pointer; font-family: inherit; }
 .wdl-pick-save:disabled { opacity: 0.6; cursor: default; }
@@ -368,7 +380,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 }
 @media (min-width: 1150px) {
   .wdl-wp-grid { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); align-items: start; }
-  .wdl-wp-side { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow-y: auto; }
+  .wdl-wp-side { position: sticky; top: 84px; max-height: calc(100vh / var(--pz, 1) - 100px); overflow-y: auto; }
 }
 .wdl-wp-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #1d2840; }
 .wdl-wp-tab { display: inline-flex; align-items: center; gap: 6px; background: #111a2b; color: #9fb0c8; border: 1px solid #26324a; border-radius: 999px; padding: 6px 14px; font-weight: 800; font-size: 13px; text-decoration: none; white-space: nowrap; }
@@ -464,8 +476,12 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-mu-team.away { justify-self: start; }
 .wdl-mu-team.home { justify-self: end; }
 .wdl-mu-logo { position: relative; width: clamp(64px, 7.5vw, 120px); height: clamp(64px, 7.5vw, 120px); object-fit: contain; filter: drop-shadow(0 8px 18px rgba(0,0,0,0.5)); }
-.wdl-mu-name { position: relative; font-weight: 900; font-size: clamp(16px, 1.6vw, 26px); color: #fff; letter-spacing: 0.02em; text-shadow: 0 2px 8px rgba(0,0,0,0.5); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding-bottom: 4px; }
+.wdl-mu-name { position: relative; font-family: "Bebas Neue", "Arial Narrow", sans-serif; font-weight: 400; font-size: clamp(26px, 2.3vw, 40px); line-height: 1; text-transform: uppercase; color: #fff; letter-spacing: 0.03em; text-shadow: 0 3px 12px rgba(0,0,0,0.6); padding: 4px 2px 7px;
+  /* always one line (ellipsis only as a last resort on the longest names) */
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .wdl-mu-name.ball::after { content: ""; position: absolute; left: 15%; right: 15%; bottom: 0; height: 3px; border-radius: 2px; background: ${GOLD}; box-shadow: 0 0 10px ${GOLD}; }
+.wdl-mu-tlink { color: inherit; text-decoration: none; }
+.wdl-mu-tlink:hover { text-decoration: underline; text-underline-offset: 4px; }
 .wdl-mu-rank { color: rgba(255,255,255,0.65); font-size: 0.7em; margin-right: 6px; }
 .wdl-mu-score { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .wdl-mu-score b { font-weight: 900; font-size: clamp(58px, 7.5vw, 120px); line-height: 1; color: #fff; text-shadow: 0 6px 22px rgba(0,0,0,0.55); animation: wdl-flash 1.6s ease-out; }
@@ -476,6 +492,10 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-mu-fb.home { transform: rotate(-32deg); }
 /* Down & distance — a scoreboard readout: two lit cells. */
 /* themed by the team with the ball (--pc, its color) */
+.wdl-mu-ddbox { display: grid; place-items: center; }
+.wdl-mu-ddbox > * { grid-area: 1 / 1; }
+.wdl-mu-sizer { visibility: hidden; }
+.wdl-mu-tobadge { align-self: start; transform: translateY(-62%); font-size: 9px; font-weight: 900; letter-spacing: 0.14em; color: #121212; background: #f2c94c; border-radius: 999px; padding: 2px 8px; z-index: 1; }
 .wdl-mu-dd { display: flex; border-radius: 10px; overflow: hidden; border: 2px solid rgba(255,255,255,0.85); background: linear-gradient(180deg, color-mix(in srgb, var(--pc) 88%, #fff), var(--pc) 55%, color-mix(in srgb, var(--pc) 75%, #000)); box-shadow: 0 0 16px color-mix(in srgb, var(--pc) 60%, transparent), 0 4px 14px rgba(0,0,0,0.45); }
 .wdl-mu-dd > div { display: flex; flex-direction: column; align-items: center; padding: 5px 14px 6px; min-width: 56px; }
 .wdl-mu-dd > div + div { border-left: 1px solid rgba(255,255,255,0.35); }
@@ -520,7 +540,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .wdl-main { padding: 12px 12px 32px; }
   .wdl-mu { grid-template-columns: 1fr auto auto auto 1fr; gap: 6px; padding: 14px 10px; min-height: 0; }
   .wdl-mu-logo { width: 44px; height: 44px; }
-  .wdl-mu-name { font-size: 13px; }
+  .wdl-mu-name { font-size: 22px; }
   .wdl-mu-score b { font-size: 40px; }
   .wdl-mu-fb { width: 22px; }
   .wdl-mu-dd > div { padding: 3px 8px 4px; min-width: 40px; }
@@ -536,7 +556,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
   .wdl-mu-day small { display: block; margin: 2px 0 0; }
   .wdl-mu-tag { font-size: 8px; padding: 2px 7px; letter-spacing: 0.08em; }
   .wdl-mu-tv { font-size: 10px; padding: 2px 6px; }
-  .wdl-main.feed .wdl-rail { order: -1; max-height: 46vh; overflow-y: auto; border-bottom: 1px solid #1d2840; padding-bottom: 8px; }
+  .wdl-main.feed .wdl-rail { order: -1; max-height: calc(46vh / var(--pz, 1)); overflow-y: auto; border-bottom: 1px solid #1d2840; padding-bottom: 8px; }
   .lpc { padding: 12px 14px; }
   .lpc-line { font-size: 19px; }
   .lpc.hype .lpc-line { font-size: 22px; }
@@ -731,8 +751,9 @@ function stripOrder(games) {
   return [...late, ...early, ...finals];
 }
 
-// A row of live scores (then all of the week's finals) for views that aren't the
-// All Games grid — click one to open it. Close 4th-quarter games glow. The
+// A row of the week's games for views that aren't the All Games grid: live
+// games first, then the ones still to come (kickoff order, with time and
+// TV), then the finals — so it's never empty while the week has games — click one to open it. Close 4th-quarter games glow. The
 // order is set when the page loads and then holds — scores update in place
 // and games only move on a refresh. In review (the week's over, all finals)
 // the row is Top 25 first instead (byTop25). Ranks show before each name. Games that start later join the end of
@@ -745,8 +766,10 @@ function ScoreStrip({ games, onPick, current, phase, onPopout, popped }) {
   const orderPhase = useRef(phase);
   if (orderPhase.current !== phase) { orderPhase.current = phase; order.current = null; }
   const shown = games.filter((g) => g.status === "in_progress" || g.status === "final");
-  const upcoming = shown.length ? null
-    : games.filter((g) => g.status === "scheduled").sort((a, b) => (Date.parse(a.startDate) || 0) - (Date.parse(b.startDate) || 0));
+  // Still to be played (a game 6+ hours past kickoff that never started —
+  // postponed — is left out).
+  const upcoming = games.filter((g) => g.status === "scheduled" && !(Date.parse(g.startDate) < Date.now() - 6 * 3600e3))
+    .sort((a, b) => (Date.parse(a.startDate) || 0) - (Date.parse(b.startDate) || 0));
   if (!order.current && shown.length) order.current = (phase === "review" ? [...shown].sort(byTop25) : stripOrder(shown)).map((g) => g.id);
   if (order.current) {
     const known = new Set(order.current);
@@ -760,7 +783,8 @@ function ScoreStrip({ games, onPick, current, phase, onPopout, popped }) {
     }
   }
   const byId = new Map(shown.map((g) => [g.id, g]));
-  const list = upcoming || (order.current || []).map((id) => byId.get(id)).filter(Boolean);
+  const ordered = (order.current || []).map((id) => byId.get(id)).filter(Boolean);
+  const list = [...ordered.filter((g) => g.status === "in_progress"), ...upcoming, ...ordered.filter((g) => g.status === "final")];
   if (!list.length) return null;
   return (
     <div className="wdl-strip">
@@ -1047,7 +1071,7 @@ function YourWeekGamePlayers({ game, players, onOpen }) {
       <div key={p.id} className={`wdl-yw-player${live ? " live" : ""}`}>
         <div className="wdl-yw-ph">
           {slug
-            ? <Link to={`/player/${slug}`} className="wdl-yw-name">{p.name}<small>{sub}</small></Link>
+            ? <Link to={`/player/${slug}`} target="_blank" rel="noopener noreferrer" className="wdl-yw-name">{p.name}<small>{sub}</small></Link>
             : <span className="wdl-yw-name">{p.name}<small>{sub}</small></span>}
           <span className={`wdl-yw-game${live ? " live" : ""}`} onClick={() => onOpen(game.id)}>
             {side === "home" ? "vs" : "@"} {teamShort(opp)} · {started ? `${statusLabel(game)} ${game[side].points ?? 0}-${opp.points ?? 0}` : kickoffLabel(game.startDate, game.startTimeTBD)}
@@ -1274,6 +1298,48 @@ const perfScore = (st = {}) => {
 
 // We-Pick on one game: every public pick (schedule26/{id}/picks), mapped
 // onto /live's home/away by school name — read once.
+// A score with the winner first: "OSU 31 – IOWA 17".
+function winFirst(game, away, home) {
+  const [w, ws, l, ls] = home > away ? [game.home, home, game.away, away] : [game.away, away, game.home, home];
+  return `${teamShort(w)} ${ws} – ${teamShort(l)} ${ls}`;
+}
+
+// uid → verified (users/{uid}.verified) for the names on screen. Cached for
+// the page's life, so each person is read once.
+const verifiedCache = new Map();
+function useVerifiedUids(uids) {
+  const key = [...new Set(uids)].sort().join(",");
+  const [, bump] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const missing = key ? key.split(",").filter((u) => !verifiedCache.has(u)) : [];
+    if (!missing.length) return undefined;
+    Promise.all(missing.map((u) => getDoc(doc(db, "users", u)).then((s) => verifiedCache.set(u, !!(s.exists() && s.data().verified))).catch(() => verifiedCache.set(u, false))))
+      .then(() => { if (alive) bump((n) => n + 1); });
+    return () => { alive = false; };
+  }, [key]);
+  return Object.fromEntries(key ? key.split(",").map((u) => [u, !!verifiedCache.get(u)]) : []);
+}
+
+// The game's community We-Pick picks for the halftime break card: who
+// fans picked, their average predicted final, and the viewer's own pick
+// (all in /live's home/away). null when there are none.
+function breakPickSummary(game, picks, user) {
+  if (!game || !picks?.picks?.length) return null;
+  const swapped = !!picks.sched.Home && picks.sched.Home === game.away?.school;
+  const sideOf = (s) => (s === "home" ? (swapped ? "away" : "home") : s === "away" ? (swapped ? "home" : "away") : null);
+  const split = { home: 0, away: 0 };
+  for (const p of picks.picks) { const sd = sideOf(pickedSideOf(p)); if (sd) split[sd]++; }
+  const scored = picks.picks.filter(hasScorePick);
+  const avg = (k) => Math.round(scored.reduce((t, p) => t + p[k], 0) / (scored.length || 1));
+  const mine = user ? picks.picks.find((p) => p.uid === user.uid) : null;
+  return {
+    split,
+    avg: scored.length ? { home: swapped ? avg("awayScore") : avg("homeScore"), away: swapped ? avg("homeScore") : avg("awayScore") } : null,
+    mine: mine && hasScorePick(mine) ? { home: swapped ? mine.awayScore : mine.homeScore, away: swapped ? mine.homeScore : mine.awayScore } : null,
+  };
+}
+
 function useGamePicks(wedraftGameId) {
   const [state, setState] = useState(null);
   useEffect(() => {
@@ -1390,7 +1456,7 @@ function GameRecap({ game, gameId, slateGame }) {
             <span className="lpc-team">{(win.logoDark || win.logo) && <img src={win.logoDark || win.logo} alt="" />}{teamShort(win)}</span>
           </div>
           {top.slug
-            ? <Link to={`/player/${top.slug}`} className="wdl-recap-name">{top.name}</Link>
+            ? <Link to={`/player/${top.slug}`} target="_blank" rel="noopener noreferrer" className="wdl-recap-name">{top.name}</Link>
             : <div className="wdl-recap-name">{top.name}</div>}
           <div className="wdl-recap-lines">{topLines.map(([k, v]) => <div key={k}><span>{k}</span>{v}</div>)}</div>
         </div>
@@ -1402,17 +1468,17 @@ function GameRecap({ game, gameId, slateGame }) {
             : !wp ? <div className="wdl-recap-sub">No We-Pick picks on this game.</div>
               : <>
                 {wp.scoredCount > 0 && (
-                  <div className="wdl-recap-big"><small>Fans predicted</small>{teamShort(game.away)} {wp.avgAway} – {teamShort(game.home)} {wp.avgHome}</div>
+                  <div className="wdl-recap-big"><small>Fans predicted</small>{winFirst(game, wp.avgAway, wp.avgHome)}</div>
                 )}
                 <div className="wdl-recap-sub">
-                  Final: {teamShort(game.away)} {ap} – {teamShort(game.home)} {hp}
+                  Final: {winFirst(game, ap, hp)}
                 </div>
                 <div className="wdl-recap-big" style={{ marginTop: 10 }}>{wp.pct}%<small style={{ marginLeft: 8 }}>picked {teamShort(win)} · {wp.right} of {wp.total}</small></div>
                 <div className="wdl-recap-bar" style={{ "--tc": win.color || GOLD }}><i style={{ width: `${wp.pct}%` }} /></div>
                 {wp.exact > 0 && <div className="wdl-recap-sub">🎯 {wp.exact} nailed the exact score</div>}
                 {wp.mine && (
                   <div className="wdl-recap-sub" style={{ color: "#eef2f8" }}>
-                    Your pick: {teamShort(game.away)} {wp.mine.away} – {teamShort(game.home)} {wp.mine.home} · <span style={{ color: wp.mine.points > 0 ? "#3ddc84" : "#ff6b6b" }}>{wp.mine.points} pts</span>
+                    Your pick: {winFirst(game, wp.mine.away, wp.mine.home)} · <span style={{ color: wp.mine.points > 0 ? "#3ddc84" : "#ff6b6b" }}>{wp.mine.points} pts</span>
                     {" "}{wp.mine.ranked ? <span className="wdl-rk on">⭐ Ranked</span> : <span className="wdl-rk">Unranked</span>}
                   </div>
                 )}
@@ -1540,7 +1606,7 @@ function GameRoster({ game, side, roster: given, loading }) {
   if (!roster?.players?.length) return <div className="wdl-empty">No roster on file for {teamShort(t)} yet.</div>;
   return (
     <div className="wdl-roster">
-      <TeamRoster roster={roster} color1={t.color || "#1d2840"} color2={t.color2 || "#f6a21d"} isMobile={narrow} dark hideStars />
+      <TeamRoster roster={roster} color1={t.color || "#1d2840"} color2={t.color2 || "#f6a21d"} isMobile={narrow} dark hideStars newTab />
     </div>
   );
 }
@@ -1577,7 +1643,7 @@ function PreviewView({ game, slateGame }) {
   // Leaders: the player's name as the header (a link when he has a
   // We-Draft profile), then the stat and his line under it.
   const leaderCell = (x, unit, line) => (!x ? <span style={{ color: "#6f819c" }}>—</span> : <>
-    <span className="nm">{x.p.slug ? <Link to={`/player/${x.p.slug}`}>{x.p.first} {x.p.last}</Link> : `${x.p.first} ${x.p.last}`}{x.p.pos && <span className="u"> {x.p.pos}</span>}</span>
+    <span className="nm">{x.p.slug ? <Link to={`/player/${x.p.slug}`} target="_blank" rel="noopener noreferrer">{x.p.first} {x.p.last}</Link> : `${x.p.first} ${x.p.last}`}{x.p.pos && <span className="u"> {x.p.pos}</span>}</span>
     <small className="stat">{Number.isInteger(x.v) ? x.v.toLocaleString() : x.v} {unit}</small>
     {line && <small className="sub">{line(x.p.s || {})}</small>}
   </>);
@@ -1604,7 +1670,7 @@ function PreviewView({ game, slateGame }) {
               const r = roster.get(p.Slug);
               const line = r?.s ? seasonLine(r.s, p.Position) : "";
               return (
-                <Link key={p.id} to={`/player/${p.Slug}`} className="wdl-pro" style={{ "--tc": t.color || "#2a3753" }}>
+                <Link key={p.id} to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" className="wdl-pro" style={{ "--tc": t.color || "#2a3753" }}>
                   <span className="n">{p.First} {p.Last}<small>{[p.Position, p.Eligible].filter(Boolean).join(" · ")}</small></span>
                   <span className="g">{gradeLabel(p.avg) || "Watchlist"}</span>
                   <span className="l">{line || "No stats yet this season"}</span>
@@ -1698,6 +1764,11 @@ function PreviewPickCard({ game, withInfo = false }) {
   const [msg, setMsg] = useState("");
   const [mineLocal, setMineLocal] = useState(null);
   const [showAllPicks, setShowAllPicks] = useState(false);
+  // Switching games reuses this card — start the new game clean (the last
+  // game's typed score, message and saved pick must not carry over).
+  useEffect(() => {
+    setVals({ away: "", home: "" }); setMsg(""); setMineLocal(null); setShowAllPicks(false); setSwap(null);
+  }, [game?.wedraftGameId]); // eslint-disable-line react-hooks/exhaustive-deps
   // The Ranked 6 swap chooser (components/RankedSwap.js), open when this
   // pick should be ranked but the week's 6 are full: { ranked } (the other
   // ranked picks). swapBusy: the pick being swapped out / "rank" while ranking.
@@ -1707,6 +1778,8 @@ function PreviewPickCard({ game, withInfo = false }) {
   const picks = (data?.picks || []).map((p) => (user && p.uid === user.uid && mineLocal ? { ...p, ...mineLocal } : p));
   if (user && mineLocal && !picks.some((p) => p.uid === user.uid)) picks.push({ uid: user.uid, ...mineLocal });
   const mine = user ? picks.find((p) => p.uid === user.uid) : null;
+  // Verified badges for the public picks' names.
+  const verified = useVerifiedUids(picks.filter((p) => p.visibility !== "private").map((p) => p.uid));
   // A pick's scores in /live's orientation.
   const live = (p) => ({ home: swapped ? p.awayScore : p.homeScore, away: swapped ? p.homeScore : p.awayScore });
   useEffect(() => {
@@ -1811,7 +1884,7 @@ function PreviewPickCard({ game, withInfo = false }) {
       <label className="wdl-pick-row">
         {(t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
         <span className="nm">{teamShort(t)}</span>
-        <input type="number" min="0" max="99" inputMode="numeric" value={vals[side]} disabled={!open || saving}
+        <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} value={vals[side]} disabled={!open || saving}
           onChange={(e) => setVals((v) => ({ ...v, [side]: e.target.value.replace(/[^0-9]/g, "").slice(0, 2) }))} />
       </label>
     );
@@ -1847,7 +1920,7 @@ function PreviewPickCard({ game, withInfo = false }) {
         </div>
       ) : (
         <div className="wdl-recap-sub">
-          {hasScorePick(mine) ? <>Your pick: {teamShort(game.away)} {live(mine).away} – {teamShort(game.home)} {live(mine).home} {mine.ranked ? <span className="wdl-rk on">⭐ Ranked</span> : <span className="wdl-rk">Unranked</span>}</>
+          {hasScorePick(mine) ? <>Your pick: {winFirst(game, live(mine).away, live(mine).home)} {mine.ranked ? <span className="wdl-rk on">⭐ Ranked</span> : <span className="wdl-rk">Unranked</span>}</>
             : !data ? "Loading…"
               : notYet ? `Picks open ${new Date(opensAt).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}.`
                 : "Picks are locked."}
@@ -1881,8 +1954,8 @@ function PreviewPickCard({ game, withInfo = false }) {
               {side("home")}
             </div>
             <div className="wdl-pick-split">
-              <i style={{ width: `${awayPct}%`, background: game.away?.color || "#4d9fff" }} />
-              <i style={{ width: `${100 - awayPct}%`, background: game.home?.color || GOLD }} />
+              <i style={{ width: `${awayPct}%`, background: distinctTeamColors(game.away, game.home, ["#4d9fff", GOLD])[0] }} />
+              <i style={{ width: `${100 - awayPct}%`, background: distinctTeamColors(game.away, game.home, ["#4d9fff", GOLD])[1] }} />
             </div>
             <div className="wdl-pick-legend"><span>{awayPct}% pick {teamShort(game.away)}</span><span>{100 - awayPct}% pick {teamShort(game.home)}</span></div>
             {aAvg == null && <div className="wdl-recap-sub">No score picks yet — the average score shows once fans predict one.</div>}
@@ -1899,10 +1972,10 @@ function PreviewPickCard({ game, withInfo = false }) {
             const t = side ? game[side] : null;
             return (
               <div key={p.uid} className={`wdl-picklist-row${user && p.uid === user.uid ? " me" : ""}`}>
-                <span className="who">{p.displayName || "Anonymous Fan"}{user && p.uid === user.uid ? " (you)" : ""}{p.ranked && hasScorePick(p) && <span title="In their Ranked 6"> ⭐</span>}</span>
+                <span className="who"><VerifiedNameBadge uid={p.uid} name={p.displayName || "Anonymous Fan"} verified={!!verified[p.uid]} size={13} />{user && p.uid === user.uid ? " (you)" : ""}{p.ranked && hasScorePick(p) && <span title="In their Ranked 6"> ⭐</span>}</span>
                 <span className="pk">
                   {t && (t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
-                  {sc ? `${sc.away}–${sc.home}` : t ? teamShort(t) : ""}
+                  {sc ? `${Math.max(sc.away, sc.home)}–${Math.min(sc.away, sc.home)}` : t ? teamShort(t) : ""}
                 </span>
                 {p.prediction && <span className="txt">“{p.prediction}”</span>}
               </div>
@@ -2122,7 +2195,7 @@ function useSchoolExtras(names) {
       .then((snap) => {
         if (!alive) return;
         const m = {};
-        snap.docs.forEach((d) => { const x = d.data(); if (x.School) m[x.School] = { color2: x.Color2 || null, mascot: x.Mascot || null }; });
+        snap.docs.forEach((d) => { const x = d.data(); if (x.School) m[x.School] = { color2: x.Color2 || null, mascot: x.Mascot || null, slug: x.Slug || x.TeamSlug || null }; });
         setMap(m);
       })
       .catch(() => {});
@@ -2217,7 +2290,9 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // takeover: { kind, side, key, hold? } — hold is the score shown until it
   // ends (the old score), then the new one counts up (ScoreNum).
   const [takeover, setTakeover] = useState(null);
-  const clearTakeover = useCallback(() => setTakeover(null), []);
+  // Takeovers that have played out (by key) — their score is no longer held.
+  const doneTakeovers = useRef(new Set());
+  const clearTakeover = useCallback(() => setTakeover((t) => { if (t) doneTakeovers.current.add(t.key); return null; }), []);
   // Pop-out scoreboard (desktop Chrome / Edge): an always-on-top Document
   // Picture-in-Picture window the scoreboard + a play line render into, so
   // it can float over other apps and screens. The page's styles are copied in.
@@ -2309,6 +2384,22 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // New plays are revealed through the top slot one at a time (each held
   // ~10s before it drops into the list) — see hooks/usePlayReveal.js.
   const { listed, slot, justListed, queued } = usePlayReveal(plays, gameId);
+  // Insight cards (server/live/insights.js, on the game doc): each shows a
+  // beat after its play drops into the list, just above it.
+  const devPreview = useDevInsights(gameId); // local preview only (null in production)
+  const devInsights = devPreview?.insights || null;
+  const insightsByPlay = useInsightReveal(devInsights || live?.insights, listed, gameId);
+  // Break summaries (server/live/breaks.js): the rotating break card in the
+  // top slot while play is stopped, a recap in the log after.
+  const breaks = devPreview?.breaks || live?.breaks || [];
+  const trivia = devPreview?.trivia || live?.trivia || [];
+  const breakByPlay = new Map(breaks.map((b) => [b.markerPlayId, b]));
+  // (preview only: each timeout's box as the live slot would have shown it)
+  const devTimeouts = new Map((devPreview?.timeouts || []).map((t) => [t.playId, t]));
+  const { user } = useAuth();
+  // We-Pick's community picks — read only once halftime has a card to show them on.
+  const breakPicks = useGamePicks(breaks.some((b) => b.key === "half") ? gLive?.wedraftGameId : null);
+  const breakPick = useMemo(() => breakPickSummary(gLive, breakPicks, user), [gLive?.wedraftGameId, breakPicks, user]); // eslint-disable-line react-hooks/exhaustive-deps
   // Tell the page which plays are still queued, so the Feed rail holds
   // them back until the game feed has shown them.
   const queuedKey = queued.join(",");
@@ -2316,21 +2407,44 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
     onQueueChange?.(gameId, queued);
     return () => onQueueChange?.(gameId, []); // leaving this game: nothing held back
   }, [gameId, queuedKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // While plays are queued, the header shows the game as of the last play
-  // revealed — score, quarter, clock — and catches up as they play out.
+  // A live game's header score is always the score after the last play
+  // revealed — the game doc often gets a new score before its play lands,
+  // and the score must never change ahead of the play that caused it.
+  // While plays are queued the quarter and clock follow the reveal too.
   const g = useMemo(() => {
-    if (!gLive || !queued.length) return gLive;
+    if (!gLive || gLive.status !== "in_progress") return gLive;
     const shownNewest = slot || listed[listed.length - 1];
     if (!shownNewest || shownNewest.homeScore == null) return gLive;
     return {
       ...gLive,
       home: { ...gLive.home, points: shownNewest.homeScore },
       away: { ...gLive.away, points: shownNewest.awayScore },
-      period: shownNewest.period ?? gLive.period,
-      clock: shownNewest.clock ?? gLive.clock,
+      ...(queued.length ? { period: shownNewest.period ?? gLive.period, clock: shownNewest.clock ?? gLive.clock } : {}),
     };
   }, [gLive, queuedKey, slot, listed]); // eslint-disable-line react-hooks/exhaustive-deps
   const newestListed = useMemo(() => [...listed].reverse(), [listed]);
+
+  // Stoppage watch: no new play revealed and the game clock not moving for
+  // STALL_MS → play has stopped (a TV timeout, an injury, a review) and the
+  // next-play card reads "TIMEOUT" instead of waiting on a snap.
+  const newestShownId = (slot || newestListed[0])?.id ?? null;
+  const stall = useRef({ playId: null, playAt: 0, clock: null, clockAt: 0 });
+  const [tick, setTick] = useState(() => Date.now());
+  const liveNow = gLive?.status === "in_progress";
+  useEffect(() => {
+    if (!liveNow) return undefined;
+    const id = setInterval(() => setTick(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, [liveNow]);
+  {
+    const st = stall.current;
+    const t = Date.now();
+    if (st.playId !== newestShownId) { st.playId = newestShownId; st.playAt = t; }
+    const clk = gLive ? `${gLive.period}|${gLive.clock}` : null;
+    if (st.clock !== clk) { st.clock = clk; st.clockAt = t; }
+  }
+  const stalled = liveNow && !queued.length && !slot
+    && tick - stall.current.playAt > STALL_MS && tick - stall.current.clockAt > STALL_MS;
 
   // Scroll the play picked in the Feed into view — once per pick. (It
   // waits for that play to be loaded, but new plays arriving afterwards
@@ -2362,15 +2476,24 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // Takeovers: a touchdown / field goal / safety / turnover as its play is
   // revealed (the "just now" slot — never for plays already there when the
   // game opened). The winner's takeover is with the final confetti below.
+  // The score before the play in the slot: the newest play under it.
+  const prevPts = useMemo(() => {
+    const p = [...listed].reverse().find((x) => x.homeScore != null);
+    return p ? { home: p.homeScore, away: p.awayScore } : { ...lastPoints.current };
+  }, [listed]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The takeover the slot's play calls for — known in the same render the
+  // play appears, so the score is held from the first frame (an effect
+  // alone let the new score flash up before the takeover started).
+  const slotTk = slot && gLive?.status === "in_progress" ? checkScorer(takeoverForPlay(slot), slot, prevPts) : null;
+  const slotKey = slot ? `play-${slot.id}` : null;
   useEffect(() => {
-    if (!slot || gLive?.status !== "in_progress") return;
-    // The score change on the play decides the team (checkScorer).
-    const t = checkScorer(takeoverForPlay(slot), slot, lastPoints.current);
-    if (t?.side) setTakeover({ ...t, key: `play-${slot.id}`, hold: TAKEOVER_POINTS[t.kind] ? { ...lastPoints.current } : null });
-  }, [slot?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (slotTk?.side) setTakeover({ ...slotTk, key: slotKey, hold: TAKEOVER_POINTS[slotTk.kind] ? prevPts : null });
+  }, [slotKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The score on the board while a scoring takeover is pending or running.
+  const holdPts = takeover?.hold
+    || (slotTk?.side && TAKEOVER_POINTS[slotTk.kind] && !doneTakeovers.current.has(slotKey) && takeover?.key !== slotKey ? prevPts : null);
 
-  // The last score shown (g lags the live doc while queued plays reveal) —
-  // a takeover holds it until it ends.
+  // The last score shown — the fallback "before" score when nothing is listed yet.
   useEffect(() => { lastPoints.current = { away: g?.away?.points ?? null, home: g?.home?.points ?? null }; });
 
   const scrolledTo = useRef(null);
@@ -2390,7 +2513,9 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
     play: p,
     // Badge = team credited with the play (defense on a sack/pick); the
     // right column shows who had the ball on the snap.
-    team: (p.presentation?.creditSide || p.offense) ? g[p.presentation?.creditSide || p.offense] : null,
+    // A timeout's team only when its text names one (utils/live.js timeoutSide).
+    team: p.presentation?.type === "timeout" ? (timeoutSide(p, g) ? g[timeoutSide(p, g)] : null)
+      : (p.presentation?.creditSide || p.offense) ? g[p.presentation?.creditSide || p.offense] : null,
     possessionTeam: p.offense ? g[p.offense] : null,
     scoreLabel: `${teamShort(g.away)} ${p.awayScore} – ${teamShort(g.home)} ${p.homeScore}`,
     followedIds,
@@ -2401,13 +2526,21 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
   // One object feeds the next-play card AND the header. null → nothing to
   // show (not live, or a kickoff is next after a score).
   const shown = slot ? [slot, ...newestListed] : newestListed;
-  const next = isLive ? nextSituation(shown, g) : null;
+  const next = isLive ? nextSituation(shown, g, { stalled }) : null;
+  // The break on right now: play stopped at the end of a period whose
+  // summary is in (end of Q1, halftime, end of Q3).
+  const activeBreak = isLive && !slot && next?.brk && shown[0]?.presentation?.type === "period"
+    ? breaks.find((b) => b.period === shown[0].period) || null : null;
   const heat = clutchHeat(g);
   const isFinal = g.status === "final";
   // The scoreboard's state.
   const headG = g;
   const headLive = isLive;
   const headNext = next;
+  // Who has the ball, as of the plays on screen (the game doc's possession
+  // runs ahead of them) — nobody during a break or after a score.
+  const snapNext = next && (!next.brk || next.brk.kind === "timeout") ? next : null;
+  const ballSide = !headLive ? null : !shown.length ? headG.possession : snapNext?.offense || null;
   // A two-point try is its own entity, right after its touchdown.
   const withTwo = (p) => (p.presentation?.pat?.type === "two"
     ? <TwoPointCard pat={p.presentation.pat} team={g[p.presentation.creditSide || p.offense]} /> : null);
@@ -2428,12 +2561,19 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
         const team = (side) => {
           const t = headG[side] || {};
           const logo = t.logoDark || t.logo;
-          const hasBall = headLive && headG.possession === side;
+          const hasBall = headLive && ballSide === side;
           return (
             <div className={`wdl-mu-team ${side}${loser === side ? " lose" : ""}${loser && loser !== side ? " win" : ""}`}>
               {logo && <img className="wdl-mu-logo" src={logo} alt="" />}
               <div className={`wdl-mu-name${hasBall ? " ball" : ""}`}>
-                {t.rank ? <span className="wdl-mu-rank">#{t.rank}</span> : null}<span className="wdl-mu-full">{teamName(t)}</span><span className="wdl-mu-short">{teamShort(t)}</span>
+                {(() => {
+                  const label = <>{t.rank ? <span className="wdl-mu-rank">#{t.rank}</span> : null}<span className="wdl-mu-full">{teamName(t)}</span><span className="wdl-mu-short">{teamShort(t)}</span></>;
+                  // the school's Slug, else the site-wide fallback from its name (TeamPage.js toTeamSlug)
+                  const slug = t.slug || extras[t.school]?.slug
+                    || (t.school ? t.school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-") : null);
+                  // The team's We-Draft page — a new tab, so the game stays open.
+                  return slug ? <a className="wdl-mu-tlink" href={`/team/${slug}`} target="_blank" rel="noopener noreferrer" title={`${teamName(t)} — team page (opens in a new tab)`}>{label}</a> : label;
+                })()}
               </div>
               {slateGame?.[side]?.record && <div className="wdl-mu-rec">{slateGame[side].record}</div>}
             </div>
@@ -2443,9 +2583,9 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
           const t = headG[side] || {};
           return (
             <div className={`wdl-mu-score ${side}${loser === side ? " lose" : ""}${loser && loser !== side ? " win" : ""}`}>
-              {headLive && headG.possession === side && <FootballIcon side={side} />}
+              {headLive && ballSide === side && <FootballIcon side={side} />}
               {t.points != null
-                ? <ScoreNum value={takeover?.hold?.[side] ?? t.points} bump={headG[side]?.color2 || extras[headG[side]?.school]?.color2 || "#fff"} />
+                ? <ScoreNum value={holdPts?.[side] ?? t.points} bump={headG[side]?.color2 || extras[headG[side]?.school]?.color2 || "#fff"} />
                 : <b className="pre">–</b>}
             </div>
           );
@@ -2491,18 +2631,27 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
               <div className={`wdl-mu-status${headLive ? " live" : ""}`}>{headLive && <span className="wdl-dot" />}{statusLabel(headG)}</div>
               {/* Down & distance, scoreboard style (the spot is on the field
                   strip below); a break (halftime …) as plain text. */}
-              {headLive && headNext?.down ? (
-                <div className="wdl-mu-dd" style={{ "--pc": headG[headNext.offense]?.color || "#1d2840" }}>
-                  <div><span>Down</span><b>{["", "1st", "2nd", "3rd", "4th"][headNext.down]}</b></div>
-                  <div><span>To go</span><b className={headNext.distance === "Goal" ? "goal" : ""}>{headNext.distance}</b></div>
+              {/* One fixed-height box whatever it holds — down & distance, a
+                  break, or nothing (after a score) — so the board never
+                  changes size mid-game. The hidden copy sets the height. */}
+              {headLive && (
+                <div className="wdl-mu-ddbox">
+                  <div className="wdl-mu-dd wdl-mu-sizer" aria-hidden="true"><div><span>Down</span><b>1st</b></div><div><span>To go</span><b>10</b></div></div>
+                  {snapNext?.down ? (
+                    <div className="wdl-mu-dd" style={{ "--pc": headG[headNext.offense]?.color || "#1d2840" }}>
+                      <div><span>Down</span><b>{["", "1st", "2nd", "3rd", "4th"][headNext.down]}</b></div>
+                      <div><span>To go</span><b className={headNext.distance === "Goal" ? "goal" : ""}>{headNext.distance}</b></div>
+                    </div>
+                  ) : headNext?.brk?.label ? <div className="wdl-mu-next">{headNext.brk.label}</div> : null}
+                  {snapNext?.down && snapNext.brk && <div className="wdl-mu-tobadge">{snapNext.brk.label}</div>}
                 </div>
-              ) : headLive && headNext?.brk?.label ? <div className="wdl-mu-next">{headNext.brk.label}</div> : null}
+              )}
               {!isFinal && headG.tv && <div className="wdl-mu-tv">📺 {tvShort(headG.tv)}</div>}
             </div>}
             {!pregame && score("home")}
             {team("home")}
             {/* Field strip: where the ball is for the next snap. */}
-            {headLive && headNext?.offense && headNext.ytg != null && <LiveField game={headG} next={headNext} />}
+            {headLive && <LiveField game={headG} next={snapNext?.offense && snapNext.ytg != null ? snapNext : null} />}
             {((inWidget && inWidget !== "log") || boardFull) && widgetPlay &&<div key={widgetPlay} className="wdl-mu-play">{widgetPlay}</div>}
             {!inWidget && boardFull && (
               <div className="wdl-mu-rotate" aria-hidden="true">
@@ -2561,19 +2710,45 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
             <LivePlayCard variant="detailed" justNow {...cardProps(slot)} />
             {withTwo(slot)}
           </div>
+        ) : activeBreak ? (
+          <div key={`slot-break-${activeBreak.key}`} className="wdl-slot-swap">
+            <LiveBreakCard brk={activeBreak} game={g} rotate live pick={breakPick} onChat={() => pickTab("chat")} trivia={trivia} />
+          </div>
         ) : (
           <div key="slot-next" className="wdl-slot-swap">
-            <PendingPlayCard game={g} situation={next} />
+            <PendingPlayCard game={g} situation={next} tip={next?.brk?.kind === "timeout"
+              ? <TimeoutTip game={g} tip={pickTimeoutTip({ situation: next, game: g, teamNow: live?.teamNow, prospects: live?.prospects, trivia, seed: shown[0]?.id })} />
+              : null} />
           </div>
         )}
       </div>
     )}
-    {newestListed.length || slot ? newestListed.filter((p) => !(isFinal && p.presentation?.type === "period" && p.period >= 4)).map((p) => (
+    {newestListed.length || slot ? newestListed.filter((p, i) => !(isFinal && p.presentation?.type === "period" && p.period >= 4)
+      // the timeout the next-play card is showing right now isn't repeated under it
+      && !(i === 0 && !slot && next?.brk?.kind === "timeout" && p.presentation?.type === "timeout")).flatMap((p) => [
+      // a break's recap, above its end-of-period play (not while it's the
+      // break on now — that one is in the slot); a preview rotates it
+      ...(devTimeouts.has(p.id) ? [(() => {
+        const t = devTimeouts.get(p.id);
+        return (
+          <div key={`dev-timeout-${p.id}`} style={{ opacity: 0.95 }}>
+            <PendingPlayCard game={g} situation={{ ...t.situation, brk: { kind: "timeout", label: "TIMEOUT", detail: timeoutSide(p, g) ? teamName(g[timeoutSide(p, g)]) : "" } }}
+              tip={<TimeoutTip game={g} tip={pickTimeoutTip({ situation: t.situation, game: g, teamNow: t.teamNow, prospects: t.prospects, trivia, seed: p.id })} />} />
+          </div>
+        );
+      })()] : []),
+      ...(breakByPlay.has(p.id) && breakByPlay.get(p.id) !== activeBreak ? [
+        <LiveBreakCard key={`break-${breakByPlay.get(p.id).key}`} brk={breakByPlay.get(p.id)} game={g} rotate={!!devPreview} pick={breakPick} onChat={() => pickTab("chat")} trivia={trivia} />,
+      ] : []),
+      // this play's insights, just above it (newest first)
+      ...(insightsByPlay.get(p.id) || []).map(({ insight, fresh }) => (
+        <LiveInsightCard key={`ins-${insight.id}`} insight={insight} fresh={fresh} team={g[insight.side]} />
+      )),
       <div key={p.id} id={`play-${p.id}`}>
         <LivePlayCard variant="detailed" highlight={p.id === focusPlayId} fresh={p.id === justListed} {...cardProps(p)} />
         {withTwo(p)}
-      </div>
-    )) : (
+      </div>,
+    ]) : (
       <div className="wdl-empty">
         {g.status === "scheduled" ? `Kickoff ${statusLabel(g)}. Plays will stream in here once it starts.` : "No plays available for this game yet."}
       </div>
@@ -2631,8 +2806,13 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
       </div>
       {tab.startsWith("roster-") && !isFinal ? <GameRoster game={g} side={tab.slice(7)} />
         : tab === "chat" ? <LiveChat gameId={gameId} game={g} />
-        : tab === "stats" ? <LiveGameStats gameId={gameId} game={g} />
-        : isFinal && !focusPlayId ? <>
+        : tab === "stats" ? <LiveGameStats gameId={gameId} game={{
+          ...g,
+          away: { ...g.away, color2: g.away?.color2 || extras[g.away?.school]?.color2 },
+          home: { ...g.home, color2: g.home?.color2 || extras[g.home?.school]?.color2 },
+        }} />
+        // (a local insight preview reads a finished game as the live feed)
+        : isFinal && !focusPlayId && !devInsights ? <>
           <DriveSummary plays={plays} game={g} cardProps={cardProps} withTwo={withTwo} />
           <FinalCard game={g} />
         </> : renderPlays()}
@@ -3098,6 +3278,9 @@ export default function LivePage() {
   const weekStanding = useWeekStanding(view === "week" ? user?.uid : null, wePickWeek);
   // Your Week's This week / Last week toggle.
   const [ywWhich, setYwWhich] = useState("this");
+  // All games | Completed on the week's games — null until picked: then
+  // Completed once every game is final, else All games.
+  const [allSub, setAllSub] = useState(null);
   // Games the feed follows (unless "All games"): union of the checked sources.
   const feedGameIds = useMemo(() => {
     if (feedPrefs.games.all) return [];
@@ -3261,7 +3444,9 @@ export default function LivePage() {
   else if (pathSlug && !gameParam) body = (
     <div className="wdl-empty">{pathMissing ? <>We couldn't find that game. <Link to="/live" style={{ color: GOLD }}>See this week's games →</Link></> : "Loading the game…"}</div>
   );
-  else if (view === "game" && gameParam) body = <GameView gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} showRecap={compact} onWeek={goWeek} />;
+  // keyed by game: switching games (the schedule strip up top) starts the
+  // new one fresh — its first tab, its own picks and reveal state.
+  else if (view === "game" && gameParam) body = <GameView key={gameParam} gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} followedPlayers={followedPlayers} onTogglePlayer={togglePlayer} onQueueChange={onQueueChange} showRecap={compact} onWeek={goWeek} />;
   else if (compact && (view === "game" || onFeed) && gameParam) body = (
     <div className="wdl-solo">
       <button className="wdl-back" onClick={() => { unlockOrientation(); setParams({ view: "feed" }); window.scrollTo(0, 0); }}>← Feed</button>
@@ -3404,13 +3589,24 @@ export default function LivePage() {
       {!games.length && <div className="wdl-empty">No games on the slate yet.</div>}
     </div>
   );
-  else body = (
-    <div>
-      {slate.week != null && <WeekNav week={Number(slate.week)} current={null} onWeek={goWeek} />}
-      <div className="wdl-h">{slate.week ? `Week ${slate.week}` : "This week"} · {phase === "review" ? `${games.length} finals` : `${games.length} games`}</div>
-      {grid(feedWindow.open ? games : [...games].sort(byTop25), "No games on the slate right now.")}
-    </div>
-  );
+  else body = (() => {
+    const done = games.filter((g) => g.status === "final");
+    const sub = done.length ? allSub || (phase === "review" ? "completed" : "all") : "all";
+    const list = sub === "completed" ? done : games;
+    return (
+      <div>
+        {slate.week != null && <WeekNav week={Number(slate.week)} current={null} onWeek={goWeek} />}
+        {done.length > 0 && (
+          <div className="wdl-gtabs" style={{ marginTop: 0 }}>
+            <button className={`wdl-gtab${sub === "all" ? " on" : ""}`} onClick={() => setAllSub("all")}>All games · {games.length}</button>
+            <button className={`wdl-gtab${sub === "completed" ? " on" : ""}`} onClick={() => setAllSub("completed")}>Completed · {done.length}</button>
+          </div>
+        )}
+        <div className="wdl-h">{slate.week ? `Week ${slate.week}` : "This week"} · {sub === "completed" ? `${done.length} final${done.length === 1 ? "" : "s"}` : `${games.length} games`}</div>
+        {grid(feedWindow.open && sub === "all" ? list : [...list].sort(byTop25), "No games on the slate right now.")}
+      </div>
+    );
+  })();
 
   const split = !compact && ((view === "all" && feedWindow.open) || view === "game" || onFeed);
 
@@ -3530,7 +3726,7 @@ export default function LivePage() {
           matchup visually). */}
       {seo.h1 && <h1 className="wdl-sr">{seo.h1}</h1>}
       <header className="wdl-top">
-        <Link to="/" className="wdl-brand" aria-label="We-Draft.com home"><img src={Logo2} alt="We-Draft.com" /><span>LIVE</span></Link>
+        <Link to="/" target="_blank" rel="noopener noreferrer" className="wdl-brand" aria-label="We-Draft.com home (opens in a new tab)"><img src={Logo2} alt="We-Draft.com" /><span>LIVE</span></Link>
         <nav className="wdl-tabs" ref={tabsRef}>
           {tabs.map((t) => (
             <button key={t.key} className={`wdl-tab${view === t.key ? " on" : ""}`} onClick={() => (t.key === "game" ? null : setView(t.key))}>{t.label}</button>
@@ -3576,7 +3772,7 @@ export default function LivePage() {
       )}
       <main className={`wdl-main${split ? " split" : ""}${onFeed ? " feed" : ""}${compact ? " compact" : ""}`}>
         <section>{body}</section>
-        {split && slate && (view === "game" && gameParam ? <GameRecapRail gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} fallback={feedRail} /> : feedRail)}
+        {split && slate && (view === "game" && gameParam ? <GameRecapRail key={gameParam} gameId={gameParam} slateGame={games.find((g) => g.id === gameParam)} fallback={feedRail} /> : feedRail)}
       </main>
     </div>
   );

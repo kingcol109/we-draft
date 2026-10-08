@@ -1339,7 +1339,7 @@ export default function GamePage() {
     });
   };
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   if (notFound || !game) {
     return (

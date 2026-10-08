@@ -56,6 +56,7 @@ import ProvenFlair from "../assets/proven.png";
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
 import { fetchTeammateVideos } from "../components/PlayerSidebars";
+import { cssRect, viewportCssWidth, withoutPageZoom } from "../utils/pageZoom";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -356,7 +357,7 @@ function TrendTag({
   const triggerRef = useRef(null);
 
   const updatePos = () => {
-    const rect = triggerRef.current?.getBoundingClientRect();
+    const rect = triggerRef.current && cssRect(triggerRef.current);
     if (!rect) return;
     setPos({ top: rect.bottom + 14, left: rect.left + rect.width / 2 });
   };
@@ -1141,7 +1142,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
   // already gets this for free — .wd-watch-col itself is already capped to
   // `min(100%, calc(100dvh * 9/16))` — so this only branches for mobile.
   const mobileFrameStyle = isMobile
-    ? { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "min(100vw, calc(100dvh * 9 / 16))", height: "min(100dvh, calc(100vw * 16 / 9))" }
+    ? { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "min(100vw, calc(100dvh / var(--pz, 1) * 9 / 16))", height: "min(calc(100dvh / var(--pz, 1)), calc(100vw * 16 / 9))" }
     : { position: "absolute", inset: 0 };
 
   return (
@@ -1161,7 +1162,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
           overrides that outright, so this forces it to fill the layer
           regardless of what YouTube decided on construction. */}
       <style>{`
-        .wd-watch-slide, .wd-watch-col { height: 100vh; height: 100dvh; }
+        .wd-watch-slide, .wd-watch-col { height: calc(100vh / var(--pz, 1)); height: calc(100dvh / var(--pz, 1)); }
         .wd-watch-video-layer, .wd-watch-video-layer iframe {
           position: absolute; inset: 0; width: 100% !important; height: 100% !important; border: none;
         }
@@ -1262,7 +1263,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
                 <img
                   src={sanitizeUrl(activeCard.schoolLogo)}
                   alt={activeClip.playerSchool}
-                  style={{ height: "min(120px, 14vh)", width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: "14px" }}
+                  style={{ height: "min(120px, calc(14vh / var(--pz, 1)))", width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: "14px" }}
                   referrerPolicy="no-referrer"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
@@ -1395,7 +1396,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
           capped to its own native 9:16 (never wider than the viewport is
           tall) on desktop, so the two side margins actually have room to
           exist instead of the video eating the whole monitor. */}
-      <div className="wd-watch-col" style={{ position: "relative", width: isMobile ? "100%" : "min(100%, calc(100dvh * 9 / 16))", flexShrink: 0, background: isMobile ? activeColor1 : "#000" }}>
+      <div className="wd-watch-col" style={{ position: "relative", width: isMobile ? "100%" : "min(100%, calc(100dvh / var(--pz, 1) * 9 / 16))", flexShrink: 0, background: isMobile ? activeColor1 : "#000" }}>
         {/* The single, fixed video layer — always covers exactly whichever
             slide is currently scrolled into view, since every slide is one
             full viewport tall (see .wd-watch-slide). Sits behind the
@@ -2211,11 +2212,11 @@ export default function PlayerProfile() {
   const CONTENT_H_PADDING = 60;
   const recomputeAdLayout = () => {
     if (isMobile || !mainGridRef.current) { setShowMarginAds(false); return; }
-    const rect = mainGridRef.current.getBoundingClientRect();
+    const rect = cssRect(mainGridRef.current);
     const visibleLeftEdge = rect.left + CONTENT_H_PADDING;
     const visibleRightEdge = rect.right - CONTENT_H_PADDING;
     const leftGutter = Math.max(0, visibleLeftEdge);
-    const rightGutter = Math.max(0, window.innerWidth - visibleRightEdge);
+    const rightGutter = Math.max(0, viewportCssWidth() - visibleRightEdge);
     const minGutter = Math.min(leftGutter, rightGutter);
     const MIN_USABLE_GUTTER = 160; // below this, there's no sensible room for a card + breathing room
     if (minGutter < MIN_USABLE_GUTTER) { setShowMarginAds(false); return; }
@@ -3222,7 +3223,7 @@ useEffect(() => {
   const handleShareEvaluation = async () => {
     if (!exportCardRef.current) return;
     try {
-      const dataUrl = await htmlToImage.toPng(exportCardRef.current, { pixelRatio:2, backgroundColor:"#ffffff", skipFonts:true, filter:(node)=>node.tagName!=="IMG" });
+      const dataUrl = await withoutPageZoom(() => htmlToImage.toPng(exportCardRef.current, { pixelRatio:2, backgroundColor:"#ffffff", skipFonts:true, filter:(node)=>node.tagName!=="IMG" }));
       setEvalShareImageUrl(dataUrl);
       setEvalShareOpen(true);
     } catch(e) { alert("Failed to build the share image. Please try again."); }
@@ -3410,7 +3411,7 @@ useEffect(() => {
     catch { return ""; }
   };
 
-  if (!player) return <LoadingSpinner label="Loading Player" size={56} minHeight="100vh" />;
+  if (!player) return <LoadingSpinner label="Loading Player" size={56} minHeight="calc(100vh / var(--pz, 1))" />;
 
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
   const isTrendingUp = (trend?.Trend || "").toString().trim().toLowerCase() === "up";
@@ -5295,7 +5296,18 @@ useEffect(() => {
               )}
             </div>
           ) : (
-            <div className="flex bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
+            <div style={{ containerType:"inline-size" }}>
+            {/* When the center column is narrow (laptop widths), NFL Fits
+                drops to its own full-width row instead of being clipped. */}
+            <style>{`
+              @container (max-width: 700px) {
+                .wd-scout-row { flex-wrap: wrap; }
+                .wd-scout-weak { border-right: 0 !important; }
+                .wd-scout-fits { flex: 1 1 100% !important; border-top: 1px solid #e5e7eb; }
+                .wd-scout-fitlogos { flex-direction: row !important; justify-content: center !important; flex-wrap: wrap; }
+              }
+            `}</style>
+            <div className="flex bg-white rounded-lg overflow-hidden wd-scout-row" style={{ border:`2px solid ${color1}` }}>
               <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
                 <h3 className="text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Community Grade</h3>
                 {(() => {
@@ -5347,7 +5359,7 @@ useEffect(() => {
                   </div>
                 )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
               </div>
-              <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
+              <div className="flex-1 px-5 py-5 wd-scout-weak" style={{ borderRight:"1px solid #e5e7eb" }}>
                 <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Top Weaknesses</h3>
                 {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
@@ -5360,16 +5372,17 @@ useEffect(() => {
                   </div>
                 )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
               </div>
-              <div className="flex flex-col px-5 py-5" style={{ flex:"0 0 150px" }}>
+              <div className="flex flex-col px-5 py-5 wd-scout-fits" style={{ flex:"0 0 150px" }}>
                 <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
                 {fitLogos.length > 0 ? (
-                  <div className="flex flex-col items-center justify-start flex-1 gap-3">
+                  <div className="flex flex-col items-center justify-start flex-1 gap-3 wd-scout-fitlogos">
                     {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
                   </div>
                 ) : community.topFits.length > 0 ? (
                   <div className="flex flex-col gap-1">{community.topFits.map((t,i) => <p key={i} className="text-sm font-bold text-gray-600">{t}</p>)}</div>
                 ) : <p className="italic text-gray-400 text-sm">No fits yet</p>}
               </div>
+            </div>
             </div>
           )}
         </div>
@@ -5443,7 +5456,7 @@ useEffect(() => {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ background:"#fff", border:`2px solid ${color1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"90vh", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
+              style={{ background:"#fff", border:`2px solid ${color1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"calc(90vh / var(--pz, 1))", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
             >
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
                 <div style={{ color:color1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>

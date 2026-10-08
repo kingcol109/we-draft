@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import verifiedBadgeIcon from "../assets/verified.png";
+import { cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
 
 // Module-level, not component state — socials for a given uid are fetched
 // at most once per page load no matter how many rows/badges for that same
@@ -89,7 +90,7 @@ export default function VerifiedNameBadge({ uid, name, verified, size = 13, fall
   // that measurement to react to.
   const ASSUMED_WIDTH = 160;
   const guessPosition = () => {
-    const rect = anchorRef.current?.getBoundingClientRect();
+    const rect = anchorRef.current && cssRect(anchorRef.current);
     if (!rect) return;
     setPos({ top: rect.bottom + 8, left: rect.left + rect.width / 2 - ASSUMED_WIDTH / 2 });
   };
@@ -142,16 +143,16 @@ export default function VerifiedNameBadge({ uid, name, verified, size = 13, fall
   // matter where the name is on the page.
   useLayoutEffect(() => {
     if (!open || !pos || !popoverRef.current || !anchorRef.current) return;
-    const anchorRect = anchorRef.current.getBoundingClientRect();
-    const popRect = popoverRef.current.getBoundingClientRect();
+    const anchorRect = cssRect(anchorRef.current);
+    const popRect = cssRect(popoverRef.current);
     const margin = 8;
     let top = anchorRect.bottom + margin;
-    if (top + popRect.height > window.innerHeight - margin) {
+    if (top + popRect.height > viewportCssHeight() - margin) {
       top = anchorRect.top - popRect.height - margin;
     }
-    top = Math.max(margin, Math.min(top, window.innerHeight - popRect.height - margin));
+    top = Math.max(margin, Math.min(top, viewportCssHeight() - popRect.height - margin));
     let left = anchorRect.left + anchorRect.width / 2 - popRect.width / 2;
-    left = Math.max(margin, Math.min(left, window.innerWidth - popRect.width - margin));
+    left = Math.max(margin, Math.min(left, viewportCssWidth() - popRect.width - margin));
     if (Math.abs(left - pos.left) > 1 || Math.abs(top - pos.top) > 1) {
       setPos({ top, left });
     }

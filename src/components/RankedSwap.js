@@ -31,7 +31,7 @@ export const RANKED_SWAP_STYLE = `
 .rsw-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 .rsw-foot button { background: none; border: 1px solid #3a4a6a; color: #c9d5e6; border-radius: 999px; padding: 6px 14px; font-weight: 800; font-size: 12px; cursor: pointer; font-family: inherit; }
 .rsw-modal { position: fixed; inset: 0; z-index: 10060; background: rgba(4,8,16,0.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
-.rsw-modal .rsw { width: min(460px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+.rsw-modal .rsw { width: min(460px, 100%); max-height: calc(100vh / var(--pz, 1) - 32px); overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
 `;
 
 const matchup = (g) => `${g.Away} @ ${g.Home}`;

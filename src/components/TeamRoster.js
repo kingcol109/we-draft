@@ -61,7 +61,8 @@ const THEMES = {
     link: () => "#fff", underline: (c1, c2) => visibleOnDark(c2, c1), chip: (c1) => c1, chipLine: "rgba(255,255,255,0.25)", empty: "#111a2b", emptyText: "#6f819c" },
 };
 
-export default function TeamRoster({ roster, color1, color2, isMobile, dark = false, hideStars = false }) {
+// newTab: player links open in a new tab (We-Draft Live keeps the game open).
+export default function TeamRoster({ roster, color1, color2, isMobile, dark = false, hideStars = false, newTab = false }) {
   const th = THEMES[dark ? "dark" : "light"];
   const [unit, setUnit] = useState("all");
   const [sortKey, setSortKey] = useState("no");
@@ -147,7 +148,7 @@ export default function TeamRoster({ roster, color1, color2, isMobile, dark = fa
             </div>
             <div style={{ ...cellBox(col.name), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: isMobile ? "15px" : "17px", color: th.text }}>
               {p.slug ? (
-                <Link to={`/player/${p.slug}`} style={{ color: th.link(color1), textDecoration: "underline", textDecorationColor: th.underline(color1, color2), textUnderlineOffset: "2px" }}>
+                <Link to={`/player/${p.slug}`} {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})} style={{ color: th.link(color1), textDecoration: "underline", textDecorationColor: th.underline(color1, color2), textUnderlineOffset: "2px" }}>
                   <span style={{ fontWeight: 600 }}>{p.first}</span> <span style={{ fontWeight: 900 }}>{p.last}</span>
                 </Link>
               ) : (

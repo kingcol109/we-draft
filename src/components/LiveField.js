@@ -34,7 +34,22 @@ export const LIVE_FIELD_STYLE = `
 .lfs-pad { height: 52px; }
 `;
 
+// next: null → the bare field (after a score, at a break) — the strip
+// stays so the scoreboard keeps its height.
 export default function LiveField({ game, next, tag }) {
+  if (!next) {
+    return (
+      <div className="lfs" aria-hidden="true">
+        <div className="lfs-line">
+          <span className="lfs-ez away" style={{ background: game.away?.color || "#2a4a7a" }} />
+          <span className="lfs-ez home" style={{ background: game.home?.color || "#7a2a2a" }} />
+          {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((y) => <span key={y} className={`lfs-tick${y === 50 ? " mid" : ""}`} style={{ left: `${y}%` }} />)}
+          <span className="lfs-fifty" style={{ left: "50%" }}>50</span>
+        </div>
+        <div className="lfs-pad" />
+      </div>
+    );
+  }
   const off = game[next.offense] || {};
   // Field yard 0 = left (away) goal line … 100 = right (home): the home
   // offense drives left, the away offense right.

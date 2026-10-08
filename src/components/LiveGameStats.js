@@ -10,7 +10,7 @@
 import { useMemo } from "react";
 import { useLiveGame, useLiveStats } from "../hooks/useLiveGame";
 import { computeGameStats, boxPlayers } from "../utils/liveStats";
-import { teamShort } from "../utils/live";
+import { teamShort, distinctTeamColors } from "../utils/live";
 
 const GOLD = "#f6a21d";
 
@@ -162,11 +162,13 @@ export default function LiveGameStats({ gameId, game, theme = "dark" }) {
   const adv = game.advanced;
   const away = game.away || {};
   const home = game.home || {};
+  // Bars in each team's color — but never two colors you can't tell apart.
+  const barColors = distinctTeamColors(away, home, ["#4d9fff", GOLD]);
 
   if (!statsReady) return null;
   if (!stats && !plays.length) return <div className={`lgs-empty-all${theme === "light" ? " lgs-light" : ""}`}>Stats will appear once the game is underway.</div>;
   return (
-    <div className={theme === "light" ? "lgs-light" : undefined} style={{ "--ac": away.color || "#4d9fff", "--hc2": home.color || GOLD }}>
+    <div className={theme === "light" ? "lgs-light" : undefined} style={{ "--ac": barColors[0], "--hc2": barColors[1] }}>
       <div className="lgs-src">
         {official ? <>Player stats: <b>official box score</b> · team stats from the play-by-play</> : <>Live — from the play-by-play{game.status === "final" ? " (official box score coming)" : ""}</>}
       </div>

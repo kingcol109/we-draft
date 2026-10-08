@@ -20,6 +20,7 @@ import PlayersMentionedList from "./PlayersMentionedList";
 // keeps its ▲ triangle text).
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
+import { cssRect, viewportCssWidth } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -139,12 +140,12 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
   const recompute = useRef(() => {});
   recompute.current = () => {
     if (isMobile || !contentRef.current || !anchorRef.current) { setLayout((p) => ({ ...p, show: false })); return; }
-    const rect = contentRef.current.getBoundingClientRect();
-    const anchorRect = anchorRef.current.getBoundingClientRect();
+    const rect = cssRect(contentRef.current);
+    const anchorRect = cssRect(anchorRef.current);
     const visibleLeftEdge = rect.left + horizontalPadding;
     const visibleRightEdge = rect.right - horizontalPadding;
     const leftGutter = Math.max(0, visibleLeftEdge);
-    const rightGutter = Math.max(0, window.innerWidth - visibleRightEdge);
+    const rightGutter = Math.max(0, viewportCssWidth() - visibleRightEdge);
     const minGutter = Math.min(leftGutter, rightGutter);
     const MIN_USABLE_GUTTER = 170;
     if (minGutter < MIN_USABLE_GUTTER) { setLayout((p) => ({ ...p, show: false })); return; }

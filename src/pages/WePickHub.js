@@ -29,6 +29,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { useAuth } from "../context/AuthContext";
 import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
+import { withoutPageZoom } from "../utils/pageZoom";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -608,10 +609,10 @@ function MyPicksSection() {
           // border-radius cuts away from its bounding box — matched to
           // PAGE_BG's darkest stop (not white) so those corners blend into
           // the card instead of showing as pale triangles.
-          const dataUrl = await htmlToImage.toPng(shareCardRef.current, {
+          const dataUrl = await withoutPageZoom(() => htmlToImage.toPng(shareCardRef.current, {
             pixelRatio: 2, backgroundColor: "#06162c", skipFonts: true,
             filter: (node) => node.tagName !== "IMG",
-          });
+          }));
           if (!cancelled) setShareImageUrl(dataUrl);
         } catch (e) {
           console.error("We-Pick share-image render error:", e);
@@ -1094,7 +1095,7 @@ function MyPicksSection() {
     );
   }
 
-  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="40vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="calc(40vh / var(--pz, 1))" />;
 
   // Current (latest-published) Top 25 — every GameRow below shows each
   // team's current standing, not what they were ranked back in that game's
@@ -1752,7 +1753,7 @@ function MyPicksSection() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: PANEL, border: "1px solid #2a3753", borderRadius: "14px", maxWidth: "420px", width: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
+            style={{ background: PANEL, border: "1px solid #2a3753", borderRadius: "14px", maxWidth: "420px", width: "100%", maxHeight: "calc(90vh / var(--pz, 1))", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
               <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Share</div>
@@ -3004,7 +3005,7 @@ function MyStatsSection() {
     );
   }
 
-  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="40vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="calc(40vh / var(--pz, 1))" />;
 
   return (
     <>
@@ -3504,7 +3505,7 @@ function GameRow({ game, schoolsByName, currentRankMap: currentTop25, pick, onSa
         {final && pick && (
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "8px", marginTop: "6px", flexWrap: "wrap" }}>
             <span style={{ fontSize: "11px", fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>
-              your pick: {pick.awayScore != null ? `${pick.awayScore}-${pick.homeScore}` : (side === "away" ? game.Away : side === "home" ? game.Home : "—")}
+              your pick: {pick.awayScore != null ? `${Math.max(pick.awayScore, pick.homeScore)}-${Math.min(pick.awayScore, pick.homeScore)}` : (side === "away" ? game.Away : side === "home" ? game.Home : "—")}
             </span>
             {resultBadge}
           </div>

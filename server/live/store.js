@@ -182,21 +182,29 @@ let wdIndexCache = null;
 async function wedraftPlayerIndex(db) {
   if (wdIndexCache && Date.now() - wdIndexCache.at < 6 * 3600e3) return wdIndexCache.index;
   const [playersSnap, schoolsSnap] = await Promise.all([
-    db.collection("players").select("First", "Last", "School", "Slug", "Position").get(),
+    db.collection("players").select("First", "Last", "School", "Slug", "Position", "Eligible", "Live").get(),
     db.collection("schools").select("School", "CFBDTeamId").get(),
   ]);
   const teamBySchool = new Map(schoolsSnap.docs.map((d) => [d.data().School, d.data().CFBDTeamId]));
   const index = new Map();
+  // Also by profile slug (live/breaks.js: a roster's linked players → their
+  // We-Draft id, position, class and visibility).
+  const bySlug = new Map();
   for (const d of playersSnap.docs) {
     const p = d.data();
+    if (p.Slug) bySlug.set(p.Slug, { id: d.id, pos: p.Position || null, cls: p.Eligible != null ? String(p.Eligible) : null, live: p.Live });
     const teamId = teamBySchool.get(p.School);
     if (teamId == null || !p.First || !p.Last) continue;
     const key = `${normName(`${p.First} ${p.Last}`)}|${teamId}`;
     if (!index.has(key)) index.set(key, []);
     index.get(key).push({ id: d.id, slug: p.Slug || null });
   }
-  wdIndexCache = { at: Date.now(), index };
+  wdIndexCache = { at: Date.now(), index, bySlug };
   return index;
+}
+async function wedraftPlayersBySlug(db) {
+  await wedraftPlayerIndex(db);
+  return wdIndexCache.bySlug;
 }
 
 // Writes the box score doc, each player's game-log line, and upserts the
@@ -372,8 +380,8 @@ const MAX_SLATE_BIG_PLAYS = 60;
 
 // The fields the slate's feeds render — keeps liveSlate/current small.
 function compactPresentation(pr) {
-  const { v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat, downsTurnover } = pr;
-  return JSON.parse(JSON.stringify({ v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat, downsTurnover }));
+  const { v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat, downsTurnover, flagStory, wasPlay } = pr;
+  return JSON.parse(JSON.stringify({ v, type, headline, emphasis, line, detail, yards, touchdown, firstDown, turnover, nullified, confidence, fallbackText, penaltyText, creditSide, pat, downsTurnover, flagStory, wasPlay }));
 }
 
 function mergeAthletes(p) {
@@ -582,4 +590,4 @@ function finalFeedEntry(gameId, g, at = Date.now()) {
   };
 }
 
-module.exports = { gameKey, weekKey, saveRecordsBase, saveLiveStats, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed };
+module.exports = { gameKey, weekKey, saveRecordsBase, saveLiveStats, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed, wedraftPlayersBySlug };

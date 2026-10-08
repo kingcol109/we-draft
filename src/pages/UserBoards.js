@@ -457,7 +457,7 @@ export default function UserBoards() {
   };
 
   if (!user) return (
-    <div style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+    <div style={{ minHeight: "calc(70vh / var(--pz, 1))", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
       <div style={{ width: "100%", maxWidth: "520px", border: `2px solid ${GOLD}`, borderRadius: "14px", overflow: "hidden", boxShadow: "0 8px 40px rgba(0,85,165,0.14)" }}>
         {/* Header */}
         <div style={{ background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`, padding: "28px 32px 24px", textAlign: "center", position: "relative", overflow: "hidden" }}>
@@ -512,7 +512,7 @@ export default function UserBoards() {
     </div>
   );
 
-  if (loading) return <LoadingSpinner label="Loading Board" size={56} minHeight="100vh" />;
+  if (loading) return <LoadingSpinner label="Loading Board" size={56} minHeight="calc(100vh / var(--pz, 1))" />;
 
   return (
     <>
@@ -649,7 +649,7 @@ export default function UserBoards() {
               <div style={{ height: "3px", background: GOLD }} />
 
               {isMobile ? (
-                <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
+                <div style={{ maxHeight: "calc(70vh / var(--pz, 1))", overflowY: "auto" }}>
                   {sortedPlayers.length === 0 ? (
                     <div style={{ padding: "28px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>
                       {!hasActiveFilters ? `No ${eligibleYear} players on your board yet. Go to the Community Board and add some players to see them here.` : "No players match your filters."}

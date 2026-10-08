@@ -24,3 +24,6 @@ yarn-error.log*
 
 # firebase local cache
 .firebase
+
+# scripts/replayInsights.js --preview output (local dev only)
+/public/dev-insights/

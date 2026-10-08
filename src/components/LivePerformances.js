@@ -35,8 +35,8 @@ export const PERF_STYLE = `
 .lpf-logo { width: 28px; height: 28px; object-fit: contain; }
 .lpf-who { min-width: 0; }
 .lpf-name { display: flex; align-items: center; gap: 6px; font-weight: 900; font-size: 16px; color: #eef2f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lpf-name button { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
-.lpf-name button.on { color: ${GOLD}; }
+.lpf-name > span { overflow: hidden; text-overflow: ellipsis; }
+.lpf-name > span.on { color: ${GOLD}; }
 .lpf-name a { display: inline-flex; flex-shrink: 0; }
 .lpf-name a img { width: 13px; height: 13px; }
 .lpf-line { font-weight: 800; font-size: 13px; color: #c9d5e6; font-variant-numeric: tabular-nums; margin-top: 2px; }
@@ -66,7 +66,7 @@ export function performancesFromGames(games) {
 
 // `initial`: rows shown per board until "Show more" (up to the
 // MAX_PERFORMANCES stored); without it, a fixed SHOW rows.
-export default function LivePerformances({ games, onOpenGame, followedIds, onTogglePlayer, perf: given, title, initial }) {
+export default function LivePerformances({ games, onOpenGame, followedIds, perf: given, title, initial }) {
   const [snap, setSnap] = useState(null);
   const [expanded, setExpanded] = useState({}); // category → showing all
   const [liveOnly, setLiveOnly] = useState(false);
@@ -104,8 +104,8 @@ export default function LivePerformances({ games, onOpenGame, followedIds, onTog
                 const team = g[e.side] || {};
                 const opp = g[e.side === "home" ? "away" : "home"] || {};
                 const live = g.status === "in_progress";
-                const canFollow = /^\d+$/.test(String(e.id)) && onTogglePlayer;
-                const on = canFollow && followedIds.has(String(e.id));
+                // Names don't follow on tap — that's My Players' job; ★ marks a followed one.
+                const on = !!followedIds?.has(String(e.id));
                 return (
                   <div key={`${e.gameId}:${e.id}`} className="lpf-row" role="button" tabIndex={0}
                     onClick={() => onOpenGame(g.id)} onKeyDown={(ev) => { if (ev.key === "Enter") onOpenGame(g.id); }}>
@@ -113,10 +113,7 @@ export default function LivePerformances({ games, onOpenGame, followedIds, onTog
                     {(team.logoDark || team.logo) ? <img className="lpf-logo" src={team.logoDark || team.logo} alt="" /> : <span />}
                     <div className="lpf-who">
                       <div className="lpf-name">
-                        {canFollow ? (
-                          <button className={on ? "on" : ""} title={on ? `Unfollow ${e.name}` : `Follow ${e.name}`}
-                            onClick={(ev) => { ev.stopPropagation(); onTogglePlayer({ id: e.id, name: e.name }); }}>{on ? "★ " : ""}{e.name}</button>
-                        ) : <span>{e.name}</span>}
+                        <span className={on ? "on" : undefined}>{on ? "★ " : ""}{e.name}</span>
                         {e.slug && (
                           <a href={`/player/${e.slug}`} target="_blank" rel="noopener noreferrer" title={`${e.name} — We-Draft profile (opens in a new tab)`} onClick={(ev) => ev.stopPropagation()}>
                             <img src="/wd-icon.png" alt="We-Draft profile" />

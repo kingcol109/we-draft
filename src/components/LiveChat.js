@@ -24,6 +24,7 @@ import { collection, deleteDoc, doc, limit, onSnapshot, orderBy, query, updateDo
 import { auth, db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { chatProblem, CHAT_MAX } from "../utils/chatFilter";
+import VerifiedNameBadge from "./VerifiedNameBadge";
 
 const GOLD = "#f6a21d";
 const CHAT_SHOWN = 150;
@@ -31,16 +32,17 @@ const BURIED_AT = -3;
 
 export const LIVE_CHAT_STYLE = `
 .lch { background: #111a2b; border: 1px solid #1d2840; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; }
-.lch-list { height: min(62vh, 620px); min-height: 320px; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; }
-.lch-msg { padding: 6px 8px; border-radius: 10px; line-height: 1.35; word-wrap: break-word; position: relative; }
-.lch-msg:hover { background: #16213a; }
-.lch-msg.mine { background: rgba(246,162,29,0.07); }
-.lch-name { font-weight: 900; font-size: 13px; color: #8fb8ff; margin-right: 6px; }
+.lch-list { height: min(calc(62vh / var(--pz, 1)), 620px); min-height: 320px; overflow-y: auto; padding: 6px 0; display: flex; flex-direction: column; }
+/* a message: a plain row — name, time and votes on top, the text under it */
+.lch-msg { display: grid; grid-template-columns: 1fr auto; column-gap: 10px; padding: 8px 16px 9px; border-left: 3px solid transparent; line-height: 1.4; word-wrap: break-word; position: relative; }
+.lch-msg + .lch-msg { border-top: 1px solid #172238; }
+.lch-msg.mine { border-left-color: ${GOLD}; }
+.lch-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lch-name { font-weight: 900; font-size: 13px; color: #8fb8ff; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lch-msg.mine .lch-name { color: ${GOLD}; }
-.lch-ver { color: #4d9fff; font-size: 11px; margin-left: 2px; }
-.lch-time { font-size: 10px; font-weight: 700; color: #4f6080; margin-left: 6px; }
-.lch-text { font-size: 15px; color: #e6ecf5; font-weight: 600; }
-.lch-mod { position: absolute; right: 6px; top: 5px; display: none; gap: 4px; }
+.lch-time { font-size: 11px; font-weight: 700; color: #4f6080; flex-shrink: 0; }
+.lch-text { grid-column: 1 / -1; margin-top: 2px; font-size: 15px; color: #e6ecf5; font-weight: 600; }
+.lch-mod { position: absolute; right: 90px; top: 6px; display: none; gap: 4px; }
 .lch-msg:hover .lch-mod { display: flex; }
 .lch-mod button { background: #26324a; border: 0; color: #c9d5e6; font-size: 10px; font-weight: 900; padding: 3px 7px; border-radius: 6px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; }
 .lch-mod button:hover { background: #d62828; color: #fff; }
@@ -55,7 +57,7 @@ export const LIVE_CHAT_STYLE = `
 .lch-note { padding: 12px 14px; border-top: 1px solid #1d2840; background: #0c1220; color: #9fb0c8; font-weight: 800; font-size: 14px; text-align: center; }
 .lch-note button { background: none; border: 0; color: ${GOLD}; font: inherit; font-weight: 900; cursor: pointer; text-decoration: underline; padding: 0; }
 .lch-err { padding: 6px 14px 0; color: #ff6b6b; font-weight: 800; font-size: 13px; background: #0c1220; }
-.lch-votes { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; vertical-align: 1px; }
+.lch-votes { display: inline-flex; align-items: center; gap: 2px; align-self: center; }
 .lch-votes button { background: none; border: 0; padding: 1px 4px; border-radius: 5px; color: #4f6080; font-size: 11px; line-height: 1; cursor: pointer; }
 .lch-votes button:hover:not(:disabled) { background: #1d2840; color: #c9d5e6; }
 .lch-votes button:disabled { cursor: default; }
@@ -65,7 +67,7 @@ export const LIVE_CHAT_STYLE = `
 .lch-votes b.pos { color: ${GOLD}; }
 .lch-votes b.neg { color: #ff6b6b; }
 .lch-msg.buried { opacity: 0.45; }
-.lch-mark { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; color: ${GOLD}; font-weight: 900; font-size: 12px; letter-spacing: 0.04em; position: relative; }
+.lch-mark { display: flex; align-items: center; gap: 10px; margin: 10px 16px 6px; color: ${GOLD}; font-weight: 900; font-size: 12px; letter-spacing: 0.04em; position: relative; }
 .lch-mark::before, .lch-mark::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(246,162,29,0.45), transparent); }
 .lch-mark span { text-align: center; white-space: normal; }
 .lch-mark small { margin-left: 6px; font-size: 10px; font-weight: 700; color: #4f6080; }
@@ -210,9 +212,10 @@ export default function LiveChat({ gameId, game }) {
             <Fragment key={m.id}>
             {pregameHead}
             <div className={`lch-msg${own ? " mine" : ""}${score <= BURIED_AT ? " buried" : ""}`}>
-              <span className="lch-name">{m.name}{m.verified && <span className="lch-ver" title="Verified">✔</span>}</span>
-              <span className="lch-text">{m.text}</span>
-              <span className="lch-time">{timeOf(m.atMs)}</span>
+              <div className="lch-top">
+                <span className="lch-name"><VerifiedNameBadge uid={m.uid} name={m.name} verified={!!m.verified} size={14} /></span>
+                <span className="lch-time">{timeOf(m.atMs)}</span>
+              </div>
               <span className="lch-votes">
                 <button type="button" className={`up${mine === 1 ? " on" : ""}`} disabled={own} onClick={() => castVote(m, 1)}
                   aria-label="Upvote" aria-pressed={mine === 1} title={own ? "Your message" : mine === 1 ? "Remove upvote" : "Upvote"}>▲</button>
@@ -220,6 +223,7 @@ export default function LiveChat({ gameId, game }) {
                 <button type="button" className={`down${mine === -1 ? " on" : ""}`} disabled={own} onClick={() => castVote(m, -1)}
                   aria-label="Downvote" aria-pressed={mine === -1} title={own ? "Your message" : mine === -1 ? "Remove downvote" : "Downvote"}>▼</button>
               </span>
+              <div className="lch-text">{m.text}</div>
               {isAdmin && (
                 <span className="lch-mod">
                   <button type="button" onClick={() => remove(m)}>Delete</button>

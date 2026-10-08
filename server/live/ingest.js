@@ -31,6 +31,8 @@ const S = require("./store");
 const { syncSchedule } = require("./scheduleSync");
 const { presentPlay, learnSpotAbbrs } = require("./playParser");
 const { rostersForGame } = require("./rosters");
+const { runInsights } = require("./insights");
+const { buildBreaks, timeoutExtras } = require("./breaks");
 
 const CONFIG = {
   SEASON: 2026,
@@ -84,6 +86,10 @@ const CONFIG = {
   SEASON_SYNC_MS: 12 * 3600 * 1000,
   // Feed entries kept on each game doc (liveGames/{id}.feedPlays).
   MAX_GAME_FEED: 40,
+  // Insight cards (server/live/insights.js) get at most this long per game
+  // per fetch — they run after the plays are written, so a slow or failed
+  // run only costs the insight, never the play feed.
+  INSIGHT_BUDGET_MS: 5000,
   // The internal clock: a week stays the slate after its games, in REVIEW
   // (finals, big plays, top performances to catch up on), until Monday
   // 6:00 AM Eastern — then the next week takes over (its preview). CFBD
@@ -321,7 +327,9 @@ async function loadWeekGames(db, wk) {
 // ── Per-game ingestion ─────────────────────────────────────────────────
 
 // Plays → order → athletes → big plays → store. Returns feed-worthy new plays.
-async function storePlays(db, game, plays, playStats, { complete, rosterBudget }) {
+// insights: also run the insight engine (live games only — a postgame
+// ingest of a finished game never makes cards).
+async function storePlays(db, game, plays, playStats, { complete, rosterBudget, insights = false, log = () => {} }) {
   let ordered = P.finishPlays(plays);
   if (playStats) P.attachAthletes(ordered, playStats);
   detectBigPlays(ordered);
@@ -369,6 +377,43 @@ async function storePlays(db, game, plays, playStats, { complete, rosterBudget }
   // flag added): still Feed-worthy → refreshed entry; no longer (wiped out
   // by a penalty) or deleted upstream → pulled from the feed.
   const revised = res.changedPlays || [];
+  // Insight cards — strictly after everything above is written, so the
+  // feed never waits on them; any failure or timeout just means no card.
+  let cards = game.insights || [];
+  if (insights && (res.added.length || revised.length)) {
+    let timer;
+    try {
+      const out = await Promise.race([
+        runInsights(db, game, ordered, { rosters }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("insight budget exceeded")), CONFIG.INSIGHT_BUDGET_MS); }),
+      ]);
+      if (out?.insights) cards = out.insights;
+      if (out?.added) log(`insights ${gid}: +${out.added} (${out.made.map((m) => m.context).join(" | ").slice(0, 200)})`);
+    } catch (e) {
+      log(`insights ${gid}: ${e.message.slice(0, 160)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  // Break summaries (end of Q1 / halftime / end of Q3) once a break has been
+  // reached, and for a live game what its timeout box draws on (each team's
+  // third / fourth downs, the game's We-Draft prospects) — server/live/
+  // breaks.js. Same rule as the insights: after everything above, isolated,
+  // and rewritten only when it changed.
+  if (res.added.length || revised.length) {
+    try {
+      const reached = ordered.some((p) => (p.period || 0) >= 2 || p.presentation?.type === "period");
+      const fields = reached ? { breaks: await buildBreaks(db, game, ordered, { rosters, insights: cards }) } : {};
+      if (insights) Object.assign(fields, await timeoutExtras(db, rosters, stats, game));
+      const h = crypto.createHash("sha1").update(JSON.stringify(fields)).digest("hex").slice(0, 16);
+      if (Object.keys(fields).length && h !== game.extrasHash) {
+        await S.setGameFields(db, game.providerGameId, { ...JSON.parse(JSON.stringify(fields)), extrasHash: h });
+        game.extrasHash = h;
+      }
+    } catch (e) {
+      log(`breaks ${gid}: ${e.message.slice(0, 160)}`);
+    }
+  }
   return {
     ...res,
     last,
@@ -525,7 +570,7 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
         await step(`live plays ${id}`, async () => {
           const live = P.fromLivePlays(await cfbd.livePlays(g.providerGameId), g.home?.name);
           if (live.advanced) await S.setGameFields(db, g.providerGameId, { advanced: JSON.parse(JSON.stringify(live.advanced)) });
-          const res = await storePlays(db, g, live.plays, null, { complete: true, rosterBudget });
+          const res = await storePlays(db, g, live.plays, null, { complete: true, rosterBudget, insights: true, log });
           newBig.push(...res.big);
           dropKeys.push(...(res.dropKeys || []));
           const state = liveStateFromPlays(live, res.last);

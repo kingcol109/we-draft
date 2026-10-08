@@ -478,7 +478,7 @@ export default function HomeOffSeason() {
 
           {/* ── Left chips: 2x2 grid (desktop only) ── */}
           {!isMobile && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "280px", maxWidth: "420px", alignSelf: "stretch" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "240px", maxWidth: "420px", alignSelf: "stretch" }}>
               {[
                 { label: "Evaluate Players", sub: "Grade every prospect", to: "/community", icon: "📋" },
                 { label: "Watch", sub: "Player Shorts, one after another", to: "/watch", icon: "▶" },
@@ -503,11 +503,11 @@ export default function HomeOffSeason() {
           )}
 
           {/* ── Center ── */}
-          <div style={{ flex: "1.3 1 0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+          <div style={{ flex: "1.3 1 0", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
             <img
               src={logo}
               alt="We-Draft.com"
-              style={{ width: isMobile ? "220px" : "660px", maxWidth: "90vw", height: "auto", marginBottom: isMobile ? "10px" : "16px" }}
+              style={{ width: isMobile ? "220px" : "660px", maxWidth: "min(100%, 90vw)", height: "auto", marginBottom: isMobile ? "10px" : "16px" }}
             />
 
             <div style={{ fontSize: isMobile ? "18px" : "32px", fontWeight: 900, letterSpacing: "0.04em", lineHeight: 1.1, marginBottom: "8px" }}>
@@ -560,7 +560,7 @@ export default function HomeOffSeason() {
 
           {/* ── Right chips: 2x2 grid (desktop only) ── */}
           {!isMobile && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "280px", maxWidth: "420px", alignSelf: "stretch" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "240px", maxWidth: "420px", alignSelf: "stretch" }}>
 
               <Link to="/nfl" style={{
                 display: "flex", flexDirection: "column", gap: "8px",
@@ -638,7 +638,7 @@ export default function HomeOffSeason() {
         {/* ===== MAIN GRID: 3-col desktop, stacked mobile (board first) ===== */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 2fr 1fr",
+          gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr)",
           gap: isMobile ? "24px" : "20px",
           marginBottom: isMobile ? "28px" : "40px",
           alignItems: "start",
@@ -708,7 +708,7 @@ export default function HomeOffSeason() {
           <div style={{ order: isMobile ? 1 : 0 }}>
             <div style={{
               display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+              gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
               gap: isMobile ? "24px" : "16px",
               alignItems: "start",
             }}>

@@ -18,6 +18,7 @@
 import { useRef, useState } from "react";
 import * as htmlToImage from "html-to-image";
 import Logo1 from "../assets/Logo1.png";
+import { withoutPageZoom } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -67,10 +68,10 @@ export default function ShareMockButton({
       // hosted team logo can taint the canvas and blank out the whole
       // export, so this card only ever uses flat colors/text, never a
       // logo image, and this filter is just belt-and-suspenders.
-      const dataUrl = await htmlToImage.toPng(cardRef.current, {
+      const dataUrl = await withoutPageZoom(() => htmlToImage.toPng(cardRef.current, {
         pixelRatio: 2, backgroundColor: "#06162c", skipFonts: true,
         filter: (node) => node.tagName !== "IMG",
-      });
+      }));
       setImageUrl(dataUrl);
       setOpen(true);
     } catch (e) {
@@ -219,7 +220,7 @@ export default function ShareMockButton({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "16px", maxWidth: "460px", width: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
+            style={{ background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "16px", maxWidth: "460px", width: "100%", maxHeight: "calc(90vh / var(--pz, 1))", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
               <div style={{ color: BLUE, fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Share Mock Draft</div>

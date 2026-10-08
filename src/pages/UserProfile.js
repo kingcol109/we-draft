@@ -229,7 +229,7 @@ export default function UserProfile() {
   };
 
   if (!user) return <p style={{ textAlign: "center", color: "red", marginTop: "40px" }}>Please sign in first.</p>;
-  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="calc(60vh / var(--pz, 1))" />;
 
   const SectionHeader = ({ label, open, onToggle, badge }) => (
     <button

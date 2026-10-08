@@ -119,7 +119,7 @@ export default function MyMocksPage() {
   const filteredMocks = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
   const atLimit = filteredMocks.length >= MAX_MOCKS_PER_CLASS;
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   if (!user) return (
     <div style={{ maxWidth: "600px", margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: "'Arial Black', Arial, sans-serif" }}>

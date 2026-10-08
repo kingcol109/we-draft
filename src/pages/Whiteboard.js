@@ -7,6 +7,7 @@ import { collection, getDocs, getDoc, doc, setDoc, serverTimestamp } from "fireb
 import { db } from "../firebase";
 import { useRef } from "react";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { getPageScale, unzoomTransform } from "../utils/pageZoom";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -295,7 +296,7 @@ export default function Whiteboard() {
   }, [bankPlayers]);
 
   const boardStyles = `
-    .wb-page { padding: 40px 16px 80px; background: ${SITE_BG}; min-height: 100vh; }
+    .wb-page { padding: 40px 16px 80px; background: ${SITE_BG}; min-height: calc(100vh / var(--pz, 1)); }
     @media (min-width: 900px) { .wb-page { padding: 56px 60px 100px; } }
 
     .wb-header-row {
@@ -473,7 +474,7 @@ export default function Whiteboard() {
 
   if (!user) {
     return (
-      <div className="wb-state-page" style={{ background: SITE_BG, minHeight: "100vh" }}>
+      <div className="wb-state-page" style={{ background: SITE_BG, minHeight: "calc(100vh / var(--pz, 1))" }}>
         <style>{boardStyles}</style>
         <div className="wb-state-card">
           <h2 style={{ color: SITE_INK, fontSize: 20, margin: 0 }}>Please log in to access your draft board.</h2>
@@ -484,7 +485,7 @@ export default function Whiteboard() {
 
   if (loadError) {
     return (
-      <div className="wb-state-page" style={{ background: SITE_BG, minHeight: "100vh" }}>
+      <div className="wb-state-page" style={{ background: SITE_BG, minHeight: "calc(100vh / var(--pz, 1))" }}>
         <style>{boardStyles}</style>
         <div className="wb-state-card">
           <h2 style={{ color: SITE_INK, fontSize: 18, margin: 0 }}>{loadError}</h2>
@@ -495,9 +496,9 @@ export default function Whiteboard() {
 
   if (!board) {
     return (
-      <div style={{ background: SITE_BG, minHeight: "100vh" }}>
+      <div style={{ background: SITE_BG, minHeight: "calc(100vh / var(--pz, 1))" }}>
         <style>{boardStyles}</style>
-        <LoadingSpinner label="Loading your whiteboard" size={48} minHeight="100vh" />
+        <LoadingSpinner label="Loading your whiteboard" size={48} minHeight="calc(100vh / var(--pz, 1))" />
       </div>
     );
   }
@@ -589,9 +590,11 @@ export default function Whiteboard() {
       </div>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <DragOverlay>
+        {/* dnd-kit positions the overlay with fixed px measured in screen px,
+            so cancel the page zoom on the overlay box and restore it inside. */}
+        <DragOverlay style={{ zoom: 1 / getPageScale() }}>
           {activeId ? (
-            <div style={{ padding: "8px 12px", border: `1.5px solid ${SITE_GOLD}`, background: "#fff", fontSize: 13, fontWeight: 700, boxShadow: "0 8px 20px rgba(11,18,32,0.25)", borderRadius: 8, cursor: "grabbing" }}>
+            <div style={{ zoom: getPageScale(), padding: "8px 12px", border: `1.5px solid ${SITE_GOLD}`, background: "#fff", fontSize: 13, fontWeight: 700, boxShadow: "0 8px 20px rgba(11,18,32,0.25)", borderRadius: 8, cursor: "grabbing" }}>
               {(() => {
                 const player = allPlayers.find(p => p.id === activeId);
                 if (!player) return "";
@@ -690,7 +693,7 @@ function DraggablePlayer({ id, player, marker, onToggleMarker }) {
   const ringWidth = flagged || starred ? 2 : 1;
 
   const style = {
-    transform: CSS.Transform.toString(transform),
+    transform: CSS.Transform.toString(unzoomTransform(transform)),
     transition,
     border: `${ringWidth}px solid ${ringColor}`,
     boxShadow: flagged

@@ -94,7 +94,7 @@ export default function ViewMock() {
     load();
   }, [mockId]);
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   if (!mock) return (
     <div style={{ maxWidth: "600px", margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: "'Arial Black', Arial, sans-serif" }}>

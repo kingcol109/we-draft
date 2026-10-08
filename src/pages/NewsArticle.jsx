@@ -204,7 +204,7 @@ export default function NewsArticle() {
   // triggering a second parallel fetch for the same doc.
   const engagement = useEngagement(article?.type === "article" && article?.id ? ["articles", article.id] : []);
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="60vh" />;
+  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   if (!article) return (
     <div style={{ textAlign: "center", marginTop: "80px", color: "#999", fontStyle: "italic", fontSize: "16px" }}>
