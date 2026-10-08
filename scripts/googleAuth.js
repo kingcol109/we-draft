@@ -14,11 +14,13 @@
 // two-character sequences instead of actual line breaks — this loader
 // converts those back before anything tries to use the key.
 
-function loadServiceAccount() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+// envName: Stream Manager's VM control loads its own, separate key
+// (GCE_SERVICE_ACCOUNT_KEY, server/stream-manager/compute.js) the same way.
+function loadServiceAccount(envName = "GOOGLE_SERVICE_ACCOUNT_KEY") {
+  const raw = process.env[envName];
   if (!raw) {
     throw new Error(
-      "GOOGLE_SERVICE_ACCOUNT_KEY env var is not set. It should contain the full service account JSON key as a single-line string."
+      `${envName} env var is not set. It should contain the full service account JSON key as a single-line string.`
     );
   }
 
@@ -27,13 +29,13 @@ function loadServiceAccount() {
     parsed = JSON.parse(raw);
   } catch (e) {
     throw new Error(
-      "GOOGLE_SERVICE_ACCOUNT_KEY is not valid JSON. Make sure the entire key file's contents were pasted in as one line (see setup steps)."
+      `${envName} is not valid JSON. Make sure the entire key file's contents were pasted in as one line (see setup steps).`
     );
   }
 
   if (!parsed.client_email || !parsed.private_key) {
     throw new Error(
-      "GOOGLE_SERVICE_ACCOUNT_KEY is missing client_email or private_key — this doesn't look like a full service account key file."
+      `${envName} is missing client_email or private_key — this doesn't look like a full service account key file.`
     );
   }
 

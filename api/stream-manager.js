@@ -16,6 +16,12 @@
 //   delete           { id } the record only — never the YouTube broadcast
 //   youtube-create   { id } create the YouTube broadcast, bind the worker stream
 //   youtube-refresh  { id } pull lifecycle / privacy / ingest health from YouTube
+//   vm-status        the worker VM's Compute Engine status
+//   vm-start         start the worker VM (no-op if already starting/running)
+//   vm-stop          { confirmLive } stop it (no-op if stopped; refuses while a
+//                    broadcast is live unless confirmLive: true)
+// The vm-* actions only ever touch the VM named in GCE_* env vars
+// (server/stream-manager/compute.js); a request can't name another one.
 // The broadcast list itself is read straight from Firestore (broadcasts,
 // admin read in firestore.rules).
 //
@@ -69,6 +75,7 @@ module.exports = async function handler(req, res) {
 
     const yt = require("../server/stream-manager/youtube");
     const bc = require("../server/stream-manager/broadcasts");
+    const vm = require("../server/stream-manager/compute");
     const body = req.body || {};
     switch (body.action) {
       case "channel": return res.status(200).json(await bc.channelStatus(db, { withStreams: !!body.streams }));
@@ -80,6 +87,9 @@ module.exports = async function handler(req, res) {
       case "delete": return res.status(200).json(await bc.deleteRecord(db, body));
       case "youtube-create": return res.status(200).json(await bc.youtubeCreate(db, body));
       case "youtube-refresh": return res.status(200).json(await bc.youtubeRefresh(db, body));
+      case "vm-status": return res.status(200).json(await vm.status());
+      case "vm-start": return res.status(200).json(await vm.start(uid));
+      case "vm-stop": return res.status(200).json(await vm.stop(db, uid, body));
       default: return res.status(400).json({ error: "unknown action" });
     }
   } catch (e) {
