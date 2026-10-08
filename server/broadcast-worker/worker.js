@@ -2,16 +2,20 @@
 // server/broadcast-worker/worker.js
 //
 // We-Draft broadcast worker: /broadcast/:gameId → Chromium → FFmpeg →
-// continuous 1920×1080 H.264 (video only).
+// continuous 1920×1080 H.264 (video only), to a file (OUTPUT_MODE=file,
+// the default) or to YouTube Live over RTMP/RTMPS (OUTPUT_MODE=youtube).
 //
 //   node worker.js --game clemson-vs-lsu-9-5-2026 --replay 4
 //   BROADCAST_URL=http://localhost:3000/broadcast/<slug>?mode=stream node worker.js
+//   OUTPUT_MODE=youtube YOUTUBE_STREAM_URL=… YOUTUBE_STREAM_KEY_FILE=… node worker.js --game <slug>
+//   node worker.js … --check     validate the settings and exit, without starting
 //
 // Runs until stopped (Ctrl+C / SIGTERM) or --duration seconds. Every
 // --stats seconds it logs frame rates and the CPU/memory of Chromium,
-// FFmpeg and itself; on exit it writes a summary next to the output
-// (<out>.stats.json). Exit code 0 = stopped cleanly, 1 = something failed
-// (a supervisor should restart it), 130 = interrupted.
+// FFmpeg and itself; on exit it writes a summary (<out>.stats.json, or
+// OUTPUT_DIR/youtube-<time>.stats.json). Exit code 0 = stopped cleanly,
+// 1 = something failed (a supervisor should restart it), 2 = bad settings,
+// 130 = interrupted.
 //
 // Options: see config.js.
 const fs = require("fs");
@@ -25,6 +29,9 @@ const procStats = require("./procStats");
 const WATCHDOG_MS = 10_000;
 const WATCHDOG_FAILS = 3;
 const IDLE_REFRESH_MS = 30_000;
+// FFmpeg reports progress every 5s; no new frames encoded for this long
+// means it's wedged (e.g. a dead ingest connection that never errors).
+const ENCODER_STALL_MS = 30_000;
 
 const t0 = Date.now();
 const log = (msg) => console.log(`[${new Date().toISOString().slice(11, 19)} +${Math.round((Date.now() - t0) / 1000)}s] ${msg}`);
@@ -44,9 +51,19 @@ function withTimeout(p, ms, what) {
 }
 
 async function main() {
-  const cfg = loadConfig();
+  let cfg;
+  try {
+    cfg = loadConfig();
+  } catch (e) {
+    log(`config: ${e.message}`);
+    process.exit(2);
+  }
   log(`broadcast: ${cfg.url}`);
-  log(`output:    ${cfg.out} (${cfg.width}x${cfg.height} @ ${cfg.fps}fps, H.264 ${cfg.bitrateKbps}kbps, no audio)`);
+  log(`output:    [${cfg.mode}] ${cfg.outLabel} (${cfg.width}x${cfg.height} @ ${cfg.fps}fps, H.264 High ${cfg.bitrateKbps}kbps, keyframe every 2s, ${cfg.mode === "youtube" ? "silent AAC 128kbps" : "no audio"})`);
+  if (process.argv.includes("--check")) {
+    log("settings OK (--check: not starting)");
+    process.exit(0);
+  }
 
   let browser, page, enc, pump, cast;
   let stopping = false;
@@ -134,6 +151,16 @@ async function main() {
     }
   }, WATCHDOG_MS));
 
+  // Encoder watchdog: FFmpeg alive but not encoding (stuck writing to a
+  // dead connection) never exits on its own.
+  let lastEncFrame = null;
+  let lastEncAdvance = performance.now();
+  timers.push(setInterval(() => {
+    const frame = enc.progress.frame;
+    if (frame !== lastEncFrame) { lastEncFrame = frame; lastEncAdvance = performance.now(); return; }
+    if (performance.now() - lastEncAdvance > ENCODER_STALL_MS) shutdown(1, `ffmpeg stalled (no frames encoded for ${ENCODER_STALL_MS / 1000}s)`);
+  }, WATCHDOG_MS));
+
   // Stats.
   let prev = { at: performance.now(), c: pump.counters(), cpu: new Map() };
   timers.push(setInterval(async () => {
@@ -187,7 +214,8 @@ function writeSummary(cfg, pump, samples, code, reason) {
   const groups = ["chromium", "ffmpeg", "node"];
   const summary = {
     url: cfg.url,
-    out: cfg.out,
+    mode: cfg.mode,
+    out: cfg.outLabel,
     exitCode: code,
     reason,
     seconds: Math.round((Date.now() - t0) / 1000),
@@ -204,7 +232,8 @@ function writeSummary(cfg, pump, samples, code, reason) {
     samples,
   };
   try {
-    if (!/^[a-z]+:\/\//i.test(cfg.out)) fs.writeFileSync(`${cfg.out}.stats.json`, JSON.stringify(summary, null, 2));
+    fs.mkdirSync(require("path").dirname(cfg.statsPath), { recursive: true });
+    fs.writeFileSync(cfg.statsPath, JSON.stringify(summary, null, 2));
   } catch { /* best effort */ }
   log(`frames: ${c.written} written (${c.unique} new, ${c.written - c.unique - c.dropped} repeats), ${c.catchup} catch-up, ${c.dropped} dropped, max late ${Math.round(c.maxLateMs)}ms`);
 }

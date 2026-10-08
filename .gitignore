@@ -31,3 +31,7 @@ yarn-error.log*
 # broadcast worker (server/broadcast-worker): its own deps and local test output
 /server/broadcast-worker/node_modules/
 /server/broadcast-worker/output/
+# YouTube stream settings/keys, if ever put next to the worker (keep them outside the repo)
+/server/broadcast-worker/*.env
+/server/broadcast-worker/*.key
+/server/broadcast-worker/youtube-key*

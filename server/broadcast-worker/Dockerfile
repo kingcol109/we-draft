@@ -13,13 +13,18 @@
 # needs. The tag must match the playwright version in package.json.
 FROM mcr.microsoft.com/playwright:v1.64.0-noble
 
-# FFmpeg from Ubuntu (libx264 included) rather than ffmpeg-static's GitHub
+# FFmpeg from Ubuntu (libx264, RTMPS, anullsrc and AAC included — the
+# build checks all four)
+# rather than ffmpeg-static's GitHub
 # download; tini as PID 1 forwards SIGTERM/SIGINT to the worker and reaps
 # Chromium's child processes.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg tini \
  && rm -rf /var/lib/apt/lists/* \
- && ffmpeg -hide_banner -encoders | grep -q libx264
+ && ffmpeg -hide_banner -encoders | grep -q libx264 \
+ && ffmpeg -hide_banner -protocols | grep -qE '^\s*rtmps$' \
+ && ffmpeg -hide_banner -filters | grep -q anullsrc \
+ && ffmpeg -hide_banner -encoders | grep -qE '^\s*A\S*\s+aac\s'
 
 WORKDIR /app
 COPY package.json package-lock.json ./

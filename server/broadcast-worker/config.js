@@ -4,6 +4,7 @@
 // fallbacks, so the same worker runs from a terminal locally and from a
 // container's env later. Flags win over env.
 //
+//   --mode     OUTPUT_MODE     "file" (default) or "youtube"
 //   --url      BROADCAST_URL   full broadcast URL (mode=stream is added if missing)
 //   --game     GAME_ID         a /live slug or CFBD id, used with --base
 //   --base     BASE_URL        site origin for --game (default http://localhost:3000)
@@ -18,6 +19,18 @@
 //   --duration DURATION_SEC    stop after this many seconds (default 0 = run until stopped)
 //   --stats    STATS_SEC       seconds between stats lines (default 10)
 //   --ready-timeout READY_TIMEOUT_SEC  max wait for the page to report ready (default 90)
+//
+// YouTube mode (OUTPUT_MODE=youtube) streams to YouTube Live instead of
+// writing a file. Env only — never flags, never in the repo:
+//
+//   YOUTUBE_STREAM_URL        the ingest URL from YouTube Studio (rtmp:// or rtmps://)
+//   YOUTUBE_STREAM_KEY        the stream key, or
+//   YOUTUBE_STREAM_KEY_FILE   a file containing it (keeps it out of env/`docker inspect`)
+//
+// The key only ever appears in FFmpeg's output URL; everything that logs
+// or records the target uses outLabel, and FFmpeg's own messages are
+// scrubbed of it (encoder.js).
+const fs = require("fs");
 const path = require("path");
 
 const WIDTH = 1920;
@@ -55,18 +68,49 @@ function outputDir(env = process.env) {
   return path.resolve(env.OUTPUT_DIR || path.join(__dirname, "output"));
 }
 
+// YouTube ingest target. Refuses to build one from incomplete settings.
+function youtubeTarget(env) {
+  const url = (env.YOUTUBE_STREAM_URL || "").trim();
+  let key = (env.YOUTUBE_STREAM_KEY || "").trim();
+  if (!key && env.YOUTUBE_STREAM_KEY_FILE) {
+    try {
+      key = fs.readFileSync(env.YOUTUBE_STREAM_KEY_FILE, "utf8").trim();
+    } catch (e) {
+      throw new Error(`OUTPUT_MODE=youtube: can't read YOUTUBE_STREAM_KEY_FILE (${e.code || e.message}).`);
+    }
+  }
+  const missing = [!url && "YOUTUBE_STREAM_URL", !key && "YOUTUBE_STREAM_KEY (or YOUTUBE_STREAM_KEY_FILE)"].filter(Boolean);
+  if (missing.length) throw new Error(`OUTPUT_MODE=youtube needs ${missing.join(" and ")}. Not starting.`);
+  if (!/^rtmps?:\/\/[^/\s]+\/\S*$/i.test(url)) throw new Error("YOUTUBE_STREAM_URL must be the rtmp:// or rtmps:// ingest URL from YouTube Studio (e.g. rtmps://<host>/<app>).");
+  if (/[\s/]/.test(key)) throw new Error("YOUTUBE_STREAM_KEY looks wrong (contains a space or '/'). Not starting.");
+  const base = url.replace(/\/+$/, "");
+  return { out: `${base}/${key}`, outLabel: `${base}/<stream key>`, secret: key };
+}
+
 function loadConfig(argv = process.argv.slice(2), env = process.env) {
   const f = parseFlags(argv);
   const pick = (flag, envName) => f[flag] ?? env[envName];
-  const out = pick("out", "OUTPUT") || path.join(outputDir(env), "broadcast-test.mp4");
+  const mode = String(pick("mode", "OUTPUT_MODE") || "file").toLowerCase();
+  let target;
+  if (mode === "youtube") {
+    target = { ...youtubeTarget(env), format: "flv" };
+    // A small run summary, never video.
+    target.statsPath = path.join(outputDir(env), `youtube-${new Date().toISOString().replace(/[:.]/g, "-")}.stats.json`);
+  } else if (mode === "file") {
+    const out = path.resolve(pick("out", "OUTPUT") || path.join(outputDir(env), "broadcast-test.mp4"));
+    target = { out, outLabel: out, secret: null, format: null, statsPath: `${out}.stats.json` };
+  } else {
+    throw new Error(`OUTPUT_MODE must be "file" or "youtube" (got "${mode}").`);
+  }
   return {
+    mode,
+    ...target,
     url: broadcastUrl({
       url: pick("url", "BROADCAST_URL"),
       game: pick("game", "GAME_ID"),
       base: pick("base", "BASE_URL") || "http://localhost:3000",
       replay: pick("replay", "REPLAY"),
     }),
-    out: path.resolve(out),
     width: WIDTH,
     height: HEIGHT,
     fps: num(pick("fps", "FPS"), 30),

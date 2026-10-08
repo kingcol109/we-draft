@@ -70,7 +70,7 @@ function decodes(file) {
 async function runScenario(s) {
   const out = path.join(DIR, `${s.name}.mp4`);
   fs.rmSync(out, { force: true });
-  const proc = spawn(process.execPath, [path.join(__dirname, "worker.js"), "--game", GAME, "--base", BASE, "--replay", "4", "--stats", "5", "--out", out],
+  const proc = spawn(process.execPath, [path.join(__dirname, "worker.js"), "--mode", "file", "--game", GAME, "--base", BASE, "--replay", "4", "--stats", "5", "--out", out],
     { stdio: ["ignore", "pipe", "pipe"] });
   let log = "";
   const onData = (d) => { log += d; };

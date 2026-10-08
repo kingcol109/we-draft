@@ -88,7 +88,7 @@ async function main() {
   const started = Date.now();
   let log = "";
   const code = await new Promise((resolve) => {
-    const p = spawn(process.execPath, [path.join(__dirname, "worker.js"),
+    const p = spawn(process.execPath, [path.join(__dirname, "worker.js"), "--mode", "file", // never YouTube, whatever the env says
       "--game", GAME, "--base", BASE, "--replay", REPLAY, "--duration", String(DURATION), "--fps", String(FPS), "--out", OUT],
     { stdio: ["ignore", "pipe", "inherit"] });
     p.stdout.on("data", (d) => { process.stdout.write(d); log += d; });

@@ -46,6 +46,7 @@
     "broadcast-worker": "node server/broadcast-worker/worker.js",
     "broadcast-worker:test": "node server/broadcast-worker/test.js",
     "broadcast-worker:faults": "node server/broadcast-worker/faults.js",
+    "broadcast-worker:ingest-test": "node server/broadcast-worker/ingest-test.js",
     "broadcast-worker:docker-build": "docker build -t we-draft-broadcast-worker server/broadcast-worker",
     "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js"
   },

@@ -1,2 +1,6 @@
 node_modules
 output
+# Never bake a stream key into the image.
+*.env
+*.key
+youtube-key*
