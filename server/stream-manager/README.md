@@ -150,3 +150,99 @@ The existing variables (`GOOGLE_SERVICE_ACCOUNT_KEY`, `YOUTUBE_OAUTH_*`,
 - To rotate the key, create a new one (step 4), update the Vercel variable,
   redeploy, then delete the old key with
   `gcloud iam service-accounts keys delete <old-key-id> --iam-account ...`.
+
+# Automatic broadcasts (Auto Schedule)
+
+Admin → Stream Manager → **Auto Schedule** lists upcoming games from the
+saved CFB schedule (`schedule26`). An admin enables individual games.
+Enabling only records the choice; the server does everything else, and
+only for enabled games.
+
+## Where the data comes from
+
+| Data | Source |
+|---|---|
+| Games, kickoff (`KickoffAt`), `Final`, `Slug`, `CFBDGameId` | `schedule26/{id}`, the saved CFB schedule (kept current by the CFBD sync) |
+| Live status (`scheduled` / `in_progress` / `final`) | `liveGames/{CFBDGameId}`, written by the `live-ingest` cron |
+| Broadcast + automation state | `broadcasts/{id}`, the existing records, with an `auto` block. One per game (`g<CFBDGameId>`, or an existing record adopted) |
+| Slots, capacity, VM ownership, last run | `streamManager/orchestrator` (admin read) |
+| VM agent heartbeat | `streamManager/agent` (admin read) |
+
+## How it runs
+
+- **`api/stream-orchestrator.js`** is a Vercel Cron that runs every minute
+  (`CRON_SECRET`). Each run is one pass of
+  [orchestrator.js](orchestrator.js): it reads Firestore, the VM and
+  YouTube, moves each enabled broadcast at most one step, and saves. No
+  function stays alive, and no browser is involved. A lease keeps two runs
+  from overlapping.
+- **`api/broadcast-agent.js`** is the endpoint the VM agent
+  ([server/broadcast-agent](../broadcast-agent/README.md)) polls every 10s
+  (`STREAM_AGENT_TOKEN`). It records which containers are running and tells
+  the agent which workers to run.
+
+Each enabled game moves through these phases:
+
+1. **selected:** waiting for kickoff minus 15 min. The kickoff is re-read
+   from `schedule26` on every run, so time changes are picked up.
+2. **preparing:** takes a stream slot, then creates the YouTube broadcast
+   and binds it to that slot's stream. If the broadcast already exists, it's
+   re-bound instead. The VM is started now if it's stopped.
+3. **vm:** waits until the VM is running and the agent is reporting.
+4. **worker:** the agent launches the worker for `/broadcast/<slug>?mode=stream`.
+5. **ingest:** waits for YouTube's stream status to be `active`.
+6. **going-live:** moves the broadcast testing → live, and only ever with
+   the stream active.
+7. **live:** watches `liveGames.status`.
+8. **postgame:** starts at `final` and lasts 15 min. If the game leaves
+   `final` (a correction), it goes back to live and the wait starts over.
+9. **ending:** completes the YouTube broadcast first, then stops the worker.
+10. **completed.**
+
+Any step can instead end in **failed** (with an actionable error) or
+**cancelled**. Both can be retried.
+
+Guards:
+
+- **Timeouts:** the VM must be up within 10 min, the worker within 5, ingest
+  within 5 and going live within 5. Otherwise the broadcast fails with what
+  to check.
+- **Hard maximum runtime:** 6h from the worker's start. The orchestrator
+  ends the broadcast, and the agent independently stops the container.
+- **Recovery:** a crashed worker is restarted by the agent while the
+  broadcast stays live. A VM that stops mid-broadcast is restarted.
+- **Duplicates:**
+  - one record per game, enforced in a transaction;
+  - YouTube create has its own lock, and the broadcast id is saved before binding;
+  - one container per record (`wd-bc-<id>`);
+  - slots are given out by one run at a time.
+- **VM stop:** the VM stops only if the orchestrator started it, nothing is
+  active, no enabled game prepares within 45 min, and it's been idle 10 min.
+  It never sends `confirmLive`, so the VM live guard stays in force.
+- **Manual VM controls:**
+  - Stop VM now also refuses while an automatic broadcast is starting or on
+    air, unless `confirmLive` is sent.
+  - A forced manual stop pauses automatic VM starts for 30 min.
+  - A manual Start VM hands the VM to the admin, so the orchestrator never
+    idle-stops it.
+
+## Concurrent games
+
+One reusable YouTube stream (one key) carries one feed at a time, so each
+simultaneous broadcast needs its own **stream slot**. Under Auto Schedule →
+Stream Slots, pick a stream for each slot and set "max at once". On the VM,
+put slot N's key in `~/.we-draft/youtube-key-N` (slot 0 is the existing
+`youtube-key`). With one slot, an overlapping game waits ("waiting for a
+free stream slot") and starts once the slot frees up.
+
+## Extra configuration
+
+| Where | Variable | Value |
+|---|---|---|
+| Vercel | `CRON_SECRET` | already set (shared with `live-ingest`) |
+| Vercel | `STREAM_AGENT_TOKEN` | 32+ random characters, the same as the VM's `~/.we-draft/agent-token` |
+| VM | `/etc/we-draft-agent.env` | see [the agent README](../broadcast-agent/README.md) |
+
+No new Google Cloud permissions are needed. The orchestrator uses the same
+`we-draft-vm-control` account (get/start/stop) and the existing YouTube
+connection.

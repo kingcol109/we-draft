@@ -13,8 +13,11 @@
 //       broadcastId, videoId, streamId, channelId,
 //       lifecycleStatus, streamStatus, healthStatus,
 //       lastSyncedAt, error, creatingAt }
-//     worker: {                  the cloud worker — written by the next phase
+//     worker: {                  the cloud worker — from the VM agent's reports
 //       status, instanceId, startedAt, stoppedAt, lastHeartbeat, error }
+//     auto: { ... }              automated orchestration, when the game was
+//                                enabled from the schedule picker — see
+//                                server/stream-manager/orchestrator.js
 //     createdBy, createdAt, updatedAt
 //
 // Written only here (Admin SDK); firestore.rules gives admins read access and
@@ -28,12 +31,16 @@ const CREATE_LOCK_MS = 90 * 1000;
 const { httpError } = yt;
 
 // Overall status from the YouTube and worker groups.
+const AUTO_PREPARING = ["preparing", "vm", "worker", "ingest", "going-live"];
 function deriveStatus(b) {
   const lc = b.youtube?.lifecycleStatus;
   if (lc === "complete" || lc === "revoked") return "ended";
+  if (b.auto?.phase === "completed") return "ended";
+  if (b.auto?.phase === "failed") return "error";
   if (b.youtube?.error || b.worker?.error) return "error";
   if (lc === "live") return "live";
   if (["testStarting", "testing", "liveStarting"].includes(lc) || ["starting", "running"].includes(b.worker?.status)) return "preparing";
+  if (AUTO_PREPARING.includes(b.auto?.phase)) return "preparing";
   return "scheduled";
 }
 
@@ -140,7 +147,14 @@ async function settings(db) {
 // The worker stream every broadcast binds to: the one chosen in Stream
 // Manager → Channel, else the channel's "We-Draft Live Worker" stream, else
 // a new one (the worker VM then needs that stream's key from YouTube Studio).
-async function workerStream(db, token, s) {
+// slotStreamId: the orchestrator's stream slot for this broadcast — used
+// as-is, never saved as the channel default.
+async function workerStream(db, token, s, slotStreamId) {
+  if (slotStreamId) {
+    const st = await yt.getStream(token, slotStreamId);
+    if (st) return { stream: st, created: false };
+    throw httpError(400, "A stream slot's YouTube stream no longer exists on the connected channel — fix the slots in Stream Manager → Auto Broadcasts.");
+  }
   if (s.workerStreamId) {
     const st = await yt.getStream(token, s.workerStreamId);
     if (st) return { stream: st, created: false };
@@ -180,12 +194,16 @@ async function fail(ref, e) {
   await ref.update({ "youtube.error": String(e.message || e).slice(0, 500), "youtube.creatingAt": null, status: "error", updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
 }
 
+// body.streamId (orchestrator only): bind to that slot's stream, re-binding
+// an existing broadcast if it's on a different one.
 async function youtubeCreate(db, body) {
   const { ref } = await loadRecord(db, body.id);
+  const slotStreamId = body.streamId ? String(body.streamId) : null;
   // One create at a time per record (double clicks, two admins).
   const rec = await db.runTransaction(async (tx) => {
     const d = (await tx.get(ref)).data();
-    if (d.youtube?.broadcastId && d.youtube?.streamId) throw httpError(409, "This record already has a bound YouTube broadcast — use Refresh.");
+    const rebind = slotStreamId && d.youtube?.streamId !== slotStreamId;
+    if (d.youtube?.broadcastId && d.youtube?.streamId && !rebind) throw httpError(409, "This record already has a bound YouTube broadcast — use Refresh.");
     if (d.youtube?.creatingAt && Date.now() - d.youtube.creatingAt < CREATE_LOCK_MS) throw httpError(409, "A YouTube create is already running for this broadcast.");
     tx.update(ref, { "youtube.creatingAt": Date.now() });
     return d;
@@ -197,7 +215,7 @@ async function youtubeCreate(db, body) {
     const token = await yt.accessToken(db);
     if (!s.channelId) throw httpError(409, "No YouTube channel is connected.");
     if (rec.youtube.channelId && rec.youtube.channelId !== s.channelId) throw httpError(409, "This broadcast was started on a different YouTube channel than the one connected now.");
-    const { stream, created: streamCreated } = await workerStream(db, token, s);
+    const { stream, created: streamCreated } = await workerStream(db, token, s, slotStreamId);
 
     let b;
     if (rec.youtube.broadcastId) {
@@ -278,6 +296,6 @@ async function setWorkerStream(db, body) {
 }
 
 module.exports = {
-  deriveStatus, defaultTitle, defaultDescription,
+  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, loadRecord, settings,
   createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, channelStatus, setWorkerStream,
 };

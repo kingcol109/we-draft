@@ -1,0 +1,18 @@
+# /etc/systemd/system/we-draft-agent.service — see README.md
+[Unit]
+Description=We-Draft broadcast agent (runs the broadcast worker containers Stream Manager asks for)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+# The VM user that owns ~/.we-draft and is in the docker group.
+User=REPLACE_WITH_VM_USER
+EnvironmentFile=/etc/we-draft-agent.env
+ExecStart=/usr/bin/node /opt/we-draft/server/broadcast-agent/agent.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

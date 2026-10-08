@@ -180,12 +180,19 @@ async function stop(db, uid, body = {}) {
     }
     throw httpError(409, `The worker VM is ${before.state} (${before.status}) and can't be stopped from here.`);
   }
-  const live = await db.collection("broadcasts").where("status", "==", "live").limit(1).get();
+  // Live, or an automated broadcast in progress (orchestrator.js auto.active).
+  const [live, auto] = await Promise.all([
+    db.collection("broadcasts").where("status", "==", "live").limit(1).get(),
+    db.collection("broadcasts").where("auto.active", "==", true).limit(1).get(),
+  ]);
   if (!live.empty && body.confirmLive !== true) {
     throw httpError(409, "A broadcast is live — stopping the worker VM will end the stream. Send confirmLive: true to stop anyway.");
   }
+  if (!auto.empty && body.confirmLive !== true) {
+    throw httpError(409, "An automatic broadcast is starting or on air — stopping the worker VM will break it. Send confirmLive: true to stop anyway.");
+  }
   const op = await gce("POST", t, "/stop");
-  log("vm-stop", uid, { instance: t.instance, from: before.status, op: op.name || "-", liveOverride: !live.empty });
+  log("vm-stop", uid, { instance: t.instance, from: before.status, op: op.name || "-", liveOverride: !live.empty || !auto.empty });
   return { ok: true, result: "stopping", operation: sanitizeOp(op), instance: await getInstance(t) };
 }
 

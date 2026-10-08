@@ -22,6 +22,14 @@
 //                    broadcast is live unless confirmLive: true)
 // The vm-* actions only ever touch the VM named in GCE_* env vars
 // (server/stream-manager/compute.js); a request can't name another one.
+//   auto-select      { scheduleId, privacyStatus, confirmPublic } enable a
+//                    schedule26 game for automatic broadcast (nothing starts now)
+//   auto-cancel      { id, confirmEnd } disable it (ends it if on air — confirmEnd)
+//   auto-retry       { id } a failed / cancelled one back to selected
+//   auto-config      { slotStreamIds, maxConcurrent } stream slots / capacity
+// The lifecycle itself runs server-side only: api/stream-orchestrator.js
+// (cron) and api/broadcast-agent.js (the VM agent) — see
+// server/stream-manager/orchestrator.js.
 // The broadcast list itself is read straight from Firestore (broadcasts,
 // admin read in firestore.rules).
 //
@@ -76,6 +84,7 @@ module.exports = async function handler(req, res) {
     const yt = require("../server/stream-manager/youtube");
     const bc = require("../server/stream-manager/broadcasts");
     const vm = require("../server/stream-manager/compute");
+    const orch = require("../server/stream-manager/orchestrator");
     const body = req.body || {};
     switch (body.action) {
       case "channel": return res.status(200).json(await bc.channelStatus(db, { withStreams: !!body.streams }));
@@ -88,8 +97,20 @@ module.exports = async function handler(req, res) {
       case "youtube-create": return res.status(200).json(await bc.youtubeCreate(db, body));
       case "youtube-refresh": return res.status(200).json(await bc.youtubeRefresh(db, body));
       case "vm-status": return res.status(200).json(await vm.status());
-      case "vm-start": return res.status(200).json(await vm.start(uid));
-      case "vm-stop": return res.status(200).json(await vm.stop(db, uid, body));
+      case "vm-start": {
+        const r = await vm.start(uid);
+        await orch.noteManualVm(db, "vm-start", r);
+        return res.status(200).json(r);
+      }
+      case "vm-stop": {
+        const r = await vm.stop(db, uid, body);
+        await orch.noteManualVm(db, "vm-stop", r, body);
+        return res.status(200).json(r);
+      }
+      case "auto-select": return res.status(200).json(await orch.selectGame(db, uid, body));
+      case "auto-cancel": return res.status(200).json(await orch.cancelGame(db, uid, body));
+      case "auto-retry": return res.status(200).json(await orch.retryGame(db, uid, body));
+      case "auto-config": return res.status(200).json(await orch.setConfig(db, uid, body));
       default: return res.status(400).json({ error: "unknown action" });
     }
   } catch (e) {

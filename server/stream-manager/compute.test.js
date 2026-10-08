@@ -34,10 +34,12 @@ const USERS = { "tok-admin": { uid: "admin1", role: "admin" }, "tok-user": { uid
 let state; // { vmStatus, liveBroadcast, computeCalls, computeFail }
 
 const fakeDb = {
+  // streamManager/orchestrator — the manual VM buttons note who owns the VM.
+  doc: (p) => ({ set: async (d) => { state.docs[p] = { ...(state.docs[p] || {}), ...d }; } }),
   collection(name) {
     return {
       doc: (id) => ({ get: async () => ({ data: () => (name === "users" ? Object.values(USERS).find((u) => u.uid === id) : undefined) }) }),
-      where: () => ({ limit: () => ({ get: async () => ({ empty: !(name === "broadcasts" && state.liveBroadcast) }) }) }),
+      where: (f) => ({ limit: () => ({ get: async () => ({ empty: !(name === "broadcasts" && (f === "auto.active" ? state.autoActive : state.liveBroadcast)) }) }) }),
     };
   },
 };
@@ -100,7 +102,7 @@ const posts = () => state.computeCalls.filter((c) => c.method === "POST");
 const savedEnv = {};
 beforeEach(() => {
   for (const [k, v] of Object.entries(ENV)) { if (!(k in savedEnv)) savedEnv[k] = process.env[k]; process.env[k] = v; }
-  state = { vmStatus: "TERMINATED", liveBroadcast: false, computeCalls: [], computeFail: 0 };
+  state = { vmStatus: "TERMINATED", liveBroadcast: false, computeCalls: [], computeFail: 0, docs: {}, autoActive: false };
   vm._setTokenProvider(async () => ACCESS_TOKEN);
 });
 
@@ -162,6 +164,8 @@ test("vm-start starts a stopped VM", async () => {
   assert.deepEqual(r.body.operation, { id: "operation-start-1", status: "RUNNING" });
   assert.equal(r.body.instance.state, "starting");
   assert.deepEqual(posts().map((c) => c.url), [`${VM_URL}/start`]);
+  // A manual start: the orchestrator won't idle-stop this VM.
+  assert.equal(state.docs["streamManager/orchestrator"].vmOwned, false);
 });
 
 test("vm-start is a no-op when the VM is already starting or running", async () => {
@@ -205,6 +209,17 @@ test("vm-stop refuses while a broadcast is live unless confirmLive is exactly tr
   const r = await call({ action: "vm-stop", confirmLive: true });
   assert.equal(r.statusCode, 200);
   assert.equal(posts().length, 1);
+  // A forced stop pauses automatic VM starts for a while.
+  assert.ok(state.docs["streamManager/orchestrator"].vmHoldUntil > Date.now());
+});
+
+test("vm-stop also refuses while an automatic broadcast is starting", async () => {
+  state.vmStatus = "RUNNING";
+  state.autoActive = true;
+  const r = await call({ action: "vm-stop" });
+  assert.equal(r.statusCode, 409);
+  assert.match(r.body.error, /automatic broadcast.*confirmLive/);
+  assert.equal(posts().length, 0);
 });
 
 test("vm-stop is a no-op when the VM is already stopped or stopping", async () => {

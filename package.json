@@ -49,7 +49,7 @@
     "broadcast-worker:ingest-test": "node server/broadcast-worker/ingest-test.js",
     "broadcast-worker:docker-build": "docker build -t we-draft-broadcast-worker server/broadcast-worker",
     "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js",
-    "stream-manager:test": "node --test server/stream-manager/compute.test.js"
+    "stream-manager:test": "node --test server/stream-manager/compute.test.js server/stream-manager/orchestrator.test.js server/stream-manager/endpoints.test.js server/broadcast-agent/agent.test.js"
   },
   "eslintConfig": {
     "extends": [

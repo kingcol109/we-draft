@@ -165,11 +165,11 @@ async function accessToken(db) {
   const snap = await db.doc(TOKEN.join("/")).get();
   if (!snap.exists) throw httpError(409, "No YouTube channel is connected — connect one in Stream Manager → Channel.");
   const { id, secret } = clientCreds();
-  const r = await fetch("https://oauth2.googleapis.com/token", {
+  const r = await timedFetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: id, client_secret: secret, refresh_token: decrypt(snap.data().refreshToken), grant_type: "refresh_token" }),
-  });
+  }, "Google token refresh");
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     if (j.error === "invalid_grant") {
@@ -184,12 +184,23 @@ async function accessToken(db) {
 
 // ── YouTube Data API v3 ──
 
+// Every Google call is bounded, so a hung request can't stall an
+// orchestrator tick (api/stream-orchestrator.js) past its lease.
+const TIMEOUT_MS = 15 * 1000;
+async function timedFetch(url, opts, what) {
+  try {
+    return await fetch(url, { ...opts, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch (e) {
+    throw httpError(504, `${what} didn't respond (${e.name === "TimeoutError" ? "timed out" : "network error"}).`);
+  }
+}
+
 async function yt(token, method, path, params, body) {
-  const r = await fetch(`${API}/${path}?${new URLSearchParams(params)}`, {
+  const r = await timedFetch(`${API}/${path}?${new URLSearchParams(params)}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }, `YouTube ${path}`);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const reason = j.error?.errors?.[0]?.reason;
@@ -277,9 +288,18 @@ async function getBroadcast(token, id) {
   return sanitizeBroadcast(j.items?.[0]);
 }
 
+// testing | live | complete — the orchestrator's lifecycle steps
+// (server/stream-manager/orchestrator.js). YouTube only allows live/testing
+// once the bound stream is receiving data.
+async function transitionBroadcast(token, id, broadcastStatus) {
+  if (!["testing", "live", "complete"].includes(broadcastStatus)) throw httpError(400, "Bad broadcast transition.");
+  const j = await yt(token, "POST", "liveBroadcasts/transition", { part: "id,snippet,status,contentDetails", id, broadcastStatus });
+  return sanitizeBroadcast(j);
+}
+
 module.exports = {
   SETTINGS, WORKER_STREAM_TITLE, SCOPES, httpError,
   startOAuth, finishOAuth, disconnect, accessToken,
-  mineChannel, listStreams, getStream, insertWorkerStream, insertBroadcast, bindBroadcast, getBroadcast,
+  mineChannel, listStreams, getStream, insertWorkerStream, insertBroadcast, bindBroadcast, getBroadcast, transitionBroadcast,
   sanitizeStream, sanitizeBroadcast, encrypt, decrypt,
 };
