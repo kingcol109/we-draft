@@ -9,6 +9,9 @@
 //               worker stream every broadcast binds to
 //   Worker VM   Compute Engine status / start / stop of the broadcast worker
 //               VM (vm-* actions; Google Cloud is only ever called server-side)
+//   Auto        Auto Schedule: enable games from the saved CFB schedule
+//               (schedule26) for automatic broadcast — run server-side by
+//               server/stream-manager/orchestrator.js
 //   Broadcasts  broadcasts/{id} records, live from Firestore (admin read)
 //   New         pick a liveGames game, title / description / visibility / start
 //   Detail      GAME / YOUTUBE / WORKER panels + actions
@@ -17,7 +20,7 @@
 // here writes Firestore or sees a token or stream key. The per-broadcast
 // worker controls are placeholders until the orchestration phase.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, getDocs, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
 const BLUE = "#0055a5";
@@ -233,7 +236,8 @@ const VM_STATE = {
 };
 const VM_MOVING = ["starting", "stopping"];
 // The backend's 409 when a broadcast is live and confirmLive wasn't sent.
-const isLiveGuard = (e) => e?.status === 409 && /broadcast is live/i.test(e.message || "");
+// (Also its twin for an automatic broadcast that's starting.)
+const isLiveGuard = (e) => e?.status === 409 && /confirmLive/.test(e.message || "");
 // The API's messages are written to be shown (no keys or tokens); fetch's own
 // network errors aren't helpful as-is.
 const vmError = (e) => (e instanceof TypeError ? "Couldn't reach the server — check your connection and Refresh." : String(e?.message || e).slice(0, 300));
@@ -306,8 +310,8 @@ export function VmPanel({ liveCount = 0, pollMs = 5000, timeoutMs = 3 * 60 * 100
       } catch (e) {
         if (!isLiveGuard(e)) throw e;
         // The server's guard tripped. Only a second, typed confirmation sends the override.
-        const typed = window.prompt(`${e.message}\n\nStopping now ENDS the live stream. Type STOP to stop the VM anyway.`);
-        if (typed !== "STOP") return setMsg({ kind: "error", text: "Stop cancelled — a broadcast is live, so the VM was left running." });
+        const typed = window.prompt(`${e.message}\n\nStopping now ENDS the stream. Type STOP to stop the VM anyway.`);
+        if (typed !== "STOP") return setMsg({ kind: "error", text: "Stop cancelled — a broadcast is live or starting, so the VM was left running." });
         r = await api("vm-stop", { confirmLive: true });
       }
       setInst(r.instance);
@@ -358,6 +362,264 @@ export function VmPanel({ liveCount = 0, pollMs = 5000, timeoutMs = 3 * 60 * 100
         </div>
       )}
       <Message msg={msg} />
+    </div>
+  );
+}
+
+// ── Auto Schedule ──
+// Games from the saved CFB schedule (schedule26) an admin enables for
+// automatic broadcast. Enabling only writes the selection; the server's
+// orchestrator (api/stream-orchestrator.js, every minute) does everything
+// else, starting 15 min before kickoff. Nothing here runs a lifecycle step.
+const AUTO = {
+  selected: { label: "Selected", color: "#b8c2cf" },
+  scheduled: { label: "Scheduled", color: BLUE },
+  starting: { label: "Starting", color: AMBER, pulse: true },
+  live: { label: "Live", color: GREEN, pulse: true },
+  postgame: { label: "Live · Postgame", color: GREEN, pulse: true },
+  ending: { label: "Ending", color: AMBER },
+  completed: { label: "Completed", color: "#333" },
+  failed: { label: "Failed", color: RED },
+  cancelled: { label: "Cancelled", color: "#b8c2cf" },
+  cancelling: { label: "Cancelling", color: AMBER },
+};
+const STARTING_PHASES = ["preparing", "vm", "worker", "ingest", "going-live"];
+export function autoState(b) {
+  const a = b?.auto;
+  if (!a) return null;
+  if (a.cancelRequested) return AUTO.cancelling;
+  if (a.phase === "selected") return a.kickoffAt ? AUTO.scheduled : AUTO.selected;
+  if (STARTING_PHASES.includes(a.phase)) return AUTO.starting;
+  return AUTO[a.phase] || AUTO.selected;
+}
+const GAME_STATUS = {
+  scheduled: { label: "Upcoming", color: "#b8c2cf" },
+  in_progress: { label: "In progress", color: GREEN, pulse: true },
+  final: { label: "Final", color: "#333" },
+};
+const ago = (t, now) => (t ? `${Math.max(0, Math.round((now - t) / 1000))}s ago` : "never");
+
+// Presentational: everything comes in as props (tested on its own).
+//   games   schedule26 docs { id, Home, Away, KickoffAt (ms), Week, CFBDGameId, Final }
+//   statusById  liveGames status by CFBD id (from liveSlate/current)
+//   rows    broadcasts records; orchDoc / agentDoc: streamManager docs
+export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agentDoc, now, onOpen }) {
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [search, setSearch] = useState("");
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [days, setDays] = useState(7);
+
+  // One record per game; the open one (or the latest) wins.
+  const recByGame = useMemo(() => {
+    const m = new Map();
+    for (const b of rows) {
+      if (!b.auto) continue;
+      const k = String(b.gameId);
+      const cur = m.get(k);
+      if (!cur || (b.auto.open && !cur.auto.open) || (!!b.auto.open === !!cur.auto.open && (b.auto.selectedAt || 0) > (cur.auto.selectedAt || 0))) m.set(k, b);
+    }
+    return m;
+  }, [rows]);
+
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const end = now + days * 86400e3;
+    return (games || [])
+      .filter((g) => g.KickoffAt && g.KickoffAt <= end)
+      .filter((g) => !q || `${g.Home} ${g.Away}`.toLowerCase().includes(q))
+      .filter((g) => !onlySelected || recByGame.get(String(g.CFBDGameId))?.auto?.open)
+      .sort((a, b) => a.KickoffAt - b.KickoffAt);
+  }, [games, search, onlySelected, days, now, recByGame]);
+
+  const act = async (key, fn, ok) => {
+    setBusy(key); setMsg(null);
+    try { const r = await fn(); setMsg({ kind: "ok", text: typeof ok === "function" ? ok(r) : ok }); } catch (e) { setMsg({ kind: "error", text: vmError(e) }); } finally { setBusy(""); }
+  };
+  const enable = (g) => {
+    if (!window.confirm(`Enable automatic broadcast for ${g.Away} at ${g.Home}?\n\nNothing starts now. 15 min before kickoff (${fmtFull(g.KickoffAt)}) the server starts the VM, creates the YouTube broadcast (Unlisted unless this game already has a record with another visibility) and goes live once the stream is received. It ends 15 min after the game is FINAL.`)) return;
+    act(`g${g.id}`, () => api("auto-select", { scheduleId: g.id }), (r) => (r.already ? "Already enabled." : "Enabled — it will start automatically before kickoff."));
+  };
+  const disable = (b) => {
+    const onAir = ["live", "postgame"].includes(b.auto.phase);
+    if (onAir) {
+      if (!window.confirm("This broadcast is ON AIR.\n\nDisabling it ends the YouTube broadcast now and stops its worker. End it?")) return;
+    } else if (!window.confirm(STARTING_PHASES.includes(b.auto.phase) ? "This broadcast is starting. Disable it and stop its preparation?" : "Disable the automatic broadcast for this game?")) return;
+    act(`g${b.gameId}`, () => api("auto-cancel", { id: b.id, ...(onAir ? { confirmEnd: true } : {}) }), onAir ? "Ending — the server is completing the YouTube broadcast." : "Disabled.");
+  };
+  const retry = (b) => act(`g${b.gameId}`, () => api("auto-retry", { id: b.id }), "Re-enabled.");
+
+  const agentOnline = agentDoc?.lastSeenAt && now - agentDoc.lastSeenAt < 60e3;
+  const tickOk = orchDoc?.lastTickAt && now - orchDoc.lastTickAt < 3 * 60e3;
+  const slots = orchDoc?.slotStreamIds?.length || 0;
+  const activeCount = rows.filter((b) => b.auto?.active).length;
+
+  return (
+    <div>
+      <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "14px 18px", marginBottom: 14, display: "flex", gap: 22, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ ...label, marginBottom: 0 }}>Orchestrator</div>
+        <span style={{ fontSize: 13, fontWeight: 800, color: tickOk ? "#1e6b36" : RED }}>{tickOk ? "●" : "○"} Last run {ago(orchDoc?.lastTickAt, now)}</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: agentOnline ? "#1e6b36" : "#889" }}>{agentOnline ? "●" : "○"} VM agent {agentOnline ? "online" : `offline (last ${ago(agentDoc?.lastSeenAt, now)})`}</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: INK }}>Slots {activeCount}/{Math.min(slots || 1, orchDoc?.maxConcurrent || 1)} in use</span>
+        {orchDoc?.vmOwned && <span style={{ fontSize: 12, fontWeight: 800, color: "#667" }}>VM started automatically (stops when idle)</span>}
+        {(orchDoc?.lastTick?.errors || []).length > 0 && (
+          <span style={{ fontSize: 12, fontWeight: 800, color: RED, flexBasis: "100%" }}>Last run: {orchDoc.lastTick.errors.slice(0, 2).join(" · ")}</span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search teams…" style={{ ...input, width: 220, padding: "8px 10px" }} />
+        {[[2, "2 days"], [7, "7 days"], [21, "3 weeks"]].map(([d, l]) => (
+          <button key={d} onClick={() => setDays(d)} style={{ ...btn(BLUE, days === d), padding: "7px 12px" }}>{l}</button>
+        ))}
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, fontWeight: 800, color: "#556" }}>
+          <input type="checkbox" checked={onlySelected} onChange={(e) => setOnlySelected(e.target.checked)} /> Enabled only
+        </label>
+      </div>
+      <Message msg={msg} />
+
+      {!games ? (
+        <div style={{ padding: 30, textAlign: "center", color: "#99a", fontWeight: 800 }}>Loading schedule…</div>
+      ) : !shown.length ? (
+        <div style={{ border: "2px dashed #dde3ea", borderRadius: 12, padding: "30px 20px", textAlign: "center", color: "#99a", fontWeight: 800, fontSize: 13 }}>
+          No games in this window. Games without a kickoff time in the CFB schedule appear once they have one.
+        </div>
+      ) : (
+        <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+          {shown.map((g) => {
+            const b = recByGame.get(String(g.CFBDGameId));
+            const s = autoState(b);
+            const a = b?.auto;
+            const gs = statusById[String(g.CFBDGameId)] || (g.Final ? "final" : "scheduled");
+            const linked = /^\d+$/.test(String(g.CFBDGameId ?? ""));
+            const key = `g${g.id}`;
+            const rowBusy = busy === key || busy === `g${g.CFBDGameId}`;
+            return (
+              <div key={g.id} data-testid={`game-${g.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.6fr) 1fr 0.8fr minmax(150px,1.3fr) auto", gap: 10, padding: "12px 16px", alignItems: "center", borderBottom: "1px solid #f0f2f6" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 900, fontSize: 14, color: INK }}>{g.Away} at {g.Home}</div>
+                  <div style={{ fontSize: 11, color: "#889", fontWeight: 700 }}>{g.Week || ""}{linked ? "" : " · not linked to We-Draft Live"}</div>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#445" }}>{fmtFull(g.KickoffAt)}</div>
+                <div><Pill s={GAME_STATUS[gs] || GAME_STATUS.scheduled} small /></div>
+                <div style={{ minWidth: 0 }}>
+                  {s ? <Pill s={s} small /> : <span style={{ fontSize: 12, color: "#aab", fontWeight: 800 }}>Not enabled</span>}
+                  {a?.open && a.waiting && <div style={{ fontSize: 11, color: "#667", fontWeight: 700, marginTop: 3 }}>{a.waiting}</div>}
+                  {a?.error && <div style={{ fontSize: 11, color: RED, fontWeight: 800, marginTop: 3 }}>{a.error}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  {a?.open ? (
+                    <button onClick={() => disable(b)} disabled={!!busy || a.cancelRequested || a.phase === "ending"} style={btn(RED, ["live", "postgame"].includes(a.phase), !!busy || a.cancelRequested || a.phase === "ending")}>
+                      {rowBusy ? "…" : ["live", "postgame"].includes(a.phase) ? "End Broadcast" : "Disable"}
+                    </button>
+                  ) : a && ["failed", "cancelled"].includes(a.phase) ? (
+                    <button onClick={() => retry(b)} disabled={!!busy || g.Final} style={btn(GOLD, true, !!busy || g.Final)}>{rowBusy ? "…" : "Retry"}</button>
+                  ) : a?.phase === "completed" ? null : (
+                    <button onClick={() => enable(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn(GREEN, true, !!busy || !linked || g.Final || gs === "final")}>{rowBusy ? "…" : "Enable"}</button>
+                  )}
+                  {b && onOpen && <button onClick={() => onOpen(b.id)} style={{ ...btn("#889", false), padding: "9px 10px" }}>Open</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Stream slots: one reusable YouTube stream per concurrent broadcast; slot
+// i's key is on the VM as ~/.we-draft/youtube-key (slot 0) / youtube-key-i.
+function SlotSettings({ orchDoc }) {
+  const [open, setOpen] = useState(false);
+  const [streams, setStreams] = useState(null);
+  const [ids, setIds] = useState([]);
+  const [max, setMax] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const edit = async () => {
+    setOpen(true); setMsg(null);
+    setIds(orchDoc?.slotStreamIds?.length ? orchDoc.slotStreamIds : []);
+    setMax(orchDoc?.maxConcurrent || 1);
+    try {
+      const ch = await api("channel", { streams: true });
+      setStreams(ch.streams || []);
+      if (!orchDoc?.slotStreamIds?.length && ch.workerStream?.id) setIds([ch.workerStream.id]);
+    } catch (e) { setMsg({ kind: "error", text: vmError(e) }); }
+  };
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try { await api("auto-config", { slotStreamIds: ids.filter(Boolean), maxConcurrent: Number(max) }); setMsg({ kind: "ok", text: "Saved." }); setOpen(false); } catch (e) { setMsg({ kind: "error", text: vmError(e) }); } finally { setBusy(false); }
+  };
+  const title = (id) => streams?.find((s) => s.id === id)?.title || id;
+
+  return (
+    <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "14px 18px", marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ ...label, marginBottom: 0 }}>Stream Slots</div>
+        <span style={{ fontSize: 13, fontWeight: 800, color: INK, flex: 1 }}>
+          {orchDoc?.slotStreamIds?.length ? `${orchDoc.slotStreamIds.length} slot(s), up to ${orchDoc.maxConcurrent || 1} at once` : "Default: 1 slot (the Channel's worker stream)"}
+        </span>
+        {!open && <button onClick={edit} style={btn(BLUE, false)}>Edit</button>}
+      </div>
+      {open && (
+        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          {ids.map((id, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 12, fontWeight: 900, width: 200, color: "#556" }}>Slot {i} <span style={{ fontFamily: "monospace", fontWeight: 700 }}>({i === 0 ? "youtube-key" : `youtube-key-${i}`})</span></span>
+              <select value={id} onChange={(e) => setIds(ids.map((x, j) => (j === i ? e.target.value : x)))} style={{ ...input, width: "auto", minWidth: 260, padding: "7px 10px" }}>
+                <option value="">Pick a stream…</option>
+                {(streams || []).map((s) => <option key={s.id} value={s.id}>{s.title || s.id}</option>)}
+                {id && !streams?.some((s) => s.id === id) && <option value={id}>{title(id)}</option>}
+              </select>
+              {i > 0 && i === ids.length - 1 && <button onClick={() => setIds(ids.slice(0, -1))} style={{ ...btn(RED, false), padding: "6px 10px" }}>Remove</button>}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {ids.length < 6 && <button onClick={() => setIds([...ids, ""])} style={{ ...btn(BLUE, false), padding: "6px 10px" }}>+ Slot</button>}
+            <span style={{ fontSize: 12, fontWeight: 800, color: "#556" }}>Max at once</span>
+            <input type="number" min={1} max={6} value={max} onChange={(e) => setMax(e.target.value)} style={{ ...input, width: 70, padding: "6px 8px" }} />
+            <button onClick={save} disabled={busy} style={btn(BLUE, true, busy)}>{busy ? "Saving…" : "Save"}</button>
+            <button onClick={() => setOpen(false)} disabled={busy} style={btn("#889", false, busy)}>Cancel</button>
+          </div>
+          <div style={{ fontSize: 12, color: "#778", fontFamily: "Arial" }}>
+            Each slot needs its stream's key on the VM in the file shown. Raise “max at once” only if the VM has the CPU for it (about 2 vCPUs per broadcast).
+          </div>
+        </div>
+      )}
+      <Message msg={msg} />
+    </div>
+  );
+}
+
+// Container: loads the schedule and live statuses, renders AutoSchedule.
+function AutoPanel({ rows, now, onOpen, onBack }) {
+  const [games, setGames] = useState(null);
+  const [statusById, setStatusById] = useState({});
+  const [orchDoc, setOrchDoc] = useState(null);
+  const [agentDoc, setAgentDoc] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    const since = new Date(Date.now() - 6 * 3600e3);
+    getDocs(query(collection(db, "schedule26"), where("KickoffAt", ">=", since), orderBy("KickoffAt"), limit(500)))
+      .then((snap) => setGames(snap.docs.map((d) => { const x = d.data(); return { id: d.id, ...x, KickoffAt: ms(x.KickoffAt) }; })))
+      .catch((e) => { setErr(e.message); setGames([]); });
+    const unsubs = [
+      onSnapshot(doc(db, "liveSlate", "current"), (s) => setStatusById(Object.fromEntries((s.data()?.games || []).map((g) => [String(g.id), g.status])))),
+      onSnapshot(doc(db, "streamManager", "orchestrator"), (s) => setOrchDoc(s.data() || null), () => {}),
+      onSnapshot(doc(db, "streamManager", "agent"), (s) => setAgentDoc(s.data() || null), () => {}),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, []);
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ ...btn("#889", false), marginBottom: 14 }}>← All broadcasts</button>
+      {err && <Message msg={{ kind: "error", text: `Couldn't load the schedule: ${err}` }} />}
+      <SlotSettings orchDoc={orchDoc} />
+      <AutoSchedule games={games} statusById={statusById} rows={rows || []} orchDoc={orchDoc} agentDoc={agentDoc} now={now} onOpen={onOpen} />
     </div>
   );
 }
@@ -576,12 +838,25 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           <Row k="Started">{w.startedAt ? fmtFull(ms(w.startedAt)) : "—"}</Row>
           <Row k="Stopped">{w.stoppedAt ? fmtFull(ms(w.stoppedAt)) : "—"}</Row>
           {w.error && <div style={{ fontSize: 12, color: RED, fontWeight: 800, fontFamily: "Arial" }}>{w.error}</div>}
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button disabled style={btn(GREEN, true, true)} title="Coming soon — worker orchestration is the next phase">Start Worker</button>
-            <button disabled style={btn(RED, false, true)} title="Coming soon — worker orchestration is the next phase">Stop Worker</button>
+          <div style={{ fontSize: 11, color: "#99a", fontWeight: 800, fontFamily: "Arial" }}>
+            {b.auto?.enabled ? "Started and stopped automatically (Auto Schedule)." : "Workers run only for games enabled in Auto Schedule."}
           </div>
-          <div style={{ fontSize: 11, color: "#99a", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>Coming soon</div>
         </Panel>
+
+        {b.auto && (
+          <Panel title="Automation" accent={GOLD}>
+            <Row k="State"><Pill s={autoState(b) || AUTO.selected} small /></Row>
+            <Row k="Phase" mono>{b.auto.phase}</Row>
+            <Row k="Kickoff">{fmtFull(b.auto.kickoffAt)}</Row>
+            <Row k="Prep starts">{fmtFull(b.auto.prepAt)}</Row>
+            <Row k="Stream slot">{b.auto.slot ?? "—"}</Row>
+            <Row k="Final seen">{b.auto.finalSeenAt ? fmtFull(b.auto.finalSeenAt) : "—"}</Row>
+            <Row k="Failsafe end">{b.auto.deadlineAt ? fmtFull(b.auto.deadlineAt) : "—"}</Row>
+            {b.auto.endReason && <Row k="Ended">{b.auto.endReason}</Row>}
+            {b.auto.waiting && <div style={{ fontSize: 12, color: "#667", fontWeight: 800, fontFamily: "Arial" }}>{b.auto.waiting}</div>}
+            {b.auto.error && <div style={{ fontSize: 12, color: RED, fontWeight: 800, fontFamily: "Arial" }}>{b.auto.error}</div>}
+          </Panel>
+        )}
       </div>
 
       <div style={{ marginTop: 14, border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "14px 16px" }}>
@@ -654,7 +929,7 @@ export default function AdminStreamManager() {
   const [rows, setRows] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [games, setGames] = useState([]);
-  const [view, setView] = useState({ kind: "list" }); // list | new | detail {id} | edit {id}
+  const [view, setView] = useState({ kind: "list" }); // list | auto | new | detail {id} | edit {id}
   const [filter, setFilter] = useState("upcoming");
   const [msg, setMsg] = useState(null);
   const [now, setNow] = useState(Date.now());
@@ -728,6 +1003,9 @@ export default function AdminStreamManager() {
       <ChannelPanel onMessage={setMsg} />
       <VmPanel liveCount={counts.live} />
 
+      {view.kind === "auto" && (
+        <AutoPanel rows={rows} now={now} onOpen={(id) => setView({ kind: "detail", id })} onBack={() => setView({ kind: "list" })} />
+      )}
       {view.kind === "new" && (
         <BroadcastForm games={games} onCancel={() => setView({ kind: "list" })} onDone={(id) => { setMsg({ kind: "ok", text: "Broadcast record created." }); setView({ kind: "detail", id }); }} />
       )}
@@ -751,6 +1029,7 @@ export default function AdminStreamManager() {
               <button key={k} onClick={() => setFilter(k)} style={{ ...btn(BLUE, filter === k), padding: "7px 14px" }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
+            <button onClick={() => setView({ kind: "auto" })} style={btn(BLUE, true)}>Auto Schedule</button>
             <button onClick={() => setView({ kind: "new" })} style={btn(GOLD, true)}>+ New Broadcast</button>
           </div>
           {loadErr && <Message msg={{ kind: "error", text: `Couldn't load broadcasts: ${loadErr}` }} />}

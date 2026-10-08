@@ -185,3 +185,115 @@ test("a network failure shows a readable message", async () => {
   renderPanel();
   expect(await screen.findByText(/Couldn't reach the server/)).toBeInTheDocument();
 });
+
+// ── Auto Schedule picker ──
+// Rendered with props (schedule26 games, statuses, broadcast records); the
+// fetch stub records the API calls it makes.
+describe("AutoSchedule", () => {
+  const { AutoSchedule } = require("./AdminStreamManager");
+  const NOW = Date.UTC(2026, 9, 10, 15, 0);
+  const H = 3600e3;
+  const games = [
+    { id: "s2", Home: "Texas", Away: "Ohio State", KickoffAt: NOW + 5 * H, CFBDGameId: 401002, Week: "Week 7" },
+    { id: "s1", Home: "LSU", Away: "Clemson", KickoffAt: NOW + 2 * H, CFBDGameId: 401001, Week: "Week 7" },
+    { id: "s3", Home: "Navy", Away: "Army", KickoffAt: NOW + 3 * H, CFBDGameId: null, Week: "Week 7" },
+    { id: "s4", Home: "Iowa", Away: "Ohio", KickoffAt: NOW - 3 * H, CFBDGameId: 401004, Final: true },
+    { id: "s5", Home: "Far", Away: "Future", KickoffAt: NOW + 30 * 86400e3, CFBDGameId: 401005 },
+  ];
+  const rec = (gameId, auto, extra = {}) => ({ id: `g${gameId}`, gameId: String(gameId), auto: { open: true, ...auto }, ...extra });
+  const renderPicker = (props = {}) => render(<AutoSchedule games={games} rows={[]} now={NOW} statusById={{ 401004: "final" }} orchDoc={null} agentDoc={null} {...props} />);
+  const row = (id) => screen.getByTestId(`game-${id}`);
+  const within = require("@testing-library/react").within;
+
+  beforeEach(() => {
+    global.fetch = jest.fn((url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, auth: opts.headers.Authorization, body });
+      return reply(200, { ok: true, id: "g401001" });
+    });
+  });
+
+  test("lists upcoming schedule games in kickoff order, starting nothing", () => {
+    renderPicker();
+    const rows = screen.getAllByTestId(/^game-/).map((r) => r.dataset.testid);
+    expect(rows).toEqual(["game-s4", "game-s1", "game-s3", "game-s2"]); // s5 is outside 7 days
+    expect(within(row("s1")).getByText("Clemson at LSU")).toBeInTheDocument();
+    expect(within(row("s4")).getByText("Final")).toBeInTheDocument();
+    expect(within(row("s1")).getByText("Not enabled")).toBeInTheDocument();
+    expect(calls).toEqual([]);
+  });
+
+  test("unlinked and final games can't be enabled", () => {
+    renderPicker();
+    expect(within(row("s3")).getByRole("button", { name: "Enable" })).toBeDisabled();
+    expect(within(row("s3")).getByText(/not linked/)).toBeInTheDocument();
+    expect(within(row("s4")).getByRole("button", { name: "Enable" })).toBeDisabled();
+  });
+
+  test("Enable asks first, then only sends auto-select", async () => {
+    window.confirm.mockReturnValueOnce(false);
+    renderPicker();
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Enable" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Enable" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/Nothing starts now/);
+    expect(await screen.findByText(/Enabled — it will start automatically/)).toBeInTheDocument();
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-select", scheduleId: "s1" }]);
+    expect(calls[0].auth).toBe("Bearer firebase-id-token");
+  });
+
+  test("shows each broadcast state with what it's waiting on or why it failed", () => {
+    renderPicker({
+      rows: [
+        rec(401001, { phase: "worker", waiting: "Waiting for the agent to launch the worker…" }),
+        rec(401002, { phase: "failed", open: false, error: "YouTube never received the worker's stream" }),
+      ],
+    });
+    expect(within(row("s1")).getByText("Starting")).toBeInTheDocument();
+    expect(within(row("s1")).getByText(/launch the worker/)).toBeInTheDocument();
+    expect(within(row("s2")).getByText("Failed")).toBeInTheDocument();
+    expect(within(row("s2")).getByText(/never received/)).toBeInTheDocument();
+    expect(within(row("s2")).getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  test("Disable on a scheduled game cancels without confirmEnd", async () => {
+    renderPicker({ rows: [rec(401001, { phase: "selected", kickoffAt: NOW + 2 * H })] });
+    expect(within(row("s1")).getByText("Scheduled")).toBeInTheDocument();
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Disable" }));
+    await screen.findByText("Disabled.");
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-cancel", id: "g401001" }]);
+  });
+
+  test("ending a live broadcast needs its own confirmation and sends confirmEnd", async () => {
+    renderPicker({ rows: [rec(401001, { phase: "live" })] });
+    expect(within(row("s1")).getByText("Live")).toBeInTheDocument();
+    window.confirm.mockReturnValueOnce(false);
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "End Broadcast" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "End Broadcast" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/ON AIR/);
+    await screen.findByText(/Ending/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-cancel", id: "g401001", confirmEnd: true }]);
+  });
+
+  test("Retry re-enables a failed game", async () => {
+    renderPicker({ rows: [rec(401001, { phase: "failed", open: false, error: "x" })] });
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Retry" }));
+    await screen.findByText("Re-enabled.");
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-retry", id: "g401001" }]);
+  });
+
+  test("server errors are shown", async () => {
+    global.fetch = jest.fn(() => reply(400, { error: "This game isn't linked to We-Draft Live (no CFBD game id) — set it in Admin → CFB Schedule." }));
+    renderPicker();
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Enable" }));
+    expect(await screen.findByText(/isn't linked to We-Draft Live/)).toBeInTheDocument();
+  });
+
+  test("orchestrator and agent health are shown", () => {
+    renderPicker({ orchDoc: { lastTickAt: NOW - 30e3, slotStreamIds: ["a", "b"], maxConcurrent: 2 }, agentDoc: { lastSeenAt: NOW - 5e3 } });
+    expect(screen.getByText(/Last run 30s ago/)).toBeInTheDocument();
+    expect(screen.getByText(/VM agent online/)).toBeInTheDocument();
+    expect(screen.getByText(/Slots 0\/2 in use/)).toBeInTheDocument();
+  });
+});
