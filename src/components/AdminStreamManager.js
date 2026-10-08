@@ -7,14 +7,16 @@
 //
 //   Channel     the connected YouTube channel (OAuth, server-side) and the
 //               worker stream every broadcast binds to
+//   Worker VM   Compute Engine status / start / stop of the broadcast worker
+//               VM (vm-* actions; Google Cloud is only ever called server-side)
 //   Broadcasts  broadcasts/{id} records, live from Firestore (admin read)
 //   New         pick a liveGames game, title / description / visibility / start
 //   Detail      GAME / YOUTUBE / WORKER panels + actions
 //
 // Every change goes through api/stream-manager.js (admin-checked); nothing
-// here writes Firestore or sees a token or stream key. Worker controls are
-// placeholders until the orchestration phase.
-import { useEffect, useMemo, useState } from "react";
+// here writes Firestore or sees a token or stream key. The per-broadcast
+// worker controls are placeholders until the orchestration phase.
+import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
@@ -88,7 +90,7 @@ async function api(action, payload = {}) {
   });
   const j = await r.json().catch(() => ({}));
   if (r.status === 404) throw new Error("the Stream Manager API isn't deployed here (it runs on the live site, or locally under `vercel dev`).");
-  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status });
   return j;
 }
 
@@ -214,6 +216,148 @@ function ChannelPanel({ onMessage }) {
         </div>
       )}
       {(err || st?.lastError) && <Message msg={{ kind: "error", text: err || st.lastError }} />}
+    </div>
+  );
+}
+
+// ── Worker VM ──
+// The VM's Compute Engine state (server/stream-manager/compute.js STATES).
+const VM_STATE = {
+  starting: { label: "Starting", color: AMBER, pulse: true },
+  running: { label: "Running", color: GREEN },
+  stopping: { label: "Stopping", color: AMBER, pulse: true },
+  stopped: { label: "Stopped", color: "#333" },
+  suspended: { label: "Suspended", color: "#8aa4c8" },
+  repairing: { label: "Repairing", color: RED },
+  unknown: { label: "Unknown", color: "#b8c2cf" },
+};
+const VM_MOVING = ["starting", "stopping"];
+// The backend's 409 when a broadcast is live and confirmLive wasn't sent.
+const isLiveGuard = (e) => e?.status === 409 && /broadcast is live/i.test(e.message || "");
+// The API's messages are written to be shown (no keys or tokens); fetch's own
+// network errors aren't helpful as-is.
+const vmError = (e) => (e instanceof TypeError ? "Couldn't reach the server — check your connection and Refresh." : String(e?.message || e).slice(0, 300));
+
+// Reads status on open; starts or stops only on an admin's click. After a
+// start/stop, polls vm-status until the VM settles or timeoutMs passes.
+export function VmPanel({ liveCount = 0, pollMs = 5000, timeoutMs = 3 * 60 * 1000 }) {
+  const [inst, setInst] = useState(null);
+  const [busy, setBusy] = useState("load"); // load | refresh | start | stop | poll | ""
+  const [msg, setMsg] = useState(null);
+  const alive = useRef(true);
+
+  const status = async () => {
+    const { instance } = await api("vm-status");
+    if (alive.current) setInst(instance);
+    return instance;
+  };
+
+  useEffect(() => {
+    alive.current = true;
+    status().catch((e) => alive.current && setMsg({ kind: "error", text: vmError(e) })).finally(() => alive.current && setBusy(""));
+    return () => { alive.current = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const poll = async (want) => {
+    setBusy("poll");
+    const deadline = Date.now() + timeoutMs;
+    let last = null;
+    while (alive.current && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      if (!alive.current) return;
+      try {
+        last = await status();
+        if (!VM_MOVING.includes(last.state)) break;
+      } catch { /* one failed poll isn't fatal; keep trying until the deadline */ }
+    }
+    if (!alive.current) return;
+    if (last?.state === want) setMsg({ kind: "ok", text: `Worker VM is ${want}.` });
+    else if (last && !VM_MOVING.includes(last.state)) setMsg({ kind: "error", text: `Worker VM ended up ${last.state} (${last.status}), not ${want}.` });
+    else setMsg({ kind: "error", text: `Worker VM still isn't ${want} after ${Math.max(1, Math.round(timeoutMs / 60000))} min — Refresh to check again, or look in the Google Cloud console.` });
+  };
+
+  const act = async (what, fn) => {
+    setBusy(what); setMsg(null);
+    try { await fn(); } catch (e) { if (alive.current) setMsg({ kind: "error", text: vmError(e) }); } finally { if (alive.current) setBusy(""); }
+  };
+
+  const refresh = () => act("refresh", status);
+
+  const start = () => {
+    if (!window.confirm(`Start the worker VM (${inst?.name})?\n\nThis boots the machine (Compute Engine billing starts). It doesn't start a stream.`)) return;
+    act("start", async () => {
+      const r = await api("vm-start");
+      setInst(r.instance);
+      if (r.result === "already-running") return setMsg({ kind: "ok", text: "Worker VM is already starting or running." });
+      setMsg({ kind: "ok", text: "Start requested — waiting for the VM…" });
+      await poll("running");
+    });
+  };
+
+  const stop = () => {
+    const warn = liveCount > 0
+      ? `\n\n⚠ ${liveCount} broadcast${liveCount > 1 ? "s are" : " is"} LIVE. Stopping the VM will end the stream.`
+      : "\n\nAny stream the worker is sending will end.";
+    if (!window.confirm(`Stop the worker VM (${inst?.name})?${warn}`)) return;
+    act("stop", async () => {
+      let r;
+      try {
+        r = await api("vm-stop");
+      } catch (e) {
+        if (!isLiveGuard(e)) throw e;
+        // The server's guard tripped. Only a second, typed confirmation sends the override.
+        const typed = window.prompt(`${e.message}\n\nStopping now ENDS the live stream. Type STOP to stop the VM anyway.`);
+        if (typed !== "STOP") return setMsg({ kind: "error", text: "Stop cancelled — a broadcast is live, so the VM was left running." });
+        r = await api("vm-stop", { confirmLive: true });
+      }
+      setInst(r.instance);
+      if (r.result === "already-stopped") return setMsg({ kind: "ok", text: "Worker VM is already stopped or stopping." });
+      setMsg({ kind: "ok", text: "Stop requested — waiting for the VM…" });
+      await poll("stopped");
+    });
+  };
+
+  const state = inst?.state || "unknown";
+  const locked = !!busy;
+  const canStart = !locked && state === "stopped";
+  const canStop = !locked && ["running", "starting", "repairing"].includes(state);
+  const fmtTs = (t) => (t ? fmtFull(Date.parse(t)) : "—");
+
+  return (
+    <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "16px 18px", marginBottom: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ ...label, marginBottom: 0, minWidth: 120 }}>Worker VM</div>
+        {busy === "load" && !inst ? (
+          <span style={{ flex: 1, fontSize: 13, color: "#999", fontWeight: 700 }}>Checking…</span>
+        ) : inst ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 18, flex: 1, minWidth: 260, flexWrap: "wrap" }}>
+            <Pill s={VM_STATE[state] || VM_STATE.unknown} />
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 15, color: INK, fontFamily: "monospace" }}>{inst.name}</div>
+              <div style={{ fontSize: 12, color: "#667", fontWeight: 700 }}>
+                {inst.zone} · {inst.machineType || "—"} · <span style={{ fontFamily: "monospace" }}>{inst.status || "—"}</span>
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>
+              <div>Last start: {fmtTs(inst.lastStartTimestamp)}</div>
+              <div>Last stop: {fmtTs(inst.lastStopTimestamp)}</div>
+            </div>
+          </div>
+        ) : (
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#889" }}>Status unavailable.</span>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={refresh} disabled={locked} style={btn(BLUE, false, locked)}>{busy === "refresh" || busy === "load" ? "Checking…" : "Refresh Status"}</button>
+          <button onClick={start} disabled={!canStart} style={btn(GREEN, true, !canStart)}>{busy === "start" ? "Starting…" : "Start VM"}</button>
+          <button onClick={stop} disabled={!canStop} style={btn(RED, false, !canStop)}>{busy === "stop" ? "Stopping…" : "Stop VM"}</button>
+        </div>
+      </div>
+      {busy === "poll" && (
+        <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, color: "#778" }}>
+          Waiting for the VM to finish {state === "stopping" ? "stopping" : "starting"}… (checking every {Math.max(1, Math.round(pollMs / 1000))}s)
+        </div>
+      )}
+      <Message msg={msg} />
     </div>
   );
 }
@@ -582,6 +726,7 @@ export default function AdminStreamManager() {
 
       <Message msg={msg} />
       <ChannelPanel onMessage={setMsg} />
+      <VmPanel liveCount={counts.live} />
 
       {view.kind === "new" && (
         <BroadcastForm games={games} onCancel={() => setView({ kind: "list" })} onDone={(id) => { setMsg({ kind: "ok", text: "Broadcast record created." }); setView({ kind: "detail", id }); }} />

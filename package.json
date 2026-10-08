@@ -48,7 +48,8 @@
     "broadcast-worker:faults": "node server/broadcast-worker/faults.js",
     "broadcast-worker:ingest-test": "node server/broadcast-worker/ingest-test.js",
     "broadcast-worker:docker-build": "docker build -t we-draft-broadcast-worker server/broadcast-worker",
-    "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js"
+    "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js",
+    "stream-manager:test": "node --test server/stream-manager/compute.test.js"
   },
   "eslintConfig": {
     "extends": [
@@ -69,6 +70,9 @@
     ]
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17"
