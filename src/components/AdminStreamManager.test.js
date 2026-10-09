@@ -216,7 +216,7 @@ describe("AutoSchedule", () => {
   test("lists upcoming schedule games in kickoff order, starting nothing", () => {
     renderPicker();
     const rows = screen.getAllByTestId(/^game-/).map((r) => r.dataset.testid);
-    expect(rows).toEqual(["game-s4", "game-s1", "game-s3", "game-s2"]); // s5 is outside 7 days
+    expect(rows).toEqual(["game-national", "game-s4", "game-s1", "game-s3", "game-s2"]); // national is pinned first; s5 is outside 7 days
     expect(within(row("s1")).getByText("Clemson at LSU")).toBeInTheDocument();
     expect(within(row("s4")).getByText("Final")).toBeInTheDocument();
     expect(within(row("s1")).getByText("Not enabled")).toBeInTheDocument();
@@ -815,5 +815,82 @@ describe("Edit Metadata thumbnail", () => {
     expect(await screen.findByText("Draft saved.")).toBeInTheDocument();
     expect(saved).toBeNull();
     expect(screen.getByTestId("thumbnail-status")).toHaveTextContent("Preview — not saved");
+  });
+});
+
+// ── National coverage pinned in Auto Schedule, with its own metadata ──
+describe("National coverage in Auto Schedule", () => {
+  const { AutoSchedule, defaultNationalWindow } = require("./AdminStreamManager");
+  const { within } = require("@testing-library/react");
+  const NOW = new Date(2026, 9, 8, 15, 0).getTime(); // a Thursday, local time
+  const games = [
+    { id: "s1", Home: "Wake Forest", Away: "North Carolina", KickoffAt: NOW + 2 * 3600e3, CFBDGameId: 401001 },
+    { id: "s2", Home: "LSU", Away: "Clemson", KickoffAt: NOW + 3 * 3600e3, CFBDGameId: 401002 },
+  ];
+  const NAT = { title: "College Football LIVE | Scores, Highlights & Action Around the Country", description: "College football action from across the country — all in one place. 🏈\n\n#CollegeFootball #CollegeFootballLive #WeDraftLive #FSUvsLOU" };
+
+  beforeEach(() => {
+    global.fetch = jest.fn((url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, auth: opts.headers.Authorization, body });
+      if (body.action === "metadata-get") {
+        return reply(200, { game: null, national: { startAt: Date.parse(body.startAt), endAt: Date.parse(body.endAt) }, draft: null, thumbnail: null, defaults: NAT, limits: { titleMax: 100, descriptionMaxBytes: 5000 }, broadcast: { exists: false, youtubeCreated: false } });
+      }
+      if (body.action === "metadata-thumbnail-generate") return reply(200, { gameId: "national", sha256: "c".repeat(64), width: 1280, height: 720, notes: [], dataUrl: "data:image/png;base64,NAT" });
+      return reply(400, { error: `unexpected action ${body.action}` });
+    });
+  });
+  const renderPicker = (rows = []) => render(<AutoSchedule games={games} rows={rows} now={NOW} statusById={{}} orchDoc={null} agentDoc={null} />);
+  const ids = () => screen.getAllByTestId(/^game-/).map((r) => r.dataset.testid);
+
+  test("national coverage is the first row, pinned, whatever the search or filters", () => {
+    renderPicker();
+    expect(ids()[0]).toBe("game-national");
+    expect(within(screen.getByTestId("game-national")).getByText("PINNED")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "zzz" } });
+    expect(ids()).toEqual(["game-national"]);
+    expect(screen.getByText(/No games in this window/)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "" } });
+    fireEvent.click(screen.getByLabelText("Enabled only"));
+    expect(ids()).toEqual(["game-national"]);
+    expect(calls).toEqual([]);
+  });
+
+  test("still pinned while the schedule loads", () => {
+    render(<AutoSchedule games={null} rows={[]} now={NOW} statusById={{}} orchDoc={null} agentDoc={null} />);
+    expect(ids()).toEqual(["game-national"]);
+    expect(screen.getByText("Loading schedule…")).toBeInTheDocument();
+  });
+
+  test("Edit Metadata opens the national editor for the window set in the row — read-only, nothing scheduled", async () => {
+    renderPicker();
+    fireEvent.click(within(screen.getByTestId("game-national")).getByRole("button", { name: "Edit Metadata" }));
+    expect(await screen.findByDisplayValue(NAT.title)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("National Coverage")).toBeInTheDocument();
+    const w = defaultNationalWindow(NOW);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "metadata-get", national: true, startAt: new Date(w.start).toISOString(), endAt: new Date(w.end).toISOString() }]);
+    expect(screen.getByLabelText("YouTube description").value).toMatch(/#WeDraftLive #FSUvsLOU$/);
+    expect(screen.getByText(/the window's top game \(Game of the Week, else Featured\) goes in the hashtags/)).toBeInTheDocument();
+    // the thumbnail is the national one, for the same window
+    fireEvent.click(screen.getByRole("button", { name: "Generate Thumbnail" }));
+    expect(await screen.findByAltText("Thumbnail preview (not saved)")).toHaveAttribute("src", "data:image/png;base64,NAT");
+    expect(calls[1].body).toEqual({ action: "metadata-thumbnail-generate", national: true, startAt: new Date(w.start).toISOString(), endAt: new Date(w.end).toISOString() });
+    expect(calls.every((c) => c.body.action.startsWith("metadata-"))).toBe(true);
+  });
+
+  test("with a national window scheduled, the editor follows that window", async () => {
+    const rec = { id: "n1", kind: "national", gameId: null, youtube: { privacyStatus: "unlisted" }, auto: { open: true, phase: "selected", kickoffAt: NOW + 3600e3, endAt: NOW + 9 * 3600e3 } };
+    renderPicker([rec]);
+    fireEvent.click(within(screen.getByTestId("game-national")).getByRole("button", { name: "Edit Metadata" }));
+    await screen.findByDisplayValue(NAT.title);
+    expect(calls[0].body).toEqual({ action: "metadata-get", national: true, startAt: new Date(NOW + 3600e3).toISOString(), endAt: new Date(NOW + 9 * 3600e3).toISOString() });
+  });
+
+  test("a game's Edit Metadata is still the game's", async () => {
+    renderPicker();
+    fireEvent.click(within(screen.getByTestId("game-s2")).getByRole("button", { name: "Edit Metadata" }));
+    await screen.findByRole("dialog");
+    expect(calls[0].body).toEqual({ action: "metadata-get", scheduleId: "s2" });
   });
 });

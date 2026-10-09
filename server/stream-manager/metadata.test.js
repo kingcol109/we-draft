@@ -139,7 +139,7 @@ test("opening the editor for an unenabled game with no broadcast record: generat
   assert.equal(r.body.defaults.title, "North Carolina vs Wake Forest LIVE Score and Play by Play");
   assert.match(r.body.defaults.description, /^Watch the North Carolina take on the Wake Forest LIVE with We-Draft Live/);
   assert.match(r.body.defaults.description, /\n📅 Date: Saturday, October 17, 2026\n⏰ Kickoff: 3:30 PM ET\n/);
-  assert.match(r.body.defaults.description, /#NorthCarolinaFootball #WakeForestFootball #CollegeFootball$/);
+  assert.match(r.body.defaults.description, /#NorthCarolinaFootball #WakeForestFootball #NCvsWF #CollegeFootball$/);
   assert.deepEqual(docPaths(), before, "a read writes nothing");
   assertNothingExternal();
 });
@@ -155,8 +155,8 @@ test("an unlinked or unknown schedule game can't have a draft", async () => {
 
 test("the generated title and description follow the template exactly", () => {
   const v = md.buildGenerated({
-    away: { school: "Florida State", mascot: "Seminoles", rank: 23 },
-    home: { school: "Louisville", mascot: "Cardinals", rank: 24 },
+    away: { school: "Florida State", short: "FSU", mascot: "Seminoles", rank: 23 },
+    home: { school: "Louisville", short: "Louisville", mascot: "Cardinals", rank: 24 },
     kickoffAt: KICK,
   });
   assert.equal(v.title, "Florida State vs Louisville LIVE Score and Play by Play");
@@ -169,7 +169,7 @@ Follow We-Draft for more college football coverage, player evaluations, and NFL 
 🌐 Website: https://we-draft.com
 📺 YouTube: https://www.youtube.com/@kingcoldsports
 Subscribe for more college football content throughout the season.
-#FloridaStateFootball #LouisvilleFootball #CollegeFootball`);
+#FloridaStateFootball #LouisvilleFootball #FSUvsLOU #CollegeFootball`);
   assert.deepEqual(v.errors, {});
 });
 
@@ -177,9 +177,17 @@ test("generated text: unranked teams, no mascot, time TBA, hashtags from any sch
   const v = md.buildGenerated({ away: { school: "Texas A&M", mascot: "Aggies", rank: null }, home: { school: "San José State", mascot: null }, kickoffAt: KICK, timeTbd: true });
   assert.match(v.description, /^Watch the Texas A&M Aggies take on the San José State LIVE/);
   assert.match(v.description, /⏰ Kickoff: TBA\n/);
-  assert.match(v.description, /#TexasAMFootball #SanJoseStateFootball #CollegeFootball$/);
+  assert.match(v.description, /#TexasAMFootball #SanJoseStateFootball #TAMvsSJS #CollegeFootball$/);
   assert.match(md.buildGenerated({ away: { school: "A" }, home: { school: "B" }, kickoffAt: null }).description, /📅 Date: TBA\n⏰ Kickoff: TBA/);
   assert.equal(md.hashtag("Miami (OH)"), "#MiamiOHFootball");
+});
+
+test("matchup hashtag: short names when they're short, else initials, else the first three letters", () => {
+  assert.equal(md.matchupTag({ school: "Florida State", short: "FSU" }, { school: "Louisville", short: "Louisville" }), "#FSUvsLOU");
+  assert.equal(md.teamAbbr({ school: "Boston College" }), "BC");
+  assert.equal(md.teamAbbr({ school: "Texas A&M", short: "TAMU" }), "TAMU");
+  assert.equal(md.teamAbbr({ school: "Miami (OH)", short: "M-OH" }), "MOH");
+  assert.equal(md.teamAbbr({ school: "LSU" }), "LSU");
 });
 
 test("generated text: ranks from the live game, else the week's poll; mascots from the schools", async () => {
@@ -394,6 +402,141 @@ test("rehearsal records and drafts stay separate from real broadcast records", a
   assert.equal(made.length, 0);
   assert.deepEqual(db.data("broadcastMetadata/401001"), draft);
   assert.equal(db.data("broadcasts/g401001"), undefined, "no real record appeared");
+});
+
+// ── National coverage metadata ──
+
+const ts = (ms) => ({ toMillis: () => ms });
+// A week after the seed's own games, so only these are in the window.
+const KN = KICK + 7 * 86400e3;
+const W0 = KN - 4 * 3600e3;
+const W1 = KN + 8 * 3600e3;
+const natWindow = { startAt: new Date(W0).toISOString(), endAt: new Date(W1).toISOString() };
+const natSeed = (more = {}) => seed({
+  "schedule26/n1": { Home: "Louisville", Away: "Florida State", KickoffAt: ts(KN + 3600e3), CFBDGameId: 501, GameOfWeek: true, Week: "Week 8" },
+  "schedule26/n2": { Home: "Ohio State", Away: "Penn State", KickoffAt: ts(KN - 3600e3), CFBDGameId: 502, Featured: true, Week: "Week 8" },
+  "schedule26/n3": { Home: "Navy", Away: "Army", KickoffAt: ts(KN + 2 * 3600e3), CFBDGameId: 503, Week: "Week 8" },
+  "schedule26/late": { Home: "Late", Away: "Night", KickoffAt: ts(W1 + 3600e3), CFBDGameId: 504, Featured: true, Week: "Week 8" },
+  "schools/fsu": { School: "Florida State", Short: "FSU" },
+  "schools/lou": { School: "Louisville", Short: "Louisville" },
+  ...more,
+});
+const natGet = () => call({ body: { action: "metadata-get", national: true, ...natWindow } });
+
+test("national: the generated title and description follow the template, with the window's top game as a hashtag", () => {
+  const v = md.buildNationalGenerated({ top: { away: { school: "Florida State", short: "FSU" }, home: { school: "Louisville", short: null } } });
+  assert.equal(v.title, "College Football LIVE | Scores, Highlights & Action Around the Country");
+  assert.equal(v.description, `College football action from across the country — all in one place. 🏈
+
+Welcome to the We-Draft Live National Stream, where we follow the action around college football and bring you updates from games across the country throughout the day.
+
+From major matchups to unexpected momentum swings, stay connected to the national college football landscape with We-Draft Live.
+
+📊 Follow college football: https://we-draft.com
+📺 More football coverage: https://www.youtube.com/@kingcoldsports
+
+Subscribe for college football coverage, player evaluations, and NFL Draft scouting throughout the season.
+
+#CollegeFootball #CollegeFootballLive #WeDraftLive #FSUvsLOU`);
+  assert.deepEqual(v.errors, {});
+  assert.match(md.buildNationalGenerated({ top: null }).description, /#CollegeFootball #CollegeFootballLive #WeDraftLive$/);
+});
+
+test("national: the window's games come from the schedule — Game of the Week leads, then Featured; the rest are counted", async () => {
+  db = natSeed();
+  const ni = await md.nationalInputs(db, { start: W0, end: W1 });
+  assert.deepEqual(ni.games.map((g) => g.scheduleId), ["n2", "n1", "n3"], "kickoff order, only inside the window");
+  assert.deepEqual(ni.tiles.map((g) => g.scheduleId), ["n1", "n2"]);
+  assert.equal(ni.more, 1);
+  assert.equal(ni.top.scheduleId, "n1");
+  assert.equal(md.matchupTag(ni.top.away, ni.top.home), "#FSUvsLOU");
+});
+
+test("national: no Game of the Week or Featured game → the best-ranked matchup; nothing ranked → no top game", async () => {
+  db = natSeed({
+    "schedule26/n1": { Home: "Louisville", Away: "Florida State", KickoffAt: ts(KN + 3600e3), CFBDGameId: 501, Week: "Week 8" },
+    "schedule26/n2": { Home: "Ohio State", Away: "Penn State", KickoffAt: ts(KN - 3600e3), CFBDGameId: 502, Week: "Week 8" },
+    "rankings/Week 8": { Top25: [{ School: "Ohio State", Rank: 2 }, { School: "Penn State", Rank: 7 }, { School: "Louisville", Rank: 24 }] },
+  });
+  const ni = await md.nationalInputs(db, { start: W0, end: W1 });
+  assert.deepEqual(ni.tiles.map((g) => g.scheduleId), ["n2", "n1"], "both-ranked first, then one-ranked");
+  db.store.delete("rankings/Week 8");
+  const none = await md.nationalInputs(db, { start: W0, end: W1 });
+  assert.equal(none.top, null);
+  assert.equal(none.more, 3);
+  assert.match(md.buildNationalGenerated(none).description, /#WeDraftLive$/);
+});
+
+test("national: opening the editor reads the generated text for the window and writes nothing", async () => {
+  db = natSeed();
+  const before = docPaths();
+  const r = await natGet();
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.equal(r.body.game, null);
+  assert.deepEqual(r.body.national, { startAt: W0, endAt: W1 });
+  assert.equal(r.body.draft, null);
+  assert.equal(r.body.defaults.title, "College Football LIVE | Scores, Highlights & Action Around the Country");
+  assert.match(r.body.defaults.description, /#WeDraftLive #FSUvsLOU$/);
+  assert.deepEqual(r.body.broadcast, { exists: false, youtubeCreated: false });
+  assert.deepEqual(docPaths(), before);
+  assertNothingExternal();
+});
+
+test("national: a bad window is refused", async () => {
+  const bad = async (startAt, endAt) => (await call({ body: { action: "metadata-get", national: true, startAt, endAt } })).statusCode;
+  assert.equal(await bad("nope", natWindow.endAt), 400);
+  assert.equal(await bad(natWindow.endAt, natWindow.startAt), 400);
+  assert.equal(await bad(new Date(W0).toISOString(), new Date(W0 + 17 * 3600e3).toISOString()), 400);
+});
+
+test("national: saving stores broadcastMetadata/national only — no broadcast, schedule, YouTube or VM change", async () => {
+  db = natSeed();
+  const before = new Map([...db.store.entries()].map(([k, v]) => [k, JSON.stringify(v)]));
+  const r = await call({ body: { action: "metadata-save", national: true, ...natWindow, title: "National title", description: "Line 1\n\nLine 3", baseVersion: 0 } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  const changed = [...db.store.keys()].filter((k) => before.get(k) !== JSON.stringify(db.store.get(k)));
+  assert.deepEqual(changed, ["broadcastMetadata/national"]);
+  const d = db.data("broadcastMetadata/national");
+  assert.equal(d.gameId, "national");
+  assert.equal(d.kind, "national");
+  assert.equal(d.description, "Line 1\n\nLine 3");
+  assert.equal((await natGet()).body.draft.title, "National title");
+  // a game's editor never sees it
+  assert.equal((await get("s1")).body.draft, null);
+  assertNothingExternal();
+});
+
+test("national: a created national broadcast takes the saved draft, else the window's generated text", async () => {
+  db = natSeed({ "streamManager/youtube": { connected: true, channelId: "UC1", workerStreamId: "streamA" } });
+  const { id } = await orch.selectNational(db, "admin1", { startAt: new Date(W0).toISOString(), endAt: new Date(W1).toISOString() }, W0 - 86400e3);
+  await db.doc(`broadcasts/${id}`).update({ scheduledStart: Timestamp.fromMillis(Date.now() + 86400e3) });
+  assert.equal(db.data(`broadcasts/${id}`).youtube.title, "College Football LIVE | Scores, Highlights & Action Around the Country");
+  let made = realYoutube();
+  await bc.youtubeCreate(db, { id, streamId: "streamA", useDraft: true });
+  assert.equal(made[0].title, "College Football LIVE | Scores, Highlights & Action Around the Country");
+  assert.match(made[0].description, /#WeDraftLive #FSUvsLOU$/);
+  assert.equal(db.data(`broadcasts/${id}`).youtube.metadataSource, "generated");
+
+  // a second window, with a saved draft
+  await call({ body: { action: "metadata-save", national: true, ...natWindow, title: "Saturday Showcase", description: "d" } });
+  const w2 = { startAt: new Date(W1 + 3600e3).toISOString(), endAt: new Date(W1 + 5 * 3600e3).toISOString() };
+  const { id: id2 } = await orch.selectNational(db, "admin1", w2, W0 - 86400e3);
+  await db.doc(`broadcasts/${id2}`).update({ scheduledStart: Timestamp.fromMillis(Date.now() + 86400e3) });
+  made = realYoutube();
+  await bc.youtubeCreate(db, { id: id2, streamId: "streamA", useDraft: true });
+  assert.equal(made[0].title, "Saturday Showcase");
+  assert.equal(db.data(`broadcasts/${id2}`).youtube.metadataSource, "draft");
+});
+
+test("national: a rehearsal window never takes the draft and never reaches YouTube", async () => {
+  db = natSeed({ "streamManager/youtube": { connected: true, channelId: "UC1", workerStreamId: "streamA" } });
+  await call({ body: { action: "metadata-save", national: true, ...natWindow, title: "Real national", description: "" } });
+  const { id } = await orch.selectNational(db, "admin1", { ...natWindow, rehearsal: true }, W0 - 86400e3);
+  assert.match(id, /^rn/);
+  assert.notEqual(db.data(`broadcasts/${id}`).youtube.title, "Real national");
+  const made = realYoutube();
+  await assert.rejects(bc.youtubeCreate(db, { id, streamId: "streamA", useDraft: true }), /rehearsal record/);
+  assert.equal(made.length, 0);
 });
 
 test("secrets never reach the logs", () => {

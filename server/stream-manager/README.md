@@ -454,3 +454,45 @@ them.
 
 `vercel.json` includes the font and `Logo2.png` in the `api/stream-manager.js`
 function.
+
+### National coverage metadata
+
+National coverage is the first row of Auto Schedule, pinned there whatever
+the search or filters. Its **Edit Metadata** opens the same editor for the
+national stream. Every `metadata-*` action takes
+`{ national: true, startAt, endAt }` in place of `scheduleId`.
+
+There is one draft (`broadcastMetadata/national`) and one thumbnail
+(`broadcastThumbnails/national`), and every national window uses them. The
+editor works from the window set in the row, or from the scheduled window
+once there is one.
+
+**Generated text:** the fixed title "College Football LIVE | Scores,
+Highlights & Action Around the Country" and the standard description. Its
+hashtag line ends with the window's top game, for example `#FSUvsLOU`.
+
+The **top game** is picked from the `schedule26` games that kick off in the
+window:
+1. the Game of the Week;
+2. else the first Featured game;
+3. else the best-ranked matchup in the week's Top 25.
+
+If none of those exist, the line has no matchup tag. Game streams carry the
+same kind of tag, built from short names: the school's `Short` when it's 2–5
+characters, else the school's initials, else its first three letters.
+
+**Thumbnail:** its own template (`national-1`), with:
+- the We-Draft logo on top, then `COLLEGE FOOTBALL`;
+- a gold `NATIONAL COVERAGE · LIVE` label;
+- one equal tile per Game of the Week / Featured game in the window (up to
+  four; falling back to the best-ranked games), each split in the two teams'
+  colors with both logos;
+- a `+N MORE GAMES` tile for the rest of the window's games;
+- the day along the bottom.
+
+It never draws scores or ranks.
+
+**At broadcast creation:** a national broadcast takes the saved draft, else
+the window's generated text. Rehearsals never take either. Upload Thumbnail
+works for a national broadcast once YouTube has created it.
+

@@ -1038,7 +1038,7 @@ test("national: validation, one record per window, no overlaps", async () => {
   assert.equal(d.gameId, null);
   assert.equal(d.auto.prepAt, K1 - 15 * MIN);
   assert.equal(d.auto.endAt, K1 + 10 * 60 * MIN);
-  assert.match(d.youtube.title, /Every Game/);
+  assert.equal(d.youtube.title, "College Football LIVE | Scores, Highlights & Action Around the Country");
 });
 
 test("national: prepares before the window, streams /broadcast/national, ends 15 min after the last game is final", async () => {

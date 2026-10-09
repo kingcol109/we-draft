@@ -334,14 +334,14 @@ test("Upload Thumbnail sends the saved PNG to the record's YouTube broadcast —
   assert.equal(db.data("broadcasts/g401001").youtube.thumbnailSha256, sha);
 });
 
-test("Upload Thumbnail refuses rehearsals, national coverage, uncreated broadcasts and games without a saved thumbnail", async () => {
+test("Upload Thumbnail refuses rehearsals, uncreated broadcasts, and games or national coverage without a saved thumbnail", async () => {
   db.store.set("broadcasts/r401001", record({ rehearsal: true }));
   db.store.set("broadcasts/n1", record({ kind: "national", gameId: null }));
   db.store.set("broadcasts/g401001", record({ youtube: { broadcastId: null } }));
   db.store.set("broadcasts/g401009", record({ gameId: "401009" }));
   const err = async (id) => (await call({ body: { action: "youtube-thumbnail", id } })).body.error;
   assert.match(await err("r401001"), /rehearsal/);
-  assert.match(await err("n1"), /National coverage/);
+  assert.match(await err("n1"), /National coverage has no saved thumbnail/);
   assert.match(await err("g401001"), /No YouTube broadcast yet/);
   assert.match(await err("g401009"), /no saved thumbnail/);
   assert.deepEqual(ytCalls, []);
@@ -354,6 +354,120 @@ test("creating a YouTube broadcast doesn't upload the thumbnail", async () => {
   assert.equal(/setThumbnail|youtubeThumbnail/.test(create), false);
   const orch = fs.readFileSync(path.join(__dirname, "orchestrator.js"), "utf8");
   assert.equal(/setThumbnail|youtubeThumbnail|thumbnail/i.test(orch), false, "the orchestrator never touches thumbnails");
+});
+
+// ── National thumbnail ──
+
+const ts = (ms) => ({ toMillis: () => ms });
+const NW = { start: KICK - 4 * 3600e3, end: KICK + 8 * 3600e3 };
+const natWin = { national: true, startAt: new Date(NW.start).toISOString(), endAt: new Date(NW.end).toISOString() };
+function natDb(more = {}) {
+  return seed({
+    "schedule26/s1": { Home: "Wake Forest", Away: "North Carolina", KickoffAt: ts(KICK), CFBDGameId: 401001, Featured: true },
+    "schedule26/g2": { Home: "Ghost U", Away: "Nowhere State", KickoffAt: ts(KICK - 3600e3), CFBDGameId: 401002, GameOfWeek: true },
+    "schedule26/g3": { Home: "Navy", Away: "Army", KickoffAt: ts(KICK + 3600e3), CFBDGameId: 401003 },
+    "schedule26/g4": { Home: "Air Force", Away: "Colorado State", KickoffAt: ts(KICK + 2 * 3600e3), CFBDGameId: 401004 },
+    "schedule26/out": { Home: "Out", Away: "Side", KickoffAt: ts(NW.end + 3600e3), CFBDGameId: 401009, Featured: true },
+    "schedule26/s2": { Home: "Ghost U", Away: "Nowhere State", KickoffAt: ts(NW.end + 7200e3), CFBDGameId: 401002, Time: "TBA" },
+    ...more,
+  });
+}
+
+test("national thumbnail: its own 1280×720 template — the logo on top, COLLEGE FOOTBALL, the gold NATIONAL COVERAGE · LIVE label", async () => {
+  db = natDb();
+  const r = await t.generateNational(db, NW);
+  assert.deepEqual(t.pngSize(r.png), { w: 1280, h: 720 });
+  assert.equal(r.inputs.templateVersion, "national-1");
+  const { spec } = await t.nationalSpec(db, NW);
+  const svg = t.buildNationalSvg(spec);
+  const file = fs.readFileSync(path.join(__dirname, "../../src/assets/Logo2.png"));
+  const logo = new RegExp(`<image x="\\d+" y="34" width="(\\d+)" height="64" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${file.toString("base64").slice(0, 40).replace(/[+/]/g, "\\$&")}`).exec(svg);
+  assert.ok(logo, "the real logo at the top");
+  assert.ok(Math.abs(Number(logo[1]) / 64 - t.pngSize(file).w / t.pngSize(file).h) < 0.02, "aspect ratio kept");
+  assert.match(svg, />COLLEGE FOOTBALL</);
+  assert.match(svg, />NATIONAL COVERAGE</);
+  assert.match(svg, />LIVE</);
+  assert.match(svg, /fill="#f6a21d"/);
+  assert.match(svg, /fill="#0055a5"|stop-color="#0055a5"/);
+  assert.match(svg, /SATURDAY, OCTOBER 17/);
+  assert.equal(/ VS |>VS</.test(svg), false, "not a single-matchup layout");
+});
+
+test("national thumbnail: tiles for the window's Game of the Week and Featured games only, equal in size, then +N more", async () => {
+  db = natDb();
+  const r = await t.generateNational(db, NW);
+  assert.deepEqual(r.inputs.tiles.map((x) => x.scheduleId), ["g2", "s1"], "GOTW first, then Featured; nothing outside the window");
+  assert.equal(r.inputs.games, 4);
+  assert.equal(r.inputs.more, 2);
+  const { spec } = await t.nationalSpec(db, NW);
+  const svg = t.buildNationalSvg(spec);
+  const outlines = [...svg.matchAll(/<polygon points="([\d.]+),432 ([\d.]+),432 [\d.]+,608 [\d.]+,608" fill="[^"]+" stroke="#f6a21d"/g)];
+  assert.equal(outlines.length, 3, "two team tiles + the more tile");
+  const widths = new Set(outlines.map((m) => Math.round(Number(m[2]) - Number(m[1]))));
+  assert.equal(widths.size, 1, "every tile the same size");
+  assert.match(svg, />\+2</);
+  assert.match(svg, />MORE GAMES</);
+  // UNC's logo and Wake's are drawn; nothing invented (no scores, no ranks)
+  assert.equal(r.inputs.tiles[1].away.logo.source, "LogoDark");
+  assert.equal(/#\d/.test(svg.replace(/#[0-9a-fA-F]{6}/g, "")), false);
+});
+
+test("national thumbnail: missing logos show initials; a window with no games shows no tiles", async () => {
+  db = natDb();
+  const { spec, notes } = await t.nationalSpec(db, NW);
+  assert.ok(notes.some((n) => /Nowhere State: no logo could be loaded/.test(n)));
+  assert.match(t.buildNationalSvg(spec), /data-tile="0a">NS</);
+  db = seed();
+  const empty = await t.generateNational(db, { start: KICK + 30 * 86400e3, end: KICK + 30 * 86400e3 + 3600e3 });
+  assert.deepEqual(t.pngSize(empty.png), { w: 1280, h: 720 });
+  assert.deepEqual(empty.inputs.tiles, []);
+  assert.equal(empty.inputs.more, 0);
+  assert.ok(empty.notes.some((n) => /No games in this window/.test(n)));
+});
+
+test("national thumbnail: generating stores nothing; saving stores broadcastThumbnails/national only — no YouTube, VM or broadcast", async () => {
+  db = natDb();
+  let before = snapshot();
+  const gen = await call({ body: { action: "metadata-thumbnail-generate", ...natWin } });
+  assert.equal(gen.statusCode, 200, JSON.stringify(gen.body));
+  assert.equal(gen.body.gameId, "national");
+  assert.deepEqual(changedSince(before), []);
+  before = snapshot();
+  const saved = await call({ body: { action: "metadata-thumbnail-save", ...natWin, sha256: gen.body.sha256 } });
+  assert.equal(saved.statusCode, 200, JSON.stringify(saved.body));
+  assert.deepEqual(changedSince(before), ["broadcastThumbnails/national"]);
+  const d = db.data("broadcastThumbnails/national");
+  assert.equal(d.kind, "national");
+  assert.deepEqual(d.window, { startAt: NW.start, endAt: NW.end });
+  assert.ok(d.png.equals(pngOf(gen.body.dataUrl)));
+  assert.equal([...db.store.keys()].some((k) => k.startsWith("broadcasts/")), false);
+  assertNoYoutubeOrVm();
+  assert.equal((await call({ body: { action: "metadata-get", ...natWin } })).body.thumbnail.sha256, gen.body.sha256);
+  // a game's thumbnail is separate
+  assert.equal(db.data("broadcastThumbnails/401001"), undefined);
+});
+
+test("national thumbnail: a schedule change after the preview means generate again", async () => {
+  db = natDb();
+  const gen = (await call({ body: { action: "metadata-thumbnail-generate", ...natWin } })).body;
+  await db.doc("schedule26/g3").update({ Featured: true });
+  const r = await call({ body: { action: "metadata-thumbnail-save", ...natWin, sha256: gen.sha256 } });
+  assert.equal(r.statusCode, 409);
+  assert.equal(db.data("broadcastThumbnails/national"), undefined);
+});
+
+test("national thumbnail: Upload Thumbnail sends it to a created national broadcast — only on request", async () => {
+  db = natDb();
+  const gen = (await call({ body: { action: "metadata-thumbnail-generate", ...natWin } })).body;
+  await call({ body: { action: "metadata-thumbnail-save", ...natWin, sha256: gen.sha256 } });
+  assert.deepEqual(ytCalls, []);
+  db.store.set("streamManager/youtube", { connected: true, channelId: "UC1" });
+  db.store.set("broadcasts/n1", record({ kind: "national", gameId: null }));
+  const sent = [];
+  yt.accessToken = async () => "access-token-never-logged";
+  yt.setThumbnail = async (_t, videoId, buf) => { sent.push({ videoId, buf }); return { url: null }; };
+  assert.equal((await call({ body: { action: "youtube-thumbnail", id: "n1" } })).statusCode, 200);
+  assert.ok(sent[0].buf.equals(db.data("broadcastThumbnails/national").png));
 });
 
 test("secrets never reach the logs", () => {

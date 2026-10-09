@@ -15,6 +15,9 @@
 //                                doc lacks one (ESPN's logo set is keyed by it)
 //   src/assets/Logo2.png         the We-Draft logo, embedded as-is
 //
+// National coverage has its own template (buildNationalSvg — the window's
+// lead games as equal tiles, "+N more") and is stored under "national".
+//
 // Stored (metadata.js saveThumbnail) in broadcastThumbnails/{CFBDGameId}.
 // Generating or saving one never calls YouTube; uploading it to a created
 // broadcast is its own admin action (broadcasts.js youtubeThumbnail).
@@ -282,6 +285,17 @@ async function schoolDoc(db, name) {
   return snap.docs[0]?.data() || null;
 }
 
+// One team's branding for a template: name, colors and the first logo that
+// loads; anything missing is noted.
+async function teamBranding(db, name, teamId, notes, fetchImpl, label = name) {
+  const s = await schoolDoc(db, name);
+  if (!s) notes.push(`${label || "A team"}: no school branding found — default colors.`);
+  else if (!hex(s.Color1)) notes.push(`${name}: no school color saved — default color.`);
+  const { logo, tried } = await firstLogo(logoCandidates(s || {}, teamId ?? null), fetchImpl);
+  if (!logo) notes.push(`${label || "A team"}: no logo could be loaded${tried.length ? ` (${tried.join("; ")})` : ""} — showing initials.`);
+  return { name: s?.School || name || "TBD", short: s?.Short || null, color: s?.Color1 || null, color2: s?.Color2 || null, logo };
+}
+
 // Everything the template needs for one schedule26 game, plus notes on
 // anything missing (shown in the editor). fetchImpl: the logo fetch (tests).
 async function gameSpec(db, scheduleId, { fetchImpl } = {}) {
@@ -291,12 +305,8 @@ async function gameSpec(db, scheduleId, { fetchImpl } = {}) {
   const live = (await db.collection("liveGames").doc(g.gameId).get()).data() || {};
   const notes = [];
   const side = async (k, name) => {
-    const s = await schoolDoc(db, name);
-    if (!s) notes.push(`${name || k}: no school branding found — default colors.`);
-    else if (!hex(s.Color1)) notes.push(`${name}: no school color saved — default color.`);
-    const { logo, tried } = await firstLogo(logoCandidates(s || {}, live[k]?.providerTeamId ?? null), fetchImpl);
-    if (!logo) notes.push(`${name || k}: no logo could be loaded${tried.length ? ` (${tried.join("; ")})` : ""} — showing initials.`);
-    return { name: s?.School || name || "TBD", short: s?.Short || live[k]?.short || null, color: s?.Color1 || null, color2: s?.Color2 || null, logo };
+    const t = await teamBranding(db, name, live[k]?.providerTeamId, notes, fetchImpl, name || k);
+    return { ...t, short: t.short || live[k]?.short || null };
   };
   const away = await side("away", g.away);
   const home = await side("home", g.home);
@@ -312,8 +322,126 @@ async function generate(db, scheduleId, opts = {}) {
   return { game, ...out, notes, inputs: { away: summary(spec.away), home: summary(spec.home), kickoffAt: spec.kickoffAt, templateVersion: TEMPLATE_VERSION } };
 }
 
+// ── National coverage template ──
+// Its own template, not a matchup: the We-Draft logo across the top, COLLEGE
+// FOOTBALL, a gold NATIONAL COVERAGE · LIVE label, and a row of equal tiles —
+// one per lead game of the window (Game of the Week, Featured; else the
+// best-ranked — metadata.js nationalInputs), each split in the two teams'
+// colors with both logos — then "+N MORE" for the window's other games. No
+// one tile is bigger than another; no scores or ranks are drawn.
+const NATIONAL_TEMPLATE = "national-1";
+const TILE = { w: 214, h: 176, skew: 26, gap: 22, y: 432, logo: 84 };
+
+function buildNationalSvg(spec, measureFn = measure) {
+  const a = loadAssets();
+  const wdH = 64;
+  const wdW = Math.round((a.wdLogo.w * wdH) / a.wdLogo.h);
+  const head = fitText("College Football", null, { maxW: 1160, size: 176, minSize: 60, shortBelow: 0 }, measureFn);
+  const labelText = "NATIONAL COVERAGE";
+  const labelSize = 64;
+  const labelW = Math.ceil(measureFn(labelText, labelSize));
+  const live = { w: 132, h: 58 };
+  const bandW = 40 + labelW + 26 + live.w + 40;
+  const bandX = Math.round((W - bandW) / 2);
+  const band = { y: 300, h: 86, skew: 22 };
+  const date = spec.dateLabel ? fitText(spec.dateLabel, null, { maxW: 900, size: 40, minSize: 24, shortBelow: 0 }, measureFn) : null;
+
+  const tiles = spec.tiles || [];
+  const n = tiles.length + (spec.more > 0 ? 1 : 0);
+  const rowW = n * TILE.w + Math.max(0, n - 1) * TILE.gap;
+  const x0 = Math.round((W - rowW) / 2);
+  const tileShape = (x) => `${x + TILE.skew},${TILE.y} ${x + TILE.w},${TILE.y} ${x + TILE.w - TILE.skew},${TILE.y + TILE.h} ${x},${TILE.y + TILE.h}`;
+  const logoOrInitials = (t, cx, cy, id) => (t.logo
+    ? `<image x="${cx - TILE.logo / 2}" y="${cy - TILE.logo / 2}" width="${TILE.logo}" height="${TILE.logo}" preserveAspectRatio="xMidYMid meet" filter="url(#lift)" href="data:${t.logo.mime};base64,${t.logo.b64}"/>`
+    : `<text x="${cx}" y="${cy + 16}" text-anchor="middle" font-family="${FONT}" font-size="${initials(t.name).length > 3 ? 38 : 48}" fill="#ffffff" filter="url(#shadow)" data-tile="${id}">${esc(initials(t.name))}</text>`);
+  const tileSvg = tiles.map((tl, i) => {
+    const x = x0 + i * (TILE.w + TILE.gap);
+    const c = panelColors(tl.away, tl.home);
+    const split = `${x + TILE.skew},${TILE.y} ${x + TILE.w * 0.6},${TILE.y} ${x + TILE.w * 0.4},${TILE.y + TILE.h} ${x},${TILE.y + TILE.h}`;
+    return `<g clip-path="url(#tile${i})">`
+      + `<rect x="${x}" y="${TILE.y}" width="${TILE.w}" height="${TILE.h}" fill="${c.home}"/>`
+      + `<polygon points="${split}" fill="${c.away}"/>`
+      + `<rect x="${x}" y="${TILE.y}" width="${TILE.w}" height="${TILE.h}" fill="url(#tileShade)"/>`
+      + "</g>"
+      + logoOrInitials(tl.away, x + TILE.w * 0.3, TILE.y + TILE.h * 0.4, `${i}a`)
+      + logoOrInitials(tl.home, x + TILE.w * 0.7, TILE.y + TILE.h * 0.6, `${i}h`)
+      + `<polygon points="${tileShape(x)}" fill="none" stroke="${GOLD}" stroke-width="4"/>`;
+  }).join("\n");
+  const moreSvg = spec.more > 0 ? (() => {
+    const x = x0 + tiles.length * (TILE.w + TILE.gap);
+    const big = `+${spec.more}`;
+    return `<polygon points="${tileShape(x)}" fill="${NAVY}" stroke="${GOLD}" stroke-width="4"/>`
+      + `<text x="${x + TILE.w / 2}" y="${TILE.y + 100}" text-anchor="middle" font-family="${FONT}" font-size="${big.length > 3 ? 70 : 86}" fill="${GOLD}">${esc(big)}</text>`
+      + `<text x="${x + TILE.w / 2}" y="${TILE.y + 146}" text-anchor="middle" font-family="${FONT}" font-size="34" fill="#ffffff">${spec.more === 1 ? "MORE GAME" : "MORE GAMES"}</text>`;
+  })() : "";
+  const tagline = !n ? `<text x="${W / 2}" y="${TILE.y + 100}" text-anchor="middle" font-family="${FONT}" font-size="52" fill="#ffffff" filter="url(#shadow)">SCORES · HIGHLIGHTS · ACTION AROUND THE COUNTRY</text>` : "";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<defs>
+  <linearGradient id="nb" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="${BLUE}"/><stop offset="1" stop-color="${shade(BLUE, 0.5)}"/></linearGradient>
+  <linearGradient id="tileShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.35"/></linearGradient>
+  <filter id="shadow" x="-10%" y="-30%" width="120%" height="160%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.55"/></filter>
+  <filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.5"/></filter>
+  ${tiles.map((_, i) => `<clipPath id="tile${i}"><polygon points="${tileShape(x0 + i * (TILE.w + TILE.gap))}"/></clipPath>`).join("")}
+</defs>
+<rect width="${W}" height="${H}" fill="${NAVY}"/>
+<polygon points="0,0 820,0 600,${H} 0,${H}" fill="url(#nb)"/>
+<polygon points="808,0 836,0 616,${H} 588,${H}" fill="${GOLD}"/>
+<polygon points="930,0 990,0 770,${H} 710,${H}" fill="${BLUE}" fill-opacity="0.28"/>
+<polygon points="1040,0 1068,0 848,${H} 820,${H}" fill="${GOLD}" fill-opacity="0.35"/>
+<image x="${Math.round((W - wdW) / 2)}" y="34" width="${wdW}" height="${wdH}" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${a.wdLogo.b64}"/>
+<text x="${W / 2}" y="268" text-anchor="middle" font-family="${FONT}" font-size="${head.size}" fill="#ffffff" filter="url(#shadow)">${esc(head.text)}</text>
+<polygon points="${bandX + band.skew},${band.y} ${bandX + bandW},${band.y} ${bandX + bandW - band.skew},${band.y + band.h} ${bandX},${band.y + band.h}" fill="${GOLD}"/>
+<text x="${bandX + 40}" y="${band.y + 66}" font-family="${FONT}" font-size="${labelSize}" fill="${NAVY}">${labelText}</text>
+<rect x="${bandX + 40 + labelW + 26}" y="${band.y + (band.h - live.h) / 2}" width="${live.w}" height="${live.h}" rx="10" fill="${NAVY}"/>
+<circle cx="${bandX + 40 + labelW + 26 + 30}" cy="${band.y + band.h / 2}" r="11" fill="#e0262b"/>
+<text x="${bandX + 40 + labelW + 26 + 50}" y="${band.y + band.h / 2 + 18}" font-family="${FONT}" font-size="50" fill="#ffffff">LIVE</text>
+${tileSvg}
+${moreSvg}
+${tagline}
+<rect x="0" y="652" width="${W}" height="68" fill="${BLUE}"/>
+<rect x="0" y="652" width="${W}" height="6" fill="${GOLD}"/>
+${date ? `<text x="${W / 2}" y="702" text-anchor="middle" font-family="${FONT}" font-size="${date.size}" fill="#ffffff">${esc(date.text)}</text>` : ""}
+</svg>`;
+}
+
+// "SATURDAY, OCTOBER 17" — the window's day (its first day, if it spans two).
+const windowLabel = (w) => new Date(w.start).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/New_York" }).toUpperCase();
+
+async function nationalSpec(db, w, { fetchImpl } = {}) {
+  const ni = await require("./metadata").nationalInputs(db, w);
+  const notes = [];
+  const tiles = [];
+  for (const g of ni.tiles) {
+    const live = g.gameId ? (await db.collection("liveGames").doc(g.gameId).get()).data() || {} : {};
+    const [away, home] = await Promise.all([
+      teamBranding(db, g.away, live.away?.providerTeamId, notes, fetchImpl),
+      teamBranding(db, g.home, live.home?.providerTeamId, notes, fetchImpl),
+    ]);
+    tiles.push({ scheduleId: g.scheduleId, gotw: g.gotw, featured: g.featured, away, home });
+  }
+  if (!ni.games.length) notes.push("No games in this window's schedule — the thumbnail shows no team tiles.");
+  else if (!tiles.length) notes.push("No Game of the Week, Featured or ranked games in this window — the thumbnail shows only the game count.");
+  return { spec: { tiles, more: ni.more, dateLabel: windowLabel(w) }, notes, games: ni.games.length };
+}
+
+async function generateNational(db, w, opts = {}) {
+  const { spec, notes, games } = await nationalSpec(db, w, opts);
+  const out = renderPng(buildNationalSvg(spec));
+  const summary = (t) => ({ name: t.name, color: t.color, logo: t.logo ? { source: t.logo.source, url: t.logo.url } : null });
+  return {
+    game: { gameId: "national", scheduleId: null }, ...out, notes,
+    inputs: {
+      window: { startAt: w.start, endAt: w.end }, games,
+      tiles: spec.tiles.map((t) => ({ scheduleId: t.scheduleId, gotw: t.gotw, featured: t.featured, away: summary(t.away), home: summary(t.home) })),
+      more: spec.more, templateVersion: NATIONAL_TEMPLATE,
+    },
+  };
+}
+
 module.exports = {
   W, H, TEMPLATE_VERSION, BLUE, GOLD,
   logoCandidates, safeLogoUrl, imageType, fetchLogo, firstLogo, panelColors, fitText, kickoffLabel, initials,
   buildSvg, renderPng, gameSpec, generate, pngSize, measure,
+  teamBranding, buildNationalSvg, nationalSpec, generateNational, NATIONAL_TEMPLATE,
 };

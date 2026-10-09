@@ -1,7 +1,7 @@
 // server/stream-manager/__fakes__/firestore.js
 //
 // In-memory stand-in for the slice of the Admin SDK Firestore API that
-// Stream Manager uses (tests only): doc / collection / where / limit /
+// Stream Manager uses (tests only): doc / collection / where (== and ranges) / limit /
 // get / set (merge) / update (dotted paths) / runTransaction.
 
 const isPlain = (v) => v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
@@ -20,6 +20,16 @@ function deepMerge(a, b) {
   }
   return a;
 }
+
+// Range filters compare Timestamps ({ toMillis }) and Dates by time.
+const cmp = (x) => (x?.toMillis ? x.toMillis() : x instanceof Date ? x.getTime() : x);
+const OPS = {
+  "==": (a, b) => a === b,
+  "<": (a, b) => a != null && cmp(a) < cmp(b),
+  "<=": (a, b) => a != null && cmp(a) <= cmp(b),
+  ">": (a, b) => a != null && cmp(a) > cmp(b),
+  ">=": (a, b) => a != null && cmp(a) >= cmp(b),
+};
 
 function fakeFirestore(seed = {}) {
   const store = new Map(); // "col/id" → data
@@ -50,14 +60,14 @@ function fakeFirestore(seed = {}) {
   function query(col, filters = [], max = Infinity) {
     return {
       where: (f, op, v) => {
-        if (op !== "==") throw new Error(`fake firestore: only == (got ${op})`);
-        return query(col, [...filters, [f, v]], max);
+        if (!OPS[op]) throw new Error(`fake firestore: only ==, <, <=, >, >= (got ${op})`);
+        return query(col, [...filters, [f, v, op]], max);
       },
       limit: (n) => query(col, filters, n),
       get: async () => {
         const docs = [...store.keys()]
           .filter((p) => p.startsWith(`${col}/`) && p.split("/").length === 2)
-          .filter((p) => filters.every(([f, v]) => getPath(store.get(p), f) === v))
+          .filter((p) => filters.every(([f, v, op = "=="]) => OPS[op](getPath(store.get(p), f), v)))
           .slice(0, max)
           .map(snap);
         return { docs, empty: !docs.length, size: docs.length };

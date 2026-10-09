@@ -527,15 +527,17 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
       </div>
       <Message msg={msg} />
 
-      {!games ? (
-        <div style={{ padding: 30, textAlign: "center", color: "#99a", fontWeight: 800 }}>Loading schedule…</div>
-      ) : !shown.length ? (
-        <div style={{ border: "2px dashed #dde3ea", borderRadius: 12, padding: "30px 20px", textAlign: "center", color: "#99a", fontWeight: 800, fontSize: 13 }}>
-          No games in this window. Games without a kickoff time in the CFB schedule appear once they have one.
-        </div>
-      ) : (
-        <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-          {shown.map((g) => {
+      <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+        {/* National coverage: always the first row, whatever the search / filters. */}
+        <NationalCoverage rows={rows} now={now} onOpen={onOpen} pinned />
+        {!games ? (
+          <div style={{ padding: 30, textAlign: "center", color: "#99a", fontWeight: 800 }}>Loading schedule…</div>
+        ) : !shown.length ? (
+          <div style={{ padding: "30px 20px", textAlign: "center", color: "#99a", fontWeight: 800, fontSize: 13 }}>
+            No games in this window. Games without a kickoff time in the CFB schedule appear once they have one.
+          </div>
+        ) : (
+          shown.map((g) => {
             const b = recByGame.get(String(g.CFBDGameId));
             const s = autoState(b);
             const a = b?.auto;
@@ -578,9 +580,9 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </div>
       {editing && <MetadataEditor game={editing} onClose={() => setEditing(null)} />}
     </div>
   );
@@ -600,8 +602,15 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
 // (broadcastThumbnails/{CFBDGameId}). Neither uploads it — that's Upload
 // Thumbnail on a created broadcast.
 //   game: the schedule26 game { id, Home, Away, KickoffAt, CFBDGameId }
+//   national: { startAt, endAt } (ms) instead — the national stream's
+//     draft and thumbnail (broadcastMetadata/national), generated for that
+//     window (its Game of the Week / Featured games)
 const fmtSaved = (t) => (t ? new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
-export function MetadataEditor({ game, onClose }) {
+export function MetadataEditor({ game, national, onClose }) {
+  // What every request is about.
+  const req = useMemo(() => (national
+    ? { national: true, startAt: new Date(national.startAt).toISOString(), endAt: new Date(national.endAt).toISOString() }
+    : { scheduleId: game.id }), [national?.startAt, national?.endAt, game?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [data, setData] = useState(null); // metadata-get's answer
   const [loadErr, setLoadErr] = useState(null);
   const [title, setTitle] = useState("");
@@ -616,7 +625,7 @@ export function MetadataEditor({ game, onClose }) {
 
   useEffect(() => {
     let alive = true;
-    api("metadata-get", { scheduleId: game.id })
+    api("metadata-get", req)
       .then((r) => {
         if (!alive) return;
         // A saved draft always wins over the defaults — reopening never overwrites manual edits.
@@ -629,7 +638,7 @@ export function MetadataEditor({ game, onClose }) {
       })
       .catch((e) => { if (alive) setLoadErr(vmError(e)); });
     return () => { alive = false; };
-  }, [game.id]);
+  }, [req]);
 
   const limits = data?.limits || YT_LIMITS;
   const v = validateMetadata({ title, description }, limits);
@@ -663,7 +672,7 @@ export function MetadataEditor({ game, onClose }) {
     if (invalid || saving) return;
     setSaving(true); setMsg(null);
     try {
-      const r = await api("metadata-save", { scheduleId: game.id, title, description, baseVersion: draft?.version || 0 });
+      const r = await api("metadata-save", { ...req, title, description, baseVersion: draft?.version || 0 });
       setData((x) => ({ ...x, draft: r.draft }));
       setSaved({ title: r.draft.title, description: r.draft.description });
       setTitle(r.draft.title);
@@ -678,13 +687,13 @@ export function MetadataEditor({ game, onClose }) {
 
   const generate = async () => {
     setThumbBusy("generate"); setThumbMsg(null);
-    try { setPreview(await api("metadata-thumbnail-generate", { scheduleId: game.id })); } catch (e) { setThumbMsg({ kind: "error", text: vmError(e) }); } finally { setThumbBusy(""); }
+    try { setPreview(await api("metadata-thumbnail-generate", req)); } catch (e) { setThumbMsg({ kind: "error", text: vmError(e) }); } finally { setThumbBusy(""); }
   };
   const saveThumb = async () => {
     if (!preview) return;
     setThumbBusy("save"); setThumbMsg(null);
     try {
-      const r = await api("metadata-thumbnail-save", { scheduleId: game.id, sha256: preview.sha256 });
+      const r = await api("metadata-thumbnail-save", { ...req, sha256: preview.sha256 });
       setThumb(r.thumbnail);
       setPreview(null);
       setThumbMsg({ kind: "ok", text: "Thumbnail saved." });
@@ -712,8 +721,17 @@ export function MetadataEditor({ game, onClose }) {
         <div style={{ padding: "16px 20px", borderBottom: "2px solid #eef1f5", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={label}>YouTube metadata</div>
-            <div style={{ fontWeight: 900, fontSize: 17, color: INK }}>{game.Away} at {game.Home}</div>
-            <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>Kickoff {fmtFull(game.KickoffAt)} · CFBD game {game.CFBDGameId}</div>
+            {national ? (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 17, color: INK }}>National Coverage</div>
+                <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>{fmtFull(national.startAt)} → {fmtTime(national.endAt)} · used for every national window</div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 17, color: INK }}>{game.Away} at {game.Home}</div>
+                <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>Kickoff {fmtFull(game.KickoffAt)} · CFBD game {game.CFBDGameId}</div>
+              </>
+            )}
           </div>
           <span data-testid="metadata-status" style={{ fontSize: 12, fontWeight: 900, color: status.color }}>● {status.text}</span>
           <button onClick={close} aria-label="Close" style={{ ...btn("#889", false), padding: "6px 10px" }}>✕</button>
@@ -726,9 +744,10 @@ export function MetadataEditor({ game, onClose }) {
             <>
               <div style={{ fontSize: 12, color: "#556", fontWeight: 700, marginBottom: 12, lineHeight: 1.5 }}>
                 {data.broadcast?.youtubeCreated
-                  ? <span style={{ color: RED, fontWeight: 900 }}>This game's YouTube broadcast already exists. Saving here does not change it — edit it in YouTube Studio. The draft is only used for a broadcast created later.</span>
+                  ? <span style={{ color: RED, fontWeight: 900 }}>{national ? "This window's" : "This game's"} YouTube broadcast already exists. Saving here does not change it — edit it in YouTube Studio. The draft is only used for a broadcast created later.</span>
                   : draft ? "Saved as a draft only: nothing is created on YouTube and automation isn't enabled. When automation creates this game's YouTube broadcast, it uses this title and description."
-                    : "Generated automatically from the matchup, ranks and kickoff — automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and automation isn't enabled."}
+                    : national ? "Generated automatically — the window's top game (Game of the Week, else Featured) goes in the hashtags. Automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and nothing is scheduled."
+                      : "Generated automatically from the matchup, ranks and kickoff — automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and automation isn't enabled."}
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -755,7 +774,7 @@ export function MetadataEditor({ game, onClose }) {
               <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
                 <div style={{ width: 384, maxWidth: "100%", aspectRatio: "16 / 9", borderRadius: 8, overflow: "hidden", background: "#eef1f5", border: `2px solid ${thumbDirty ? AMBER : "#e3e8ef"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {shown ? <img src={shown.dataUrl} alt={thumbDirty ? "Thumbnail preview (not saved)" : "Saved thumbnail"} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
-                    : <span style={{ fontSize: 12, fontWeight: 800, color: "#99a", padding: 12, textAlign: "center" }}>{thumbBusy === "generate" ? "Generating…" : "Generate one from the teams' colors and logos"}</span>}
+                    : <span style={{ fontSize: 12, fontWeight: 800, color: "#99a", padding: 12, textAlign: "center" }}>{thumbBusy === "generate" ? "Generating…" : national ? "Generate one from the window's Game of the Week and Featured games" : "Generate one from the teams' colors and logos"}</span>}
                 </div>
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -767,7 +786,7 @@ export function MetadataEditor({ game, onClose }) {
                   </div>
                   {(preview?.notes || []).map((n) => <div key={n} style={{ fontSize: 12, color: "#8a6100", fontWeight: 800, marginTop: 6 }}>{n}</div>)}
                   <div style={{ fontSize: 11, color: "#889", fontWeight: 700, marginTop: 8, lineHeight: 1.45 }}>
-                    1280×720 PNG from the We-Draft template — the schools' saved colors and logos. Saving never uploads it: once the YouTube broadcast exists, use Upload Thumbnail on the broadcast.
+                    {national ? "1280×720 PNG from the national template — a tile per Game of the Week / Featured game in the window (schools' colors and logos), then the rest as “+N more”." : "1280×720 PNG from the We-Draft template — the schools' saved colors and logos."} Saving never uploads it: once the YouTube broadcast exists, use Upload Thumbnail on the broadcast.
                   </div>
                   <Message msg={thumbMsg} />
                 </div>
@@ -872,7 +891,7 @@ export function defaultNationalWindow(now) {
   d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
   return { start: at(d, 11, 45), end: at(d, 23, 59) };
 }
-export function NationalCoverage({ rows = [], now, onOpen }) {
+export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
   const def = useMemo(() => defaultNationalWindow(now), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [start, setStart] = useState(toLocalInput(def.start));
   const [end, setEnd] = useState(toLocalInput(def.end));
@@ -880,6 +899,7 @@ export function NationalCoverage({ rows = [], now, onOpen }) {
   const [confirmPublic, setConfirmPublic] = useState(false);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState(null);
+  const [editing, setEditing] = useState(null); // { startAt, endAt } — the metadata editor's window
 
   // Open windows first (soonest first), then the three latest closed ones.
   const recs = useMemo(() => {
@@ -913,10 +933,22 @@ export function NationalCoverage({ rows = [], now, onOpen }) {
     act(b.id, () => api("auto-cancel", { id: b.id, ...(onAir ? { confirmEnd: true } : {}) }), onAir ? "Ending — the server is completing the YouTube broadcast." : "Disabled.");
   };
   const retry = (b) => act(b.id, () => api("auto-retry", { id: b.id }), "Re-enabled.");
+  // The editor follows the next open (real) window, else the one set above.
+  const editMetadata = () => {
+    const open = recs.find((b) => b.auto.open && !b.rehearsal);
+    const s = open ? open.auto.kickoffAt : Date.parse(start);
+    const e = open ? open.auto.endAt : Date.parse(end);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return setMsg({ kind: "error", text: "Set a start and an end first — the metadata is generated for that window." });
+    setEditing({ startAt: s, endAt: e });
+  };
 
   return (
-    <div style={{ border: "2px solid #e6ecf3", borderTop: `4px solid ${GOLD}`, borderRadius: 12, background: "#fff", padding: "14px 18px", marginBottom: 14 }}>
+    <div data-testid={pinned ? "game-national" : undefined}
+      style={pinned
+        ? { background: "#fffaf0", borderLeft: `5px solid ${GOLD}`, borderBottom: "2px solid #f3e6c8", padding: "14px 16px" }
+        : { border: "2px solid #e6ecf3", borderTop: `4px solid ${GOLD}`, borderRadius: 12, background: "#fff", padding: "14px 18px", marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        {pinned && <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.1em", color: "#fff", background: GOLD, borderRadius: 999, padding: "3px 9px" }}>PINNED</span>}
         <div style={{ ...label, marginBottom: 0, color: "#a86b00" }}>National Coverage</div>
         <span style={{ fontSize: 12, fontWeight: 700, color: "#667", fontFamily: "Arial", flex: 1, minWidth: 240 }}>
           Every game's big plays and storylines, no one game — <a href="/broadcast/national" target="_blank" rel="noreferrer" style={{ color: BLUE, fontWeight: 800 }}>/broadcast/national</a>. Uses a stream slot like a game broadcast.
@@ -942,6 +974,7 @@ export function NationalCoverage({ rows = [], now, onOpen }) {
         </div>
         <button onClick={() => schedule(false)} disabled={!!busy} style={btn(GREEN, true, !!busy)}>{busy === "enable" ? "…" : "Enable"}</button>
         <button onClick={() => schedule(true)} disabled={!!busy} style={btn("#7b5ea7", false, !!busy)}>{busy === "rehearse" ? "…" : "Rehearse"}</button>
+        <button onClick={editMetadata} title="The national stream's YouTube title, description and thumbnail — saved as a draft only" style={{ ...btn(BLUE, false), padding: "9px 10px" }}>Edit Metadata</button>
       </div>
       {privacy === "public" && (
         <label style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 10, fontSize: 12, fontWeight: 800, color: RED, fontFamily: "Arial" }}>
@@ -982,11 +1015,13 @@ export function NationalCoverage({ rows = [], now, onOpen }) {
           })}
         </div>
       )}
+      {editing && <MetadataEditor national={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-// Container: loads the schedule and live statuses, renders AutoSchedule.
+// Container: loads the schedule and live statuses, renders AutoSchedule
+// (national coverage is its pinned first row).
 function AutoPanel({ rows, now, onOpen, onBack }) {
   const [games, setGames] = useState(null);
   const [statusById, setStatusById] = useState({});
@@ -1012,7 +1047,6 @@ function AutoPanel({ rows, now, onOpen, onBack }) {
       <button onClick={onBack} style={{ ...btn("#889", false), marginBottom: 14 }}>← All broadcasts</button>
       {err && <Message msg={{ kind: "error", text: `Couldn't load the schedule: ${err}` }} />}
       <SlotSettings orchDoc={orchDoc} />
-      <NationalCoverage rows={rows || []} now={now} onOpen={onOpen} />
       <AutoSchedule games={games} statusById={statusById} rows={rows || []} orchDoc={orchDoc} agentDoc={agentDoc} now={now} onOpen={onOpen} />
     </div>
   );

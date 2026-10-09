@@ -76,9 +76,11 @@ function deriveStatus(b) {
 
 // A record's name in lists and logs.
 const recordName = (b) => (b?.kind === "national" ? "National Coverage" : `${teamName(b?.awayTeam)} vs ${teamName(b?.homeTeam)}`);
-const nationalTitle = (startMs) => `We-Draft Live: College Football ${new Date(startMs).toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" })} — Every Game, Every Big Play`;
-const nationalDescription = () =>
-  "Big plays and storylines from every college football game, live — scores across the country, touchdowns as they happen and the We-Draft prospects having big days.\n\nEvery game, every score: https://we-draft.com/live";
+// A national record's own title / description (the stream's standard text,
+// without the window's top-game hashtag, which the generated text adds at
+// broadcast creation — metadata.js).
+const nationalTitle = () => require("./metadata").NATIONAL_TITLE;
+const nationalDescription = () => require("./metadata").nationalDescriptionText(null);
 const teamSnap = (t = {}) => ({ school: t.school || t.name || null, short: t.short || null, logo: t.logo || null, color: t.color || null, rank: t.rank ?? null });
 const teamName = (t) => t?.school || t?.short || "TBD";
 const defaultTitle = (g) => `We-Draft Live: ${teamName(g.away)} vs ${teamName(g.home)}`;
@@ -282,15 +284,18 @@ async function fail(ref, e) {
 // (the orchestrator's creates): the game's saved metadata draft
 // (metadata.js, broadcastMetadata/{gameId}) when there's a valid one, else
 // the generated text for the game (metadata.js generatedForBroadcast —
-// matchup, ranks, kickoff as of now); else — and always for national
-// coverage and manual creates — the record's own. Metadata that can't be
-// read never blocks the broadcast. Never writes the draft.
+// matchup, ranks, kickoff as of now); else — and always for manual
+// creates — the record's own. National coverage the same way, from the
+// national draft (broadcastMetadata/national) and the window's generated
+// text. Metadata that can't be read never blocks the broadcast. Never
+// writes the draft.
 async function broadcastText(db, rec, useDraft) {
   const own = { title: rec.youtube.title, description: rec.youtube.description, source: "record", version: null };
-  if (!useDraft || rec.kind === "national" || rec.rehearsal === true) return own;
+  if (!useDraft || rec.rehearsal === true) return own;
   const md = require("./metadata");
+  const key = rec.kind === "national" ? md.NATIONAL_KEY : rec.gameId;
   try {
-    const d = await md.draftForBroadcast(db, rec.gameId);
+    const d = await md.draftForBroadcast(db, key);
     if (d) return { title: d.title, description: d.description, source: "draft", version: d.version };
   } catch (e) {
     console.error(`stream-manager metadata draft unreadable game=${rec.gameId}: ${e.message}`);
@@ -398,16 +403,17 @@ async function youtubeRefresh(db, body) {
 }
 
 // Uploads the game's saved generated thumbnail (metadata.js /
-// thumbnail.js, broadcastThumbnails/{gameId}) to this record's YouTube
-// broadcast — only on this explicit admin action, never when a thumbnail is
-// generated or saved, and never for a rehearsal or national coverage.
+// thumbnail.js, broadcastThumbnails/{gameId}, or …/national for national
+// coverage) to this record's YouTube broadcast — only on this explicit admin
+// action, never when a thumbnail is generated or saved, and never for a
+// rehearsal.
 async function youtubeThumbnail(db, body) {
   const { ref, data } = await loadRecord(db, body.id);
   if (data.rehearsal === true) throw httpError(409, "This is a rehearsal record — it has no YouTube broadcast.");
-  if (data.kind === "national") throw httpError(400, "National coverage has no game thumbnail.");
   if (!data.youtube?.broadcastId) throw httpError(400, "No YouTube broadcast yet — the thumbnail can be uploaded once it's created.");
-  const t = await require("./metadata").thumbnailForBroadcast(db, data.gameId);
-  if (!t) throw httpError(404, "This game has no saved thumbnail — generate and save one in Auto Schedule → Edit Metadata.");
+  const md = require("./metadata");
+  const t = await md.thumbnailForBroadcast(db, data.kind === "national" ? md.NATIONAL_KEY : data.gameId);
+  if (!t) throw httpError(404, `${data.kind === "national" ? "National coverage" : "This game"} has no saved thumbnail — generate and save one in Auto Schedule → Edit Metadata.`);
   const s = await settings(db);
   if (data.youtube.channelId && s.channelId && data.youtube.channelId !== s.channelId) throw httpError(409, "This broadcast belongs to a different YouTube channel than the one connected now.");
   const token = await yt.accessToken(db);

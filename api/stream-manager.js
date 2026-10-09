@@ -44,6 +44,9 @@
 //                    {CFBDGameId}) when it matches the previewed image — no upload
 //   youtube-thumbnail { id } upload the game's saved thumbnail to that record's
 //                    created YouTube broadcast (explicit only)
+//   (every metadata-* action also takes { national: true, startAt, endAt } in
+//   place of scheduleId: the national stream's draft / thumbnail, generated
+//   for that window — broadcastMetadata/national, broadcastThumbnails/national)
 // The lifecycle itself runs server-side only: api/stream-orchestrator.js
 // (cron) and api/broadcast-agent.js (the VM agent) — see
 // server/stream-manager/orchestrator.js.

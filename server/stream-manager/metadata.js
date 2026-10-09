@@ -6,7 +6,8 @@
 // the orchestrator later creates the game's real YouTube broadcast
 // (broadcasts.js youtubeCreate with useDraft).
 //
-//   broadcastMetadata/{CFBDGameId}
+//   broadcastMetadata/{CFBDGameId}   (…/national: the national stream —
+//                                kind "national", used by every national window)
 //     gameId, scheduleId         which game (the key is the CFBD id; the
 //                                schedule26 doc stays the source of truth for
 //                                matchup, kickoff and slug)
@@ -15,7 +16,7 @@
 //     version                    +1 per save (an edit made from an older copy is refused)
 //     createdAt/By, updatedAt/By
 //
-//   broadcastThumbnails/{CFBDGameId}   the game's generated thumbnail
+//   broadcastThumbnails/{CFBDGameId | national}   the generated thumbnail
 //     gameId, scheduleId         (thumbnail.js — drawn from a fixed template,
 //     png (bytes), width, height, bytes, sha256      no AI, no image service)
 //     inputs { away, home: { name, color, logo: { source, url } }, kickoffAt, templateVersion }
@@ -85,19 +86,34 @@ async function scheduleGame(db, scheduleId) {
 // ── Generated title / description ──
 // Every game gets these automatically: the editor starts from them, and an
 // automated broadcast uses them when no draft was saved. Built from the
-// saved schedule (matchup, kickoff), the schools (mascots) and the current
-// polls (ranks — the live game's rank, else the week's rankings Top 25).
+// saved schedule (matchup, kickoff), the schools (mascots, short names) and
+// the current polls (ranks — the live game's rank, else the week's rankings
+// Top 25).
 //
 //   Florida State vs Louisville LIVE Score and Play by Play
 //
 //   Watch the (#23) Florida State Seminoles take on the (#24) Louisville
 //   Cardinals LIVE with We-Draft Live, … (template below)
+//   … #FloridaStateFootball #LouisvilleFootball #FSUvsLOU #CollegeFootball
 
 const ET = "America/New_York";
 const genDate = (ms) => (ms ? new Date(ms).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: ET }) : "TBA");
 const genTime = (ms, tbd) => (ms && !tbd ? `${new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ET })} ET` : "TBA");
+const plain = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
 // "#FloridaStateFootball" — letters and digits only ("Texas A&M" → TexasAM, "San José State" → SanJoseState).
-const hashtag = (school) => `#${String(school || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((w) => w[0].toUpperCase() + w.slice(1)).join("")}Football`;
+const hashtag = (school) => `#${plain(school).replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/).map((w) => w[0].toUpperCase() + w.slice(1)).join("")}Football`;
+// A team's short tag: its short name when it's one (2–5 letters/digits —
+// "FSU"), else the school's initials ("Boston College" → "BC"), else the
+// first three letters of a one-word name ("Louisville" → "LOU").
+function teamAbbr(t) {
+  const short = plain(t.short).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (short.length >= 2 && short.length <= 5) return short;
+  const words = plain(t.school).replace(/[^A-Za-z0-9 ]+/g, " ").trim().split(/\s+/).filter((w) => w && !/^(of|the)$/i.test(w));
+  if (words.length > 1) return words.map((w) => w[0]).join("").toUpperCase().slice(0, 5);
+  return (words[0] || "TBD").slice(0, 3).toUpperCase();
+}
+// "#FSUvsLOU" — away first, like the title.
+const matchupTag = (away, home) => `#${teamAbbr(away)}vs${teamAbbr(home)}`;
 // "(#23) Florida State Seminoles" / "Florida State Seminoles"
 const fullName = (t) => {
   const mascot = t.mascot && !String(t.school).toLowerCase().includes(String(t.mascot).toLowerCase()) ? ` ${t.mascot}` : "";
@@ -116,31 +132,31 @@ function buildGenerated({ away, home, kickoffAt, timeTbd }) {
     "🌐 Website: https://we-draft.com",
     "📺 YouTube: https://www.youtube.com/@kingcoldsports",
     "Subscribe for more college football content throughout the season.",
-    `${hashtag(away.school)} ${hashtag(home.school)} #CollegeFootball`,
+    `${hashtag(away.school)} ${hashtag(home.school)} ${matchupTag(away, home)} #CollegeFootball`,
   ].join("\n");
   return validateMetadata({ title, description });
 }
 
 const rankNum = (v) => (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 25 ? Number(v) : null);
 const rankingsWeekKey = (week) => { const w = String(week || "").trim(); return w.toLowerCase() === "week 0" ? "Week 1" : w; };
+async function pollFor(db, week) {
+  const key = rankingsWeekKey(week);
+  const poll = new Map();
+  if (key) ((await db.collection("rankings").doc(key).get()).data()?.Top25 || []).forEach((e) => { if (e?.School) poll.set(e.School, rankNum(e.Rank)); });
+  return poll;
+}
+const schoolByName = async (db, name) => (await db.collection("schools").where("School", "==", String(name || "")).limit(1).get()).docs[0]?.data() || {};
 
 // The inputs for one schedule game (scheduleGame's shape).
 async function generatedInputs(db, g) {
   const sched = (await db.collection("schedule26").doc(g.scheduleId).get()).data() || {};
   const live = (await db.collection("liveGames").doc(g.gameId).get()).data() || {};
   let poll = null;
-  const pollRank = async (school) => {
-    if (!poll) {
-      const key = rankingsWeekKey(g.week);
-      poll = new Map();
-      if (key) ((await db.collection("rankings").doc(key).get()).data()?.Top25 || []).forEach((e) => { if (e?.School) poll.set(e.School, e.Rank); });
-    }
-    return rankNum(poll.get(school));
-  };
   const team = async (side, school) => {
-    const s = (await db.collection("schools").where("School", "==", String(school || "")).limit(1).get()).docs[0]?.data() || {};
-    const rank = rankNum(live[side]?.rank) ?? (await pollRank(school));
-    return { school: school || "TBD", mascot: s.Mascot || live[side]?.mascot || null, rank };
+    const s = await schoolByName(db, school);
+    let rank = rankNum(live[side]?.rank);
+    if (rank == null) { poll ||= await pollFor(db, g.week); rank = poll.get(school) ?? null; }
+    return { school: school || "TBD", short: s.Short || live[side]?.short || null, mascot: s.Mascot || live[side]?.mascot || null, rank };
   };
   return {
     away: await team("away", g.away),
@@ -156,9 +172,90 @@ async function generatedMetadata(db, g) {
   return { title: v.title, description: v.description };
 }
 
-// For youtubeCreate: the generated text for a broadcast record's game (its
-// automation's schedule game, else the schedule doc with its CFBD id), or null.
+// ── National coverage ──
+// One draft and one thumbnail for the national stream
+// (broadcastMetadata/national, broadcastThumbnails/national), used by every
+// national window. Generated text names the window's top game: the Game of
+// the Week, else the first Featured game, else the best-ranked matchup.
+const NATIONAL_KEY = "national";
+const NATIONAL_TITLE = "College Football LIVE | Scores, Highlights & Action Around the Country";
+const NATIONAL_MAX_MS = 16 * 3600e3;
+const nationalDescriptionText = (top) => [
+  "College football action from across the country — all in one place. 🏈",
+  "",
+  "Welcome to the We-Draft Live National Stream, where we follow the action around college football and bring you updates from games across the country throughout the day.",
+  "",
+  "From major matchups to unexpected momentum swings, stay connected to the national college football landscape with We-Draft Live.",
+  "",
+  "📊 Follow college football: https://we-draft.com",
+  "📺 More football coverage: https://www.youtube.com/@kingcoldsports",
+  "",
+  "Subscribe for college football coverage, player evaluations, and NFL Draft scouting throughout the season.",
+  "",
+  `#CollegeFootball #CollegeFootballLive #WeDraftLive${top ? ` ${matchupTag(top.away, top.home)}` : ""}`,
+].join("\n");
+
+function buildNationalGenerated({ top }) {
+  return validateMetadata({ title: NATIONAL_TITLE, description: nationalDescriptionText(top) });
+}
+
+// { start, end } from { startAt, endAt } (ISO or ms).
+function nationalWindow(body = {}) {
+  const start = toMs(body.startAt);
+  const end = toMs(body.endAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw httpError(400, "Set when national coverage starts and ends.");
+  if (end <= start) throw httpError(400, "The coverage end must be after its start.");
+  if (end - start > NATIONAL_MAX_MS) throw httpError(400, `National coverage can run at most ${NATIONAL_MAX_MS / 3600e3} hours.`);
+  return { start, end };
+}
+
+// The window's schedule games (kickoff inside it), soonest first, and which
+// of them lead: Game of the Week, then Featured — else the best-ranked
+// (both teams ranked first). tiles: those (up to max); top: the first.
+async function nationalInputs(db, w, max = 4) {
+  const snap = await db.collection("schedule26")
+    .where("KickoffAt", ">=", Timestamp.fromMillis(w.start)).where("KickoffAt", "<=", Timestamp.fromMillis(w.end)).get();
+  const games = snap.docs.map((d) => {
+    const s = d.data();
+    return {
+      scheduleId: d.id, gameId: s.CFBDGameId != null ? String(s.CFBDGameId) : null, home: s.Home || "TBD", away: s.Away || "TBD",
+      kickoffAt: toMs(s.KickoffAt), week: s.Week || null, gotw: !!s.GameOfWeek, featured: !!s.Featured,
+    };
+  }).sort((a, b) => a.kickoffAt - b.kickoffAt || String(a.scheduleId).localeCompare(String(b.scheduleId)));
+  let lead = [...games.filter((g) => g.gotw), ...games.filter((g) => g.featured && !g.gotw)];
+  if (!lead.length && games.length) {
+    const poll = await pollFor(db, games[0].week);
+    const score = (g) => { const a = poll.get(g.away); const h = poll.get(g.home); return a && h ? a + h : a || h ? (a || h) + 50 : null; };
+    lead = games.filter((g) => score(g) != null).sort((a, b) => score(a) - score(b));
+  }
+  const tiles = lead.slice(0, max);
+  const named = async (g) => {
+    const [a, h] = await Promise.all([schoolByName(db, g.away), schoolByName(db, g.home)]);
+    return { ...g, awayTeam: { school: g.away, short: a.Short || null }, homeTeam: { school: g.home, short: h.Short || null } };
+  };
+  const top = tiles[0] ? await named(tiles[0]) : null;
+  return {
+    games, tiles, more: Math.max(0, games.length - tiles.length),
+    top: top ? { ...top, away: top.awayTeam, home: top.homeTeam } : null,
+  };
+}
+
+async function generatedNational(db, w) {
+  const v = buildNationalGenerated(await nationalInputs(db, w));
+  return { title: v.title, description: v.description };
+}
+
+// For youtubeCreate: the generated text for a broadcast record — national
+// coverage by its window; a game by its automation's schedule game, else the
+// schedule doc with its CFBD id — or null.
 async function generatedForBroadcast(db, rec) {
+  if (rec.kind === "national") {
+    const start = rec.auto?.kickoffAt ?? rec.national?.startAt;
+    const end = rec.auto?.endAt ?? rec.national?.endAt;
+    if (!start || !end) return null;
+    const v = buildNationalGenerated(await nationalInputs(db, { start, end }));
+    return Object.keys(v.errors).length ? null : { title: v.title, description: v.description };
+  }
   let scheduleId = rec.auto?.scheduleId || null;
   if (!scheduleId) {
     const snap = await db.collection("schedule26").where("CFBDGameId", "==", Number(rec.gameId)).limit(1).get();
@@ -170,6 +267,8 @@ async function generatedForBroadcast(db, rec) {
   const v = buildGenerated(await generatedInputs(db, g));
   return Object.keys(v.errors).length ? null : { title: v.title, description: v.description };
 }
+
+// ── Drafts and thumbnails ──
 
 const draftView = (d) => (d ? {
   title: d.title, description: d.description, version: d.version || 0,
@@ -184,58 +283,72 @@ const thumbView = (t) => {
     dataUrl: `data:image/png;base64,${png.toString("base64")}`,
   } : null;
 };
+// A draft / thumbnail key: a CFBD game id, or "national".
+const validKey = (k) => GAME_ID_RE.test(String(k || "")) || k === NATIONAL_KEY;
 
-// The game's saved thumbnail doc, only when it's really this game's.
-async function readThumbnail(db, gameId) {
-  const snap = await db.collection(THUMBS).doc(String(gameId)).get();
+// The saved thumbnail doc, only when it's really this key's.
+async function readThumbnail(db, key) {
+  const snap = await db.collection(THUMBS).doc(String(key)).get();
   const t = snap.exists ? snap.data() : null;
-  return t && String(t.gameId) === String(gameId) && pngBuffer(t.png) ? t : null;
+  return t && String(t.gameId) === String(key) && pngBuffer(t.png) ? t : null;
 }
 
-// A stored draft, only when it's really this game's.
-async function readDraft(db, gameId) {
-  const snap = await db.collection(COLLECTION).doc(String(gameId)).get();
+// A stored draft, only when it's really this key's.
+async function readDraft(db, key) {
+  const snap = await db.collection(COLLECTION).doc(String(key)).get();
   const d = snap.exists ? snap.data() : null;
-  return d && String(d.gameId) === String(gameId) ? d : null;
+  return d && String(d.gameId) === String(key) ? d : null;
 }
 
-// metadata-get { scheduleId } — read-only. broadcast: whether a real
-// broadcast for this game already has a YouTube broadcast (which a draft
-// never changes).
-async function getMetadata(db, body = {}) {
+// What an editor request is for: { national: true, startAt, endAt } — the
+// national stream for that window — or { scheduleId } — that game.
+async function target(db, body = {}) {
+  if (body.national === true) return { key: NATIONAL_KEY, national: true, window: nationalWindow(body) };
   const g = await scheduleGame(db, body.scheduleId);
-  const d = await readDraft(db, g.gameId);
-  const recs = (await db.collection("broadcasts").where("gameId", "==", g.gameId).get()).docs.map((x) => x.data()).filter((b) => b.rehearsal !== true);
-  const yt = recs.find((b) => b.youtube?.broadcastId);
+  return { key: g.gameId, game: g };
+}
+
+// metadata-get { scheduleId } | { national: true, startAt, endAt } —
+// read-only. broadcast: whether a real broadcast for this game (or an open
+// national window overlapping this one) already has a YouTube broadcast
+// (which a draft never changes).
+async function getMetadata(db, body = {}) {
+  const t = await target(db, body);
+  const recs = t.national
+    ? (await db.collection("broadcasts").where("kind", "==", "national").get()).docs.map((x) => x.data())
+      .filter((b) => b.rehearsal !== true && b.auto?.open && (b.auto.kickoffAt || 0) < t.window.end && (b.auto.endAt || 0) > t.window.start)
+    : (await db.collection("broadcasts").where("gameId", "==", t.key).get()).docs.map((x) => x.data()).filter((b) => b.rehearsal !== true);
   return {
-    game: g,
-    draft: draftView(d),
-    thumbnail: thumbView(await readThumbnail(db, g.gameId)),
-    defaults: await generatedMetadata(db, g),
+    game: t.game || null,
+    national: t.national ? { startAt: t.window.start, endAt: t.window.end } : null,
+    draft: draftView(await readDraft(db, t.key)),
+    thumbnail: thumbView(await readThumbnail(db, t.key)),
+    defaults: t.national ? await generatedNational(db, t.window) : await generatedMetadata(db, t.game),
     limits: LIMITS,
-    broadcast: { exists: recs.length > 0, youtubeCreated: !!yt },
+    broadcast: { exists: recs.length > 0, youtubeCreated: recs.some((b) => b.youtube?.broadcastId) },
   };
 }
 
-// metadata-save { scheduleId, title, description, baseVersion } — writes
-// broadcastMetadata/{gameId} only. baseVersion: the version the editor
-// opened (0 = none saved); a save over a newer one is refused.
+// metadata-save { scheduleId | national, title, description, baseVersion } —
+// writes broadcastMetadata/{gameId | national} only. baseVersion: the version
+// the editor opened (0 = none saved); a save over a newer one is refused.
 async function saveMetadata(db, uid, body = {}, now = Date.now()) {
-  const g = await scheduleGame(db, body.scheduleId);
+  const t = await target(db, body);
   const v = validateMetadata(body);
   const bad = Object.values(v.errors);
   if (bad.length) throw Object.assign(httpError(400, bad.join(" ")), { fields: v.errors });
-  const ref = db.collection(COLLECTION).doc(g.gameId);
+  const ref = db.collection(COLLECTION).doc(t.key);
   const saved = await db.runTransaction(async (tx) => {
     const cur = (await tx.get(ref)).data();
-    if (cur && String(cur.gameId) !== g.gameId) throw httpError(409, "The stored draft belongs to another game.");
+    if (cur && String(cur.gameId) !== t.key) throw httpError(409, "The stored draft belongs to another game.");
     const version = cur?.version || 0;
     if (body.baseVersion != null && Number(body.baseVersion) !== version) {
       throw httpError(409, "This draft was saved somewhere else since you opened it — close the editor and reopen it to see the latest.");
     }
     const at = Timestamp.fromMillis(now);
     const doc = {
-      gameId: g.gameId, scheduleId: g.scheduleId, home: g.home, away: g.away,
+      gameId: t.key,
+      ...(t.national ? { kind: "national" } : { scheduleId: t.game.scheduleId, home: t.game.home, away: t.game.away }),
       title: v.title, description: v.description,
       version: version + 1,
       createdAt: cur?.createdAt || at, createdBy: cur?.createdBy || uid,
@@ -244,36 +357,46 @@ async function saveMetadata(db, uid, body = {}, now = Date.now()) {
     tx.set(ref, doc);
     return doc;
   });
-  return { ok: true, gameId: g.gameId, draft: draftView(saved) };
+  return { ok: true, gameId: t.key, draft: draftView(saved) };
 }
 
-// metadata-thumbnail-generate { scheduleId } — renders a preview from the
-// template (thumbnail.js). Stores nothing; calls no YouTube API.
+// Renders the target's thumbnail: a game's matchup template, or the national
+// template for the window (thumbnail.js).
+async function renderThumbnail(db, t, opts) {
+  const th = require("./thumbnail");
+  return t.national ? th.generateNational(db, t.window, opts) : th.generate(db, t.game.scheduleId, opts);
+}
+
+// metadata-thumbnail-generate { scheduleId | national, startAt, endAt } —
+// renders a preview. Stores nothing; calls no YouTube API.
 async function generateThumbnail(db, body = {}, opts = {}) {
-  const r = await require("./thumbnail").generate(db, body.scheduleId, opts);
+  const t = await target(db, body);
+  const r = await renderThumbnail(db, t, opts);
   return {
-    gameId: r.game.gameId, sha256: r.sha256, width: r.width, height: r.height, bytes: r.png.length,
+    gameId: t.key, sha256: r.sha256, width: r.width, height: r.height, bytes: r.png.length,
     inputs: r.inputs, notes: r.notes, dataUrl: `data:image/png;base64,${r.png.toString("base64")}`,
   };
 }
 
-// metadata-thumbnail-save { scheduleId, sha256 } — renders again and stores
-// it in broadcastThumbnails/{gameId}, only when it's the image the admin
-// previewed (sha256): if anything it's drawn from changed since (a logo, a
-// color, the kickoff), nothing is saved and the preview is to be
-// regenerated. Never uploads it anywhere.
+// metadata-thumbnail-save { scheduleId | national…, sha256 } — renders again
+// and stores it in broadcastThumbnails/{gameId | national}, only when it's
+// the image the admin previewed (sha256): if anything it's drawn from changed
+// since (a logo, a color, the kickoff, the window's games), nothing is saved
+// and the preview is to be regenerated. Never uploads it anywhere.
 async function saveThumbnail(db, uid, body = {}, now = Date.now(), opts = {}) {
   if (!/^[0-9a-f]{64}$/.test(String(body.sha256 || ""))) throw httpError(400, "Generate a thumbnail and check the preview before saving it.");
-  const r = await require("./thumbnail").generate(db, body.scheduleId, opts);
-  if (r.sha256 !== body.sha256) throw httpError(409, "The thumbnail came out different from the preview (a logo, color or kickoff changed) — generate it again and check the new preview.");
+  const t = await target(db, body);
+  const r = await renderThumbnail(db, t, opts);
+  if (r.sha256 !== body.sha256) throw httpError(409, "The thumbnail came out different from the preview (a logo, color, kickoff or game changed) — generate it again and check the new preview.");
   if (r.png.length > MAX_THUMB_BYTES) throw httpError(413, `The thumbnail is ${Math.round(r.png.length / 1024)} KB — over the ${MAX_THUMB_BYTES / 1024} KB that can be stored.`);
-  const ref = db.collection(THUMBS).doc(r.game.gameId);
+  const ref = db.collection(THUMBS).doc(t.key);
   const saved = await db.runTransaction(async (tx) => {
     const cur = (await tx.get(ref)).data();
-    if (cur && String(cur.gameId) !== r.game.gameId) throw httpError(409, "The stored thumbnail belongs to another game.");
+    if (cur && String(cur.gameId) !== t.key) throw httpError(409, "The stored thumbnail belongs to another game.");
     const at = Timestamp.fromMillis(now);
     const doc = {
-      gameId: r.game.gameId, scheduleId: r.game.scheduleId,
+      gameId: t.key,
+      ...(t.national ? { kind: "national", window: { startAt: t.window.start, endAt: t.window.end } } : { scheduleId: t.game.scheduleId }),
       png: r.png, width: r.width, height: r.height, bytes: r.png.length, sha256: r.sha256,
       inputs: r.inputs, notes: r.notes, templateVersion: r.inputs.templateVersion,
       version: (cur?.version || 0) + 1,
@@ -283,22 +406,22 @@ async function saveThumbnail(db, uid, body = {}, now = Date.now(), opts = {}) {
     tx.set(ref, doc);
     return doc;
   });
-  return { ok: true, gameId: r.game.gameId, thumbnail: thumbView(saved) };
+  return { ok: true, gameId: t.key, thumbnail: thumbView(saved) };
 }
 
 // For an explicit upload to a created YouTube broadcast (broadcasts.js
-// youtubeThumbnail): the game's saved PNG, or null.
-async function thumbnailForBroadcast(db, gameId) {
-  if (!GAME_ID_RE.test(String(gameId || ""))) return null;
-  const t = await readThumbnail(db, gameId);
+// youtubeThumbnail): the saved PNG for a game id or "national", or null.
+async function thumbnailForBroadcast(db, key) {
+  if (!validKey(key)) return null;
+  const t = await readThumbnail(db, key);
   return t ? { png: pngBuffer(t.png), sha256: t.sha256, version: t.version || 0 } : null;
 }
 
-// For youtubeCreate: the game's saved draft when it's valid, else null (the
-// record's own title / description are used — the current default).
-async function draftForBroadcast(db, gameId) {
-  if (!GAME_ID_RE.test(String(gameId || ""))) return null;
-  const d = await readDraft(db, gameId);
+// For youtubeCreate: the saved draft for a game id or "national" when it's
+// valid, else null.
+async function draftForBroadcast(db, key) {
+  if (!validKey(key)) return null;
+  const d = await readDraft(db, key);
   if (!d) return null;
   const v = validateMetadata(d);
   if (Object.keys(v.errors).length) return null;
@@ -306,8 +429,9 @@ async function draftForBroadcast(db, gameId) {
 }
 
 module.exports = {
-  COLLECTION, THUMBS, LIMITS, MAX_THUMB_BYTES, validateMetadata, scheduleGame,
-  buildGenerated, generatedMetadata, generatedForBroadcast, hashtag,
+  COLLECTION, THUMBS, LIMITS, MAX_THUMB_BYTES, NATIONAL_KEY, NATIONAL_TITLE, validateMetadata, scheduleGame,
+  buildGenerated, generatedMetadata, generatedForBroadcast, hashtag, teamAbbr, matchupTag,
+  buildNationalGenerated, nationalDescriptionText, nationalWindow, nationalInputs, generatedNational,
   getMetadata, saveMetadata, draftForBroadcast,
   generateThumbnail, saveThumbnail, thumbnailForBroadcast,
 };
