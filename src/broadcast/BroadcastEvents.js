@@ -20,12 +20,16 @@
 //
 // Adding or upgrading a graphic is one entry in GRAPHICS.
 import { memo } from "react";
-import { panelColor, accentColor, playerUrl } from "../utils/broadcast";
-import { teamName } from "../utils/live";
+import { panelColor, accentColor, readableAccent, playerUrl } from "../utils/broadcast";
+import { teamName, teamShort } from "../utils/live";
 import { GRADE_BADGE } from "../components/LiveInsightCard";
+import { Logo } from "./TeamLogo";
+
+// A team's name where room is short: the full name, or its short name when
+// the full one wouldn't fit ("Middle Tennessee State" → "MTSU").
+const fitName = (t, max = 18) => { const n = teamName(t); return n.length > max ? teamShort(t) || n : n; };
 
 const WD_ICON = "/wd-icon.png";
-const logoOf = (t) => t?.logoDark || t?.logo || null;
 
 // The columns, in canvas px (broadcastStyle.js .bc-play / .bc-recent /
 // .bc-summary.tall / .bc-tstats). g1 / g2: where the gap between the two
@@ -71,19 +75,29 @@ function WdTag({ player, label = "PROSPECT" }) {
 }
 
 // The call: the team, the word, the line under it, a prospect's link, and
-// the big number.
+// the big number. A national play (e.national — /broadcast/national) puts
+// the player on a line of his own, his numbers so far under it
+// (e.statLines), and its game (e.context: score · clock) last, so a long
+// name never gets squeezed out by the score.
 function Call({ e, game, spec }) {
   const team = e.side ? game?.[e.side] : null;
   const word = spec.word(e, game);
-  const sub = spec.sub(e, game);
+  const sub = e.national ? null : spec.sub(e, game);
   const num = spec.num?.(e, game);
   return (
     <>
-      {logoOf(team) ? <img className="logo" src={logoOf(team)} alt="" /> : <img className="logo" src={WD_ICON} alt="" />}
-      <div className="txt">
-        {team && spec.size === "big" && <div className="who bc-disp bc-ell">{teamName(team)}</div>}
+      <Logo team={team} className="logo" fallback={WD_ICON} />
+      <div className={`txt${e.national ? " nat" : ""}`}>
+        {team && spec.size === "big" && <div className="who bc-disp bc-ell">{fitName(team, 24)}</div>}
         <div className={`word bc-disp${word.length > 11 ? " long" : ""}`}>{word}</div>
         {sub && <div className="sub bc-ell">{sub}</div>}
+        {e.national && e.player?.name && <div className="pname bc-disp bc-ell">{e.player.name}</div>}
+        {e.national && e.statLines?.length > 0 && (
+          <div className="estats">
+            {e.statLines.map((x) => <span key={x.name} className="bc-ell"><b>{x.name.split(" ").slice(-1)[0]}</b>{x.line}</span>)}
+          </div>
+        )}
+        {e.national && e.context && <div className="sub ctx bc-ell">{e.context}</div>}
         <WdTag player={e.player} />
       </div>
       {num && <div className="num bc-disp">{num}{spec.unit && <small>{spec.unit}</small>}</div>}
@@ -99,7 +113,7 @@ function PlayerCard({ e, game }) {
   const team = e.side ? game?.[e.side] : null;
   const wd = ins.wd;
   const url = playerUrl(ins.player?.slug);
-  const meta = [wd?.pos, team ? teamName(team) : null, wd?.cls ? `Class of ${wd.cls}` : null].filter(Boolean).join(" • ") || ins.subtitle || "";
+  const meta = [wd?.pos, team ? fitName(team) : null, wd?.cls ? `Class of ${wd.cls}` : null].filter(Boolean).join(" • ") || ins.subtitle || "";
   const grade = wd ? wd.grade || "Watchlist" : null;
   const badge = grade ? GRADE_BADGE[grade] || GRADE_BADGE.Watchlist : null;
   const name = ins.title || ins.player?.name || "";
@@ -107,7 +121,7 @@ function PlayerCard({ e, game }) {
     <div className="pcard">
       <div className="kick"><img src={WD_ICON} alt="" />{wd ? "We-Draft Player Watch" : ins.milestone ? "Milestone" : "Player Watch"}</div>
       <div className="who">
-        {logoOf(team) && <img src={logoOf(team)} alt="" />}
+        {team && <Logo team={team} />}
         <div className={`nm bc-disp${name.length > 16 ? " long" : ""}`}>{name}</div>
       </div>
       {meta && <div className="meta bc-ell">{meta}</div>}
@@ -141,8 +155,8 @@ function TrendCard({ e, game }) {
     <div className="pcard trend">
       <div className="kick"><img src={WD_ICON} alt="" />{ins.category === "game_trend" ? "Game trend" : "Team trend"}</div>
       <div className="who">
-        {logoOf(team) && <img src={logoOf(team)} alt="" />}
-        <div className="nm bc-disp">{teamName(team) || ins.title}</div>
+        {team && <Logo team={team} />}
+        <div className="nm bc-disp">{(team && fitName(team, 14)) || ins.title}</div>
       </div>
       {ins.headline && <div className="hl bc-disp">{ins.headline}</div>}
       {ins.statLine && <div className="stat">{ins.statLine}</div>}
@@ -165,7 +179,7 @@ function BroadcastEvent({ event, game, tall }) {
     <div key={event.id} className={`bc-mo ${col} ${kind}`}
       style={{
         left: f.left, width: f.width, top: f.top, height: f.height, "--g1": `${f.g1}px`, "--g2": `${f.g2}px`, "--gm": `${f.gm}px`,
-        "--dur": `${event.durationMs}ms`, "--ec": panelColor(team, "#0b2d5c"), "--ec2": accentColor(team),
+        "--dur": `${event.durationMs}ms`, "--ec": panelColor(team, "#0b2d5c"), "--ec2": accentColor(team), "--et": readableAccent(team),
       }}>
       <div className="tint" />
       {spec.size === "big" && !spec.calm && <><div className="stripes" /><div className="flash" /><div className="sweep" /></>}

@@ -23,16 +23,18 @@
 //
 // The data comes from the same Firestore docs and the same derived state
 // as /live (hooks/useBroadcastState.js); nothing here calls CFBD.
-import { useEffect, useLayoutEffect, useState } from "react";
+//
+// /broadcast/national (pages/BroadcastNationalPage.js) is the same frame
+// for every game on at once.
+import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useBroadcastState } from "../hooks/useBroadcastState";
 import BroadcastScreen from "../broadcast/BroadcastScreen";
-import { BROADCAST_STYLE, BROADCAST_FONTS } from "../broadcast/broadcastStyle";
-import { BROADCAST_W, BROADCAST_H } from "../utils/broadcast";
+import { BROADCAST_STYLE } from "../broadcast/broadcastStyle";
 import { EVENT_TYPES } from "../broadcast/BroadcastEvents";
-import { suspendPageZoom } from "../utils/pageZoom";
+import { usePageShell, useFontsReady, useFit, stageTransform, useCaptureReport } from "../broadcast/useBroadcastShell";
 
 // slug → liveGames id (one query); an all-digits param is taken as the id
 // itself when no game has that slug.
@@ -48,67 +50,6 @@ function useGameId(slug) {
     return () => { alive = false; };
   }, [slug]);
   return state.slug === slug ? state : { id: null, done: false };
-}
-
-// The page itself: no site padding, no scrollbars, no page zoom, the
-// broadcast's fonts — all put back when leaving.
-function usePageShell(stream) {
-  useLayoutEffect(() => {
-    const restoreZoom = suspendPageZoom();
-    const b = document.body.style;
-    const h = document.documentElement.style;
-    const prev = { bp: b.paddingTop, bm: b.margin, bo: b.overflow, bbg: b.background, bc: b.cursor, ho: h.overflow, hbg: h.background };
-    b.paddingTop = "0"; b.margin = "0"; b.overflow = "hidden"; b.background = "#000";
-    h.overflow = "hidden"; h.background = "#000";
-    if (stream) b.cursor = "none";
-    let link = document.querySelector("link[data-bc-fonts]");
-    if (!link) {
-      link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = BROADCAST_FONTS;
-      link.setAttribute("data-bc-fonts", "");
-      document.head.appendChild(link);
-    }
-    return () => {
-      Object.assign(b, { paddingTop: prev.bp, margin: prev.bm, overflow: prev.bo, background: prev.bbg, cursor: prev.bc });
-      Object.assign(h, { overflow: prev.ho, background: prev.hbg });
-      restoreZoom();
-    };
-  }, [stream]);
-}
-
-// Fonts loaded (or given up on after 8s — never block the stream on them).
-function useFontsReady() {
-  const [ok, setOk] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    const t = setTimeout(() => alive && setOk(true), 8000);
-    Promise.all([
-      document.fonts?.load?.('400 100px "Bebas Neue"'),
-      document.fonts?.load?.('700 40px "Barlow Condensed"'),
-      document.fonts?.load?.('800 40px "Barlow Condensed"'),
-    ].filter(Boolean)).then(() => document.fonts?.ready).finally(() => { if (alive) { clearTimeout(t); setOk(true); } });
-    return () => { alive = false; clearTimeout(t); };
-  }, []);
-  return ok;
-}
-
-// The frame's scale and offset: fit the window, centered. At exactly
-// 1920×1080 (the capture size) that's 1 and 0,0 — no resampling.
-function useFit() {
-  const calc = () => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const k = Math.min(w / BROADCAST_W, h / BROADCAST_H);
-    return { k, x: Math.round((w - BROADCAST_W * k) / 2), y: Math.round((h - BROADCAST_H * k) / 2) };
-  };
-  const [fit, setFit] = useState(calc);
-  useEffect(() => {
-    const on = () => setFit(calc());
-    window.addEventListener("resize", on);
-    return () => window.removeEventListener("resize", on);
-  }, []);
-  return fit;
 }
 
 // Manual replay (testing): a small bar over the preview — never part of the
@@ -159,20 +100,7 @@ export default function BroadcastPage() {
   const state = done && !id ? { ...s, phase: "missing" } : s;
 
   const ready = fontsOk && state.phase !== "loading";
-  useEffect(() => {
-    const root = document.documentElement;
-    root.dataset.broadcastReady = ready ? "1" : "0";
-    root.dataset.broadcastPhase = state.phase;
-    root.dataset.broadcastStale = state.health.stale ? "1" : "0";
-    window.__BROADCAST__ = { ready, phase: state.phase, stale: state.health.stale, gameId: id };
-  }, [ready, state.phase, state.health.stale, id]);
-  useEffect(() => () => {
-    const root = document.documentElement;
-    delete root.dataset.broadcastReady;
-    delete root.dataset.broadcastPhase;
-    delete root.dataset.broadcastStale;
-    delete window.__BROADCAST__;
-  }, []);
+  useCaptureReport({ ready, phase: state.phase, stale: state.health.stale, gameId: id });
 
   useEffect(() => {
     const g = state.game;
@@ -182,7 +110,7 @@ export default function BroadcastPage() {
   return (
     <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000" }}>
       <style>{BROADCAST_STYLE}</style>
-      <div className="bc-stage" style={{ transform: fit.k === 1 && !fit.x && !fit.y ? "none" : `translate(${fit.x}px, ${fit.y}px) scale(${fit.k})`, opacity: fontsOk ? 1 : 0 }}>
+      <div className="bc-stage" style={{ transform: stageTransform(fit), opacity: fontsOk ? 1 : 0 }}>
         <BroadcastScreen s={state} />
       </div>
       {state.replay?.manual && !stream && <StepControls replay={state.replay} />}

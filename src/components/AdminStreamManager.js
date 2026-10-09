@@ -10,8 +10,12 @@
 //   Worker VM   Compute Engine status / start / stop of the broadcast worker
 //               VM (vm-* actions; Google Cloud is only ever called server-side)
 //   Auto        Auto Schedule: enable games from the saved CFB schedule
-//               (schedule26) for automatic broadcast — run server-side by
-//               server/stream-manager/orchestrator.js
+//               (schedule26) for automatic broadcast, and edit each game's
+//               YouTube title / description draft (Edit Metadata — saved
+//               only, never activates anything) — run server-side by
+//               server/stream-manager/orchestrator.js — and National
+//               Coverage: /broadcast/national (every game's big plays and
+//               storylines) for a time window, same automation
 //   Broadcasts  broadcasts/{id} records, live from Firestore (admin read)
 //   New         pick a liveGames game, title / description / visibility / start
 //   Detail      GAME / YOUTUBE / WORKER panels + actions
@@ -22,6 +26,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { LIMITS as YT_LIMITS, validateMetadata, charCount, byteCount } from "../utils/youtubeMetadata";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -103,7 +108,8 @@ const fmtTime = (t) => (t ? new Date(t).toLocaleTimeString(undefined, { hour: "n
 const fmtFull = (t) => (t ? `${fmtDay(t)} · ${fmtTime(t)}` : "—");
 const toLocalInput = (t) => (t ? new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const teamName = (t) => t?.school || t?.short || "TBD";
-const matchup = (b) => `${teamName(b.awayTeam)} vs ${teamName(b.homeTeam)}`;
+const isNational = (b) => b?.kind === "national";
+const matchup = (b) => (isNational(b) ? "National Coverage" : `${teamName(b.awayTeam)} vs ${teamName(b.homeTeam)}`);
 // Same defaults as server/stream-manager/broadcasts.js.
 const defaultTitle = (g) => `We-Draft Live: ${teamName(g.away)} vs ${teamName(g.home)}`;
 const defaultDescription = (g) =>
@@ -439,6 +445,7 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
   const [search, setSearch] = useState("");
   const [onlySelected, setOnlySelected] = useState(false);
   const [days, setDays] = useState(7);
+  const [editing, setEditing] = useState(null); // the schedule game whose metadata is open
 
   // One record per game; the open one (or the latest) wins.
   const recByGame = useMemo(() => {
@@ -564,6 +571,9 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
                       <button onClick={() => rehearse(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn("#7b5ea7", false, !!busy || !linked || g.Final || gs === "final")}>Rehearse</button>
                     </>
                   )}
+                  <button onClick={() => setEditing(g)} disabled={!linked}
+                    title={linked ? "YouTube title and description for this game — saved as a draft only" : "Not linked to We-Draft Live (no CFBD game id)"}
+                    style={{ ...btn(BLUE, false, !linked), padding: "9px 10px" }}>Edit Metadata</button>
                   {b && onOpen && <button onClick={() => onOpen(b.id)} style={{ ...btn("#889", false), padding: "9px 10px" }}>Open</button>}
                 </div>
               </div>
@@ -571,6 +581,215 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
           })}
         </div>
       )}
+      {editing && <MetadataEditor game={editing} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+// ── Metadata editor ──
+// A game's YouTube title / description, prepared ahead of time (e.g. text
+// generated elsewhere and pasted in) and saved as a draft:
+// broadcastMetadata/{CFBDGameId} through metadata-get / metadata-save
+// (server/stream-manager/metadata.js). Saving never creates, schedules or
+// changes a YouTube broadcast, enables automation or touches the VM; the
+// draft is used when automation later creates the game's broadcast.
+// Works for any linked game, enabled or not.
+// Thumbnail: Generate draws one from the fixed template
+// (server/stream-manager/thumbnail.js — the teams' colors and logos, no AI)
+// as a preview; Save Thumbnail stores that exact image
+// (broadcastThumbnails/{CFBDGameId}). Neither uploads it — that's Upload
+// Thumbnail on a created broadcast.
+//   game: the schedule26 game { id, Home, Away, KickoffAt, CFBDGameId }
+const fmtSaved = (t) => (t ? new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+export function MetadataEditor({ game, onClose }) {
+  const [data, setData] = useState(null); // metadata-get's answer
+  const [loadErr, setLoadErr] = useState(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [saved, setSaved] = useState(null); // { title, description } — the saved draft, or the defaults when none
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [thumb, setThumb] = useState(null); // the saved thumbnail
+  const [preview, setPreview] = useState(null); // a generated, unsaved one
+  const [thumbBusy, setThumbBusy] = useState("");
+  const [thumbMsg, setThumbMsg] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    api("metadata-get", { scheduleId: game.id })
+      .then((r) => {
+        if (!alive) return;
+        // A saved draft always wins over the defaults — reopening never overwrites manual edits.
+        const start = r.draft || r.defaults;
+        setData(r);
+        setThumb(r.thumbnail || null);
+        setSaved({ title: start.title, description: start.description });
+        setTitle(start.title);
+        setDescription(start.description);
+      })
+      .catch((e) => { if (alive) setLoadErr(vmError(e)); });
+    return () => { alive = false; };
+  }, [game.id]);
+
+  const limits = data?.limits || YT_LIMITS;
+  const v = validateMetadata({ title, description }, limits);
+  const invalid = Object.keys(v.errors).length > 0;
+  const textDirty = !!saved && (title !== saved.title || description !== saved.description);
+  const thumbDirty = !!preview && preview.sha256 !== thumb?.sha256;
+  const dirty = textDirty || thumbDirty;
+  const draft = data?.draft || null;
+
+  // Leaving the page with unsaved edits asks first.
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const close = () => {
+    if (dirty && !window.confirm(`You have unsaved changes to this game's ${[textDirty && "YouTube title / description", thumbDirty && "thumbnail"].filter(Boolean).join(" and ")}. Close without saving?`)) return;
+    onClose();
+  };
+  const reset = () => {
+    if (!data) return;
+    const d = data.defaults;
+    if ((title !== d.title || description !== d.description) && !window.confirm("Replace the title and description with the generated text? Nothing is saved until you press Save Draft.")) return;
+    setTitle(d.title);
+    setDescription(d.description);
+    setMsg(null);
+  };
+  const save = async () => {
+    if (invalid || saving) return;
+    setSaving(true); setMsg(null);
+    try {
+      const r = await api("metadata-save", { scheduleId: game.id, title, description, baseVersion: draft?.version || 0 });
+      setData((x) => ({ ...x, draft: r.draft }));
+      setSaved({ title: r.draft.title, description: r.draft.description });
+      setTitle(r.draft.title);
+      setDescription(r.draft.description);
+      setMsg({ kind: "ok", text: "Draft saved." });
+    } catch (e) {
+      setMsg({ kind: "error", text: vmError(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const generate = async () => {
+    setThumbBusy("generate"); setThumbMsg(null);
+    try { setPreview(await api("metadata-thumbnail-generate", { scheduleId: game.id })); } catch (e) { setThumbMsg({ kind: "error", text: vmError(e) }); } finally { setThumbBusy(""); }
+  };
+  const saveThumb = async () => {
+    if (!preview) return;
+    setThumbBusy("save"); setThumbMsg(null);
+    try {
+      const r = await api("metadata-thumbnail-save", { scheduleId: game.id, sha256: preview.sha256 });
+      setThumb(r.thumbnail);
+      setPreview(null);
+      setThumbMsg({ kind: "ok", text: "Thumbnail saved." });
+    } catch (e) { setThumbMsg({ kind: "error", text: vmError(e) }); } finally { setThumbBusy(""); }
+  };
+  const shown = preview || thumb;
+
+  const status = dirty ? { text: "Unsaved changes", color: AMBER }
+    : draft ? { text: `Saved ${fmtSaved(draft.updatedAt)}`, color: GREEN }
+      : { text: "Generated automatically — not saved", color: "#889" };
+  const field = (err) => ({ ...input, borderColor: err ? RED : "#dde3ea" });
+  const count = (n, max, unit) => (
+    <span style={{ fontSize: 11, fontWeight: 800, color: n > max ? RED : "#889" }}>{n.toLocaleString()} / {max.toLocaleString()} {unit}</span>
+  );
+  const canSave = !!data && !saving && !invalid && (textDirty || !draft);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Edit YouTube metadata"
+      onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+      // Above the site's fixed navbar (z-index 10000–10002), centered, and
+      // never taller than the window: the header and the Save / Cancel row
+      // stay on screen while the middle scrolls.
+      style={{ position: "fixed", inset: 0, zIndex: 10050, background: "rgba(11,26,46,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
+      <div style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 860, maxHeight: "calc(100vh - 48px)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", fontFamily: "Arial, sans-serif" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "2px solid #eef1f5", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={label}>YouTube metadata</div>
+            <div style={{ fontWeight: 900, fontSize: 17, color: INK }}>{game.Away} at {game.Home}</div>
+            <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>Kickoff {fmtFull(game.KickoffAt)} · CFBD game {game.CFBDGameId}</div>
+          </div>
+          <span data-testid="metadata-status" style={{ fontSize: 12, fontWeight: 900, color: status.color }}>● {status.text}</span>
+          <button onClick={close} aria-label="Close" style={{ ...btn("#889", false), padding: "6px 10px" }}>✕</button>
+        </div>
+
+        <div data-testid="metadata-body" style={{ padding: "16px 20px", overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
+          {loadErr ? <Message msg={{ kind: "error", text: loadErr }} /> : !data ? (
+            <div style={{ padding: 30, textAlign: "center", color: "#99a", fontWeight: 800 }}>Loading…</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: "#556", fontWeight: 700, marginBottom: 12, lineHeight: 1.5 }}>
+                {data.broadcast?.youtubeCreated
+                  ? <span style={{ color: RED, fontWeight: 900 }}>This game's YouTube broadcast already exists. Saving here does not change it — edit it in YouTube Studio. The draft is only used for a broadcast created later.</span>
+                  : draft ? "Saved as a draft only: nothing is created on YouTube and automation isn't enabled. When automation creates this game's YouTube broadcast, it uses this title and description."
+                    : "Generated automatically from the matchup, ranks and kickoff — automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and automation isn't enabled."}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <label htmlFor="md-title" style={label}>YouTube title</label>
+                {count(charCount(v.title), limits.titleMax, "characters")}
+              </div>
+              <input id="md-title" value={title} onChange={(e) => setTitle(e.target.value)} style={field(v.errors.title)} />
+              {v.errors.title && <div role="alert" style={{ color: RED, fontSize: 12, fontWeight: 800, marginTop: 4 }}>{v.errors.title}</div>}
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 14 }}>
+                <label htmlFor="md-description" style={label}>YouTube description</label>
+                {count(byteCount(v.description), limits.descriptionMaxBytes, "bytes")}
+              </div>
+              <textarea id="md-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={10}
+                style={{ ...field(v.errors.description), resize: "vertical", lineHeight: 1.45 }} />
+              {v.errors.description && <div role="alert" style={{ color: RED, fontSize: 12, fontWeight: 800, marginTop: 4 }}>{v.errors.description}</div>}
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 18 }}>
+                <div style={label}>Thumbnail</div>
+                <span data-testid="thumbnail-status" style={{ fontSize: 11, fontWeight: 900, color: thumbDirty ? AMBER : thumb ? GREEN : "#889" }}>
+                  {thumbDirty ? "Preview — not saved" : thumb ? `Saved ${fmtSaved(thumb.updatedAt)}` : "None yet"}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <div style={{ width: 384, maxWidth: "100%", aspectRatio: "16 / 9", borderRadius: 8, overflow: "hidden", background: "#eef1f5", border: `2px solid ${thumbDirty ? AMBER : "#e3e8ef"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {shown ? <img src={shown.dataUrl} alt={thumbDirty ? "Thumbnail preview (not saved)" : "Saved thumbnail"} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                    : <span style={{ fontSize: 12, fontWeight: 800, color: "#99a", padding: 12, textAlign: "center" }}>{thumbBusy === "generate" ? "Generating…" : "Generate one from the teams' colors and logos"}</span>}
+                </div>
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button onClick={generate} disabled={!!thumbBusy} style={btn(BLUE, !shown, !!thumbBusy)}>
+                      {thumbBusy === "generate" ? "Generating…" : shown ? "Regenerate" : "Generate Thumbnail"}
+                    </button>
+                    {thumbDirty && <button onClick={saveThumb} disabled={!!thumbBusy} style={btn(GREEN, true, !!thumbBusy)}>{thumbBusy === "save" ? "Saving…" : "Save Thumbnail"}</button>}
+                    {thumbDirty && <button onClick={() => setPreview(null)} disabled={!!thumbBusy} style={btn("#889", false, !!thumbBusy)}>Discard</button>}
+                  </div>
+                  {(preview?.notes || []).map((n) => <div key={n} style={{ fontSize: 12, color: "#8a6100", fontWeight: 800, marginTop: 6 }}>{n}</div>)}
+                  <div style={{ fontSize: 11, color: "#889", fontWeight: 700, marginTop: 8, lineHeight: 1.45 }}>
+                    1280×720 PNG from the We-Draft template — the schools' saved colors and logos. Saving never uploads it: once the YouTube broadcast exists, use Upload Thumbnail on the broadcast.
+                  </div>
+                  <Message msg={thumbMsg} />
+                </div>
+              </div>
+
+              <div style={{ ...label, marginTop: 18 }}>Preview</div>
+              <div data-testid="metadata-preview" style={{ border: "2px solid #eef1f5", borderRadius: 10, padding: "14px 16px", background: "#fafbfc" }}>
+                <div data-testid="preview-title" style={{ fontSize: 18, fontWeight: 800, color: "#0f0f0f", wordBreak: "break-word" }}>{v.title || <span style={{ color: "#aab" }}>(no title)</span>}</div>
+                <div data-testid="preview-description" style={{ marginTop: 10, fontSize: 13, color: "#333", whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.5 }}>{v.description || <span style={{ color: "#aab" }}>(no description)</span>}</div>
+              </div>
+
+              <Message msg={msg} />
+            </>
+          )}
+        </div>
+
+        <div style={{ padding: "14px 20px", borderTop: "2px solid #eef1f5", display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", flexShrink: 0 }}>
+          <button onClick={reset} disabled={!data || saving} style={btn("#889", false, !data || saving)}>Reset</button>
+          <button onClick={close} style={btn("#889", false)}>Cancel</button>
+          <button onClick={save} disabled={!canSave} style={btn(GREEN, true, !canSave)}>{saving ? "Saving…" : "Save Draft"}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -641,6 +860,132 @@ export function SlotSettings({ orchDoc }) {
   );
 }
 
+// National coverage: /broadcast/national (no one game — the big plays and
+// storylines from every game) for a window, run by the same orchestrator
+// (orchestrator.js selectNational). Presentational: rows are broadcasts
+// records; the national ones are picked out here.
+const at = (d, h, m) => { const x = new Date(d); x.setHours(h, m, 0, 0); return x.getTime(); };
+// Default window: the next Saturday (today if it's Saturday), 11:45 AM to
+// 11:59 PM your time.
+export function defaultNationalWindow(now) {
+  const d = new Date(now);
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
+  return { start: at(d, 11, 45), end: at(d, 23, 59) };
+}
+export function NationalCoverage({ rows = [], now, onOpen }) {
+  const def = useMemo(() => defaultNationalWindow(now), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [start, setStart] = useState(toLocalInput(def.start));
+  const [end, setEnd] = useState(toLocalInput(def.end));
+  const [privacy, setPrivacy] = useState("unlisted");
+  const [confirmPublic, setConfirmPublic] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState(null);
+
+  // Open windows first (soonest first), then the three latest closed ones.
+  const recs = useMemo(() => {
+    const n = rows.filter((b) => isNational(b) && b.auto);
+    const open = n.filter((b) => b.auto.open).sort((a, b) => (a.auto.kickoffAt || 0) - (b.auto.kickoffAt || 0));
+    const closed = n.filter((b) => !b.auto.open).sort((a, b) => (b.auto.kickoffAt || 0) - (a.auto.kickoffAt || 0)).slice(0, 3);
+    return [...open, ...closed];
+  }, [rows]);
+
+  const act = async (key, fn, ok) => {
+    setBusy(key); setMsg(null);
+    try { const r = await fn(); setMsg({ kind: "ok", text: typeof ok === "function" ? ok(r) : ok }); } catch (e) { setMsg({ kind: "error", text: vmError(e) }); } finally { setBusy(""); }
+  };
+  const schedule = (rehearsal) => {
+    const s = Date.parse(start);
+    const e = Date.parse(end);
+    if (!Number.isFinite(s) || !Number.isFinite(e)) return setMsg({ kind: "error", text: "Set a start and an end." });
+    if (e <= s) return setMsg({ kind: "error", text: "The end must be after the start." });
+    if (privacy === "public" && !confirmPublic && !rehearsal) return setMsg({ kind: "error", text: "Tick the public confirmation, or choose Unlisted." });
+    const what = rehearsal
+      ? "A rehearsal never touches YouTube: the lifecycle runs with a simulated worker, only on a VM agent in DRY_RUN mode."
+      : `The server starts the VM 15 min before, creates the YouTube broadcast (${privacy.toUpperCase()}) and goes live once the stream is received.`;
+    if (!window.confirm(`${rehearsal ? "Rehearse" : "Schedule"} national coverage?\n\n${fmtFull(s)} → ${fmtFull(e)}\n\n${what} It ends 15 min after every game in the window is FINAL, or at the end time, whichever comes first.`)) return;
+    act(rehearsal ? "rehearse" : "enable",
+      () => api("auto-national", { startAt: new Date(s).toISOString(), endAt: new Date(e).toISOString(), privacyStatus: privacy, confirmPublic: privacy === "public" && confirmPublic, ...(rehearsal ? { rehearsal: true } : {}) }),
+      (r) => (r.already ? "Already scheduled." : rehearsal ? "Rehearsal scheduled — nothing goes to YouTube." : "Scheduled — it starts automatically 15 min before the window."));
+  };
+  const disable = (b) => {
+    const onAir = ["live", "postgame"].includes(b.auto.phase);
+    if (!window.confirm(onAir ? "National coverage is ON AIR.\n\nDisabling it ends the YouTube broadcast now and stops its worker. End it?" : "Disable this national coverage window?")) return;
+    act(b.id, () => api("auto-cancel", { id: b.id, ...(onAir ? { confirmEnd: true } : {}) }), onAir ? "Ending — the server is completing the YouTube broadcast." : "Disabled.");
+  };
+  const retry = (b) => act(b.id, () => api("auto-retry", { id: b.id }), "Re-enabled.");
+
+  return (
+    <div style={{ border: "2px solid #e6ecf3", borderTop: `4px solid ${GOLD}`, borderRadius: 12, background: "#fff", padding: "14px 18px", marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        <div style={{ ...label, marginBottom: 0, color: "#a86b00" }}>National Coverage</div>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#667", fontFamily: "Arial", flex: 1, minWidth: 240 }}>
+          Every game's big plays and storylines, no one game — <a href="/broadcast/national" target="_blank" rel="noreferrer" style={{ color: BLUE, fontWeight: 800 }}>/broadcast/national</a>. Uses a stream slot like a game broadcast.
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <div style={label}>Starts (your time)</div>
+          <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} style={{ ...input, width: 210, padding: "8px 10px" }} />
+        </div>
+        <div>
+          <div style={label}>Ends</div>
+          <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} style={{ ...input, width: 210, padding: "8px 10px" }} />
+        </div>
+        <div>
+          <div style={label}>Visibility</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {PRIVACY.map((p) => (
+              <button key={p.key} type="button" onClick={() => { setPrivacy(p.key); if (p.key !== "public") setConfirmPublic(false); }} title={p.note}
+                style={{ ...btn(p.key === "public" ? RED : BLUE, privacy === p.key), padding: "7px 12px" }}>{p.label}</button>
+            ))}
+          </div>
+        </div>
+        <button onClick={() => schedule(false)} disabled={!!busy} style={btn(GREEN, true, !!busy)}>{busy === "enable" ? "…" : "Enable"}</button>
+        <button onClick={() => schedule(true)} disabled={!!busy} style={btn("#7b5ea7", false, !!busy)}>{busy === "rehearse" ? "…" : "Rehearse"}</button>
+      </div>
+      {privacy === "public" && (
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 10, fontSize: 12, fontWeight: 800, color: RED, fontFamily: "Arial" }}>
+          <input type="checkbox" checked={confirmPublic} onChange={(e) => setConfirmPublic(e.target.checked)} />
+          I want this to be a PUBLIC YouTube broadcast, visible to everyone.
+        </label>
+      )}
+      <Message msg={msg} />
+      {recs.length > 0 && (
+        <div style={{ marginTop: 12, border: "1px solid #eef1f5", borderRadius: 10, overflow: "hidden" }}>
+          {recs.map((b) => {
+            const a = b.auto;
+            const s = autoState(b);
+            const onAir = ["live", "postgame"].includes(a.phase);
+            return (
+              <div key={b.id} data-testid={`national-${b.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(220px,1.4fr) minmax(150px,1.3fr) auto", gap: 10, padding: "10px 14px", alignItems: "center", borderBottom: "1px solid #f0f2f6" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 900, fontSize: 13, color: INK }}>{fmtFull(a.kickoffAt)} → {fmtTime(a.endAt)}</div>
+                  <div style={{ fontSize: 11, color: "#889", fontWeight: 700, fontFamily: "Arial" }}>{b.rehearsal ? "Rehearsal" : (b.youtube?.privacyStatus || "")}{a.endReason ? ` · ended: ${a.endReason}` : ""}</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  {s && <Pill s={s} small />}
+                  {a.open && a.waiting && <div style={{ fontSize: 11, color: "#667", fontWeight: 700, marginTop: 3 }}>{a.waiting}</div>}
+                  {a.error && <div style={{ fontSize: 11, color: RED, fontWeight: 800, marginTop: 3 }}>{a.error}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  {a.open ? (
+                    <button onClick={() => disable(b)} disabled={!!busy || a.cancelRequested || a.phase === "ending"} style={btn(RED, onAir, !!busy || a.cancelRequested || a.phase === "ending")}>
+                      {busy === b.id ? "…" : onAir ? "End Broadcast" : "Disable"}
+                    </button>
+                  ) : ["failed", "cancelled"].includes(a.phase) && (a.endAt || 0) > now ? (
+                    <button onClick={() => retry(b)} disabled={!!busy || a.ytUnconfirmed === true} style={btn(GOLD, true, !!busy || a.ytUnconfirmed === true)}>{busy === b.id ? "…" : "Retry"}</button>
+                  ) : null}
+                  {onOpen && <button onClick={() => onOpen(b.id)} style={{ ...btn("#889", false), padding: "9px 10px" }}>Open</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Container: loads the schedule and live statuses, renders AutoSchedule.
 function AutoPanel({ rows, now, onOpen, onBack }) {
   const [games, setGames] = useState(null);
@@ -667,6 +1012,7 @@ function AutoPanel({ rows, now, onOpen, onBack }) {
       <button onClick={onBack} style={{ ...btn("#889", false), marginBottom: 14 }}>← All broadcasts</button>
       {err && <Message msg={{ kind: "error", text: `Couldn't load the schedule: ${err}` }} />}
       <SlotSettings orchDoc={orchDoc} />
+      <NationalCoverage rows={rows || []} now={now} onOpen={onOpen} />
       <AutoSchedule games={games} statusById={statusById} rows={rows || []} orchDoc={orchDoc} agentDoc={agentDoc} now={now} onOpen={onOpen} />
     </div>
   );
@@ -824,6 +1170,10 @@ function BroadcastDetail({ b, onBack, onEdit }) {
     if (!window.confirm(`Create the YouTube broadcast now?\n\n“${y.title}”\nVisibility: ${vis}\nStart: ${fmtFull(ms(b.scheduledStart))}`)) return;
     run("create", "youtube-create", (r) => `YouTube broadcast ${r.broadcastId} created and bound to the worker stream.${r.streamCreated ? " A new “We-Draft Live Worker” stream was created — put its key (YouTube Studio) on the worker VM." : ""}`);
   };
+  const uploadThumb = () => {
+    if (!window.confirm("Upload this game's saved thumbnail (Auto Schedule → Edit Metadata) to its YouTube broadcast? It replaces the broadcast's current thumbnail.")) return;
+    run("thumb", "youtube-thumbnail", "Thumbnail uploaded to YouTube.");
+  };
   const del = () => {
     const warn = y.broadcastId ? "\n\nThis only removes the We-Draft record — the YouTube broadcast stays on YouTube (delete it in Studio if it's not wanted)." : "";
     if (!window.confirm(`Delete this broadcast record?${warn}`)) return;
@@ -847,6 +1197,18 @@ function BroadcastDetail({ b, onBack, onEdit }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+        {isNational(b) ? (
+          <Panel title="Coverage">
+            <Row k="Broadcast">National — every game</Row>
+            <Row k="Window starts">{fmtFull(b.national?.startAt ?? b.auto?.kickoffAt)}</Row>
+            <Row k="Window ends">{fmtFull(b.national?.endAt ?? b.auto?.endAt)}</Row>
+            <Row k="Broadcast start">{fmtFull(ms(b.scheduledStart))}</Row>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <a href="/live" target="_blank" rel="noreferrer" style={{ ...btn(BLUE, false), textDecoration: "none", padding: "6px 10px", fontSize: 11 }}>/live</a>
+              <a href="/broadcast/national" target="_blank" rel="noreferrer" style={{ ...btn(BLUE, false), textDecoration: "none", padding: "6px 10px", fontSize: 11 }}>Broadcast preview</a>
+            </div>
+          </Panel>
+        ) : (
         <Panel title="Game">
           <Row k="Matchup">{matchup(b)}</Row>
           <Row k="Kickoff">{fmtFull(ms(b.kickoff))}</Row>
@@ -860,6 +1222,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
             </div>
           )}
         </Panel>
+        )}
 
         {b.rehearsal ? (
           <Panel title="YouTube (simulated)" accent="#7b5ea7">
@@ -897,7 +1260,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           <Row k="Stopped">{w.stoppedAt ? fmtFull(ms(w.stoppedAt)) : "—"}</Row>
           {w.error && <div style={{ fontSize: 12, color: RED, fontWeight: 800, fontFamily: "Arial" }}>{w.error}</div>}
           <div style={{ fontSize: 11, color: "#99a", fontWeight: 800, fontFamily: "Arial" }}>
-            {b.auto?.enabled ? "Started and stopped automatically (Auto Schedule)." : "Workers run only for games enabled in Auto Schedule."}
+            {b.auto?.enabled ? "Started and stopped automatically (Auto Schedule)." : "Workers run only for games (or national coverage) enabled in Auto Schedule."}
           </div>
         </Panel>
 
@@ -906,10 +1269,10 @@ function BroadcastDetail({ b, onBack, onEdit }) {
             <Row k="State"><Pill s={autoState(b) || AUTO.selected} small /></Row>
             <Row k="Mode">{b.rehearsal ? "Rehearsal (simulated, no YouTube)" : "Real broadcast"}</Row>
             <Row k="Phase" mono>{b.auto.phase}</Row>
-            <Row k="Kickoff">{fmtFull(b.auto.kickoffAt)}</Row>
+            <Row k={isNational(b) ? "Window" : "Kickoff"}>{isNational(b) ? `${fmtFull(b.auto.kickoffAt)} → ${fmtTime(b.auto.endAt)}` : fmtFull(b.auto.kickoffAt)}</Row>
             <Row k="Prep starts">{fmtFull(b.auto.prepAt)}</Row>
             <Row k="Stream slot">{b.auto.slot ?? "—"}</Row>
-            <Row k="Final seen">{b.auto.finalSeenAt ? fmtFull(b.auto.finalSeenAt) : "—"}</Row>
+            <Row k={isNational(b) ? "All final seen" : "Final seen"}>{b.auto.finalSeenAt ? fmtFull(b.auto.finalSeenAt) : "—"}</Row>
             <Row k="Failsafe end">{b.auto.deadlineAt ? fmtFull(b.auto.deadlineAt) : "—"}</Row>
             {b.auto.endReason && <Row k="Ended">{b.auto.endReason}</Row>}
             {b.auto.waiting && <div style={{ fontSize: 12, color: "#667", fontWeight: 800, fontFamily: "Arial" }}>{b.auto.waiting}</div>}
@@ -934,6 +1297,11 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           {!b.rehearsal && (
             <button onClick={() => run("refresh", "youtube-refresh", "YouTube status refreshed.")} disabled={!!busy || !y.broadcastId} style={btn(BLUE, false, !!busy || !y.broadcastId)}>
               {busy === "refresh" ? "Refreshing…" : "Refresh YouTube Status"}
+            </button>
+          )}
+          {!b.rehearsal && b.kind !== "national" && y.broadcastId && (
+            <button onClick={uploadThumb} disabled={!!busy} title={y.thumbnailUploadedAt ? `Last uploaded ${fmtFull(y.thumbnailUploadedAt)}` : undefined} style={btn(BLUE, false, !!busy)}>
+              {busy === "thumb" ? "Uploading…" : "Upload Thumbnail"}
             </button>
           )}
           {!y.broadcastId && <button onClick={onEdit} disabled={!!busy} style={btn("#556", false, !!busy)}>Edit</button>}

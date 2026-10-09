@@ -25,11 +25,25 @@
 //   auto-select      { scheduleId, privacyStatus, confirmPublic, rehearsal } enable a
 //                    schedule26 game for automatic broadcast (nothing starts now);
 //                    rehearsal: true = simulated, never touches YouTube
+//   auto-national    { startAt, endAt, privacyStatus, confirmPublic, rehearsal, title?, description? }
+//                    schedule national coverage (/broadcast/national) for a window
 //   auto-cancel      { id, confirmEnd } disable it (ends it if on air — confirmEnd)
 //   auto-retry       { id } a failed / cancelled one back to selected
 //   auto-config      { slotStreamIds, maxConcurrent } stream slots / capacity
 //   refresh-statuses { apply } recompute stored statuses of closed records
 //                    (dry run unless apply: true; never deletes)
+//   metadata-get     { scheduleId } a game's YouTube title / description draft,
+//                    the editor's defaults and limits (read-only)
+//   metadata-save    { scheduleId, title, description, baseVersion } save the
+//                    draft (broadcastMetadata/{CFBDGameId} only — no YouTube
+//                    call, no broadcast record, no automation / VM change;
+//                    server/stream-manager/metadata.js)
+//   metadata-thumbnail-generate { scheduleId } render a thumbnail preview from the
+//                    template (server/stream-manager/thumbnail.js) — stores nothing
+//   metadata-thumbnail-save     { scheduleId, sha256 } store it (broadcastThumbnails/
+//                    {CFBDGameId}) when it matches the previewed image — no upload
+//   youtube-thumbnail { id } upload the game's saved thumbnail to that record's
+//                    created YouTube broadcast (explicit only)
 // The lifecycle itself runs server-side only: api/stream-orchestrator.js
 // (cron) and api/broadcast-agent.js (the VM agent) — see
 // server/stream-manager/orchestrator.js.
@@ -111,15 +125,21 @@ module.exports = async function handler(req, res) {
         return res.status(200).json(r);
       }
       case "auto-select": return res.status(200).json(await orch.selectGame(db, uid, body));
+      case "auto-national": return res.status(200).json(await orch.selectNational(db, uid, body));
       case "auto-cancel": return res.status(200).json(await orch.cancelGame(db, uid, body));
       case "auto-retry": return res.status(200).json(await orch.retryGame(db, uid, body));
       case "auto-config": return res.status(200).json(await orch.setConfig(db, uid, body));
       case "refresh-statuses": return res.status(200).json(await bc.refreshStatuses(db, body));
+      case "metadata-get": return res.status(200).json(await require("../server/stream-manager/metadata").getMetadata(db, body));
+      case "metadata-save": return res.status(200).json(await require("../server/stream-manager/metadata").saveMetadata(db, uid, body));
+      case "metadata-thumbnail-generate": return res.status(200).json(await require("../server/stream-manager/metadata").generateThumbnail(db, body));
+      case "metadata-thumbnail-save": return res.status(200).json(await require("../server/stream-manager/metadata").saveThumbnail(db, uid, body));
+      case "youtube-thumbnail": return res.status(200).json(await bc.youtubeThumbnail(db, body));
       default: return res.status(400).json({ error: "unknown action" });
     }
   } catch (e) {
     const status = e.status || 500;
     if (status >= 500) console.error("stream-manager failed:", e.message);
-    return res.status(status).json({ error: String(e.message || e).slice(0, 500) });
+    return res.status(status).json({ error: String(e.message || e).slice(0, 500), ...(e.fields ? { fields: e.fields } : {}) });
   }
 };

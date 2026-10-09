@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { communityFor, gradeLabel } from "../utils/communityGrades";
 import { useLiveGame, useLiveStats } from "./useLiveGame";
 import { useGameFeed } from "./useGameFeed";
 import { useInsightReveal, useDevInsights } from "./useInsightReveal";
@@ -111,12 +112,18 @@ function useSchoolProspects(game, enabled) {
     const load = async (school, side) => {
       if (!school) return [];
       const snap = await getDocs(query(collection(db, "players"), where("School", "==", school)));
-      return snap.docs.map((d) => d.data())
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
         .filter((p) => PRE_CLASSES.includes(String(p.Eligible)) && !HIDDEN.includes(p.Live) && p.Slug)
-        .map((p) => ({ name: `${p.First || ""} ${p.Last || ""}`.trim(), slug: p.Slug, side, pos: p.Position || null, cls: String(p.Eligible) }));
+        .map((p) => ({ id: p.id, name: `${p.First || ""} ${p.Last || ""}`.trim(), slug: p.Slug, side, pos: p.Position || null, cls: String(p.Eligible) }));
     };
+    // Their community grades too (the game doc's prospects carry theirs).
     Promise.all([load(home, "home"), load(away, "away")])
-      .then(([h, a]) => { if (alive) setList([...h, ...a]); })
+      .then(async ([h, a]) => {
+        const all = [...h, ...a];
+        const comm = await communityFor(all.map((p) => p.id)).catch(() => ({}));
+        const graded = all.map((p) => ({ ...p, gradeAvg: comm[p.id]?.avg ?? null, grade: gradeLabel(comm[p.id]?.avg) }));
+        if (alive) setList(graded);
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, [home, away, enabled]);

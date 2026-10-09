@@ -22,6 +22,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { wePickHref, isWePickPath } from "../utils/wePickRoutes";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
+import { useFbsTeamStats, fmtTeamStat } from "../utils/fbsTeamStats";
 import { syncProfileFollow } from "../utils/liveFollowSync";
 import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { useLiveGame, useLiveStats } from "../hooks/useLiveGame";
@@ -1510,26 +1511,6 @@ function useTeamRosters(homeId, awayId) {
     return () => { alive = false; };
   }, [homeId, awayId]);
   return rosters;
-}
-
-// Every FBS team's yards (total / passing / rushing) and points per game,
-// gained and allowed, with national ranks — cfbLeaders/teams, the CFB
-// page's Teams stats (scripts/syncCfbdTeamStats.js). One read, kept for the
-// visit; returns a Map of CFBD team id → { v, r } (values, ranks).
-let fbsTeamStats = null;
-// A team stat as shown: 3rd down as a %, turnover margin signed (+0.80).
-const fmtTeamStat = (k, v) => (k === "toMargin" ? `${v > 0 ? "+" : ""}${v.toFixed(2)}` : k.startsWith("thirdPct") ? `${v.toFixed(1)}%` : v.toFixed(1));
-function useFbsTeamStats() {
-  const [byId, setById] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    fbsTeamStats ||= getDoc(doc(db, "cfbLeaders", "teams"))
-      .then((d) => new Map((d.exists() ? d.data().teams || [] : []).map((t) => [Number(t.id), t])))
-      .catch(() => { fbsTeamStats = null; return new Map(); });
-    fbsTeamStats.then((m) => { if (alive) setById(m); });
-    return () => { alive = false; };
-  }, []);
-  return byId;
 }
 
 // Each school's We-Draft prospects (active classes, Live), best community

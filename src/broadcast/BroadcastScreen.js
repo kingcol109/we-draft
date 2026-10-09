@@ -20,21 +20,15 @@ import BroadcastEvent from "./BroadcastEvents";
 import { panelColor, barColor, BROADCAST_CTAS, CTA_ROTATE_MS } from "../utils/broadcast";
 import { teamName, teamShort, statusLabel, periodLabel, distinctTeamColors } from "../utils/live";
 import { gameLeaders, statLine } from "../utils/liveStats";
+import { Logo } from "./TeamLogo";
+import { useFbsTeamStats, fmtTeamStat } from "../utils/fbsTeamStats";
+import { GRADE_BADGE } from "../components/LiveInsightCard";
 
 const WD_ICON = "/wd-icon.png";
-const logoOf = (t) => t?.logoDark || t?.logo || null;
 const ORD = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th" };
 const ET = "America/New_York";
 
-// A logo with a fixed box — it never shifts the layout while loading, and
-// one that fails to load simply disappears.
-function Logo({ team, className }) {
-  const src = logoOf(team);
-  const [bad, setBad] = useState(false);
-  useEffect(() => setBad(false), [src]);
-  if (!src || bad) return <span className={className} style={{ display: "inline-block" }} />;
-  return <img className={className} src={src} alt="" decoding="async" onError={() => setBad(true)} />;
-}
+export { Logo };
 
 function FootballSvg() {
   return (
@@ -438,6 +432,58 @@ function FinalPanel({ s, game }) {
 }
 
 // ── Pregame ──
+// Before kickoff: the two teams' season stats, with national ranks
+// (cfbLeaders/teams — utils/fbsTeamStats.js), gold on the better number.
+// How long each takes its turn in the panel (the stats get the longer look).
+const PREGAME_PROS_MS = 20 * 1000;
+const PREGAME_STATS_MS = 40 * 1000;
+const SEASON_STATS = [
+  ["Points / game", "ppg"], ["Total yards / game", "ypg"], ["Passing yards / game", "passYpg"], ["Rushing yards / game", "rushYpg"],
+  ["Points allowed", "papg", true], ["Yards allowed", "yapg", true], ["Turnover margin", "toMargin"], ["3rd down %", "thirdPct"],
+];
+function SeasonStats({ game, ts }) {
+  const val = (t, k) => (t?.v?.[k] == null ? "—" : fmtTeamStat(k, t.v[k]));
+  const rk = (t, k) => (t?.v?.[k] != null && t?.r?.[k] ? `${t.r[k].replace(/^(T-)?/, "$1#")}` : "");
+  return (
+    <div key="stats" className="bc-panel bc-pros">
+      <div className="bc-ph"><img src={WD_ICON} alt="" /><span className="gold">Season stats</span><span className="right">National rank among FBS teams</span></div>
+      <div className="bc-sgrid">
+        {SEASON_STATS.map(([label, k, low]) => {
+          const a = ts.away?.v?.[k];
+          const h = ts.home?.v?.[k];
+          const edge = a == null || h == null || a === h ? [false, false] : low ? [a < h, h < a] : [a > h, h > a];
+          return (
+            <div key={k} className="bc-scard">
+              <div className="lbl">{label}</div>
+              <div className="row">
+                <Logo team={game.away} />
+                <b className={`bc-disp${edge[0] ? " best" : ""}`}>{val(ts.away, k)}</b><small>{rk(ts.away, k)}</small>
+                <i />
+                <small>{rk(ts.home, k)}</small><b className={`bc-disp${edge[1] ? " best" : ""}`}>{val(ts.home, k)}</b>
+                <Logo team={game.home} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// A prospect's community draft grade: the round's colored pill over its
+// name ("Early 1st", "3rd Round"); ungraded players are on the watchlist.
+const gradeShort = (g) => g.replace(/^(Early|Middle|Late) First Round$/, (_, w) => `${w === "Middle" ? "Mid" : w} 1st`);
+function GradeChip({ grade }) {
+  const g = grade || "Watchlist";
+  const badge = GRADE_BADGE[g] || GRADE_BADGE.Watchlist;
+  return (
+    <div className="bc-grade">
+      <span className="pill bc-disp" style={{ background: badge.bg, borderColor: badge.border }}>{badge.short}</span>
+      <span className="gl">{gradeShort(g)}</span>
+    </div>
+  );
+}
+
 function Pregame({ s, game }) {
   const at = game.startDate ? new Date(game.startDate) : null;
   const ok = at && !isNaN(at);
@@ -458,6 +504,19 @@ function Pregame({ s, game }) {
     );
   };
   const pros = s.playerWatch.slice(0, 6);
+  // The panel under the matchup: prospects to watch and the two teams'
+  // season stats take turns (just one when the other has nothing).
+  const teamStats = useFbsTeamStats();
+  const ts = { away: teamStats?.get(Number(game.away?.providerTeamId)), home: teamStats?.get(Number(game.home?.providerTeamId)) };
+  const hasStats = SEASON_STATS.some(([, k]) => ts.away?.v?.[k] != null || ts.home?.v?.[k] != null);
+  const [turn, setTurn] = useState(0);
+  const both = hasStats && pros.length > 0;
+  const view = hasStats && (!pros.length || turn % 2 === 1) ? "stats" : "pros";
+  useEffect(() => {
+    if (!both) return undefined;
+    const t = setTimeout(() => setTurn((x) => x + 1), view === "stats" ? PREGAME_STATS_MS : PREGAME_PROS_MS);
+    return () => clearTimeout(t);
+  }, [both, view]);
   return (
     <>
       <div className="bc-match">
@@ -470,21 +529,24 @@ function Pregame({ s, game }) {
         </div>
         {side("home")}
       </div>
-      <div className="bc-panel bc-pros">
-        <div className="bc-ph"><img src={WD_ICON} alt="" /><span className="gold">We-Draft prospects to watch</span><span className="right">Scouting reports · we-draft.com</span></div>
-        <div className="bc-pgrid">
-          {pros.map((p) => (
-            <div key={p.slug} className="bc-pcard" style={{ "--pc": panelColor(p.team) }}>
-              <Logo team={p.team} />
-              <div style={{ minWidth: 0 }}>
-                <div className="n bc-disp bc-ell">{p.name}</div>
-                <div className="m bc-ell">{[p.pos, teamShort(p.team), p.cls ? `Class of ${p.cls}` : null].filter(Boolean).join(" • ")}</div>
+      {view === "stats" ? <SeasonStats game={game} ts={ts} /> : (
+        <div key="pros" className="bc-panel bc-pros">
+          <div className="bc-ph"><img src={WD_ICON} alt="" /><span className="gold">We-Draft prospects to watch</span><span className="right">Scouting reports · we-draft.com</span></div>
+          <div className="bc-pgrid">
+            {pros.map((p) => (
+              <div key={p.slug} className="bc-pcard" style={{ "--pc": panelColor(p.team) }}>
+                <Logo team={p.team} />
+                <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                  <div className="n bc-disp bc-ell">{p.name}</div>
+                  <div className="m bc-ell">{[p.pos, teamShort(p.team), p.cls ? `Class of ${p.cls}` : null].filter(Boolean).join(" • ")}</div>
+                </div>
+                <GradeChip grade={p.grade} />
               </div>
-            </div>
-          ))}
-          {!pros.length && <div style={{ gridColumn: "1 / -1", alignSelf: "center", textAlign: "center", fontSize: 32, color: "#7f90aa" }}>Prospect list loading — every player's scouting report is at we-draft.com</div>}
+            ))}
+            {!pros.length && <div style={{ gridColumn: "1 / -1", alignSelf: "center", textAlign: "center", fontSize: 32, color: "#7f90aa" }}>Prospect list loading — every player's scouting report is at we-draft.com</div>}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

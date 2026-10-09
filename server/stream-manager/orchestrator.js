@@ -60,6 +60,16 @@
 // key lives only on the VM (~/.we-draft/youtube-key, youtube-key-1, …).
 // capacity = min(slots, maxConcurrent) — 0 when no stream is configured.
 //
+// National coverage (record-level `kind: "national"`, doc id n<startMs> /
+// rn<startMs> for a rehearsal): no one game — the worker opens
+// /broadcast/national, the big plays and storylines from every game. The
+// same lifecycle, keyed to a coverage window instead of a game:
+// auto.kickoffAt is the window's start (preparation 15 min before),
+// auto.endAt its end. It goes to postgame once nothing is in progress and
+// nothing else kicks off before the end (liveSlate/current — nationalDone),
+// ends 15 min after that, and ends at auto.endAt regardless. Its failsafe
+// deadline is the window's end + NATIONAL_TAIL_MS, not MAX_RUNTIME_MS.
+//
 // Logs: phase changes and VM actions with record ids — never tokens or keys.
 
 const crypto = require("crypto");
@@ -84,6 +94,8 @@ const CFG = {
   LOCK_MS: 70e3,                    // > the function's 60s maxDuration, so a lease never expires under a live tick
   HOLD_MS: 30 * 60e3,               // an admin's forced manual stop pauses auto VM starts
   MAX_SLOTS: 6,
+  NATIONAL_MAX_MS: 16 * 3600e3,     // longest national coverage window
+  NATIONAL_TAIL_MS: 30 * 60e3,      // its failsafe: the window's end + this
 };
 
 const TERMINAL = ["completed", "failed", "cancelled"];
@@ -157,6 +169,24 @@ function desiredWorkers(records, { agentDryRun = false } = {}) {
     .filter((w) => w.game && ID_RE.test(w.id));
 }
 
+// ── National coverage ──
+const isNational = (r) => r?.kind === "national";
+// A scheduled game this far past kickoff that never started is postponed
+// (same rule as the site's slatePhase) — it doesn't hold coverage open.
+const POSTPONED_MS = 6 * 3600e3;
+// Nothing left to cover: no game in progress, and none still to kick off
+// before the window ends. No slate at all is not "done" (unknown).
+function nationalDone(slate, endAt, now) {
+  const games = slate?.games;
+  if (!Array.isArray(games)) return false;
+  if (games.some((g) => g.status === "in_progress")) return false;
+  return !games.some((g) => {
+    if (g.status !== "scheduled") return false;
+    const k = Date.parse(g.startDate || "");
+    return Number.isFinite(k) && k > now - POSTPONED_MS && (!endAt || k < endAt);
+  });
+}
+
 // ── One record, one step ──
 
 async function step(r, ctx) {
@@ -178,12 +208,17 @@ async function step(r, ctx) {
   const since = now - (a.phaseAt || now);
   const sim = (more) => { p.sim = { ...(a.sim || {}), ...p.sim, ...more }; };
 
-  const sched = ctx.schedules.get(a.scheduleId);
-  const game = ctx.games.get(String(r.gameId));
+  // National coverage has no schedule game: its "game" is the slate, its
+  // kickoff the window's start, and it's "final" once the window has
+  // nothing left to show.
+  const national = isNational(r);
+  const sched = national ? null : ctx.schedules.get(a.scheduleId);
+  const game = national ? ctx.slate : ctx.games.get(String(r.gameId));
   const kickoff = toMs(sched?.KickoffAt) || a.kickoffAt || null;
   if (kickoff !== (a.kickoffAt ?? null)) Object.assign(p, { kickoffAt: kickoff, prepAt: kickoff ? kickoff - CFG.PREP_LEAD_MS : null });
   const prepAt = kickoff ? kickoff - CFG.PREP_LEAD_MS : null;
-  const final = game?.status === "final";
+  const endAt = national ? a.endAt || null : null;
+  const final = national ? nationalDone(ctx.slate, endAt, now) : game?.status === "final";
   // Why a real (non-rehearsal) broadcast can't start right now, if anything.
   const blocker = rehearsal ? null : realBlocker(ctx);
 
@@ -218,7 +253,8 @@ async function step(r, ctx) {
   // Hard failsafe, whatever the game status says.
   if (a.deadlineAt && now >= a.deadlineAt && RUN_WORKER.includes(phase)) {
     to("ending", { endReason: "max runtime" });
-    p.error = `Hit the ${Math.round(CFG.MAX_RUNTIME_MS / 3600e3)}h maximum runtime — ended automatically.`;
+    p.error = national ? "Ran past the coverage window's end — ended automatically."
+      : `Hit the ${Math.round(CFG.MAX_RUNTIME_MS / 3600e3)}h maximum runtime — ended automatically.`;
     p.errorAt = now;
     return { p, y };
   }
@@ -226,8 +262,12 @@ async function step(r, ctx) {
   switch (phase) {
     case "selected": {
       if (!kickoff) { p.waiting = "Kickoff time isn't set in the CFB schedule yet."; break; }
-      if (final || sched?.Final) { fail("The game was already final before the broadcast started."); break; }
-      if (now > kickoff + CFG.MISSED_MS) { fail("Missed — the game kicked off over 4h ago and was never prepared."); break; }
+      if (national) {
+        if (endAt && now >= endAt) { fail("The coverage window ended before the broadcast started."); break; }
+      } else {
+        if (final || sched?.Final) { fail("The game was already final before the broadcast started."); break; }
+        if (now > kickoff + CFG.MISSED_MS) { fail("Missed — the game kicked off over 4h ago and was never prepared."); break; }
+      }
       if (now < prepAt) { if (a.waiting) p.waiting = null; break; }
       if (blocker) {
         // Held here (not preparing): no VM, no YouTube. Gives up at kickoff.
@@ -241,7 +281,10 @@ async function step(r, ctx) {
 
     case "preparing": {
       if (blocker) { fail(blocker); break; }
-      if (!game) throw httpError(409, "The game isn't in We-Draft Live (liveGames) yet — the live ingester adds this week's games.");
+      if (!game) {
+        throw httpError(409, national ? "We-Draft Live has no slate (liveSlate/current) yet — the live ingester writes it."
+          : "The game isn't in We-Draft Live (liveGames) yet — the live ingester adds this week's games.");
+      }
       if (rehearsal) {
         // No slot, no Worker Stream, no YouTube broadcast: everything YouTube
         // would do is simulated in auto.sim.
@@ -277,7 +320,9 @@ async function step(r, ctx) {
           fail("Rehearsals only run on a VM agent in DRY_RUN mode — it never launches a real worker for a rehearsal. Set DRY_RUN=1 on the agent, or use Enable for a real broadcast.");
           break;
         }
-        to("worker", { workerStartedAt: now, deadlineAt: now + CFG.MAX_RUNTIME_MS });
+        // National: the failsafe follows the window (it may run past 6h).
+        const deadlineAt = national ? Math.min((endAt || now) + CFG.NATIONAL_TAIL_MS, now + CFG.NATIONAL_MAX_MS + CFG.NATIONAL_TAIL_MS) : now + CFG.MAX_RUNTIME_MS;
+        to("worker", { workerStartedAt: now, deadlineAt });
         break;
       }
       if (since > CFG.VM_READY_TIMEOUT_MS) {
@@ -342,15 +387,17 @@ async function step(r, ctx) {
       const note = !ctx.vmReady ? "VM or agent unavailable — recovering."
         : c?.state !== "running" ? "Worker isn't running — the agent is restarting it."
         : ytErr ? `Can't read YouTube status (${ytErr}) — still on air.` : null;
+      // National: the window's end ends it, whatever the games are doing.
+      if (national && endAt && now >= endAt) { to("ending", { endReason: "coverage window ended" }); break; }
       if (phase === "live") {
         if (final) { to("postgame", { finalSeenAt: now }); break; }
         if (note !== (a.waiting ?? null)) p.waiting = note;
         break;
       }
       // A FINAL that's taken back (stat correction) puts the game back on air.
-      if (!final) { to("live", { finalSeenAt: null, waiting: "The game left FINAL — back to live." }); break; }
-      if (now >= a.finalSeenAt + CFG.POSTGAME_MS) { to("ending", { endReason: "game final" }); break; }
-      p.waiting = note || `Final — ending at ${new Date(a.finalSeenAt + CFG.POSTGAME_MS).toISOString()}.`;
+      if (!final) { to("live", { finalSeenAt: null, waiting: national ? "A game is on again — back to live." : "The game left FINAL — back to live." }); break; }
+      if (now >= a.finalSeenAt + CFG.POSTGAME_MS) { to("ending", { endReason: national ? "every game final" : "game final" }); break; }
+      p.waiting = note || `${national ? "Every game in the window is final" : "Final"} — ending at ${new Date(a.finalSeenAt + CFG.POSTGAME_MS).toISOString()}.`;
       break;
     }
 
@@ -476,9 +523,12 @@ async function runTick(db, deps = realDeps()) {
     const schedules = new Map();
     const games = new Map();
     await Promise.all(records.map(async (r) => {
+      if (isNational(r)) return;
       if (r.auto?.scheduleId) schedules.set(r.auto.scheduleId, (await db.collection("schedule26").doc(r.auto.scheduleId).get()).data());
       if (r.gameId) games.set(String(r.gameId), (await db.collection("liveGames").doc(String(r.gameId)).get()).data());
     }));
+    // National coverage reads the slate (one doc) instead of a game.
+    const slate = records.some(isNational) ? (await db.doc("liveSlate/current").get()).data() || null : null;
 
     const { ids: slots, capacity } = slotsOf(orch, ytSnap.data() || {});
     const agentDryRun = agent.dryRun === true; // the agent's last report, however old
@@ -511,12 +561,13 @@ async function runTick(db, deps = realDeps()) {
     let token = null;
     const tok = async () => (token ||= await deps.yt.accessToken(db));
     const ctx = {
-      now, db, vm, vmHeld, containers, slots, capacity, takeSlot, schedules, games, agentDryRun,
+      now, db, vm, vmHeld, containers, slots, capacity, takeSlot, schedules, games, slate, agentDryRun,
       vmReady: vm?.state === "running" && agentFresh,
       getStream: async (id) => deps.yt.getStream(await tok(), id),
       getBroadcast: async (id) => deps.yt.getBroadcast(await tok(), id),
       transition: async (id, to) => deps.yt.transitionBroadcast(await tok(), id, to),
-      youtubeCreate: (id, streamId) => deps.bc.youtubeCreate(db, { id, streamId }),
+      // useDraft: a new broadcast takes the game's saved metadata draft (metadata.js).
+      youtubeCreate: (id, streamId) => deps.bc.youtubeCreate(db, { id, streamId, useDraft: true }),
       setScheduledStart: (id, ms) => db.collection("broadcasts").doc(id).update({ scheduledStart: Timestamp.fromMillis(ms) }),
     };
 
@@ -733,6 +784,63 @@ async function selectGame(db, uid, body, now = Date.now()) {
   });
 }
 
+// National coverage for a window: { startAt, endAt (ISO), privacyStatus,
+// confirmPublic, rehearsal, title?, description? }. Like selectGame, nothing
+// starts now — the tick prepares it 15 min before startAt. One open window
+// of each kind (real / rehearsal) at a time, and windows never overlap.
+async function selectNational(db, uid, body, now = Date.now()) {
+  const bc = require("./broadcasts");
+  const start = Date.parse(body.startAt);
+  const end = Date.parse(body.endAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) throw httpError(400, "Set when national coverage starts and ends.");
+  if (end <= start) throw httpError(400, "The coverage end must be after its start.");
+  if (end - start > CFG.NATIONAL_MAX_MS) throw httpError(400, `National coverage can run at most ${CFG.NATIONAL_MAX_MS / 3600e3} hours.`);
+  if (end <= now + 30 * 60e3) throw httpError(400, "That window is over (or ends within 30 min).");
+  const privacyStatus = bc.cleanPrivacy(body.privacyStatus || "unlisted", body.confirmPublic);
+  const rehearsal = body.rehearsal === true;
+  if (!rehearsal && rehearsalOnly()) throw httpError(409, "The server is in rehearsal-only mode (STREAM_REHEARSAL_ONLY) — use Rehearse.");
+  const title = bc.cleanText(body.title || bc.nationalTitle(start), "Title", 100, true);
+  const description = bc.cleanText(body.description ?? bc.nationalDescription(), "Description", 5000, false);
+
+  const ref = db.collection("broadcasts").doc(`${rehearsal ? "rn" : "n"}${start}`);
+  return db.runTransaction(async (tx) => {
+    const open = (await tx.get(db.collection("broadcasts").where("kind", "==", "national"))).docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((x) => x.auto?.open && isRehearsal(x) === rehearsal);
+    const same = open.find((x) => x.id === ref.id);
+    if (same) return { id: same.id, already: true };
+    const clash = open.find((x) => (x.auto.kickoffAt || 0) < end && (x.auto.endAt || 0) > start);
+    if (clash) throw httpError(409, `National coverage is already scheduled ${new Date(clash.auto.kickoffAt).toISOString()} → ${new Date(clash.auto.endAt).toISOString()} — disable it first, or pick a window that doesn't overlap.`);
+    if ((await tx.get(ref)).exists) throw httpError(409, "A national broadcast with that start already ran — Retry it, or pick another start.");
+    tx.set(ref, {
+      ...(rehearsal ? { rehearsal: true } : {}),
+      kind: "national",
+      gameId: null, gameSlug: "national", homeTeam: null, awayTeam: null,
+      kickoff: new Date(start).toISOString(),
+      national: { startAt: start, endAt: end },
+      scheduledStart: Timestamp.fromMillis(start),
+      status: "scheduled",
+      youtube: {
+        title: `${rehearsal ? "[Rehearsal] " : ""}${title}`.slice(0, 100), description, privacyStatus,
+        broadcastId: null, videoId: null, streamId: null, channelId: null,
+        lifecycleStatus: null, streamStatus: null, healthStatus: null, lastSyncedAt: null, error: null, creatingAt: null,
+      },
+      worker: { status: "idle", instanceId: null, startedAt: null, stoppedAt: null, lastHeartbeat: null, error: null },
+      auto: {
+        enabled: true, open: true, active: false, scheduleId: null, phase: "selected", phaseAt: now,
+        slot: null, kickoffAt: start, prepAt: start - CFG.PREP_LEAD_MS, endAt: end,
+        workerStartedAt: null, deadlineAt: null, liveAt: null, finalSeenAt: null,
+        youtubeDone: false, endReason: null, completedAt: null,
+        error: null, errorAt: null, errors: 0, waiting: null, cancelRequested: false,
+        selectedBy: uid, selectedAt: now,
+      },
+      createdBy: uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    console.log(`stream-manager auto-national uid=${uid} id=${ref.id} start=${start} end=${end}${rehearsal ? " rehearsal" : ""}`);
+    return { id: ref.id, created: true, ...(rehearsal ? { rehearsal: true } : {}) };
+  });
+}
+
 // Disable a selected game. One that's on air needs confirmEnd: true, and
 // then ends through the normal path (YouTube complete, worker stop).
 async function cancelGame(db, uid, body) {
@@ -750,7 +858,7 @@ async function cancelGame(db, uid, body) {
 
 // Failed / cancelled → selected again. The tick never touches closed
 // records, so this can write the phase directly.
-async function retryGame(db, uid, body) {
+async function retryGame(db, uid, body, now = Date.now()) {
   const bc = require("./broadcasts");
   const { ref } = await bc.loadRecord(db, body.id);
   return db.runTransaction(async (tx) => {
@@ -766,8 +874,9 @@ async function retryGame(db, uid, body) {
     }
     const s = a.scheduleId ? (await tx.get(db.collection("schedule26").doc(a.scheduleId))).data() : null;
     if (s?.Final) throw httpError(400, "That game is already final.");
+    if (isNational(d) && a.endAt && now >= a.endAt) throw httpError(400, "That coverage window is over — schedule a new one.");
     const upd = {
-      "auto.phase": "selected", "auto.phaseAt": Date.now(), "auto.open": true, "auto.active": false, "auto.enabled": true,
+      "auto.phase": "selected", "auto.phaseAt": now, "auto.open": true, "auto.active": false, "auto.enabled": true,
       "auto.slot": null, "auto.error": null, "auto.errorAt": null, "auto.errors": 0, "auto.waiting": null,
       "auto.workerStartedAt": null, "auto.deadlineAt": null, "auto.liveAt": null, "auto.finalSeenAt": null,
       "auto.youtubeDone": false, "auto.youtubeDoneAt": null, "auto.endReason": null, "auto.cancelRequested": false,
@@ -815,7 +924,7 @@ async function noteManualVm(db, action, result, body = {}, now = Date.now()) {
 
 module.exports = {
   CFG, ACTIVE, TERMINAL, RUN_WORKER, ORCH, AGENT,
-  step, runTick, agentReport, desiredWorkers, slotsOf, workerGame,
-  selectGame, cancelGame, retryGame, setConfig, noteManualVm,
+  step, runTick, agentReport, desiredWorkers, slotsOf, workerGame, nationalDone, isNational,
+  selectGame, selectNational, cancelGame, retryGame, setConfig, noteManualVm,
   _lease: { lock, unlock }, // tests
 };

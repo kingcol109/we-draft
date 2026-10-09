@@ -425,3 +425,395 @@ test("Retry is disabled for a failed broadcast whose YouTube end is unconfirmed"
   rerender(<AutoSchedule games={games} rows={[rec({ ytUnconfirmed: false })]} now={NOW} />);
   expect(btn()).toBeEnabled();
 });
+
+describe("National Coverage", () => {
+  const { NationalCoverage, defaultNationalWindow } = require("./AdminStreamManager");
+  const within = require("@testing-library/react").within;
+  const NOW = new Date(2026, 9, 8, 15, 0).getTime(); // a Thursday, local time
+  const H = 3600e3;
+  const nat = (id, auto, extra = {}) => ({ id, kind: "national", gameId: null, gameSlug: "national", youtube: { privacyStatus: "unlisted" }, auto: { open: true, kickoffAt: NOW + 2 * H, endAt: NOW + 10 * H, ...auto }, ...extra });
+
+  beforeEach(() => {
+    global.fetch = jest.fn((url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, auth: opts.headers.Authorization, body });
+      return reply(200, { ok: true, id: "n1", created: true });
+    });
+  });
+
+  test("the default window is the coming Saturday, 11:45 AM to 11:59 PM", () => {
+    const { start, end } = defaultNationalWindow(NOW);
+    expect(new Date(start).getDay()).toBe(6);
+    expect([new Date(start).getHours(), new Date(start).getMinutes()]).toEqual([11, 45]);
+    expect([new Date(end).getHours(), new Date(end).getMinutes()]).toEqual([23, 59]);
+    expect(end - start).toBeLessThan(16 * H);
+  });
+
+  test("Enable asks first, then only sends auto-national with the window", async () => {
+    window.confirm.mockReturnValueOnce(false);
+    render(<NationalCoverage rows={[]} now={NOW} />);
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/15 min after every game in the window is FINAL/);
+    expect(await screen.findByText(/Scheduled — it starts automatically/)).toBeInTheDocument();
+    const { start, end } = defaultNationalWindow(NOW);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-national", startAt: new Date(start).toISOString(), endAt: new Date(end).toISOString(), privacyStatus: "unlisted", confirmPublic: false }]);
+  });
+
+  test("Rehearse sends rehearsal: true; public needs the confirmation box", async () => {
+    render(<NationalCoverage rows={[]} now={NOW} />);
+    fireEvent.click(screen.getByRole("button", { name: "Public" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    expect(await screen.findByText(/Tick the public confirmation/)).toBeInTheDocument();
+    expect(calls).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Rehearse" }));
+    await screen.findByText(/Rehearsal scheduled/);
+    expect(calls[0].body).toMatchObject({ action: "auto-national", rehearsal: true });
+  });
+
+  test("an on-air window ends with its own confirmation and confirmEnd; game records aren't listed", async () => {
+    render(<NationalCoverage rows={[nat("n1", { phase: "live" }), { id: "g1", gameId: "1", auto: { open: true, phase: "live" } }]} now={NOW} onOpen={() => {}} />);
+    expect(screen.getAllByTestId(/^national-/).map((r) => r.dataset.testid)).toEqual(["national-n1"]);
+    fireEvent.click(within(screen.getByTestId("national-n1")).getByRole("button", { name: "End Broadcast" }));
+    expect(window.confirm.mock.calls[0][0]).toMatch(/ON AIR/);
+    await screen.findByText(/Ending/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-cancel", id: "n1", confirmEnd: true }]);
+  });
+
+  test("Retry only while the window isn't over", () => {
+    render(<NationalCoverage rows={[nat("n1", { open: false, phase: "failed" }), nat("n2", { open: false, phase: "cancelled", kickoffAt: NOW - 10 * H, endAt: NOW - H })]} now={NOW} />);
+    expect(within(screen.getByTestId("national-n1")).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("national-n2")).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+// ── Edit Metadata (YouTube title / description drafts) ──
+// A faked metadata-get / metadata-save; any other action would be recorded
+// and refused, so these tests also prove the editor never enables
+// automation, creates a broadcast or touches the VM.
+describe("Edit Metadata", () => {
+  const { AutoSchedule } = require("./AdminStreamManager");
+  const { within } = require("@testing-library/react");
+  const NOW = Date.UTC(2026, 9, 10, 15, 0);
+  const games = [
+    { id: "s1", Home: "Wake Forest", Away: "North Carolina", KickoffAt: NOW + 2 * 3600e3, CFBDGameId: 401001, Week: "Week 7" },
+    { id: "s3", Home: "Navy", Away: "Army", KickoffAt: NOW + 3 * 3600e3, CFBDGameId: null },
+  ];
+  const DEFAULTS = { title: "We-Draft Live: North Carolina vs Wake Forest", description: "Kickoff: Saturday\n\nNorth Carolina at Wake Forest — live scores." };
+  let drafts, youtubeCreated, saveFails;
+
+  beforeEach(() => {
+    drafts = {}; youtubeCreated = false; saveFails = null;
+    global.fetch = jest.fn((url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, auth: opts.headers.Authorization, body });
+      const gameId = body.scheduleId === "s1" ? "401001" : null;
+      if (body.action === "metadata-get") {
+        return reply(200, { game: { gameId }, draft: drafts[gameId] || null, defaults: DEFAULTS, limits: { titleMax: 100, descriptionMaxBytes: 5000 }, broadcast: { exists: youtubeCreated, youtubeCreated } });
+      }
+      if (body.action === "metadata-save") {
+        if (saveFails) return reply(saveFails.code, { error: saveFails.error });
+        const cur = drafts[gameId];
+        drafts[gameId] = { title: body.title.trim(), description: body.description.trim(), version: (cur?.version || 0) + 1, updatedAt: NOW, updatedBy: "admin1", thumbnail: null };
+        return reply(200, { ok: true, gameId, draft: drafts[gameId] });
+      }
+      return reply(400, { error: `unexpected action ${body.action}` });
+    });
+  });
+
+  const renderPicker = () => render(<AutoSchedule games={games} rows={[]} now={NOW} statusById={{}} orchDoc={null} agentDoc={null} />);
+  const open = async (id = "s1") => {
+    fireEvent.click(within(screen.getByTestId(`game-${id}`)).getByRole("button", { name: "Edit Metadata" }));
+    return screen.findByRole("dialog");
+  };
+  const titleBox = () => screen.getByLabelText("YouTube title");
+  const descBox = () => screen.getByLabelText("YouTube description");
+  const actions = () => calls.map((c) => c.body.action);
+  const onlyMetadataCalls = () => actions().every((a) => a.startsWith("metadata-"));
+
+  test("opens for a game that isn't enabled and has no broadcast: the defaults, read-only", async () => {
+    renderPicker();
+    await open();
+    expect(await screen.findByDisplayValue(DEFAULTS.title)).toBeInTheDocument();
+    expect(descBox().value).toBe(DEFAULTS.description);
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Generated automatically");
+    expect(screen.getByText(/Generated automatically from the matchup, ranks and kickoff/)).toBeInTheDocument();
+    expect(calls.map((c) => c.body)).toEqual([{ action: "metadata-get", scheduleId: "s1" }]);
+    expect(calls[0].auth).toBe("Bearer firebase-id-token");
+    // opening changes nothing about the game's automation
+    expect(within(screen.getByTestId("game-s1")).getByText("Not enabled")).toBeInTheDocument();
+  });
+
+  test("an unlinked game has no metadata to edit", () => {
+    renderPicker();
+    expect(within(screen.getByTestId("game-s3")).getByRole("button", { name: "Edit Metadata" })).toBeDisabled();
+  });
+
+  test("a previously saved draft is loaded instead of the defaults", async () => {
+    drafts["401001"] = { title: "My saved title", description: "Saved\n\ndescription", version: 3, updatedAt: NOW, updatedBy: "admin1" };
+    renderPicker();
+    await open();
+    expect(await screen.findByDisplayValue("My saved title")).toBeInTheDocument();
+    expect(descBox().value).toBe("Saved\n\ndescription");
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Saved");
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled(); // nothing changed
+  });
+
+  test("save, then reopen: the draft comes back with its line breaks; only metadata actions are sent", async () => {
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue(DEFAULTS.title);
+    fireEvent.change(titleBox(), { target: { value: "Tar Heels at Demon Deacons" } });
+    fireEvent.change(descBox(), { target: { value: "Line 1\n\nLine 3" } });
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Unsaved changes");
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(await screen.findByText("Draft saved.")).toBeInTheDocument();
+    expect(calls[1].body).toEqual({ action: "metadata-save", scheduleId: "s1", title: "Tar Heels at Demon Deacons", description: "Line 1\n\nLine 3", baseVersion: 0 });
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Saved");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(window.confirm).not.toHaveBeenCalled(); // nothing unsaved
+    await open();
+    expect(await screen.findByDisplayValue("Tar Heels at Demon Deacons")).toBeInTheDocument();
+    expect(descBox().value).toBe("Line 1\n\nLine 3");
+
+    // a second save sends the version it opened
+    fireEvent.change(titleBox(), { target: { value: "Second" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    await waitFor(() => expect(drafts["401001"].title).toBe("Second"));
+    expect(calls[calls.length - 1].body.baseVersion).toBe(1);
+    expect(actions()).toEqual(["metadata-get", "metadata-save", "metadata-get", "metadata-save"]);
+    expect(onlyMetadataCalls()).toBe(true);
+  });
+
+  test("editing and cancelling asks first and saves nothing", async () => {
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue(DEFAULTS.title);
+    fireEvent.change(titleBox(), { target: { value: "Changed" } });
+    window.confirm.mockReturnValueOnce(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(window.confirm.mock.calls[0][0]).toMatch(/unsaved changes/);
+    expect(screen.getByRole("dialog")).toBeInTheDocument(); // kept open
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(actions()).toEqual(["metadata-get"]);
+    expect(drafts).toEqual({});
+  });
+
+  test("unsaved changes also warn before leaving the page", async () => {
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue(DEFAULTS.title);
+    const leave = () => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
+    expect(leave()).toBe(false);
+    fireEvent.change(descBox(), { target: { value: "edited" } });
+    expect(leave()).toBe(true);
+    fireEvent.change(descBox(), { target: { value: DEFAULTS.description } });
+    expect(leave()).toBe(false); // back to what's saved
+  });
+
+  test("title and description are validated against YouTube's limits", async () => {
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue(DEFAULTS.title);
+    const save = () => screen.getByRole("button", { name: "Save Draft" });
+
+    fireEvent.change(titleBox(), { target: { value: "x".repeat(101) } });
+    expect(screen.getByText(/Title must be 100 characters or fewer \(it's 101\)/)).toBeInTheDocument();
+    expect(screen.getByText("101 / 100 characters")).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+
+    fireEvent.change(titleBox(), { target: { value: "   " } });
+    expect(screen.getByText("Title is required.")).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+
+    fireEvent.change(titleBox(), { target: { value: "Fine" } });
+    fireEvent.change(descBox(), { target: { value: "a <tag>" } });
+    expect(screen.getByText("Description can't contain < or >.")).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+
+    // bytes, not characters: 2,501 × "é" is 5,002 bytes
+    fireEvent.change(descBox(), { target: { value: "é".repeat(2501) } });
+    expect(screen.getByText(/5000 bytes or fewer \(it's 5002\)/)).toBeInTheDocument();
+    fireEvent.change(descBox(), { target: { value: "é".repeat(2500) } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(save()).toBeEnabled();
+    fireEvent.click(save());
+    expect(await screen.findByText("Draft saved.")).toBeInTheDocument();
+  });
+
+  test("the preview shows the title and the description's line breaks", async () => {
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue(DEFAULTS.title);
+    fireEvent.change(titleBox(), { target: { value: "Preview me" } });
+    fireEvent.change(descBox(), { target: { value: "One\n\nThree" } });
+    expect(screen.getByTestId("preview-title")).toHaveTextContent("Preview me");
+    expect(screen.getByTestId("preview-description").textContent).toBe("One\n\nThree");
+    expect(screen.getByTestId("preview-description")).toHaveStyle({ whiteSpace: "pre-wrap" });
+  });
+
+  test("Reset puts the generated text back (after asking) without saving", async () => {
+    drafts["401001"] = { title: "Saved title", description: "Saved", version: 1, updatedAt: NOW };
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue("Saved title");
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(window.confirm.mock.calls[0][0]).toMatch(/generated text/);
+    expect(titleBox().value).toBe(DEFAULTS.title);
+    expect(descBox().value).toBe(DEFAULTS.description);
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Unsaved changes");
+    expect(actions()).toEqual(["metadata-get"]);
+    expect(drafts["401001"].title).toBe("Saved title");
+  });
+
+  test("the editor opens above the site navbar, centered and inside the window", async () => {
+    renderPicker();
+    const dialog = await open();
+    expect(Number(dialog.style.zIndex)).toBeGreaterThan(10002); // Navbar.js uses up to 10002
+    expect(dialog).toHaveStyle({ position: "fixed", alignItems: "center" });
+    expect(dialog.firstChild).toHaveStyle({ maxHeight: "calc(100vh - 48px)" });
+    expect(screen.getByTestId("metadata-body")).toHaveStyle({ overflowY: "auto" });
+  });
+
+  test("a game whose YouTube broadcast exists says the draft won't change it", async () => {
+    youtubeCreated = true;
+    renderPicker();
+    await open();
+    expect(await screen.findByText(/YouTube broadcast already exists. Saving here does not change it/)).toBeInTheDocument();
+  });
+
+  test("a failed save shows the server's message and keeps the edits", async () => {
+    saveFails = { code: 409, error: "This draft was saved somewhere else since you opened it — close the editor and reopen it to see the latest." };
+    renderPicker();
+    await open();
+    await screen.findByDisplayValue(DEFAULTS.title);
+    fireEvent.change(titleBox(), { target: { value: "Mine" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(await screen.findByText(/saved somewhere else/)).toBeInTheDocument();
+    expect(titleBox().value).toBe("Mine");
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Unsaved changes");
+  });
+});
+
+// ── Edit Metadata → Thumbnail ──
+describe("Edit Metadata thumbnail", () => {
+  const { AutoSchedule } = require("./AdminStreamManager");
+  const { within } = require("@testing-library/react");
+  const NOW = Date.UTC(2026, 9, 10, 15, 0);
+  const games = [{ id: "s1", Home: "Wake Forest", Away: "North Carolina", KickoffAt: NOW + 2 * 3600e3, CFBDGameId: 401001 }];
+  const DEFAULTS = { title: "We-Draft Live: North Carolina vs Wake Forest", description: "d" };
+  const IMG = (n) => `data:image/png;base64,PNG${n}`;
+  let saved, gens, notes, genFails;
+
+  beforeEach(() => {
+    saved = null; gens = 0; notes = []; genFails = null;
+    global.fetch = jest.fn((url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, auth: opts.headers.Authorization, body });
+      switch (body.action) {
+        case "metadata-get":
+          return reply(200, { game: { gameId: "401001" }, draft: null, thumbnail: saved, defaults: DEFAULTS, limits: { titleMax: 100, descriptionMaxBytes: 5000 }, broadcast: { exists: false, youtubeCreated: false } });
+        case "metadata-thumbnail-generate":
+          if (genFails) return reply(genFails.code, { error: genFails.error });
+          gens++;
+          return reply(200, { gameId: "401001", sha256: `${"a".repeat(63)}${gens}`, width: 1280, height: 720, bytes: 1000, notes, dataUrl: IMG(gens) });
+        case "metadata-thumbnail-save":
+          saved = { sha256: body.sha256, width: 1280, height: 720, version: 1, updatedAt: NOW, dataUrl: IMG(`saved-${body.sha256.slice(-1)}`) };
+          return reply(200, { ok: true, gameId: "401001", thumbnail: saved });
+        default:
+          return reply(400, { error: `unexpected action ${body.action}` });
+      }
+    });
+  });
+
+  const open = async () => {
+    render(<AutoSchedule games={games} rows={[]} now={NOW} statusById={{}} orchDoc={null} agentDoc={null} />);
+    fireEvent.click(within(screen.getByTestId("game-s1")).getByRole("button", { name: "Edit Metadata" }));
+    await screen.findByDisplayValue(DEFAULTS.title);
+  };
+  const actions = () => calls.map((c) => c.body.action);
+  const click = (name) => fireEvent.click(screen.getByRole("button", { name }));
+
+  test("Generate shows a preview without saving anything", async () => {
+    await open();
+    expect(screen.getByTestId("thumbnail-status")).toHaveTextContent("None yet");
+    click("Generate Thumbnail");
+    const img = await screen.findByAltText("Thumbnail preview (not saved)");
+    expect(img).toHaveAttribute("src", IMG(1));
+    expect(screen.getByTestId("thumbnail-status")).toHaveTextContent("Preview — not saved");
+    expect(screen.getByTestId("metadata-status")).toHaveTextContent("Unsaved changes");
+    expect(actions()).toEqual(["metadata-get", "metadata-thumbnail-generate"]);
+    expect(saved).toBeNull();
+  });
+
+  test("Regenerate replaces the preview; Save Thumbnail stores the previewed image (by its hash), nothing else", async () => {
+    await open();
+    click("Generate Thumbnail");
+    await screen.findByAltText("Thumbnail preview (not saved)");
+    click("Regenerate");
+    await waitFor(() => expect(screen.getByAltText("Thumbnail preview (not saved)")).toHaveAttribute("src", IMG(2)));
+    click("Save Thumbnail");
+    expect(await screen.findByText("Thumbnail saved.")).toBeInTheDocument();
+    expect(calls[calls.length - 1].body).toEqual({ action: "metadata-thumbnail-save", scheduleId: "s1", sha256: `${"a".repeat(63)}2` });
+    expect(screen.getByAltText("Saved thumbnail")).toHaveAttribute("src", IMG("saved-2"));
+    expect(screen.getByTestId("thumbnail-status")).toHaveTextContent("Saved");
+    expect(screen.getByTestId("metadata-status")).not.toHaveTextContent("Unsaved");
+    expect(actions().every((a) => a.startsWith("metadata-"))).toBe(true);
+    // closing now asks nothing
+    click("Cancel");
+    expect(window.confirm).not.toHaveBeenCalled();
+  });
+
+  test("a saved thumbnail is shown when the editor opens", async () => {
+    saved = { sha256: "b".repeat(64), width: 1280, height: 720, version: 2, updatedAt: NOW, dataUrl: IMG("old") };
+    await open();
+    expect(screen.getByAltText("Saved thumbnail")).toHaveAttribute("src", IMG("old"));
+    expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+  });
+
+  test("an unsaved preview warns before closing; Discard drops it", async () => {
+    await open();
+    click("Generate Thumbnail");
+    await screen.findByAltText("Thumbnail preview (not saved)");
+    window.confirm.mockReturnValueOnce(false);
+    click("Cancel");
+    expect(window.confirm.mock.calls[0][0]).toMatch(/unsaved changes to this game's thumbnail/);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const e = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    click("Discard");
+    expect(screen.queryByAltText("Thumbnail preview (not saved)")).toBeNull();
+    expect(screen.getByTestId("metadata-status")).not.toHaveTextContent("Unsaved");
+  });
+
+  test("missing logos or colors are explained under the preview; errors are shown", async () => {
+    notes = ["Ghost U: no logo could be loaded — showing initials."];
+    await open();
+    click("Generate Thumbnail");
+    expect(await screen.findByText(/no logo could be loaded — showing initials/)).toBeInTheDocument();
+    genFails = { code: 400, error: "That game isn't in the CFB schedule." };
+    click("Regenerate");
+    expect(await screen.findByText("That game isn't in the CFB schedule.")).toBeInTheDocument();
+  });
+
+  test("saving the text draft doesn't save the thumbnail preview, and vice versa", async () => {
+    await open();
+    click("Generate Thumbnail");
+    await screen.findByAltText("Thumbnail preview (not saved)");
+    fireEvent.change(screen.getByLabelText("YouTube title"), { target: { value: "New title" } });
+    global.fetch.mockImplementationOnce((url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, body });
+      return reply(200, { ok: true, gameId: "401001", draft: { title: body.title, description: body.description, version: 1, updatedAt: NOW } });
+    });
+    click("Save Draft");
+    expect(await screen.findByText("Draft saved.")).toBeInTheDocument();
+    expect(saved).toBeNull();
+    expect(screen.getByTestId("thumbnail-status")).toHaveTextContent("Preview — not saved");
+  });
+});

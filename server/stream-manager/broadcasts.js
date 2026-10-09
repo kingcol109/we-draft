@@ -4,6 +4,9 @@
 // api/stream-manager.js). One doc per planned We-Draft Live YouTube stream:
 //
 //   broadcasts/{id}
+//     kind                       "national" for national coverage (no one game —
+//                                gameId null, gameSlug "national", national:
+//                                { startAt, endAt }; orchestrator.js selectNational)
 //     gameId, gameSlug           → liveGames/{gameId} (the game itself lives there,
 //     homeTeam, awayTeam, kickoff   these are a display snapshot taken at create)
 //     scheduledStart             Timestamp — when the YouTube broadcast is scheduled
@@ -11,6 +14,10 @@
 //                                (| rehearsal — an open rehearsal record, rehearsal: true)
 //     youtube: {                 the YouTube broadcast
 //       title, description, privacyStatus,
+//       metadataSource, metadataVersion   where a created broadcast's title /
+//                                description came from: "draft" | "generated" (metadata.js) | "record"
+//       thumbnailSha256, thumbnailVersion, thumbnailUploadedAt   the generated
+//                                thumbnail last uploaded (youtubeThumbnail)
 //       broadcastId, videoId, streamId, channelId,
 //       lifecycleStatus, streamStatus, healthStatus,
 //       lastSyncedAt, error, creatingAt }
@@ -67,6 +74,11 @@ function deriveStatus(b) {
   return "scheduled";
 }
 
+// A record's name in lists and logs.
+const recordName = (b) => (b?.kind === "national" ? "National Coverage" : `${teamName(b?.awayTeam)} vs ${teamName(b?.homeTeam)}`);
+const nationalTitle = (startMs) => `We-Draft Live: College Football ${new Date(startMs).toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" })} — Every Game, Every Big Play`;
+const nationalDescription = () =>
+  "Big plays and storylines from every college football game, live — scores across the country, touchdowns as they happen and the We-Draft prospects having big days.\n\nEvery game, every score: https://we-draft.com/live";
 const teamSnap = (t = {}) => ({ school: t.school || t.name || null, short: t.short || null, logo: t.logo || null, color: t.color || null, rank: t.rank ?? null });
 const teamName = (t) => t?.school || t?.short || "TBD";
 const defaultTitle = (g) => `We-Draft Live: ${teamName(g.away)} vs ${teamName(g.home)}`;
@@ -199,7 +211,7 @@ async function refreshStatuses(db, body = {}) {
     if (!Object.keys(upd).length) continue;
     changes.push({
       id: d.id,
-      matchup: `${teamName(b.awayTeam)} vs ${teamName(b.homeTeam)}`,
+      matchup: recordName(b),
       from: b.status ?? null,
       to: upd.status ?? b.status ?? null,
       disableAuto: "auto.enabled" in upd,
@@ -266,8 +278,35 @@ async function fail(ref, e) {
   await ref.update({ "youtube.error": String(e.message || e).slice(0, 500), "youtube.creatingAt": null, status: "error", updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
 }
 
+// The title / description a new YouTube broadcast is created with. useDraft
+// (the orchestrator's creates): the game's saved metadata draft
+// (metadata.js, broadcastMetadata/{gameId}) when there's a valid one, else
+// the generated text for the game (metadata.js generatedForBroadcast —
+// matchup, ranks, kickoff as of now); else — and always for national
+// coverage and manual creates — the record's own. Metadata that can't be
+// read never blocks the broadcast. Never writes the draft.
+async function broadcastText(db, rec, useDraft) {
+  const own = { title: rec.youtube.title, description: rec.youtube.description, source: "record", version: null };
+  if (!useDraft || rec.kind === "national" || rec.rehearsal === true) return own;
+  const md = require("./metadata");
+  try {
+    const d = await md.draftForBroadcast(db, rec.gameId);
+    if (d) return { title: d.title, description: d.description, source: "draft", version: d.version };
+  } catch (e) {
+    console.error(`stream-manager metadata draft unreadable game=${rec.gameId}: ${e.message}`);
+  }
+  try {
+    const gen = await md.generatedForBroadcast(db, rec);
+    if (gen) return { ...gen, source: "generated", version: null };
+  } catch (e) {
+    console.error(`stream-manager generated metadata failed game=${rec.gameId}: ${e.message}`);
+  }
+  return own;
+}
+
 // body.streamId (orchestrator only): bind to that slot's stream, re-binding
-// an existing broadcast if it's on a different one.
+// an existing broadcast if it's on a different one. body.useDraft
+// (orchestrator only): a new broadcast takes the game's metadata draft.
 // Server-side guard for every YouTube create/bind (manual or orchestrator):
 // never for a rehearsal record, never in rehearsal-only mode.
 function assertRealYoutube(data) {
@@ -292,7 +331,7 @@ async function youtubeCreate(db, body) {
   });
 
   try {
-    await loadGame(db, rec.gameId);
+    if (rec.kind !== "national") await loadGame(db, rec.gameId);
     const s = await settings(db);
     const token = await yt.accessToken(db);
     if (!s.channelId) throw httpError(409, "No YouTube channel is connected.");
@@ -308,14 +347,20 @@ async function youtubeCreate(db, body) {
       const startMs = rec.scheduledStart.toMillis();
       if (startMs < Date.now() + 60 * 1000) throw httpError(400, "The scheduled start is in the past — edit it to a future time first.");
       const privacyStatus = cleanPrivacy(rec.youtube.privacyStatus, rec.youtube.privacyStatus === "public");
+      const meta = await broadcastText(db, rec, body.useDraft === true);
       b = await yt.insertBroadcast(token, {
-        title: rec.youtube.title,
-        description: rec.youtube.description,
+        title: meta.title,
+        description: meta.description,
         scheduledStart: new Date(startMs).toISOString(),
         privacyStatus,
       });
-      // Saved before binding so a retry never makes a second broadcast.
-      await ref.update({ "youtube.broadcastId": b.id, "youtube.videoId": b.id, "youtube.channelId": s.channelId });
+      // Saved before binding so a retry never makes a second broadcast —
+      // with the title / description it was created with.
+      await ref.update({
+        "youtube.broadcastId": b.id, "youtube.videoId": b.id, "youtube.channelId": s.channelId,
+        "youtube.title": meta.title, "youtube.description": meta.description,
+        "youtube.metadataSource": meta.source, "youtube.metadataVersion": meta.version,
+      });
     }
     if (b.boundStreamId !== stream.id) b = await yt.bindBroadcast(token, b.id, stream.id);
     const st = await yt.getStream(token, stream.id);
@@ -352,6 +397,25 @@ async function youtubeRefresh(db, body) {
   }
 }
 
+// Uploads the game's saved generated thumbnail (metadata.js /
+// thumbnail.js, broadcastThumbnails/{gameId}) to this record's YouTube
+// broadcast — only on this explicit admin action, never when a thumbnail is
+// generated or saved, and never for a rehearsal or national coverage.
+async function youtubeThumbnail(db, body) {
+  const { ref, data } = await loadRecord(db, body.id);
+  if (data.rehearsal === true) throw httpError(409, "This is a rehearsal record — it has no YouTube broadcast.");
+  if (data.kind === "national") throw httpError(400, "National coverage has no game thumbnail.");
+  if (!data.youtube?.broadcastId) throw httpError(400, "No YouTube broadcast yet — the thumbnail can be uploaded once it's created.");
+  const t = await require("./metadata").thumbnailForBroadcast(db, data.gameId);
+  if (!t) throw httpError(404, "This game has no saved thumbnail — generate and save one in Auto Schedule → Edit Metadata.");
+  const s = await settings(db);
+  if (data.youtube.channelId && s.channelId && data.youtube.channelId !== s.channelId) throw httpError(409, "This broadcast belongs to a different YouTube channel than the one connected now.");
+  const token = await yt.accessToken(db);
+  await yt.setThumbnail(token, data.youtube.broadcastId, t.png);
+  await ref.update({ "youtube.thumbnailSha256": t.sha256, "youtube.thumbnailVersion": t.version, "youtube.thumbnailUploadedAt": Date.now(), updatedAt: FieldValue.serverTimestamp() });
+  return { ok: true, sha256: t.sha256 };
+}
+
 // ── Channel ──
 
 async function channelStatus(db, { withStreams }) {
@@ -385,7 +449,8 @@ async function setWorkerStream(db, body) {
 }
 
 module.exports = {
-  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, loadRecord, settings, refreshStatuses, ON_AIR, OFF_AIR,
+  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, cleanText, loadRecord, settings, refreshStatuses, ON_AIR, OFF_AIR,
+  recordName, nationalTitle, nationalDescription,
   assertConfirmedOffAir, UNCONFIRMED_MSG,
-  createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, channelStatus, setWorkerStream,
+  createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, youtubeThumbnail, channelStatus, setWorkerStream,
 };

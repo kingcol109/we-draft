@@ -74,6 +74,8 @@ function WePickRedirect({ tab = "picks" }) {
 const LivePage = lazy(() => import("./pages/LivePage"));
 // The We-Draft Live broadcast renderer (a 1920×1080 frame for streaming).
 const BroadcastPage = lazy(() => import("./pages/BroadcastPage"));
+// …and the national one: every game on right now in one frame.
+const BroadcastNationalPage = lazy(() => import("./pages/BroadcastNationalPage"));
 const MyFeed = lazy(() => import("./pages/MyFeed"));
 
 // Admin — the single biggest chunk to keep out of everyone else's download
@@ -124,6 +126,9 @@ function App() {
                 never remounts the page. */}
             <Route path="/live/*" element={<LivePage />} />
             {/* /broadcast/:slug — same slugs as /live; ?mode=stream for capture. */}
+            {/* /broadcast/national — every game on now (a static segment, so
+                it wins over :slug). */}
+            <Route path="/broadcast/national" element={<BroadcastNationalPage />} />
             <Route path="/broadcast/:slug" element={<BroadcastPage />} />
             <Route path="/sim" element={<SimRoute><SimPage /></SimRoute>} />
 

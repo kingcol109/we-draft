@@ -49,7 +49,7 @@ function setup({ slots = ["streamA"], maxConcurrent = 1 } = {}) {
     events: [], // ordered side effects, for ordering checks
     exitOnStart: null, keyMissing: false, agentDown: false, ytCreateFails: 0, ingestBroken: false,
     monitorOff: false, testingError: null, ytReadFails: false, completeFails: false,
-    agentDryRun: false, ytCalls: [], liveFails: false, liveStuck: false, completeFailCount: 0, completeRedundant: false, testStuck: false,
+    agentDryRun: false, ytCalls: [], createArgs: [], liveFails: false, liveStuck: false, completeFailCount: 0, completeRedundant: false, testStuck: false,
     slots,
   };
 }
@@ -104,8 +104,9 @@ const deps = () => ({
   },
   bc: {
     deriveStatus: bc.deriveStatus,
-    youtubeCreate: async (_db, { id, streamId }) => {
+    youtubeCreate: async (_db, { id, streamId, useDraft }) => {
       w.ytCalls.push("youtubeCreate");
+      w.createArgs.push({ id, streamId, useDraft });
       if (w.ytCreateFails > 0) { w.ytCreateFails--; throw Object.assign(new Error("YouTube liveBroadcasts failed: quota"), { status: 502 }); }
       const rec = db.data(`broadcasts/${id}`);
       let bid = rec.youtube.broadcastId;
@@ -220,6 +221,8 @@ test("kickoff workflow: prepare at T-15, go live once ingest is active, end 15 m
   const d = rec("g401001");
   assert.ok(clock <= K1 - 5 * MIN, "on air before kickoff");
   assert.equal(w.creates, 1);
+  // the YouTube create takes the game's metadata draft (metadata.js), if any
+  assert.deepEqual(w.createArgs[0], { id: "g401001", streamId: "streamA", useDraft: true });
   assert.equal(d.youtube.streamId, "streamA");
   assert.equal(d.auto.slot, 0);
   assert.equal(w.containers.get("g401001").game, "clemson-vs-lsu");
@@ -1010,6 +1013,107 @@ test("outside ending, a crashed worker is still restarted (regression)", async (
   assert.equal(w.containers.get("g401001").state, "running");
 });
 
+
+// ── National coverage (/broadcast/national) ──
+
+const iso = (t) => new Date(t).toISOString();
+const slate = (games) => db.doc("liveSlate/current").set({ games });
+const national = (extra = {}) => orch.selectNational(db, "admin1", { startAt: iso(K1), endAt: iso(K1 + 10 * 60 * MIN), ...extra }, clock);
+
+test("national: validation, one record per window, no overlaps", async () => {
+  await assert.rejects(national({ startAt: "nope" }), /starts and ends/);
+  await assert.rejects(national({ endAt: iso(K1 - MIN) }), /after its start/);
+  await assert.rejects(national({ endAt: iso(K1 + 17 * 60 * MIN) }), /at most 16 hours/);
+  await assert.rejects(national({ startAt: iso(K1 - 300 * MIN), endAt: iso(clock + 10 * MIN) }), /over/);
+  await assert.rejects(national({ privacyStatus: "public" }), /public confirmation/);
+  const r = await national();
+  assert.equal(r.id, `n${K1}`);
+  assert.deepEqual(await national(), { id: `n${K1}`, already: true });
+  await assert.rejects(national({ startAt: iso(K1 + 60 * MIN), endAt: iso(K1 + 3 * 60 * MIN) }), /already scheduled/);
+  // A rehearsal is its own record and may share the window.
+  assert.equal((await national({ rehearsal: true })).id, `rn${K1}`);
+  const d = rec(`n${K1}`);
+  assert.equal(d.kind, "national");
+  assert.equal(d.gameSlug, "national");
+  assert.equal(d.gameId, null);
+  assert.equal(d.auto.prepAt, K1 - 15 * MIN);
+  assert.equal(d.auto.endAt, K1 + 10 * 60 * MIN);
+  assert.match(d.youtube.title, /Every Game/);
+});
+
+test("national: prepares before the window, streams /broadcast/national, ends 15 min after the last game is final", async () => {
+  await slate([
+    { id: "401001", status: "scheduled", startDate: iso(K1) },
+    { id: "401002", status: "scheduled", startDate: iso(K2) },
+  ]);
+  const id = (await national()).id;
+  await minute(44);
+  assert.equal(phase(id), "selected");
+  await minute();
+  assert.equal(phase(id), "preparing");
+  await until(() => phase(id) === "live", 15);
+  assert.equal(w.containers.get(id).game, "national");
+  assert.equal(rec(id).auto.deadlineAt, K1 + 10 * 60 * MIN + CFG.NATIONAL_TAIL_MS, "failsafe follows the window, not the 6h game limit");
+  // Six hours of games — past the single-game runtime limit — still live.
+  await slate([{ id: "401001", status: "in_progress", startDate: iso(K1) }, { id: "401002", status: "in_progress", startDate: iso(K2) }]);
+  await minute(6 * 60);
+  assert.equal(phase(id), "live");
+  // One game final, the other still on: stays live.
+  await slate([{ id: "401001", status: "final", startDate: iso(K1) }, { id: "401002", status: "in_progress", startDate: iso(K2) }]);
+  await minute(5);
+  assert.equal(phase(id), "live");
+  await slate([{ id: "401001", status: "final", startDate: iso(K1) }, { id: "401002", status: "final", startDate: iso(K2) }]);
+  await minute();
+  assert.equal(phase(id), "postgame");
+  await minute(14);
+  assert.equal(phase(id), "postgame");
+  await until(() => phase(id) === "completed", 5);
+  assert.equal(rec(id).auto.endReason, "every game final");
+  const iComplete = w.events.indexOf(`yt-complete:yt-${id}`);
+  const iStop = w.events.indexOf(`worker-stop:${id}`);
+  assert.ok(iComplete >= 0 && iStop > iComplete, w.events.join(","));
+  assert.equal(rec(id).status, "ended");
+});
+
+test("national: the window's end ends it even with games on; it never waits on a game after the window", async () => {
+  await slate([{ id: "401001", status: "scheduled", startDate: iso(K1) }]);
+  const id = (await national({ endAt: iso(K1 + 3 * 60 * MIN) })).id;
+  await until(() => phase(id) === "live", 60);
+  await slate([{ id: "401001", status: "in_progress", startDate: iso(K1) }]);
+  await until(() => phase(id) === "ending", 4 * 60);
+  assert.ok(clock >= K1 + 3 * 60 * MIN);
+  assert.equal(rec(id).auto.endReason, "coverage window ended");
+  await until(() => phase(id) === "completed", 6);
+  await assert.rejects(orch.retryGame(db, "admin1", { id }), /Only a failed or cancelled/);
+});
+
+test("national: a window whose end passes before it starts fails; retry is refused once it's over", async () => {
+  await slate([]);
+  const id = (await national({ startAt: iso(clock + 120 * MIN), endAt: iso(clock + 150 * MIN) })).id;
+  await orch.cancelGame(db, "admin1", { id });
+  await minute();
+  assert.equal(phase(id), "cancelled");
+  clock += 200 * MIN;
+  await assert.rejects(orch.retryGame(db, "admin1", { id }, clock), /window is over/);
+});
+
+test("nationalDone: games in progress or still to kick off in the window hold it open", () => {
+  const now = K1;
+  const end = K1 + 5 * 60 * MIN;
+  const g = (status, k) => ({ status, startDate: iso(k) });
+  assert.equal(orch.nationalDone(null, end, now), false, "no slate is unknown, not done");
+  assert.equal(orch.nationalDone({ games: [] }, end, now), true);
+  assert.equal(orch.nationalDone({ games: [g("in_progress", K1)] }, end, now), false);
+  assert.equal(orch.nationalDone({ games: [g("scheduled", K1 + 60 * MIN)] }, end, now), false);
+  assert.equal(orch.nationalDone({ games: [g("scheduled", end + MIN)] }, end, now), true, "after the window doesn't count");
+  assert.equal(orch.nationalDone({ games: [g("scheduled", K1 - 7 * 60 * MIN)] }, end, now), true, "postponed doesn't count");
+  assert.equal(orch.nationalDone({ games: [g("final", K1)] }, end, now), true);
+});
+
+test("national: desired worker opens /broadcast/national", () => {
+  const ws = orch.desiredWorkers([{ id: `n${K1}`, kind: "national", gameSlug: "national", gameId: null, auto: { open: true, enabled: true, phase: "live", slot: 0, deadlineAt: K1 } }]);
+  assert.deepEqual(ws, [{ id: `n${K1}`, game: "national", slot: 0, deadlineAt: K1 }]);
+});
 
 test("nothing logged contains a token", () => {
   for (const l of logs) assert.ok(!l.includes("yt-access-token-never-logged"), l);

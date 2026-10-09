@@ -9,6 +9,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@resvg/resvg-js": "2.6.2",
     "@tiptap/extension-image": "^3.22.2",
     "@tiptap/extension-link": "^3.20.4",
     "@tiptap/extension-text-style": "^3.22.3",
@@ -49,7 +50,7 @@
     "broadcast-worker:ingest-test": "node server/broadcast-worker/ingest-test.js",
     "broadcast-worker:docker-build": "docker build -t we-draft-broadcast-worker server/broadcast-worker",
     "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js",
-    "stream-manager:test": "node --test server/stream-manager/compute.test.js server/stream-manager/orchestrator.test.js server/stream-manager/endpoints.test.js server/stream-manager/cancellation.test.js server/broadcast-agent/agent.test.js server/broadcast-agent/agent-docker.test.js"
+    "stream-manager:test": "node --test server/stream-manager/compute.test.js server/stream-manager/orchestrator.test.js server/stream-manager/endpoints.test.js server/stream-manager/cancellation.test.js server/stream-manager/metadata.test.js server/stream-manager/thumbnail.test.js server/broadcast-agent/agent.test.js server/broadcast-agent/agent-docker.test.js"
   },
   "eslintConfig": {
     "extends": [

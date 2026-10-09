@@ -317,14 +317,14 @@ export function playerWatchList(game, stats, extra = []) {
     if (seen.has(p.slug)) continue;
     seen.add(p.slug);
     const line = bySlug.get(p.slug);
-    out.push({ slug: p.slug, name: p.name, side: p.side, pos: p.pos || null, cls: p.cls || null, gradeAvg: p.gradeAvg ?? null, stats: line?.stats || null, score: line ? perfScore(line.stats) : 0 });
+    out.push({ slug: p.slug, name: p.name, side: p.side, pos: p.pos || null, cls: p.cls || null, grade: p.grade || null, gradeAvg: p.gradeAvg ?? null, stats: line?.stats || null, score: line ? perfScore(line.stats) : 0 });
   }
   // A linked player who's playing but isn't in the prospects list (no
   // active class, or an older game doc): still a We-Draft player.
   for (const [slug, l] of bySlug) {
     if (seen.has(slug)) continue;
     const s = perfScore(l.stats);
-    if (s >= 6) out.push({ slug, name: l.name, side: l.side, pos: null, cls: null, gradeAvg: null, stats: l.stats, score: s });
+    if (s >= 6) out.push({ slug, name: l.name, side: l.side, pos: null, cls: null, grade: null, gradeAvg: null, stats: l.stats, score: s });
   }
   // Ties (before kickoff nobody has numbers, and ungraded players all tie)
   // alternate teams and lead with the skill positions, so neither roster
@@ -370,6 +370,15 @@ export function accentColor(team, fallback = "#dfe6f0") {
   if (team?.color2) return team.color2;
   if (team?.color) return `color-mix(in srgb, ${team.color} 50%, #ffffff)`;
   return fallback;
+}
+
+// The accent for text and numbers on a team's dark panel (panelColor): the
+// team's accent when it reads there, white when it's too dark to (a navy or
+// black second color — the "+6" would vanish into the panel).
+export function readableAccent(team, fallback = "#dfe6f0") {
+  const c = accentColor(team, fallback);
+  const l = lum(c);
+  return l != null && l < 0.3 ? "#ffffff" : c;
 }
 
 export const shortName = teamShort;

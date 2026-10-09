@@ -297,9 +297,28 @@ async function transitionBroadcast(token, id, broadcastStatus) {
   return sanitizeBroadcast(j);
 }
 
+// Sets a video's (a live broadcast's) custom thumbnail from a PNG. Only
+// ever called by an admin's explicit "Upload Thumbnail" on a created
+// broadcast (broadcasts.js youtubeThumbnail) — never by generating or saving
+// one. YouTube needs the channel to be allowed custom thumbnails.
+async function setThumbnail(token, videoId, png) {
+  if (!/^[A-Za-z0-9_-]{6,20}$/.test(String(videoId || ""))) throw httpError(400, "Bad YouTube video id.");
+  const r = await timedFetch(`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?${new URLSearchParams({ videoId, uploadType: "media" })}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/png", "Content-Length": String(png.length) },
+    body: png,
+  }, "YouTube thumbnails/set");
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const reason = j.error?.errors?.[0]?.reason;
+    throw httpError(r.status >= 500 || r.status === 401 ? 502 : 400, `YouTube thumbnails/set failed: ${j.error?.message || r.status}${reason ? ` (${reason})` : ""}`);
+  }
+  return { url: j.items?.[0]?.maxres?.url || j.items?.[0]?.high?.url || j.items?.[0]?.default?.url || null };
+}
+
 module.exports = {
   SETTINGS, WORKER_STREAM_TITLE, SCOPES, httpError,
   startOAuth, finishOAuth, disconnect, accessToken,
-  mineChannel, listStreams, getStream, insertWorkerStream, insertBroadcast, bindBroadcast, getBroadcast, transitionBroadcast,
+  mineChannel, listStreams, getStream, insertWorkerStream, insertBroadcast, bindBroadcast, getBroadcast, transitionBroadcast, setThumbnail,
   sanitizeStream, sanitizeBroadcast, encrypt, decrypt,
 };

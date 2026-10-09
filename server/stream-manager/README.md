@@ -361,3 +361,96 @@ While a broadcast is **ending**, the agent's worker request carries
 - a running worker keeps feeding YouTube;
 - one that crashes or exits is not relaunched, and none is started fresh;
 - the 6h hard limit and normal cleanup still apply.
+
+## Game metadata drafts
+
+In Admin → Stream Manager → Auto Schedule, each linked game has an **Edit
+Metadata** button. It opens an editor for the game's YouTube title and
+description, and works whether or not the game is enabled. It also works
+with no Worker Stream, no YouTube live-streaming access and the VM stopped.
+
+Drafts are stored in `broadcastMetadata/{CFBDGameId}`
+([metadata.js](metadata.js)). The game id always comes from the
+`schedule26` doc the editor was opened for, so one game's draft can't be
+saved under another game's id. Only the server reads and writes the
+collection, and there is no client rule for it.
+
+| action | body | result |
+|---|---|---|
+| `metadata-get` | `{ scheduleId }` | `{ game, draft \| null, thumbnail \| null, defaults, limits, broadcast: { exists, youtubeCreated } }` |
+| `metadata-save` | `{ scheduleId, title, description, baseVersion }` | `{ ok, gameId, draft }`; 400 with `fields` when invalid, 409 when the draft changed since `baseVersion` |
+
+Limits follow YouTube: a title of 1–100 characters, a description of up to
+5000 UTF-8 bytes, and no `<` or `>` in either. Line breaks in the
+description are kept.
+
+**Saving a draft only writes that one doc.** It makes no YouTube call and
+creates or changes no `broadcasts` record. It doesn't enable automation and
+doesn't touch the VM, agent, workers, slots or `schedule26`/`liveGames`.
+
+**When a draft is used:** when the orchestrator creates a game's YouTube
+broadcast (`youtubeCreate` with `useDraft: true`), the new broadcast takes
+the game's valid draft. Otherwise it gets the record's default title and
+description. The record then shows `youtube.metadataSource` (`"draft"` or
+`"record"`).
+
+The draft is never used for:
+- a manual **Create on YouTube**;
+- national coverage;
+- a rehearsal;
+- a YouTube broadcast that already exists. Editing a draft never changes it.
+
+### Thumbnails
+
+The same editor generates a 1280×720 PNG thumbnail
+([thumbnail.js](thumbnail.js)). There's no AI and no image service: it's a
+fixed SVG template rendered by `@resvg/resvg-js`, which runs locally inside
+the function.
+
+**Layout:**
+- The away team's angled color panel on the left, the home team's on the
+  right (both from `schedule26`), split by a gold stripe with a VS badge.
+- Each team's logo above its name.
+- A We-Draft blue bar along the bottom with the real `src/assets/Logo2.png`
+  (embedded unchanged, aspect ratio kept), a LIVE tag and the kickoff time.
+
+**Text:** only the bundled `assets/BebasNeue-Regular.ttf` (SIL OFL, see
+`assets/OFL-BebasNeue.txt`) is used, never system fonts, so the same inputs
+give the same PNG. Names are measured and shrink to fit their panel. A very
+long name switches to the school's short name, or is cut with an ellipsis.
+
+**Colors:** each school's `Color1`. A near-white primary uses `Color2`
+instead. When the two teams' colors look alike, the home panel uses its
+`Color2` or is darkened.
+
+**Logos:** tried in this order, and the first one that loads is used:
+1. `LogoDark`
+2. `LogoBlack`
+3. `Logo1`
+4. ESPN's dark set, by CFBD team id
+5. ESPN's regular set, by CFBD team id
+
+Only https addresses on public hosts are fetched, with a 3 MB limit and a 6s
+timeout per logo. Only PNG, JPEG, GIF and SVG are used, because resvg can't
+draw WebP.
+
+**Missing assets:** a team with no logo gets its initials in a ring, and a
+team with no colors gets a default. The editor lists what was missing.
+
+| action | body | result |
+|---|---|---|
+| `metadata-thumbnail-generate` | `{ scheduleId }` | a preview: `{ dataUrl, sha256, width, height, notes, inputs }`. Stores nothing. |
+| `metadata-thumbnail-save` | `{ scheduleId, sha256 }` | renders again and stores it in `broadcastThumbnails/{CFBDGameId}` only if it matches the previewed `sha256`; otherwise 409, generate again |
+| `youtube-thumbnail` | `{ id }` | uploads the game's saved thumbnail to that record's created YouTube broadcast |
+
+There's no file storage in the project, so the PNG is stored as bytes in
+Firestore (about 300–400 KB; anything over 900 KB is refused). Generating or
+saving a thumbnail never calls YouTube and never touches a broadcast record,
+automation, the VM or the schedule. Creating a broadcast doesn't upload it
+either. Upload only happens through **Upload Thumbnail** on a broadcast that
+YouTube has already created, never for a rehearsal or national coverage.
+YouTube only accepts custom thumbnails from channels that are allowed to use
+them.
+
+`vercel.json` includes the font and `Logo2.png` in the `api/stream-manager.js`
+function.
