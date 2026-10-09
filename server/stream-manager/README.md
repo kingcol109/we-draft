@@ -246,3 +246,32 @@ free stream slot") and starts once the slot frees up.
 No new Google Cloud permissions are needed. The orchestrator uses the same
 `we-draft-vm-control` account (get/start/stop) and the existing YouTube
 connection.
+
+## Cancelling, deleting and repairing statuses
+
+- **Disabling a game** in Auto Schedule ends with automation phase
+  `cancelled` and overall status `cancelled`. Automation is closed and
+  deactivated, and `auto.enabled` becomes `false`. The orchestrator and the
+  agent never act on it again until an admin clicks **Retry** or enables the
+  game again (both reuse the same record).
+  - Cancelled broadcasts are listed under **Ended** and aren't counted as
+    Scheduled.
+  - A cancelled record whose YouTube broadcast is somehow still on air shows
+    **Error** instead, so it gets noticed.
+- **Delete Record** removes only the Firestore record. The server refuses
+  (409) while any of these is true:
+  - automation is open or active;
+  - the worker is starting or running;
+  - the YouTube broadcast is testing or live.
+
+  That way a running worker or a live broadcast is never left without a
+  record to manage it.
+- **Repair Statuses** (broadcast list toolbar, action `refresh-statuses`)
+  recomputes the stored status of closed and manual records, and turns
+  `auto.enabled` off on cancelled ones.
+  - It always shows the list of changes first, and writes only after you
+    confirm (`apply: true`).
+  - It skips open automation records, which belong to the orchestrator,
+    and never deletes anything.
+  - Use it once after deploying the cancelled status, to fix records
+    cancelled before it existed.

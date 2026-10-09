@@ -27,6 +27,8 @@
 //   auto-cancel      { id, confirmEnd } disable it (ends it if on air — confirmEnd)
 //   auto-retry       { id } a failed / cancelled one back to selected
 //   auto-config      { slotStreamIds, maxConcurrent } stream slots / capacity
+//   refresh-statuses { apply } recompute stored statuses of closed records
+//                    (dry run unless apply: true; never deletes)
 // The lifecycle itself runs server-side only: api/stream-orchestrator.js
 // (cron) and api/broadcast-agent.js (the VM agent) — see
 // server/stream-manager/orchestrator.js.
@@ -111,6 +113,7 @@ module.exports = async function handler(req, res) {
       case "auto-cancel": return res.status(200).json(await orch.cancelGame(db, uid, body));
       case "auto-retry": return res.status(200).json(await orch.retryGame(db, uid, body));
       case "auto-config": return res.status(200).json(await orch.setConfig(db, uid, body));
+      case "refresh-statuses": return res.status(200).json(await bc.refreshStatuses(db, body));
       default: return res.status(400).json({ error: "unknown action" });
     }
   } catch (e) {

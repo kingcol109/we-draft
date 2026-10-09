@@ -297,3 +297,47 @@ describe("AutoSchedule", () => {
     expect(screen.getByText(/Slots 0\/2 in use/)).toBeInTheDocument();
   });
 });
+
+// ── Cancelled status: display, filters, counts ──
+describe("cancelled broadcasts", () => {
+  const { overallStatus, isDone, filterBroadcasts, statusCounts, AutoSchedule } = require("./AdminStreamManager");
+  const within = require("@testing-library/react").within;
+  const rows = [
+    { id: "a", status: "scheduled", scheduledStart: 3 },
+    { id: "b", status: "live", scheduledStart: 1 },
+    { id: "c", status: "cancelled", auto: { phase: "cancelled" }, scheduledStart: 2 },
+    // saved before the cancelled status existed (Florida State vs Louisville)
+    { id: "d", status: "scheduled", auto: { phase: "cancelled", enabled: true }, scheduledStart: 4 },
+    { id: "e", status: "ended", scheduledStart: 5 },
+    { id: "f", status: "error", auto: { phase: "cancelled" }, scheduledStart: 6 }, // cancelled but YouTube still on air
+  ];
+
+  test("cancelled records show as Cancelled, including legacy ones stored as scheduled", () => {
+    expect(overallStatus(rows[2])).toBe("cancelled");
+    expect(overallStatus(rows[3])).toBe("cancelled");
+    expect(overallStatus(rows[0])).toBe("scheduled");
+    expect(overallStatus(rows[5])).toBe("error"); // needs attention, not hidden
+  });
+
+  test("cancelled is done: under Ended, not Upcoming", () => {
+    expect(rows.filter(isDone).map((r) => r.id)).toEqual(["c", "d", "e"]);
+    expect(filterBroadcasts(rows, "upcoming").map((r) => r.id)).toEqual(["b", "a", "f"]);
+    expect(filterBroadcasts(rows, "ended").map((r) => r.id)).toEqual(["c", "d", "e"]);
+    expect(filterBroadcasts(rows, "all")).toHaveLength(6);
+  });
+
+  test("header counts don't count cancelled as Scheduled", () => {
+    expect(statusCounts(rows)).toEqual({ live: 1, preparing: 0, scheduled: 1, error: 1 });
+  });
+
+  test("the picker shows a cancelled game as Cancelled with Retry (not Enable)", () => {
+    const NOW = Date.UTC(2026, 9, 10, 15, 0);
+    const games = [{ id: "s1", Home: "Louisville", Away: "Florida State", KickoffAt: NOW + 3600e3, CFBDGameId: 401858254 }];
+    render(<AutoSchedule games={games} rows={[{ id: "g401858254", gameId: "401858254", status: "scheduled", auto: { phase: "cancelled", open: false, enabled: true } }]} now={NOW} />);
+    const row = screen.getByTestId("game-s1");
+    expect(within(row).getByText("Cancelled")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(within(row).queryByRole("button", { name: "Enable" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Disable" })).toBeNull();
+  });
+});

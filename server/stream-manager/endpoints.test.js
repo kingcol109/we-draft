@@ -125,6 +125,18 @@ test("auto-config validates input", async () => {
   for (const b of bad) assert.equal((await call(smApi, { auth: "Bearer tok-admin", body: { action: "auto-config", ...b } })).statusCode, 400, JSON.stringify(b));
 });
 
+test("refresh-statuses and delete go through admin auth; delete's guard reaches the client", async () => {
+  assert.equal((await call(smApi, { auth: "Bearer tok-user", body: { action: "refresh-statuses", apply: true } })).statusCode, 403);
+  await db.doc("broadcasts/open1").set({ gameId: "1", status: "scheduled", youtube: {}, worker: {}, auto: { phase: "selected", open: true, active: false } });
+  const r = await call(smApi, { auth: "Bearer tok-admin", body: { action: "delete", id: "open1" } });
+  assert.equal(r.statusCode, 409);
+  assert.match(r.body.error, /still under automation/);
+  assert.ok(db.data("broadcasts/open1"));
+  const dry = await call(smApi, { auth: "Bearer tok-admin", body: { action: "refresh-statuses" } });
+  assert.equal(dry.statusCode, 200);
+  assert.equal(dry.body.applied, false);
+});
+
 test("tokens never reach the logs", () => {
   for (const l of logs) assert.ok(!l.includes(AGENT_TOKEN) && !l.includes(CRON), l);
 });

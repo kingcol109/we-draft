@@ -7,7 +7,7 @@
 //     gameId, gameSlug           → liveGames/{gameId} (the game itself lives there,
 //     homeTeam, awayTeam, kickoff   these are a display snapshot taken at create)
 //     scheduledStart             Timestamp — when the YouTube broadcast is scheduled
-//     status                     overall: scheduled | preparing | live | ended | error
+//     status                     overall: scheduled | preparing | live | ended | cancelled | error
 //     youtube: {                 the YouTube broadcast
 //       title, description, privacyStatus,
 //       broadcastId, videoId, streamId, channelId,
@@ -32,11 +32,16 @@ const { httpError } = yt;
 
 // Overall status from the YouTube and worker groups.
 const AUTO_PREPARING = ["preparing", "vm", "worker", "ingest", "going-live"];
+// YouTube lifecycles where the broadcast is (or may be) on the air.
+const ON_AIR = ["testStarting", "testing", "liveStarting", "live"];
 function deriveStatus(b) {
   const lc = b.youtube?.lifecycleStatus;
   if (lc === "complete" || lc === "revoked") return "ended";
   if (b.auto?.phase === "completed") return "ended";
   if (b.auto?.phase === "failed") return "error";
+  // Cancelled automation is done — unless YouTube still shows it on air
+  // (completing it failed), which needs attention.
+  if (b.auto?.phase === "cancelled") return ON_AIR.includes(lc) ? "error" : "cancelled";
   if (b.youtube?.error || b.worker?.error) return "error";
   if (lc === "live") return "live";
   if (["testStarting", "testing", "liveStarting"].includes(lc) || ["starting", "running"].includes(b.worker?.status)) return "preparing";
@@ -132,10 +137,57 @@ async function updateRecord(db, body) {
   return { ok: true };
 }
 
+// Deletes the record only (never a YouTube broadcast) — and refuses while
+// anything could still be running, so nothing on YouTube or the VM is
+// left without a record to manage it.
 async function deleteRecord(db, body) {
   const { ref } = await loadRecord(db, body.id);
-  await ref.delete();
+  await db.runTransaction(async (tx) => {
+    const b = (await tx.get(ref)).data();
+    if (!b) throw httpError(404, "That broadcast record doesn't exist.");
+    if (b.auto?.open || b.auto?.active) {
+      throw httpError(409, "This broadcast is still under automation — disable it in Auto Schedule (or let it finish) and wait until it shows Cancelled or Ended before deleting.");
+    }
+    if (["starting", "running"].includes(b.worker?.status)) {
+      throw httpError(409, "Its worker may still be running — wait until the worker shows Stopped before deleting.");
+    }
+    if (ON_AIR.includes(b.youtube?.lifecycleStatus)) {
+      throw httpError(409, "Its YouTube broadcast is testing or live — end it first (YouTube Studio, then Refresh YouTube Status) so it isn't left without a record.");
+    }
+    tx.delete(ref);
+  });
   return { ok: true };
+}
+
+// Recomputes the stored overall status of records the orchestrator no
+// longer touches (closed automation, manual records) — e.g. cancelled
+// records saved as "scheduled" before the cancelled status existed — and
+// turns auto.enabled off on cancelled ones. Open automation records are
+// skipped (the orchestrator owns them). Never deletes anything.
+// { apply: true } writes; anything else is a dry run listing the changes.
+async function refreshStatuses(db, body = {}) {
+  const apply = body.apply === true;
+  const snap = await db.collection("broadcasts").get();
+  const changes = [];
+  for (const d of snap.docs) {
+    const b = d.data();
+    if (b.auto?.open) continue;
+    const upd = {};
+    const status = deriveStatus(b);
+    if (status !== b.status) upd.status = status;
+    if (b.auto?.phase === "cancelled" && b.auto.enabled !== false) upd["auto.enabled"] = false;
+    if (!Object.keys(upd).length) continue;
+    changes.push({
+      id: d.id,
+      matchup: `${teamName(b.awayTeam)} vs ${teamName(b.homeTeam)}`,
+      from: b.status ?? null,
+      to: upd.status ?? b.status ?? null,
+      disableAuto: "auto.enabled" in upd,
+    });
+    if (apply) await d.ref.update({ ...upd, updatedAt: FieldValue.serverTimestamp() });
+  }
+  if (apply) console.log(`stream-manager refresh-statuses applied=${changes.length}`);
+  return { applied: apply, changes };
 }
 
 // ── YouTube ──
@@ -296,6 +348,6 @@ async function setWorkerStream(db, body) {
 }
 
 module.exports = {
-  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, loadRecord, settings,
+  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, loadRecord, settings, refreshStatuses, ON_AIR,
   createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, channelStatus, setWorkerStream,
 };

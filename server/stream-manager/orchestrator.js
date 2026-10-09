@@ -92,9 +92,12 @@ function slotsOf(orch = {}, ytSettings = {}) {
 }
 
 // What the VM agent should be running right now (also the agent's answer).
+// A disabled record (auto.enabled false) never gets a worker, except to
+// finish an ending that's already completing YouTube.
 function desiredWorkers(records) {
   return records
-    .filter((r) => r.auto?.open && r.auto.slot != null && (RUN_WORKER.includes(r.auto.phase) || (r.auto.phase === "ending" && !r.auto.youtubeDone)))
+    .filter((r) => r.auto?.open && r.auto.slot != null && (r.auto.enabled !== false || r.auto.phase === "ending")
+      && (RUN_WORKER.includes(r.auto.phase) || (r.auto.phase === "ending" && !r.auto.youtubeDone)))
     .map((r) => ({ id: r.id, game: workerGame(r), slot: r.auto.slot, deadlineAt: r.auto.deadlineAt || null }))
     .filter((w) => w.game && ID_RE.test(w.id));
 }
@@ -137,8 +140,8 @@ async function step(r, ctx) {
     }
   };
 
-  // Admin asked to stop this game.
-  if (a.cancelRequested) {
+  // Admin asked to stop this game (or it was disabled some other way).
+  if (a.cancelRequested || (a.enabled === false && !TERMINAL.includes(phase))) {
     p.cancelRequested = false;
     if (phase === "ending") return { p, y };
     // A worker may be up (and YouTube testing/live): end it the normal way.
@@ -405,6 +408,7 @@ async function runTick(db, deps = realDeps()) {
       if (p.phase && p.phase !== a.phase) {
         p.open = !TERMINAL.includes(p.phase);
         p.active = ACTIVE.includes(p.phase);
+        if (p.phase === "cancelled") p.enabled = false; // disabled until an admin retries
         if (!p.open && a.slot != null) used.delete(a.slot);
         summary.changes.push(`${r.id}: ${a.phase} → ${p.phase}`);
         deps.log(`${r.id} ${a.phase} → ${p.phase}${p.error ? ` (${p.error})` : ""}`);

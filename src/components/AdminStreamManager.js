@@ -36,8 +36,32 @@ const OVERALL = {
   preparing: { label: "Preparing", color: AMBER },
   live: { label: "Live", color: GREEN, pulse: true },
   ended: { label: "Ended", color: "#333" },
+  cancelled: { label: "Cancelled", color: "#8a94a3" },
   error: { label: "Error", color: RED },
 };
+
+// The overall status to show. Same as the stored one, except a cancelled
+// automation still stored as scheduled/preparing (records saved before the
+// cancelled status existed — "Repair Statuses" fixes the data itself).
+export function overallStatus(b) {
+  if (b?.auto?.phase === "cancelled" && ["scheduled", "preparing"].includes(b.status)) return "cancelled";
+  return b?.status || "scheduled";
+}
+// Ended and cancelled broadcasts are done: they're listed under Ended and
+// aren't counted as Scheduled or Upcoming.
+export const isDone = (b) => ["ended", "cancelled"].includes(overallStatus(b));
+export function filterBroadcasts(rows, filter) {
+  const all = rows || [];
+  if (filter === "all") return all;
+  return filter === "upcoming"
+    ? all.filter((b) => !isDone(b)).sort((a, b) => (ms(a.scheduledStart) || 0) - (ms(b.scheduledStart) || 0))
+    : all.filter(isDone);
+}
+export function statusCounts(rows) {
+  const c = { live: 0, preparing: 0, scheduled: 0, error: 0 };
+  (rows || []).forEach((b) => { const s = overallStatus(b); if (c[s] != null) c[s]++; });
+  return c;
+}
 
 function youtubeState(y = {}) {
   if (y.error) return { label: "Error", color: RED };
@@ -795,7 +819,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           <div style={{ fontSize: 20, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.03em" }}>{matchup(b)}</div>
           <div style={{ fontSize: 13, color: "#9fb3cc", fontWeight: 700, fontFamily: "Arial" }}>{y.title}</div>
         </div>
-        <Pill s={OVERALL[b.status] || OVERALL.scheduled} />
+        <Pill s={OVERALL[overallStatus(b)] || OVERALL.scheduled} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
@@ -872,7 +896,9 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           </button>
           {!y.broadcastId && <button onClick={onEdit} disabled={!!busy} style={btn("#556", false, !!busy)}>Edit</button>}
           <span style={{ flex: 1 }} />
-          <button onClick={del} disabled={!!busy} style={btn(RED, false, !!busy)}>Delete Record</button>
+          <button onClick={del} disabled={!!busy || !!b.auto?.open || !!b.auto?.active}
+            title={b.auto?.open || b.auto?.active ? "Under automation — disable it in Auto Schedule first" : undefined}
+            style={btn(RED, false, !!busy || !!b.auto?.open || !!b.auto?.active)}>Delete Record</button>
         </div>
         <Message msg={msg} />
       </div>
@@ -915,7 +941,7 @@ function BroadcastList({ rows, onOpen }) {
             <div style={{ fontSize: 13, fontWeight: 800, color: "#445" }}>{fmtTime(t)}</div>
             <div><Pill s={youtubeState(b.youtube)} small /></div>
             <div><Pill s={WORKER[b.worker?.status] || WORKER.idle} small /></div>
-            <div><Pill s={OVERALL[b.status] || OVERALL.scheduled} small /></div>
+            <div><Pill s={OVERALL[overallStatus(b)] || OVERALL.scheduled} small /></div>
             <div style={{ textAlign: "right", fontSize: 12, fontWeight: 900, color: BLUE, textTransform: "uppercase" }}>Open →</div>
           </div>
         );
@@ -959,20 +985,22 @@ export default function AdminStreamManager() {
       .catch((e) => console.error("Stream Manager games error:", e));
   }, []);
 
-  const shown = useMemo(() => {
-    const all = rows || [];
-    if (filter === "all") return all;
-    const done = (b) => b.status === "ended";
-    return filter === "upcoming"
-      ? all.filter((b) => !done(b)).sort((a, b) => ms(a.scheduledStart) - ms(b.scheduledStart))
-      : all.filter(done);
-  }, [rows, filter]);
+  const shown = useMemo(() => filterBroadcasts(rows, filter), [rows, filter]);
+  const counts = useMemo(() => statusCounts(rows), [rows]);
 
-  const counts = useMemo(() => {
-    const c = { live: 0, preparing: 0, scheduled: 0, error: 0 };
-    (rows || []).forEach((b) => { if (c[b.status] != null) c[b.status]++; });
-    return c;
-  }, [rows]);
+  // Two steps: list what would change, then apply only on confirmation.
+  const [repairing, setRepairing] = useState(false);
+  const repairStatuses = async () => {
+    setRepairing(true); setMsg(null);
+    try {
+      const { changes } = await api("refresh-statuses");
+      if (!changes.length) return setMsg({ kind: "ok", text: "All broadcast statuses are consistent — nothing to repair." });
+      const list = changes.slice(0, 12).map((c) => `• ${c.matchup}: ${c.from || "—"} → ${c.to}${c.disableAuto ? " (automation disabled)" : ""}`).join("\n");
+      if (!window.confirm(`Repair ${changes.length} broadcast status${changes.length > 1 ? "es" : ""}?\n\n${list}${changes.length > 12 ? "\n…" : ""}\n\nOnly the stored status (and auto.enabled on cancelled records) changes. Nothing is deleted, and nothing on YouTube or the VM is touched.`)) return;
+      const r = await api("refresh-statuses", { apply: true });
+      setMsg({ kind: "ok", text: `Repaired ${r.changes.length} status${r.changes.length > 1 ? "es" : ""}.` });
+    } catch (e) { setMsg({ kind: "error", text: vmError(e) }); } finally { setRepairing(false); }
+  };
 
   const current = (view.kind === "detail" || view.kind === "edit") && (rows || []).find((b) => b.id === view.id);
 
@@ -1029,6 +1057,7 @@ export default function AdminStreamManager() {
               <button key={k} onClick={() => setFilter(k)} style={{ ...btn(BLUE, filter === k), padding: "7px 14px" }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
+            <button onClick={repairStatuses} disabled={repairing} style={btn("#556", false, repairing)} title="Recompute stored statuses of closed records (shows the changes first)">{repairing ? "Checking…" : "Repair Statuses"}</button>
             <button onClick={() => setView({ kind: "auto" })} style={btn(BLUE, true)}>Auto Schedule</button>
             <button onClick={() => setView({ kind: "new" })} style={btn(GOLD, true)}>+ New Broadcast</button>
           </div>

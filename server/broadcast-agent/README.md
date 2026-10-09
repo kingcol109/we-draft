@@ -76,12 +76,14 @@ read -rs -p "Slot 1 stream key: " KEY && printf '%s' "$KEY" > ~/.we-draft/youtub
 chmod 644 ~/.we-draft/youtube-key-1
 ```
 
-**4. The agent token.** Generate a random 32+ character token. It must be
-the same value as `STREAM_AGENT_TOKEN` in Vercel.
+**4. The agent token.** It must be the same value as `STREAM_AGENT_TOKEN` in
+Vercel and is never printed. Generate it once (64 hex characters, e.g. on
+your PC straight to the clipboard), add it to Vercel as a Sensitive
+Production variable, then paste it here into a prompt that doesn't echo:
 
 ```
-openssl rand -hex 32 > ~/.we-draft/agent-token && chmod 600 ~/.we-draft/agent-token
-cat ~/.we-draft/agent-token     # copy into Vercel → STREAM_AGENT_TOKEN, then clear your terminal
+( umask 077; read -rs -p "Agent token: " T; printf '%s' "$T" > ~/.we-draft/agent-token ); echo
+wc -c < ~/.we-draft/agent-token     # 64 — the length only, never the value
 ```
 
 **5. Settings file** (`/etc/we-draft-agent.env`, `chmod 600`):

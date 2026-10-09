@@ -552,6 +552,83 @@ test("enabling a game whose manual broadcast is already testing/live is refused"
   assert.equal(rec("manual1").auto, undefined);
 });
 
+// ── Cancellation ──
+
+test("cancel → status cancelled, automation disabled/closed, and nothing restarts it", async () => {
+  await select("s1");
+  await orch.cancelGame(db, "admin1", { id: "g401001" });
+  await minute();
+  const d = rec("g401001");
+  assert.equal(d.auto.phase, "cancelled");
+  assert.equal(d.status, "cancelled");
+  assert.equal(d.auto.enabled, false);
+  assert.equal(d.auto.open, false);
+  assert.equal(d.auto.active, false);
+  assert.equal(d.auto.slot, null);
+  // Past prep time and kickoff: still cancelled, no VM, no YouTube, no worker.
+  await minute(90);
+  assert.equal(phase("g401001"), "cancelled");
+  assert.equal(w.vmStarts, 0);
+  assert.equal(w.creates, 0);
+  assert.equal(w.containers.size, 0);
+  assert.deepEqual(orch.desiredWorkers([{ id: "g401001", ...rec("g401001") }]), []);
+});
+
+test("cancel while starting ends via YouTube-first path and lands on cancelled + disabled", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "ingest", 60);
+  await orch.cancelGame(db, "admin1", { id: "g401001" });
+  await until(() => phase("g401001") === "cancelled", 10);
+  const d = rec("g401001");
+  assert.equal(d.status, "cancelled");
+  assert.equal(d.auto.enabled, false);
+  assert.ok(!w.containers.has("g401001"), "worker stopped");
+  assert.ok(!w.transitions.some((t) => t.endsWith(":live")), "never went live");
+});
+
+test("a live broadcast that's cancelled ends as completed (it was on air), not cancelled", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  await orch.cancelGame(db, "admin1", { id: "g401001", confirmEnd: true });
+  await until(() => phase("g401001") === "completed", 6);
+  assert.equal(rec("g401001").status, "ended");
+});
+
+test("retry re-enables a cancelled record; selecting the game again reuses it", async () => {
+  await select("s1");
+  await orch.cancelGame(db, "admin1", { id: "g401001" });
+  await minute();
+  await orch.retryGame(db, "admin1", { id: "g401001" });
+  let d = rec("g401001");
+  assert.equal(d.auto.phase, "selected");
+  assert.equal(d.auto.enabled, true);
+  assert.equal(d.auto.open, true);
+  assert.equal(d.status, "scheduled");
+
+  await orch.cancelGame(db, "admin1", { id: "g401001" });
+  await minute();
+  const r = await select("s1");
+  assert.deepEqual(r, { id: "g401001", adopted: true });
+  d = rec("g401001");
+  assert.equal(d.auto.enabled, true);
+  assert.equal(d.auto.phase, "selected");
+  assert.equal([...db.store.keys()].filter((k) => k.startsWith("broadcasts/")).length, 1, "no duplicate record");
+});
+
+test("an open record with auto.enabled false is treated as cancelled (kill switch)", async () => {
+  await select("s1");
+  await db.doc("broadcasts/g401001").update({ "auto.enabled": false });
+  await minute();
+  assert.equal(phase("g401001"), "cancelled");
+  assert.equal(rec("g401001").auto.open, false);
+});
+
+test("desired workers skip a disabled record, except one that's already ending", () => {
+  const r = (phase, extra = {}) => ({ id: `x${phase.replace(/-/g, "")}`, gameSlug: "a-b", auto: { open: true, slot: 0, phase, enabled: false, ...extra } });
+  const out = orch.desiredWorkers([r("live"), r("worker"), r("ending")]);
+  assert.deepEqual(out.map((x) => x.id), ["xending"]);
+});
+
 test("nothing logged contains a token", () => {
   for (const l of logs) assert.ok(!l.includes("yt-access-token-never-logged"), l);
   console.log = realLog;
