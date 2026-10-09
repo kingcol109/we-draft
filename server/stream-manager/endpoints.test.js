@@ -104,7 +104,7 @@ test("cron endpoint: the right secret runs one tick (nothing enabled → nothing
 });
 
 test("auto-* actions are admin-only", async () => {
-  for (const action of ["auto-select", "auto-cancel", "auto-retry", "auto-config"]) {
+  for (const action of ["auto-select", "auto-national", "auto-start-now", "auto-cancel", "auto-retry", "auto-config"]) {
     assert.equal((await call(smApi, { auth: "Bearer tok-user", body: { action, scheduleId: "s1" } })).statusCode, 403);
     assert.equal((await call(smApi, { body: { action } })).statusCode, 401);
   }

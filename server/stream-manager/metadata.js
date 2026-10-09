@@ -180,6 +180,7 @@ async function generatedMetadata(db, g) {
 const NATIONAL_KEY = "national";
 const NATIONAL_TITLE = "College Football LIVE | Scores, Highlights & Action Around the Country";
 const NATIONAL_MAX_MS = 20 * 3600e3;
+const OPEN_ENDED_WINDOW_MS = 12 * 3600e3; // an open-ended national's stand-in window (its games, its top-game tag)
 const nationalDescriptionText = (top) => [
   "College football action from across the country — all in one place. 🏈",
   "",
@@ -251,7 +252,8 @@ async function generatedNational(db, w) {
 async function generatedForBroadcast(db, rec) {
   if (rec.kind === "national") {
     const start = rec.auto?.kickoffAt ?? rec.national?.startAt;
-    const end = rec.auto?.endAt ?? rec.national?.endAt;
+    // An open-ended national (Start Now) has no end: the day ahead stands in.
+    const end = rec.auto?.endAt ?? rec.national?.endAt ?? (start ? start + OPEN_ENDED_WINDOW_MS : null);
     if (!start || !end) return null;
     const v = buildNationalGenerated(await nationalInputs(db, { start, end }));
     return Object.keys(v.errors).length ? null : { title: v.title, description: v.description };
@@ -316,7 +318,7 @@ async function getMetadata(db, body = {}) {
   const t = await target(db, body);
   const recs = t.national
     ? (await db.collection("broadcasts").where("kind", "==", "national").get()).docs.map((x) => x.data())
-      .filter((b) => b.rehearsal !== true && b.auto?.open && (b.auto.kickoffAt || 0) < t.window.end && (b.auto.endAt || 0) > t.window.start)
+      .filter((b) => b.rehearsal !== true && b.auto?.open && (b.auto.kickoffAt || 0) < t.window.end && (b.auto.endAt ?? Infinity) > t.window.start)
     : (await db.collection("broadcasts").where("gameId", "==", t.key).get()).docs.map((x) => x.data()).filter((b) => b.rehearsal !== true);
   return {
     game: t.game || null,

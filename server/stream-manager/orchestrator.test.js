@@ -1115,6 +1115,118 @@ test("national: desired worker opens /broadcast/national", () => {
   assert.deepEqual(ws, [{ id: `n${K1}`, game: "national", slot: 0, deadlineAt: K1 }]);
 });
 
+// ── Start Now and scheduled start times ──
+
+test("Start Now: a game not yet scheduled prepares on the next run, hours before kickoff", async () => {
+  clock = K1 - 3 * 60 * MIN;
+  const r = await select("s1", { startNow: true });
+  assert.equal(rec(r.id).auto.startAt, clock);
+  assert.equal(rec(r.id).auto.prepAt, clock);
+  await minute();
+  assert.equal(phase(r.id), "preparing");
+  await until(() => phase(r.id) === "live", 15);
+  assert.ok(clock < K1 - 2 * 60 * MIN, "on air long before kickoff");
+  assert.equal(w.creates, 1);
+  // The usual end: 15 min after FINAL.
+  await setGame(401001, "final");
+  await until(() => phase(r.id) === "completed", 20);
+});
+
+test("Start Now on a scheduled game starts it; only a waiting, enabled record can be", async () => {
+  const { id } = await select("s1");
+  await minute(5);
+  assert.equal(phase(id), "selected");
+  assert.deepEqual(await orch.startNow(db, "admin1", { id }, clock), { ok: true });
+  await minute();
+  assert.equal(phase(id), "preparing");
+  assert.deepEqual(await orch.startNow(db, "admin1", { id }, clock), { ok: true, already: true, phase: "preparing" });
+  await orch.cancelGame(db, "admin1", { id });
+  await minute();
+  await assert.rejects(orch.startNow(db, "admin1", { id }, clock), /isn't scheduled/);
+  // Retry goes back to the default start (kickoff − 15 min), not "now".
+  await orch.retryGame(db, "admin1", { id }, clock);
+  assert.equal(rec(id).auto.startAt, null);
+  assert.equal(rec(id).auto.prepAt, K1 - 15 * MIN);
+  await minute();
+  assert.equal(phase(id), "selected");
+});
+
+test("Schedule: the default start is kickoff − 15 min (stored as none); a chosen start is kept", async () => {
+  const { id } = await select("s1", { startAt: iso(K1 - 15 * MIN) });
+  assert.equal(rec(id).auto.startAt, null, "the default follows kickoff changes");
+  await orch.cancelGame(db, "admin1", { id });
+  await minute();
+  const { id: id2 } = await select("s2", { startAt: iso(K2 - 45 * MIN) });
+  assert.equal(rec(id2).auto.startAt, K2 - 45 * MIN);
+  assert.equal(rec(id2).auto.prepAt, K2 - 45 * MIN);
+  await until(() => phase(id2) !== "selected", 120);
+  assert.equal(clock, K2 - 45 * MIN);
+  await assert.rejects(select("s1", { startAt: "soon" }), /isn't valid/);
+  await assert.rejects(select("s1", { startAt: iso(K1 + 5 * 60 * MIN) }), /too long after kickoff/);
+});
+
+test("Start Now keeps every guard: zero slots holds it with no VM and no YouTube", async () => {
+  setup({ slots: [] });
+  const { id } = await select("s1", { startNow: true });
+  await minute(3);
+  assert.equal(phase(id), "selected");
+  assert.match(rec(id).auto.error, /No Worker Stream/);
+  assert.equal(w.vmStarts, 0);
+  assert.deepEqual(w.ytCalls, []);
+});
+
+test("Start Now on a rehearsal runs it at once with no YouTube calls", async () => {
+  w.agentDryRun = true;
+  const { id } = await select("s1", { rehearsal: true });
+  await orch.startNow(db, "admin1", { id }, clock);
+  await until(() => phase(id) === "live", 15);
+  assert.ok(clock < K1 - 30 * MIN);
+  assert.deepEqual(w.ytCalls, []);
+});
+
+test("national Start Now: open-ended, its own record, never ends on 'every game final' — only when an admin ends it", async () => {
+  await slate([{ id: "401001", status: "final", startDate: iso(K1 - 4 * 60 * MIN) }]); // nothing left to cover
+  const r = await national({ startNow: true });
+  assert.equal(r.id, `n${clock}`);
+  const d = rec(r.id);
+  assert.equal(d.auto.openEnded, true);
+  assert.equal(d.auto.endAt, null);
+  assert.deepEqual(await national({ startNow: true }), { id: r.id, already: true }, "a double click is the same record");
+  await minute();
+  await assert.rejects(orch.selectNational(db, "admin1", { startNow: true }, clock), /already running/);
+  // A separate scheduled window can still be added (its own record).
+  const sched = await national({ startAt: iso(K1 + 24 * 60 * MIN), endAt: iso(K1 + 30 * 60 * MIN) });
+  assert.notEqual(sched.id, r.id);
+
+  await until(() => phase(r.id) === "live", 15);
+  assert.equal(rec(r.id).auto.deadlineAt, rec(r.id).auto.workerStartedAt + CFG.NATIONAL_MAX_MS);
+  await minute(60);
+  assert.equal(phase(r.id), "live", "no games doesn't end it");
+  await orch.cancelGame(db, "admin1", { id: r.id, confirmEnd: true });
+  await until(() => phase(r.id) === "completed", 6);
+  assert.equal(rec(r.id).auto.endReason, "ended by admin");
+  assert.equal(phase(sched.id), "selected", "the scheduled window is untouched");
+});
+
+test("national Start Now: the failsafe still ends it", async () => {
+  await slate([]);
+  const { id } = await national({ startNow: true });
+  await until(() => phase(id) === "live", 15);
+  clock = rec(id).auto.deadlineAt;
+  await until(() => phase(id) === "completed", 8);
+  assert.equal(rec(id).auto.endReason, "max runtime");
+});
+
+test("national Start Now on a scheduled window starts it now and keeps its end", async () => {
+  await slate([{ id: "401001", status: "scheduled", startDate: iso(K1) }]);
+  const { id } = await national();
+  await orch.startNow(db, "admin1", { id }, clock);
+  await minute();
+  assert.equal(phase(id), "preparing");
+  assert.equal(rec(id).auto.endAt, K1 + 10 * 60 * MIN);
+  assert.equal(rec(id).auto.openEnded, false);
+});
+
 test("nothing logged contains a token", () => {
   for (const l of logs) assert.ok(!l.includes("yt-access-token-never-logged"), l);
   console.log = realLog;

@@ -223,23 +223,62 @@ describe("AutoSchedule", () => {
     expect(calls).toEqual([]);
   });
 
-  test("unlinked and final games can't be enabled", () => {
+  test("unlinked and final games can't be scheduled or started", () => {
     renderPicker();
-    expect(within(row("s3")).getByRole("button", { name: "Enable" })).toBeDisabled();
+    for (const name of ["Start Now", "Schedule", "Rehearse"]) {
+      expect(within(row("s3")).getByRole("button", { name })).toBeDisabled();
+      expect(within(row("s4")).getByRole("button", { name })).toBeDisabled();
+    }
     expect(within(row("s3")).getByText(/not linked/)).toBeInTheDocument();
-    expect(within(row("s4")).getByRole("button", { name: "Enable" })).toBeDisabled();
   });
 
-  test("Enable asks first, then only sends auto-select", async () => {
+  test("Schedule defaults to 15 min before kickoff, asks first, then only sends auto-select", async () => {
     window.confirm.mockReturnValueOnce(false);
     renderPicker();
-    fireEvent.click(within(row("s1")).getByRole("button", { name: "Enable" }));
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Schedule" }));
+    expect(calls).toEqual([]); // opening the start-time field sends nothing
+    const field = within(screen.getByTestId("schedule-s1")).getByLabelText("Start time");
+    expect(Date.parse(field.value)).toBe(NOW + 2 * H - 15 * 60e3);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Schedule" }));
     expect(calls).toEqual([]);
-    fireEvent.click(within(row("s1")).getByRole("button", { name: "Enable" }));
-    expect(window.confirm.mock.calls[1][0]).toMatch(/Nothing starts now/);
-    expect(await screen.findByText(/Enabled — it will start automatically/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Schedule" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/15 min before kickoff/);
+    expect(await screen.findByText(/Scheduled — it starts automatically/)).toBeInTheDocument();
+    // The default is sent as no start time, so the server follows kickoff changes.
     expect(calls.map((c) => c.body)).toEqual([{ action: "auto-select", scheduleId: "s1" }]);
     expect(calls[0].auth).toBe("Bearer firebase-id-token");
+    expect(screen.queryByTestId("schedule-s1")).toBeNull();
+  });
+
+  test("Schedule with a changed start time sends it", async () => {
+    renderPicker();
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Schedule" }));
+    const field = within(screen.getByTestId("schedule-s1")).getByLabelText("Start time");
+    const at = new Date(NOW + 60 * 60e3);
+    const local = new Date(at.getTime() - at.getTimezoneOffset() * 60e3).toISOString().slice(0, 16);
+    fireEvent.change(field, { target: { value: local } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Schedule" }));
+    await screen.findByText(/Scheduled — it starts automatically/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-select", scheduleId: "s1", startAt: at.toISOString() }]);
+  });
+
+  test("Start Now on a game that isn't scheduled asks first, then sends startNow", async () => {
+    window.confirm.mockReturnValueOnce(false);
+    renderPicker();
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Start Now" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Start Now" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/now\?/);
+    await screen.findByText(/Starting — the server prepares it within a minute/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-select", scheduleId: "s1", startNow: true }]);
+  });
+
+  test("Start Now on a scheduled game starts that record; it shows when it starts", async () => {
+    renderPicker({ rows: [rec(401001, { phase: "selected", kickoffAt: NOW + 2 * H, prepAt: NOW + 2 * H - 15 * 60e3 })] });
+    expect(within(row("s1")).getByText(/^Starts /)).toBeInTheDocument();
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Start Now" }));
+    await screen.findByText(/Starting — the server prepares it within a minute/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-start-now", id: "g401001" }]);
   });
 
   test("shows each broadcast state with what it's waiting on or why it failed", () => {
@@ -286,7 +325,7 @@ describe("AutoSchedule", () => {
   test("server errors are shown", async () => {
     global.fetch = jest.fn(() => reply(400, { error: "This game isn't linked to We-Draft Live (no CFBD game id) — set it in Admin → CFB Schedule." }));
     renderPicker();
-    fireEvent.click(within(row("s1")).getByRole("button", { name: "Enable" }));
+    fireEvent.click(within(row("s1")).getByRole("button", { name: "Start Now" }));
     expect(await screen.findByText(/isn't linked to We-Draft Live/)).toBeInTheDocument();
   });
 
@@ -331,14 +370,15 @@ describe("cancelled broadcasts", () => {
     expect(statusCounts(rows)).toEqual({ live: 1, preparing: 0, scheduled: 1, error: 1 });
   });
 
-  test("the picker shows a cancelled game as Cancelled with Retry (not Enable)", () => {
+  test("the picker shows a cancelled game as Cancelled with Retry (not Schedule)", () => {
     const NOW = Date.UTC(2026, 9, 10, 15, 0);
     const games = [{ id: "s1", Home: "Louisville", Away: "Florida State", KickoffAt: NOW + 3600e3, CFBDGameId: 401858254 }];
     render(<AutoSchedule games={games} rows={[{ id: "g401858254", gameId: "401858254", status: "scheduled", auto: { phase: "cancelled", open: false, enabled: true } }]} now={NOW} />);
     const row = screen.getByTestId("game-s1");
     expect(within(row).getByText("Cancelled")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Retry" })).toBeEnabled();
-    expect(within(row).queryByRole("button", { name: "Enable" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Schedule" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Start Now" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Disable" })).toBeNull();
   });
 });
@@ -385,7 +425,9 @@ describe("capacity and rehearsal display", () => {
     const row = screen.getByTestId("game-s1");
     fireEvent.click(within(row).getByRole("button", { name: "Rehearse" }));
     expect(calls).toEqual([]);
-    fireEvent.click(within(row).getByRole("button", { name: "Rehearse" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Confirm Rehearsal" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(within(row).getByRole("button", { name: "Confirm Rehearsal" }));
     expect(window.confirm.mock.calls[1][0]).toMatch(/never touches YouTube/);
     await screen.findByText(/Rehearsal scheduled — nothing goes to YouTube/);
     expect(calls.map((c) => c.body)).toEqual([{ action: "auto-select", scheduleId: "s1", rehearsal: true }]);
@@ -453,12 +495,12 @@ describe("National Coverage", () => {
     expect(et(defaultNationalWindow(Date.parse("2026-10-11T02:00:00Z")).start)).toBe("Sat, 10/10, 11:30 AM");
   });
 
-  test("Enable asks first, then only sends auto-national with the window", async () => {
+  test("Schedule asks first, then only sends auto-national with the window", async () => {
     window.confirm.mockReturnValueOnce(false);
     render(<NationalCoverage rows={[]} now={NOW} />);
-    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
     expect(calls).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
     expect(window.confirm.mock.calls[1][0]).toMatch(/15 min after every game in the window is FINAL/);
     expect(await screen.findByText(/Scheduled — it starts automatically/)).toBeInTheDocument();
     const { start, end } = defaultNationalWindow(NOW);
@@ -468,8 +510,9 @@ describe("National Coverage", () => {
   test("Rehearse sends rehearsal: true; public needs the confirmation box", async () => {
     render(<NationalCoverage rows={[]} now={NOW} />);
     fireEvent.click(screen.getByRole("button", { name: "Public" }));
-    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
     expect(await screen.findByText(/Tick the public confirmation/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start Now" }));
     expect(calls).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Rehearse" }));
     await screen.findByText(/Rehearsal scheduled/);
@@ -483,6 +526,29 @@ describe("National Coverage", () => {
     expect(window.confirm.mock.calls[0][0]).toMatch(/ON AIR/);
     await screen.findByText(/Ending/);
     expect(calls.map((c) => c.body)).toEqual([{ action: "auto-cancel", id: "n1", confirmEnd: true }]);
+  });
+
+  test("Start Now asks first, then sends an open-ended auto-national (no window)", async () => {
+    window.confirm.mockReturnValueOnce(false);
+    render(<NationalCoverage rows={[]} now={NOW} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start Now" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Start Now" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/until you click End Broadcast/);
+    await screen.findByText(/Starting — the server prepares it within a minute/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-national", startNow: true, privacyStatus: "unlisted", confirmPublic: false }]);
+  });
+
+  test("each broadcast is its own row; a waiting window can Start Now; an open-ended one runs until ended", async () => {
+    render(<NationalCoverage rows={[
+      nat("n1", { phase: "selected", prepAt: NOW + 2 * H - 15 * 60e3 }),
+      nat("n2", { phase: "live", openEnded: true, kickoffAt: NOW - H, endAt: null }),
+    ]} now={NOW} />);
+    expect(within(screen.getByTestId("national-n2")).getByText(/until ended/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("national-n2")).queryByRole("button", { name: "Start Now" })).toBeNull();
+    fireEvent.click(within(screen.getByTestId("national-n1")).getByRole("button", { name: "Start Now" }));
+    await screen.findByText(/Starting/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-start-now", id: "n1" }]);
   });
 
   test("Retry only while the window isn't over", () => {

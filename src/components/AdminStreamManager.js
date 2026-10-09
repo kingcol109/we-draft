@@ -415,6 +415,8 @@ const AUTO = {
   cancelling: { label: "Cancelling", color: AMBER },
 };
 const STARTING_PHASES = ["preparing", "vm", "worker", "ingest", "going-live"];
+const PREP_LEAD_MS = 15 * 60e3; // a scheduled start's default: kickoff − 15 min (orchestrator CFG.PREP_LEAD_MS)
+const NATIONAL_MAX_H = 20; // an open-ended national's failsafe (orchestrator CFG.NATIONAL_MAX_MS)
 function autoBase(a) {
   if (a.cancelRequested) return AUTO.cancelling;
   if (a.phase === "selected") return a.error ? { label: "Blocked", color: RED } : a.kickoffAt ? AUTO.scheduled : AUTO.selected;
@@ -446,6 +448,9 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
   const [onlySelected, setOnlySelected] = useState(false);
   const [days, setDays] = useState(7);
   const [editing, setEditing] = useState(null); // the schedule game whose metadata is open
+  // Schedule / Rehearse open a start-time field for that game:
+  // { gameId, rehearsal, at (datetime-local, default kickoff − 15 min) }.
+  const [scheduling, setScheduling] = useState(null);
 
   // One record per game; the open one (or the latest) wins.
   const recByGame = useMemo(() => {
@@ -469,13 +474,37 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
       .sort((a, b) => a.KickoffAt - b.KickoffAt);
   }, [games, search, onlySelected, days, now, recByGame]);
 
+  // Resolves true when the action succeeded.
   const act = async (key, fn, ok) => {
     setBusy(key); setMsg(null);
-    try { const r = await fn(); setMsg({ kind: "ok", text: typeof ok === "function" ? ok(r) : ok }); } catch (e) { setMsg({ kind: "error", text: vmError(e) }); } finally { setBusy(""); }
+    try { const r = await fn(); setMsg({ kind: "ok", text: typeof ok === "function" ? ok(r) : ok }); return true; } catch (e) { setMsg({ kind: "error", text: vmError(e) }); return false; } finally { setBusy(""); }
   };
-  const enable = (g) => {
-    if (!window.confirm(`Enable automatic broadcast for ${g.Away} at ${g.Home}?\n\nNothing starts now. 15 min before kickoff (${fmtFull(g.KickoffAt)}) the server starts the VM, creates the YouTube broadcast (Unlisted unless this game already has a record with another visibility) and goes live once the stream is received. It ends 15 min after the game is FINAL.`)) return;
-    act(`g${g.id}`, () => api("auto-select", { scheduleId: g.id }), (r) => (r.already ? "Already enabled." : "Enabled — it will start automatically before kickoff."));
+  const openSchedule = (g, rehearsal) => setScheduling({ gameId: g.id, rehearsal, at: toLocalInput(g.KickoffAt - PREP_LEAD_MS) });
+  // Schedule (or Rehearse) at the chosen start. The default, kickoff − 15 min,
+  // is sent as no start time, so the server keeps following kickoff changes.
+  const confirmSchedule = (g) => {
+    const { rehearsal, at } = scheduling;
+    const t = Date.parse(at);
+    if (!Number.isFinite(t)) return setMsg({ kind: "error", text: "Set a start time." });
+    const isDefault = at === toLocalInput(g.KickoffAt - PREP_LEAD_MS);
+    const what = rehearsal
+      ? "A rehearsal never touches YouTube: no broadcast is created, bound, started or ended, and no Worker Stream is needed. The server runs the lifecycle with a simulated worker — only on a VM agent in DRY_RUN mode."
+      : "The server starts the VM, creates the YouTube broadcast (Unlisted unless this game already has a record with another visibility) and goes live once the stream is received.";
+    if (!window.confirm(`${rehearsal ? "Rehearse" : "Schedule"} ${g.Away} at ${g.Home}?\n\nStarts ${fmtFull(t)}${isDefault ? " (15 min before kickoff)" : ""}. ${what} It ends 15 min after the game is FINAL.`)) return;
+    act(`g${g.id}`, () => api("auto-select", { scheduleId: g.id, ...(isDefault ? {} : { startAt: new Date(t).toISOString() }), ...(rehearsal ? { rehearsal: true } : {}) }),
+      (r) => (r.already ? (rehearsal ? "Already rehearsing." : "Already scheduled.") : rehearsal ? "Rehearsal scheduled — nothing goes to YouTube." : `Scheduled — it starts automatically ${fmtFull(t)}.`))
+      .then((ok) => ok && setScheduling(null));
+  };
+  // Start Now: a game that isn't scheduled yet is scheduled to start now; a
+  // scheduled one (still waiting) starts now. Within a minute either way.
+  const startNow = (g, b) => {
+    const waiting = b?.auto?.open && b.auto.phase === "selected";
+    const label = waiting && b.rehearsal ? "the rehearsal of " : "";
+    if (!window.confirm(`Start ${label}${g.Away} at ${g.Home} now?\n\n${waiting && b.rehearsal
+      ? "The rehearsal starts within a minute — no YouTube, simulated worker only."
+      : "Within a minute the server starts the VM, creates the YouTube broadcast (Unlisted unless this game already has a record with another visibility) and goes live once the stream is received — usually a few minutes."} It ends 15 min after the game is FINAL, or when you end it.`)) return;
+    act(`g${g.id}`, () => (waiting ? api("auto-start-now", { id: b.id }) : api("auto-select", { scheduleId: g.id, startNow: true })),
+      (r) => (r.already && r.phase ? "It's already starting." : "Starting — the server prepares it within a minute."));
   };
   const disable = (b) => {
     const onAir = ["live", "postgame"].includes(b.auto.phase);
@@ -485,10 +514,6 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
     act(`g${b.gameId}`, () => api("auto-cancel", { id: b.id, ...(onAir ? { confirmEnd: true } : {}) }), onAir ? "Ending — the server is completing the YouTube broadcast." : "Disabled.");
   };
   const retry = (b) => act(`g${b.gameId}`, () => api("auto-retry", { id: b.id }), "Re-enabled.");
-  const rehearse = (g) => {
-    if (!window.confirm(`Rehearse ${g.Away} at ${g.Home}?\n\nA rehearsal never touches YouTube: no broadcast is created, bound, started or ended, and no Worker Stream is needed. 15 min before kickoff the server starts the VM (if needed) and runs the lifecycle with a simulated worker — only on a VM agent in DRY_RUN mode. It ends 15 min after the game is FINAL.`)) return;
-    act(`g${g.id}`, () => api("auto-select", { scheduleId: g.id, rehearsal: true }), (r) => (r.already ? "Already rehearsing." : "Rehearsal scheduled — nothing goes to YouTube."));
-  };
 
   const agentOnline = agentDoc?.lastSeenAt && now - agentDoc.lastSeenAt < 60e3;
   const tickOk = orchDoc?.lastTickAt && now - orchDoc.lastTickAt < 3 * 60e3;
@@ -545,8 +570,11 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
             const linked = /^\d+$/.test(String(g.CFBDGameId ?? ""));
             const key = `g${g.id}`;
             const rowBusy = busy === key || busy === `g${g.CFBDGameId}`;
+            const blocked = !!busy || !linked || g.Final || gs === "final";
+            const sch = scheduling?.gameId === g.id ? scheduling : null;
             return (
-              <div key={g.id} data-testid={`game-${g.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.6fr) 1fr 0.8fr minmax(150px,1.3fr) auto", gap: 10, padding: "12px 16px", alignItems: "center", borderBottom: "1px solid #f0f2f6" }}>
+              <div key={g.id} data-testid={`game-${g.id}`} style={{ borderBottom: "1px solid #f0f2f6" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(200px,1.6fr) 1fr 0.8fr minmax(150px,1.3fr) auto", gap: 10, padding: "12px 16px", alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 900, fontSize: 14, color: INK }}>{g.Away} at {g.Home}</div>
                   <div style={{ fontSize: 11, color: "#889", fontWeight: 700 }}>{g.Week || ""}{linked ? "" : " · not linked to We-Draft Live"}</div>
@@ -555,22 +583,29 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
                 <div><Pill s={GAME_STATUS[gs] || GAME_STATUS.scheduled} small /></div>
                 <div style={{ minWidth: 0 }}>
                   {s ? <Pill s={s} small /> : <span style={{ fontSize: 12, color: "#aab", fontWeight: 800 }}>Not enabled</span>}
+                  {a?.open && a.phase === "selected" && a.prepAt && <div style={{ fontSize: 11, color: "#445", fontWeight: 800, marginTop: 3 }}>Starts {fmtFull(a.prepAt)}</div>}
                   {a?.open && a.waiting && <div style={{ fontSize: 11, color: "#667", fontWeight: 700, marginTop: 3 }}>{a.waiting}</div>}
                   {a?.error && <div style={{ fontSize: 11, color: RED, fontWeight: 800, marginTop: 3 }}>{a.error}</div>}
                 </div>
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   {a?.open ? (
-                    <button onClick={() => disable(b)} disabled={!!busy || a.cancelRequested || a.phase === "ending"} style={btn(RED, ["live", "postgame"].includes(a.phase), !!busy || a.cancelRequested || a.phase === "ending")}>
-                      {rowBusy ? "…" : ["live", "postgame"].includes(a.phase) ? "End Broadcast" : "Disable"}
-                    </button>
+                    <>
+                      {a.phase === "selected" && !a.cancelRequested && (
+                        <button onClick={() => startNow(g, b)} disabled={!!busy} style={btn(GREEN, true, !!busy)}>{rowBusy ? "…" : "Start Now"}</button>
+                      )}
+                      <button onClick={() => disable(b)} disabled={!!busy || a.cancelRequested || a.phase === "ending"} style={btn(RED, ["live", "postgame"].includes(a.phase), !!busy || a.cancelRequested || a.phase === "ending")}>
+                        {rowBusy && a.phase !== "selected" ? "…" : ["live", "postgame"].includes(a.phase) ? "End Broadcast" : "Disable"}
+                      </button>
+                    </>
                   ) : a && ["failed", "cancelled"].includes(a.phase) ? (
                     <button onClick={() => retry(b)} disabled={!!busy || g.Final || a.ytUnconfirmed === true}
                       title={a.ytUnconfirmed === true ? "The YouTube end was never confirmed — check Studio, then Refresh YouTube Status on the broadcast first" : undefined}
                       style={btn(GOLD, true, !!busy || g.Final || a.ytUnconfirmed === true)}>{rowBusy ? "…" : "Retry"}</button>
                   ) : a?.phase === "completed" ? null : (
                     <>
-                      <button onClick={() => enable(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn(GREEN, true, !!busy || !linked || g.Final || gs === "final")}>{rowBusy ? "…" : "Enable"}</button>
-                      <button onClick={() => rehearse(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn("#7b5ea7", false, !!busy || !linked || g.Final || gs === "final")}>Rehearse</button>
+                      <button onClick={() => startNow(g, null)} disabled={blocked} style={btn(GREEN, true, blocked)}>{rowBusy ? "…" : "Start Now"}</button>
+                      <button onClick={() => openSchedule(g, false)} disabled={blocked} style={btn(GREEN, false, blocked)}>Schedule</button>
+                      <button onClick={() => openSchedule(g, true)} disabled={blocked} style={btn("#7b5ea7", false, blocked)}>Rehearse</button>
                     </>
                   )}
                   <button onClick={() => setEditing(g)} disabled={!linked}
@@ -578,6 +613,18 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
                     style={{ ...btn(BLUE, false, !linked), padding: "9px 10px" }}>Edit Metadata</button>
                   {b && onOpen && <button onClick={() => onOpen(b.id)} style={{ ...btn("#889", false), padding: "9px 10px" }}>Open</button>}
                 </div>
+              </div>
+              {sch && (
+                <div data-testid={`schedule-${g.id}`} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", padding: "0 16px 12px", justifyContent: "flex-end" }}>
+                  <div>
+                    <div style={label}>{sch.rehearsal ? "Rehearsal starts" : "Broadcast starts"} (your time)</div>
+                    <input type="datetime-local" aria-label="Start time" value={sch.at} onChange={(e) => setScheduling({ ...sch, at: e.target.value })} style={{ ...input, width: 210, padding: "8px 10px" }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: "#778", fontWeight: 700, paddingBottom: 10 }}>Default: 15 min before kickoff</span>
+                  <button onClick={() => confirmSchedule(g)} disabled={!!busy} style={btn(sch.rehearsal ? "#7b5ea7" : GREEN, true, !!busy)}>{rowBusy ? "…" : sch.rehearsal ? "Confirm Rehearsal" : "Confirm Schedule"}</button>
+                  <button onClick={() => setScheduling(null)} style={btn("#889", false)}>Cancel</button>
+                </div>
+              )}
               </div>
             );
           })
@@ -939,6 +986,18 @@ export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
       () => api("auto-national", { startAt: new Date(s).toISOString(), endAt: new Date(e).toISOString(), privacyStatus: privacy, confirmPublic: privacy === "public" && confirmPublic, ...(rehearsal ? { rehearsal: true } : {}) }),
       (r) => (r.already ? "Already scheduled." : rehearsal ? "Rehearsal scheduled — nothing goes to YouTube." : "Scheduled — it starts automatically 15 min before the window."));
   };
+  // Start Now: a new open-ended national broadcast, on air until an admin ends it.
+  const startNowNew = () => {
+    if (privacy === "public" && !confirmPublic) return setMsg({ kind: "error", text: "Tick the public confirmation, or choose Unlisted." });
+    if (!window.confirm(`Start national coverage now?\n\nWithin a minute the server starts the VM, creates the YouTube broadcast (${privacy.toUpperCase()}) and goes live once the stream is received — usually a few minutes.\n\nIt stays on air until you click End Broadcast (failsafe: ${NATIONAL_MAX_H}h). The start/end times above are only for Schedule.`)) return;
+    act("start-now", () => api("auto-national", { startNow: true, privacyStatus: privacy, confirmPublic: privacy === "public" && confirmPublic }),
+      "Starting — the server prepares it within a minute. End it with End Broadcast.");
+  };
+  // Start Now on a scheduled window that's still waiting.
+  const startNowScheduled = (b) => {
+    if (!window.confirm(`Start this ${b.rehearsal ? "rehearsal" : "national coverage"} now instead of 15 min before ${fmtFull(b.auto.kickoffAt)}?\n\nIt still ends at ${fmtFull(b.auto.endAt)}, or 15 min after every game in the window is FINAL.`)) return;
+    act(b.id, () => api("auto-start-now", { id: b.id }), (r) => (r.already && r.phase ? "It's already starting." : "Starting — the server prepares it within a minute."));
+  };
   const disable = (b) => {
     const onAir = ["live", "postgame"].includes(b.auto.phase);
     if (!window.confirm(onAir ? "National coverage is ON AIR.\n\nDisabling it ends the YouTube broadcast now and stops its worker. End it?" : "Disable this national coverage window?")) return;
@@ -949,7 +1008,8 @@ export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
   const editMetadata = () => {
     const open = recs.find((b) => b.auto.open && !b.rehearsal);
     const s = open ? open.auto.kickoffAt : Date.parse(start);
-    const e = open ? open.auto.endAt : Date.parse(end);
+    // An open-ended one (Start Now) has no end: the 12h ahead stand in (as on the server).
+    const e = open ? open.auto.endAt ?? s + 12 * 3600e3 : Date.parse(end);
     if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return setMsg({ kind: "error", text: "Set a start and an end first — the metadata is generated for that window." });
     setEditing({ startAt: s, endAt: e });
   };
@@ -984,7 +1044,8 @@ export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
             ))}
           </div>
         </div>
-        <button onClick={() => schedule(false)} disabled={!!busy} style={btn(GREEN, true, !!busy)}>{busy === "enable" ? "…" : "Enable"}</button>
+        <button onClick={startNowNew} disabled={!!busy} title="Go on air now; it runs until you end it" style={btn(GREEN, true, !!busy)}>{busy === "start-now" ? "…" : "Start Now"}</button>
+        <button onClick={() => schedule(false)} disabled={!!busy} title="A separate national broadcast for this window" style={btn(GREEN, false, !!busy)}>{busy === "enable" ? "…" : "Schedule"}</button>
         <button onClick={() => schedule(true)} disabled={!!busy} style={btn("#7b5ea7", false, !!busy)}>{busy === "rehearse" ? "…" : "Rehearse"}</button>
         <button onClick={editMetadata} title="The national stream's YouTube title, description and thumbnail — saved as a draft only" style={{ ...btn(BLUE, false), padding: "9px 10px" }}>Edit Metadata</button>
       </div>
@@ -1004,8 +1065,9 @@ export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
             return (
               <div key={b.id} data-testid={`national-${b.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(220px,1.4fr) minmax(150px,1.3fr) auto", gap: 10, padding: "10px 14px", alignItems: "center", borderBottom: "1px solid #f0f2f6" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, fontSize: 13, color: INK }}>{fmtFull(a.kickoffAt)} → {fmtTime(a.endAt)}</div>
-                  <div style={{ fontSize: 11, color: "#889", fontWeight: 700, fontFamily: "Arial" }}>{b.rehearsal ? "Rehearsal" : (b.youtube?.privacyStatus || "")}{a.endReason ? ` · ended: ${a.endReason}` : ""}</div>
+                  <div style={{ fontWeight: 900, fontSize: 13, color: INK }}>{a.openEnded ? `${fmtFull(a.kickoffAt)} → until ended` : `${fmtFull(a.kickoffAt)} → ${fmtTime(a.endAt)}`}</div>
+                  <div style={{ fontSize: 11, color: "#889", fontWeight: 700, fontFamily: "Arial" }}>{a.openEnded ? "Started now · " : "Scheduled · "}{b.rehearsal ? "Rehearsal" : (b.youtube?.privacyStatus || "")}{a.endReason ? ` · ended: ${a.endReason}` : ""}</div>
+                  {a.open && a.phase === "selected" && !a.openEnded && a.prepAt && <div style={{ fontSize: 11, color: "#445", fontWeight: 800 }}>Starts {fmtFull(a.prepAt)}</div>}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   {s && <Pill s={s} small />}
@@ -1014,10 +1076,15 @@ export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
                 </div>
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   {a.open ? (
-                    <button onClick={() => disable(b)} disabled={!!busy || a.cancelRequested || a.phase === "ending"} style={btn(RED, onAir, !!busy || a.cancelRequested || a.phase === "ending")}>
-                      {busy === b.id ? "…" : onAir ? "End Broadcast" : "Disable"}
-                    </button>
-                  ) : ["failed", "cancelled"].includes(a.phase) && (a.endAt || 0) > now ? (
+                    <>
+                      {a.phase === "selected" && !a.cancelRequested && (a.prepAt || 0) > now && (
+                        <button onClick={() => startNowScheduled(b)} disabled={!!busy} style={btn(GREEN, true, !!busy)}>Start Now</button>
+                      )}
+                      <button onClick={() => disable(b)} disabled={!!busy || a.cancelRequested || a.phase === "ending"} style={btn(RED, onAir, !!busy || a.cancelRequested || a.phase === "ending")}>
+                        {busy === b.id ? "…" : onAir ? "End Broadcast" : "Disable"}
+                      </button>
+                    </>
+                  ) : ["failed", "cancelled"].includes(a.phase) && (a.openEnded || (a.endAt || 0) > now) ? (
                     <button onClick={() => retry(b)} disabled={!!busy || a.ytUnconfirmed === true} style={btn(GOLD, true, !!busy || a.ytUnconfirmed === true)}>{busy === b.id ? "…" : "Retry"}</button>
                   ) : null}
                   {onOpen && <button onClick={() => onOpen(b.id)} style={{ ...btn("#889", false), padding: "9px 10px" }}>Open</button>}
@@ -1247,7 +1314,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           <Panel title="Coverage">
             <Row k="Broadcast">National — every game</Row>
             <Row k="Window starts">{fmtFull(b.national?.startAt ?? b.auto?.kickoffAt)}</Row>
-            <Row k="Window ends">{fmtFull(b.national?.endAt ?? b.auto?.endAt)}</Row>
+            <Row k="Window ends">{b.auto?.openEnded ? "When ended (Start Now)" : fmtFull(b.national?.endAt ?? b.auto?.endAt)}</Row>
             <Row k="Broadcast start">{fmtFull(ms(b.scheduledStart))}</Row>
             <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <a href="/live" target="_blank" rel="noreferrer" style={{ ...btn(BLUE, false), textDecoration: "none", padding: "6px 10px", fontSize: 11 }}>/live</a>
@@ -1315,7 +1382,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
             <Row k="State"><Pill s={autoState(b) || AUTO.selected} small /></Row>
             <Row k="Mode">{b.rehearsal ? "Rehearsal (simulated, no YouTube)" : "Real broadcast"}</Row>
             <Row k="Phase" mono>{b.auto.phase}</Row>
-            <Row k={isNational(b) ? "Window" : "Kickoff"}>{isNational(b) ? `${fmtFull(b.auto.kickoffAt)} → ${fmtTime(b.auto.endAt)}` : fmtFull(b.auto.kickoffAt)}</Row>
+            <Row k={isNational(b) ? "Window" : "Kickoff"}>{isNational(b) ? `${fmtFull(b.auto.kickoffAt)} → ${b.auto.openEnded ? "until ended" : fmtTime(b.auto.endAt)}` : fmtFull(b.auto.kickoffAt)}</Row>
             <Row k="Prep starts">{fmtFull(b.auto.prepAt)}</Row>
             <Row k="Stream slot">{b.auto.slot ?? "—"}</Row>
             <Row k={isNational(b) ? "All final seen" : "Final seen"}>{b.auto.finalSeenAt ? fmtFull(b.auto.finalSeenAt) : "—"}</Row>

@@ -154,9 +154,22 @@ The existing variables (`GOOGLE_SERVICE_ACCOUNT_KEY`, `YOUTUBE_OAUTH_*`,
 # Automatic broadcasts (Auto Schedule)
 
 Admin → Stream Manager → **Auto Schedule** lists upcoming games from the
-saved CFB schedule (`schedule26`). An admin enables individual games.
-Enabling only records the choice; the server does everything else, and
-only for enabled games.
+saved CFB schedule (`schedule26`). Each game row has:
+
+- **Start Now:** the server prepares it on its next run (within a minute)
+  instead of waiting for kickoff. On a game that's already scheduled and
+  still waiting, it starts that record now (`auto-start-now`).
+- **Schedule:** opens a start time, defaulting to 15 min before kickoff. The
+  default is stored as no start time (`auto.startAt: null`), so later
+  kickoff changes are still followed; a changed time is kept as
+  `auto.startAt` (a time already past means now).
+- **Rehearse:** the same, as a rehearsal (below). Start Now on a waiting
+  rehearsal runs it at once.
+
+Scheduling only records the choice; the server does everything else, and
+only for scheduled games. Start Now changes when preparation begins, nothing
+else: every guard below (blockers, slots, timeouts, rehearsal rules) still
+applies. **Retry** returns a record to the default start.
 
 ## Where the data comes from
 
@@ -183,8 +196,10 @@ only for enabled games.
 
 Each enabled game moves through these phases:
 
-1. **selected:** waiting for kickoff minus 15 min. The kickoff is re-read
-   from `schedule26` on every run, so time changes are picked up.
+1. **selected:** waiting for its start: `auto.startAt` if one was set
+   (Start Now, or a changed Schedule time), else kickoff minus 15 min. The
+   kickoff is re-read from `schedule26` on every run, so time changes are
+   picked up.
 2. **preparing:** takes a stream slot, then creates the YouTube broadcast
    and binds it to that slot's stream. If the broadcast already exists, it's
    re-bound instead. The VM is started now if it's stopped.
@@ -225,6 +240,30 @@ Guards:
   - A forced manual stop pauses automatic VM starts for 30 min.
   - A manual Start VM hands the VM to the admin, so the orchestrator never
     idle-stops it.
+
+## National coverage
+
+National coverage is the pinned first row of Auto Schedule. It streams
+`/broadcast/national` (every game, no one game) and goes through the same
+phases. Every broadcast is its own record:
+
+- **Start Now** (`auto-national` with `startNow: true`) creates an
+  open-ended record `n<now>` (`auto.openEnded`). It starts on the next run
+  and stays on air until an admin clicks **End Broadcast**. It never ends on
+  "every game final", so it can run any day. Its failsafe is 20h after the
+  worker starts. It's refused while another national broadcast of the same
+  kind is running or about to start.
+- **Schedule** (`startAt`, `endAt`) creates a record `n<startMs>` for that
+  window. It prepares 15 min before the start and ends 15 min after every
+  game in the window is FINAL, or at the end time. Scheduled windows can't
+  overlap each other. Each window is a new record with its own YouTube
+  broadcast, so national coverage can be scheduled as often as needed.
+- **Start Now** on a scheduled window that's still waiting starts it at
+  once and keeps its end.
+- **Rehearse** schedules a rehearsal window.
+
+An open-ended broadcast and a scheduled window can both be open. If both
+need to be on air with one stream slot, the later one waits for the slot.
 
 ## Concurrent games
 
@@ -344,7 +383,7 @@ When the ending can't confirm YouTube went off the air, the record ends
 **failed** with `ytUnconfirmed: true`. Until that's cleared, the server
 refuses all of these, whatever the stored YouTube state says:
 - **Retry**
-- **re-enabling the game** (Enable / Rehearse on any record of it)
+- **re-enabling the game** (Start Now / Schedule / Rehearse on any record of it)
 - **Delete Record**
 - **manual YouTube create/bind**
 
