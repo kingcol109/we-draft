@@ -41,7 +41,7 @@ function setup({ slots = ["streamA"], maxConcurrent = 1 } = {}) {
     ...scheduleDoc("s4", { home: "Iowa", away: "Ohio", kickoff: K1, cfbd: 401004, slug: "ohio-vs-iowa", final: true }),
     "liveGames/401001": { status: "scheduled", slug: "clemson-vs-lsu", home: { school: "LSU" }, away: { school: "Clemson" } },
     "liveGames/401002": { status: "scheduled", slug: "ohio-state-vs-texas", home: { school: "Texas" }, away: { school: "Ohio State" } },
-    "streamManager/youtube": { connected: true, channelId: "UC1", workerStreamId: slots[0] },
+    "streamManager/youtube": { connected: true, channelId: "UC1", workerStreamId: slots[0] || null },
     "streamManager/orchestrator": { slotStreamIds: slots, maxConcurrent },
   });
   w = {
@@ -49,6 +49,7 @@ function setup({ slots = ["streamA"], maxConcurrent = 1 } = {}) {
     events: [], // ordered side effects, for ordering checks
     exitOnStart: null, keyMissing: false, agentDown: false, ytCreateFails: 0, ingestBroken: false,
     monitorOff: false, testingError: null, ytReadFails: false, completeFails: false,
+    agentDryRun: false, ytCalls: [], liveFails: false, liveStuck: false, completeFailCount: 0, completeRedundant: false, testStuck: false,
     slots,
   };
 }
@@ -68,15 +69,26 @@ const deps = () => ({
   },
   yt: {
     SETTINGS: ["streamManager", "youtube"],
-    accessToken: async () => "yt-access-token-never-logged",
-    getStream: async (_t, id) => ({ id, title: id, streamStatus: streamActive(id) ? "active" : "ready", healthStatus: streamActive(id) ? "good" : "noData" }),
+    accessToken: async () => { w.ytCalls.push("accessToken"); return "yt-access-token-never-logged"; },
+    getStream: async (_t, id) => (w.ytCalls.push("getStream"), { id, title: id, streamStatus: streamActive(id) ? "active" : "ready", healthStatus: streamActive(id) ? "good" : "noData" }),
     getBroadcast: async (_t, id) => {
+      w.ytCalls.push("getBroadcast");
+      const cur = w.broadcasts[id];
+      if (cur && cur.lifeCycleStatus === "liveStarting" && !w.liveStuck) cur.lifeCycleStatus = "live";
+      if (cur && cur.lifeCycleStatus === "testStarting" && !w.testStuck) cur.lifeCycleStatus = "testing";
       if (w.ytReadFails) throw Object.assign(new Error("YouTube liveBroadcasts failed: Invalid Credentials (authError)"), { status: 502 });
       return w.broadcasts[id] ? { ...w.broadcasts[id] } : null;
     },
     transitionBroadcast: async (_t, id, to) => {
+      w.ytCalls.push(`transition:${to}`);
       const b = w.broadcasts[id];
       w.events.push(`yt-try-${to}:${id}`);
+      if (to === "live" && w.liveFails) throw Object.assign(new Error("YouTube liveBroadcasts/transition failed: Backend Error (backendError)"), { status: 502 });
+      if (to === "complete" && w.completeFailCount > 0) { w.completeFailCount--; throw Object.assign(new Error("YouTube liveBroadcasts/transition failed: Backend Error (backendError)"), { status: 502 }); }
+      if (to === "complete" && w.completeRedundant && ["live", "testing"].includes(b.lifeCycleStatus)) {
+        b.lifeCycleStatus = "complete"; w.transitions.push(`${id}:complete`); w.events.push(`yt-complete:${id}`);
+        throw Object.assign(new Error("YouTube liveBroadcasts/transition failed: Redundant transition (redundantTransition)"), { status: 400 });
+      }
       if (to === "testing" && w.testingError) throw Object.assign(new Error(`YouTube liveBroadcasts/transition failed: nope (${w.testingError})`), { status: 400 });
       if (to === "testing" && w.monitorOff) throw Object.assign(new Error("YouTube liveBroadcasts/transition failed: Invalid transition (invalidTransition)"), { status: 400 });
       if (to === "complete" && w.completeFails) throw Object.assign(new Error("YouTube liveBroadcasts/transition failed: backend (backendError)"), { status: 502 });
@@ -84,7 +96,7 @@ const deps = () => ({
         || (to === "live" && (b.lifeCycleStatus === "testing" || (w.monitorOff && b.lifeCycleStatus === "ready")) && streamActive(b.boundStreamId))
         || (to === "complete" && ["live", "testing"].includes(b.lifeCycleStatus));
       if (!ok) throw Object.assign(new Error(`invalidTransition ${b.lifeCycleStatus}→${to}`), { status: 400 });
-      b.lifeCycleStatus = to;
+      b.lifeCycleStatus = to === "live" && w.liveStuck ? "liveStarting" : to === "testing" && w.testStuck ? "testStarting" : to;
       w.transitions.push(`${id}:${to}`);
       w.events.push(`yt-${to}:${id}`);
       return { ...b };
@@ -93,6 +105,7 @@ const deps = () => ({
   bc: {
     deriveStatus: bc.deriveStatus,
     youtubeCreate: async (_db, { id, streamId }) => {
+      w.ytCalls.push("youtubeCreate");
       if (w.ytCreateFails > 0) { w.ytCreateFails--; throw Object.assign(new Error("YouTube liveBroadcasts failed: quota"), { status: 502 }); }
       const rec = db.data(`broadcasts/${id}`);
       let bid = rec.youtube.broadcastId;
@@ -129,9 +142,9 @@ let lastDesired = [];
 async function agentCycle() {
   if (w.vm !== "running" || w.agentDown) return;
   const containers = await fakeDocker.list();
-  const r = await orch.agentReport(db, { containers: agent.report(containers, lastDesired, agentState), host: { version: "test" } }, clock);
+  const r = await orch.agentReport(db, { dryRun: w.agentDryRun, containers: agent.report(containers, lastDesired, agentState), host: { version: "test" } }, clock);
   lastDesired = r.desired;
-  await agent.reconcile(lastDesired, containers, clock, agentCfg, fakeDocker, agentState, fakeFs);
+  await agent.reconcile(lastDesired, containers, clock, { ...agentCfg, dryRun: w.agentDryRun }, fakeDocker, agentState, fakeFs);
 }
 
 async function minute(n = 1) {
@@ -517,7 +530,7 @@ test("YouTube LIVE: never attempted before the worker's stream is active", async
   assert.ok(workerStart >= 0 && firstTry > workerStart);
 });
 
-test("YouTube read failures on air don't stop FINAL handling; the worker still stops", async () => {
+test("YouTube read failures on air don't stop FINAL handling; unconfirmed end → failed, worker stopped only after the bound", async () => {
   await select("s1");
   await until(() => phase("g401001") === "live", 60);
   w.ytReadFails = true;
@@ -527,9 +540,18 @@ test("YouTube read failures on air don't stop FINAL handling; the worker still s
   assert.match(rec("g401001").auto.waiting, /Can't read YouTube status/);
   await setGame(401001, "final");
   await until(() => phase("g401001") === "ending", 20);
-  await until(() => phase("g401001") === "completed", 10);
-  assert.match(rec("g401001").auto.error, /end it in YouTube Studio/);
-  assert.ok(!w.containers.has("g401001"), "worker stopped");
+  const endingAt = clock;
+  // YouTube can't be confirmed off the air: the worker keeps running until the bound.
+  await minute(4);
+  assert.equal(phase("g401001"), "ending");
+  assert.ok(w.containers.has("g401001"), "worker not stopped while YouTube may be live");
+  await until(() => phase("g401001") === "failed", 10);
+  assert.ok(clock - endingAt > CFG.ENDING_YT_TIMEOUT_MS);
+  const d = rec("g401001");
+  assert.match(d.auto.error, /Couldn't confirm the YouTube broadcast ended/);
+  assert.equal(d.auto.ytUnconfirmed, true);
+  assert.equal(d.status, "error", "never reported as a success");
+  assert.ok(!w.containers.has("g401001"), "worker stopped after the bound");
 });
 
 test("lease: a busy lease skips the tick; an old tick can't release a newer tick's lease", async () => {
@@ -628,6 +650,366 @@ test("desired workers skip a disabled record, except one that's already ending",
   const out = orch.desiredWorkers([r("live"), r("worker"), r("ending")]);
   assert.deepEqual(out.map((x) => x.id), ["xending"]);
 });
+
+// ── D1: server-enforced rehearsal ──
+
+const rsel = (id) => select(id, { rehearsal: true });
+
+test("rehearsal: full lifecycle with no Worker Stream and zero YouTube calls", async () => {
+  setup({ slots: [] });
+  w.agentDryRun = true;
+  const r = await rsel("s1");
+  assert.deepEqual(r, { id: "r401001", created: true, rehearsal: true });
+  assert.equal(rec("r401001").rehearsal, true);
+  assert.match(rec("r401001").youtube.title, /^\[Rehearsal\]/);
+  await until(() => phase("r401001") === "live", 60);
+  let d = rec("r401001");
+  assert.equal(d.status, "rehearsal", "never shown as a real live broadcast");
+  assert.equal(d.auto.sim.lifecycleStatus, "live");
+  assert.equal(d.youtube.broadcastId, null);
+  assert.equal(d.youtube.lifecycleStatus, null, "youtube.* never written");
+  assert.equal(d.auto.slot, null, "no real slot used");
+  assert.equal(w.vmStarts, 1);
+  assert.ok(w.containers.has("r401001"), "simulated worker running");
+  await setGame(401001, "final");
+  await until(() => phase("r401001") === "completed", 25);
+  d = rec("r401001");
+  assert.equal(d.status, "ended");
+  assert.equal(d.auto.sim.lifecycleStatus, "complete");
+  assert.ok(!w.containers.has("r401001"));
+  assert.deepEqual(w.ytCalls, [], "no YouTube call of any kind");
+  assert.equal(w.creates, 0);
+  assert.deepEqual(w.transitions, []);
+});
+
+test("rehearsal: never dispatched to a real (non-DRY_RUN) agent; fails with an actionable error", async () => {
+  setup({ slots: [] });
+  await rsel("s1");
+  await until(() => phase("r401001") === "failed", 70);
+  assert.match(rec("r401001").auto.error, /DRY_RUN/);
+  assert.ok(!w.events.some((e) => e.startsWith("worker-start")), "no worker ever launched");
+  assert.deepEqual(w.ytCalls, []);
+  const recs = [{ id: "r1", rehearsal: true, gameSlug: "a-b", auto: { open: true, slot: null, phase: "worker", enabled: true } }];
+  assert.deepEqual(orch.desiredWorkers(recs), []);
+  assert.deepEqual(orch.desiredWorkers(recs, { agentDryRun: true }).map((x) => [x.id, x.slot, x.rehearsal]), [["r1", 0, true]]);
+});
+
+test("rehearsal: failure, cancellation and retry paths make no YouTube calls", async () => {
+  setup({ slots: [] });
+  w.agentDryRun = true;
+  w.exitOnStart = 2;
+  await rsel("s1");
+  await until(() => phase("r401001") === "failed", 70);
+  w.exitOnStart = null;
+  await orch.retryGame(db, "admin1", { id: "r401001" });
+  assert.equal(rec("r401001").rehearsal, true, "retry keeps it a rehearsal");
+  await until(() => phase("r401001") === "live", 30);
+  await assert.rejects(orch.cancelGame(db, "admin1", { id: "r401001" }), /confirmEnd/);
+  await orch.cancelGame(db, "admin1", { id: "r401001", confirmEnd: true });
+  await until(() => phase("r401001") === "completed", 6);
+  assert.equal(rec("r401001").auto.endReason, "ended by admin");
+
+  // cancelled while the (simulated) worker is starting
+  await rsel("s1");
+  assert.equal(phase("r401001"), "selected", "a finished rehearsal can be rehearsed again");
+  await until(() => phase("r401001") === "worker" || phase("r401001") === "ingest", 60);
+  await orch.cancelGame(db, "admin1", { id: "r401001" });
+  await until(() => phase("r401001") === "cancelled", 6);
+  assert.deepEqual(w.ytCalls, []);
+});
+
+test("rehearsal: the record's own YouTube actions are refused server-side", async () => {
+  setup({ slots: [] });
+  await rsel("s1");
+  await assert.rejects(bc.youtubeCreate(db, { id: "r401001" }), (e) => e.status === 409 && /rehearsal record/.test(e.message));
+  await assert.rejects(bc.youtubeCreate(db, { id: "r401001", streamId: "streamA" }), /rehearsal record/);
+  await assert.rejects(bc.youtubeRefresh(db, { id: "r401001" }), /rehearsal record/);
+  assert.equal(rec("r401001").youtube.broadcastId, null);
+});
+
+test("rehearsal and real records never stand in for each other", async () => {
+  await rsel("s1");
+  await assert.rejects(select("s1"), /open rehearsal — disable it first/);
+  await orch.cancelGame(db, "admin1", { id: "r401001" });
+  await minute();
+  const real = await select("s1");
+  assert.equal(real.id, "g401001", "a new real record, not the rehearsal");
+  assert.equal(rec("g401001").rehearsal, undefined);
+  await assert.rejects(rsel("s1"), /open real broadcast — disable it first/);
+});
+
+test("STREAM_REHEARSAL_ONLY: real broadcasts can't start or mutate YouTube; rehearsals still run", async () => {
+  await select("s1"); // selected before the switch
+  process.env.STREAM_REHEARSAL_ONLY = "1";
+  try {
+    await assert.rejects(select("s2"), /rehearsal-only mode/);
+    await minute(50); // past prep time
+    assert.equal(phase("g401001"), "selected");
+    assert.match(rec("g401001").auto.error, /rehearsal-only mode/);
+    assert.equal(w.vmStarts, 0);
+    assert.deepEqual(w.ytCalls, []);
+    await assert.rejects(bc.youtubeCreate(db, { id: "g401001" }), /rehearsal-only mode/);
+    await until(() => phase("g401001") === "failed", 20);
+    assert.match(rec("g401001").auto.error, /Kickoff passed/);
+    await assert.rejects(orch.retryGame(db, "admin1", { id: "g401001" }), /rehearsal-only mode/);
+  } finally {
+    delete process.env.STREAM_REHEARSAL_ONLY;
+  }
+});
+
+test("STREAM_REHEARSAL_ONLY still lets a real broadcast already on air be completed", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  process.env.STREAM_REHEARSAL_ONLY = "1";
+  try {
+    await orch.cancelGame(db, "admin1", { id: "g401001", confirmEnd: true });
+    await until(() => phase("g401001") === "completed", 6);
+    assert.ok(w.transitions.includes("yt-g401001:complete"));
+  } finally {
+    delete process.env.STREAM_REHEARSAL_ONLY;
+  }
+});
+
+// ── D2: failures after YouTube may be on air ──
+
+test("failure while testing: live transition keeps failing → completed on YouTube, then worker stopped, ends failed", async () => {
+  w.liveFails = true;
+  await select("s1");
+  await until(() => phase("g401001") === "going-live", 60);
+  await until(() => phase("g401001") === "ending", 10);
+  assert.ok(w.containers.has("g401001"), "worker still running while YouTube is testing");
+  await until(() => phase("g401001") === "failed", 8);
+  const d = rec("g401001");
+  assert.match(d.auto.failReason, /backendError/);
+  assert.equal(d.status, "error");
+  const iComplete = w.events.indexOf("yt-complete:yt-g401001");
+  const iStop = w.events.indexOf("worker-stop:g401001");
+  assert.ok(iComplete >= 0 && iStop > iComplete, w.events.join(","));
+  assert.ok(!w.transitions.includes("yt-g401001:live"));
+});
+
+test("going-live times out while YouTube is liveStarting: waits, completes once live, worker kept until then", async () => {
+  w.liveStuck = true;
+  await select("s1");
+  await until(() => phase("g401001") === "going-live", 60);
+  await until(() => phase("g401001") === "ending", 10);
+  await minute(2);
+  assert.equal(phase("g401001"), "ending");
+  assert.match(rec("g401001").auto.waiting, /liveStarting/);
+  assert.ok(w.containers.has("g401001"), "worker kept while YouTube may go live");
+  w.liveStuck = false; // YouTube finishes going live
+  await until(() => phase("g401001") === "failed", 8);
+  const iComplete = w.events.indexOf("yt-complete:yt-g401001");
+  const iStop = w.events.indexOf("worker-stop:g401001");
+  assert.ok(iComplete >= 0 && iStop > iComplete, w.events.join(","));
+  assert.match(rec("g401001").auto.error, /didn't go live/);
+});
+
+test("failure after YouTube is live (reads failing while going live): ends it on YouTube once reachable", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "going-live", 60);
+  w.ytReadFails = true; // YouTube went live, but we can't see it
+  await until(() => phase("g401001") === "ending", 10);
+  assert.ok(w.containers.has("g401001"));
+  w.ytReadFails = false;
+  await until(() => phase("g401001") === "failed", 6);
+  assert.equal(w.broadcasts["yt-g401001"].lifeCycleStatus, "complete");
+  const iComplete = w.events.indexOf("yt-complete:yt-g401001");
+  const iStop = w.events.indexOf("worker-stop:g401001");
+  assert.ok(iComplete >= 0 && iStop > iComplete, w.events.join(","));
+  assert.equal(rec("g401001").auto.ytUnconfirmed, undefined);
+});
+
+test("completion retries: transient complete errors retry until confirmed; the worker waits", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  w.completeFailCount = 3;
+  await setGame(401001, "final");
+  await until(() => phase("g401001") === "ending", 20);
+  await minute(2);
+  assert.equal(phase("g401001"), "ending");
+  assert.match(rec("g401001").auto.waiting, /Completing on YouTube failed/);
+  assert.ok(w.containers.has("g401001"));
+  await until(() => phase("g401001") === "completed", 6);
+  assert.equal(rec("g401001").status, "ended");
+  assert.equal(rec("g401001").auto.error, null);
+});
+
+test("completion is idempotent: a redundantTransition is confirmed by the next read", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  w.completeRedundant = true;
+  await orch.cancelGame(db, "admin1", { id: "g401001", confirmEnd: true });
+  await until(() => phase("g401001") === "completed", 6);
+  assert.equal(w.broadcasts["yt-g401001"].lifeCycleStatus, "complete");
+});
+
+test("retry is refused while the YouTube broadcast may still be on the air", async () => {
+  await db.doc("broadcasts/gx").set({ gameId: "9", status: "error", youtube: { broadcastId: "b", lifecycleStatus: "live" }, worker: {}, auto: { phase: "failed", open: false } });
+  await assert.rejects(orch.retryGame(db, "admin1", { id: "gx" }), /may still be on the air/);
+});
+
+// ── D3: zero slots ──
+
+test("slotsOf never turns 'no stream' into one slot", () => {
+  assert.equal(orch.slotsOf({}, {}).capacity, 0);
+  assert.equal(orch.slotsOf({ maxConcurrent: 3 }, {}).capacity, 0);
+  assert.equal(orch.slotsOf({ slotStreamIds: [] }, { workerStreamId: null }).capacity, 0);
+  assert.equal(orch.slotsOf({}, { workerStreamId: "a" }).capacity, 1);
+  assert.equal(orch.slotsOf({ slotStreamIds: ["a", "b"], maxConcurrent: 1 }).capacity, 1);
+});
+
+test("zero slots: a real game is held (no VM, no YouTube), capacity reported 0, fails at kickoff", async () => {
+  setup({ slots: [] });
+  await select("s1");
+  await minute(50); // K1-10m — past prep time
+  assert.equal(phase("g401001"), "selected");
+  assert.match(rec("g401001").auto.error, /No Worker Stream is configured/);
+  assert.equal(rec("g401001").auto.active, false);
+  assert.equal(w.vmStarts, 0);
+  assert.deepEqual(w.ytCalls, []);
+  const o = db.data("streamManager/orchestrator");
+  assert.equal(o.capacity, 0);
+  assert.equal(o.slotsInUse, 0);
+  await until(() => phase("g401001") === "failed", 15);
+  assert.match(rec("g401001").auto.error, /Kickoff passed/);
+  assert.equal(w.vmStarts, 0);
+});
+
+test("zero slots: an older record stuck in preparing fails at once without starting the VM", async () => {
+  setup({ slots: [] });
+  await select("s1");
+  await db.doc("broadcasts/g401001").update({ "auto.phase": "preparing", "auto.active": true, "auto.phaseAt": clock });
+  await minute();
+  assert.equal(phase("g401001"), "failed");
+  assert.match(rec("g401001").auto.error, /No Worker Stream/);
+  assert.equal(w.vmStarts, 0);
+  assert.deepEqual(w.ytCalls, []);
+});
+
+test("zero slots: a blocked game doesn't keep an orchestrator-owned VM warm", async () => {
+  setup({ slots: [] });
+  w.vm = "running";
+  await db.doc("streamManager/orchestrator").set({ vmOwned: true }, { merge: true });
+  await select("s1"); // prep in 45 min — would normally keep the VM warm
+  await minute(12);
+  assert.deepEqual(w.vmStops, ["orchestrator"]);
+});
+
+test("an agent in DRY_RUN blocks real broadcasts before any YouTube call", async () => {
+  w.agentDryRun = true;
+  w.vm = "running";
+  await minute(); // the agent reports DRY_RUN
+  await select("s1");
+  await minute(48);
+  assert.equal(phase("g401001"), "selected");
+  assert.match(rec("g401001").auto.error, /DRY_RUN mode — real broadcasts are blocked/);
+  assert.deepEqual(w.ytCalls, []);
+  assert.equal(w.creates, 0);
+});
+
+
+// ── D2: unconfirmed endings ──
+
+const snapshot = (id) => { const d = rec(id); return JSON.stringify({ auto: d.auto, status: d.status, youtube: d.youtube, worker: d.worker }); };
+
+test("YouTube still live past the ending deadline (complete keeps failing) → failed + unconfirmed; worker stopped only after the bound", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  w.completeFails = true;
+  await setGame(401001, "final");
+  await until(() => phase("g401001") === "ending", 20);
+  const endingAt = clock;
+  await minute(4);
+  assert.equal(phase("g401001"), "ending");
+  assert.ok(w.containers.has("g401001"), "worker kept while YouTube is live");
+  await until(() => phase("g401001") === "failed", 8);
+  assert.ok(clock - endingAt > CFG.ENDING_YT_TIMEOUT_MS);
+  const d = rec("g401001");
+  assert.equal(d.auto.ytUnconfirmed, true);
+  assert.match(d.auto.error, /Couldn't confirm the YouTube broadcast ended \(still live after 5 min\)/);
+  assert.equal(d.status, "error");
+  assert.ok(!w.containers.has("g401001"), "worker stopped after the bound");
+});
+
+for (const [name, knob] of [["liveStarting", "liveStuck"], ["testStarting", "testStuck"]]) {
+  test(`YouTube stuck in ${name} past the ending deadline → failed + unconfirmed`, async () => {
+    w[knob] = true;
+    await select("s1");
+    await until(() => phase("g401001") === "going-live", 60);
+    await until(() => phase("g401001") === "ending", 10);
+    await minute(3);
+    assert.equal(phase("g401001"), "ending");
+    assert.match(rec("g401001").auto.waiting, new RegExp(name));
+    assert.ok(w.containers.has("g401001"), "worker kept while YouTube may go on air");
+    await until(() => phase("g401001") === "failed", 10);
+    const d = rec("g401001");
+    assert.equal(d.auto.ytUnconfirmed, true);
+    assert.match(d.auto.error, new RegExp(`still ${name} after 5 min`));
+    assert.equal(d.status, "error");
+    assert.ok(!w.transitions.includes("yt-g401001:complete"), "never completed (couldn't be)");
+  });
+}
+
+test("a failed, unconfirmed record is untouched by later runs and blocks every way back in", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  w.completeFails = true;
+  await setGame(401001, "final");
+  await until(() => phase("g401001") === "failed", 30);
+  // Simulate a stale stored state: it says "ready" though YouTube may be live.
+  await db.doc("broadcasts/g401001").update({ "youtube.lifecycleStatus": "ready" });
+  const before = snapshot("g401001");
+  const ytBefore = w.ytCalls.length;
+  const createsBefore = w.creates;
+  await minute(30);
+  assert.equal(snapshot("g401001"), before, "no later run changed it (never marked completed)");
+  assert.equal(w.ytCalls.length, ytBefore, "no YouTube call for it");
+  assert.equal(w.creates, createsBefore, "no new YouTube broadcast");
+  assert.deepEqual(orch.desiredWorkers([{ id: "g401001", ...rec("g401001") }]), [], "no worker");
+
+  const unconfirmed = (e) => e.status === 409 && /never confirmed/.test(e.message);
+  await assert.rejects(orch.retryGame(db, "admin1", { id: "g401001" }), unconfirmed, "Retry");
+  await assert.rejects(select("s1"), unconfirmed, "re-enable");
+  await assert.rejects(bc.deleteRecord(db, { id: "g401001" }), unconfirmed, "delete");
+  await assert.rejects(bc.youtubeCreate(db, { id: "g401001" }), unconfirmed, "manual create/bind");
+  // Repair Statuses can't clear the flag or open a way around the guard.
+  await bc.refreshStatuses(db, { apply: true });
+  assert.equal(rec("g401001").auto.ytUnconfirmed, true);
+  assert.equal(rec("g401001").status, "error");
+  await assert.rejects(orch.retryGame(db, "admin1", { id: "g401001" }), unconfirmed, "Retry after repair");
+  assert.equal(w.creates, createsBefore);
+});
+
+test("a worker that crashes during ending is not relaunched; the ending still completes", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  w.completeFailCount = 4;
+  await setGame(401001, "final");
+  await until(() => phase("g401001") === "ending", 20);
+  assert.equal(orch.desiredWorkers([{ id: "g401001", ...rec("g401001") }])[0].noRestart, true);
+  const starts = () => w.events.filter((e) => e === "worker-start:g401001").length;
+  const before = starts();
+  w.containers.get("g401001").state = "exited";
+  w.containers.get("g401001").exitCode = 1;
+  await minute(3);
+  assert.equal(starts(), before, "not relaunched");
+  assert.equal(w.containers.get("g401001")?.state, "exited");
+  await until(() => phase("g401001") === "completed", 6);
+  assert.ok(w.transitions.includes("yt-g401001:complete"));
+  assert.equal(rec("g401001").auto.ytUnconfirmed, undefined);
+});
+
+test("outside ending, a crashed worker is still restarted (regression)", async () => {
+  await select("s1");
+  await until(() => phase("g401001") === "live", 60);
+  assert.equal(orch.desiredWorkers([{ id: "g401001", ...rec("g401001") }])[0].noRestart, undefined);
+  w.containers.get("g401001").state = "exited";
+  w.containers.get("g401001").exitCode = 1;
+  await minute(2);
+  assert.equal(w.containers.get("g401001").state, "running");
+});
+
 
 test("nothing logged contains a token", () => {
   for (const l of logs) assert.ok(!l.includes("yt-access-token-never-logged"), l);

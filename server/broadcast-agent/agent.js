@@ -59,7 +59,8 @@ const log = (m) => console.log(`${new Date().toISOString()} agent ${m}`);
 function validDesired(list) {
   return (Array.isArray(list) ? list : []).filter((d) =>
     ID_RE.test(String(d?.id || "")) && GAME_RE.test(String(d?.game || "")) && Number.isInteger(d.slot) && d.slot >= 0 && d.slot < 10
-    && (d.deadlineAt == null || Number.isFinite(d.deadlineAt)));
+    && (d.deadlineAt == null || Number.isFinite(d.deadlineAt)) && (d.rehearsal == null || typeof d.rehearsal === "boolean")
+    && (d.noRestart == null || typeof d.noRestart === "boolean"));
 }
 
 // ── Docker ──
@@ -71,12 +72,16 @@ function run(cmd, args) {
   });
 }
 
-function realDocker(cfg) {
-  const docker = (args) => (cfg.dryRun ? (log(`[dry-run] docker ${args.filter((a) => !a.includes("youtube-key")).join(" ")}`), { code: 0, stdout: "", stderr: "" }) : run("docker", args));
+// DRY_RUN never runs docker: it logs what it would run and keeps simulated
+// containers in memory (reported with simulated: true), so a rehearsal can
+// go through its whole lifecycle.
+function realDocker(cfg, runner = run) {
+  const sim = new Map();
+  const docker = (args) => (cfg.dryRun ? (log(`[dry-run] docker ${args.filter((a) => !a.includes("youtube-key")).join(" ")}`), { code: 0, stdout: "", stderr: "" }) : runner("docker", args));
   return {
     async list() {
-      if (cfg.dryRun) return [];
-      const r = await run("docker", ["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{json .}}"]);
+      if (cfg.dryRun) return [...sim.values()].map((c) => ({ ...c }));
+      const r = await runner("docker", ["ps", "-a", "--filter", `label=${LABEL}`, "--format", "{{json .}}"]);
       if (r.code) throw new Error(`docker ps failed: ${r.stderr.trim().slice(0, 200)}`);
       return r.stdout.split("\n").filter(Boolean).map((line) => {
         const j = JSON.parse(line);
@@ -87,7 +92,7 @@ function realDocker(cfg) {
     },
     async hasImage() {
       if (cfg.dryRun) return true;
-      return (await run("docker", ["image", "inspect", cfg.image])).code === 0;
+      return (await runner("docker", ["image", "inspect", cfg.image])).code === 0;
     },
     async start(d, durationSec) {
       await docker(["rm", "-f", nameOf(d.id)]);
@@ -103,13 +108,16 @@ function realDocker(cfg) {
         "node", "worker.js", "--game", d.game, "--base", cfg.base, "--duration", String(durationSec),
       ]);
       if (r.code) throw new Error(`docker run failed: ${r.stderr.trim().slice(0, 200)}`);
+      if (cfg.dryRun) sim.set(d.id, { id: d.id, slot: d.slot, state: "running", exitCode: null, simulated: true });
     },
     async stop(id) {
       await docker(["stop", "-t", "30", nameOf(id)]);
       await docker(["rm", "-f", nameOf(id)]);
+      sim.delete(id);
     },
     async remove(id) {
       await docker(["rm", "-f", nameOf(id)]);
+      sim.delete(id);
     },
   };
 }
@@ -138,17 +146,27 @@ async function reconcile(desiredIn, containers, now, cfg, docker, state, fs_ = f
     }
     state.restarts.delete(c.id);
     state.errors.delete(c.id);
+    state.held?.delete(c.id);
   }
 
   let running = containers.filter((c) => c.state === "running" && desired.has(c.id)).length;
   for (const d of desired.values()) {
     const c = have.get(d.id);
     if (c?.state === "running" || c?.state === "restarting" || c?.state === "created") continue;
+    // Ending: a running worker keeps feeding YouTube, but one that crashed
+    // or exited is never relaunched (and none is started fresh).
+    if (d.noRestart) {
+      state.held ||= new Set();
+      if (!state.held.has(d.id)) { state.held.add(d.id); did.push(`not relaunching ${d.id} (ending)`); }
+      continue;
+    }
     if (c?.state === "exited" && c.exitCode === 2) continue; // bad settings: restarting won't help — reported instead
     const r = state.restarts.get(d.id) || { count: 0, nextAt: 0 };
     if (c && now < r.nextAt) continue; // crashed: wait out the backoff
+    // A rehearsal must never stream: only a DRY_RUN agent (simulated) runs one.
+    if (d.rehearsal && !cfg.dryRun) { state.errors.set(d.id, "rehearsal-needs-dry-run"); did.push(`refused rehearsal ${d.id} (not in DRY_RUN)`); continue; }
     if (running >= cfg.maxWorkers) { did.push(`skip ${d.id} (at MAX_WORKERS ${cfg.maxWorkers})`); continue; }
-    if (!fs_.existsSync(keyFile(cfg.keyDir, d.slot))) { state.errors.set(d.id, "no-key"); did.push(`no key for slot ${d.slot}`); continue; }
+    if (!d.rehearsal && !fs_.existsSync(keyFile(cfg.keyDir, d.slot))) { state.errors.set(d.id, "no-key"); did.push(`no key for slot ${d.slot}`); continue; }
     if (!(await docker.hasImage())) { state.errors.set(d.id, "no-image"); did.push("no image"); continue; }
     const durationSec = Math.max(60, Math.floor(((d.deadlineAt || now + cfg.defaultRuntimeSec * 1000) - now) / 1000));
     try {
@@ -169,7 +187,7 @@ async function reconcile(desiredIn, containers, now, cfg, docker, state, fs_ = f
 // What goes to the control plane: real containers, plus desired ones that
 // couldn't launch (with why).
 function report(containers, desired, state) {
-  const out = containers.map((c) => ({ id: c.id, slot: c.slot, state: c.state, exitCode: c.exitCode, restarts: state.restarts.get(c.id)?.count || 0 }));
+  const out = containers.map((c) => ({ id: c.id, slot: c.slot, state: c.state, exitCode: c.exitCode, restarts: state.restarts.get(c.id)?.count || 0, ...(c.simulated ? { simulated: true } : {}) }));
   for (const d of validDesired(desired)) {
     if (!containers.some((c) => c.id === d.id) && state.errors.has(d.id)) out.push({ id: d.id, slot: d.slot, state: "missing", error: state.errors.get(d.id) });
   }
@@ -208,6 +226,7 @@ async function main() {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({
+            dryRun: CFG.dryRun,
             containers: report(containers, desired, state),
             host: { version: VERSION, load1: os.loadavg()[0], memFreeMb: Math.round(os.freemem() / 1048576), cpus: os.cpus().length },
           }),
@@ -230,4 +249,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { reconcile, report, validDesired, keyFile, backoff, nameOf, singleInstance, VERSION };
+module.exports = { reconcile, report, validDesired, keyFile, backoff, nameOf, singleInstance, realDocker, VERSION };

@@ -8,6 +8,7 @@
 //     homeTeam, awayTeam, kickoff   these are a display snapshot taken at create)
 //     scheduledStart             Timestamp — when the YouTube broadcast is scheduled
 //     status                     overall: scheduled | preparing | live | ended | cancelled | error
+//                                (| rehearsal — an open rehearsal record, rehearsal: true)
 //     youtube: {                 the YouTube broadcast
 //       title, description, privacyStatus,
 //       broadcastId, videoId, streamId, channelId,
@@ -34,11 +35,28 @@ const { httpError } = yt;
 const AUTO_PREPARING = ["preparing", "vm", "worker", "ingest", "going-live"];
 // YouTube lifecycles where the broadcast is (or may be) on the air.
 const ON_AIR = ["testStarting", "testing", "liveStarting", "live"];
+// …and the ones that prove it's off the air.
+const OFF_AIR = ["complete", "revoked", "ready", "created"];
+
+// An automation ending that couldn't confirm YouTube went off the air
+// (orchestrator.js giveUp → auto.ytUnconfirmed). Until Refresh YouTube
+// Status confirms it's off the air, nothing may restart, re-enable, rebuild
+// or forget that broadcast.
+const UNCONFIRMED_MSG = "The YouTube broadcast may still be on the air — its end was never confirmed. Check it in YouTube Studio (end it there if it's live), then Refresh YouTube Status; once YouTube confirms it's off the air this can be retried.";
+function assertConfirmedOffAir(b) {
+  if (b?.auto?.ytUnconfirmed === true) throw httpError(409, UNCONFIRMED_MSG);
+}
 function deriveStatus(b) {
+  // A rehearsal never has a real YouTube state: it's "rehearsal" while open.
+  if (b.rehearsal === true) {
+    const ph = b.auto?.phase;
+    return ph === "completed" ? "ended" : ph === "cancelled" ? "cancelled" : ph === "failed" ? "error" : "rehearsal";
+  }
   const lc = b.youtube?.lifecycleStatus;
+  // A failed automation is an error even if YouTube was safely completed.
+  if (b.auto?.phase === "failed") return "error";
   if (lc === "complete" || lc === "revoked") return "ended";
   if (b.auto?.phase === "completed") return "ended";
-  if (b.auto?.phase === "failed") return "error";
   // Cancelled automation is done — unless YouTube still shows it on air
   // (completing it failed), which needs attention.
   if (b.auto?.phase === "cancelled") return ON_AIR.includes(lc) ? "error" : "cancelled";
@@ -145,6 +163,8 @@ async function deleteRecord(db, body) {
   await db.runTransaction(async (tx) => {
     const b = (await tx.get(ref)).data();
     if (!b) throw httpError(404, "That broadcast record doesn't exist.");
+    // Deleting would drop the only record of a broadcast that may be on air.
+    assertConfirmedOffAir(b);
     if (b.auto?.open || b.auto?.active) {
       throw httpError(409, "This broadcast is still under automation — disable it in Auto Schedule (or let it finish) and wait until it shows Cancelled or Ended before deleting.");
     }
@@ -248,12 +268,22 @@ async function fail(ref, e) {
 
 // body.streamId (orchestrator only): bind to that slot's stream, re-binding
 // an existing broadcast if it's on a different one.
+// Server-side guard for every YouTube create/bind (manual or orchestrator):
+// never for a rehearsal record, never in rehearsal-only mode.
+function assertRealYoutube(data) {
+  assertConfirmedOffAir(data);
+  if (data?.rehearsal === true) throw httpError(409, "This is a rehearsal record — it never creates or touches a YouTube broadcast.");
+  if (process.env.STREAM_REHEARSAL_ONLY === "1") throw httpError(409, "The server is in rehearsal-only mode (STREAM_REHEARSAL_ONLY) — YouTube broadcasts can't be created.");
+}
+
 async function youtubeCreate(db, body) {
-  const { ref } = await loadRecord(db, body.id);
+  const { ref, data: first } = await loadRecord(db, body.id);
+  assertRealYoutube(first);
   const slotStreamId = body.streamId ? String(body.streamId) : null;
   // One create at a time per record (double clicks, two admins).
   const rec = await db.runTransaction(async (tx) => {
     const d = (await tx.get(ref)).data();
+    assertRealYoutube(d);
     const rebind = slotStreamId && d.youtube?.streamId !== slotStreamId;
     if (d.youtube?.broadcastId && d.youtube?.streamId && !rebind) throw httpError(409, "This record already has a bound YouTube broadcast — use Refresh.");
     if (d.youtube?.creatingAt && Date.now() - d.youtube.creatingAt < CREATE_LOCK_MS) throw httpError(409, "A YouTube create is already running for this broadcast.");
@@ -299,6 +329,7 @@ async function youtubeCreate(db, body) {
 
 async function youtubeRefresh(db, body) {
   const { ref, data } = await loadRecord(db, body.id);
+  if (data.rehearsal === true) throw httpError(409, "This is a rehearsal record — it has no YouTube broadcast.");
   if (!data.youtube?.broadcastId) throw httpError(400, "No YouTube broadcast yet — create it first.");
   try {
     const s = await settings(db);
@@ -307,8 +338,14 @@ async function youtubeRefresh(db, body) {
     const b = await yt.getBroadcast(token, data.youtube.broadcastId);
     if (!b) throw httpError(404, "YouTube no longer has this broadcast (deleted in Studio?).");
     const st = b.boundStreamId ? await yt.getStream(token, b.boundStreamId) : null;
-    await finish(ref, youtubeFields(b, st));
-    return { ok: true };
+    const upd = youtubeFields(b, st);
+    // Read-only toward YouTube. A read that shows the broadcast off the air is
+    // the only thing that clears an unconfirmed ending; the record's failed /
+    // error status is left as it is (finish() re-derives it from auto.phase).
+    const confirmed = data.auto?.ytUnconfirmed === true && OFF_AIR.includes(b.lifeCycleStatus);
+    if (confirmed) Object.assign(upd, { "auto.ytUnconfirmed": false, "auto.offAirConfirmedAt": Date.now() });
+    await finish(ref, upd);
+    return { ok: true, ...(data.auto?.ytUnconfirmed === true ? { offAirConfirmed: confirmed } : {}) };
   } catch (e) {
     await ref.update({ "youtube.error": String(e.message || e).slice(0, 500), status: "error", updatedAt: FieldValue.serverTimestamp() }).catch(() => {});
     throw e;
@@ -348,6 +385,7 @@ async function setWorkerStream(db, body) {
 }
 
 module.exports = {
-  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, loadRecord, settings, refreshStatuses, ON_AIR,
+  deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, loadRecord, settings, refreshStatuses, ON_AIR, OFF_AIR,
+  assertConfirmedOffAir, UNCONFIRMED_MSG,
   createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, channelStatus, setWorkerStream,
 };

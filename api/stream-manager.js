@@ -22,8 +22,9 @@
 //                    broadcast is live unless confirmLive: true)
 // The vm-* actions only ever touch the VM named in GCE_* env vars
 // (server/stream-manager/compute.js); a request can't name another one.
-//   auto-select      { scheduleId, privacyStatus, confirmPublic } enable a
-//                    schedule26 game for automatic broadcast (nothing starts now)
+//   auto-select      { scheduleId, privacyStatus, confirmPublic, rehearsal } enable a
+//                    schedule26 game for automatic broadcast (nothing starts now);
+//                    rehearsal: true = simulated, never touches YouTube
 //   auto-cancel      { id, confirmEnd } disable it (ends it if on air — confirmEnd)
 //   auto-retry       { id } a failed / cancelled one back to selected
 //   auto-config      { slotStreamIds, maxConcurrent } stream slots / capacity

@@ -28,9 +28,28 @@
 //   enabled, open (non-terminal → ticked), active (holds a slot / needs the VM)
 //   scheduleId, phase, phaseAt, slot, kickoffAt, prepAt
 //   workerStartedAt, deadlineAt (hard max runtime), liveAt, finalSeenAt
-//   youtubeDone, youtubeDoneAt, endReason, completedAt
+//   youtubeDone, youtubeDoneAt, ytUnconfirmed, endReason, failReason, completedAt
 //   error, errorAt, errors, waiting (a non-error "what it's waiting on")
 //   cancelRequested, selectedBy, selectedAt
+//   sim { lifecycleStatus, streamStatus }   rehearsal only — simulated YouTube
+//
+// Rehearsal (record-level `rehearsal: true`, doc id r<CFBDGameId>): the same
+// lifecycle with every YouTube call blocked server-side — no broadcast is
+// created, bound, transitioned or completed, and no Worker Stream or slot is
+// needed. What YouTube would do is simulated in auto.sim (youtube.* is never
+// written). Its worker is only ever sent to a VM agent that reports DRY_RUN
+// (a simulated container); the agent refuses one otherwise. A rehearsal
+// record is never adopted as, or converted into, a real one.
+// STREAM_REHEARSAL_ONLY=1 (env) additionally blocks every real broadcast
+// from starting and every YouTube mutation except completing one that's
+// already on air.
+//
+// Failures after YouTube may have started testing or going live go through
+// "ending" (complete on YouTube, confirm, then stop the worker) and end
+// "failed" — never straight to failed with a broadcast left on air.
+//
+// No Worker Stream configured = capacity 0: a real game is held in
+// "selected" with an error (no VM, no YouTube) and fails at kickoff.
 //
 // Phases: selected → preparing → vm → worker → ingest → going-live → live
 //         → postgame → ending → completed;  failed / cancelled (retryable)
@@ -39,7 +58,7 @@
 // time, so each concurrent broadcast needs its own slot. Slot i is
 // slotStreamIds[i] (default: the Channel's worker stream as slot 0) and its
 // key lives only on the VM (~/.we-draft/youtube-key, youtube-key-1, …).
-// capacity = min(slots, maxConcurrent).
+// capacity = min(slots, maxConcurrent) — 0 when no stream is configured.
 //
 // Logs: phase changes and VM actions with record ids — never tokens or keys.
 
@@ -56,6 +75,7 @@ const CFG = {
   INGEST_TIMEOUT_MS: 5 * 60e3,      // YouTube sees the stream
   GO_LIVE_TIMEOUT_MS: 5 * 60e3,
   ENDING_TIMEOUT_MS: 3 * 60e3,      // worker stop after YouTube complete
+  ENDING_YT_TIMEOUT_MS: 5 * 60e3,   // confirming YouTube is off the air, before the worker is stopped anyway
   AGENT_FRESH_MS: 60e3,
   IDLE_STOP_MS: 10 * 60e3,          // an orchestrator-started VM idles this long before stopping
   KEEP_WARM_MS: 45 * 60e3,          // …unless a selected game prepares within this
@@ -76,6 +96,32 @@ const ORCH = "streamManager/orchestrator";
 const AGENT = "streamManager/agent";
 const LOCK = "streamManagerPrivate/orchestratorLock";
 
+// ── Rehearsal / YouTube guards ──
+const rehearsalOnly = () => process.env.STREAM_REHEARSAL_ONLY === "1";
+const isRehearsal = (r) => r?.rehearsal === true;
+
+// Why a real broadcast can't start now (null = it can).
+function realBlocker(ctx) {
+  if (rehearsalOnly()) return "The server is in rehearsal-only mode (STREAM_REHEARSAL_ONLY) — real broadcasts are blocked. Use Rehearse.";
+  if (!ctx.capacity) return "No Worker Stream is configured (0 stream slots) — pick one in Stream Manager → Channel → Worker Stream (needs YouTube live streaming), or use Rehearse.";
+  if (ctx.agentDryRun) return "The VM agent is in DRY_RUN mode — real broadcasts are blocked. Switch the agent to real mode, or use Rehearse.";
+  return null;
+}
+
+// The YouTube functions one record may use: none for a rehearsal; in
+// rehearsal-only mode, reads plus "complete" (ending something already on
+// air is a safety action), nothing that creates or starts a broadcast.
+function youtubeFor(r, ctx) {
+  const blocked = (what) => async () => { throw httpError(409, `Blocked: ${what} isn't allowed ${isRehearsal(r) ? "for a rehearsal" : "in rehearsal-only mode"}.`); };
+  if (isRehearsal(r)) {
+    return { ...ctx, getStream: blocked("a YouTube stream read"), getBroadcast: blocked("a YouTube broadcast read"), transition: blocked("a YouTube transition"), youtubeCreate: blocked("creating a YouTube broadcast"), setScheduledStart: blocked("scheduling a YouTube broadcast") };
+  }
+  if (rehearsalOnly()) {
+    return { ...ctx, youtubeCreate: blocked("creating a YouTube broadcast"), setScheduledStart: blocked("scheduling a YouTube broadcast"), transition: (id, to) => (to === "complete" ? ctx.transition(id, to) : blocked(`a YouTube "${to}" transition`)()) };
+  }
+  return ctx;
+}
+
 const toMs = (v) => (v?.toMillis ? v.toMillis() : v instanceof Date ? v.getTime() : typeof v === "number" ? v : Date.parse(v) || null);
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,119}$/;
 const ID_RE = /^[A-Za-z0-9]{1,40}$/;
@@ -84,21 +130,30 @@ const ID_RE = /^[A-Za-z0-9]{1,40}$/;
 // else the CFBD id, which the broadcast route also accepts.
 const workerGame = (r) => (SLUG_RE.test(r.gameSlug || "") ? r.gameSlug : /^\d{1,20}$/.test(String(r.gameId || "")) ? String(r.gameId) : null);
 
+// No configured stream → capacity 0, whatever maxConcurrent says.
 function slotsOf(orch = {}, ytSettings = {}) {
-  const ids = Array.isArray(orch.slotStreamIds) && orch.slotStreamIds.length ? orch.slotStreamIds
-    : ytSettings.workerStreamId ? [ytSettings.workerStreamId] : [];
-  const capacity = Math.min(ids.length, Math.max(1, Number(orch.maxConcurrent) || 1));
+  const ids = (Array.isArray(orch.slotStreamIds) && orch.slotStreamIds.length ? orch.slotStreamIds
+    : ytSettings.workerStreamId ? [ytSettings.workerStreamId] : []).filter(Boolean);
+  const capacity = ids.length ? Math.min(ids.length, Math.max(1, Number(orch.maxConcurrent) || 1)) : 0;
   return { ids, capacity };
 }
 
 // What the VM agent should be running right now (also the agent's answer).
 // A disabled record (auto.enabled false) never gets a worker, except to
-// finish an ending that's already completing YouTube.
-function desiredWorkers(records) {
+// finish an ending that's already completing YouTube. A rehearsal worker is
+// only ever sent to an agent that reports DRY_RUN (agentDryRun). While
+// ending, noRestart: the agent keeps a running worker feeding YouTube but
+// never relaunches (or first launches) one.
+function desiredWorkers(records, { agentDryRun = false } = {}) {
   return records
-    .filter((r) => r.auto?.open && r.auto.slot != null && (r.auto.enabled !== false || r.auto.phase === "ending")
+    .filter((r) => r.auto?.open && (r.auto.slot != null || isRehearsal(r)) && (r.auto.enabled !== false || r.auto.phase === "ending")
       && (RUN_WORKER.includes(r.auto.phase) || (r.auto.phase === "ending" && !r.auto.youtubeDone)))
-    .map((r) => ({ id: r.id, game: workerGame(r), slot: r.auto.slot, deadlineAt: r.auto.deadlineAt || null }))
+    .filter((r) => !isRehearsal(r) || agentDryRun)
+    .map((r) => ({
+      id: r.id, game: workerGame(r), slot: isRehearsal(r) ? 0 : r.auto.slot, deadlineAt: r.auto.deadlineAt || null,
+      ...(isRehearsal(r) ? { rehearsal: true } : {}),
+      ...(r.auto.phase === "ending" ? { noRestart: true } : {}),
+    }))
     .filter((w) => w.game && ID_RE.test(w.id));
 }
 
@@ -108,11 +163,20 @@ async function step(r, ctx) {
   const a = r.auto || {};
   const now = ctx.now;
   const phase = a.phase || "selected";
+  const rehearsal = isRehearsal(r);
   const p = {}; // auto.* changes
-  const y = {}; // youtube.* changes
+  const y = {}; // youtube.* changes (never for a rehearsal)
   const to = (next, more = {}) => Object.assign(p, { phase: next, phaseAt: now, error: null, errors: 0, waiting: null }, more);
   const fail = (msg) => to("failed", { error: msg, errorAt: now, slot: null });
+  // A failure once YouTube may have started testing / going live: end it
+  // through "ending" (complete on YouTube, confirm, then stop the worker),
+  // never straight to failed.
+  const abort = (msg) => {
+    to("ending", { endReason: "failed", failReason: msg, youtubeDone: false });
+    Object.assign(p, { error: msg, errorAt: now });
+  };
   const since = now - (a.phaseAt || now);
+  const sim = (more) => { p.sim = { ...(a.sim || {}), ...p.sim, ...more }; };
 
   const sched = ctx.schedules.get(a.scheduleId);
   const game = ctx.games.get(String(r.gameId));
@@ -120,6 +184,8 @@ async function step(r, ctx) {
   if (kickoff !== (a.kickoffAt ?? null)) Object.assign(p, { kickoffAt: kickoff, prepAt: kickoff ? kickoff - CFG.PREP_LEAD_MS : null });
   const prepAt = kickoff ? kickoff - CFG.PREP_LEAD_MS : null;
   const final = game?.status === "final";
+  // Why a real (non-rehearsal) broadcast can't start right now, if anything.
+  const blocker = rehearsal ? null : realBlocker(ctx);
 
   const syncYoutube = (b) => {
     if (!b) return;
@@ -162,24 +228,38 @@ async function step(r, ctx) {
       if (!kickoff) { p.waiting = "Kickoff time isn't set in the CFB schedule yet."; break; }
       if (final || sched?.Final) { fail("The game was already final before the broadcast started."); break; }
       if (now > kickoff + CFG.MISSED_MS) { fail("Missed — the game kicked off over 4h ago and was never prepared."); break; }
-      if (now >= prepAt) to("preparing");
-      else if (a.waiting) p.waiting = null;
+      if (now < prepAt) { if (a.waiting) p.waiting = null; break; }
+      if (blocker) {
+        // Held here (not preparing): no VM, no YouTube. Gives up at kickoff.
+        if (now >= kickoff) { fail(`${blocker} Kickoff passed, so this broadcast was not started.`); break; }
+        if (a.error !== blocker) Object.assign(p, { error: blocker, errorAt: now, waiting: "Blocked — see the error." });
+        break;
+      }
+      to("preparing");
       break;
     }
 
     case "preparing": {
+      if (blocker) { fail(blocker); break; }
+      if (!game) throw httpError(409, "The game isn't in We-Draft Live (liveGames) yet — the live ingester adds this week's games.");
+      if (rehearsal) {
+        // No slot, no Worker Stream, no YouTube broadcast: everything YouTube
+        // would do is simulated in auto.sim.
+        sim({ lifecycleStatus: "ready", streamStatus: "inactive" });
+        to("vm", { slot: null });
+        break;
+      }
       let slot = a.slot ?? null;
       if (slot == null) {
         slot = ctx.takeSlot(r.youtube?.streamId);
         if (slot == null) {
           if (kickoff && now > kickoff + CFG.MISSED_MS) { fail("No stream slot came free in time."); break; }
-          p.waiting = `Waiting for a free stream slot — all ${ctx.capacity} in use${ctx.capacity ? "" : " (none configured: pick a Worker Stream in Channel)"}.`;
+          p.waiting = `Waiting for a free stream slot — all ${ctx.capacity} in use.`;
           break;
         }
         p.slot = slot;
       }
       const streamId = ctx.slots[slot];
-      if (!game) throw httpError(409, "The game isn't in We-Draft Live (liveGames) yet — the live ingester adds this week's games.");
       const yt = r.youtube || {};
       if (yt.broadcastId && ["complete", "revoked"].includes(yt.lifecycleStatus)) throw httpError(409, "This record's YouTube broadcast already ended — Retry creates a new one.");
       if (!(yt.broadcastId && yt.streamId === streamId)) {
@@ -192,7 +272,14 @@ async function step(r, ctx) {
     }
 
     case "vm": {
-      if (ctx.vmReady) { to("worker", { workerStartedAt: now, deadlineAt: now + CFG.MAX_RUNTIME_MS }); break; }
+      if (ctx.vmReady) {
+        if (rehearsal && !ctx.agentDryRun) {
+          fail("Rehearsals only run on a VM agent in DRY_RUN mode — it never launches a real worker for a rehearsal. Set DRY_RUN=1 on the agent, or use Enable for a real broadcast.");
+          break;
+        }
+        to("worker", { workerStartedAt: now, deadlineAt: now + CFG.MAX_RUNTIME_MS });
+        break;
+      }
       if (since > CFG.VM_READY_TIMEOUT_MS) {
         fail(ctx.vm?.state === "running"
           ? "The VM is running but its broadcast agent isn't reporting — check `systemctl status we-draft-agent` on the VM."
@@ -210,27 +297,32 @@ async function step(r, ctx) {
       if (c?.state === "exited" && c.exitCode === 2) { fail("The worker refused its settings (exit 2) — check YOUTUBE_STREAM_URL and this slot's key file on the VM."); break; }
       if (c?.error === "no-image") { fail("The worker Docker image isn't on the VM — build it (server/broadcast-agent/README.md)."); break; }
       if (c?.error === "no-key") { fail(`The VM has no key file for stream slot ${a.slot} — see server/broadcast-agent/README.md.`); break; }
+      if (c?.error === "rehearsal-needs-dry-run") { fail("The VM agent refused a rehearsal worker because it isn't in DRY_RUN mode."); break; }
       if (since > CFG.WORKER_START_TIMEOUT_MS) { fail(`The worker didn't start within ${CFG.WORKER_START_TIMEOUT_MS / 60e3} min${c ? ` (last state: ${c.state})` : ""}.`); break; }
       p.waiting = c ? `Worker ${c.state}…` : "Waiting for the agent to launch the worker…";
       break;
     }
 
     case "ingest": {
+      if (rehearsal) { sim({ streamStatus: "active", lifecycleStatus: "testing" }); to("going-live"); break; }
       const st = await ctx.getStream(ctx.slots[a.slot]);
       Object.assign(y, { streamStatus: st?.streamStatus || null, healthStatus: st?.healthStatus || null });
       if (st?.streamStatus === "active") { await startTesting(); to("going-live"); break; }
-      if (since > CFG.INGEST_TIMEOUT_MS) { fail(`YouTube never received the worker's stream (status: ${st?.streamStatus || "unknown"}) — check that slot ${a.slot}'s key file on the VM belongs to stream “${st?.title || ctx.slots[a.slot]}”.`); break; }
+      if (since > CFG.INGEST_TIMEOUT_MS) { abort(`YouTube never received the worker's stream (status: ${st?.streamStatus || "unknown"}) — check that slot ${a.slot}'s key file on the VM belongs to stream “${st?.title || ctx.slots[a.slot]}”.`); break; }
       p.waiting = `Waiting for YouTube to receive the stream (${st?.streamStatus || "?"}).`;
       break;
     }
 
     case "going-live": {
+      if (rehearsal) { sim({ lifecycleStatus: "live" }); to("live", { liveAt: now }); break; }
       const b = await ctx.getBroadcast(r.youtube.broadcastId);
       syncYoutube(b);
       const lc = b?.lifeCycleStatus;
       if (lc === "live") { to("live", { liveAt: now }); break; }
       if (!b || lc === "complete" || lc === "revoked") { fail("The YouTube broadcast was deleted or ended outside Stream Manager."); break; }
-      if (since > CFG.GO_LIVE_TIMEOUT_MS) { fail(`YouTube didn't go live within ${CFG.GO_LIVE_TIMEOUT_MS / 60e3} min (lifecycle: ${lc}).`); break; }
+      // Timed out — YouTube may still be testing or already going live, so
+      // end it safely rather than leave it on the air without a feed.
+      if (since > CFG.GO_LIVE_TIMEOUT_MS) { abort(`YouTube didn't go live within ${CFG.GO_LIVE_TIMEOUT_MS / 60e3} min (lifecycle: ${lc}).${a.error ? ` Last error: ${a.error}` : ""}`); break; }
       if (lc === "testing") syncYoutube(await ctx.transition(r.youtube.broadcastId, "live"));
       else if (lc === "ready") await startTesting();
       p.waiting = `Going live (YouTube: ${lc})…`;
@@ -242,8 +334,10 @@ async function step(r, ctx) {
       // A YouTube read failing (quota, revoked auth, outage) must not stop
       // the FINAL / postgame logic — the game still ends on time.
       let b, ytErr = null;
-      try { b = await ctx.getBroadcast(r.youtube.broadcastId); syncYoutube(b); } catch (e) { ytErr = String(e.message || e).slice(0, 150); }
-      if (!ytErr && (!b || ["complete", "revoked"].includes(b.lifeCycleStatus))) { to("ending", { endReason: "ended on YouTube", youtubeDone: true, youtubeDoneAt: now }); break; }
+      if (!rehearsal) {
+        try { b = await ctx.getBroadcast(r.youtube.broadcastId); syncYoutube(b); } catch (e) { ytErr = String(e.message || e).slice(0, 150); }
+        if (!ytErr && (!b || ["complete", "revoked"].includes(b.lifeCycleStatus))) { to("ending", { endReason: "ended on YouTube", youtubeDone: true, youtubeDoneAt: now }); break; }
+      }
       const c = ctx.containers.get(r.id);
       const note = !ctx.vmReady ? "VM or agent unavailable — recovering."
         : c?.state !== "running" ? "Worker isn't running — the agent is restarting it."
@@ -262,17 +356,50 @@ async function step(r, ctx) {
 
     case "ending": {
       if (!a.youtubeDone) {
-        // YouTube first, then the worker, so the stream never shows a dead feed.
+        // YouTube first, then the worker, so the stream never shows a dead
+        // feed and a broadcast is never left on air without one. Done only
+        // when YouTube confirms it's off the air; bounded by
+        // ENDING_YT_TIMEOUT_MS, after which the worker is stopped anyway and
+        // the record ends failed with an explicit "couldn't confirm".
+        const done = () => Object.assign(p, { youtubeDone: true, youtubeDoneAt: now, waiting: "Stopping the worker…" });
+        if (rehearsal) { if (a.sim?.lifecycleStatus) sim({ lifecycleStatus: "complete", streamStatus: "inactive" }); done(); break; }
+        if (!r.youtube?.broadcastId) { done(); break; }
+        const giveUp = (why) => Object.assign(p, {
+          youtubeDone: true, youtubeDoneAt: now, ytUnconfirmed: true, waiting: null, errorAt: now,
+          error: [a.failReason, `Couldn't confirm the YouTube broadcast ended (${why}) — end it in YouTube Studio, then Refresh YouTube Status.`].filter(Boolean).join(" "),
+        });
+        const overdue = since > CFG.ENDING_YT_TIMEOUT_MS;
+        const errors = (a.errors || 0) + 1;
+        let b;
         try {
-          const b = r.youtube?.broadcastId ? await ctx.getBroadcast(r.youtube.broadcastId) : null;
-          syncYoutube(b);
-          if (b && ["live", "testing"].includes(b.lifeCycleStatus)) syncYoutube(await ctx.transition(b.id, "complete"));
-          Object.assign(p, { youtubeDone: true, youtubeDoneAt: now, waiting: "Stopping the worker…" });
+          b = await ctx.getBroadcast(r.youtube.broadcastId);
         } catch (e) {
-          const errors = (a.errors || 0) + 1;
-          if (errors < CFG.MAX_ERRORS) throw e;
-          Object.assign(p, { youtubeDone: true, youtubeDoneAt: now, errors, error: `Couldn't complete the YouTube broadcast (${e.message}) — end it in YouTube Studio.`, errorAt: now });
+          if (overdue) { giveUp(String(e.message || e).slice(0, 150)); break; }
+          Object.assign(p, { errors, waiting: `Can't read YouTube yet (${String(e.message || e).slice(0, 120)}) — retrying.` });
+          break;
         }
+        syncYoutube(b);
+        const lc = b?.lifeCycleStatus;
+        if (!b || ["complete", "revoked", "created", "ready"].includes(lc)) { done(); break; } // off the air (or never on it)
+        if (overdue) { giveUp(`still ${lc} after ${CFG.ENDING_YT_TIMEOUT_MS / 60e3} min`); break; }
+        if (["live", "testing"].includes(lc)) {
+          try {
+            const t = await ctx.transition(r.youtube.broadcastId, "complete");
+            syncYoutube(t);
+            if (["complete", "revoked"].includes(t?.lifeCycleStatus)) { done(); break; }
+          } catch (e) {
+            // redundantTransition: already completing — confirmed by the next read.
+            if (!/redundantTransition/.test(e.message)) {
+              Object.assign(p, { errors, waiting: `Completing on YouTube failed (${String(e.message || e).slice(0, 120)}) — retrying.` });
+              break;
+            }
+          }
+          p.waiting = "Completing the YouTube broadcast — confirming…";
+          break;
+        }
+        // testStarting / liveStarting: it may be about to go on air — wait,
+        // then complete it; the worker keeps running meanwhile.
+        p.waiting = `Waiting for YouTube (${lc}) before completing it…`;
         break;
       }
       const c = ctx.containers.get(r.id);
@@ -280,9 +407,11 @@ async function step(r, ctx) {
       // The stop wait counts from when YouTube was done, not from the
       // start of ending (completing may have taken a few retries).
       if (stopped || now - (a.youtubeDoneAt || a.phaseAt || now) > CFG.ENDING_TIMEOUT_MS) {
-        // Never on air (cancelled while starting) → cancelled, so it can be retried.
-        to(a.liveAt ? "completed" : "cancelled", { completedAt: now, slot: null });
-        // Keep a failsafe / YouTube note, and add the worker one if needed.
+        // Failed (or unconfirmed on YouTube) → failed; otherwise on air →
+        // completed; never on air (cancelled while starting) → cancelled.
+        const end = a.failReason || a.ytUnconfirmed ? "failed" : a.liveAt ? "completed" : "cancelled";
+        to(end, { completedAt: now, slot: null });
+        // Keep a failure / failsafe / YouTube note, and add the worker one if needed.
         const notes = [a.error, !stopped && "The worker didn't confirm it stopped — check the VM."].filter(Boolean);
         if (notes.length) Object.assign(p, { error: notes.join(" "), errorAt: now });
       }
@@ -351,7 +480,14 @@ async function runTick(db, deps = realDeps()) {
       if (r.gameId) games.set(String(r.gameId), (await db.collection("liveGames").doc(String(r.gameId)).get()).data());
     }));
 
-    const soon = (r) => r.auto?.phase === "selected" && r.auto.kickoffAt && r.auto.kickoffAt - CFG.PREP_LEAD_MS - now <= CFG.KEEP_WARM_MS && now - r.auto.kickoffAt < CFG.MISSED_MS;
+    const { ids: slots, capacity } = slotsOf(orch, ytSnap.data() || {});
+    const agentDryRun = agent.dryRun === true; // the agent's last report, however old
+    const blockCtx = { capacity, agentDryRun };
+    // A selected game that can actually start soon keeps an idle VM warm.
+    const soon = (r) => r.auto?.phase === "selected" && r.auto.kickoffAt && r.auto.kickoffAt - CFG.PREP_LEAD_MS - now <= CFG.KEEP_WARM_MS && now - r.auto.kickoffAt < CFG.MISSED_MS
+      && (isRehearsal(r) || !realBlocker(blockCtx));
+    // With no Worker Stream (capacity 0) a real game never reaches an active
+    // phase (it's held in "selected"), so it never makes the VM needed.
     const needsVmNow = () => records.some((r) => ACTIVE.includes(r.auto?.phase));
 
     // The VM (only asked about when it matters).
@@ -363,7 +499,6 @@ async function runTick(db, deps = realDeps()) {
     const containers = new Map((agentFresh ? agent.containers || [] : []).map((c) => [c.id, c]));
     const vmHeld = (orch.vmHoldUntil || 0) > now;
 
-    const { ids: slots, capacity } = slotsOf(orch, ytSnap.data() || {});
     const used = new Set(records.filter((r) => ACTIVE.includes(r.auto?.phase) && r.auto.slot != null).map((r) => r.auto.slot));
     const takeSlot = (preferStreamId) => {
       const free = [...Array(capacity).keys()].filter((i) => !used.has(i));
@@ -376,7 +511,7 @@ async function runTick(db, deps = realDeps()) {
     let token = null;
     const tok = async () => (token ||= await deps.yt.accessToken(db));
     const ctx = {
-      now, db, vm, vmHeld, containers, slots, capacity, takeSlot, schedules, games,
+      now, db, vm, vmHeld, containers, slots, capacity, takeSlot, schedules, games, agentDryRun,
       vmReady: vm?.state === "running" && agentFresh,
       getStream: async (id) => deps.yt.getStream(await tok(), id),
       getBroadcast: async (id) => deps.yt.getBroadcast(await tok(), id),
@@ -389,7 +524,7 @@ async function runTick(db, deps = realDeps()) {
       const a = r.auto || {};
       let out;
       try {
-        out = await step(r, ctx);
+        out = await step(r, youtubeFor(r, ctx));
       } catch (e) {
         // A failed step is retried next tick; repeated failures of the
         // preparing step give up (later phases have their own timeouts).
@@ -397,7 +532,11 @@ async function runTick(db, deps = realDeps()) {
         const msg = String(e.message || e).slice(0, 300);
         out = { p: { errors, error: msg, errorAt: now }, y: {} };
         const limit = PHASE_TIMEOUTS[a.phase];
-        if ((a.phase === "preparing" && errors >= CFG.MAX_ERRORS) || (limit && now - (a.phaseAt || now) > limit)) {
+        const overdue = limit && now - (a.phaseAt || now) > limit;
+        if (overdue && ["ingest", "going-live"].includes(a.phase) && !isRehearsal(r)) {
+          // YouTube may already be testing / going live: end it safely.
+          Object.assign(out.p, { phase: "ending", phaseAt: now, endReason: "failed", failReason: msg, youtubeDone: false, errors: 0, waiting: null });
+        } else if ((a.phase === "preparing" && errors >= CFG.MAX_ERRORS) || overdue) {
           Object.assign(out.p, { phase: "failed", phaseAt: now, slot: null, waiting: null });
         }
         summary.errors.push(`${r.id}: ${msg}`);
@@ -454,6 +593,9 @@ async function runTick(db, deps = realDeps()) {
       orchUpd.vmIdleSince = null;
       if (vm?.state === "stopped" && orch.vmOwned) orchUpd.vmOwned = false;
     }
+    // What the UI shows: real capacity (0 = no Worker Stream), slots held, and
+    // whether the agent last reported DRY_RUN.
+    Object.assign(orchUpd, { capacity, slotsInUse: used.size, agentDryRun, rehearsalOnly: rehearsalOnly() });
     await db.doc(ORCH).set({ ...orchUpd, lastTickAt: now, lastTick: summary }, { merge: true });
     return summary;
   } finally {
@@ -475,8 +617,9 @@ function cleanReport(body) {
       state: C_STATES.includes(c.state) ? c.state : "unknown",
       exitCode: Number.isInteger(c.exitCode) ? c.exitCode : null,
       restarts: Number.isInteger(c.restarts) ? Math.min(c.restarts, 1e6) : 0,
-      error: ["no-image", "no-key", "launch-failed"].includes(c.error) ? c.error : null,
+      error: ["no-image", "no-key", "launch-failed", "rehearsal-needs-dry-run"].includes(c.error) ? c.error : null,
       slot: Number.isInteger(c.slot) ? c.slot : null,
+      simulated: c.simulated === true,
     };
   });
 }
@@ -492,7 +635,8 @@ async function agentReport(db, body, now = Date.now()) {
     memFreeMb: Number.isFinite(body.host.memFreeMb) ? body.host.memFreeMb : null,
     cpus: Number.isInteger(body.host.cpus) ? body.host.cpus : null,
   } : null;
-  await db.doc(AGENT).set({ lastSeenAt: now, containers, host }, { merge: false });
+  const dryRun = body?.dryRun === true;
+  await db.doc(AGENT).set({ lastSeenAt: now, containers, host, dryRun }, { merge: false });
 
   // Only records that hold a slot can need a worker (every 10s — keep it small).
   const recs = (await db.collection("broadcasts").where("auto.active", "==", true).get()).docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
@@ -512,7 +656,7 @@ async function agentReport(db, body, now = Date.now()) {
       ...(status === "stopped" && w.status !== "stopped" ? { "worker.stoppedAt": now } : {}),
     });
   }));
-  return { desired: desiredWorkers(recs), pollSec: 10 };
+  return { desired: desiredWorkers(recs, { agentDryRun: dryRun }), pollSec: 10 };
 }
 
 // ── Admin actions ──
@@ -529,6 +673,8 @@ async function selectGame(db, uid, body, now = Date.now()) {
   const kickoff = toMs(s.KickoffAt);
   if (kickoff && now > kickoff + CFG.MISSED_MS) throw httpError(400, "That game was played already.");
   const privacyStatus = bc.cleanPrivacy(body.privacyStatus || "unlisted", body.confirmPublic);
+  const rehearsal = body.rehearsal === true;
+  if (!rehearsal && rehearsalOnly()) throw httpError(409, "The server is in rehearsal-only mode (STREAM_REHEARSAL_ONLY) — use Rehearse.");
 
   const freshAuto = {
     enabled: true, open: true, active: false, scheduleId, phase: "selected", phaseAt: now,
@@ -540,35 +686,42 @@ async function selectGame(db, uid, body, now = Date.now()) {
   };
 
   return db.runTransaction(async (tx) => {
-    const existing = (await tx.get(db.collection("broadcasts").where("gameId", "==", gameId))).docs;
+    const all = (await tx.get(db.collection("broadcasts").where("gameId", "==", gameId))).docs;
     const live = (await tx.get(db.collection("liveGames").doc(gameId))).data();
-    for (const d of existing) {
+    for (const d of all) {
       const x = d.data();
-      if (x.auto?.open) return { id: d.id, already: true };
+      if (!x.auto?.open) continue;
+      if (isRehearsal(x) === rehearsal) return { id: d.id, already: true };
+      throw httpError(409, `This game already has an open ${isRehearsal(x) ? "rehearsal" : "real broadcast"} — disable it first.`);
     }
+    // Real and rehearsal records never stand in for each other.
+    const existing = all.filter((d) => isRehearsal(d.data()) === rehearsal);
+    // Not while an earlier broadcast of this game may still be on the air.
+    for (const d of existing) bc.assertConfirmedOffAir(d.data());
     // An existing record for this game is reused, never duplicated — but not
     // one that's already on YouTube's air (or testing): that stays manual.
-    const reuse = existing.find((d) => d.data().status !== "ended" && d.data().auto?.phase !== "completed");
+    const reuse = existing.find((d) => rehearsal || (d.data().status !== "ended" && d.data().auto?.phase !== "completed"));
     if (reuse && ["testStarting", "testing", "liveStarting", "live"].includes(reuse.data().youtube?.lifecycleStatus)) {
       throw httpError(409, "This game already has a broadcast on YouTube that's testing or live — finish it manually before enabling automation.");
     }
     if (reuse) {
-      tx.update(reuse.ref, { auto: freshAuto, updatedAt: FieldValue.serverTimestamp() });
+      tx.update(reuse.ref, { auto: freshAuto, status: rehearsal ? "rehearsal" : reuse.data().status, updatedAt: FieldValue.serverTimestamp() });
       return { id: reuse.id, adopted: true };
     }
     if (existing.length) throw httpError(409, "This game was already broadcast.");
 
     const team = (lg, name) => ({ school: lg?.school || name || null, short: lg?.short || null, logo: lg?.logo || null, color: lg?.color || null, rank: lg?.rank ?? null });
     const g = { home: { school: s.Home }, away: { school: s.Away }, slug: s.Slug, providerGameId: gameId };
-    const ref = db.collection("broadcasts").doc(`g${gameId}`);
+    const ref = db.collection("broadcasts").doc(`${rehearsal ? "r" : "g"}${gameId}`);
     tx.set(ref, {
+      ...(rehearsal ? { rehearsal: true } : {}),
       gameId, gameSlug: s.Slug || live?.slug || null,
       homeTeam: team(live?.home, s.Home), awayTeam: team(live?.away, s.Away),
       kickoff: kickoff ? new Date(kickoff).toISOString() : null,
       scheduledStart: Timestamp.fromMillis(kickoff || now + 24 * 3600e3),
       status: "scheduled",
       youtube: {
-        title: bc.defaultTitle(g).slice(0, 100), description: bc.defaultDescription(g), privacyStatus,
+        title: `${rehearsal ? "[Rehearsal] " : ""}${bc.defaultTitle(g)}`.slice(0, 100), description: bc.defaultDescription(g), privacyStatus,
         broadcastId: null, videoId: null, streamId: null, channelId: null,
         lifecycleStatus: null, streamStatus: null, healthStatus: null, lastSyncedAt: null, error: null, creatingAt: null,
       },
@@ -576,7 +729,7 @@ async function selectGame(db, uid, body, now = Date.now()) {
       auto: freshAuto,
       createdBy: uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
-    return { id: ref.id, created: true };
+    return { id: ref.id, created: true, ...(rehearsal ? { rehearsal: true } : {}) };
   });
 }
 
@@ -604,13 +757,21 @@ async function retryGame(db, uid, body) {
     const d = (await tx.get(ref)).data();
     const a = d.auto;
     if (!a || !["failed", "cancelled"].includes(a.phase)) throw httpError(409, "Only a failed or cancelled automatic broadcast can be retried.");
+    if (!isRehearsal(d) && rehearsalOnly()) throw httpError(409, "The server is in rehearsal-only mode (STREAM_REHEARSAL_ONLY) — real broadcasts can't be retried.");
+    // Unconfirmed ending: refused whatever the stored YouTube state says.
+    bc.assertConfirmedOffAir(d);
+    // Never restart over a YouTube broadcast that may still be on the air.
+    if (["testStarting", "testing", "liveStarting", "live"].includes(d.youtube?.lifecycleStatus)) {
+      throw httpError(409, "Its YouTube broadcast may still be on the air — end it in YouTube Studio, then Refresh YouTube Status, before retrying.");
+    }
     const s = a.scheduleId ? (await tx.get(db.collection("schedule26").doc(a.scheduleId))).data() : null;
     if (s?.Final) throw httpError(400, "That game is already final.");
     const upd = {
       "auto.phase": "selected", "auto.phaseAt": Date.now(), "auto.open": true, "auto.active": false, "auto.enabled": true,
       "auto.slot": null, "auto.error": null, "auto.errorAt": null, "auto.errors": 0, "auto.waiting": null,
       "auto.workerStartedAt": null, "auto.deadlineAt": null, "auto.liveAt": null, "auto.finalSeenAt": null,
-      "auto.youtubeDone": false, "auto.endReason": null, "auto.cancelRequested": false,
+      "auto.youtubeDone": false, "auto.youtubeDoneAt": null, "auto.endReason": null, "auto.cancelRequested": false,
+      "auto.failReason": null, "auto.ytUnconfirmed": false, "auto.sim": null,
       "worker.error": null, "youtube.error": null, status: "scheduled", updatedAt: FieldValue.serverTimestamp(),
     };
     // A YouTube broadcast that already ended can't go live again.

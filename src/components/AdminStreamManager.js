@@ -37,6 +37,7 @@ const OVERALL = {
   live: { label: "Live", color: GREEN, pulse: true },
   ended: { label: "Ended", color: "#333" },
   cancelled: { label: "Cancelled", color: "#8a94a3" },
+  rehearsal: { label: "Rehearsal", color: "#7b5ea7" },
   error: { label: "Error", color: RED },
 };
 
@@ -408,13 +409,18 @@ const AUTO = {
   cancelling: { label: "Cancelling", color: AMBER },
 };
 const STARTING_PHASES = ["preparing", "vm", "worker", "ingest", "going-live"];
+function autoBase(a) {
+  if (a.cancelRequested) return AUTO.cancelling;
+  if (a.phase === "selected") return a.error ? { label: "Blocked", color: RED } : a.kickoffAt ? AUTO.scheduled : AUTO.selected;
+  if (STARTING_PHASES.includes(a.phase)) return AUTO.starting;
+  return AUTO[a.phase] || AUTO.selected;
+}
+// A rehearsal's states are simulated — always labelled so.
 export function autoState(b) {
   const a = b?.auto;
   if (!a) return null;
-  if (a.cancelRequested) return AUTO.cancelling;
-  if (a.phase === "selected") return a.kickoffAt ? AUTO.scheduled : AUTO.selected;
-  if (STARTING_PHASES.includes(a.phase)) return AUTO.starting;
-  return AUTO[a.phase] || AUTO.selected;
+  const s = autoBase(a);
+  return b.rehearsal ? { ...s, label: `Rehearsal · ${s.label}`, pulse: false } : s;
 }
 const GAME_STATUS = {
   scheduled: { label: "Upcoming", color: "#b8c2cf" },
@@ -472,24 +478,36 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
     act(`g${b.gameId}`, () => api("auto-cancel", { id: b.id, ...(onAir ? { confirmEnd: true } : {}) }), onAir ? "Ending — the server is completing the YouTube broadcast." : "Disabled.");
   };
   const retry = (b) => act(`g${b.gameId}`, () => api("auto-retry", { id: b.id }), "Re-enabled.");
+  const rehearse = (g) => {
+    if (!window.confirm(`Rehearse ${g.Away} at ${g.Home}?\n\nA rehearsal never touches YouTube: no broadcast is created, bound, started or ended, and no Worker Stream is needed. 15 min before kickoff the server starts the VM (if needed) and runs the lifecycle with a simulated worker — only on a VM agent in DRY_RUN mode. It ends 15 min after the game is FINAL.`)) return;
+    act(`g${g.id}`, () => api("auto-select", { scheduleId: g.id, rehearsal: true }), (r) => (r.already ? "Already rehearsing." : "Rehearsal scheduled — nothing goes to YouTube."));
+  };
 
   const agentOnline = agentDoc?.lastSeenAt && now - agentDoc.lastSeenAt < 60e3;
   const tickOk = orchDoc?.lastTickAt && now - orchDoc.lastTickAt < 3 * 60e3;
-  const slots = orchDoc?.slotStreamIds?.length || 0;
-  const activeCount = rows.filter((b) => b.auto?.active).length;
+  // Real capacity as the orchestrator computed it (0 = no Worker Stream); unknown until it has run.
+  const capacity = typeof orchDoc?.capacity === "number" ? orchDoc.capacity : null;
 
   return (
     <div>
       <div style={{ border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "14px 18px", marginBottom: 14, display: "flex", gap: 22, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ ...label, marginBottom: 0 }}>Orchestrator</div>
         <span style={{ fontSize: 13, fontWeight: 800, color: tickOk ? "#1e6b36" : RED }}>{tickOk ? "●" : "○"} Last run {ago(orchDoc?.lastTickAt, now)}</span>
-        <span style={{ fontSize: 13, fontWeight: 800, color: agentOnline ? "#1e6b36" : "#889" }}>{agentOnline ? "●" : "○"} VM agent {agentOnline ? "online" : `offline (last ${ago(agentDoc?.lastSeenAt, now)})`}</span>
-        <span style={{ fontSize: 13, fontWeight: 800, color: INK }}>Slots {activeCount}/{Math.min(slots || 1, orchDoc?.maxConcurrent || 1)} in use</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: agentOnline ? "#1e6b36" : "#889" }}>{agentOnline ? "●" : "○"} VM agent {agentOnline ? "online" : `offline (last ${ago(agentDoc?.lastSeenAt, now)})`}{agentDoc?.dryRun ? " · DRY RUN" : ""}</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: capacity === 0 ? RED : INK }}>Slots {orchDoc?.slotsInUse ?? 0}/{capacity ?? "?"} in use</span>
+        {orchDoc?.rehearsalOnly && <span style={{ fontSize: 12, fontWeight: 900, color: "#7b5ea7" }}>REHEARSAL-ONLY MODE</span>}
         {orchDoc?.vmOwned && <span style={{ fontSize: 12, fontWeight: 800, color: "#667" }}>VM started automatically (stops when idle)</span>}
         {(orchDoc?.lastTick?.errors || []).length > 0 && (
           <span style={{ fontSize: 12, fontWeight: 800, color: RED, flexBasis: "100%" }}>Last run: {orchDoc.lastTick.errors.slice(0, 2).join(" · ")}</span>
         )}
       </div>
+
+      {capacity === 0 && (
+        <Message msg={{ kind: "error", text: "No Worker Stream is configured (0 stream slots), so real broadcasts can't start: an enabled game is held before preparation (no VM, no YouTube) and fails at kickoff. Pick a Worker Stream in Channel → Worker Stream (needs YouTube live streaming), or use Rehearse to test without YouTube." }} />
+      )}
+      {agentDoc?.dryRun && (
+        <Message msg={{ kind: "ok", text: "The VM agent is in DRY_RUN mode: real broadcasts are blocked, and rehearsals run with a simulated worker. Nothing is streamed." }} />
+      )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search teams…" style={{ ...input, width: 220, padding: "8px 10px" }} />
@@ -537,9 +555,14 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
                       {rowBusy ? "…" : ["live", "postgame"].includes(a.phase) ? "End Broadcast" : "Disable"}
                     </button>
                   ) : a && ["failed", "cancelled"].includes(a.phase) ? (
-                    <button onClick={() => retry(b)} disabled={!!busy || g.Final} style={btn(GOLD, true, !!busy || g.Final)}>{rowBusy ? "…" : "Retry"}</button>
+                    <button onClick={() => retry(b)} disabled={!!busy || g.Final || a.ytUnconfirmed === true}
+                      title={a.ytUnconfirmed === true ? "The YouTube end was never confirmed — check Studio, then Refresh YouTube Status on the broadcast first" : undefined}
+                      style={btn(GOLD, true, !!busy || g.Final || a.ytUnconfirmed === true)}>{rowBusy ? "…" : "Retry"}</button>
                   ) : a?.phase === "completed" ? null : (
-                    <button onClick={() => enable(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn(GREEN, true, !!busy || !linked || g.Final || gs === "final")}>{rowBusy ? "…" : "Enable"}</button>
+                    <>
+                      <button onClick={() => enable(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn(GREEN, true, !!busy || !linked || g.Final || gs === "final")}>{rowBusy ? "…" : "Enable"}</button>
+                      <button onClick={() => rehearse(g)} disabled={!!busy || !linked || g.Final || gs === "final"} style={btn("#7b5ea7", false, !!busy || !linked || g.Final || gs === "final")}>Rehearse</button>
+                    </>
                   )}
                   {b && onOpen && <button onClick={() => onOpen(b.id)} style={{ ...btn("#889", false), padding: "9px 10px" }}>Open</button>}
                 </div>
@@ -554,7 +577,7 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
 
 // Stream slots: one reusable YouTube stream per concurrent broadcast; slot
 // i's key is on the VM as ~/.we-draft/youtube-key (slot 0) / youtube-key-i.
-function SlotSettings({ orchDoc }) {
+export function SlotSettings({ orchDoc }) {
   const [open, setOpen] = useState(false);
   const [streams, setStreams] = useState(null);
   const [ids, setIds] = useState([]);
@@ -583,7 +606,8 @@ function SlotSettings({ orchDoc }) {
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ ...label, marginBottom: 0 }}>Stream Slots</div>
         <span style={{ fontSize: 13, fontWeight: 800, color: INK, flex: 1 }}>
-          {orchDoc?.slotStreamIds?.length ? `${orchDoc.slotStreamIds.length} slot(s), up to ${orchDoc.maxConcurrent || 1} at once` : "Default: 1 slot (the Channel's worker stream)"}
+          {orchDoc?.slotStreamIds?.length ? `${orchDoc.slotStreamIds.length} slot(s), up to ${orchDoc.maxConcurrent || 1} at once`
+            : orchDoc?.capacity ? "Default: 1 slot (the Channel's Worker Stream)" : "No Worker Stream selected — 0 slots"}
         </span>
         {!open && <button onClick={edit} style={btn(BLUE, false)}>Edit</button>}
       </div>
@@ -837,6 +861,15 @@ function BroadcastDetail({ b, onBack, onEdit }) {
           )}
         </Panel>
 
+        {b.rehearsal ? (
+          <Panel title="YouTube (simulated)" accent="#7b5ea7">
+            <div style={{ fontSize: 12, color: "#7b5ea7", fontWeight: 900, fontFamily: "Arial" }}>
+              Rehearsal — no YouTube broadcast exists or will be created. These states are simulated.
+            </div>
+            <Row k="Simulated lifecycle" mono>{b.auto?.sim?.lifecycleStatus}</Row>
+            <Row k="Simulated stream" mono>{b.auto?.sim?.streamStatus}</Row>
+          </Panel>
+        ) : (
         <Panel title="YouTube" accent={RED}>
           <Row k="State"><Pill s={youtubeState(y)} small /></Row>
           <Row k="Broadcast ID" mono>{y.broadcastId}</Row>
@@ -854,6 +887,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
             </div>
           )}
         </Panel>
+        )}
 
         <Panel title="Worker" accent="#556">
           <Row k="Status"><Pill s={WORKER[w.status] || WORKER.idle} small /></Row>
@@ -870,6 +904,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
         {b.auto && (
           <Panel title="Automation" accent={GOLD}>
             <Row k="State"><Pill s={autoState(b) || AUTO.selected} small /></Row>
+            <Row k="Mode">{b.rehearsal ? "Rehearsal (simulated, no YouTube)" : "Real broadcast"}</Row>
             <Row k="Phase" mono>{b.auto.phase}</Row>
             <Row k="Kickoff">{fmtFull(b.auto.kickoffAt)}</Row>
             <Row k="Prep starts">{fmtFull(b.auto.prepAt)}</Row>
@@ -879,6 +914,11 @@ function BroadcastDetail({ b, onBack, onEdit }) {
             {b.auto.endReason && <Row k="Ended">{b.auto.endReason}</Row>}
             {b.auto.waiting && <div style={{ fontSize: 12, color: "#667", fontWeight: 800, fontFamily: "Arial" }}>{b.auto.waiting}</div>}
             {b.auto.error && <div style={{ fontSize: 12, color: RED, fontWeight: 800, fontFamily: "Arial" }}>{b.auto.error}</div>}
+            {b.auto.ytUnconfirmed === true && (
+              <div style={{ fontSize: 12, color: RED, fontWeight: 900, fontFamily: "Arial" }}>
+                YouTube end unconfirmed — the broadcast may still be on air. Check YouTube Studio, then Refresh YouTube Status. Retry and Delete stay blocked until YouTube confirms it's off the air.
+              </div>
+            )}
           </Panel>
         )}
       </div>
@@ -886,19 +926,21 @@ function BroadcastDetail({ b, onBack, onEdit }) {
       <div style={{ marginTop: 14, border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "14px 16px" }}>
         <div style={{ ...label, marginBottom: 10 }}>Actions</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {!bound && (
+          {!bound && !b.rehearsal && (
             <button onClick={createYt} disabled={!!busy || creating} style={btn(RED, true, !!busy || creating)}>
               {busy === "create" || creating ? "Creating on YouTube…" : y.broadcastId ? "Finish YouTube Setup (bind stream)" : "Create YouTube Broadcast"}
             </button>
           )}
-          <button onClick={() => run("refresh", "youtube-refresh", "YouTube status refreshed.")} disabled={!!busy || !y.broadcastId} style={btn(BLUE, false, !!busy || !y.broadcastId)}>
-            {busy === "refresh" ? "Refreshing…" : "Refresh YouTube Status"}
-          </button>
+          {!b.rehearsal && (
+            <button onClick={() => run("refresh", "youtube-refresh", "YouTube status refreshed.")} disabled={!!busy || !y.broadcastId} style={btn(BLUE, false, !!busy || !y.broadcastId)}>
+              {busy === "refresh" ? "Refreshing…" : "Refresh YouTube Status"}
+            </button>
+          )}
           {!y.broadcastId && <button onClick={onEdit} disabled={!!busy} style={btn("#556", false, !!busy)}>Edit</button>}
           <span style={{ flex: 1 }} />
-          <button onClick={del} disabled={!!busy || !!b.auto?.open || !!b.auto?.active}
-            title={b.auto?.open || b.auto?.active ? "Under automation — disable it in Auto Schedule first" : undefined}
-            style={btn(RED, false, !!busy || !!b.auto?.open || !!b.auto?.active)}>Delete Record</button>
+          <button onClick={del} disabled={!!busy || !!b.auto?.open || !!b.auto?.active || b.auto?.ytUnconfirmed === true}
+            title={b.auto?.open || b.auto?.active ? "Under automation — disable it in Auto Schedule first" : b.auto?.ytUnconfirmed === true ? "YouTube end unconfirmed — Refresh YouTube Status first" : undefined}
+            style={btn(RED, false, !!busy || !!b.auto?.open || !!b.auto?.active || b.auto?.ytUnconfirmed === true)}>Delete Record</button>
         </div>
         <Message msg={msg} />
       </div>

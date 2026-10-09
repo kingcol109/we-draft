@@ -291,10 +291,11 @@ describe("AutoSchedule", () => {
   });
 
   test("orchestrator and agent health are shown", () => {
-    renderPicker({ orchDoc: { lastTickAt: NOW - 30e3, slotStreamIds: ["a", "b"], maxConcurrent: 2 }, agentDoc: { lastSeenAt: NOW - 5e3 } });
+    renderPicker({ orchDoc: { lastTickAt: NOW - 30e3, slotStreamIds: ["a", "b"], maxConcurrent: 2, capacity: 2, slotsInUse: 1 }, agentDoc: { lastSeenAt: NOW - 5e3 } });
     expect(screen.getByText(/Last run 30s ago/)).toBeInTheDocument();
     expect(screen.getByText(/VM agent online/)).toBeInTheDocument();
-    expect(screen.getByText(/Slots 0\/2 in use/)).toBeInTheDocument();
+    expect(screen.getByText(/Slots 1\/2 in use/)).toBeInTheDocument();
+    expect(screen.queryByText(/No Worker Stream is configured/)).toBeNull();
   });
 });
 
@@ -340,4 +341,87 @@ describe("cancelled broadcasts", () => {
     expect(within(row).queryByRole("button", { name: "Enable" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Disable" })).toBeNull();
   });
+});
+
+// ── Zero capacity, DRY_RUN and rehearsals ──
+describe("capacity and rehearsal display", () => {
+  const { AutoSchedule, SlotSettings, autoState, overallStatus, statusCounts, filterBroadcasts } = require("./AdminStreamManager");
+  const within = require("@testing-library/react").within;
+  const NOW = Date.UTC(2026, 9, 10, 15, 0);
+  const games = [{ id: "s1", Home: "LSU", Away: "Clemson", KickoffAt: NOW + 3600e3, CFBDGameId: 401001 }];
+
+  beforeEach(() => {
+    global.fetch = jest.fn((url, opts) => { calls.push({ url, body: JSON.parse(opts.body) }); return reply(200, { ok: true, id: "r401001", rehearsal: true }); });
+  });
+
+  test("zero capacity is shown as 0, never as one default slot, with an actionable error", () => {
+    render(<AutoSchedule games={games} rows={[]} now={NOW} orchDoc={{ lastTickAt: NOW, capacity: 0, slotsInUse: 0, maxConcurrent: 1 }} agentDoc={{ lastSeenAt: NOW }} />);
+    expect(screen.getByText(/Slots 0\/0 in use/)).toBeInTheDocument();
+    expect(screen.getByText(/No Worker Stream is configured \(0 stream slots\)/)).toBeInTheDocument();
+    expect(screen.getByText(/use Rehearse to test without YouTube/)).toBeInTheDocument();
+  });
+
+  test("before the orchestrator has reported, capacity is unknown, not 1", () => {
+    render(<AutoSchedule games={games} rows={[]} now={NOW} orchDoc={{ lastTickAt: NOW }} agentDoc={null} />);
+    expect(screen.getByText(/Slots 0\/\? in use/)).toBeInTheDocument();
+  });
+
+  test("slot settings say 0 slots when no Worker Stream is selected", () => {
+    const { rerender } = render(<SlotSettings orchDoc={{ capacity: 0 }} />);
+    expect(screen.getByText("No Worker Stream selected — 0 slots")).toBeInTheDocument();
+    rerender(<SlotSettings orchDoc={{ capacity: 1 }} />);
+    expect(screen.getByText(/Default: 1 slot/)).toBeInTheDocument();
+  });
+
+  test("a DRY_RUN agent is flagged", () => {
+    render(<AutoSchedule games={games} rows={[]} now={NOW} orchDoc={{ lastTickAt: NOW, capacity: 1 }} agentDoc={{ lastSeenAt: NOW, dryRun: true }} />);
+    expect(screen.getByText(/VM agent online · DRY RUN/)).toBeInTheDocument();
+    expect(screen.getByText(/real broadcasts are blocked, and rehearsals run with a simulated worker/)).toBeInTheDocument();
+  });
+
+  test("Rehearse asks first and sends rehearsal: true", async () => {
+    window.confirm.mockReturnValueOnce(false);
+    render(<AutoSchedule games={games} rows={[]} now={NOW} orchDoc={{ lastTickAt: NOW, capacity: 0 }} />);
+    const row = screen.getByTestId("game-s1");
+    fireEvent.click(within(row).getByRole("button", { name: "Rehearse" }));
+    expect(calls).toEqual([]);
+    fireEvent.click(within(row).getByRole("button", { name: "Rehearse" }));
+    expect(window.confirm.mock.calls[1][0]).toMatch(/never touches YouTube/);
+    await screen.findByText(/Rehearsal scheduled — nothing goes to YouTube/);
+    expect(calls.map((c) => c.body)).toEqual([{ action: "auto-select", scheduleId: "s1", rehearsal: true }]);
+  });
+
+  test("a rehearsal is always labelled as one and never counts as a real live broadcast", () => {
+    const r = { id: "r401001", gameId: "401001", rehearsal: true, status: "rehearsal", auto: { phase: "live", open: true, active: true } };
+    expect(autoState(r).label).toBe("Rehearsal · Live");
+    expect(overallStatus(r)).toBe("rehearsal");
+    expect(statusCounts([r])).toEqual({ live: 0, preparing: 0, scheduled: 0, error: 0 });
+    expect(filterBroadcasts([r], "upcoming")).toHaveLength(1);
+    render(<AutoSchedule games={games} rows={[r]} now={NOW} orchDoc={{ lastTickAt: NOW, capacity: 0 }} />);
+    const row = screen.getByTestId("game-s1");
+    expect(within(row).getByText("Rehearsal · Live")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "End Broadcast" })).toBeInTheDocument();
+  });
+
+  test("a held (blocked) game shows Blocked with the server's reason", () => {
+    const r = { id: "g401001", gameId: "401001", status: "scheduled", auto: { phase: "selected", open: true, kickoffAt: NOW + 3600e3, error: "No Worker Stream is configured (0 stream slots) — pick one…" } };
+    render(<AutoSchedule games={games} rows={[r]} now={NOW} orchDoc={{ lastTickAt: NOW, capacity: 0 }} />);
+    const row = screen.getByTestId("game-s1");
+    expect(within(row).getByText("Blocked")).toBeInTheDocument();
+    expect(within(row).getByText(/pick one…/)).toBeInTheDocument();
+  });
+});
+
+test("Retry is disabled for a failed broadcast whose YouTube end is unconfirmed", () => {
+  const { AutoSchedule } = require("./AdminStreamManager");
+  const within = require("@testing-library/react").within;
+  const NOW = Date.UTC(2026, 9, 10, 15, 0);
+  const games = [{ id: "s1", Home: "LSU", Away: "Clemson", KickoffAt: NOW + 3600e3, CFBDGameId: 401001 }];
+  const rec = (auto) => ({ id: "g401001", gameId: "401001", status: "error", auto: { phase: "failed", open: false, ...auto } });
+  const { rerender } = render(<AutoSchedule games={games} rows={[rec({ ytUnconfirmed: true, error: "Couldn't confirm the YouTube broadcast ended" })]} now={NOW} />);
+  const btn = () => within(screen.getByTestId("game-s1")).getByRole("button", { name: "Retry" });
+  expect(btn()).toBeDisabled();
+  expect(btn().title).toMatch(/never confirmed/);
+  rerender(<AutoSchedule games={games} rows={[rec({ ytUnconfirmed: false })]} now={NOW} />);
+  expect(btn()).toBeEnabled();
 });

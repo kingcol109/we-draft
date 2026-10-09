@@ -77,6 +77,13 @@ test("agent endpoint: a valid report is stored and answered with desired workers
   assert.equal(bad.statusCode, 400);
 });
 
+test("agent endpoint: stores the agent's DRY_RUN flag (only an exact true counts)", async () => {
+  await call(agentApi, { auth: `Bearer ${AGENT_TOKEN}`, body: { dryRun: true, containers: [] } });
+  assert.equal(db.data("streamManager/agent").dryRun, true);
+  await call(agentApi, { auth: `Bearer ${AGENT_TOKEN}`, body: { dryRun: "true", containers: [] } });
+  assert.equal(db.data("streamManager/agent").dryRun, false);
+});
+
 test("cron endpoint: needs CRON_SECRET", async () => {
   assert.equal((await call(cronApi, { method: "GET" })).statusCode, 401);
   assert.equal((await call(cronApi, { method: "GET", auth: "Bearer wrong" })).statusCode, 401);

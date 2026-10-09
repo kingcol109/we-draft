@@ -111,3 +111,38 @@ test("only one agent runs per VM (pid lock; stale locks are taken over)", () => 
   assert.equal(singleInstance("/l", fs_, kill, 200), true, "stale lock taken over");
   assert.equal(files["/l"], "200");
 });
+
+// ── No restarts while ending (noRestart) ──
+
+test("ending: a crashed worker is not relaunched, a running one is kept, none is started fresh", async () => {
+  const st = fresh();
+  let d = fakeDocker();
+  await reconcile([want("g1", { noRestart: true })], [{ id: "g1", state: "exited", exitCode: 1 }], NOW, cfg, d, st, fs);
+  assert.deepEqual(d.calls, [], "crashed: not relaunched (and not removed while still requested)");
+  d = fakeDocker();
+  await reconcile([want("g1", { noRestart: true })], [{ id: "g1", state: "running" }], NOW, cfg, d, st, fs);
+  assert.deepEqual(d.calls, [], "running: kept feeding YouTube");
+  d = fakeDocker();
+  await reconcile([want("g2", { noRestart: true })], [], NOW, cfg, d, st, fs);
+  assert.deepEqual(d.calls, [], "missing: never started during ending");
+});
+
+test("ending: normal cleanup and the hard deadline still apply", async () => {
+  let d = fakeDocker();
+  await reconcile([], [{ id: "g1", state: "running" }, { id: "g2", state: "exited", exitCode: 1 }], NOW, cfg, d, fresh(), fs);
+  assert.deepEqual(d.calls, [["stop", "g1"], ["remove", "g2"]], "no longer requested → stopped / removed");
+  d = fakeDocker();
+  await reconcile([want("g1", { noRestart: true, deadlineAt: NOW - 1 })], [{ id: "g1", state: "running" }], NOW, cfg, d, fresh(), fs);
+  assert.deepEqual(d.calls, [["stop", "g1"]], "past the deadline → stopped even while ending");
+});
+
+test("outside ending, a crashed worker still restarts under the existing policy", async () => {
+  const d = fakeDocker();
+  await reconcile([want("g1")], [{ id: "g1", state: "exited", exitCode: 1 }], NOW, cfg, d, fresh(), fs);
+  assert.equal(d.calls[0][0], "start");
+});
+
+test("noRestart must be a boolean", () => {
+  assert.deepEqual(validDesired([want("g1", { noRestart: "yes" })]), []);
+  assert.equal(validDesired([want("g1", { noRestart: true })]).length, 1);
+});

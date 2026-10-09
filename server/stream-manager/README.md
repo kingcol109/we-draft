@@ -275,3 +275,89 @@ connection.
     and never deletes anything.
   - Use it once after deploying the cancelled status, to fix records
     cancelled before it existed.
+
+## Rehearsals (server-enforced dry run)
+
+**Rehearse** (Auto Schedule) runs a game's whole lifecycle without YouTube.
+It goes selected → preparing → VM → worker → simulated testing/live → FINAL
++ 15 min → ending → completed.
+
+- **Its own record:** `broadcasts/r<CFBDGameId>` with `rehearsal: true`. It
+  is never adopted as, or converted into, a real record, and a real record
+  is never used for a rehearsal.
+- **No YouTube, ever:** nothing is created, bound, transitioned, completed
+  or even read.
+  - The orchestrator replaces every YouTube function with one that refuses.
+  - `youtubeCreate` / `youtubeRefresh` refuse rehearsal records too.
+  - Simulated state lives in `auto.sim`; `youtube.*` stays empty.
+  - The overall status is `rehearsal` while open, and the UI labels every
+    state "Rehearsal · …".
+- **No Worker Stream or slot needed.**
+- **The worker is simulated only:** it's sent only to an agent that reports
+  `DRY_RUN=1`, where it's an in-memory simulated container. A real agent
+  refuses it, and the rehearsal fails with that reason.
+- **Rerunnable:** Retry and Rehearse can run it again; both keep it a
+  rehearsal.
+
+**`STREAM_REHEARSAL_ONLY=1`** (optional Vercel env var, not set by default)
+is a server-wide brake:
+- real games can't be enabled or retried;
+- real games already enabled are held before preparation;
+- no YouTube broadcast can be created or started;
+- completing a broadcast that's already on air is still allowed, so it can
+  end safely.
+
+## Failures after YouTube may be on air
+
+Failures and timeouts in the ingest and going-live phases go through
+**ending**, never straight to `failed`:
+
+1. YouTube is read.
+2. If testing or live, it's completed. If `testStarting` / `liveStarting`,
+   the orchestrator waits.
+3. The end is confirmed by a re-read (`complete`, `revoked`, `ready` or
+   `created` counts as off the air).
+4. Only then is the worker stopped.
+
+The record ends **failed** with the reason (`failReason`). If YouTube can't
+be confirmed off the air within 5 min (`ENDING_YT_TIMEOUT_MS`), the worker
+is stopped anyway, and the record ends **failed** with "Couldn't confirm the
+YouTube broadcast ended". It's never reported as completed. Retry is refused
+while the stored YouTube state is still testing or live.
+
+## No Worker Stream = 0 slots
+
+Without a Worker Stream (or configured slots), capacity is 0 and the
+orchestrator publishes `capacity: 0`. A real game is held in **selected**
+with "No Worker Stream is configured":
+- no VM start;
+- no YouTube call;
+- it doesn't keep an idle VM warm;
+- it fails at kickoff.
+
+The same hold applies when the VM agent last reported DRY_RUN, or in
+rehearsal-only mode.
+
+### Unconfirmed endings (`auto.ytUnconfirmed`)
+
+When the ending can't confirm YouTube went off the air, the record ends
+**failed** with `ytUnconfirmed: true`. Until that's cleared, the server
+refuses all of these, whatever the stored YouTube state says:
+- **Retry**
+- **re-enabling the game** (Enable / Rehearse on any record of it)
+- **Delete Record**
+- **manual YouTube create/bind**
+
+Only **Refresh YouTube Status** clears it, and only when its read shows the
+broadcast off the air (`complete`, `revoked`, `ready`, `created`). A failed
+read, a missing broadcast, or a testing/live/starting state leaves the flag
+set.
+- Refresh never creates, binds or transitions anything.
+- The record stays **failed / Error** after the flag is cleared.
+- Repair Statuses never touches the flag.
+
+While a broadcast is **ending**, the agent's worker request carries
+`noRestart: true`:
+- a running worker keeps feeding YouTube;
+- one that crashes or exits is not relaunched, and none is started fresh;
+- the 6h hard limit and normal cleanup still apply.

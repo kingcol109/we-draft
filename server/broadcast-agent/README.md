@@ -31,6 +31,8 @@ never leave the VM.
   deadline, even if it can't reach the control plane.
 - **Control plane unreachable:** running workers keep running (a network
   blip never ends a live game) until their deadline.
+- **Ending:** a worker request with `noRestart: true` (the broadcast is
+  ending) is kept if it's running, but never relaunched or started.
 - **Crashes:** a crashed worker restarts with backoff (10s, 20s, 40s … up to
   2 min). Exit code 2 (bad settings) is never restarted; it's reported, and
   the broadcast fails with that reason.
@@ -39,7 +41,14 @@ never leave the VM.
   through a shell.
 - **No secrets in logs:** the agent never reads, sends or logs a stream key.
   Its own token is only sent in the `Authorization` header.
-- **Dry run:** `DRY_RUN=1` logs what it would do without touching Docker.
+- **Dry run:** `DRY_RUN=1` never runs a command. It logs the `docker`
+  commands it would run, keeps simulated containers in memory (reported
+  with `simulated: true`) so a **rehearsal** can run its whole lifecycle,
+  and reports `dryRun: true`. While the agent reports DRY_RUN, the server
+  blocks real broadcasts.
+- **Rehearsals:** a rehearsal worker is only ever sent to a DRY_RUN agent.
+  A real agent refuses one (`rehearsal-needs-dry-run`) and never launches
+  it.
 - **One agent per VM:** `~/.we-draft/agent.pid` (or `LOCK_FILE`) is a pid
   lock. A second copy, such as `node agent.js` while the service runs,
   exits 2. To test by hand, `sudo systemctl stop we-draft-agent` first.

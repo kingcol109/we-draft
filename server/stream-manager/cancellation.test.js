@@ -20,6 +20,15 @@ test("cancelled automation derives a distinct cancelled status", () => {
   assert.equal(d({ phase: "cancelled" }, { lifecycleStatus: "testing" }), "error");
   // YouTube already ended wins
   assert.equal(d({ phase: "cancelled" }, { lifecycleStatus: "complete" }), "ended");
+  // a failure stays an error even when YouTube was safely completed
+  assert.equal(d({ phase: "failed" }, { lifecycleStatus: "complete" }), "error");
+  // rehearsals have their own status and never look like real broadcasts
+  const rh = (phase) => bc.deriveStatus({ rehearsal: true, auto: { phase }, youtube: {}, worker: {} });
+  assert.equal(rh("live"), "rehearsal");
+  assert.equal(rh("selected"), "rehearsal");
+  assert.equal(rh("completed"), "ended");
+  assert.equal(rh("cancelled"), "cancelled");
+  assert.equal(rh("failed"), "error");
   // others unchanged
   assert.equal(d({ phase: "completed" }), "ended");
   assert.equal(d({ phase: "failed" }), "error");
@@ -110,4 +119,106 @@ test("refresh-statuses only applies with apply === true", async () => {
     assert.equal(r.applied, false);
   }
   assert.equal(db.data("broadcasts/legacyFsu").status, "scheduled");
+});
+
+// ── Refresh YouTube Status and unconfirmed endings ──
+// The YouTube module is stubbed: reads return what each test says, and
+// anything that would create, bind or transition a broadcast throws.
+
+const yt = require("./youtube");
+const orchMod = require("./orchestrator");
+
+function withYoutube(getBroadcast, fn) {
+  const saved = {};
+  const stub = {
+    accessToken: async () => "tok",
+    getBroadcast,
+    getStream: async () => null,
+    transitionBroadcast: async () => { throw new Error("refresh must never transition"); },
+    insertBroadcast: async () => { throw new Error("refresh must never create"); },
+    bindBroadcast: async () => { throw new Error("refresh must never bind"); },
+    insertWorkerStream: async () => { throw new Error("refresh must never create a stream"); },
+  };
+  for (const k of Object.keys(stub)) { saved[k] = yt[k]; yt[k] = stub[k]; }
+  return fn().finally(() => { for (const k of Object.keys(stub)) yt[k] = saved[k]; });
+}
+
+function unconfirmedDb(storedLc = "ready") {
+  return fakeFirestore({
+    "streamManager/youtube": { connected: true, channelId: "UC1" },
+    "broadcasts/g1": {
+      gameId: "1", status: "error",
+      youtube: { broadcastId: "b1", channelId: "UC1", lifecycleStatus: storedLc },
+      worker: { status: "error" },
+      auto: { phase: "failed", open: false, active: false, enabled: true, ytUnconfirmed: true, failReason: "YouTube didn't go live", error: "Couldn't confirm the YouTube broadcast ended" },
+    },
+  });
+}
+const yb = (lc) => async () => ({ id: "b1", lifeCycleStatus: lc, privacyStatus: "unlisted", boundStreamId: null });
+
+test("refresh: a failed read keeps the record unconfirmed (and in error)", async () => {
+  const db = unconfirmedDb();
+  await withYoutube(async () => { throw Object.assign(new Error("YouTube liveBroadcasts failed: quota"), { status: 502 }); }, async () => {
+    await assert.rejects(bc.youtubeRefresh(db, { id: "g1" }), /quota/);
+  });
+  assert.equal(db.data("broadcasts/g1").auto.ytUnconfirmed, true);
+  assert.equal(db.data("broadcasts/g1").status, "error");
+});
+
+test("refresh: a deleted / missing broadcast is ambiguous — stays unconfirmed", async () => {
+  const db = unconfirmedDb();
+  await withYoutube(async () => null, async () => {
+    await assert.rejects(bc.youtubeRefresh(db, { id: "g1" }), (e) => e.status === 404);
+  });
+  assert.equal(db.data("broadcasts/g1").auto.ytUnconfirmed, true);
+});
+
+for (const lc of ["live", "testing", "liveStarting", "testStarting"]) {
+  test(`refresh: YouTube still ${lc} → stays unconfirmed, nothing transitioned`, async () => {
+    const db = unconfirmedDb();
+    let r;
+    await withYoutube(yb(lc), async () => { r = await bc.youtubeRefresh(db, { id: "g1" }); });
+    assert.deepEqual(r, { ok: true, offAirConfirmed: false });
+    const d = db.data("broadcasts/g1");
+    assert.equal(d.auto.ytUnconfirmed, true);
+    assert.equal(d.youtube.lifecycleStatus, lc);
+    assert.equal(d.status, "error");
+    await assert.rejects(orchMod.retryGame(db, "admin1", { id: "g1" }), /may still be on the air/);
+  });
+}
+
+for (const lc of ["complete", "revoked", "ready", "created"]) {
+  test(`refresh: YouTube ${lc} (off the air) clears the flag but the record stays failed / error`, async () => {
+    const db = unconfirmedDb("live");
+    let r;
+    await withYoutube(yb(lc), async () => { r = await bc.youtubeRefresh(db, { id: "g1" }); });
+    assert.deepEqual(r, { ok: true, offAirConfirmed: true });
+    const d = db.data("broadcasts/g1");
+    assert.equal(d.auto.ytUnconfirmed, false);
+    assert.ok(d.auto.offAirConfirmedAt > 0);
+    assert.equal(d.auto.phase, "failed", "automation still failed");
+    assert.equal(d.status, "error", "never shown as a success");
+  });
+}
+
+test("after a confirmed off-air refresh, Retry and Delete are allowed again", async () => {
+  const db = unconfirmedDb("live");
+  await assert.rejects(orchMod.retryGame(db, "admin1", { id: "g1" }), /never confirmed/);
+  await withYoutube(yb("complete"), () => bc.youtubeRefresh(db, { id: "g1" }));
+  await orchMod.retryGame(db, "admin1", { id: "g1" });
+  const d = db.data("broadcasts/g1");
+  assert.equal(d.auto.phase, "selected");
+  assert.equal(d.youtube.broadcastId, null, "the ended broadcast is never reused");
+
+  const db2 = unconfirmedDb("live");
+  await assert.rejects(bc.deleteRecord(db2, { id: "g1" }), /never confirmed/);
+  await withYoutube(yb("complete"), () => bc.youtubeRefresh(db2, { id: "g1" }));
+  assert.deepEqual(await bc.deleteRecord(db2, { id: "g1" }), { ok: true });
+});
+
+test("Repair Statuses neither clears the flag nor opens a way around the retry guard", async () => {
+  const db = unconfirmedDb();
+  await bc.refreshStatuses(db, { apply: true });
+  assert.equal(db.data("broadcasts/g1").auto.ytUnconfirmed, true);
+  await assert.rejects(orchMod.retryGame(db, "admin1", { id: "g1" }), /never confirmed/);
 });
