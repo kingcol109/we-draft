@@ -27,6 +27,16 @@
 // and the next kickoffs, the main panel through the top performances in the
 // country, the strip through what's next, upsets and prospects' best lines.
 //
+// We-Draft Gameday (Saturday from 6 AM ET until the first kickoff —
+// utils/broadcastNational.js isGameday): the same frame, previewing the day
+// instead — the main panel turns through the marquee matchups (both teams,
+// kickoff, a prospect to watch from each school), the panel under it the
+// tale of the tape (cfbLeaders/teams — utils/fbsTeamStats.js), the rail and
+// the strip the day's games, the right column the kickoffs. The tale of
+// the tape turns over to both teams' season leaders (cfbRosters/{teamId});
+// the prospects card to players' big games last time out (each team's last
+// final in liveGames).
+//
 // The rail: close games (one score, 4th quarter or overtime) hold their
 // scorebugs; the rest take turns, with games that just ended in the turn
 // for RECENT_FINAL_MS (utils/broadcastNational.js railCards).
@@ -38,12 +48,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useLiveGameDocs } from "./useLiveFeed";
-import { BROADCAST_CTAS } from "../utils/broadcast";
 import { communityFor, gradeLabel } from "../utils/communityGrades";
+import { useFbsTeamStats } from "../utils/fbsTeamStats";
 import {
-  railCards, railAt, topPerformers, isFinalEntry, playerOfGame, topPerformanceList, idleStories, PERF_ROTATE_MS, nationalPhase, scoreChanges, scoreSnapshot, tickerItems, storylines, quietStory,
+  railCards, railAt, topPerformers, isFinalEntry, playerOfGame, topPerformanceList, idleStories, PERF_ROTATE_MS, nationalPhase, scoreChanges, scoreSnapshot, NATIONAL_PROMOS, storylines, quietStory,
   eventForBigPlay, eventForNationalInsight, nationalInsights, queueBigPlays, playerLinesFor, leadersFromBox,
-  performanceStories, spotlightCandidates,
+  performanceStories, spotlightCandidates, isGameday, gamedayGames, previewMatchups, gamedayStories, prospectsToWatch, teamLeaders, lastGameStories, lastFinal, PREVIEW_ROTATE_MS,
   NATIONAL_PAGE_MS, IDLE_PAGE_MS, NATIONAL_HOT_MS, STORY_ROTATE_MS, IDLE_STORY_ROTATE_MS, BEAT_DWELL_MS,
   SPOTLIGHT_EVERY_MS, SPOTLIGHT_MS, SPOTLIGHT_REPEAT_MS,
 } from "../utils/broadcastNational";
@@ -80,11 +90,61 @@ function loadProspectCard(slug, force = false) {
   return cardCache.get(key);
 }
 
+// A school's We-Draft players (switched on for Live) with their community
+// grades, for the gameday preview's prospect to watch — one query per
+// school, cached for the session.
+const schoolCache = new Map();
+function loadSchoolProspects(school) {
+  if (!school) return Promise.resolve([]);
+  if (!schoolCache.has(school)) {
+    schoolCache.set(school, (async () => {
+      const snap = await getDocs(query(collection(db, "players"), where("School", "==", school)));
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => p.Slug && !HIDDEN_LIVE.includes(p.Live) && p.Eligible != null);
+      const comm = list.length ? await communityFor(list.map((p) => p.id)).catch(() => ({})) : {};
+      return list.map((p) => ({
+        id: p.id, name: `${p.First || ""} ${p.Last || ""}`.trim(), slug: p.Slug, pos: p.Position || null, cls: String(p.Eligible),
+        gradeAvg: comm[p.id]?.avg ?? null, grade: gradeLabel(comm[p.id]?.avg) || null,
+      })).filter((p) => p.name);
+    })().catch(() => { schoolCache.delete(school); return []; }));
+  }
+  return schoolCache.get(school);
+}
+
+// A team's season leaders (utils/broadcastNational.js teamLeaders) from
+// its roster doc, cfbRosters/{teamId} — one read per team, cached for the
+// session.
+const leadersCache = new Map();
+function loadTeamLeaders(teamId) {
+  const key = String(teamId);
+  if (!leadersCache.has(key)) {
+    leadersCache.set(key, getDoc(doc(db, "cfbRosters", key))
+      .then((d) => (d.exists() ? teamLeaders(d.data()) : null))
+      .catch(() => { leadersCache.delete(key); return null; }));
+  }
+  return leadersCache.get(key);
+}
+
+// A team's last game (utils/broadcastNational.js lastFinal) from its
+// liveGames docs — two queries (home, away) per team, cached for the
+// session — for the preview's player storylines.
+const lastGameCache = new Map();
+function loadLastGame(teamId) {
+  const key = String(teamId);
+  if (!lastGameCache.has(key)) {
+    const id = Number(teamId);
+    lastGameCache.set(key, Promise.all(["home", "away"].map((side) => getDocs(query(collection(db, "liveGames"), where(`${side}.providerTeamId`, "==", id)))))
+      .then((snaps) => lastFinal(snaps.flatMap((sn) => sn.docs.map((d) => ({ id: d.id, ...d.data() })))))
+      .catch(() => { lastGameCache.delete(key); return null; }));
+  }
+  return lastGameCache.get(key);
+}
+
 // Testing / preview options (pages/BroadcastNationalPage.js URL params):
 //   testEvent "latest"  the newest big play's graphic, once
 //   spotlightNow        the first spotlight as soon as there's a candidate;
 //                       a slug: that player first, even if he's hidden from Live
-export function useNationalState({ testEvent = null, spotlightNow = false } = {}) {
+//   gameday             the gameday preview whenever nothing's on (any day)
+export function useNationalState({ testEvent = null, spotlightNow = false, gameday: forceGameday = false } = {}) {
   const [slate, setSlate] = useState({ ready: false, games: [], bigPlays: [], week: null, seasonType: null });
   const [hot, setHot] = useState(() => new Map()); // id → { side, pts, at }
   const lastScores = useRef(null);
@@ -151,7 +211,11 @@ export function useNationalState({ testEvent = null, spotlightNow = false } = {}
 
   // ── The rail: close games hold, the rest take turns ──
   const liveCount = liveIds.length;
-  const rail = useMemo(() => railCards(slate.games, now, finalAt.current), [slate.games, now]);
+  const gameday = slate.ready && isGameday(slate.games, now, forceGameday);
+  const matchups = useMemo(() => (gameday ? previewMatchups(slate.games, now) : []), [gameday, slate.games, now]);
+  const rail = useMemo(() => (gameday
+    ? { pinned: [], pool: matchups.map((game) => ({ game, kind: "upcoming" })), fill: [] }
+    : railCards(slate.games, now, finalAt.current)), [gameday, matchups, slate.games, now]);
   const [pageTick, setPageTick] = useState(0);
   const turn = railAt(rail, pageTick);
   const many = turn.pages > 1;
@@ -165,9 +229,9 @@ export function useNationalState({ testEvent = null, spotlightNow = false } = {}
   // ── Storylines (the strip): game situations + big performances ──
   const perfList = useMemo(() => topPerformanceList(perf, gamesById, now), [perf, gamesById, now]);
   const stories = useMemo(() => {
-    const s = idle ? idleStories(slate.games, perfList, now) : storylines(slate.games, now, performanceStories(gameDocs, gamesById, now));
+    const s = gameday ? gamedayStories(slate.games, now) : idle ? idleStories(slate.games, perfList, now) : storylines(slate.games, now, performanceStories(gameDocs, gamesById, now));
     return s.length ? s : [quietStory(slate.games, now)];
-  }, [idle, slate.games, now, gameDocs, gamesById, perfList]);
+  }, [gameday, idle, slate.games, now, gameDocs, gamesById, perfList]);
   // Nothing on: the featured top performance turns over.
   const [perfTick, setPerfTick] = useState(0);
   useEffect(() => {
@@ -183,6 +247,49 @@ export function useNationalState({ testEvent = null, spotlightNow = false } = {}
     return () => clearInterval(t);
   }, [idle]);
   const storyIndex = storyTick % stories.length;
+
+  // ── Gameday: the matchup of the moment ──
+  const [previewTick, setPreviewTick] = useState(0);
+  useEffect(() => {
+    if (!gameday) return undefined;
+    const t = setInterval(() => setPreviewTick((x) => x + 1), PREVIEW_ROTATE_MS);
+    return () => clearInterval(t);
+  }, [gameday]);
+  const preview = matchups.length ? matchups[previewTick % matchups.length] : null;
+  const teamStats = useFbsTeamStats();
+  // Each school's prospect to watch: the matchup on screen, and the next
+  // one read ahead so its panel never waits.
+  const [schoolPros, setSchoolPros] = useState(() => new Map()); // school → list
+  const nextPreview = matchups.length > 1 ? matchups[(previewTick + 1) % matchups.length] : null;
+  useEffect(() => {
+    let alive = true;
+    const schools = [preview, nextPreview].flatMap((g) => [g?.home?.school, g?.away?.school]).filter((x) => x && !schoolPros.has(x));
+    schools.forEach((school) => loadSchoolProspects(school).then((list) => {
+      if (alive) setSchoolPros((m) => (m.has(school) ? m : new Map(m).set(school, list)));
+    }));
+    return () => { alive = false; };
+  }, [preview?.id, nextPreview?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ...and each team's season leaders (its roster doc) and last game (its
+  // players' storylines), the same way.
+  const [teamLeads, setTeamLeads] = useState(() => new Map()); // team id → { leaders, last }
+  useEffect(() => {
+    let alive = true;
+    const ids = [preview, nextPreview].flatMap((g) => [g?.home?.providerTeamId, g?.away?.providerTeamId]).filter((x) => x != null && !teamLeads.has(String(x)));
+    ids.forEach((id) => Promise.all([loadTeamLeaders(id), loadLastGame(id)]).then(([leaders, last]) => {
+      if (alive) setTeamLeads((m) => (m.has(String(id)) ? m : new Map(m).set(String(id), { leaders, last })));
+    }));
+    return () => { alive = false; };
+  }, [preview?.id, nextPreview?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const previewInfo = useMemo(() => {
+    if (!preview) return null;
+    const side = (s) => ({
+      stats: teamStats?.get(Number(preview[s]?.providerTeamId)) || null,
+      prospect: prospectsToWatch(schoolPros.get(preview[s]?.school), now)[0] || null,
+      leaders: teamLeads.get(String(preview[s]?.providerTeamId))?.leaders || null,
+      stories: lastGameStories(teamLeads.get(String(preview[s]?.providerTeamId))?.last, preview[s]?.providerTeamId, now),
+    });
+    return { game: preview, away: side("away"), home: side("home"), statsReady: !!teamStats, index: previewTick % matchups.length, count: matchups.length };
+  }, [preview, teamStats, schoolPros, teamLeads, previewTick, matchups.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Left lane: big plays, one beat at a time ──
   // beat: { play, event, phase: "graphic" | "dwell" | "rest", at }
@@ -383,7 +490,6 @@ export function useNationalState({ testEvent = null, spotlightNow = false } = {}
     lastDataAt: lastDataAt.current,
   };
 
-  const ticker = useMemo(() => tickerItems(slate.games, BROADCAST_CTAS, now), [slate.games, now]);
 
   return {
     phase,
@@ -400,6 +506,9 @@ export function useNationalState({ testEvent = null, spotlightNow = false } = {}
     latestStats: currentStats,
     latestStar: currentStar,
     idle,
+    gameday,
+    preview: previewInfo,
+    firstKick: gameday ? gamedayGames(slate.games, now)[0] || null : null,
     perfList: perfTop,
     perfIndex,
     recent,
@@ -411,7 +520,7 @@ export function useNationalState({ testEvent = null, spotlightNow = false } = {}
     leftGame: docOf(leftEvent),
     rightEvent: rightEv.current,
     rightGame: docOf(rightEv.current),
-    ticker,
+    ticker: NATIONAL_PROMOS,
     health,
   };
 }

@@ -1023,7 +1023,7 @@ const national = (extra = {}) => orch.selectNational(db, "admin1", { startAt: is
 test("national: validation, one record per window, no overlaps", async () => {
   await assert.rejects(national({ startAt: "nope" }), /starts and ends/);
   await assert.rejects(national({ endAt: iso(K1 - MIN) }), /after its start/);
-  await assert.rejects(national({ endAt: iso(K1 + 17 * 60 * MIN) }), /at most 16 hours/);
+  await assert.rejects(national({ endAt: iso(K1 + 21 * 60 * MIN) }), /at most 20 hours/);
   await assert.rejects(national({ startAt: iso(K1 - 300 * MIN), endAt: iso(clock + 10 * MIN) }), /over/);
   await assert.rejects(national({ privacyStatus: "public" }), /public confirmation/);
   const r = await national();

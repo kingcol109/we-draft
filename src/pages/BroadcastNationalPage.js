@@ -16,6 +16,8 @@
 //   &event=latest                      fire the newest big play's graphic (testing)
 //   &spotlight=now                     the prospect spotlight right away
 //   &spotlight=<slug>                  …with that player (if he's in a live game's leaders)
+//   &gameday=1                         the We-Draft Gameday preview whenever nothing's live
+//                                      (otherwise it's on Saturdays from 6 AM ET to the first kickoff)
 //
 // Reports itself to the capture worker the same way /broadcast/:slug does
 // (pages/BroadcastPage.js): data-broadcast-ready / -phase / -stale on
@@ -38,6 +40,7 @@ export default function BroadcastNationalPage() {
   const [opts] = useState(() => ({
     testEvent: params.get("event") === "latest" ? "latest" : null,
     spotlightNow: params.get("spotlight") === "now" ? true : params.get("spotlight") || false,
+    gameday: params.get("gameday") === "1",
   }));
   const s = useNationalState(opts);
 
@@ -45,8 +48,8 @@ export default function BroadcastNationalPage() {
   useCaptureReport({ ready, phase: s.phase, stale: s.health.stale, gameId: "national" });
 
   useEffect(() => {
-    document.title = s.liveCount ? `${s.liveCount} live · We-Draft Live National Broadcast` : "We-Draft Live National Broadcast";
-  }, [s.liveCount]);
+    document.title = s.liveCount ? `${s.liveCount} live · We-Draft Live National Broadcast` : s.gameday ? "We-Draft Gameday" : "We-Draft Live National Broadcast";
+  }, [s.liveCount, s.gameday]);
 
   return (
     <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000" }}>

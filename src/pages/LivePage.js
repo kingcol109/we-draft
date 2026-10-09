@@ -24,12 +24,13 @@ import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import { useFbsTeamStats, fmtTeamStat } from "../utils/fbsTeamStats";
 import { syncProfileFollow } from "../utils/liveFollowSync";
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { useLiveGame, useLiveStats } from "../hooks/useLiveGame";
 import { LEADER_CATS, statLine } from "../utils/liveStats";
 import { communityFor, gradeLabel } from "../utils/communityGrades";
 import { fetchCurrentRankMap } from "../utils/rankings";
 import { isPickable, mondayOfWeekUtc, toMs } from "../utils/wePickLocks";
+import { summarizePicks, pickView, pickPublic, listedPick } from "../utils/wePickSummary";
 import { pickedSideOf, isGameFinal, hasScorePick, scoreGamePick, compareStandingsEntries } from "../utils/wePickScoring";
 import { hasRankedRoom, loadWeekRanked, swapRanked, RANKED_SIZE } from "../utils/wePickRanked";
 import RankedSwap from "../components/RankedSwap";
@@ -1324,38 +1325,86 @@ function useVerifiedUids(uids) {
 // The game's community We-Pick picks for the halftime break card: who
 // fans picked, their average predicted final, and the viewer's own pick
 // (all in /live's home/away). null when there are none.
-function breakPickSummary(game, picks, user) {
-  if (!game || !picks?.picks?.length) return null;
-  const swapped = !!picks.sched.Home && picks.sched.Home === game.away?.school;
-  const sideOf = (s) => (s === "home" ? (swapped ? "away" : "home") : s === "away" ? (swapped ? "home" : "away") : null);
-  const split = { home: 0, away: 0 };
-  for (const p of picks.picks) { const sd = sideOf(pickedSideOf(p)); if (sd) split[sd]++; }
-  const scored = picks.picks.filter(hasScorePick);
-  const avg = (k) => Math.round(scored.reduce((t, p) => t + p[k], 0) / (scored.length || 1));
-  const mine = user ? picks.picks.find((p) => p.uid === user.uid) : null;
+function breakPickSummary(game, data, user) {
+  const v = pickView(data, user?.uid);
+  if (!game || !v || !(v.summary.count || v.summary.scored)) return null;
+  const S = v.summary;
+  const swapped = !!v.sched.Home && v.sched.Home === game.away?.school;
+  const split = swapped ? { home: S.split.away, away: S.split.home } : { home: S.split.home, away: S.split.away };
+  const avg = (k) => Math.round(S.sum[k] / (S.scored || 1));
+  const mine = v.mine;
   return {
     split,
-    avg: scored.length ? { home: swapped ? avg("awayScore") : avg("homeScore"), away: swapped ? avg("homeScore") : avg("awayScore") } : null,
+    avg: S.scored ? { home: swapped ? avg("away") : avg("home"), away: swapped ? avg("home") : avg("away") } : null,
     mine: mine && hasScorePick(mine) ? { home: swapped ? mine.awayScore : mine.homeScore, away: swapped ? mine.homeScore : mine.awayScore } : null,
   };
 }
 
+// A game's community We-Pick picks: { sched, summary, mine, mineCounted }.
+//   summary  wePickSummaries/{id} — one doc the live ingester keeps
+//            (server/live/pickSummaries.js): count, split { away, home },
+//            scored, sum { away, home }, scores ("away-home" → n),
+//            publicCount, recent (the newest public picks), builtAt — all
+//            in schedule26's orientation. A game without one yet (a game
+//            from before summaries) reads every pick instead and is
+//            summarized here the same way.
+//   mine     the viewer's own pick (users/{uid}/picks/{id}); mineCounted:
+//            whether the summary already includes it (it may lag a few
+//            minutes — pickView folds a newer one in).
+// Three reads (four with a pick of your own) however many fans picked.
 function useGamePicks(wedraftGameId) {
+  const { user } = useAuth();
+  const uid = user?.uid || null;
   const [state, setState] = useState(null);
   useEffect(() => {
     let alive = true;
     setState(null);
     if (!wedraftGameId) return undefined;
-    Promise.all([
-      getDoc(doc(db, "schedule26", wedraftGameId)),
-      getDocs(collection(db, "schedule26", wedraftGameId, "picks")),
-    ]).then(([g, ps]) => {
-      if (alive) setState({ sched: g.exists() ? g.data() : {}, picks: ps.docs.map((d) => ({ uid: d.id, ...d.data() })) });
-    }).catch(() => { if (alive) setState({ sched: {}, picks: [] }); });
+    (async () => {
+      const [g, sum, own] = await Promise.all([
+        getDoc(doc(db, "schedule26", wedraftGameId)),
+        getDoc(doc(db, "wePickSummaries", wedraftGameId)).catch(() => null),
+        uid ? getDoc(doc(db, "users", uid, "picks", wedraftGameId)).catch(() => null) : null,
+      ]);
+      const sched = g.exists() ? g.data() : {};
+      const mine = own?.exists() ? { uid, ...own.data() } : null;
+      if (sum?.exists()) {
+        const summary = sum.data();
+        return { sched, summary, mine, mineCounted: !!mine && (toMs(mine.updatedAt) || 0) <= (summary.builtAt || 0) };
+      }
+      const ps = await getDocs(collection(db, "schedule26", wedraftGameId, "picks"));
+      const picks = ps.docs.map((d) => ({ uid: d.id, ...d.data() }));
+      const own2 = mine || picks.find((p) => p.uid === uid) || null;
+      return { sched, summary: summarizePicks(picks), mine: own2, mineCounted: !!own2 && picks.some((p) => p.uid === uid) };
+    })()
+      .then((st) => { if (alive) setState(st); })
+      .catch(() => { if (alive) setState({ sched: {}, summary: summarizePicks([]), mine: null, mineCounted: false }); });
     return () => { alive = false; };
-  }, [wedraftGameId]);
+  }, [wedraftGameId, uid]);
   return state;
 }
+
+// Older public picks, newest first, MORE_PICKS_PAGE per page — read only
+// when someone opens the full list (the summary carries the newest).
+const MORE_PICKS_PAGE = 50;
+function useMorePicks(wedraftGameId, pages) {
+  const [list, setList] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (!wedraftGameId) { setList(null); return undefined; }
+    getDocs(query(collection(db, "schedule26", wedraftGameId, "picks"), orderBy("updatedAt", "desc"), limit(pages * MORE_PICKS_PAGE)))
+      .then((snap) => {
+        if (!alive) return;
+        const out = snap.docs.map((d) => ({ uid: d.id, ...d.data() })).filter(pickPublic).map(listedPick);
+        out.full = snap.size >= pages * MORE_PICKS_PAGE; // a full page: there may be more
+        setList(out);
+      })
+      .catch(() => { if (alive) setList([]); });
+    return () => { alive = false; };
+  }, [wedraftGameId, pages]);
+  return list;
+}
+
 
 // The recap's one-line story of the game: "Ohio State routs Iowa 42–10,
 // moving to 4-1. Iowa drops to 4-1." The verb follows the margin (blowout,
@@ -1414,21 +1463,22 @@ function GameRecap({ game, gameId, slateGame }) {
 
   // We-Pick: fans' average predicted final, and how many called the winner.
   let wp = null;
-  if (picks && picks.picks.length) {
-    const swapped = !!picks.sched.Home && picks.sched.Home === game.away.school;
-    const sideOf = (s) => (s === "home" ? (swapped ? "away" : "home") : s === "away" ? (swapped ? "home" : "away") : null);
-    const scored = picks.picks.filter(hasScorePick);
-    const avg = (k) => Math.round(scored.reduce((t, p) => t + p[k], 0) / (scored.length || 1));
-    const avgHome = swapped ? avg("awayScore") : avg("homeScore");
-    const avgAway = swapped ? avg("homeScore") : avg("awayScore");
-    const sided = picks.picks.map((p) => sideOf(pickedSideOf(p))).filter(Boolean);
-    const right = sided.filter((sd) => sd === winSide).length;
-    const exact = scored.filter((p) => (swapped ? p.awayScore : p.homeScore) === hp && (swapped ? p.homeScore : p.awayScore) === ap).length;
-    const mine = user ? picks.picks.find((p) => p.uid === user.uid) : null;
+  const pv = pickView(picks, user?.uid);
+  if (pv && (pv.summary.count || pv.summary.scored)) {
+    const S = pv.summary;
+    const swapped = !!pv.sched.Home && pv.sched.Home === game.away.school;
+    // (the summary is in schedule26's orientation; a swapped game's "home" is /live's away)
+    const schedSide = (sd) => (swapped ? (sd === "home" ? "away" : "home") : sd);
+    const avg = (k) => Math.round(S.sum[k] / (S.scored || 1));
+    const avgHome = avg(schedSide("home"));
+    const avgAway = avg(schedSide("away"));
+    const right = S.split[schedSide(winSide)] || 0;
+    const exact = S.scores[swapped ? `${hp}-${ap}` : `${ap}-${hp}`] || 0;
+    const mine = pv.mine;
     const schedFinal = swapped ? { Final: true, HomeScore: ap, AwayScore: hp } : { Final: true, HomeScore: hp, AwayScore: ap };
     wp = {
-      total: sided.length, right, pct: sided.length ? Math.round((100 * right) / sided.length) : 0,
-      avgHome, avgAway, scoredCount: scored.length, exact,
+      total: S.count, right, pct: S.count ? Math.round((100 * right) / S.count) : 0,
+      avgHome, avgAway, scoredCount: S.scored, exact,
       mine: mine && hasScorePick(mine) ? {
         home: swapped ? mine.awayScore : mine.homeScore, away: swapped ? mine.homeScore : mine.awayScore,
         points: scoreGamePick(mine, schedFinal),
@@ -1744,10 +1794,11 @@ function PreviewPickCard({ game, withInfo = false }) {
   const [msg, setMsg] = useState("");
   const [mineLocal, setMineLocal] = useState(null);
   const [showAllPicks, setShowAllPicks] = useState(false);
+  const [morePages, setMorePages] = useState(1);
   // Switching games reuses this card — start the new game clean (the last
   // game's typed score, message and saved pick must not carry over).
   useEffect(() => {
-    setVals({ away: "", home: "" }); setMsg(""); setMineLocal(null); setShowAllPicks(false); setSwap(null);
+    setVals({ away: "", home: "" }); setMsg(""); setMineLocal(null); setShowAllPicks(false); setMorePages(1); setSwap(null);
   }, [game?.wedraftGameId]); // eslint-disable-line react-hooks/exhaustive-deps
   // The Ranked 6 swap chooser (components/RankedSwap.js), open when this
   // pick should be ranked but the week's 6 are full: { ranked } (the other
@@ -1755,11 +1806,19 @@ function PreviewPickCard({ game, withInfo = false }) {
   const [swap, setSwap] = useState(null);
   const [swapBusy, setSwapBusy] = useState("");
   const swapped = !!data?.sched?.Home && data.sched.Home === game.away.school;
-  const picks = (data?.picks || []).map((p) => (user && p.uid === user.uid && mineLocal ? { ...p, ...mineLocal } : p));
-  if (user && mineLocal && !picks.some((p) => p.uid === user.uid)) picks.push({ uid: user.uid, ...mineLocal });
-  const mine = user ? picks.find((p) => p.uid === user.uid) : null;
-  // Verified badges for the public picks' names.
-  const verified = useVerifiedUids(picks.filter((p) => p.visibility !== "private").map((p) => p.uid));
+  // The community summary with your own pick folded in (pickView).
+  const view = useMemo(() => pickView(data, user?.uid, mineLocal), [data, user?.uid, mineLocal]);
+  const S = view?.summary || null;
+  const mine = view?.mine || null;
+  // Public picks: the summary's newest, then — only when asked for — older
+  // ones a page at a time (useMorePicks).
+  const more = useMorePicks(showAllPicks && S && S.publicCount > (S.recent || []).length ? game?.wedraftGameId : null, morePages);
+  const publicPicks = useMemo(() => {
+    const seen = new Set();
+    return [...(S?.recent || []), ...(more || [])].filter((r) => !seen.has(r.uid) && seen.add(r.uid));
+  }, [S, more]);
+  // Verified badges: in the summary; looked up only for the older ones loaded.
+  const verifiedMore = useVerifiedUids((more || []).map((r) => r.uid));
   // A pick's scores in /live's orientation.
   const live = (p) => ({ home: swapped ? p.awayScore : p.homeScore, away: swapped ? p.homeScore : p.awayScore });
   useEffect(() => {
@@ -1773,17 +1832,12 @@ function PreviewPickCard({ game, withInfo = false }) {
   const open = !!sched && game.status === "scheduled" && isPickable(sched);
   const opensAt = sched && !open && game.status === "scheduled" && toMs(sched.Date) ? mondayOfWeekUtc(toMs(sched.Date)) : null;
   const notYet = opensAt != null && Date.now() < opensAt && !sched.PicksForceOpen;
-  // Public picks, newest first (private ones still count in the split above).
-  const publicPicks = picks.filter((p) => p.visibility !== "private" && (hasScorePick(p) || pickedSideOf(p)))
-    .sort((a, b) => (toMs(b.updatedAt) || 0) - (toMs(a.updatedAt) || 0));
-
-  const scored = picks.filter(hasScorePick);
-  const sides = picks.map((p) => {
-    const sd = pickedSideOf(p);
-    return sd === "home" ? (swapped ? "away" : "home") : sd === "away" ? (swapped ? "home" : "away") : null;
-  }).filter(Boolean);
-  const awayPct = sides.length ? Math.round((100 * sides.filter((x) => x === "away").length) / sides.length) : 0;
-  const avg = (k) => Math.round(scored.reduce((t, p) => t + live(p)[k], 0) / (scored.length || 1));
+  // The split and the average score, in /live's orientation (the summary
+  // is in schedule26's).
+  const total = S?.count || 0;
+  const liveSide = (sd) => (swapped ? (sd === "home" ? "away" : "home") : sd);
+  const awayPct = total ? Math.round((100 * (S.split[liveSide("away")] || 0)) / total) : 0;
+  const avg = (k) => Math.round((S?.sum?.[liveSide(k)] || 0) / (S?.scored || 1));
 
   const rankThis = async () => {
     if (!user || !sched?.Week) return;
@@ -1906,11 +1960,11 @@ function PreviewPickCard({ game, withInfo = false }) {
                 : "Picks are locked."}
         </div>
       )}
-      {sides.length > 0 ? (() => {
+      {total > 0 ? (() => {
         // The Community Pick: every fan's score pick averaged (the big
         // score, the favorite lit up), over who they're picking to win.
-        const aAvg = scored.length ? avg("away") : null;
-        const hAvg = scored.length ? avg("home") : null;
+        const aAvg = S.scored ? avg("away") : null;
+        const hAvg = S.scored ? avg("home") : null;
         const fav = aAvg != null && aAvg !== hAvg ? (aAvg > hAvg ? "away" : "home") : awayPct !== 50 ? (awayPct > 50 ? "away" : "home") : null;
         const side = (sd) => {
           const t = game[sd] || {};
@@ -1923,7 +1977,7 @@ function PreviewPickCard({ game, withInfo = false }) {
         };
         return (
           <div className="wdl-cp">
-            <div className="wdl-cp-h"><span>Community Pick</span><small>{sides.length} pick{sides.length === 1 ? "" : "s"}</small></div>
+            <div className="wdl-cp-h"><span>Community Pick</span><small>{total} pick{total === 1 ? "" : "s"}</small></div>
             <div className="wdl-cp-board">
               {side("away")}
               {aAvg != null ? (
@@ -1942,17 +1996,16 @@ function PreviewPickCard({ game, withInfo = false }) {
           </div>
         );
       })() : data && open && <div className="wdl-recap-sub">No picks yet — be the first.</div>}
-      {publicPicks.length > 0 && (
+      {S && publicPicks.length > 0 && (
         <div className="wdl-picklist">
           <div className="wdl-picklist-h">Public picks</div>
           {publicPicks.slice(0, showAllPicks ? publicPicks.length : 12).map((p) => {
-            const sc = hasScorePick(p) ? live(p) : null;
-            const sd = pickedSideOf(p);
-            const side = sd === "home" ? (swapped ? "away" : "home") : sd === "away" ? (swapped ? "home" : "away") : null;
+            const sc = p.away != null && p.home != null ? live({ awayScore: p.away, homeScore: p.home }) : null;
+            const side = p.side ? liveSide(p.side) : null;
             const t = side ? game[side] : null;
             return (
               <div key={p.uid} className={`wdl-picklist-row${user && p.uid === user.uid ? " me" : ""}`}>
-                <span className="who"><VerifiedNameBadge uid={p.uid} name={p.displayName || "Anonymous Fan"} verified={!!verified[p.uid]} size={13} />{user && p.uid === user.uid ? " (you)" : ""}{p.ranked && hasScorePick(p) && <span title="In their Ranked 6"> ⭐</span>}</span>
+                <span className="who"><VerifiedNameBadge uid={p.uid} name={p.name || "Anonymous Fan"} verified={!!(p.verified ?? verifiedMore[p.uid])} size={13} />{user && p.uid === user.uid ? " (you)" : ""}{p.ranked && sc && <span title="In their Ranked 6"> ⭐</span>}</span>
                 <span className="pk">
                   {t && (t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
                   {sc ? `${Math.max(sc.away, sc.home)}–${Math.min(sc.away, sc.home)}` : t ? teamShort(t) : ""}
@@ -1961,8 +2014,11 @@ function PreviewPickCard({ game, withInfo = false }) {
               </div>
             );
           })}
-          {publicPicks.length > 12 && (
-            <button className="wdl-picklist-more" onClick={() => setShowAllPicks((v) => !v)}>{showAllPicks ? "Show fewer" : `Show all ${publicPicks.length}`}</button>
+          {S.publicCount > 12 && (
+            <button className="wdl-picklist-more" onClick={() => setShowAllPicks((v) => !v)}>{showAllPicks ? "Show fewer" : `Show all ${S.publicCount}`}</button>
+          )}
+          {showAllPicks && more?.full && publicPicks.length < S.publicCount && (
+            <button className="wdl-picklist-more" onClick={() => setMorePages((n) => n + 1)}>Show more</button>
           )}
         </div>
       )}
@@ -2050,6 +2106,10 @@ async function schoolBrands(names) {
   return brand;
 }
 
+// How long a game page that saw its game end waits for the play archive
+// before loading every play instead (GameView).
+const ARCHIVE_WAIT_MS = 2 * 60 * 1000;
+
 const scheduledCache = new Map(); // CFBD game id → built game (or null), per page session
 function useScheduledGame(cfbdGameId) {
   const [game, setGame] = useState(() => (cfbdGameId != null && scheduledCache.has(String(cfbdGameId)) ? scheduledCache.get(String(cfbdGameId)) : undefined)); // undefined = loading/off, null = none
@@ -2078,9 +2138,12 @@ function useScheduledGame(cfbdGameId) {
   return game;
 }
 
-// Any week's slate for All Games' week browser: /live's own games for a
-// week it has ingested (liveGames by season + week), else the week's
-// schedule rows (a future week). Cached per page session.
+// Any week's slate for All Games' week browser and Last Week: the week's
+// archive (liveSlate/week-{season}-regular-{week} — one doc the ingester
+// keeps, server/live/store.js writeSlate: each game as the slate has it,
+// with its statLeaders); for a week from before archives, /live's own
+// games (liveGames by season + week); else the week's schedule rows (a
+// future week). Cached per page session.
 const weekGamesCache = new Map();
 function useWeekGames(season, week) {
   const key = week ? `${season}-${week}` : null;
@@ -2092,8 +2155,12 @@ function useWeekGames(season, week) {
     setGames(null);
     (async () => {
       try {
-        const live = await getDocs(query(collection(db, "liveGames"), where("season", "==", season), where("week", "==", week), where("seasonType", "==", "regular")));
-        let list = live.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const archived = await getDoc(doc(db, "liveSlate", `week-${season}-regular-${week}`));
+        let list = archived.exists() ? archived.data().games || [] : [];
+        if (!list.length) {
+          const live = await getDocs(query(collection(db, "liveGames"), where("season", "==", season), where("week", "==", week), where("seasonType", "==", "regular")));
+          list = live.docs.map((d) => ({ id: d.id, ...d.data() }));
+        }
         if (!list.length) {
           const rows = await getDocs(query(collection(db, "schedule26"), where("Week", "==", `Week ${week}`)));
           const [brand, ranks] = await Promise.all([schoolBrands(rows.docs.flatMap((d) => [d.data().Home, d.data().Away])), latestRanks()]);
@@ -2348,14 +2415,27 @@ function GameView({ gameId, slateGame, followedPlayers, onTogglePlayer, focusPla
     };
   }, [boardFull]);
   // Jumping to a specific play (from the Feed) loads the full play list so
-  // an older play can be found, and so does a final game (its drive
-  // summary needs every play); otherwise just the newest plays.
+  // an older play can be found, and a final game loads its whole list (its
+  // drive summary needs every play) from its play archive — one or two
+  // docs (hooks/useLiveGame.js "final"); otherwise just the newest plays.
   const [finalSeen, setFinalSeen] = useState(slateGame?.status === "final");
-  const { game: live, plays, ready } = useLiveGame(gameId, { plays: focusPlayId || finalSeen ? "all" : "recent", box: false });
+  const { game: live, plays, ready } = useLiveGame(gameId, { plays: focusPlayId ? "all" : finalSeen ? "final" : "recent", box: false });
   const tvShort = useTvShort();
   // Not on the slate and not ingested yet → its schedule row (future weeks).
   const scheduled = useScheduledGame(ready && !live && !slateGame ? gameId : null);
-  useEffect(() => { if (live?.status === "final") setFinalSeen(true); }, [live?.status]);
+  // A game that ends while it's open: its archive is written within a tick
+  // or two of the final — wait for it (up to ARCHIVE_WAIT_MS) rather than
+  // every viewer loading every play the moment the game ends.
+  // (A game that was already over when the page opened needs no wait.)
+  const hasArchive = !!live?.playArchive?.chunks;
+  const sawLive = useRef(false);
+  if (live?.status && live.status !== "final") sawLive.current = true;
+  useEffect(() => {
+    if (live?.status !== "final" || finalSeen) return undefined;
+    if (hasArchive || !sawLive.current) { setFinalSeen(true); return undefined; }
+    const t = setTimeout(() => setFinalSeen(true), ARCHIVE_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [live?.status, hasArchive, finalSeen]);
   const gLive = live || slateGame || scheduled || null;
   // Each team's second color and mascot for the takeover — on the game doc
   // once the ingester has written them, else read from its school.

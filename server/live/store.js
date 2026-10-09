@@ -471,14 +471,64 @@ async function writeSlate(db, { season, week, seasonType, nextWeekAt = null, gam
   // on the slate doc too — this set() replaces the whole doc, so it has to
   // be written here or it reads as changed every time.
   const liveCount = gamesOut.filter((g) => g.status === "in_progress").length;
-  await ref.set({ season, week, seasonType, nextWeekAt, games: gamesOut, bigPlays, statusLiveCount: liveCount, perfHash, updatedAt: FieldValue.serverTimestamp() });
+  // liveSlate/week-{season}-{seasonType}-{week} — the week kept as one doc
+  // (its games as the slate has them, each with its statLeaders), so /live's
+  // week browser and Last Week read one doc instead of every game's
+  // liveGames doc. Only written between games (nothing in progress — a
+  // past week is only ever read once it's over) and when it changed; its
+  // hash rides on the slate doc like perfHash.
+  const archive = weekArchive(gamesOut, games);
+  const archiveHash = hash(archive);
+  const writeArchive = !liveCount && (!sameWeek || prev.weekArchiveHash !== archiveHash);
+  const weekArchiveHash = writeArchive ? archiveHash : sameWeek ? prev.weekArchiveHash || null : null;
+  await ref.set({ season, week, seasonType, nextWeekAt, games: gamesOut, bigPlays, statusLiveCount: liveCount, perfHash, weekArchiveHash, updatedAt: FieldValue.serverTimestamp() });
   if (!sameWeek || prev.statusLiveCount !== liveCount) {
     await db.collection("liveSlate").doc("status").set({ liveCount, updatedAt: FieldValue.serverTimestamp() });
   }
   if (!sameWeek || prev.perfHash !== perfHash) {
     await db.collection("liveSlate").doc("performances").set({ season, week, seasonType, ...performances, updatedAt: FieldValue.serverTimestamp() });
   }
+  if (writeArchive) {
+    await db.collection("liveSlate").doc(weekArchiveId({ season, week, seasonType })).set({ season, week, seasonType, games: archive, updatedAt: FieldValue.serverTimestamp() });
+  }
   return { games: gamesOut.length, bigPlays: bigPlays.length };
+}
+
+// The week archive's doc id and games: the slate's games without what only
+// matters mid-game (clock, down, last play), plus each game's statLeaders
+// (/live's Top Performances for a past week are built from them).
+const weekArchiveId = ({ season, week, seasonType }) => `week-${season}-${seasonType}-${week}`;
+function weekArchive(gamesOut, games) {
+  return gamesOut.map(({ clock, possession, situation, lastPlayText, lastPlay, ...g }) => ({
+    ...g, statLeaders: JSON.parse(JSON.stringify(games.get(g.id)?.statLeaders || {})),
+  }));
+}
+
+// ── Play archive ───────────────────────────────────────────────────────
+// A final game's whole play-by-play in one or two docs (liveGames/{id}/box/
+// pbp0, pbp1 …), so a final game's page reads one doc instead of every
+// play. Built from the stored play docs themselves (exactly what a page
+// would read), hidden and removed plays left out. The game doc's
+// playArchive { rev, chunks, count } says it's there and which plays
+// revision (playsRev) it holds.
+const ARCHIVE_CHUNK_BYTES = 700 * 1024;
+async function writePlayArchive(db, providerGameId, rev = 0) {
+  const gameRef = db.collection("liveGames").doc(gameKey(providerGameId));
+  const snap = await gameRef.collection("plays").get();
+  const plays = snap.docs.map((d) => d.data()).filter((p) => !p.hidden && !p.removed)
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  const chunks = [[]];
+  let bytes = 0;
+  for (const p of plays) {
+    const n = Buffer.byteLength(JSON.stringify(p));
+    if (bytes + n > ARCHIVE_CHUNK_BYTES && chunks[chunks.length - 1].length) { chunks.push([]); bytes = 0; }
+    chunks[chunks.length - 1].push(p);
+    bytes += n;
+  }
+  const ops = chunks.map((list, i) => (b) => b.set(gameRef.collection("box").doc(`pbp${i}`), { i, of: chunks.length, plays: list, updatedAt: FieldValue.serverTimestamp() }));
+  ops.push((b) => b.set(gameRef, { playArchive: { rev, chunks: chunks.length, count: plays.length, at: Date.now() } }, { merge: true }));
+  await commitInBatches(db, ops);
+  return { plays: plays.length, chunks: chunks.length };
 }
 
 // Every game's statLeaders merged into the week's top MAX_PERFORMANCES per
@@ -591,4 +641,4 @@ function finalFeedEntry(gameId, g, at = Date.now()) {
   };
 }
 
-module.exports = { gameKey, weekKey, saveRecordsBase, saveLiveStats, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed, wedraftPlayersBySlug };
+module.exports = { gameKey, weekKey, weekArchiveId, writePlayArchive, saveRecordsBase, saveLiveStats, upsertGames, setGameFields, savePlays, saveBox, writeSlate, slateBigPlay, feedWorthy, wedraftPlayerIndex, normName, compactPresentation, MAX_SLATE_BIG_PLAYS, finalFeedEntry, dedupeFeed, wedraftPlayersBySlug };

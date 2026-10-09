@@ -486,7 +486,7 @@ test("national: a bad window is refused", async () => {
   const bad = async (startAt, endAt) => (await call({ body: { action: "metadata-get", national: true, startAt, endAt } })).statusCode;
   assert.equal(await bad("nope", natWindow.endAt), 400);
   assert.equal(await bad(natWindow.endAt, natWindow.startAt), 400);
-  assert.equal(await bad(new Date(W0).toISOString(), new Date(W0 + 17 * 3600e3).toISOString()), 400);
+  assert.equal(await bad(new Date(W0).toISOString(), new Date(W0 + 21 * 3600e3).toISOString()), 400);
 });
 
 test("national: saving stores broadcastMetadata/national only — no broadcast, schedule, YouTube or VM change", async () => {

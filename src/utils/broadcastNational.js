@@ -484,6 +484,170 @@ export function idleStories(games, perfList, now = Date.now()) {
   return out;
 }
 
+// ── We-Draft Gameday ──
+// Saturday morning before anything's kicked off: the broadcast previews the
+// day instead of recapping the week. On from GAMEDAY_START_HOUR ET until
+// the day's first game starts (then it's the live set-up; a lull later in
+// the day is the ordinary idle set-up, since by then a game today has
+// started).
+export const GAMEDAY_START_HOUR = 6;
+// Each matchup preview on the main panel stays up this long; the panel
+// under it turns through its pages in that time (the tale of the tape,
+// twice, then both teams' offensive and defensive leaders).
+export const PREVIEW_ROTATE_MS = 60 * 1000;
+// At most this many of the day's games are previewed (the marquee ones).
+export const PREVIEW_MAX = 16;
+const etDate = (ms) => new Date(ms).toLocaleDateString("en-CA", { timeZone: ET }); // 2026-10-10
+const etHour = (ms) => Number(new Date(ms).toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone: ET }));
+const etWeekday = (ms) => new Date(ms).toLocaleDateString("en-US", { weekday: "short", timeZone: ET });
+
+// The day being previewed: the scheduled games on the ET date of the next
+// kickoff, soonest first.
+export function gamedayGames(games, now = Date.now()) {
+  const up = upcomingGames(games, now).filter((g) => kick(g) > now);
+  if (!up.length) return [];
+  const day = etDate(kick(up[0]));
+  return up.filter((g) => etDate(kick(g)) === day);
+}
+
+// Gameday is on: a Saturday (ET) from 6 AM, nothing in progress, no game
+// today started or finished yet, and a game still to come today.
+// force (?gameday=1): any time nothing's in progress and there's a next
+// game day to preview.
+export function isGameday(games, now = Date.now(), force = false) {
+  const list = games || [];
+  if (list.some((g) => g.status === "in_progress")) return false;
+  const day = gamedayGames(list, now);
+  if (!day.length) return false;
+  if (force) return true;
+  if (etWeekday(now) !== "Sat" || etHour(now) < GAMEDAY_START_HOUR) return false;
+  const today = etDate(now);
+  if (etDate(kick(day[0])) !== today) return false;
+  return !list.some((g) => g.status !== "scheduled" && etDate(kick(g)) === today);
+}
+
+// How much a matchup is worth previewing: the game of the week, featured
+// games, then ranked-vs-ranked (best pair first), then one ranked team.
+const marquee = (g) => {
+  const h = g.home?.rank;
+  const a = g.away?.rank;
+  return (g.gameOfWeek ? 1000 : 0) + (g.featured ? 500 : 0) + (h && a ? 300 - h - a : 0) + (h || a ? 100 - Math.min(h || 99, a || 99) : 0);
+};
+// The matchups the main panel turns through: the day's marquee games (at
+// most max), in kickoff order so the early games come first; the earliest
+// games when nothing stands out.
+export function previewMatchups(games, now = Date.now(), max = PREVIEW_MAX) {
+  const day = gamedayGames(games, now);
+  const picked = new Set([...day].sort((a, b) => marquee(b) - marquee(a) || kick(a) - kick(b) || byId(a, b)).filter((g) => marquee(g) > 0).slice(0, max));
+  for (const g of day) { if (picked.size >= Math.min(max, 6)) break; picked.add(g); }
+  return day.filter((g) => picked.has(g));
+}
+
+// "3h 20m" / "45 min" until a kickoff.
+export function untilText(ms) {
+  if (ms < 3600e3) return `${Math.max(1, Math.round(ms / 60e3))} min`;
+  const h = Math.floor(ms / 3600e3);
+  const m = Math.round((ms % 3600e3) / 60e3);
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+// The storyline strip on gameday: the countdown to the first kickoff, the
+// game of the week, every top-25 clash, and the day at a glance.
+export function gamedayStories(games, now = Date.now()) {
+  const day = gamedayGames(games, now);
+  if (!day.length) return [];
+  const out = [];
+  const first = day[0];
+  out.push({ key: `first-${first.id}`, chip: "Kickoff in", tone: "gold", game: first,
+    text: `${untilText(kick(first) - now)} · ${named(first.away)} at ${named(first.home)} · ${kickText(first, now)}${first.tv ? ` · ${String(first.tv).split("|")[0].trim()}` : ""}` });
+  const gow = day.find((g) => g.gameOfWeek);
+  if (gow) out.push({ key: `gow-${gow.id}`, chip: "Game of the week", tone: "gold", game: gow, text: `${named(gow.away)} at ${named(gow.home)} · ${kickText(gow, now)}` });
+  for (const g of day.filter((x) => x.home?.rank && x.away?.rank && x !== gow).sort((a, b) => a.home.rank + a.away.rank - b.home.rank - b.away.rank)) {
+    out.push({ key: `t25-${g.id}`, chip: "Top 25 clash", tone: "red", game: g, text: `${named(g.away)} at ${named(g.home)} · ${kickText(g, now)}` });
+  }
+  const ranked = day.reduce((n, g) => n + (g.home?.rank ? 1 : 0) + (g.away?.rank ? 1 : 0), 0);
+  out.push({ key: "today", chip: "Today", tone: "blue", game: null,
+    text: [`${day.length} ${day.length === 1 ? "game" : "games"}`, ranked && `${ranked} ranked ${ranked === 1 ? "team" : "teams"} in action`, `first kickoff ${kickText(first, now)}`].filter(Boolean).join(" · ") });
+  return out;
+}
+
+// A team's season leaders for the preview, from its roster doc
+// (cfbRosters/{teamId} — scripts/syncCfbdRosters.js: players[].s, season
+// stats by category): { [cat]: { name, pos, slug, v, line } | null }.
+const num = (v) => (v == null || v === "" ? 0 : Number(v) || 0);
+const fmtN = (v) => (Number.isInteger(v) ? v.toLocaleString("en-US") : String(v));
+export const LEADER_CATS = {
+  passing: { label: "Passing", get: (s) => num(s.passing?.YDS), line: (s) => `${fmtN(num(s.passing?.YDS))} YDS · ${num(s.passing?.TD)} TD` },
+  rushing: { label: "Rushing", get: (s) => num(s.rushing?.YDS), line: (s) => `${fmtN(num(s.rushing?.YDS))} YDS · ${num(s.rushing?.TD)} TD` },
+  receiving: { label: "Receiving", get: (s) => num(s.receiving?.YDS), line: (s) => `${num(s.receiving?.REC)} REC · ${fmtN(num(s.receiving?.YDS))} YDS` },
+  tackles: { label: "Tackles", get: (s) => num(s.defensive?.TOT), line: (s) => `${fmtN(num(s.defensive?.TOT))} TKL${num(s.defensive?.TFL) ? ` · ${fmtN(num(s.defensive?.TFL))} TFL` : ""}` },
+  sacks: { label: "Sacks", get: (s) => num(s.defensive?.SACKS), line: (s) => `${fmtN(num(s.defensive?.SACKS))} ${num(s.defensive?.SACKS) === 1 ? "SACK" : "SACKS"}` },
+  interceptions: { label: "Interceptions", get: (s) => num(s.interceptions?.INT), line: (s) => `${fmtN(num(s.interceptions?.INT))} INT` },
+};
+export function teamLeaders(roster) {
+  const out = {};
+  for (const [cat, c] of Object.entries(LEADER_CATS)) {
+    let best = null;
+    for (const p of roster?.players || []) {
+      const v = c.get(p.s || {});
+      if (v > 0 && (!best || v > best.v)) best = { p, v };
+    }
+    out[cat] = best ? { name: `${best.p.first || ""} ${best.p.last || ""}`.trim(), pos: best.p.pos || null, slug: best.p.slug || null, v: best.v, line: c.line(best.p.s || {}) } : null;
+  }
+  return out;
+}
+
+// Player storylines for the preview's card box: the big lines a team's
+// players put up in its last game (a liveGames doc — its statLeaders, each
+// category's top lines with their side), best first, at most n:
+// [{ key, name, slug, cat, headline, line, ctx, prospect, score }].
+//   headline  the number that makes it a story ("5 passing TDs")
+//   line      the full line ("24/31 · 312 YDS · 5 TD")
+//   ctx       the game ("Last week · W 38–24 vs. BC")
+const STORY = {
+  passing: (s) => ((s.td || 0) >= 4 ? `${s.td} passing TDs` : (s.yds || 0) >= 300 ? `${s.yds} passing yards` : (s.td || 0) >= 3 ? `${s.td} passing TDs` : null),
+  rushing: (s) => ((s.td || 0) >= 3 ? `${s.td} rushing TDs` : (s.yds || 0) >= 100 ? `${s.yds} rushing yards` : (s.td || 0) >= 2 ? `${s.td} rushing TDs` : null),
+  receiving: (s) => ((s.td || 0) >= 3 ? `${s.td} receiving TDs` : (s.yds || 0) >= 100 ? `${s.yds} receiving yards` : (s.td || 0) >= 2 ? `${s.td} receiving TDs` : null),
+  defense: (s) => ((s.int || 0) >= 2 ? `${s.int} interceptions` : (s.sacks || 0) >= 2 ? `${Number.isInteger(s.sacks) ? s.sacks : s.sacks.toFixed(1)} sacks` : (s.int || 0) >= 1 ? "Interception" : null),
+};
+export function lastGameStories(gameDoc, teamId, now = Date.now(), n = 2) {
+  if (!gameDoc?.statLeaders) return [];
+  const side = String(gameDoc.home?.providerTeamId) === String(teamId) ? "home" : String(gameDoc.away?.providerTeamId) === String(teamId) ? "away" : null;
+  if (!side) return [];
+  const opp = gameDoc[side === "home" ? "away" : "home"] || {};
+  const us = gameDoc[side]?.points ?? 0;
+  const them = opp.points ?? 0;
+  const ctx = `Last game · ${us > them ? "W" : us < them ? "L" : "T"} ${us}–${them} ${side === "home" ? "vs." : "at"} ${teamShort(opp) || teamName(opp)}`;
+  const seen = new Set();
+  return CATS.flatMap((cat) => (gameDoc.statLeaders[cat] || []).filter((e) => e.side === side).map((e) => ({ e, cat })))
+    .map(({ e, cat }) => {
+      const headline = STORY[cat](e.stats || {});
+      return headline && {
+        key: `${gameDoc.id || ""}-${e.id || e.name}-${cat}`, name: e.name, slug: e.slug || null, cat, headline, ctx,
+        line: statLine(cat, e.stats).replace(/ · LONG -?\d+/, ""), prospect: activeProspect(e.slug, now), score: catScore[cat](e.stats || {}),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .filter((x) => !seen.has(x.name) && seen.add(x.name))
+    .slice(0, n);
+}
+// A team's last game from its liveGames docs: the latest final before now
+// that has stat lines.
+export function lastFinal(docs, now = Date.now()) {
+  return (docs || []).filter((d) => d.status === "final" && d.statLeaders && kick(d) < now).sort((a, b) => kick(b) - kick(a))[0] || null;
+}
+
+// A school's prospect to watch on the preview: its We-Draft players in the
+// next three classes (list: [{ name, slug, pos, cls, gradeAvg, grade }]),
+// best community grade first (a lower average is a better grade).
+export function prospectsToWatch(list, now = Date.now(), n = 1) {
+  const y = draftYear(now);
+  return (list || []).filter((p) => { const c = Number(p.cls); return c >= y && c <= y + 2; })
+    .sort((a, b) => (a.gradeAvg ?? 99) - (b.gradeAvg ?? 99) || Number(a.cls) - Number(b.cls) || String(a.name).localeCompare(String(b.name)))
+    .slice(0, n);
+}
+
 // We-Draft prospects (linked players in a class still to be drafted —
 // each game's statLeaders carry their profile slugs) having big days in
 // the live games, best first, for the spotlight: [{ key, slug, name, side,
@@ -524,8 +688,21 @@ export function nationalInsights(docs, n = 3) {
   return out.sort((a, b) => (b.insight.at || 0) - (a.insight.at || 0)).slice(0, n);
 }
 
-// The ticker along the bottom: recent finals and the next kickoffs, with a
-// call to action every few items.   [{ key, tag, text, url? }]
+// The national broadcast's ticker along the bottom is reserved for the
+// site: these promos, in turn — never scores or kickoffs (the rail, strip
+// and panels carry those). [{ key, tag, text, url }]
+export const NATIONAL_PROMOS = [
+  { key: "live", tag: null, text: "Live stats and every game", url: "we-draft.com/live" },
+  { key: "prospects", tag: null, text: "Scouting reports on every draft prospect", url: "we-draft.com" },
+  { key: "community", tag: null, text: "Grade the prospects with the We-Draft community", url: "we-draft.com/community" },
+  { key: "wepick", tag: null, text: "Pick the games · climb the We-Pick standings", url: "we-draft.com/we-pick" },
+  { key: "boards", tag: null, text: "Build your own big board", url: "we-draft.com/boards" },
+  { key: "mocks", tag: null, text: "Make your own mock draft", url: "we-draft.com/mocks/create" },
+  { key: "stats", tag: null, text: "College football stat leaders", url: "we-draft.com/cfb/stats" },
+];
+
+// A kickoff as text: "12:00 PM ET", with the day when it isn't today
+// ("Sat 12:00 PM ET").
 const ET = "America/New_York";
 const kickText = (g, now) => {
   const d = new Date(g.startDate || "");
@@ -534,22 +711,4 @@ const kickText = (g, now) => {
   const pre = day(d) === day(new Date(now)) ? "" : `${day(d)} `;
   return g.startTimeTBD ? `${pre}TBA` : `${pre}${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ET })} ET`;
 };
-export function tickerItems(games, ctas, now = Date.now(), { finals = 8, upcoming = 8, ctaEvery = 4 } = {}) {
-  const items = [
-    ...finalGames(games).slice(0, finals).map((g) => {
-      const [w, l] = (g.home?.points ?? 0) >= (g.away?.points ?? 0) ? ["home", "away"] : ["away", "home"];
-      return { key: `f-${g.id}`, tag: g.period > 4 ? "Final/OT" : "Final", text: `${named(g[w])} ${g[w]?.points ?? 0}, ${named(g[l])} ${g[l]?.points ?? 0}` };
-    }),
-    ...upcomingGames(games, now).slice(0, upcoming).map((g) => ({
-      key: `u-${g.id}`, tag: kickText(g, now), text: `${named(g.away)} at ${named(g.home)}${g.tv ? ` · ${g.tv}` : ""}`,
-    })),
-  ];
-  const out = [];
-  let c = 0;
-  items.forEach((it, i) => {
-    if (i % ctaEvery === 0 && ctas.length) { const x = ctas[c++ % ctas.length]; out.push({ key: `cta-${x.key}-${i}`, tag: null, text: x.label, url: x.url() }); }
-    out.push(it);
-  });
-  if (!out.length) for (const x of ctas) out.push({ key: `cta-${x.key}`, tag: null, text: x.label, url: x.url() });
-  return out;
-}
+

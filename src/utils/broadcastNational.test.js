@@ -1,7 +1,8 @@
 import {
-  railCards, railAt, closeGames, isFinalEntry, topPerformers, resultLine, playerOfGame, topPerformanceList, idleStories, nationalPhase, orderLive, scoreChanges, scoreSnapshot, tickerItems,
+  railCards, railAt, closeGames, isFinalEntry, topPerformers, resultLine, playerOfGame, topPerformanceList, idleStories, nationalPhase, orderLive, scoreChanges, scoreSnapshot, NATIONAL_PROMOS,
   storylines, quietStory, eventForBigPlay, eventForNationalInsight, nationalInsights,
   queueBigPlays, playerLinesFor, leadersFromBox, performanceStories, spotlightCandidates, activeProspect,
+  isGameday, gamedayGames, previewMatchups, gamedayStories, prospectsToWatch, untilText, teamLeaders, lastGameStories, lastFinal,
 } from "./broadcastNational";
 
 // utils/broadcast.js and utils/liveStats.mjs aren't loadable in this Jest
@@ -124,23 +125,6 @@ describe("scoreChanges", () => {
     ];
     const c = scoreChanges(scoreSnapshot(before), after);
     expect([...c]).toEqual([["1", { side: "away", pts: 7 }]]);
-  });
-});
-
-describe("tickerItems", () => {
-  const ctas = [{ key: "live", label: "All games", url: () => "we-draft.com/live" }];
-  it("lists finals winner-first and upcoming kickoffs, with calls to action between", () => {
-    const g = [
-      game(1, "final", { home: team("OSU", 31, 3), away: team("MICH", 24) }),
-      game(2, "scheduled", { startDate: at(1), tv: "ABC" }),
-    ];
-    const items = tickerItems(g, ctas, NOW);
-    expect(items[0].url).toBe("we-draft.com/live");
-    expect(items[1]).toMatchObject({ tag: "Final", text: "#3 OSU 31, MICH 24" });
-    expect(items[2].text).toBe("A2 at H2 · ABC");
-  });
-  it("falls back to the calls to action alone", () => {
-    expect(tickerItems([], ctas, NOW)).toHaveLength(1);
   });
 });
 
@@ -299,5 +283,123 @@ describe("nothing on", () => {
     expect(stories[0].text).toBe("A3 at H3 · in 11h 0m");
     expect(stories[1].text).toBe("WASH took down #12 IOWA 20–10");
     expect(stories[3].text).toBe("2 games final · 1 still to play");
+  });
+});
+
+describe("We-Draft Gameday", () => {
+  // Saturday Oct 10, 2026 (EDT, UTC-4)
+  const SAT_7AM = Date.parse("2026-10-10T11:00:00Z");
+  const SAT_5AM = Date.parse("2026-10-10T09:00:00Z");
+  const iso = (s) => new Date(Date.parse(s)).toISOString();
+  const day = [
+    game(1, "scheduled", { startDate: iso("2026-10-10T16:00:00Z") }), // noon ET
+    game(2, "scheduled", { startDate: iso("2026-10-10T19:30:00Z"), home: team("H2", 0, 5), away: team("A2", 0, 9) }),
+    game(3, "scheduled", { startDate: iso("2026-10-10T23:00:00Z"), gameOfWeek: true }),
+    game(4, "scheduled", { startDate: iso("2026-10-17T16:00:00Z") }), // next week
+    game(5, "final", { startDate: iso("2026-10-10T00:00:00Z") }), // Friday night ET
+  ];
+
+  it("is on Saturday from 6 AM ET until a game today starts", () => {
+    expect(isGameday(day, SAT_7AM)).toBe(true);
+    expect(isGameday(day, SAT_5AM)).toBe(false);
+    // Friday night's final doesn't count against today
+    const started = day.map((g) => (g.id === "1" ? { ...g, status: "in_progress" } : g));
+    expect(isGameday(started, SAT_7AM)).toBe(false);
+    // a lull after today's first game ended is the ordinary idle set-up
+    const ended = day.map((g) => (g.id === "1" ? { ...g, status: "final" } : g));
+    expect(isGameday(ended, Date.parse("2026-10-10T19:00:00Z"))).toBe(false);
+    // not on a Friday — unless forced
+    const fri = Date.parse("2026-10-09T15:00:00Z");
+    expect(isGameday(day, fri)).toBe(false);
+    expect(isGameday(day, fri, true)).toBe(true);
+    expect(isGameday([], SAT_7AM, true)).toBe(false);
+  });
+
+  it("previews the next game day's games, marquee ones in kickoff order", () => {
+    expect(gamedayGames(day, SAT_7AM).map((g) => g.id)).toEqual(["1", "2", "3"]);
+    expect(previewMatchups(day, SAT_7AM, 2).map((g) => g.id)).toEqual(["2", "3"]);
+    // a short day: everything
+    expect(previewMatchups(day, SAT_7AM).map((g) => g.id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("strip: the countdown, the game of the week, top 25 clashes, the day", () => {
+    const s = gamedayStories(day, SAT_7AM);
+    expect(s.map((x) => x.chip)).toEqual(["Kickoff in", "Game of the week", "Top 25 clash", "Today"]);
+    expect(s[0].text).toMatch(/^5h · A1 at H1 · 12:00 PM ET/);
+    expect(s[2].text).toMatch(/#9 A2 at #5 H2/);
+    expect(s[3].text).toBe("3 games · 2 ranked teams in action · first kickoff 12:00 PM ET");
+  });
+
+  it("untilText and prospectsToWatch", () => {
+    expect(untilText(45 * 60e3)).toBe("45 min");
+    expect(untilText(200 * 60e3)).toBe("3h 20m");
+    const list = [
+      { name: "Old", cls: "2026", gradeAvg: 1 },
+      { name: "B", cls: "2028", gradeAvg: null },
+      { name: "A", cls: "2027", gradeAvg: 3.2 },
+      { name: "C", cls: "2027", gradeAvg: 2.1 },
+    ];
+    expect(prospectsToWatch(list, SAT_7AM, 3).map((p) => p.name)).toEqual(["C", "A", "B"]);
+  });
+});
+
+describe("teamLeaders", () => {
+  it("each category's season leader from the roster doc", () => {
+    const roster = { players: [
+      { first: "Tommy", last: "Castellanos", pos: "QB", s: { passing: { YDS: "1834", TD: "14" }, rushing: { YDS: "310", TD: "4" } } },
+      { first: "Gavin", last: "Sawchuk", pos: "RB", s: { rushing: { YDS: "512", TD: "6" }, receiving: { REC: "9", YDS: "80" } } },
+      { first: "Duce", last: "Robinson", pos: "WR", slug: "duce-robinson-2027-wr", s: { receiving: { REC: "31", YDS: "602" } } },
+      { first: "Stefon", last: "Thompson", pos: "LB", s: { defensive: { TOT: "44", TFL: "5.5", SACKS: "2.5" } } },
+      { first: "Edwin", last: "Joseph", pos: "S", s: { defensive: { TOT: "30", SACKS: "1" }, interceptions: { INT: "1" } } },
+    ] };
+    const l = teamLeaders(roster);
+    expect(l.passing).toMatchObject({ name: "Tommy Castellanos", line: "1,834 YDS · 14 TD" });
+    expect(l.rushing).toMatchObject({ name: "Gavin Sawchuk", line: "512 YDS · 6 TD" });
+    expect(l.receiving).toMatchObject({ name: "Duce Robinson", slug: "duce-robinson-2027-wr", line: "31 REC · 602 YDS" });
+    expect(l.tackles.line).toBe("44 TKL · 5.5 TFL");
+    expect(l.sacks).toMatchObject({ name: "Stefon Thompson", line: "2.5 SACKS" });
+    expect(l.interceptions.line).toBe("1 INT");
+    expect(teamLeaders({ players: [] }).passing).toBeNull();
+  });
+});
+
+describe("lastGameStories", () => {
+  const doc = {
+    id: "401858248", status: "final", startDate: "2026-10-03T19:30:00Z",
+    home: { providerTeamId: 103, short: "BC", points: 24 }, away: { providerTeamId: 97, short: "LOU", points: 38 },
+    statLeaders: {
+      passing: [{ id: "1", name: "Ashton Daniels", slug: "ashton-daniels-2026-qb", side: "away", stats: { cmp: 24, att: 31, yds: 287, td: 5 } },
+        { id: "9", name: "Other QB", side: "home", stats: { cmp: 30, att: 40, yds: 350, td: 2 } }],
+      rushing: [{ id: "2", name: "Isaac Brown", side: "away", stats: { car: 18, yds: 142, td: 1, long: 40 } }],
+      receiving: [{ id: "3", name: "Chris Bell", side: "away", stats: { rec: 4, yds: 61, td: 2 } }],
+      defense: [{ id: "4", name: "Clev Lubin", slug: "clev-lubin-2027-edge", side: "away", stats: { sacks: 2.5 } }],
+    },
+  };
+  it("a team's big lines from its last game, best first, with the result", () => {
+    const s = lastGameStories(doc, 97, NOW, 3);
+    expect(s.map((x) => [x.name, x.headline])).toEqual([["Ashton Daniels", "5 passing TDs"], ["Isaac Brown", "142 rushing yards"], ["Chris Bell", "2 receiving TDs"]]);
+    expect(s[0].line).toBe("24/31 · 287 YDS · 5 TD");
+    expect(s[0].ctx).toBe("Last game · W 38–24 at BC");
+    expect(s[1].line).toBe("18 CAR · 142 YDS · 1 TD");
+    expect(lastGameStories(doc, 97, NOW, 5).find((x) => x.name === "Clev Lubin")).toMatchObject({ headline: "2.5 sacks", prospect: true });
+    // the other side's lines aren't this team's
+    expect(lastGameStories(doc, 103, NOW).map((x) => x.headline)).toEqual(["350 passing yards"]);
+    expect(lastGameStories(null, 97)).toEqual([]);
+  });
+  it("lastFinal: the latest final with stat lines", () => {
+    const old = { ...doc, startDate: "2026-09-26T19:30:00Z" };
+    const noStats = { ...doc, startDate: "2026-10-04T19:30:00Z", statLeaders: null };
+    const later = { ...doc, status: "scheduled", startDate: "2026-10-09T23:00:00Z" };
+    expect(lastFinal([old, doc, noStats, later], NOW)).toBe(doc);
+  });
+});
+
+describe("NATIONAL_PROMOS", () => {
+  it("the national ticker is site promos only — never a score or kickoff", () => {
+    expect(NATIONAL_PROMOS.length).toBeGreaterThan(3);
+    for (const p of NATIONAL_PROMOS) {
+      expect(p.tag).toBeNull();
+      expect(p.url).toMatch(/^we-draft\.com/);
+    }
   });
 });

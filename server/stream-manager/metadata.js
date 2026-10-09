@@ -179,7 +179,7 @@ async function generatedMetadata(db, g) {
 // the Week, else the first Featured game, else the best-ranked matchup.
 const NATIONAL_KEY = "national";
 const NATIONAL_TITLE = "College Football LIVE | Scores, Highlights & Action Around the Country";
-const NATIONAL_MAX_MS = 16 * 3600e3;
+const NATIONAL_MAX_MS = 20 * 3600e3;
 const nationalDescriptionText = (top) => [
   "College football action from across the country — all in one place. 🏈",
   "",

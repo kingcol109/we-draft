@@ -453,6 +453,16 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Each We-Pick game's community picks, summarized (split, average
+    // predicted score, newest public picks) by the live ingester
+    // (server/live/pickSummaries.js, Admin SDK) — so a game page on /live
+    // reads one doc instead of every user's pick. Public read, admin write.
+    // Its private/index subdoc (the ingester's bookkeeping) matches no rule,
+    // so no client can read it.
+    match /wePickSummaries/{gameId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // A user's locked-in Ranked 6 for a given week (WePickHub.js's "Submit
     // for Ranking" button) — same public-read/owner-write shape as
     // schedule26's picks subcollection, since the eventual scoring job

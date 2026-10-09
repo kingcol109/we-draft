@@ -374,10 +374,15 @@ export const NATIONAL_STYLE = `
 
 /* ── Rail: four scorebugs (436 × 220) ── */
 .nr-rail { position: absolute; left: 64px; top: 112px; width: 1792px; height: 220px; display: grid; grid-template-columns: repeat(4, 436px); gap: 16px; }
-.nr-bug { position: relative; display: grid; grid-template-rows: 82px 82px 56px; border-radius: 18px; overflow: hidden;
-  box-shadow: 0 24px 60px -24px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.08) inset; background: #0b1426;
-  animation: bc-rise 450ms cubic-bezier(.2,.8,.2,1) calc(var(--i, 0) * 70ms) both; }
-.nr-bug.empty { display: flex; align-items: center; justify-content: center; background: rgba(13,22,40,0.55); animation: none; }
+/* each slot a window the scorebugs roll through (NationalScreen.js Slot) */
+.nr-slot { position: relative; border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px -24px rgba(0,0,0,0.8); }
+.nr-bug { position: absolute; inset: 0; display: grid; grid-template-rows: 82px 82px 56px; border-radius: 18px; overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset; background: #0b1426; backface-visibility: hidden; }
+.nr-bug.roll-in { animation: nr-roll-in 800ms cubic-bezier(.45,.05,.2,1) calc(var(--i, 0) * 120ms) both; }
+.nr-bug.roll-out { animation: nr-roll-out 800ms cubic-bezier(.45,.05,.2,1) calc(var(--i, 0) * 120ms) both; z-index: 0; }
+@keyframes nr-roll-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes nr-roll-out { from { transform: none; } to { transform: translateY(-100%); } }
+.nr-bug.empty { display: flex; align-items: center; justify-content: center; background: rgba(13,22,40,0.55); }
 .nr-bug.empty img { width: 70px; height: 70px; opacity: 0.25; }
 .nr-team { position: relative; display: flex; align-items: center; gap: 14px; padding-left: 18px; min-width: 0;
   background: linear-gradient(90deg, var(--pc) 0%, color-mix(in srgb, var(--pc) 70%, #0a1222) 100%); }
@@ -545,6 +550,54 @@ export const NATIONAL_STYLE = `
 .nr-close img { width: 36px; height: 36px; object-fit: contain; }
 .nr-close b { font-family: "Bebas Neue", sans-serif; font-weight: 400; font-size: 38px; padding-top: 4px; min-width: 0; }
 .nr-close > span:last-child { font-size: 21px; font-weight: 800; letter-spacing: 0.08em; color: ${GOLD}; text-transform: uppercase; }
+
+/* ── Gameday: no scores yet — the rail's teams run the bug's full width ── */
+.nr-rail.gd .nr-pts { display: none; }
+.nr-rail.gd .nr-team { padding-right: 18px; }
+.nr-rail.gd .nr-bug.upcoming .nr-team { filter: none; }
+
+/* ── Gameday: the matchup preview (main panel) and its tale of the tape ── */
+.nr-pre-body .wash { background: linear-gradient(100deg, color-mix(in srgb, var(--ac) 85%, transparent) 0%, transparent 46%),
+  linear-gradient(260deg, color-mix(in srgb, var(--hc) 70%, transparent) 0%, transparent 46%); }
+.nr-pre-body .mid { gap: 4px; }
+.nr-pre-body .tags { margin-bottom: 4px; }
+.nr-pre .tm { display: flex; align-items: center; gap: 14px; height: 84px; min-width: 0; }
+.nr-pre .tm img, .nr-pre .tm > span:first-child:not(.bc-disp) { flex: 0 0 auto; width: 72px; height: 72px; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.5)); }
+.nr-pre .tm i { flex: 0 0 auto; font-style: normal; font-size: 24px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.65); }
+.nr-pre .tm .rk { flex: 0 0 auto; font-size: 46px; color: ${GOLD}; padding-top: 6px; }
+.nr-pre .tm .nm { min-width: 0; font-size: 74px; line-height: 1; padding-top: 6px; text-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+.nr-pre .tm .rec { flex: 0 0 auto; font-size: 26px; font-weight: 800; color: rgba(255,255,255,0.75); letter-spacing: 0.04em; }
+.nr-watch { gap: 10px; }
+.nr-watch .pw { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.nr-watch .pw + .pw { padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); }
+.nr-watch .pw img, .nr-watch .pw > span:first-child { flex: 0 0 auto; width: 40px; height: 40px; object-fit: contain; }
+.nr-watch .nm { font-size: 38px; line-height: 1; padding-top: 4px; }
+.nr-watch .nm.long { font-size: 31px; }
+.nr-watch .meta { font-size: 18px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #c9d5e6; }
+.nr-watch .pill { flex: 0 0 auto; min-width: 50px; height: 36px; padding: 0 8px; border-radius: 8px; border: 2px solid; display: inline-flex; align-items: center; justify-content: center; font-size: 21px; font-weight: 800; color: #fff; }
+/* the card box: a fixed window the cards morph through (NationalScreen.js CardBox) */
+.nr-final-body .star.nr-cards { position: relative; height: 232px; padding: 0; overflow: hidden; }
+.nr-card { position: absolute; inset: 0; padding: 16px 20px; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+.nr-card.in { animation: nr-morph-in 750ms cubic-bezier(.3,.7,.2,1) 150ms both; }
+.nr-card.out { animation: nr-morph-out 550ms cubic-bezier(.5,0,.75,0) both; }
+@keyframes nr-morph-in { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes nr-morph-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-14px) scale(1.03); } }
+.nr-pstory { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.nr-pstory .hl { font-size: 48px; line-height: 1; color: ${GOLD}; padding-top: 4px; }
+.nr-pstory .hl.long { font-size: 40px; }
+.nr-pstory .ln { font-size: 22px; font-weight: 800; color: #fff; }
+.nr-tape .row { height: 39px; display: grid; grid-template-columns: 1fr 340px 1fr; align-items: center; padding: 0 26px; animation: bc-fade 500ms ease-out both; }
+.nr-tape .row + .row { border-top: 1px solid rgba(255,255,255,0.05); }
+.nr-tape .sd { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.nr-tape .sd.hm { justify-content: flex-end; }
+.nr-tape .sd img, .nr-tape .sd > span:not(.bc-disp) { align-self: center; flex: 0 0 auto; width: 30px; height: 30px; object-fit: contain; }
+.nr-tape .sd b { font-size: 29px; font-weight: 800; color: #dfe6f0; }
+.nr-tape .sd b.edge { color: ${GOLD}; }
+.nr-tape .sd b.na { color: #6f819c; }
+.nr-tape .sd small { font-size: 19px; font-weight: 800; letter-spacing: 0.06em; color: #7f90aa; }
+.nr-tape .sd b.ld { flex: 0 1 auto; min-width: 0; font-size: 27px; }
+.nr-tape .sd small.bc-ell { flex: 0 1 auto; min-width: 0; color: #c9a25a; font-size: 20px; }
+.nr-tape .lb { text-align: center; font-size: 21px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #9fb0c8; white-space: nowrap; }
 
 .nr-ttag { flex: 0 0 auto; font-size: 22px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: #121212; background: ${GOLD}; border-radius: 6px; padding: 2px 10px; }
 `;

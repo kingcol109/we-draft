@@ -441,12 +441,16 @@ describe("National Coverage", () => {
     });
   });
 
-  test("the default window is the coming Saturday, 11:45 AM to 11:59 PM", () => {
-    const { start, end } = defaultNationalWindow(NOW);
-    expect(new Date(start).getDay()).toBe(6);
-    expect([new Date(start).getHours(), new Date(start).getMinutes()]).toEqual([11, 45]);
-    expect([new Date(end).getHours(), new Date(end).getMinutes()]).toEqual([23, 59]);
-    expect(end - start).toBeLessThan(16 * H);
+  test("the default window is the coming Saturday, 11:30 AM to 11:59 PM ET", () => {
+    const et = (ms) => new Date(ms).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const { start, end } = defaultNationalWindow(Date.parse("2026-10-08T19:00:00Z")); // Thursday
+    expect(et(start)).toBe("Sat, 10/10, 11:30 AM");
+    expect(et(end)).toBe("Sat, 10/10, 11:59 PM");
+    expect(end - start).toBeLessThan(20 * H);
+    // on a Saturday it's today; in standard time too
+    expect(et(defaultNationalWindow(Date.parse("2026-11-14T15:00:00Z")).start)).toBe("Sat, 11/14, 11:30 AM");
+    // late Saturday night ET (already Sunday in UTC) is still Saturday
+    expect(et(defaultNationalWindow(Date.parse("2026-10-11T02:00:00Z")).start)).toBe("Sat, 10/10, 11:30 AM");
   });
 
   test("Enable asks first, then only sends auto-national with the window", async () => {

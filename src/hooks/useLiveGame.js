@@ -7,7 +7,11 @@
 //   - the game doc (score, clock, scoring summary) is always one listener;
 //   - plays: "recent" listens only to the newest RECENT_PLAYS (new plays
 //     arrive as single-doc updates), "all" loads the full list, "none"
-//     skips plays entirely (e.g. a game that hasn't started);
+//     skips plays entirely (e.g. a game that hasn't started); "final" is
+//     the whole list for a finished game from its play archive
+//     (liveGames/{id}/box/pbp0… — server/live/store.js writePlayArchive):
+//     one or two doc reads instead of every play, the full list only for
+//     a game that has no archive;
 //   - the box score is one doc.
 import { useEffect, useState } from "react";
 import { db } from "../firebase";
@@ -34,10 +38,27 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
     );
   }, [id]);
 
+  // "final": which source, once the game doc has said whether it has an
+  // archive (its chunk count and revision — a rebuilt archive reloads).
+  const arch = game?.playArchive?.chunks ? `${game.playArchive.chunks}:${game.playArchive.rev ?? 0}` : null;
+  const source = playsMode !== "final" ? playsMode : !ready ? null : arch ? `archive:${arch}` : "all";
   useEffect(() => {
     setPlays([]);
-    if (!id || playsMode === "none") return undefined;
-    const q = playsMode === "all"
+    if (!id || !source || source === "none") return undefined;
+    if (source.startsWith("archive:")) {
+      const n = Number(source.split(":")[1]);
+      const parts = new Array(n).fill(null);
+      const unsubs = parts.map((_, i) => onSnapshot(
+        doc(db, "liveGames", id, "box", `pbp${i}`),
+        (s) => {
+          parts[i] = s.exists() ? s.data().plays || [] : [];
+          if (parts.every(Boolean)) setPlays(orderPlays(parts.flat().filter((p) => !p.hidden && !p.removed)));
+        },
+        () => {},
+      ));
+      return () => unsubs.forEach((u) => u());
+    }
+    const q = source === "all"
       ? query(collection(db, "liveGames", id, "plays"), orderBy("seq", "desc"))
       : query(collection(db, "liveGames", id, "plays"), orderBy("seq", "desc"), limit(RECENT_PLAYS));
     return onSnapshot(
@@ -45,7 +66,7 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
       (s) => setPlays(orderPlays(s.docs.map((d) => d.data()).filter((p) => !p.hidden && !p.removed))),
       () => {},
     );
-  }, [id, playsMode]);
+  }, [id, source]);
 
   useEffect(() => {
     setBox(null);

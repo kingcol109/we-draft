@@ -883,13 +883,25 @@ export function SlotSettings({ orchDoc }) {
 // storylines from every game) for a window, run by the same orchestrator
 // (orchestrator.js selectNational). Presentational: rows are broadcasts
 // records; the national ones are picked out here.
-const at = (d, h, m) => { const x = new Date(d); x.setHours(h, m, 0, 0); return x.getTime(); };
-// Default window: the next Saturday (today if it's Saturday), 11:45 AM to
-// 11:59 PM your time.
+// Wall-clock h:m on ET date (y, mo, d) as a timestamp (EDT or EST, whichever
+// is in effect then).
+const ET_TZ = "America/New_York";
+function etAt(y, mo, d, h, m) {
+  const guess = Date.UTC(y, mo, d, h, m);
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: ET_TZ, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" })
+    .formatToParts(new Date(guess)).map((x) => [x.type, Number(x.value)]));
+  return guess - (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute) - guess);
+}
+// Default window: the next Saturday in ET (today if it's Saturday), 11:30 AM
+// to 11:59 PM ET. (An earlier start set by hand — from 6 AM — opens with
+// We-Draft Gameday, the preview show, until the first kickoff:
+// utils/broadcastNational.js isGameday.)
 export function defaultNationalWindow(now) {
-  const d = new Date(now);
-  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
-  return { start: at(d, 11, 45), end: at(d, 23, 59) };
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: ET_TZ, year: "numeric", month: "numeric", day: "numeric", weekday: "short" })
+    .formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+  const ahead = (6 - ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday) + 7) % 7;
+  const [y, mo, d] = [Number(p.year), Number(p.month) - 1, Number(p.day) + ahead];
+  return { start: etAt(y, mo, d, 11, 30), end: etAt(y, mo, d, 23, 59) };
 }
 export function NationalCoverage({ rows = [], now, onOpen, pinned = false }) {
   const def = useMemo(() => defaultNationalWindow(now), []); // eslint-disable-line react-hooks/exhaustive-deps

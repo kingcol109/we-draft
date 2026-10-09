@@ -33,6 +33,7 @@ const { presentPlay, learnSpotAbbrs } = require("./playParser");
 const { rostersForGame } = require("./rosters");
 const { runInsights } = require("./insights");
 const { buildBreaks, timeoutExtras } = require("./breaks");
+const { buildPickSummaries } = require("./pickSummaries");
 
 const CONFIG = {
   SEASON: 2026,
@@ -84,6 +85,12 @@ const CONFIG = {
   // Season-wide schedule26 kickoff sync (TV windows get announced 6-12
   // days out) — 2 CFBD calls each time.
   SEASON_SYNC_MS: 12 * 3600 * 1000,
+  // Final games' play archives built per tick (store.js writePlayArchive —
+  // each reads the game's plays once).
+  PLAY_ARCHIVES_PER_TICK: 3,
+  // How often the We-Pick summaries are brought up to date (each open
+  // game: one query for picks changed since the last run).
+  PICK_SUMMARY_MS: 5 * 60 * 1000,
   // Feed entries kept on each game doc (liveGames/{id}.feedPlays).
   MAX_GAME_FEED: 40,
   // Insight cards (server/live/insights.js) get at most this long per game
@@ -373,6 +380,10 @@ async function storePlays(db, game, plays, playStats, { complete, rosterBudget, 
     // liveSlate/performances (Top Performances) by writeSlate.
     statLeaders: JSON.parse(JSON.stringify(gameLeaders(stats))),
     feedPlays,
+    // Bumped whenever a stored play is added, revised or pulled — a final
+    // game's play archive (store.js writePlayArchive) is rebuilt when it
+    // falls behind.
+    ...(res.added.length || res.changed || res.removed ? { playsRev: FieldValue.increment(1) } : {}),
     ...(last ? { lastPlayId: last.id, ...(game.lastPlayText ? {} : { lastPlayText: last.text }) } : {}),
   });
   // Feed entries for new plays, plus revised plays (CFBD corrected text, a
@@ -620,6 +631,36 @@ async function runTick(db, { now = Date.now(), log = () => {}, forceSlate = fals
         g.finalFeed = entry;
         newBig.push(entry);
         log(`final feed ${id}: ${entry.text}`);
+      });
+    }
+
+    // 4c. Play archives: a final game's play-by-play in one doc (store.js
+    // writePlayArchive), so its page reads that instead of every play —
+    // built when it goes final, rebuilt when its plays change after (the
+    // postgame ingest). A few per tick; the rest wait for the next.
+    {
+      const stale = [...games.values()]
+        .filter((g) => g.status === "final" && (g.playCount || 0) > 0 && (!g.playArchive || (g.playArchive.rev ?? -1) !== (g.playsRev || 0)))
+        .slice(0, CONFIG.PLAY_ARCHIVES_PER_TICK);
+      for (const g of stale) {
+        if (outOfTime()) break;
+        await step(`play archive ${g.providerGameId}`, async () => {
+          const res = await S.writePlayArchive(db, g.providerGameId, g.playsRev || 0);
+          log(`play archive ${g.providerGameId}: ${res.plays} plays in ${res.chunks} doc(s)`);
+        });
+      }
+    }
+
+    // 4d. We-Pick summaries (server/live/pickSummaries.js): each upcoming
+    // or just-locked game's community picks as one doc, so a game page
+    // reads that instead of every pick. Every PICK_SUMMARY_MS.
+    if (now - (meta.pickSummaryAt || 0) >= CONFIG.PICK_SUMMARY_MS && !outOfTime()) {
+      await step("pick summaries", async () => {
+        const res = await buildPickSummaries(db, { now, state: meta.pickSummary || {}, outOfTime, log });
+        // update(), not the merged meta write: it replaces the whole map, so
+        // games that leave the window drop out of it.
+        await metaRef(db).update({ pickSummary: res.state, pickSummaryAt: now });
+        summary.pickSummaries = res.built;
       });
     }
 

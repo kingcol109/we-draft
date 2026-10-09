@@ -94,7 +94,7 @@ const CFG = {
   LOCK_MS: 70e3,                    // > the function's 60s maxDuration, so a lease never expires under a live tick
   HOLD_MS: 30 * 60e3,               // an admin's forced manual stop pauses auto VM starts
   MAX_SLOTS: 6,
-  NATIONAL_MAX_MS: 16 * 3600e3,     // longest national coverage window
+  NATIONAL_MAX_MS: 20 * 3600e3,     // longest national coverage window (6 AM gameday → late games)
   NATIONAL_TAIL_MS: 30 * 60e3,      // its failsafe: the window's end + this
 };
 

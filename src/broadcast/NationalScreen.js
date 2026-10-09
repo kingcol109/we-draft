@@ -20,21 +20,29 @@
 //                and now and then the prospect spotlight, which expands the
 //                column up over the strip: a prospect's day, grade,
 //                strengths and weaknesses
-//   ticker       finals, upcoming kickoffs, calls to action
+//   ticker       We-Draft promos only (NATIONAL_PROMOS) — never scores
+//
+// We-Draft Gameday (Saturday morning until the first kickoff — s.gameday):
+// the top bar says so and counts down to the first kickoff; the rail and
+// strip preview the day's games; the left column is the matchup of the
+// moment (both teams, kickoff, a prospect to watch from each school) over
+// its tale of the tape and both teams' season leaders; the right column the
+// day's kickoffs.
 //
 // Graphics run in two lanes (useNationalState): big plays on the left, a
 // prospect's moment on the right.
 //
 // Same canvas, fonts and rules as the game broadcast: fixed footprints,
 // transform / opacity motion only, nothing animating while idle.
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import BroadcastEvent from "./BroadcastEvents";
 import { Logo } from "./TeamLogo";
 import { panelColor, playerUrl } from "../utils/broadcast";
 import { teamName, teamShort, statusLabel } from "../utils/live";
 import { playSummary } from "../components/LivePlayCard";
 import { GRADE_BADGE } from "../components/LiveInsightCard";
-import { scoreLine, playClock, isScore, isFinalEntry, upcomingGames, NATIONAL_PER_PAGE, UP_NEXT_PER_PAGE, UP_NEXT_PAGE_MS } from "../utils/broadcastNational";
+import { scoreLine, playClock, isScore, isFinalEntry, upcomingGames, untilText, LEADER_CATS, NATIONAL_PER_PAGE, UP_NEXT_PER_PAGE, UP_NEXT_PAGE_MS, PREVIEW_ROTATE_MS } from "../utils/broadcastNational";
+import { fmtTeamStat } from "../utils/fbsTeamStats";
 
 const WD_ICON = "/wd-icon.png";
 const ET = "America/New_York";
@@ -59,11 +67,12 @@ function TopBar({ s }) {
       <div className="bc-brand"><img src={WD_ICON} alt="" /><span className="bc-disp">We-Draft<span className="live">Live</span></span></div>
       <div className="bc-ctx">
         {wk && <span>{wk}</span>}
-        <span className="tag">National Coverage</span>
+        <span className="tag">{s.gameday ? "We-Draft Gameday" : "National Coverage"}</span>
       </div>
       <div className="bc-pills">
         {s.health.stale && <span className="bc-pill stale">{s.health.offline ? "Connection lost" : "Live data delayed"} · last update {lastAt} ET</span>}
-        {s.liveCount > 0
+        {s.gameday && s.firstKick ? <span className="bc-pill pre">First kickoff {kickTime(s.firstKick, s.now)}</span>
+          : s.liveCount > 0
           ? <span className="bc-pill live"><i />{s.liveCount} {s.liveCount === 1 ? "game" : "games"} live</span>
           : <span className="bc-pill pre">No games live</span>}
       </div>
@@ -121,7 +130,7 @@ function BugTeam({ g, side, live, lose, win, scored }) {
   );
 }
 
-function Bug({ card, hot, now, i }) {
+function Bug({ card, hot, now, roll = "" }) {
   const { game: g, kind } = card;
   const live = kind === "live";
   const hp = g.home?.points ?? 0;
@@ -135,7 +144,7 @@ function Bug({ card, hot, now, i }) {
   const tv = channel(g);
   const status = kind === "upcoming" ? `Kickoff ${label}` : label;
   return (
-    <div className={`nr-bug ${kind}${card.close ? " close" : ""}${hot ? " hot" : ""}`} style={{ "--i": i }}>
+    <div className={`nr-bug ${kind}${card.close ? " close" : ""}${hot ? " hot" : ""}${roll}`}>
       <BugTeam g={g} side="away" live={live} lose={lose === "away"} win={lose === "home"} scored={hot?.side === "away"} />
       <BugTeam g={g} side="home" live={live} lose={lose === "home"} win={lose === "away"} scored={hot?.side === "home"} />
       <div className="nr-foot">
@@ -148,16 +157,42 @@ function Bug({ card, hot, now, i }) {
   );
 }
 
-// Close games hold their slots (keyed by game, so they never re-animate
-// when the others turn over); the rest come and go.
+// Each slot rolls when its game changes: the old scorebug rolls up and
+// out as the next rolls up into place, slot by slot left to right — a
+// scoreboard drum turning over. Close games hold their slots, so they
+// never move.
+const ROLL_MS = 1400; // the last slot's roll, its stagger included
+function Slot({ card, hot, now, i }) {
+  const key = card ? String(card.game.id) : "empty";
+  // out: the face rolling away ({ card } — card null for an empty slot)
+  const [roll, setRoll] = useState({ key, out: null, n: 0 });
+  const last = useRef(card);
+  if (roll.key !== key) setRoll({ key, out: { card: last.current }, n: roll.n + 1 });
+  last.current = card;
+  useEffect(() => {
+    if (!roll.out) return undefined;
+    const t = setTimeout(() => setRoll((r) => ({ ...r, out: null })), ROLL_MS);
+    return () => clearTimeout(t);
+  }, [roll.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const face = (c, cls, h) => (c ? <Bug card={c} hot={h} now={now} roll={cls} />
+    : <div className={`nr-bug empty${cls}`}><img src={WD_ICON} alt="" /></div>);
+  return (
+    <div className="nr-slot" style={{ "--i": i }}>
+      {roll.out && face(roll.out.card, " roll-out", null)}
+      {/* keyed by turn, so the incoming face rolls in each time */}
+      <Fragment key={`${key}-${roll.n}`}>{face(card, " roll-in", hot)}</Fragment>
+    </div>
+  );
+}
+
 function Rail({ s }) {
   const cards = s.page;
   return (
-    <div className="nr-rail">
-      {cards.map((c, i) => <Bug key={c.game.id} card={c} hot={s.hot.get(String(c.game.id))} now={s.now} i={i} />)}
-      {Array.from({ length: Math.max(0, NATIONAL_PER_PAGE - cards.length) }, (_, k) => (
-        <div key={`empty-${k}`} className="nr-bug empty"><img src={WD_ICON} alt="" /></div>
-      ))}
+    <div className={`nr-rail${s.gameday ? " gd" : ""}`}>
+      {Array.from({ length: NATIONAL_PER_PAGE }, (_, k) => {
+        const c = cards[k] || null;
+        return <Slot key={k} card={c} hot={c ? s.hot.get(String(c.game.id)) : null} now={s.now} i={k} />;
+      })}
     </div>
   );
 }
@@ -312,6 +347,221 @@ function FinalPanel({ s, b }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Gameday: the matchup of the moment ──
+function MatchupPanel({ s }) {
+  const pv = s.preview;
+  if (!pv) return <LatestPanel s={{ ...s, latest: null }} />;
+  const g = pv.game;
+  const tv = channel(g);
+  const ms = Date.parse(g.startDate || "") - s.now;
+  const tags = [
+    g.gameOfWeek ? "Game of the week" : g.featured ? "Featured" : null,
+    g.home?.rank && g.away?.rank ? "Top 25 clash" : null,
+  ].filter(Boolean);
+  const team = (side) => {
+    const t = g[side] || {};
+    return (
+      <div className="tm">
+        <Logo team={t} />
+        {side === "home" && <i>at</i>}
+        {t.rank ? <span className="rk bc-disp">#{t.rank}</span> : null}
+        <span className="nm bc-disp bc-ell">{fitName(t, 18)}</span>
+        {t.record && <span className="rec">{t.record}</span>}
+      </div>
+    );
+  };
+  return (
+    <div className="bc-panel bc-play nr-pre" style={{ "--ac": panelColor(g.away), "--hc": panelColor(g.home) }}>
+      <div className="bc-ph"><span className="gold">Gameday preview</span><span className="right">Kickoff {kickTime(g, s.now)}{tv ? ` · ${tv}` : ""}</span></div>
+      <div key={g.id} className="nr-final-body nr-pre-body">
+        <div className="wash" />
+        <div className="mid">
+          <div className="tags">
+            {tags.map((t) => <span key={t} className={t === "Top 25 clash" ? "up" : "wd"}>{t}</span>)}
+            {ms > 0 && <span>{g.startTimeTBD ? "Time TBA" : `Kickoff in ${untilText(ms)}`}</span>}
+          </div>
+          {team("away")}
+          {team("home")}
+        </div>
+        <CardBox g={g} pv={pv} />
+      </div>
+    </div>
+  );
+}
+
+// The card on the right of the preview, turning over while the matchup is
+// up: the prospects to watch (a top-graded We-Draft player from each
+// school), then players' big games last time out, the teams taking turns.
+const CARD_MS = 15 * 1000;
+function CardBox({ g, pv }) {
+  const cards = useMemo(() => {
+    const out = [];
+    const watch = ["away", "home"].map((side) => ({ side, p: pv[side].prospect })).filter((x) => x.p);
+    if (watch.length) out.push({ key: "watch", watch });
+    const a = pv.away.stories || [];
+    const h = pv.home.stories || [];
+    for (let i = 0; i < Math.max(a.length, h.length); i++) {
+      if (a[i]) out.push({ key: a[i].key, story: a[i], side: "away" });
+      if (h[i]) out.push({ key: h[i].key, story: h[i], side: "home" });
+    }
+    return out;
+  }, [pv]);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    setTick(0);
+    const t = setInterval(() => setTick((x) => x + 1), CARD_MS);
+    return () => clearInterval(t);
+  }, [g.id]);
+  const c = cards.length ? cards[tick % cards.length] : null;
+  // The box pops in with the matchup and stays put; when its card changes
+  // the old one dissolves up and away as the next settles in through it.
+  const [morph, setMorph] = useState({ key: c?.key, out: null, n: 0 });
+  const last = useRef(c);
+  if (c && morph.key !== c.key) setMorph({ key: c.key, out: last.current, n: morph.n + 1 });
+  last.current = c;
+  useEffect(() => {
+    if (!morph.out) return undefined;
+    const t = setTimeout(() => setMorph((m) => ({ ...m, out: null })), MORPH_MS);
+    return () => clearTimeout(t);
+  }, [morph.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!c) return null;
+  return (
+    <div className="star nr-watch nr-cards">
+      {morph.out && morph.out.key !== c.key && <div className="nr-card out">{cardFace(morph.out, g)}</div>}
+      <div key={c.key} className={`nr-card${morph.n ? " in" : ""}`}>{cardFace(c, g)}</div>
+    </div>
+  );
+}
+const MORPH_MS = 900;
+// The exact width of an element's text (scrollWidth rounds, so a name a
+// fraction of a pixel too wide would pass and get an ellipsis).
+const textWidth = (el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width; };
+// Text that's shortened only when it wouldn't fit: the first of `ways`
+// ([{ text, cls }], longest first) that fits its box, measured once laid
+// out, before it paints (the last one if none does).
+function Fit({ ways, className, style }) {
+  const ref = useRef(null);
+  const sig = ways.map((w) => w.text + w.cls).join("|");
+  const [step, setStep] = useState(0);
+  useLayoutEffect(() => setStep(0), [sig]);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && step < ways.length - 1 && textWidth(el) > el.clientWidth) setStep(step + 1);
+  }, [step, sig]); // eslint-disable-line react-hooks/exhaustive-deps
+  const w = ways[Math.min(step, ways.length - 1)];
+  return <div ref={ref} className={`${className}${w.cls}`} style={style}>{w.text}</div>;
+}
+// A storyline's headline: as written ("117 receiving yards"), else
+// "yards" → "yds", else that a size smaller.
+const headlineWays = (t) => { const s = t.replace(/\byards\b/i, "yds"); return [{ text: t, cls: "" }, { text: s, cls: "" }, { text: s, cls: " long" }]; };
+// A player's name: as is, else a size smaller, else his first initial
+// ("D. Williams Jr.").
+const nameWays = (n) => [{ text: n, cls: "" }, { text: n, cls: " long" }, { text: shortName(n), cls: " long" }];
+function cardFace(c, g) {
+  if (c.watch) {
+    return (
+      <>
+        <div className="k">Prospects to watch</div>
+        {c.watch.map(({ side, p }) => {
+          const badge = GRADE_BADGE[p.grade] || GRADE_BADGE.Watchlist;
+          return (
+            <div key={side} className="pw">
+              <Logo team={g[side]} />
+              <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                <Fit className="bc-disp bc-ell nm" ways={nameWays(p.name)} />
+                <div className="meta bc-ell">{[p.pos, `Class of ${p.cls}`].filter(Boolean).join(" • ")}</div>
+              </div>
+              {p.grade && <span className="pill" style={{ background: badge.bg, borderColor: badge.border }}>{badge.short}</span>}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+  const st = c.story;
+  return (
+    <div className="nr-pstory">
+      <div className="k bc-ell">{st.prospect ? "We-Draft prospect" : "Player storyline"}</div>
+      <div className="pw">
+        <Logo team={g[c.side]} />
+        <Fit className="bc-disp bc-ell nm" ways={nameWays(st.name)} style={{ minWidth: 0, flex: "1 1 auto" }} />
+      </div>
+      <Fit className="hl bc-disp bc-ell" ways={headlineWays(st.headline)} />
+      <div className="ln bc-ell">{st.line}</div>
+      <div className="meta bc-ell">{st.ctx}</div>
+    </div>
+  );
+}
+
+// Under it, turning over while the matchup is up: both teams' season
+// numbers with their FBS ranks (two pages), then their season leaders —
+// offense, then defense — gold on the better one. A team without a roster
+// on file skips the leaders (the tape gets the time).
+const TAPE_PAGES = [
+  { kind: "tape", title: "Tale of the tape", right: "Season averages · FBS rank", rows: [["Points / game", "ppg"], ["Points allowed", "papg", true], ["Total yards / game", "ypg"]] },
+  { kind: "tape", title: "Tale of the tape", right: "Season averages · FBS rank", rows: [["Yards allowed / game", "yapg", true], ["Turnover margin / game", "toMargin"], ["3rd down %", "thirdPct"]] },
+  { kind: "lead", title: "Season leaders", right: "Offense", rows: ["passing", "rushing", "receiving"] },
+  { kind: "lead", title: "Season leaders", right: "Defense", rows: ["tackles", "sacks", "interceptions"] },
+];
+const TAPE_STEPS = TAPE_PAGES.length;
+// "Mandrell Desir" → "M. Desir"
+const shortName = (n) => { const p = String(n || "").split(" "); return p.length > 1 ? `${p[0][0]}. ${p.slice(1).join(" ")}` : n; };
+function TapePanel({ s }) {
+  const pv = s.preview;
+  const id = pv?.game.id;
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    setStep(0);
+    const t = setInterval(() => setStep((x) => x + 1), PREVIEW_ROTATE_MS / TAPE_STEPS);
+    return () => clearInterval(t);
+  }, [id]);
+  if (!pv) return <PerfRows s={s} />;
+  const g = pv.game;
+  const pages = TAPE_PAGES.filter((p) => p.kind === "tape" || pv.away.leaders || pv.home.leaders);
+  const page = pages[Math.min(pages.length - 1, Math.floor((step * pages.length) / TAPE_STEPS))];
+  const pageNo = pages.indexOf(page);
+  const a = pv.away.stats;
+  const h = pv.home.stats;
+  // (the FBS rank always on the inside, toward the label)
+  const cell = (t, k, better, home = false) => {
+    if (t?.v?.[k] == null) return <b className="na">—</b>;
+    const v = <b className={better ? "edge" : ""}>{fmtTeamStat(k, t.v[k])}</b>;
+    const r = t.r?.[k] && <small>{t.r[k].replace(/^(T-)?/, "$1#")}</small>;
+    return home ? <>{r}{v}</> : <>{v}{r}</>;
+  };
+  const lead = (x, home = false) => (!x ? <b className="na">—</b>
+    : home ? <><small className="bc-ell">{x.line}</small><b className="ld bc-ell">{shortName(x.name)}</b></>
+      : <><b className="ld bc-ell">{shortName(x.name)}</b><small className="bc-ell">{x.line}</small></>);
+  return (
+    <div className="bc-panel bc-recent nr-tape">
+      <div className="bc-ph"><span>{page.title}</span><span className="right">{page.right}</span></div>
+      {page.rows.map((r) => {
+        if (page.kind === "lead") {
+          return (
+            <div key={`${g.id}-${pageNo}-${r}`} className="row">
+              <div className="sd"><Logo team={g.away} />{lead(pv.away.leaders?.[r])}</div>
+              <div className="lb">{LEADER_CATS[r].label}</div>
+              <div className="sd hm">{lead(pv.home.leaders?.[r], true)}<Logo team={g.home} /></div>
+            </div>
+          );
+        }
+        const [label, k, low] = r;
+        const av = a?.v?.[k];
+        const hv = h?.v?.[k];
+        const both = av != null && hv != null && av !== hv;
+        const aBetter = both && (low ? av < hv : av > hv);
+        return (
+          <div key={`${g.id}-${pageNo}-${k}`} className="row">
+            <div className="sd"><Logo team={g.away} />{cell(a, k, aBetter)}</div>
+            <div className="lb">{label}</div>
+            <div className="sd hm">{cell(h, k, both && !aBetter, true)}<Logo team={g.home} /></div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -567,7 +817,7 @@ function Ticker({ items, idle }) {
 
 function NationalScreen({ s }) {
   // The backdrop glows in the colors of the game with the big play on screen.
-  const g = s.latest ? s.gamesById.get(String(s.latest.gameId)) : null;
+  const g = s.gameday ? s.preview?.game : s.latest ? s.gamesById.get(String(s.latest.gameId)) : null;
   const vars = { "--away": g?.away?.color || "#0055a5", "--home": g?.home?.color || "#f6a21d" };
   let body;
   if (s.phase === "loading") {
@@ -584,8 +834,8 @@ function NationalScreen({ s }) {
         <TopBar s={s} />
         <Rail s={s} />
         <StoryStrip s={s} />
-        {s.idle ? <PerformancePanel s={s} /> : <LatestPanel s={s} />}
-        {s.idle ? <PerfRows s={s} /> : <RecentBig s={s} />}
+        {s.gameday ? <MatchupPanel s={s} /> : s.idle ? <PerformancePanel s={s} /> : <LatestPanel s={s} />}
+        {s.gameday ? <TapePanel s={s} /> : s.idle ? <PerfRows s={s} /> : <RecentBig s={s} />}
         {s.spotlight ? <Spotlight sp={s.spotlight} /> : s.idle ? <UpNext s={s} /> : <Storylines s={s} />}
         <Ticker items={s.ticker} idle={s.idle} />
         <BroadcastEvent event={s.leftEvent} game={s.leftGame} tall={false} />
