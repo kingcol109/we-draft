@@ -41,9 +41,12 @@
 //   metadata-thumbnail-generate { scheduleId } render a thumbnail preview from the
 //                    template (server/stream-manager/thumbnail.js) — stores nothing
 //   metadata-thumbnail-save     { scheduleId, sha256 } store it (broadcastThumbnails/
-//                    {CFBDGameId}) when it matches the previewed image — no upload
+//                    {CFBDGameId}) when it matches the previewed image; then, if
+//                    a real broadcast for it already exists on YouTube and hasn't
+//                    ended, upload it there too (best-effort — result in `youtube`)
 //   youtube-thumbnail { id } upload the game's saved thumbnail to that record's
-//                    created YouTube broadcast (explicit only)
+//                    created YouTube broadcast (automation also does this when it
+//                    creates one — broadcasts.js autoThumbnail)
 //   (every metadata-* action also takes { national: true, startAt, endAt } in
 //   place of scheduleId: the national stream's draft / thumbnail, generated
 //   for that window — broadcastMetadata/national, broadcastThumbnails/national)
@@ -137,7 +140,12 @@ module.exports = async function handler(req, res) {
       case "metadata-get": return res.status(200).json(await require("../server/stream-manager/metadata").getMetadata(db, body));
       case "metadata-save": return res.status(200).json(await require("../server/stream-manager/metadata").saveMetadata(db, uid, body));
       case "metadata-thumbnail-generate": return res.status(200).json(await require("../server/stream-manager/metadata").generateThumbnail(db, body));
-      case "metadata-thumbnail-save": return res.status(200).json(await require("../server/stream-manager/metadata").saveThumbnail(db, uid, body));
+      case "metadata-thumbnail-save": {
+        const saved = await require("../server/stream-manager/metadata").saveThumbnail(db, uid, body);
+        // Best-effort: a YouTube problem never fails the save.
+        const youtube = await bc.syncSavedThumbnail(db, saved.gameId).catch((e) => [{ error: String(e.message || e).slice(0, 300) }]);
+        return res.status(200).json({ ...saved, youtube });
+      }
       case "youtube-thumbnail": return res.status(200).json(await bc.youtubeThumbnail(db, body));
       default: return res.status(400).json({ error: "unknown action" });
     }

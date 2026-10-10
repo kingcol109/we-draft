@@ -7,7 +7,7 @@
 // the score strip's pop-out button (ScoresPicker), keeps the selection, and
 // renders ScoresWidget into it with the live slate, so it updates in place.
 // Live games first (closest late games on top), then upcoming, then finals.
-import { statusLabel, teamShort } from "../utils/live";
+import { statusLabel, teamShort, darkLogo } from "../utils/live";
 
 const LIVE_RED = "#ff4d4d";
 const GOLD = "#f6a21d";
@@ -68,7 +68,7 @@ export default function ScoresWidget({ games, week, picked, tvShort }) {
                   const other = g[side === "home" ? "away" : "home"] || {};
                   return (
                     <div key={side} className={`sw-row${final && t.points < other.points ? " lose" : ""}`}>
-                      {(t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
+                      {(darkLogo(t)) && <img src={darkLogo(t)} alt="" />}
                       <span className="sw-team">{t.rank ? <span className="sw-rank">{t.rank}</span> : null}{teamShort(t)}</span>
                       {live && g.possession === side && <span className="sw-ball" title="Possession" />}
                       <b key={t.points}>{t.points ?? ""}</b>

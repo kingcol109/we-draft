@@ -57,7 +57,7 @@ export default function LiveField({ game, next, tag }) {
   const ballYard = Math.max(0, Math.min(100, toLeft ? next.ytg : 100 - next.ytg));
   const gain = typeof next.distance === "number" ? (toLeft ? ballYard - next.distance : ballYard + next.distance) : null;
   const yardLine = ballYard > 50 ? 100 - ballYard : ballYard;
-  const logo = off.logoDark || off.logo;
+  const logo = off.logoDark || off.logo; // on the team's own color (the pin)
   return (
     <div className="lfs" aria-label={`Ball at the ${yardLine}, ${toLeft ? "driving left" : "driving right"}`}>
       {/* below the line, on the side away from the ball */}

@@ -4,10 +4,14 @@
 // from the state useBroadcastState returns (no data reads in here). The
 // layout follows the phase:
 //
-//   pregame / delayed   matchup + prospects to watch
+//   pregame             matchup + prospects to watch
+//   kickoff             the live layout at 1st 15:00, 0–0, "Kickoff shortly"
+//                       (kickoff time has come, no snap yet); the kickoff
+//                       animation plays over it when the first play arrives
 //   live                scorebug, situation strip with the field, the play
-//                       just revealed (or the next snap / a break), recent
-//                       plays, We-Draft Player Watch
+//                       just revealed — its call first (PASS / RUSH and the
+//                       player), then the result — or the next snap / a
+//                       break, recent plays, We-Draft Player Watch
 //   halftime / final    scorebug + the half's / game's summary + Player Watch
 //   loading / missing   a branded slate
 //
@@ -17,6 +21,8 @@
 // because something else changed size.
 import { memo, useEffect, useRef, useState } from "react";
 import BroadcastEvent from "./BroadcastEvents";
+import KickoffBurst from "../components/KickoffBurst";
+import FitText from "./FitText";
 import { panelColor, barColor, BROADCAST_CTAS, CTA_ROTATE_MS } from "../utils/broadcast";
 import { teamName, teamShort, statusLabel, periodLabel, distinctTeamColors } from "../utils/live";
 import { gameLeaders, statLine } from "../utils/liveStats";
@@ -57,9 +63,10 @@ function TopBar({ s, game }) {
       <div className="bc-pills">
         {s.replay && <span className="bc-pill replay">Replay {s.replay.step}/{s.replay.total}</span>}
         {s.health.stale && <span className="bc-pill stale">{s.health.offline ? "Connection lost" : "Live data delayed"} · last update {lastAt} ET</span>}
-        {(s.phase === "live" || s.phase === "halftime") && <span className="bc-pill live"><i />Live</span>}
+        {(s.phase === "live" || s.phase === "halftime" || (s.phase === "kickoff" && s.kickoffAt)) && <span className="bc-pill live"><i />Live</span>}
         {s.phase === "final" && <span className="bc-pill final">Final</span>}
-        {(s.phase === "pregame" || s.phase === "delayed") && <span className="bc-pill pre">Pregame</span>}
+        {s.phase === "pregame" && <span className="bc-pill pre">Pregame</span>}
+        {s.phase === "kickoff" && !s.kickoffAt && <span className="bc-pill pre">Kickoff shortly</span>}
       </div>
     </div>
   );
@@ -74,12 +81,14 @@ function ScoreNum({ value }) {
 
 // ── Scorebug ──
 function Scorebug({ s, game }) {
-  const live = game.status === "in_progress";
+  // Before the first snap (phase kickoff) it reads like a live game at 1st 15:00.
+  const preKick = s.phase === "kickoff";
+  const live = game.status === "in_progress" || preKick;
   const final = game.status === "final";
   const hp = game.home?.points;
   const ap = game.away?.points;
   const loser = final && hp != null && ap != null && hp !== ap ? (hp > ap ? "away" : "home") : null;
-  const label = statusLabel(game);
+  const label = statusLabel(preKick ? { ...game, status: "in_progress" } : game);
   const breakText = live && /^(HALFTIME|END OF|OT$|\d?OT$)/.test(label) ? label : null;
   // the team that just scored lights up while its graphic is on
   const hot = s.event && ["TOUCHDOWN", "FIELD_GOAL", "SAFETY"].includes(s.event.type) ? s.event.side : null;
@@ -89,7 +98,7 @@ function Scorebug({ s, game }) {
     const long = (teamName(t) || teamShort(t)).length > 12;
     return (
       <div className={`bc-team ${side}${live && s.ballSide === side ? " ball" : ""}${loser === side ? " lose" : ""}${hot === side ? " hot" : ""}`} style={{ "--pc": panelColor(t) }}>
-        <Logo team={t} className="bc-logo" />
+        <Logo team={t} className="bc-logo" onColor />
         <div className="bc-tname">
           <div className="row">
             {t.rank ? <span className="rank bc-disp">#{t.rank}</span> : null}
@@ -118,6 +127,7 @@ function Scorebug({ s, game }) {
         <div className="per">{ot ? periodLabel(game.period) : `${ORD[game.period] || ""} Qtr`}</div>
         {!ot && <div className="clk bc-disp">{game.clock || "–"}</div>}
         {s.timeout && <div className="small bc-ell" style={{ maxWidth: 250 }}>Timeout{s.timeout.side ? ` · ${teamShort(game[s.timeout.side])}` : ""}</div>}
+        {preKick && !s.callingPlay && <div className="small bc-ell" style={{ maxWidth: 250 }}>{s.kickoffAt ? "Kickoff!" : "Kickoff shortly"}</div>}
       </>
     );
   } else {
@@ -147,7 +157,7 @@ function Field({ sit, game }) {
       <div className="ez away" /><div className="turf" /><div className="ez home" />
       <div className="mid" />
       {gainX != null && <div className="gain" style={{ left: `${gainX}%` }} />}
-      {ballX != null && <div className="ballmk" style={{ left: `${ballX}%` }}><Logo team={off} /></div>}
+      {ballX != null && <div className="ballmk" style={{ left: `${ballX}%` }}><Logo team={off} onColor /></div>}
     </div>
   );
 }
@@ -156,7 +166,7 @@ function SituationStrip({ s, game }) {
   const sit = s.situation;
   const off = sit ? game[sit.offense] : null;
   let chip = null;
-  if (sit) chip = <div className="bc-dd bc-disp" style={{ "--oc": panelColor(off) }}><Logo team={off} />{sit.down}</div>;
+  if (sit) chip = <div className="bc-dd bc-disp" style={{ "--oc": panelColor(off) }}><Logo team={off} onColor />{sit.down}</div>;
   else if (s.timeout) chip = <div className="bc-dd to bc-disp">Timeout</div>;
   else if (s.breakInfo) chip = <div className="bc-dd brk bc-disp">{s.breakInfo.label}</div>;
   else chip = <div className="bc-dd brk bc-disp">Kickoff</div>; // nothing to snap: a score or the opening kick
@@ -177,11 +187,30 @@ const TONES = { td: "#f6a21d", turnover: "#ff5a5a", miss: "#ff5a5a", flag: "#f2c
 const Dots = () => <span className="bc-dots-wait"><i /><i /><i /></span>;
 function PlayPanel({ s, game }) {
   const p = s.currentPlay;
+  const c = s.callingPlay;
+  if (c) {
+    // The call first — what the play is and who has it — the result next.
+    return (
+      <div className="bc-panel bc-play">
+        <div className="bc-ph"><span className="gold">On the field</span>{c.situation && <span className="right">{c.situation}</span>}</div>
+        <div key={`call-${c.id}`} className="bc-play-body bc-call" style={{ "--tone": panelColor(c.team) }}>
+          <div className="bc-play-main">
+            <span className="bc-badge">{c.label}<Dots /></span>
+            {c.player && <div className="bc-call-name bc-disp bc-ell">{c.player}</div>}
+          </div>
+          <div className="bc-play-side">
+            <Logo team={c.team} />
+            <div className="clk">{c.clock}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (p) {
     return (
       <div className="bc-panel bc-play">
         <div className="bc-ph"><span className="gold">Just now</span>{p.situation && <span className="right">{p.situation}</span>}</div>
-        <div key={p.id} className="bc-play-body" style={{ "--tone": TONES[p.tone] }}>
+        <div key={p.id} className={`bc-play-body${s.calledId === p.id ? " bc-result" : ""}`} style={{ "--tone": TONES[p.tone] }}>
           <div className="bc-play-main">
             <span className="bc-badge">{p.headline}</span>
             <div className="bc-line">
@@ -201,7 +230,7 @@ function PlayPanel({ s, game }) {
                   <div key={x.key} className="bc-pstat" style={{ "--pc": panelColor(x.team) }}>
                     <Logo team={x.team} />
                     <span className="n">{x.short}</span>
-                    <span className="l">{x.line}</span>
+                    <FitText as="span" className="l" text={x.line} />
                   </div>
                 ))}
               </div>
@@ -259,18 +288,31 @@ function PlayPanel({ s, game }) {
       <div key="kickoff" className="bc-next">
         <img src={WD_ICON} alt="" style={{ width: 120, height: 120 }} />
         <div>
-          <div className="lbl">Up next</div>
-          <div className="big bc-disp">Kickoff</div>
+          <div className="lbl">{s.phase === "kickoff" ? "1st Qtr · 15:00" : "Up next"}</div>
+          <div className="big bc-disp">{s.phase === "kickoff" ? <>Kickoff shortly<Dots /></> : "Kickoff"}</div>
         </div>
       </div>
     );
   }
+  const waiting = s.phase === "kickoff" && !s.kickoffAt;
   return (
     <div className="bc-panel bc-play">
-      <div className="bc-ph"><span>On the field</span></div>
-      {body}
+      <div className="bc-ph"><span>On the field</span>{waiting && <span className="right gold">Waiting for kickoff<Dots /></span>}</div>
+      {waiting ? <KickoffWait game={game} fallback={body} /> : body}
     </div>
   );
+}
+
+// Waiting for kickoff: the two teams' season numbers in the panel until
+// the first snap (the pregame's Season stats, four of them).
+const WAIT_STATS = ["ppg", "ypg", "papg", "toMargin"];
+const WAIT_LABEL = { ppg: "Points / game", ypg: "Yards / game", papg: "Points allowed", toMargin: "TO margin" };
+function KickoffWait({ game, fallback }) {
+  const teamStats = useFbsTeamStats();
+  const ts = { away: teamStats?.get(Number(game.away?.providerTeamId)), home: teamStats?.get(Number(game.home?.providerTeamId)) };
+  const rows = SEASON_STATS.filter(([, k]) => WAIT_STATS.includes(k) && (ts.away?.v?.[k] != null || ts.home?.v?.[k] != null));
+  if (!rows.length) return fallback;
+  return <SeasonGrid game={game} ts={ts} rows={rows.map(([l, k, low]) => [WAIT_LABEL[k] || l, k, low])} className="bc-sgrid in-play" compact />;
 }
 
 function RecentPlays({ rows }) {
@@ -284,7 +326,7 @@ function RecentPlays({ rows }) {
           <span className="t">{r.clock}</span>
           <Logo team={r.team} />
           <span className="x bc-ell">{r.text}</span>
-          {r.stat && <span className="st"><b>{r.stat.short}</b>{r.stat.line}</span>}
+          {r.stat && <span className="st"><b>{r.stat.short}</b><FitText as="span" className="stl" text={r.stat.line} /></span>}
         </div>
       ))}
       {!rows.length && <div className="bc-rrow"><span className="x" style={{ color: "#7f90aa" }}>Plays will appear here as they happen.</span></div>}
@@ -442,13 +484,20 @@ const SEASON_STATS = [
   ["Points allowed", "papg", true], ["Yards allowed", "yapg", true], ["Turnover margin", "toMargin"], ["3rd down %", "thirdPct"],
 ];
 function SeasonStats({ game, ts }) {
-  const val = (t, k) => (t?.v?.[k] == null ? "—" : fmtTeamStat(k, t.v[k]));
-  const rk = (t, k) => (t?.v?.[k] != null && t?.r?.[k] ? `${t.r[k].replace(/^(T-)?/, "$1#")}` : "");
   return (
     <div key="stats" className="bc-panel bc-pros">
       <div className="bc-ph"><img src={WD_ICON} alt="" /><span className="gold">Season stats</span><span className="right">National rank among FBS teams</span></div>
-      <div className="bc-sgrid">
-        {SEASON_STATS.map(([label, k, low]) => {
+      <SeasonGrid game={game} ts={ts} rows={SEASON_STATS} />
+    </div>
+  );
+}
+// compact: no national ranks (the narrow in-panel version).
+function SeasonGrid({ game, ts, rows, className = "bc-sgrid", compact = false }) {
+  const val = (t, k) => (t?.v?.[k] == null ? "—" : fmtTeamStat(k, t.v[k]));
+  const rk = (t, k) => (!compact && t?.v?.[k] != null && t?.r?.[k] ? `${t.r[k].replace(/^(T-)?/, "$1#")}` : "");
+  return (
+      <div className={className}>
+        {rows.map(([label, k, low]) => {
           const a = ts.away?.v?.[k];
           const h = ts.home?.v?.[k];
           const edge = a == null || h == null || a === h ? [false, false] : low ? [a < h, h < a] : [a > h, h > a];
@@ -466,7 +515,6 @@ function SeasonStats({ game, ts }) {
           );
         })}
       </div>
-    </div>
   );
 }
 
@@ -488,8 +536,7 @@ function Pregame({ s, game }) {
   const at = game.startDate ? new Date(game.startDate) : null;
   const ok = at && !isNaN(at);
   const ms = ok ? at.getTime() - s.now : null;
-  const count = s.phase === "delayed" ? "Awaiting kickoff"
-    : ms == null || ms <= 0 ? "Kickoff shortly"
+  const count = ms == null || ms <= 0 ? "Kickoff shortly"
       : ms < 3600e3 ? `Kickoff in ${Math.max(1, Math.round(ms / 60e3))} min`
         : ms < 86400e3 ? `Kickoff in ${Math.floor(ms / 3600e3)}h ${Math.round((ms % 3600e3) / 60e3)}m`
           : `Kickoff ${at.toLocaleDateString("en-US", { weekday: "long", timeZone: ET })}`;
@@ -497,7 +544,7 @@ function Pregame({ s, game }) {
     const t = game[k] || {};
     return (
       <div className={`bc-mside ${k}`} style={{ "--pc": panelColor(t) }}>
-        <Logo team={t} />
+        <Logo team={t} onColor />
         <div className="school bc-disp bc-ell">{t.rank ? <span className="rank">#{t.rank}</span> : null}{teamName(t) || teamShort(t)}</div>
         {t.mascot && <div className="sub">{t.mascot}</div>}
       </div>
@@ -522,7 +569,7 @@ function Pregame({ s, game }) {
       <div className="bc-match">
         {side("away")}
         <div className="bc-mmid">
-          <div className="lbl">{s.phase === "delayed" ? "Kickoff delayed" : ok ? at.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: ET }) : "Kickoff"}</div>
+          <div className="lbl">{ok ? at.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: ET }) : "Kickoff"}</div>
           <div className="kick bc-disp">{ok && !game.startTimeTBD ? `${at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ET })} ET` : "TBA"}</div>
           <div className="cd">{count}</div>
           {game.venue && <div className="venue">{game.venue}</div>}
@@ -589,19 +636,21 @@ function BroadcastScreen({ s }) {
   let body;
   if (s.phase === "loading") body = <Slate title="Broadcast starting soon" />;
   else if (s.phase === "missing") body = <Slate title="Game not found" sub="Check the game link at we-draft.com/live" />;
-  else if (s.phase === "pregame" || s.phase === "delayed") body = <><TopBar s={s} game={game} /><Pregame s={s} game={game} /><Ticker game={game} phase={s.phase} /></>;
+  else if (s.phase === "pregame") body = <><TopBar s={s} game={game} /><Pregame s={s} game={game} /><Ticker game={game} phase={s.phase} /></>;
   else {
     body = (
       <>
         <TopBar s={s} game={game} />
         <Scorebug s={s} game={game} />
-        {s.phase === "live" && <SituationStrip s={s} game={game} />}
+        {(s.phase === "live" || s.phase === "kickoff") && <SituationStrip s={s} game={game} />}
         {s.phase === "halftime" ? <HalftimePanel s={s} game={game} />
           : s.phase === "final" ? <FinalPanel s={s} game={game} />
             : <><PlayPanel s={s} game={game} /><RecentPlays rows={s.recentPlays} /></>}
-        <TeamStats s={s} game={game} tall={s.phase !== "live"} />
+        <TeamStats s={s} game={game} tall={s.phase !== "live" && s.phase !== "kickoff"} />
         <Ticker game={game} phase={s.phase} />
-        <BroadcastEvent event={s.event} game={game} tall={s.phase !== "live"} />
+        <BroadcastEvent event={s.event} game={game} tall={s.phase !== "live" && s.phase !== "kickoff"} />
+        <BroadcastEvent event={s.sideEvent} game={game} tall={s.phase !== "live" && s.phase !== "kickoff"} />
+        {s.kickoffAt && <KickoffBurst key={s.kickoffAt} at={s.kickoffAt} away={game.away} home={game.home} sub="We-Draft Live · Game on" />}
       </>
     );
   }

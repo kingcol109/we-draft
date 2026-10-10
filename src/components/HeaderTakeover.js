@@ -90,6 +90,11 @@ export const TAKEOVER_STYLE = `
 .tk.home .tk-text { right: calc(100% - var(--x1) + var(--w1) / 2 + clamp(12px, 2.4vw, 34px)); left: 3%; align-items: flex-end; text-align: right; }
 .tk-team { font-weight: 900; font-size: clamp(12px, 1.5vw, 22px); letter-spacing: 0.22em; text-transform: uppercase; color: var(--tc2); text-shadow: 0 2px 8px rgba(0,0,0,0.5);
   animation: tk-rise 0.45s ease-out 0.95s both; }
+/* who made it — lands right after the call */
+.tk-who { margin-top: clamp(4px, 0.6vw, 8px); max-width: 100%; font-weight: 800; font-size: clamp(13px, 1.7vw, 25px); line-height: 1.15; color: rgba(255,255,255,0.92);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: tk-rise 0.45s ease-out 1.45s both; }
+.tk-who b { font-weight: 900; color: #fff; text-transform: uppercase; letter-spacing: 0.03em; }
+.tk-who span { color: color-mix(in srgb, var(--tc2) 55%, #fff); }
 .tk-line { display: flex; align-items: center; gap: clamp(8px, 1.2vw, 16px); }
 .tk.home .tk-line { flex-direction: row-reverse; }
 .tk-word { font-weight: 900; font-size: clamp(24px, 4.6vw, 68px); line-height: 0.95; letter-spacing: 0.01em; text-transform: uppercase; font-style: italic;
@@ -158,7 +163,9 @@ const CONFETTI = Array.from({ length: 44 }, (_, i) => ({
 // "Trojans" → "Trojans win"; a singular mascot ("Crimson Tide") wins.
 const winWord = (name) => (/s$/i.test(name) && !/ss$/i.test(name) ? "win" : "wins");
 
-export default function HeaderTakeover({ kind, side, game, onDone }) {
+// player / detail: who made the play and how ("Zion Ragins · 11-yard TD
+// pass"), under the call.
+export default function HeaderTakeover({ kind, side, game, onDone, player = null, detail = null }) {
   const call = CALLS[kind] || CALLS.td;
   const ref = useRef(null);
   useEffect(() => {
@@ -216,6 +223,9 @@ export default function HeaderTakeover({ kind, side, game, onDone }) {
             <div className="tk-word">{kind === "win" ? `${name} ${winWord(name)}` : call.word}</div>
             {call.pts && <div className="tk-pts">{call.pts}</div>}
           </div>
+          {kind !== "win" && player && (
+            <div className="tk-who"><b>{player}</b>{detail && !/^\d+ points?$/i.test(detail) ? <span> · {detail}</span> : null}</div>
+          )}
         </div>
       </div>
       {logo && <img className="tk-logo" src={logo} alt="" />}

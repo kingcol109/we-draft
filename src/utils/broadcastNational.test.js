@@ -380,6 +380,9 @@ describe("lastGameStories", () => {
     expect(s.map((x) => [x.name, x.headline])).toEqual([["Ashton Daniels", "5 passing TDs"], ["Isaac Brown", "142 rushing yards"], ["Chris Bell", "2 receiving TDs"]]);
     expect(s[0].line).toBe("24/31 · 287 YDS · 5 TD");
     expect(s[0].ctx).toBe("Last game · W 38–24 at BC");
+    // the card names the game the numbers are from
+    expect(s[0].last).toMatchObject({ where: "at", result: "W 38–24" });
+    expect(s[0].last.opp).toBeTruthy();
     expect(s[1].line).toBe("18 CAR · 142 YDS · 1 TD");
     expect(lastGameStories(doc, 97, NOW, 5).find((x) => x.name === "Clev Lubin")).toMatchObject({ headline: "2.5 sacks", prospect: true });
     // the other side's lines aren't this team's

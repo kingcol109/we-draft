@@ -90,7 +90,7 @@ export default function BroadcastPage() {
   const replayParam = params.get("replay");
   const replaySec = Number(replayParam);
   const replay = replayParam === "manual" ? { manual: true, from: Math.max(0, Number(params.get("from")) || 0) }
-    : replaySec > 0 ? { stepMs: Math.max(1, replaySec) * 1000, from: Math.max(1, Number(params.get("from")) || 1) } : null;
+    : replaySec > 0 ? { stepMs: Math.max(1, replaySec) * 1000, from: params.has("from") ? Math.max(0, Number(params.get("from")) || 0) : 1 } : null;
   const evType = (params.get("event") || "").toUpperCase();
   const testEvent = EVENT_TYPES.includes(evType) ? { type: evType, side: params.get("side") === "away" ? "away" : "home", subtitle: null } : null;
 

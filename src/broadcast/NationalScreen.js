@@ -37,6 +37,7 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import BroadcastEvent from "./BroadcastEvents";
 import { Logo } from "./TeamLogo";
+import FitText from "./FitText";
 import { panelColor, playerUrl } from "../utils/broadcast";
 import { teamName, teamShort, statusLabel } from "../utils/live";
 import { playSummary } from "../components/LivePlayCard";
@@ -112,11 +113,14 @@ function fitHeadline(text, g) {
   return { text: t, size: t.length > 30 ? " xs" : t.length > 22 ? " sm" : "" };
 }
 
-function BugTeam({ g, side, live, lose, win, scored }) {
+// pc: one color for both rows (gameday previews: the home team's) — then
+// the away logo is on another team's color and takes its dark-background
+// version, the home logo its own-color one.
+function BugTeam({ g, side, live, lose, win, scored, pc = null }) {
   const t = g[side] || {};
   return (
-    <div className={`nr-team${lose ? " lose" : ""}${win ? " win" : ""}${scored ? " hot" : ""}`} style={{ "--pc": panelColor(t) }}>
-      <Logo team={t} className="nr-logo" />
+    <div className={`nr-team${lose ? " lose" : ""}${win ? " win" : ""}${scored ? " hot" : ""}`} style={{ "--pc": pc || panelColor(t) }}>
+      <Logo team={t} className="nr-logo" onColor={!pc || side === "home"} />
       <div className="nr-name">
         {t.rank ? <span className="rank bc-disp">#{t.rank}</span> : null}
         <span className="school bc-disp bc-ell">{teamShort(t) || teamName(t)}</span>
@@ -130,7 +134,7 @@ function BugTeam({ g, side, live, lose, win, scored }) {
   );
 }
 
-function Bug({ card, hot, now, roll = "" }) {
+function Bug({ card, hot, now, roll = "", gameday = false }) {
   const { game: g, kind } = card;
   const live = kind === "live";
   const hp = g.home?.points ?? 0;
@@ -143,10 +147,12 @@ function Bug({ card, hot, now, roll = "" }) {
   const down = off && /^[1-4](st|nd|rd|th) & ([1-9]\d?|goal)\b/i.test(g.situation || "") ? g.situation : null;
   const tv = channel(g);
   const status = kind === "upcoming" ? `Kickoff ${label}` : label;
+  // Gameday previews: the whole chip in the home team's color.
+  const pc = gameday && kind === "upcoming" ? panelColor(g.home) : null;
   return (
     <div className={`nr-bug ${kind}${card.close ? " close" : ""}${hot ? " hot" : ""}${roll}`}>
-      <BugTeam g={g} side="away" live={live} lose={lose === "away"} win={lose === "home"} scored={hot?.side === "away"} />
-      <BugTeam g={g} side="home" live={live} lose={lose === "home"} win={lose === "away"} scored={hot?.side === "home"} />
+      <BugTeam g={g} side="away" live={live} lose={lose === "away"} win={lose === "home"} scored={hot?.side === "away"} pc={pc} />
+      <BugTeam g={g} side="home" live={live} lose={lose === "home"} win={lose === "away"} scored={hot?.side === "home"} pc={pc} />
       <div className="nr-foot">
         <span className={`st${live ? " on" : ""}`}>{status}</span>
         {tv && <span className="ch">{tv}</span>}
@@ -162,7 +168,7 @@ function Bug({ card, hot, now, roll = "" }) {
 // scoreboard drum turning over. Close games hold their slots, so they
 // never move.
 const ROLL_MS = 1400; // the last slot's roll, its stagger included
-function Slot({ card, hot, now, i }) {
+function Slot({ card, hot, now, i, gameday }) {
   const key = card ? String(card.game.id) : "empty";
   // out: the face rolling away ({ card } — card null for an empty slot)
   const [roll, setRoll] = useState({ key, out: null, n: 0 });
@@ -174,7 +180,7 @@ function Slot({ card, hot, now, i }) {
     const t = setTimeout(() => setRoll((r) => ({ ...r, out: null })), ROLL_MS);
     return () => clearTimeout(t);
   }, [roll.n]); // eslint-disable-line react-hooks/exhaustive-deps
-  const face = (c, cls, h) => (c ? <Bug card={c} hot={h} now={now} roll={cls} />
+  const face = (c, cls, h) => (c ? <Bug card={c} hot={h} now={now} roll={cls} gameday={gameday} />
     : <div className={`nr-bug empty${cls}`}><img src={WD_ICON} alt="" /></div>);
   return (
     <div className="nr-slot" style={{ "--i": i }}>
@@ -191,7 +197,7 @@ function Rail({ s }) {
     <div className={`nr-rail${s.gameday ? " gd" : ""}`}>
       {Array.from({ length: NATIONAL_PER_PAGE }, (_, k) => {
         const c = cards[k] || null;
-        return <Slot key={k} card={c} hot={c ? s.hot.get(String(c.game.id)) : null} now={s.now} i={k} />;
+        return <Slot key={k} card={c} hot={c ? s.hot.get(String(c.game.id)) : null} now={s.now} i={k} gameday={s.gameday} />;
       })}
     </div>
   );
@@ -199,9 +205,20 @@ function Rail({ s }) {
 
 // ── The storyline strip ──
 const TONE = { red: "#d92b2b", gold: "#f6a21d", blue: "#0055a5" };
+// Gameday: the strip promotes We-Draft Live instead of the day's storylines.
+const LIVE_PROMO = "Follow the action around the country here live";
 function StoryStrip({ s }) {
-  const st = s.story;
   const narrow = !!s.spotlight; // the spotlight takes the strip's right end
+  if (s.gameday) {
+    return (
+      <div className={`bc-sit nr-story nr-promo${narrow ? " nr-narrow" : ""}`}>
+        <div className="bc-dd bc-disp nr-chip nr-live-chip" style={{ "--oc": "#d92b2b" }}><i />Live</div>
+        <div className="nr-story-txt bc-ell">{LIVE_PROMO}</div>
+        <div className="nr-promo-url bc-disp">we-draft.com/live</div>
+      </div>
+    );
+  }
+  const st = s.story;
   if (!st) return <div className={`bc-sit${narrow ? " nr-narrow" : ""}`} />;
   const g = st.game;
   const tv = channel(g);
@@ -300,7 +317,7 @@ function LatestPanel({ s }) {
                 <div key={x.name} className="bc-pstat" style={{ "--pc": panelColor(g?.[x.side]) }}>
                   <Logo team={g?.[x.side]} />
                   <span className="n">{x.name.split(" ").slice(-1)[0]}</span>
-                  <span className="l">{x.line}</span>
+                  <FitText as="span" className="l" text={x.line} />
                 </div>
               ))}
             </div>
@@ -439,7 +456,15 @@ function CardBox({ g, pv }) {
 const MORPH_MS = 900;
 // The exact width of an element's text (scrollWidth rounds, so a name a
 // fraction of a pixel too wide would pass and get an ellipsis).
-const textWidth = (el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width; };
+// Both on screen, so a transform on the way (the stage's scale, a card
+// mid-animation) can't make the text look narrower than its box.
+const overflows = (el) => {
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  const box = el.getBoundingClientRect().width;
+  const k = el.offsetWidth ? box / el.offsetWidth : 1;
+  return r.getBoundingClientRect().width > el.clientWidth * k + 0.5;
+};
 // Text that's shortened only when it wouldn't fit: the first of `ways`
 // ([{ text, cls }], longest first) that fits its box, measured once laid
 // out, before it paints (the last one if none does).
@@ -447,17 +472,28 @@ function Fit({ ways, className, style }) {
   const ref = useRef(null);
   const sig = ways.map((w) => w.text + w.cls).join("|");
   const [step, setStep] = useState(0);
-  useLayoutEffect(() => setStep(0), [sig]);
+  // measured again once the broadcast fonts are in (wider than the fallback)
+  const [fontsIn, setFontsIn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    document.fonts?.ready?.then(() => { if (alive) setFontsIn(true); });
+    return () => { alive = false; };
+  }, []);
+  useLayoutEffect(() => setStep(0), [sig, fontsIn]);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el && step < ways.length - 1 && textWidth(el) > el.clientWidth) setStep(step + 1);
-  }, [step, sig]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (el && step < ways.length - 1 && overflows(el)) setStep(step + 1);
+  }, [step, sig, fontsIn]); // eslint-disable-line react-hooks/exhaustive-deps
   const w = ways[Math.min(step, ways.length - 1)];
   return <div ref={ref} className={`${className}${w.cls}`} style={style}>{w.text}</div>;
 }
 // A storyline's headline: as written ("117 receiving yards"), else
 // "yards" → "yds", else that a size smaller.
-const headlineWays = (t) => { const s = t.replace(/\byards\b/i, "yds"); return [{ text: t, cls: "" }, { text: s, cls: "" }, { text: s, cls: " long" }]; };
+const headlineWays = (t) => {
+  const s = t.replace(/\byards\b/i, "yds");
+  const r = s.replace(/\breceiving\b/i, "rec").replace(/\brushing\b/i, "rush").replace(/\bpassing\b/i, "pass");
+  return [{ text: t, cls: "" }, { text: s, cls: "" }, { text: r, cls: "" }, { text: r, cls: " long" }];
+};
 // A player's name: as is, else a size smaller, else his first initial
 // ("D. Williams Jr.").
 const nameWays = (n) => [{ text: n, cls: "" }, { text: n, cls: " long" }, { text: shortName(n), cls: " long" }];
@@ -482,17 +518,29 @@ function cardFace(c, g) {
       </>
     );
   }
+  // A player's big game LAST time out — the card says so up top and names
+  // the game: the opponent (logo), the result and the date.
   const st = c.story;
+  const L = st.last;
+  const opp = L ? teamShort(L.opp) || teamName(L.opp) : null;
   return (
     <div className="nr-pstory">
-      <div className="k bc-ell">{st.prospect ? "We-Draft prospect" : "Player storyline"}</div>
+      <div className="k bc-ell">{L?.date ? `Last game · ${L.date}` : "Last game"}</div>
       <div className="pw">
         <Logo team={g[c.side]} />
         <Fit className="bc-disp bc-ell nm" ways={nameWays(st.name)} style={{ minWidth: 0, flex: "1 1 auto" }} />
+        {st.prospect && <img className="wdp" src={WD_ICON} alt="We-Draft prospect" title="We-Draft prospect" />}
       </div>
       <Fit className="hl bc-disp bc-ell" ways={headlineWays(st.headline)} />
-      <div className="ln bc-ell">{st.line}</div>
-      <div className="meta bc-ell">{st.ctx}</div>
+      <div className="ln bc-ell"><span className="tag">Last game</span>{st.line}</div>
+      {L ? (
+        <div className="lg bc-ell">
+          <span className={`res ${L.result[0]}`}>{L.result}</span>
+          <span>{L.where}</span>
+          <Logo team={L.opp} />
+          <b>{opp}</b>
+        </div>
+      ) : <div className="meta bc-ell">{st.ctx}</div>}
     </div>
   );
 }
@@ -666,7 +714,7 @@ function UpNext({ s }) {
 // team's logo), so its dark-background logo can be used.
 const creditTeam = (b, s) => {
   const g = s.gamesById.get(String(b.gameId));
-  return b.teamLogo && g ? [g.home, g.away].find((t) => t && (t.logo === b.teamLogo || t.logoDark === b.teamLogo)) || null : null;
+  return b.teamLogo && g ? [g.home, g.away].find((t) => t && (t.logo === b.teamLogo || t.logoDark === b.teamLogo || t.logoBlack === b.teamLogo)) || null : null;
 };
 
 function RecentBig({ s }) {

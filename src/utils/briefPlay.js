@@ -41,6 +41,24 @@ function action(p) {
   }
 }
 
+// Whose player briefPlay's line names first — the team whose logo goes
+// with it. The offense on a run, pass, sack, fumble, punt or kick try (a
+// third-down stop still reads "Isaac Brown rush for no gain", so it's
+// Louisville's logo, not the defense credited with the stop); the
+// interceptor's team on a pick; the returner's on a kickoff; the flagged
+// team on a penalty; nobody on a timeout or a quarter break.
+const OFFENSE_NAMED = new Set(["rush", "pass", "incomplete", "sack", "fumble", "punt", "field_goal", "conversion"]);
+const other = (s) => (s === "home" ? "away" : s === "away" ? "home" : null);
+export function briefSide(p) {
+  const pr = p?.presentation || {};
+  if (["timeout", "period"].includes(pr.type)) return null;
+  if (OFFENSE_NAMED.has(pr.type)) return p.offense || pr.creditSide || null;
+  if (pr.type === "interception") return pr.creditSide || other(p.offense);
+  if (pr.type === "kickoff") return pr.players?.returner?.side || other(p.offense) || pr.creditSide || null;
+  if (pr.type === "penalty") return pr.penaltySide || null;
+  return pr.creditSide || p.offense || null;
+}
+
 export function briefPlay(p, next) {
   if (!p) return "";
   const pr = p.presentation || {};

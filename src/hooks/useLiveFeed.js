@@ -69,7 +69,7 @@ export function useCfbdSchools(on) {
         const x = d.data();
         return {
           id: x.CFBDTeamId, name: x.School || d.id, short: x.Short || "", mascot: x.Mascot || "",
-          conference: x.Conference || "", logo: x.LogoDark || x.Logo1 || x.Logo2 || null, alt: x.CFBDName || "",
+          conference: x.Conference || "", logo: x.LogoBlack || x.LogoDark || x.Logo1 || x.Logo2 || null, alt: x.CFBDName || "",
         };
       }).sort((a, b) => a.name.localeCompare(b.name));
       if (alive) setSchools(schoolsCache);

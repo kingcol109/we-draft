@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import WdWordmark from "../assets/Logo2.png";
+import { darkLogo } from "../utils/live";
 
 const SITE_BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -38,7 +39,7 @@ const GRADE_BADGE = {
 };
 
 const short = (t) => t?.short || t?.school || t?.name || "";
-const logoOf = (t) => t?.logoDark || t?.logo || null;
+const logoOf = (t) => darkLogo(t) || null;
 const CAT = { passing: "Passing", rushing: "Rushing", receiving: "Receiving", defense: "Defense" };
 
 export const BREAK_CARD_STYLE = `

@@ -101,6 +101,8 @@ const CFG = {
   AGENT_FRESH_MS: 60e3,
   IDLE_STOP_MS: 10 * 60e3,          // an orchestrator-started VM idles this long before stopping
   KEEP_WARM_MS: 45 * 60e3,          // …unless a selected game prepares within this
+  MANUAL_IDLE_STOP_MS: 30 * 60e3,   // a VM the orchestrator didn't start idles this long before stopping…
+  DAY_TZ: "America/New_York",       // …once nothing is left to broadcast before midnight here
   MISSED_MS: 4 * 3600e3,            // too late to start after kickoff + this
   MAX_ERRORS: 5,                    // consecutive failures of one step before giving up
   LOCK_MS: 70e3,                    // > the function's 60s maxDuration, so a lease never expires under a live tick
@@ -148,6 +150,12 @@ function youtubeFor(r, ctx) {
 
 const toMs = (v) => (v?.toMillis ? v.toMillis() : v instanceof Date ? v.getTime() : typeof v === "number" ? v : Date.parse(v) || null);
 // When preparation starts: the admin's own start time, else 15 min before kickoff.
+// Next local midnight in CFG.DAY_TZ (on a DST change day it can be an hour off).
+function dayEndAt(now, tz = CFG.DAY_TZ) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(now).filter((x) => x.type !== "literal").map((x) => [x.type, +x.value]));
+  return now - (((p.hour * 60 + p.minute) * 60 + p.second) * 1000 + (now % 1000)) + 24 * 3600e3;
+}
 const prepAtOf = (startAt, kickoff) => (startAt != null ? startAt : kickoff ? kickoff - CFG.PREP_LEAD_MS : null);
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,119}$/;
 const ID_RE = /^[A-Za-z0-9]{1,40}$/;
@@ -552,20 +560,24 @@ async function runTick(db, deps = realDeps()) {
     const { ids: slots, capacity } = slotsOf(orch, ytSnap.data() || {});
     const agentDryRun = agent.dryRun === true; // the agent's last report, however old
     const blockCtx = { capacity, agentDryRun };
-    // A selected game that can actually start soon keeps an idle VM warm.
-    const soon = (r) => r.auto?.phase === "selected" && prepAtOf(r.auto.startAt, r.auto.kickoffAt) != null
-      && prepAtOf(r.auto.startAt, r.auto.kickoffAt) - now <= CFG.KEEP_WARM_MS && now - (r.auto.kickoffAt || now) < CFG.MISSED_MS
+    // A selected game that can actually start before `by` (soon: keeps an
+    // idle VM warm; today: keeps a VM the orchestrator didn't start).
+    const startsBy = (by) => (r) => r.auto?.phase === "selected" && prepAtOf(r.auto.startAt, r.auto.kickoffAt) != null
+      && prepAtOf(r.auto.startAt, r.auto.kickoffAt) < by && now - (r.auto.kickoffAt || now) < CFG.MISSED_MS
       && (isRehearsal(r) || !realBlocker(blockCtx));
+    const soon = startsBy(now + CFG.KEEP_WARM_MS + 1);
+    const today = startsBy(dayEndAt(now));
     // With no Worker Stream (capacity 0) a real game never reaches an active
     // phase (it's held in "selected"), so it never makes the VM needed.
     const needsVmNow = () => records.some((r) => ACTIVE.includes(r.auto?.phase));
 
-    // The VM (only asked about when it matters).
+    // The VM (only asked about when it matters: broadcasts need it, the
+    // orchestrator or an admin started it, or the agent says it's up).
+    const agentFresh = !!agent.lastSeenAt && now - agent.lastSeenAt < CFG.AGENT_FRESH_MS;
     let vm = null;
-    if (needsVmNow() || records.some(soon) || orch.vmOwned) {
+    if (needsVmNow() || records.some(soon) || orch.vmOwned || orch.vmManual || agentFresh) {
       try { vm = (await deps.compute.status()).instance; } catch (e) { summary.errors.push(`vm-status: ${e.message}`); }
     }
-    const agentFresh = !!agent.lastSeenAt && now - agent.lastSeenAt < CFG.AGENT_FRESH_MS;
     const containers = new Map((agentFresh ? agent.containers || [] : []).map((c) => [c.id, c]));
     const vmHeld = (orch.vmHoldUntil || 0) > now;
 
@@ -637,6 +649,11 @@ async function runTick(db, deps = realDeps()) {
     const orchUpd = {};
     const needVm = needsVmNow();
     const warm = records.some(soon);
+    // A VM the orchestrator didn't start (manual Start VM, the console) runs
+    // until the day is done: no worker container and nothing enabled left
+    // before midnight. Manual broadcasts stay covered by compute.stop's live guard.
+    const vmUp = vm && ["running", "starting"].includes(vm.state);
+    const dayDone = !records.some(today) && ![...containers.values()].some((c) => ["running", "restarting", "created"].includes(c.state));
     if (vm) summary.vm = vm.state;
     if (needVm) {
       orchUpd.vmIdleSince = null;
@@ -648,21 +665,25 @@ async function runTick(db, deps = realDeps()) {
           deps.log("vm start (broadcasts need it)");
         } catch (e) { summary.errors.push(`vm-start: ${e.message}`); }
       }
-    } else if (!warm && orch.vmOwned && vm && ["running", "starting"].includes(vm.state)) {
+    } else if (vmUp && (orch.vmOwned ? !warm : dayDone)) {
       const idleSince = orch.vmIdleSince || now;
       orchUpd.vmIdleSince = idleSince;
-      if (now - idleSince >= CFG.IDLE_STOP_MS) {
+      if (now - idleSince >= (orch.vmOwned ? CFG.IDLE_STOP_MS : CFG.MANUAL_IDLE_STOP_MS)) {
         try {
           // Never confirmLive: compute.stop's own live guard stays in force.
           await deps.compute.stop(db, "orchestrator", {});
-          Object.assign(orchUpd, { vmOwned: false, vmIdleSince: null });
+          Object.assign(orchUpd, { vmOwned: false, vmManual: false, vmIdleSince: null });
           summary.vm = "stop requested";
-          deps.log("vm stop (idle, nothing scheduled soon)");
-        } catch (e) { summary.errors.push(`vm-stop: ${e.message}`); }
+          deps.log(orch.vmOwned ? "vm stop (idle, nothing scheduled soon)" : "vm stop (idle, nothing left today)");
+        } catch (e) {
+          // A manual broadcast still live: not an error, just not yet.
+          if (e.status === 409) summary.vm = `stop held: ${e.message}`;
+          else summary.errors.push(`vm-stop: ${e.message}`);
+        }
       }
     } else {
       orchUpd.vmIdleSince = null;
-      if (vm?.state === "stopped" && orch.vmOwned) orchUpd.vmOwned = false;
+      if (vm?.state === "stopped" && (orch.vmOwned || orch.vmManual)) Object.assign(orchUpd, { vmOwned: false, vmManual: false });
     }
     // What the UI shows: real capacity (0 = no Worker Stream), slots held, and
     // whether the agent last reported DRY_RUN.
@@ -982,18 +1003,18 @@ async function setConfig(db, uid, body, deps = { yt: require("./youtube") }) {
 }
 
 // Manual VM buttons: a manual start hands the VM to the admin (the
-// orchestrator won't idle-stop it); a forced stop during broadcasts pauses
+// orchestrator stops it only once the day is done); a forced stop during broadcasts pauses
 // automatic starts for a while so the two don't fight.
 async function noteManualVm(db, action, result, body = {}, now = Date.now()) {
-  if (action === "vm-start" && result.result === "starting") await db.doc(ORCH).set({ vmOwned: false, vmHoldUntil: null, vmIdleSince: null }, { merge: true });
+  if (action === "vm-start" && result.result === "starting") await db.doc(ORCH).set({ vmOwned: false, vmManual: true, vmHoldUntil: null, vmIdleSince: null }, { merge: true });
   if (action === "vm-stop" && result.result === "stopping") {
-    await db.doc(ORCH).set({ vmOwned: false, vmIdleSince: null, ...(body.confirmLive === true ? { vmHoldUntil: now + CFG.HOLD_MS } : {}) }, { merge: true });
+    await db.doc(ORCH).set({ vmOwned: false, vmManual: false, vmIdleSince: null, ...(body.confirmLive === true ? { vmHoldUntil: now + CFG.HOLD_MS } : {}) }, { merge: true });
   }
 }
 
 module.exports = {
   CFG, ACTIVE, TERMINAL, RUN_WORKER, ORCH, AGENT,
-  step, runTick, agentReport, desiredWorkers, slotsOf, workerGame, nationalDone, isNational,
+  step, runTick, agentReport, dayEndAt, desiredWorkers, slotsOf, workerGame, nationalDone, isNational,
   selectGame, selectNational, startNow, cancelGame, retryGame, setConfig, noteManualVm,
   _lease: { lock, unlock }, // tests
 };

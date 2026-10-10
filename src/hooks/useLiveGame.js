@@ -23,6 +23,7 @@ const RECENT_PLAYS = 40;
 export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: withBox = true } = {}) {
   const [game, setGame] = useState(null);
   const [plays, setPlays] = useState([]);
+  const [playsReady, setPlaysReady] = useState(false); // the play list has loaded (maybe empty)
   const [box, setBox] = useState(null);
   const [ready, setReady] = useState(false);
   const id = liveGameId != null ? String(liveGameId) : null;
@@ -44,6 +45,7 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
   const source = playsMode !== "final" ? playsMode : !ready ? null : arch ? `archive:${arch}` : "all";
   useEffect(() => {
     setPlays([]);
+    setPlaysReady(false);
     if (!id || !source || source === "none") return undefined;
     if (source.startsWith("archive:")) {
       const n = Number(source.split(":")[1]);
@@ -52,7 +54,7 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
         doc(db, "liveGames", id, "box", `pbp${i}`),
         (s) => {
           parts[i] = s.exists() ? s.data().plays || [] : [];
-          if (parts.every(Boolean)) setPlays(orderPlays(parts.flat().filter((p) => !p.hidden && !p.removed)));
+          if (parts.every(Boolean)) { setPlays(orderPlays(parts.flat().filter((p) => !p.hidden && !p.removed))); setPlaysReady(true); }
         },
         () => {},
       ));
@@ -63,7 +65,7 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
       : query(collection(db, "liveGames", id, "plays"), orderBy("seq", "desc"), limit(RECENT_PLAYS));
     return onSnapshot(
       q,
-      (s) => setPlays(orderPlays(s.docs.map((d) => d.data()).filter((p) => !p.hidden && !p.removed))),
+      (s) => { setPlays(orderPlays(s.docs.map((d) => d.data()).filter((p) => !p.hidden && !p.removed))); setPlaysReady(true); },
       () => {},
     );
   }, [id, source]);
@@ -74,7 +76,7 @@ export function useLiveGame(liveGameId, { plays: playsMode = "recent", box: with
     return onSnapshot(doc(db, "liveGames", id, "box", "players"), (s) => setBox(s.exists() ? s.data() : null), () => {});
   }, [id, withBox]);
 
-  return { game, plays, box, ready };
+  return { game, plays, box, ready, playsReady };
 }
 
 // The ingester's live stats doc (liveGames/{id}/box/live: { teams, players },

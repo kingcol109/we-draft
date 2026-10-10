@@ -14,7 +14,8 @@
 // Customize, never by tapping a name here (a followed player shows ★).
 // The We-Draft circle logo opens the profile (new tab) when there is one.
 import { useRef } from "react";
-import { periodLabel, downLabel, spotLabel } from "../utils/live";
+import { periodLabel, downLabel, spotLabel, darkLogo } from "../utils/live";
+import { playCall } from "../utils/playCall";
 
 const GOLD = "#f6a21d";
 
@@ -122,6 +123,18 @@ export const PLAY_CARD_STYLE = `
 @keyframes lpc-upd { 0% { background: rgba(246,162,29,0.45); color: #fff; } 100% { background: transparent; } }
 .lpc-pending-team { display: inline-flex; align-items: center; gap: 10px; }
 .lpc-pending-team img { width: 30px; height: 30px; object-fit: contain; }
+.lpc-call { --hc: var(--tc, #4d9fff); background: linear-gradient(100deg, color-mix(in srgb, var(--hc) 18%, #111a2b), #111a2b 60%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hc) 70%, transparent), 0 10px 30px -14px var(--hc); }
+.lpc-call .lpc-badge { color: #fff; letter-spacing: 0.16em; animation: lpc-call-in 0.35s cubic-bezier(.2,.9,.2,1) both; }
+.lpc-call .lpc-line { animation: lpc-call-in 0.4s 0.25s cubic-bezier(.2,.9,.2,1) both; }
+.lpc-call .lpc-call-team img { width: 30px; height: 30px; object-fit: contain; margin-right: 10px; vertical-align: middle; }
+.lpc-call .lpc-detail { color: #7f90aa; }
+@keyframes lpc-call-in { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+/* The result lands: the outcome lines come in after the card. */
+.lpc-result .lpc-badge { animation: lpc-res-pop 0.45s cubic-bezier(.2,1.4,.4,1) both; }
+.lpc-result .lpc-detail, .lpc-result .lpc-was { animation: lpc-call-in 0.4s 0.2s cubic-bezier(.2,.9,.2,1) both; }
+@keyframes lpc-res-pop { 0% { opacity: 0; transform: scale(1.35); } 100% { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lpc-call .lpc-badge, .lpc-call .lpc-line, .lpc-result .lpc-badge, .lpc-result .lpc-detail, .lpc-result .lpc-was { animation: none; } }
 .lpc-dots { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
 .lpc-dots i { width: 6px; height: 6px; border-radius: 50%; background: #9fb0c8; animation: lpc-dot 1.2s infinite ease-in-out; }
 .lpc-dots i:nth-child(2) { animation-delay: 0.2s; }
@@ -245,7 +258,7 @@ export function TwoPointCard({ pat, team }) {
       <div className="lpc-body">
         <div className="lpc-head">
           <span className="lpc-badge">2-PT CONVERSION</span>
-          {team && (team.logoDark || team.logo) && <span className="lpc-team"><img src={team.logoDark || team.logo} alt="" />{team.short || team.school || team.name}</span>}
+          {team && (darkLogo(team)) && <span className="lpc-team"><img src={darkLogo(team)} alt="" />{team.short || team.school || team.name}</span>}
         </div>
         {who && <div className="lpc-line">{who}</div>}
         <div className="lpc-detail">{pat.good ? "Good — 2 points" : "No good"}</div>
@@ -261,14 +274,15 @@ export function TwoPointCard({ pat, team }) {
  * @param scoreLabel e.g. "MSU 17 – 35 BAMA" (shown for scoring plays / big plays)
  * @param onScoreClick optional — makes the score chip a button (opens the game)
  */
-export default function LivePlayCard({ play, variant = "compact", team, possessionTeam, scoreLabel, scoreboard, onScoreClick, followedIds = new Set(), onClick, highlight, fresh, justNow, teamColor }) {
+export default function LivePlayCard({ play, variant = "compact", team, possessionTeam, scoreLabel, scoreboard, onScoreClick, followedIds = new Set(), onClick, highlight, fresh, justNow, result, teamColor }) {
   const pres = play.presentation;
   const detailed = variant === "detailed";
   const ot = play.period > 4;
   const clockQ = [periodLabel(play.period), ot ? null : play.clock].filter(Boolean);
   // Extra state classes: clickable (Feed → opens the game), highlighted
   // (the play just jumped to), fresh (arrived while watching).
-  const state = `${onClick ? " lpc-click" : ""}${highlight ? " lpc-focus" : ""}${fresh ? " lpc-fresh" : ""}${justNow ? " lpc-justnow" : ""}`;
+  // result: the outcome of a play whose call was just on (PlayCallCard).
+  const state = `${onClick ? " lpc-click" : ""}${highlight ? " lpc-focus" : ""}${fresh ? " lpc-fresh" : ""}${justNow ? " lpc-justnow" : ""}${result ? " lpc-result" : ""}`;
 
   // Plays stored before presentation existed (or a parse that found
   // nothing usable) still render — just as cleaned text.
@@ -290,8 +304,8 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
       <div className="lpc-head">
         {justNow && <span className="lpc-justnow-tag">JUST NOW</span>}
         <span className="lpc-badge">{EMOJI[emph] || ""}{pres.headline}</span>
-        {team && pres.type !== "period" && (team.logoDark || team.logo) && (
-          <span className="lpc-team"><img src={team.logoDark || team.logo} alt="" />{team.short || team.school || team.name}</span>
+        {team && pres.type !== "period" && (darkLogo(team)) && (
+          <span className="lpc-team"><img src={darkLogo(team)} alt="" />{team.short || team.school || team.name}</span>
         )}
       </div>
       <Line pres={pres} followedIds={followedIds} short={!detailed} />
@@ -359,7 +373,7 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
         <span className="lpc-to-label">TIMEOUT</span>
         {name && (
           <span className="lpc-to-team">
-            {team && (team.logoDark || team.logo) && <img src={team.logoDark || team.logo} alt="" />}{name}
+            {team && (darkLogo(team)) && <img src={darkLogo(team)} alt="" />}{name}
           </span>
         )}
         <span className="lpc-to-clock">{play.period > 4 ? periodLabel(play.period) : [periodLabel(play.period), play.clock].filter(Boolean).join(" ")}</span>
@@ -381,13 +395,13 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
           // Who had the ball on this snap.
           <div className="lpc-side-ball" title={`${possessionTeam.school || possessionTeam.name || ""} ball`}>
             <span className="lpc-side-fb">●</span>
-            {(possessionTeam.logoDark || possessionTeam.logo) && <img src={possessionTeam.logoDark || possessionTeam.logo} alt="" />}
+            {(darkLogo(possessionTeam)) && <img src={darkLogo(possessionTeam)} alt="" />}
             {possessionTeam.short || possessionTeam.school || possessionTeam.name}
           </div>
         )}
         {down && <div className="lpc-side-down">{down}</div>}
         {pres.turnover && team && (
-          <div className="lpc-side-swap" title="Change of possession">⇄ {(team.logoDark || team.logo) && <img src={team.logoDark || team.logo} alt="" />}{team.short || team.school || team.name} ball</div>
+          <div className="lpc-side-swap" title="Change of possession">⇄ {(darkLogo(team)) && <img src={darkLogo(team)} alt="" />}{team.short || team.school || team.name} ball</div>
         )}
         {play.scoring && scoreLabel && <ScoreTag className="lpc-score lpc-side-score" onClick={onScoreClick}>{scoreLabel}</ScoreTag>}
       </div>
@@ -401,6 +415,43 @@ export default function LivePlayCard({ play, variant = "compact", team, possessi
 // mounted while the game is live and updates in place: each value is keyed
 // by its content, so only a value that changed re-renders with a brief
 // highlight, instead of the whole card popping in again.
+// The first beat of a new play (hooks/usePlayReveal.js stage "call"): what
+// the play is and who has the ball — PASS · C. Williams — with the snap's
+// clock and down & distance, and nothing of how it turned out. The result
+// card replaces it a couple of seconds later.
+export function PlayCallCard({ play, possessionTeam, followedIds = new Set() }) {
+  const call = playCall(play);
+  if (!call) return null;
+  const t = possessionTeam;
+  const down = ["kickoff", "conversion"].includes(play.presentation.type) ? "" : downLabel(play.down, play.distance);
+  return (
+    <div className="lpc lpc-detailed lpc-call" style={t?.color ? { "--tc": t.color } : undefined}>
+      <div className="lpc-body">
+        <div className="lpc-head">
+          <span className="lpc-badge">{call.label}<span className="lpc-dots"><i /><i /><i /></span></span>
+        </div>
+        <div className="lpc-line">
+          {t && (darkLogo(t)) && <span className="lpc-call-team"><img src={darkLogo(t)} alt="" /></span>}
+          {call.player ? <span className="lpc-lead"><PlayerToken player={call.player} followedIds={followedIds} /></span> : (t?.school || t?.name || "")}
+        </div>
+      </div>
+      <div className="lpc-side">
+        {(play.clock || play.period) && (
+          <div className="lpc-side-clock">{play.period > 4 ? periodLabel(play.period) : <>{play.period ? <span className="lpc-side-q">{periodLabel(play.period)}</span> : null}{play.clock}</>}</div>
+        )}
+        {t && down && (
+          <div className="lpc-side-ball">
+            <span className="lpc-side-fb">●</span>
+            {(darkLogo(t)) && <img src={darkLogo(t)} alt="" />}
+            {t.short || t.school || t.name}
+          </div>
+        )}
+        {down && <div className="lpc-side-down">{down}</div>}
+      </div>
+    </div>
+  );
+}
+
 // A value that flashes when it changes — never on the card's first render
 // (the value it started with), and only the value that actually changed.
 function Upd({ v, children }) {
@@ -432,7 +483,7 @@ export function PendingPlayCard({ game, situation, tip = null }) {
         {offense ? (
           <div className="lpc-line">
             <span className="lpc-pending-team">
-              {(offense.logoDark || offense.logo) && <img src={offense.logoDark || offense.logo} alt="" />}
+              {(darkLogo(offense)) && <img src={darkLogo(offense)} alt="" />}
               <Upd v={offense.school || offense.name}>{offense.school || offense.name} ball</Upd>
             </span>
           </div>
@@ -447,7 +498,7 @@ export function PendingPlayCard({ game, situation, tip = null }) {
         {offense && down && (
           <div className="lpc-side-ball">
             <span className="lpc-side-fb">●</span>
-            {(offense.logoDark || offense.logo) && <img src={offense.logoDark || offense.logo} alt="" />}
+            {(darkLogo(offense)) && <img src={darkLogo(offense)} alt="" />}
             <Upd v={offense.short || offense.school || offense.name} />
           </div>
         )}
@@ -480,7 +531,7 @@ export function FinalCard({ game }) {
   const upset = !!lose.rank && (!win.rank || win.rank > lose.rank);
   return (
     <div className="lpc lpc-win" style={{ "--wc": win.color || GOLD }}>
-      {(win.logoDark || win.logo) && <img className="lpc-win-logo" src={win.logoDark || win.logo} alt="" />}
+      {(darkLogo(win)) && <img className="lpc-win-logo" src={darkLogo(win)} alt="" />}
       <div className="lpc-win-body">
         <div className="lpc-win-badge">🏆 {(game.period || 0) > 4 ? "FINAL / OT" : "FINAL"}{upset && <span className="lpc-chip warn">UPSET</span>}</div>
         <div className="lpc-win-name">{win.rank ? <span className="lpc-win-rank">#{win.rank} </span> : null}{nm(win)} wins</div>

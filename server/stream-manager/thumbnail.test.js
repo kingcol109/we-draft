@@ -52,6 +52,7 @@ console.error = (...a) => logs.push(a.join(" "));
 const yt = require("./youtube");
 const compute = require("./compute");
 const t = require("./thumbnail");
+const bc = require("./broadcasts");
 const smApi = require("../../api/stream-manager");
 
 const ytCalls = [];
@@ -309,7 +310,7 @@ test("thumbnail actions are admin-only", async () => {
   assert.deepEqual(fetched, [], "not even a logo fetch");
 });
 
-// ── Upload to a created broadcast (explicit only) ──
+// ── Upload Thumbnail (on demand) ──
 
 async function savedThumb() {
   const gen = (await call({ body: { action: "metadata-thumbnail-generate", scheduleId: "s1" } })).body;
@@ -347,13 +348,85 @@ test("Upload Thumbnail refuses rehearsals, uncreated broadcasts, and games or na
   assert.deepEqual(ytCalls, []);
 });
 
-test("creating a YouTube broadcast doesn't upload the thumbnail", async () => {
+// ── Automatic upload ──
+
+// A YouTube that creates / binds broadcasts and records thumbnail uploads.
+function fakeYoutube({ thumbFails = false } = {}) {
+  const sent = [];
+  yt.accessToken = async () => "access-token-never-logged";
+  yt.getStream = async (_t, id) => ({ id, title: id, streamStatus: "ready" });
+  yt.insertBroadcast = async () => ({ id: "newVid12345", lifeCycleStatus: "created", boundStreamId: null, privacyStatus: "unlisted" });
+  yt.bindBroadcast = async (_t, id, streamId) => ({ id, lifeCycleStatus: "ready", boundStreamId: streamId, privacyStatus: "unlisted" });
+  yt.setThumbnail = async (_t, videoId, buf) => {
+    if (thumbFails) throw Object.assign(new Error("YouTube thumbnails/set failed: The authenticated user doesn't have permissions (forbidden)"), { status: 400 });
+    sent.push({ videoId, buf }); return { url: null };
+  };
+  return sent;
+}
+const future = () => ({ toMillis: () => Date.now() + 3600e3 });
+
+test("automation's YouTube create sets the saved thumbnail; a manual create doesn't", async () => {
+  const sha = await savedThumb();
+  db.store.set("streamManager/youtube", { connected: true, channelId: "UC1" });
+  db.store.set("broadcasts/g401001", record({ scheduledStart: future(), youtube: { broadcastId: null, title: "T", description: "", privacyStatus: "unlisted" } }));
+  db.store.set("broadcasts/manual1", record({ scheduledStart: future(), youtube: { broadcastId: null, title: "T", description: "", privacyStatus: "unlisted" } }));
+  const sent = fakeYoutube();
+  const r = await bc.youtubeCreate(db, { id: "g401001", streamId: "streamA", useDraft: true });
+  assert.deepEqual(r.thumbnail, { uploaded: true });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].videoId, "newVid12345");
+  assert.ok(sent[0].buf.equals(db.data("broadcastThumbnails/401001").png));
+  assert.equal(db.data("broadcasts/g401001").youtube.thumbnailSha256, sha);
+  await bc.youtubeCreate(db, { id: "manual1", streamId: "streamA" });
+  assert.equal(sent.length, 1, "manual create: no automatic upload");
+});
+
+test("a failed thumbnail upload never fails the broadcast create; it's recorded", async () => {
   await savedThumb();
-  const src = fs.readFileSync(path.join(__dirname, "broadcasts.js"), "utf8");
-  const create = src.slice(src.indexOf("async function youtubeCreate"), src.indexOf("async function youtubeRefresh"));
-  assert.equal(/setThumbnail|youtubeThumbnail/.test(create), false);
+  db.store.set("streamManager/youtube", { connected: true, channelId: "UC1" });
+  db.store.set("broadcasts/g401001", record({ scheduledStart: future(), youtube: { broadcastId: null, title: "T", description: "", privacyStatus: "unlisted" } }));
+  fakeYoutube({ thumbFails: true });
+  const r = await bc.youtubeCreate(db, { id: "g401001", streamId: "streamA", useDraft: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.broadcastId, "newVid12345");
+  assert.match(r.thumbnail.error, /permissions/);
+  const d = db.data("broadcasts/g401001");
+  assert.equal(d.youtube.broadcastId, "newVid12345");
+  assert.match(d.youtube.thumbnailError, /permissions/);
+  assert.equal(d.youtube.error ?? null, null, "the broadcast itself isn't in error");
+});
+
+test("saving a thumbnail sets it on the game's existing YouTube broadcast — once; never on rehearsals or ended ones", async () => {
+  db.store.set("streamManager/youtube", { connected: true, channelId: "UC1" });
+  db.store.set("broadcasts/g401001", record({ youtube: { broadcastId: "abcDEF12345", channelId: "UC1", lifecycleStatus: "live" } }));
+  db.store.set("broadcasts/r401001", record({ rehearsal: true, youtube: { broadcastId: null } }));
+  db.store.set("broadcasts/old1", record({ youtube: { broadcastId: "oldVid12345", lifecycleStatus: "complete" } }));
+  const sent = fakeYoutube();
+  const gen = (await call({ body: { action: "metadata-thumbnail-generate", scheduleId: "s1" } })).body;
+  const r = await call({ body: { action: "metadata-thumbnail-save", scheduleId: "s1", sha256: gen.sha256 } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.youtube, [{ id: "g401001", uploaded: true }]);
+  assert.deepEqual(sent.map((x) => x.videoId), ["abcDEF12345"]);
+  // The same image again isn't re-sent.
+  const again = await call({ body: { action: "metadata-thumbnail-save", scheduleId: "s1", sha256: gen.sha256 } });
+  assert.deepEqual(again.body.youtube, [{ id: "g401001", skipped: "already uploaded" }]);
+  assert.equal(sent.length, 1);
+});
+
+test("a YouTube failure on save still saves the thumbnail", async () => {
+  db.store.set("streamManager/youtube", { connected: true, channelId: "UC1" });
+  db.store.set("broadcasts/g401001", record({ youtube: { broadcastId: "abcDEF12345", channelId: "UC1", lifecycleStatus: "ready" } }));
+  fakeYoutube({ thumbFails: true });
+  const gen = (await call({ body: { action: "metadata-thumbnail-generate", scheduleId: "s1" } })).body;
+  const r = await call({ body: { action: "metadata-thumbnail-save", scheduleId: "s1", sha256: gen.sha256 } });
+  assert.equal(r.statusCode, 200);
+  assert.equal(db.data("broadcastThumbnails/401001").sha256, gen.sha256);
+  assert.match(r.body.youtube[0].error, /permissions/);
+});
+
+test("the orchestrator itself never touches thumbnails (only broadcasts.js does)", () => {
   const orch = fs.readFileSync(path.join(__dirname, "orchestrator.js"), "utf8");
-  assert.equal(/setThumbnail|youtubeThumbnail|thumbnail/i.test(orch), false, "the orchestrator never touches thumbnails");
+  assert.equal(/setThumbnail|youtubeThumbnail|thumbnail/i.test(orch), false);
 });
 
 // ── National thumbnail ──

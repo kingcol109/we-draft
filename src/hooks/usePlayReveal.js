@@ -11,33 +11,56 @@
 // backlog (e.g. after a stall) only plays out the newest MAX_QUEUE, the
 // rest drop straight into the list so the feed never falls far behind.
 //
+// Each play is revealed in two beats: its call first (stage "call": PASS /
+// RUSH and the player, utils/playCall.js) for CALL_MS, then its result
+// (stage "result": yards, touchdown …), held HOLD_MS. A play with no call
+// (a flag, a timeout, a quarter break) goes straight to its result.
+//
+// From the start: a viewer who was here before the first play (the play
+// list loaded empty — opts.loaded) sees every play as it comes, the first
+// batch included, and the first one waits KICKOFF_MS behind the kickoff
+// animation (kickoffAt). Opened mid-game, the plays already there are
+// history and never animate.
+//
 // plays: the game's plays in game order (oldest first).
-// Returns { listed, slot, justListed }:
+// Returns { listed, slot, stage, justListed, queued, kickoffAt }:
 //   listed      plays to show in the list (everything not queued / in the slot)
 //   slot        the play currently held in the top slot, or null
+//   stage       "call" | "result" — which beat of the slot's play is on
 //   justListed  id of the play that just dropped from the slot (for its slide-in)
 //   queued      ids still waiting to be revealed (the rest of the page holds
 //               these back too — Feed entries, the header score — so
 //               nothing gets ahead of the game feed)
-import { useEffect, useMemo, useState } from "react";
+//   kickoffAt   when the game's first play arrived while watching (the
+//               kickoff animation's start), else null
+import { useEffect, useMemo, useRef, useState } from "react";
+import { playCall } from "../utils/playCall";
 
 export const HOLD_MS = 18 * 1000;
+export const CALL_MS = 2200;
+export const KICKOFF_MS = 4200;
 const GAP_MS = 5 * 1000;
-const MAX_QUEUE = 3;
+const MAX_QUEUE = 4;
 
-const empty = () => ({ init: false, known: new Set(), queue: [], slot: null, slotAt: 0, gapUntil: 0, justListed: null });
+const empty = () => ({ init: false, fromStart: false, known: new Set(), queue: [], slot: null, slotAt: 0, stage: "result", gapUntil: 0, justListed: null, kickoffAt: null });
 
-export function usePlayReveal(plays, resetKey) {
+export function usePlayReveal(plays, resetKey, { loaded = false } = {}) {
   const [s, setS] = useState(empty);
+  const byId = useRef(new Map());
+  byId.current = new Map(plays.map((p) => [p.id, p]));
 
   useEffect(() => { setS(empty()); }, [resetKey]);
 
   // New plays → queue. "New" = later in the game than anything already
   // known, so loading older history (jump to a play) never animates.
   useEffect(() => {
-    if (!plays.length) return;
     setS((prev) => {
-      if (!prev.init) return { ...prev, init: true, known: new Set(plays.map((p) => p.id)) };
+      if (!prev.init) {
+        if (plays.length) return { ...prev, init: true, known: new Set(plays.map((p) => p.id)) };
+        // Loaded and empty: the game hasn't had a play yet — watch from the start.
+        return loaded ? { ...prev, init: true, fromStart: true } : prev;
+      }
+      if (!plays.length) return prev;
       let lastKnown = -1;
       plays.forEach((p, i) => { if (prev.known.has(p.id)) lastKnown = i; });
       const fresh = plays.slice(lastKnown + 1).filter((p) => !prev.known.has(p.id)).map((p) => p.id);
@@ -47,16 +70,22 @@ export function usePlayReveal(plays, resetKey) {
       plays.forEach((p) => known.add(p.id));
       let queue = [...prev.queue, ...fresh];
       if (queue.length > MAX_QUEUE) queue = queue.slice(-MAX_QUEUE);
-      return { ...prev, known, queue };
+      // The game's first plays, seen live: the kickoff animation goes first.
+      const kick = prev.fromStart && !prev.kickoffAt && !prev.known.size && fresh.length;
+      const now = Date.now();
+      return { ...prev, known, queue, ...(kick ? { kickoffAt: now, gapUntil: now + KICKOFF_MS } : {}) };
     });
-  }, [plays]);
+  }, [plays, loaded]);
 
-  // Advance: hold → (gap with "next play" if more are waiting) → next.
+  // Advance: call → result (held) → (gap with "next play" if more are waiting) → next.
   useEffect(() => {
     const t = setInterval(() => {
       setS((prev) => {
         const now = Date.now();
         if (prev.slot) {
+          if (prev.stage === "call") {
+            return now - prev.slotAt < CALL_MS ? prev : { ...prev, stage: "result", slotAt: now };
+          }
           if (now - prev.slotAt < HOLD_MS) return prev;
           // Drop the held play into the list; if more are queued, show the
           // next-play card for GAP_MS before revealing the next one.
@@ -64,11 +93,12 @@ export function usePlayReveal(plays, resetKey) {
         }
         if (prev.queue.length && now >= prev.gapUntil) {
           const [next, ...rest] = prev.queue;
-          return { ...prev, slot: next, slotAt: now, queue: rest, gapUntil: 0 };
+          const stage = playCall(byId.current.get(next)) ? "call" : "result";
+          return { ...prev, slot: next, slotAt: now, stage, queue: rest, gapUntil: 0 };
         }
         return prev;
       });
-    }, 500);
+    }, 250);
     return () => clearInterval(t);
   }, []);
 
@@ -82,8 +112,10 @@ export function usePlayReveal(plays, resetKey) {
     return {
       listed: plays.filter((p) => !hidden.has(p.id)),
       slot: s.slot ? plays.find((p) => p.id === s.slot) || null : null,
+      stage: s.stage,
       justListed: s.justListed,
       queued: [...s.queue, ...unseen],
+      kickoffAt: s.kickoffAt,
     };
   }, [plays, s]);
 }

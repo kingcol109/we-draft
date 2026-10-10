@@ -24,6 +24,7 @@ import { panelColor, accentColor, readableAccent, playerUrl } from "../utils/bro
 import { teamName, teamShort } from "../utils/live";
 import { GRADE_BADGE } from "../components/LiveInsightCard";
 import { Logo } from "./TeamLogo";
+import FitText from "./FitText";
 
 // A team's name where room is short: the full name, or its short name when
 // the full one wouldn't fit ("Middle Tennessee State" → "MTSU").
@@ -86,7 +87,7 @@ function Call({ e, game, spec }) {
   const num = spec.num?.(e, game);
   return (
     <>
-      <Logo team={team} className="logo" fallback={WD_ICON} />
+      <Logo team={team} className="logo" fallback={WD_ICON} onColor />
       <div className={`txt${e.national ? " nat" : ""}`}>
         {team && spec.size === "big" && <div className="who bc-disp bc-ell">{fitName(team, 24)}</div>}
         <div className={`word bc-disp${word.length > 11 ? " long" : ""}`}>{word}</div>
@@ -124,9 +125,9 @@ function PlayerCard({ e, game }) {
         {team && <Logo team={team} />}
         <div className={`nm bc-disp${name.length > 16 ? " long" : ""}`}>{name}</div>
       </div>
-      {meta && <div className="meta bc-ell">{meta}</div>}
-      {ins.statLine && <div className="stat bc-ell">{ins.statLine}</div>}
-      {ins.context && <div className="ctx">{ins.context}</div>}
+      {meta && <FitText className="meta" text={meta} />}
+      {ins.statLine && <FitText className="stat" text={ins.statLine} />}
+      {ins.context && <FitText className="ctx" text={ins.context} lines={2} />}
       {wd && (
         <div className="board">
           <div className="grade">
@@ -158,10 +159,10 @@ function TrendCard({ e, game }) {
         {team && <Logo team={team} />}
         <div className="nm bc-disp">{(team && fitName(team, 14)) || ins.title}</div>
       </div>
-      {ins.headline && <div className="hl bc-disp">{ins.headline}</div>}
-      {ins.statLine && <div className="stat">{ins.statLine}</div>}
-      {ins.context && <div className="ctx">{ins.context}</div>}
-      {ins.extra?.[0] && <div className="meta">{ins.extra[0]}</div>}
+      {ins.headline && <FitText className="hl bc-disp" text={ins.headline} lines={2} />}
+      {ins.statLine && <FitText className="stat" text={ins.statLine} />}
+      {ins.context && <FitText className="ctx" text={ins.context} lines={3} />}
+      {ins.extra?.[0] && <FitText className="meta" text={ins.extra[0]} />}
     </div>
   );
 }

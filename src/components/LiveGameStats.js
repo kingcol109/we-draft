@@ -10,7 +10,7 @@
 import { useMemo } from "react";
 import { useLiveGame, useLiveStats } from "../hooks/useLiveGame";
 import { computeGameStats, boxPlayers } from "../utils/liveStats";
-import { teamShort, distinctTeamColors } from "../utils/live";
+import { teamShort, distinctTeamColors, darkLogo } from "../utils/live";
 
 const GOLD = "#f6a21d";
 
@@ -117,7 +117,7 @@ const DEFENSE_BOX = { cat: "defense", title: "Defense", cols: [["TOT", (s) => s.
 // A team's logo for this theme: on the light page the logos sit on white
 // (the caption's circle, the comparison header), so the regular Logo1
 // (`logo`) first; on /live's dark cards the dark variant first.
-const logoFor = (team, light) => (light ? team?.logo || team?.logoDark : team?.logoDark || team?.logo);
+const logoFor = (team, light) => (light ? team?.logo || team?.logoDark : darkLogo(team));
 
 function Table({ def, lines, team, light }) {
   const rows = lines.filter((l) => l.stats[def.cat]).sort((x, y) => def.sort(y.stats[def.cat]) - def.sort(x.stats[def.cat])).slice(0, def.max || 5);

@@ -529,6 +529,7 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
         <span style={{ fontSize: 13, fontWeight: 800, color: capacity === 0 ? RED : INK }}>Slots {orchDoc?.slotsInUse ?? 0}/{capacity ?? "?"} in use</span>
         {orchDoc?.rehearsalOnly && <span style={{ fontSize: 12, fontWeight: 900, color: "#7b5ea7" }}>REHEARSAL-ONLY MODE</span>}
         {orchDoc?.vmOwned && <span style={{ fontSize: 12, fontWeight: 800, color: "#667" }}>VM started automatically (stops when idle)</span>}
+        {orchDoc?.vmManual && <span style={{ fontSize: 12, fontWeight: 800, color: "#667" }}>VM started manually (stops 30 min after the day's last broadcast)</span>}
         {(orchDoc?.lastTick?.errors || []).length > 0 && (
           <span style={{ fontSize: 12, fontWeight: 800, color: RED, flexBasis: "100%" }}>Last run: {orchDoc.lastTick.errors.slice(0, 2).join(" · ")}</span>
         )}
@@ -743,7 +744,13 @@ export function MetadataEditor({ game, national, onClose }) {
       const r = await api("metadata-thumbnail-save", { ...req, sha256: preview.sha256 });
       setThumb(r.thumbnail);
       setPreview(null);
-      setThumbMsg({ kind: "ok", text: "Thumbnail saved." });
+      // The server also pushes it to a YouTube broadcast that already exists.
+      const yt = r.youtube || [];
+      const failed = yt.filter((x) => x.error);
+      const sent = yt.filter((x) => x.uploaded).length;
+      setThumbMsg(failed.length
+        ? { kind: "error", text: `Thumbnail saved, but the YouTube upload failed: ${failed[0].error}` }
+        : { kind: "ok", text: sent ? "Thumbnail saved and set on the YouTube broadcast." : "Thumbnail saved." });
     } catch (e) { setThumbMsg({ kind: "error", text: vmError(e) }); } finally { setThumbBusy(""); }
   };
   const shown = preview || thumb;
@@ -833,7 +840,7 @@ export function MetadataEditor({ game, national, onClose }) {
                   </div>
                   {(preview?.notes || []).map((n) => <div key={n} style={{ fontSize: 12, color: "#8a6100", fontWeight: 800, marginTop: 6 }}>{n}</div>)}
                   <div style={{ fontSize: 11, color: "#889", fontWeight: 700, marginTop: 8, lineHeight: 1.45 }}>
-                    {national ? "1280×720 PNG from the national template — a tile per Game of the Week / Featured game in the window (schools' colors and logos), then the rest as “+N more”." : "1280×720 PNG from the We-Draft template — the schools' saved colors and logos."} Saving never uploads it: once the YouTube broadcast exists, use Upload Thumbnail on the broadcast.
+                    {national ? "1280×720 PNG from the national template — a tile per Game of the Week / Featured game in the window (schools' colors and logos), then the rest as “+N more”." : "1280×720 PNG from the We-Draft template — the schools' saved colors and logos."} It becomes the YouTube thumbnail automatically: when automation creates the broadcast, or right away on save if the broadcast already exists.
                   </div>
                   <Message msg={thumbMsg} />
                 </div>

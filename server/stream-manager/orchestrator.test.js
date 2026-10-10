@@ -451,16 +451,49 @@ test("disabling a live broadcast needs confirmEnd, then ends it cleanly", async 
 
 // ── VM shutdown decisions ──
 
-test("a VM an admin started manually is never stopped by the orchestrator", async () => {
+test("a manually started VM keeps running while a broadcast is left today, then stops", async () => {
   w.vm = "running";
   await orch.noteManualVm(db, "vm-start", { result: "starting" }, {}, clock);
+  await db.doc("schedule26/s2").update({ KickoffAt: { toMillis: () => K1 + 5 * 60 * MIN } }); // 8:30 PM ET, same day
   await select("s1");
+  await select("s2");
   await until(() => phase("g401001") === "live", 60);
   assert.equal(w.vmStarts, 0, "reused the running VM");
   await setGame(401001, "final");
   await until(() => phase("g401001") === "completed", 20);
-  await minute(30);
+  await minute(90);
+  assert.equal(w.vmStops.length, 0, "s2 is still to come today");
+  await orch.cancelGame(db, "admin1", { id: "g401002" });
+  await minute(CFG.MANUAL_IDLE_STOP_MS / MIN - 1);
+  assert.equal(w.vmStops.length, 0, "idles before stopping");
+  await minute(2);
+  assert.deepEqual(w.vmStops, ["orchestrator"]);
+  assert.equal(db.data("streamManager/orchestrator").vmManual, false);
+});
+
+test("a manually started VM with nothing scheduled today stops after the idle wait", async () => {
+  w.vm = "running";
+  await orch.noteManualVm(db, "vm-start", { result: "starting" }, {}, clock);
+  await db.doc("schedule26/s2").update({ KickoffAt: { toMillis: () => K1 + 24 * 60 * MIN } }); // tomorrow
+  await select("s2");
+  await minute(CFG.MANUAL_IDLE_STOP_MS / MIN);
   assert.equal(w.vmStops.length, 0);
+  await minute(2);
+  assert.deepEqual(w.vmStops, ["orchestrator"]);
+  assert.equal(phase("g401002"), "selected", "tomorrow's game is untouched");
+});
+
+test("a VM started outside Stream Manager is found through the agent and stopped once the day is done", async () => {
+  w.vm = "running"; // e.g. started from the Cloud console: no vmOwned / vmManual
+  await minute(CFG.MANUAL_IDLE_STOP_MS / MIN + 2);
+  assert.deepEqual(w.vmStops, ["orchestrator"]);
+});
+
+test("the day ends at midnight Eastern", () => {
+  assert.equal(orch.dayEndAt(K1), Date.UTC(2026, 9, 11, 4, 0)); // 3:30 PM EDT → midnight EDT
+  assert.equal(orch.dayEndAt(Date.UTC(2026, 9, 11, 3, 59)), Date.UTC(2026, 9, 11, 4, 0));
+  assert.equal(orch.dayEndAt(Date.UTC(2026, 9, 11, 4, 0)), Date.UTC(2026, 9, 12, 4, 0));
+  assert.equal(orch.dayEndAt(Date.UTC(2026, 11, 5, 20, 0)), Date.UTC(2026, 11, 6, 5, 0)); // EST
 });
 
 test("the VM is kept warm when another selected game prepares soon", async () => {

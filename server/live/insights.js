@@ -667,7 +667,7 @@ function choose(env, targets) {
       milestone: !!c.milestone,
       side: c.side,
       teamName: teamShort(t2) || null,
-      teamLogo: t2.logoDark || t2.logo || null,
+      teamLogo: t2.logoBlack || t2.logoDark || t2.logo || null,
       teamColor: t2.color || null,
       score: Math.round(best.s),
       at: Date.now(),

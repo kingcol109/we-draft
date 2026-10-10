@@ -12,8 +12,9 @@
 // so the broadcast and the site stay in step. Components under
 // src/broadcast/ only render what this returns; none of them read data.
 //
-//   { phase, game, ready, situation, ballSide, currentPlay, recentPlays,
-//     breakInfo, playerWatch, event, health, replay }
+//   { phase, game, ready, situation, ballSide, currentPlay, callingPlay,
+//     recentPlays, breakInfo, playerWatch, event, sideEvent, kickoffAt,
+//     health, replay }
 //
 // Cloud-friendly by design: three Firestore listeners (four before kickoff
 // counts the prospects read), one 15s clock while a game is on, one timer
@@ -32,7 +33,7 @@ import { useGameFeed } from "./useGameFeed";
 import { useInsightReveal, useDevInsights } from "./useInsightReveal";
 import { computeGameStats } from "../utils/liveStats";
 import {
-  broadcastPhase, eventForPlay, eventForInsight, playView, recentPlayRows, situationView, playerWatchList, subtractStats, EVENT_MS,
+  broadcastPhase, eventForPlay, eventForInsight, playView, callView, recentPlayRows, situationView, playerWatchList, subtractStats, EVENT_MS,
 } from "../utils/broadcast";
 
 // Live data counts as stale when a game that's on shows no change at all
@@ -52,6 +53,7 @@ const MAX_QUEUED_EVENTS = 3;
 const REPLAY_KICK_MS = 5 * 60 * 1000;
 function useReplay(src, replay, dev) {
   const [step, setStep] = useState(replay?.from ?? 1);
+  const kickAt = useRef(Date.now() + REPLAY_KICK_MS); // pregame counts down to a fixed kickoff
   useEffect(() => {
     if (!replay || replay.manual) return undefined;
     const t = setInterval(() => setStep((s) => s + 1), replay.stepMs);
@@ -83,7 +85,7 @@ function useReplay(src, replay, dev) {
     const game = {
       ...g,
       status: step === 0 ? "scheduled" : done ? "final" : "in_progress",
-      ...(step === 0 ? { startDate: new Date(Date.now() + REPLAY_KICK_MS).toISOString(), startTimeTBD: false } : {}),
+      ...(step === 0 ? { startDate: new Date(kickAt.current).toISOString(), startTimeTBD: false } : {}),
       period: last?.period ?? 1,
       clock: last?.clock ?? "15:00",
       possession: last?.offense ?? null,
@@ -130,6 +132,49 @@ function useSchoolProspects(game, enabled) {
   return list;
 }
 
+// The stats doc and the plays come down separate listeners, and the stats
+// one can land first — numbers for a play the screen doesn't have yet,
+// which no queue can hold back. A doc that names its newest play
+// (asOfPlayId, server/live/ingest.js) is used only once that play is here;
+// until then the last doc that was is. (A doc whose play never shows — a
+// play pulled upstream — is taken after STATS_WAIT_MS anyway.)
+const STATS_WAIT_MS = 45 * 1000;
+function useStatsInStep(doc, plays) {
+  const used = useRef(null);
+  const waitingSince = useRef({ doc: null, at: 0 });
+  const [, bump] = useState(0);
+  const asOf = doc?.asOfPlayId != null ? String(doc.asOfPlayId) : null;
+  const here = !doc || !asOf || plays.some((p) => String(p.id) === asOf);
+  if (doc && !here && waitingSince.current.doc !== doc) waitingSince.current = { doc, at: Date.now() };
+  const overdue = doc && !here && Date.now() - waitingSince.current.at > STATS_WAIT_MS;
+  useEffect(() => {
+    if (!doc || here) return undefined;
+    const t = setTimeout(() => bump((x) => x + 1), STATS_WAIT_MS + 100);
+    return () => clearTimeout(t);
+  }, [doc, here]);
+  if (here || overdue || !used.current) used.current = here || overdue ? doc : used.current;
+  return used.current;
+}
+
+// The cards over the team stats (right column) — their own lane.
+const SIDE_EVENTS = new Set(["PLAYER_MILESTONE", "TEAM_TREND"]);
+function useEventLane(resetKey) {
+  const [ev, setEv] = useState({ current: null, queue: [] });
+  useEffect(() => { setEv({ current: null, queue: [] }); }, [resetKey]);
+  useEffect(() => {
+    if (!ev.current) return undefined;
+    const t = setTimeout(() => setEv((s) => {
+      const [nextEv, ...rest] = s.queue;
+      return { current: nextEv ? { ...nextEv, startedAt: Date.now() } : null, queue: rest };
+    }), ev.current.durationMs || 5000);
+    return () => clearTimeout(t);
+  }, [ev.current]);
+  const push = useCallback((e) => setEv((s) => (s.current
+    ? { ...s, queue: [...s.queue, e].slice(-MAX_QUEUED_EVENTS) }
+    : { current: { ...e, startedAt: Date.now() }, queue: s.queue })), []);
+  return { current: ev.current, push };
+}
+
 export function useBroadcastState(gameId, { replay = null, testEvent = null } = {}) {
   const src = useLiveGame(gameId, { plays: replay ? "all" : "recent", box: false });
   const dev = useDevInsights(replay ? gameId : null);
@@ -137,12 +182,14 @@ export function useBroadcastState(gameId, { replay = null, testEvent = null } = 
   const live = rep ? rep.game : src.game;
   const plays = rep ? rep.plays : src.plays;
   const started = live && live.status !== "scheduled";
-  const { stats: liveStats } = useLiveStats(!rep && started ? gameId : null);
+  const { stats: liveDoc } = useLiveStats(!rep && started ? gameId : null);
+  const liveStats = useStatsInStep(liveDoc, plays);
   const stats = rep ? rep.stats : liveStats;
 
   // Manual test replay: each click shows its play at once (no reveal pacing).
-  const feed = useGameFeed(gameId, live, plays, { instant: !!rep?.manual });
-  const { g, slot, listed, newestListed, snapNext, next, ballSide, prevPts, slotTk } = feed;
+  // A replay's plays are all in hand from the start (step 0 = pregame).
+  const feed = useGameFeed(gameId, live, plays, { instant: !!rep?.manual, playsReady: rep ? true : src.playsReady });
+  const { g, slot, calling, listed, newestListed, snapNext, next, ballSide, prevPts, slotTk, preKick, kickoffAt } = feed;
 
   // The stats as of the plays on screen: the stats doc minus the plays
   // still queued for reveal (utils/broadcast.js subtractStats) — so a
@@ -163,7 +210,7 @@ export function useBroadcastState(gameId, { replay = null, testEvent = null } = 
     return () => clearInterval(t);
   }, [on]);
 
-  const phase = broadcastPhase({ ready: src.ready, game: g, next, now });
+  const phase = broadcastPhase({ ready: src.ready, game: g, next, preKick });
 
   // ── Data health ── the last time anything arrived (a snapshot always
   // brings a new object), and whether the browser is online at all.
@@ -184,26 +231,21 @@ export function useBroadcastState(gameId, { replay = null, testEvent = null } = 
     lastDataAt: lastDataAt.current,
   };
 
-  // ── Events ── one on screen at a time, a short queue behind it. Each id
-  // fires once (a play, an insight, a status change), never for history.
-  const [ev, setEv] = useState({ current: null, queue: [] });
+  // ── Events ── two lanes, one graphic on screen in each with a short
+  // queue behind it: the play graphics over the left column, and the
+  // Player Watch / trend cards over the team stats on the right — which
+  // stay up a long time, so they never hold a touchdown back. Each id fires
+  // once (a play, an insight, a status change), never for history.
+  const main = useEventLane(gameId);
+  const side = useEventLane(gameId);
   const fired = useRef(new Set());
+  useEffect(() => { fired.current = new Set(); }, [gameId]);
   const push = (e) => {
     if (!e || fired.current.has(e.id)) return;
     fired.current.add(e.id);
-    setEv((s) => (s.current
-      ? { ...s, queue: [...s.queue, e].slice(-MAX_QUEUED_EVENTS) }
-      : { current: { ...e, startedAt: Date.now() }, queue: s.queue }));
+    (SIDE_EVENTS.has(e.type) ? side : main).push(e);
   };
-  useEffect(() => { fired.current = new Set(); setEv({ current: null, queue: [] }); }, [gameId]);
-  useEffect(() => {
-    if (!ev.current) return undefined;
-    const t = setTimeout(() => setEv((s) => {
-      const [nextEv, ...rest] = s.queue;
-      return { current: nextEv ? { ...nextEv, startedAt: Date.now() } : null, queue: rest };
-    }), ev.current.durationMs || 5000);
-    return () => clearTimeout(t);
-  }, [ev.current]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ev = { current: main.current };
 
   // A play as it's revealed (the slot) — never one already there on open.
   const slotEvent = slot && g?.status === "in_progress" ? eventForPlay(slot, slotTk, prevPts) : null;
@@ -263,6 +305,10 @@ export function useBroadcastState(gameId, { replay = null, testEvent = null } = 
   }, [g, next, feed.shown]);
   const recentPlays = useMemo(() => recentPlayRows(newestListed, g, shownStats), [newestListed, g, shownStats]);
   const currentPlay = useMemo(() => playView(slot, g, shownStats), [slot, g, shownStats]);
+  const callingPlay = useMemo(() => (calling ? callView(calling, g) : null), [calling, g]);
+  // The play whose call was just on: its result lands with a pop.
+  const calledId = useRef(null);
+  if (calling) calledId.current = calling.id;
 
   return {
     phase,
@@ -273,12 +319,16 @@ export function useBroadcastState(gameId, { replay = null, testEvent = null } = 
     timeout: next?.brk?.kind === "timeout" ? next.brk : null,
     ballSide,
     currentPlay,
+    callingPlay,
+    calledId: calledId.current,
+    kickoffAt,
     recentPlays,
     breakInfo,
     halftime: (g?.breaks || []).find((b) => b.key === "half") || null,
     stats: shownStats,
     playerWatch,
     event: ev.current,
+    sideEvent: side.current,
     health,
     replay: rep ? { step: Math.min(rep.step, rep.total), total: rep.total, manual: rep.manual, next: rep.next } : null,
   };

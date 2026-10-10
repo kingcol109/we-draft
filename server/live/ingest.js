@@ -371,7 +371,10 @@ async function storePlays(db, game, plays, playStats, { complete, rosterBudget, 
   // small doc the Stats tab and player pages read instead of every play.
   const { computeGameStats, gameLeaders } = await import("../../src/utils/liveStats.mjs");
   const stats = computeGameStats(ordered);
-  await S.saveLiveStats(db, game.providerGameId, stats);
+  // asOfPlayId: the newest play these numbers include — a viewer holds a
+  // new stats doc until that play has reached it (useBroadcastState), so
+  // the stats never land before their play does.
+  await S.saveLiveStats(db, game.providerGameId, { ...stats, asOfPlayId: last?.id != null ? String(last.id) : null });
   const feedPlays = S.dedupeFeed(ordered.filter(S.feedWorthy).map((p) => S.slateBigPlay(gid, game, p)).reverse()).slice(0, CONFIG.MAX_GAME_FEED);
   await S.setGameFields(db, game.providerGameId, {
     playCount: ordered.length,

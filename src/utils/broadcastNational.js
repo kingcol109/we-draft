@@ -617,13 +617,18 @@ export function lastGameStories(gameDoc, teamId, now = Date.now(), n = 2) {
   const opp = gameDoc[side === "home" ? "away" : "home"] || {};
   const us = gameDoc[side]?.points ?? 0;
   const them = opp.points ?? 0;
-  const ctx = `Last game · ${us > them ? "W" : us < them ? "L" : "T"} ${us}–${them} ${side === "home" ? "vs." : "at"} ${teamShort(opp) || teamName(opp)}`;
+  const result = `${us > them ? "W" : us < them ? "L" : "T"} ${us}–${them}`;
+  const where = side === "home" ? "vs." : "at";
+  const ctx = `Last game · ${result} ${where} ${teamShort(opp) || teamName(opp)}`;
+  // last: which game the numbers are from, spelled out on the card
+  const d = kick(gameDoc);
+  const last = { opp, where, result, date: d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : null };
   const seen = new Set();
   return CATS.flatMap((cat) => (gameDoc.statLeaders[cat] || []).filter((e) => e.side === side).map((e) => ({ e, cat })))
     .map(({ e, cat }) => {
       const headline = STORY[cat](e.stats || {});
       return headline && {
-        key: `${gameDoc.id || ""}-${e.id || e.name}-${cat}`, name: e.name, slug: e.slug || null, cat, headline, ctx,
+        key: `${gameDoc.id || ""}-${e.id || e.name}-${cat}`, name: e.name, slug: e.slug || null, cat, headline, ctx, last,
         line: statLine(cat, e.stats).replace(/ · LONG -?\d+/, ""), prospect: activeProspect(e.slug, now), score: catScore[cat](e.stats || {}),
       };
     })

@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useLiveSlate } from "../hooks/useLiveSlate";
 import { useLiveStats } from "../hooks/useLiveGame";
-import { statusLabel, teamShort, liveGameHref } from "../utils/live";
+import { statusLabel, teamShort, liveGameHref, darkLogo } from "../utils/live";
 import { LEADER_CATS, statLine } from "../utils/liveStats";
 
 const LIVE_RED = "#d62828";
@@ -91,7 +91,7 @@ function BoardSide({ game, side, mine }) {
   }, [t.points]);
   return (
     <div className={`plc-side ${side}${mine ? " mine" : ""}`}>
-      {(t.logoDark || t.logo) && <img src={t.logoDark || t.logo} alt="" />}
+      {(darkLogo(t)) && <img src={darkLogo(t)} alt="" />}
       <div className="plc-name">
         {t.rank ? <small>#{t.rank}</small> : null}{teamShort(t)}
         {game.possession === side && <span className="plc-ball" title="Has the ball" />}

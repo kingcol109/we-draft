@@ -370,7 +370,10 @@ async function youtubeCreate(db, body) {
     if (b.boundStreamId !== stream.id) b = await yt.bindBroadcast(token, b.id, stream.id);
     const st = await yt.getStream(token, stream.id);
     await finish(ref, { ...youtubeFields(b, st), "youtube.channelId": s.channelId, "youtube.creatingAt": null });
-    return { ok: true, broadcastId: b.id, streamCreated };
+    // Automatic broadcasts take the game's (or national's) saved thumbnail
+    // too — best-effort, after the broadcast is bound, never failing it.
+    const thumbnail = body.useDraft === true ? await autoThumbnail(db, ref, token) : null;
+    return { ok: true, broadcastId: b.id, streamCreated, ...(thumbnail ? { thumbnail } : {}) };
   } catch (e) {
     await fail(ref, e);
     throw e;
@@ -404,9 +407,9 @@ async function youtubeRefresh(db, body) {
 
 // Uploads the game's saved generated thumbnail (metadata.js /
 // thumbnail.js, broadcastThumbnails/{gameId}, or …/national for national
-// coverage) to this record's YouTube broadcast — only on this explicit admin
-// action, never when a thumbnail is generated or saved, and never for a
-// rehearsal.
+// coverage) to this record's YouTube broadcast, on an admin's Upload
+// Thumbnail — never for a rehearsal. (Automation and thumbnail saves also
+// send it on their own: autoThumbnail below.)
 async function youtubeThumbnail(db, body) {
   const { ref, data } = await loadRecord(db, body.id);
   if (data.rehearsal === true) throw httpError(409, "This is a rehearsal record — it has no YouTube broadcast.");
@@ -420,6 +423,60 @@ async function youtubeThumbnail(db, body) {
   await yt.setThumbnail(token, data.youtube.broadcastId, t.png);
   await ref.update({ "youtube.thumbnailSha256": t.sha256, "youtube.thumbnailVersion": t.version, "youtube.thumbnailUploadedAt": Date.now(), updatedAt: FieldValue.serverTimestamp() });
   return { ok: true, sha256: t.sha256 };
+}
+
+// The saved thumbnail becomes the YouTube thumbnail automatically:
+//   - when automation creates a broadcast (youtubeCreate with useDraft), and
+//   - when an admin saves a thumbnail while a real broadcast for that game
+//     (or an open national one) already exists on YouTube and hasn't ended
+//     (syncSavedThumbnail, called after metadata-thumbnail-save).
+// Best-effort: an upload failure is recorded as youtube.thumbnailError and
+// never throws, so it can't fail a broadcast or a save. Skipped for
+// rehearsals, in rehearsal-only mode, and when YouTube already has this
+// exact image (youtube.thumbnailSha256).
+async function autoThumbnail(db, ref, token = null) {
+  try {
+    const data = (await ref.get()).data();
+    if (!data || data.rehearsal === true || process.env.STREAM_REHEARSAL_ONLY === "1") return null;
+    const y = data.youtube || {};
+    if (!y.broadcastId || OFF_AIR_ENDED.includes(y.lifecycleStatus)) return null;
+    const md = require("./metadata");
+    const t = await md.thumbnailForBroadcast(db, data.kind === "national" ? md.NATIONAL_KEY : data.gameId);
+    if (!t) return null;
+    if (y.thumbnailSha256 === t.sha256) return { skipped: "already uploaded" };
+    try {
+      await yt.setThumbnail(token || (await yt.accessToken(db)), y.broadcastId, t.png);
+    } catch (e) {
+      const msg = String(e.message || e).slice(0, 300);
+      await ref.update({ "youtube.thumbnailError": msg, updatedAt: FieldValue.serverTimestamp() });
+      console.error(`stream-manager auto-thumbnail failed id=${ref.id}: ${msg}`);
+      return { error: msg };
+    }
+    await ref.update({ "youtube.thumbnailSha256": t.sha256, "youtube.thumbnailVersion": t.version, "youtube.thumbnailUploadedAt": Date.now(), "youtube.thumbnailError": null, updatedAt: FieldValue.serverTimestamp() });
+    console.log(`stream-manager auto-thumbnail id=${ref.id}`);
+    return { uploaded: true };
+  } catch (e) {
+    console.error(`stream-manager auto-thumbnail skipped id=${ref.id}: ${String(e.message || e).slice(0, 200)}`);
+    return { error: String(e.message || e).slice(0, 300) };
+  }
+}
+const OFF_AIR_ENDED = ["complete", "revoked"];
+
+// After a thumbnail is saved: push it to every real broadcast that uses it
+// and is already created on YouTube. key: a CFBD game id or "national".
+async function syncSavedThumbnail(db, key) {
+  const md = require("./metadata");
+  const q = key === md.NATIONAL_KEY
+    ? db.collection("broadcasts").where("kind", "==", "national")
+    : db.collection("broadcasts").where("gameId", "==", String(key));
+  const docs = (await q.get()).docs.filter((d) => {
+    const x = d.data();
+    return x.rehearsal !== true && x.youtube?.broadcastId && !OFF_AIR_ENDED.includes(x.youtube.lifecycleStatus)
+      && (key !== md.NATIONAL_KEY || x.auto?.open);
+  });
+  const out = [];
+  for (const d of docs) out.push({ id: d.id, ...((await autoThumbnail(db, d.ref)) || { skipped: true }) });
+  return out;
 }
 
 // ── Channel ──
@@ -458,5 +515,5 @@ module.exports = {
   deriveStatus, defaultTitle, defaultDescription, cleanPrivacy, cleanText, loadRecord, settings, refreshStatuses, ON_AIR, OFF_AIR,
   recordName, nationalTitle, nationalDescription,
   assertConfirmedOffAir, UNCONFIRMED_MSG,
-  createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, youtubeThumbnail, channelStatus, setWorkerStream,
+  createRecord, updateRecord, deleteRecord, youtubeCreate, youtubeRefresh, youtubeThumbnail, syncSavedThumbnail, channelStatus, setWorkerStream,
 };

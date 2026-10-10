@@ -5,6 +5,10 @@
 // We-Pick make on dark cards), else its LogoDark, else ESPN's dark set (CFBD
 // team ids are ESPN's) — and the regular logo only when none of those loads.
 //
+// On the team's own color (a scorebug panel, a team-colored graphic) it's
+// the other way round: LogoDark, else the regular logo — LogoBlack is often
+// in the team's color (Wake Forest's is gold) and would vanish there.
+//
 // Games ingested before logoBlack was carried don't have it, so the page
 // also reads each school's LogoBlack once, by CFBD team id.
 
@@ -41,9 +45,10 @@ function useBlackLogos() {
 }
 
 // The logos to try, best first.
-export function logosFor(team, black = blackById) {
+export function logosFor(team, black = blackById, onColor = false) {
   if (!team) return [];
   const id = team.providerTeamId;
+  if (onColor) return [...new Set([team.logoDark, team.logo, espnDark(id)].filter(Boolean))];
   return [...new Set([
     team.logoBlack, id != null ? black?.get(String(id)) : null, team.logoDark, espnDark(id), team.logo,
   ].filter(Boolean))];
@@ -52,9 +57,9 @@ export function logosFor(team, black = blackById) {
 // A logo with a fixed box — it never shifts the layout while loading; one
 // that fails to load gives way to the next choice, and with none left it
 // simply disappears (or shows fallback, when given).
-export function Logo({ team, className, fallback = null }) {
+export function Logo({ team, className, fallback = null, onColor = false }) {
   const black = useBlackLogos();
-  const srcs = logosFor(team, black);
+  const srcs = logosFor(team, black, onColor);
   const key = srcs.join("|");
   const [n, setN] = useState(0);
   useEffect(() => setN(0), [key]);

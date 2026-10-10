@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
-import { statusLabel, teamShort } from "../utils/live";
+import { statusLabel, teamShort, darkLogo } from "../utils/live";
 import { LEADER_CATS, statLine } from "../utils/liveStats";
 
 const GOLD = "#f6a21d";
@@ -110,7 +110,7 @@ export default function LivePerformances({ games, onOpenGame, followedIds, perf:
                   <div key={`${e.gameId}:${e.id}`} className="lpf-row" role="button" tabIndex={0}
                     onClick={() => onOpenGame(g.id)} onKeyDown={(ev) => { if (ev.key === "Enter") onOpenGame(g.id); }}>
                     <span className="lpf-rank">{i + 1}</span>
-                    {(team.logoDark || team.logo) ? <img className="lpf-logo" src={team.logoDark || team.logo} alt="" /> : <span />}
+                    {(darkLogo(team)) ? <img className="lpf-logo" src={darkLogo(team)} alt="" /> : <span />}
                     <div className="lpf-who">
                       <div className="lpf-name">
                         <span className={on ? "on" : undefined}>{on ? "★ " : ""}{e.name}</span>

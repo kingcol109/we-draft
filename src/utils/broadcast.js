@@ -7,9 +7,10 @@
 // the /live game view uses, so the broadcast and the site never disagree.
 
 import { periodLabel, downLabel, spotLabel, teamShort, statusLabel } from "./live";
-import { briefPlay } from "./briefPlay";
+import { briefPlay, briefSide } from "./briefPlay";
 import { statLine } from "./liveStats";
 import { TAKEOVER_POINTS } from "../components/HeaderTakeover";
+import { playCall } from "./playCall";
 
 // The broadcast canvas — every layout measurement is in these pixels.
 export const BROADCAST_W = 1920;
@@ -34,21 +35,21 @@ export const playerUrl = (slug) => (slug ? `we-draft.com/player/${slug}` : null)
 //   loading   waiting on the first game snapshot
 //   missing   no such game
 //   pregame   scheduled, kickoff still ahead
-//   delayed   scheduled but kickoff is DELAY_GRACE_MS past — awaiting kickoff
+//   kickoff   kickoff time has come but no snap is on screen yet (still
+//             scheduled, or live before its first play) — the live layout
+//             at 1st 15:00, 0–0, "Kickoff shortly" (useGameFeed preKick)
 //   live      in progress (quarter breaks and timeouts are part of live)
 //   halftime  in progress, at the half
 //   final     game over
 // Data health (stale live data) is separate — any phase keeps showing its
 // last known state with a notice; see useBroadcastState.
-const DELAY_GRACE_MS = 15 * 60 * 1000;
-export function broadcastPhase({ ready, game, next, now = Date.now() }) {
+export function broadcastPhase({ ready, game, next, preKick = false }) {
   if (!game) return ready ? "missing" : "loading";
   if (game.status === "final") return "final";
+  if (preKick) return "kickoff";
   if (game.status === "in_progress") {
     return next?.brk?.label === "HALFTIME" || statusLabel(game) === "HALFTIME" ? "halftime" : "live";
   }
-  const kick = Date.parse(game.startDate || "");
-  if (!game.startTimeTBD && Number.isFinite(kick) && now > kick + DELAY_GRACE_MS) return "delayed";
   return "pregame";
 }
 
@@ -70,8 +71,10 @@ export const EVENT_MS = {
   BIG_PLAY: 5200,
   HALFTIME: 6000,
   END_OF_GAME: 9000,
-  PLAYER_MILESTONE: 10000,
-  TEAM_TREND: 8000,
+  // the cards over the team stats — their own lane (useBroadcastState), so a
+  // long read never holds back a play graphic
+  PLAYER_MILESTONE: 22000,
+  TEAM_TREND: 18000,
 };
 
 const other = (s) => (s === "home" ? "away" : s === "away" ? "home" : null);
@@ -158,9 +161,22 @@ export function eventForInsight(ins) {
 const KEEP = new Set(["long"]);
 export function subtractStats(stats, less) {
   if (!stats?.players || !less?.players) return stats;
+  // Team totals too (counts and [made, att] pairs); yards per play redone.
+  const teams = stats.teams && less.teams ? Object.fromEntries(Object.entries(stats.teams).map(([side, T]) => {
+    const L = less.teams[side];
+    if (!T || !L) return [side, T];
+    const out = { ...T };
+    for (const [k, v] of Object.entries(T)) {
+      if (typeof v === "number" && typeof L[k] === "number") out[k] = Math.max(0, v - L[k]);
+      else if (Array.isArray(v) && Array.isArray(L[k])) out[k] = v.map((x, i) => Math.max(0, x - (L[k][i] || 0)));
+    }
+    out.totalYds = (T.totalYds ?? 0) - (L.totalYds ?? 0);
+    out.ypp = out.plays ? out.totalYds / out.plays : 0;
+    return [side, out];
+  })) : stats.teams;
   const minus = new Map();
   for (const side of ["home", "away"]) for (const l of less.players[side] || []) minus.set(`${side}|${l.key}`, l.stats);
-  if (!minus.size) return stats;
+  if (!minus.size) return { ...stats, teams };
   const players = {};
   for (const side of ["home", "away"]) {
     players[side] = (stats.players[side] || []).map((l) => {
@@ -174,7 +190,7 @@ export function subtractStats(stats, less) {
       return { ...l, stats: out };
     });
   }
-  return { ...stats, players };
+  return { ...stats, teams, players };
 }
 
 // Which stat line goes with each role on a play (playParser presentation.players).
@@ -233,6 +249,23 @@ export function playView(play, game, stats) {
   };
 }
 
+// A new play's first beat (utils/playCall.js): the call and the player,
+// before the result replaces it on the main panel.
+export function callView(play, game) {
+  const c = playCall(play);
+  if (!c) return null;
+  return {
+    id: play.id,
+    label: c.label,
+    player: c.player?.name || null,
+    team: play.offense ? game?.[play.offense] || null : null,
+    clock: [periodLabel(play.period), play.period > 4 ? null : play.clock].filter(Boolean).join(" "),
+    // a kick isn't a down
+    situation: play.down && !NO_DOWN.has(play.presentation?.type) ? downLabel(play.down, play.distance != null && play.yardsToGoal != null && play.distance >= play.yardsToGoal ? "Goal" : play.distance) : null,
+  };
+}
+const NO_DOWN = new Set(["kickoff", "conversion"]);
+
 // The recent-plays list: one short line each (utils/briefPlay.js — the
 // pop-out scoreboard's wording), newest first.
 // stat: the play's first player's line so far (his numbers now, not as of
@@ -243,7 +276,8 @@ export function recentPlayRows(newestListed, game, stats, n = 4) {
     .slice(0, n)
     .map((p) => {
       const pr = p.presentation;
-      const side = pr.type === "period" ? null : pr.creditSide || p.offense;
+      // the logo of the team whose player the line names (briefSide)
+      const side = briefSide(p);
       return {
         id: p.id,
         clock: [periodLabel(p.period), p.period > 4 ? null : p.clock].filter(Boolean).join(" "),

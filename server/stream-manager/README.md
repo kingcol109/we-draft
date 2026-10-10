@@ -231,15 +231,23 @@ Guards:
   - YouTube create has its own lock, and the broadcast id is saved before binding;
   - one container per record (`wd-bc-<id>`);
   - slots are given out by one run at a time.
-- **VM stop:** the VM stops only if the orchestrator started it, nothing is
-  active, no enabled game prepares within 45 min, and it's been idle 10 min.
-  It never sends `confirmLive`, so the VM live guard stays in force.
+- **VM stop:**
+  - A VM the orchestrator started stops when nothing is active, no enabled
+    game prepares within 45 min, and it's been idle 10 min. It starts again
+    when the next game prepares.
+  - Any other running VM (manual Start VM, or started from the Cloud
+    console; the orchestrator finds it through the agent's heartbeat) stops
+    once the day is done: nothing is active, the agent runs no worker, and no
+    enabled broadcast prepares before midnight Eastern. It waits 30 min idle
+    first.
+  - It never sends `confirmLive`, so the VM live guard stays in force; a live
+    manual broadcast holds the stop.
 - **Manual VM controls:**
   - Stop VM now also refuses while an automatic broadcast is starting or on
     air, unless `confirmLive` is sent.
   - A forced manual stop pauses automatic VM starts for 30 min.
-  - A manual Start VM hands the VM to the admin, so the orchestrator never
-    idle-stops it.
+  - A manual Start VM hands the VM to the admin. The orchestrator stops it
+    only once nothing is left to broadcast that day (above).
 
 ## National coverage
 
@@ -479,17 +487,28 @@ team with no colors gets a default. The editor lists what was missing.
 | action | body | result |
 |---|---|---|
 | `metadata-thumbnail-generate` | `{ scheduleId }` | a preview: `{ dataUrl, sha256, width, height, notes, inputs }`. Stores nothing. |
-| `metadata-thumbnail-save` | `{ scheduleId, sha256 }` | renders again and stores it in `broadcastThumbnails/{CFBDGameId}` only if it matches the previewed `sha256`; otherwise 409, generate again |
+| `metadata-thumbnail-save` | `{ scheduleId, sha256 }` | renders again and stores it in `broadcastThumbnails/{CFBDGameId}` only if it matches the previewed `sha256` (otherwise 409, generate again); then sets it on an existing YouTube broadcast (`youtube`: the uploads) |
 | `youtube-thumbnail` | `{ id }` | uploads the game's saved thumbnail to that record's created YouTube broadcast |
 
 There's no file storage in the project, so the PNG is stored as bytes in
-Firestore (about 300–400 KB; anything over 900 KB is refused). Generating or
-saving a thumbnail never calls YouTube and never touches a broadcast record,
-automation, the VM or the schedule. Creating a broadcast doesn't upload it
-either. Upload only happens through **Upload Thumbnail** on a broadcast that
-YouTube has already created, never for a rehearsal or national coverage.
-YouTube only accepts custom thumbnails from channels that are allowed to use
-them.
+Firestore (about 300–400 KB; anything over 900 KB is refused). Generating a
+thumbnail never calls YouTube and never touches a broadcast record,
+automation, the VM or the schedule.
+
+**The saved thumbnail becomes the YouTube thumbnail automatically**
+(`broadcasts.js` `autoThumbnail`):
+- when automation creates the YouTube broadcast (games and national
+  coverage), right after it's bound;
+- when an admin saves a thumbnail while a real broadcast for that game (or an
+  open national broadcast) already exists on YouTube and hasn't ended. The
+  save's response lists each upload in `youtube`.
+
+It's best-effort: a failed upload is stored as `youtube.thumbnailError` and
+never fails the broadcast or the save. It's never sent for a rehearsal or in
+rehearsal-only mode, and never re-sent when YouTube already has that exact
+image (`youtube.thumbnailSha256`). A manual **Create on YouTube** doesn't
+upload one; **Upload Thumbnail** still sends it on demand. YouTube only
+accepts custom thumbnails from channels that are allowed to use them.
 
 `vercel.json` includes the font and `Logo2.png` in the `api/stream-manager.js`
 function.

@@ -118,6 +118,12 @@ export function slatePhase(games, now = Date.now()) {
 
 // "Q3 8:42" | "FINAL · 10/3" | "FINAL/OT · 10/3" | "Sat 10/10 7:30 PM" —
 // dates on everything but a live game.
+// A team's logo on the site's navy / black: LogoBlack (the asset meant for
+// near-black backgrounds — e.g. Wake Forest's gold WF, whose LogoDark is
+// solid black), else LogoDark, else the regular logo. On the team's own
+// color (the matchup header, takeovers) use logoDark || logo instead.
+export const darkLogo = (t) => t?.logoBlack || t?.logoDark || t?.logo || null;
+
 export function statusLabel(g) {
   if (!g) return "";
   if (g.status === "final") {
@@ -470,13 +476,13 @@ export function feedItemFromPlay(gameId, g, p) {
     kinds,
     offense: p.offense,
     offenseName: offenseTeam?.school || offenseTeam?.name || p.offenseName || null,
-    offenseLogo: offenseTeam?.logoDark || offenseTeam?.logo || null,
+    offenseLogo: darkLogo(offenseTeam) || null,
     teamName: creditTeam?.short || creditTeam?.school || creditTeam?.name || null,
-    teamLogo: creditTeam?.logoDark || creditTeam?.logo || null,
+    teamLogo: darkLogo(creditTeam) || null,
     teamColor: creditTeam?.color || null,
     creditSide: creditSide || null,
-    homeLogo: g?.home?.logoDark || g?.home?.logo || null,
-    awayLogo: g?.away?.logoDark || g?.away?.logo || null,
+    homeLogo: darkLogo(g?.home) || null,
+    awayLogo: darkLogo(g?.away) || null,
     homeShort: g?.home?.short || g?.home?.school || g?.home?.name || null,
     awayShort: g?.away?.short || g?.away?.school || g?.away?.name || null,
     homeScore: p.homeScore,
