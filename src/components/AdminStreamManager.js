@@ -1409,7 +1409,12 @@ function BroadcastDetail({ b, onBack, onEdit }) {
       <div style={{ marginTop: 14, border: "2px solid #e6ecf3", borderRadius: 12, background: "#fff", padding: "14px 16px" }}>
         <div style={{ ...label, marginBottom: 10 }}>Actions</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {!bound && !b.rehearsal && (
+          {/* an open automatic broadcast's YouTube broadcast is the
+              orchestrator's to create (it fixes the start time first) */}
+          {!bound && !b.rehearsal && b.auto?.open && (
+            <span style={{ alignSelf: "center", fontSize: 13, fontWeight: 700, color: "#667" }}>Automation creates the YouTube broadcast when it starts preparing.</span>
+          )}
+          {!bound && !b.rehearsal && !b.auto?.open && (
             <button onClick={createYt} disabled={!!busy || creating} style={btn(RED, true, !!busy || creating)}>
               {busy === "create" || creating ? "Creating on YouTube…" : y.broadcastId ? "Finish YouTube Setup (bind stream)" : "Create YouTube Broadcast"}
             </button>

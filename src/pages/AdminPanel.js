@@ -11,6 +11,7 @@ import { CSS } from "@dnd-kit/utilities";
 import ArticlesManager from "../components/ArticlesManager";
 import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
+import VideoSuggester from "../components/VideoSuggester";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminStreamManager from "../components/AdminStreamManager";
@@ -7444,6 +7445,7 @@ function VideosSection() {
   const [saveMessage, setSaveMessage] = useState("");
   const [migrating, setMigrating] = useState(false);
   const [migrateMessage, setMigrateMessage] = useState("");
+  const [showSuggest, setShowSuggest] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -7568,6 +7570,26 @@ function VideosSection() {
       items: [{ ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
     });
     setSaveMessage("");
+  };
+
+  // A pick from the Suggest panel: a new long-form video with that player
+  // already tagged and the suggested title filled in.
+  const startSuggestedVideo = (player, title) => {
+    setFormatFilter("videos");
+    setSelectedVideo({ id: null, isNew: true });
+    setFormState({
+      Video: "",
+      Date: toDateInputValue(new Date()),
+      Short: false,
+      Tags: ["CFB"],
+      GameSlug: "",
+      GenTitle: title || "",
+      GenThumb: "",
+      PublishAt: "",
+      items: [{ ...BLANK_VIDEO_ITEM, playerId: player.id }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
+    });
+    setSaveMessage("");
+    setShowSuggest(false);
   };
 
   const handleFieldChange = (field, value) => {
@@ -7791,6 +7813,20 @@ function VideosSection() {
   };
 
   return (
+    <>
+    {showSuggest && (
+      <VideoSuggester
+        players={allPlayers}
+        videos={videos}
+        generateSlug={generateSlug}
+        stateNames={STATE_NAME_BY_ABBR}
+        // A suggestion added to We-Draft from the panel — taggable right away.
+        onPlayerAdded={(p) => setAllPlayers((prev) => [...prev, p].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")))}
+        onPlayerUpdated={(p) => setAllPlayers((prev) => prev.map((x) => (x.id === p.id ? p : x)))}
+        onCreate={startSuggestedVideo}
+        onClose={() => setShowSuggest(false)}
+      />
+    )}
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -7798,11 +7834,24 @@ function VideosSection() {
             Videos
           </div>
           <button
+            onClick={() => setShowSuggest((s) => !s)}
+            disabled={loading}
+            title="Rank trending players by last game, season stats, and page views"
+            style={{
+              marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid " + GOLD,
+              borderRadius: "6px", padding: "5px 11px", fontWeight: 900, fontSize: "11px",
+              textTransform: "uppercase", letterSpacing: "0.04em", cursor: loading ? "default" : "pointer",
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            💡 Suggest Video
+          </button>
+          <button
             onClick={migrateLegacyVideos}
             disabled={migrating || loading}
             title="Backfill playerIds on videos still using the old slug-only schema"
             style={{
-              marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid #fff",
+              background: "transparent", color: "#fff", border: "2px solid #fff",
               borderRadius: "6px", padding: "5px 11px", fontWeight: 900, fontSize: "11px",
               textTransform: "uppercase", letterSpacing: "0.04em", cursor: migrating || loading ? "default" : "pointer",
               opacity: migrating || loading ? 0.6 : 1,
@@ -8223,6 +8272,7 @@ function VideosSection() {
         )}
       </div>
     </div>
+    </>
   );
 }
 

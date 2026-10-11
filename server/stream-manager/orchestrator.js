@@ -107,6 +107,7 @@ const CFG = {
   MAX_ERRORS: 5,                    // consecutive failures of one step before giving up
   LOCK_MS: 70e3,                    // > the function's 60s maxDuration, so a lease never expires under a live tick
   HOLD_MS: 30 * 60e3,               // an admin's forced manual stop pauses auto VM starts
+  YT_LEAD_MS: 3 * 60e3,             // YouTube needs a scheduled start in the future: "now" is saved as now + this
   MAX_SLOTS: 6,
   NATIONAL_MAX_MS: 20 * 3600e3,     // longest national coverage window (6 AM gameday → late games)
   NATIONAL_TAIL_MS: 30 * 60e3,      // its failsafe: the window's end + this
@@ -149,13 +150,16 @@ function youtubeFor(r, ctx) {
 }
 
 const toMs = (v) => (v?.toMillis ? v.toMillis() : v instanceof Date ? v.getTime() : typeof v === "number" ? v : Date.parse(v) || null);
-// When preparation starts: the admin's own start time, else 15 min before kickoff.
 // Next local midnight in CFG.DAY_TZ (on a DST change day it can be an hour off).
 function dayEndAt(now, tz = CFG.DAY_TZ) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" })
     .formatToParts(now).filter((x) => x.type !== "literal").map((x) => [x.type, +x.value]));
   return now - (((p.hour * 60 + p.minute) * 60 + p.second) * 1000 + (now % 1000)) + 24 * 3600e3;
 }
+// A YouTube broadcast's scheduled start for a broadcast meant to start at
+// ms: never "now" or earlier — YouTube refuses a start that's already past.
+const ytStart = (ms, now) => Math.max(ms || 0, now + CFG.YT_LEAD_MS);
+// When preparation starts: the admin's own start time, else 15 min before kickoff.
 const prepAtOf = (startAt, kickoff) => (startAt != null ? startAt : kickoff ? kickoff - CFG.PREP_LEAD_MS : null);
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,119}$/;
 const ID_RE = /^[A-Za-z0-9]{1,40}$/;
@@ -331,7 +335,7 @@ async function step(r, ctx) {
       if (yt.broadcastId && ["complete", "revoked"].includes(yt.lifecycleStatus)) throw httpError(409, "This record's YouTube broadcast already ended — Retry creates a new one.");
       if (!(yt.broadcastId && yt.streamId === streamId)) {
         // A new YouTube broadcast needs a scheduled start in the future.
-        if (!yt.broadcastId && (toMs(r.scheduledStart) || 0) < now + 2 * 60e3) await ctx.setScheduledStart(r.id, Math.max(kickoff || 0, now + 3 * 60e3));
+        if (!yt.broadcastId && (toMs(r.scheduledStart) || 0) < now + 2 * 60e3) await ctx.setScheduledStart(r.id, ytStart(kickoff, now));
         await ctx.youtubeCreate(r.id, streamId);
       }
       to("vm", { slot });
@@ -824,7 +828,7 @@ async function selectGame(db, uid, body, now = Date.now()) {
       gameId, gameSlug: s.Slug || live?.slug || null,
       homeTeam: team(live?.home, s.Home), awayTeam: team(live?.away, s.Away),
       kickoff: kickoff ? new Date(kickoff).toISOString() : null,
-      scheduledStart: Timestamp.fromMillis(kickoff || now + 24 * 3600e3),
+      scheduledStart: Timestamp.fromMillis(kickoff ? ytStart(kickoff, now) : now + 24 * 3600e3),
       status: "scheduled",
       youtube: {
         title: `${rehearsal ? "[Rehearsal] " : ""}${bc.defaultTitle(g)}`.slice(0, 100), description: bc.defaultDescription(g), privacyStatus,
@@ -887,7 +891,8 @@ async function selectNational(db, uid, body, now = Date.now()) {
       gameId: null, gameSlug: "national", homeTeam: null, awayTeam: null,
       kickoff: new Date(start).toISOString(),
       national: { startAt: start, endAt: end },
-      scheduledStart: Timestamp.fromMillis(start),
+      // Start Now: a few minutes out, not "now" (YouTube refuses a past start)
+      scheduledStart: Timestamp.fromMillis(ytStart(start, now)),
       status: "scheduled",
       youtube: {
         title: `${rehearsal ? "[Rehearsal] " : ""}${title}`.slice(0, 100), description, privacyStatus,
@@ -938,7 +943,11 @@ async function startNow(db, uid, body, now = Date.now()) {
     if (!a?.open || a.enabled === false || a.cancelRequested) throw httpError(409, "That broadcast isn't scheduled — schedule it (or Retry) first.");
     if (a.phase !== "selected") return { ok: true, already: true, phase: a.phase };
     if (!isRehearsal(d) && rehearsalOnly()) throw httpError(409, "The server is in rehearsal-only mode (STREAM_REHEARSAL_ONLY) — use Rehearse.");
-    tx.update(ref, { "auto.startAt": now, "auto.prepAt": now, updatedAt: FieldValue.serverTimestamp() });
+    const upd = { "auto.startAt": now, "auto.prepAt": now, updatedAt: FieldValue.serverTimestamp() };
+    // No YouTube broadcast yet and its start would be past by the time it's made: move it up.
+    const sched = d.scheduledStart?.toMillis ? d.scheduledStart.toMillis() : 0;
+    if (!d.youtube?.broadcastId && sched < now + 2 * 60e3) upd.scheduledStart = Timestamp.fromMillis(ytStart(sched, now));
+    tx.update(ref, upd);
     console.log(`stream-manager auto-start-now uid=${uid} id=${body.id}`);
     return { ok: true };
   });

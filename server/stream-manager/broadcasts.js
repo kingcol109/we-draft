@@ -349,8 +349,14 @@ async function youtubeCreate(db, body) {
       b = await yt.getBroadcast(token, rec.youtube.broadcastId);
       if (!b) throw httpError(400, "The YouTube broadcast from the earlier attempt is gone (deleted in Studio?). Delete this record and create a new one.");
     } else {
-      const startMs = rec.scheduledStart.toMillis();
-      if (startMs < Date.now() + 60 * 1000) throw httpError(400, "The scheduled start is in the past — edit it to a future time first.");
+      let startMs = rec.scheduledStart.toMillis();
+      if (startMs < Date.now() + 60 * 1000) {
+        // An automatic broadcast (Start Now, a start that's come) goes out a
+        // few minutes from now; a manual record's time is the admin's to fix.
+        if (!rec.auto) throw httpError(400, "The scheduled start is in the past — edit it to a future time first.");
+        startMs = Date.now() + 3 * 60 * 1000;
+        await ref.update({ scheduledStart: Timestamp.fromMillis(startMs) });
+      }
       const privacyStatus = cleanPrivacy(rec.youtube.privacyStatus, rec.youtube.privacyStatus === "public");
       const meta = await broadcastText(db, rec, body.useDraft === true);
       b = await yt.insertBroadcast(token, {

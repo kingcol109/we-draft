@@ -34,7 +34,7 @@ const MAX_RESULTS = 60;
 const WD_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB", "K", "P", "LS"];
 // CFBD roster position → We-Draft position. CFBD lumps ends and tackles
 // into DL, so those come in as DL (switch to EDGE per row when needed).
-const POS_MAP = {
+export const POS_MAP = {
   QB: "QB", RB: "RB", FB: "RB", WR: "WR", TE: "TE",
   OL: "OL", OT: "OL", OG: "OL", C: "OL", IOL: "OL",
   DL: "DL", DT: "DL", NT: "DL", DE: "EDGE", EDGE: "EDGE",
@@ -48,11 +48,48 @@ const POS_MAP = {
 // doubt — no recruiting record). rc is the roster row's recruiting class;
 // a newly added freshman's CFBD "year" is their class too. Adjust per row.
 const BY_SIGNING = { [SEASON]: SEASON + 3, [SEASON - 1]: SEASON + 2 };
-const eligibleFor = (p) => String(BY_SIGNING[p.rc] || BY_SIGNING[p.yr] || SEASON + 1);
+export const eligibleFor = (p) => String(BY_SIGNING[p.rc] || BY_SIGNING[p.yr] || SEASON + 1);
 const ELIGIBLE_CHOICES = [SEASON + 1, SEASON + 2, SEASON + 3, SEASON + 4].map(String);
 const CLASS = (yr) => (yr == null ? "" : yr > 1000 ? "FR" : ["", "FR", "SO", "JR", "SR"][yr] || "GR");
 const heightOf = (ht) => (ht ? `${Math.floor(ht / 12)}'${ht % 12}"` : "");
 const norm = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+// Shared with VideoSuggester.js ("Add to We-Draft & Create Video") — p is a
+// roster row plus its roster's school/team/teamId; roster is that roster
+// doc ({ id, players }). Each returns the roster's updated players array.
+//
+// Link cfbdPlayers/{id} to a We-Draft profile and stamp the roster row.
+export async function linkRosterPlayer(p, roster, wdId, slug) {
+  await setDoc(doc(db, "cfbdPlayers", String(p.id)), {
+    name: `${p.first} ${p.last}`.trim(), firstName: p.first || null, lastName: p.last || null,
+    team: p.team, teamId: p.teamId, position: p.pos || null, jersey: p.no ?? null, provider: "cfbd",
+    wedraftPlayerId: wdId, wedraftSlug: slug, mappingStatus: "verified", mappingSource: "admin",
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  if (!roster) return null;
+  const players = roster.players.map((x) => (String(x.id) === String(p.id) ? { ...x, slug } : x));
+  await setDoc(doc(db, "cfbRosters", roster.id), { players }, { merge: true });
+  return players;
+}
+
+// New players doc from the roster row, then linked. Returns { player, rosterPlayers }.
+export async function addRosterPlayer(p, roster, { pos, eligible, live }, { allPlayers, generateSlug, stateNames }) {
+  const base = generateSlug(p.first, p.last, pos, eligible);
+  const taken = new Set(allPlayers.map((x) => x.Slug).filter(Boolean));
+  let slug = base;
+  for (let n = 1; taken.has(slug); n += 1) slug = `${base}-${n}`;
+  const stateAbbr = (p.home || "").split(",").pop().trim();
+  const payload = {
+    First: p.first, Last: p.last, HighSchool: "", State: stateNames[stateAbbr] || "",
+    School: p.school || "", Position: pos, Eligible: eligible,
+    Height: heightOf(p.ht), Weight: p.wt ? String(p.wt) : "",
+    Bio: "", Flair: "", Live: live, AdminNotes: "", Flag: "",
+    Slug: slug, updatedAt: serverTimestamp(),
+  };
+  const ref = await addDoc(collection(db, "players"), payload);
+  const rosterPlayers = await linkRosterPlayer(p, roster, ref.id, slug);
+  return { player: { id: ref.id, ...payload }, rosterPlayers };
+}
 
 export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames, onAdded }) {
   const [rosters, setRosters] = useState(null); // [{ id, school, players }]
@@ -97,43 +134,25 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
   const editOf = (p) => ({ pos: POS_MAP[p.pos] || "", eligible: eligibleFor(p), live: true, ...edits[p.id] });
   const setEdit = (p, field, value) => setEdits((prev) => ({ ...prev, [p.id]: { ...editOf(p), ...prev[p.id], [field]: value } }));
 
+  const applyRoster = (p, players) => {
+    if (players) setRosters((prev) => prev.map((r) => (r.id === p.rosterId ? { ...r, players } : r)));
+  };
+
   // Link cfbdPlayers/{id} to a We-Draft profile and stamp the roster row.
   const link = async (p, wdId, slug) => {
-    await setDoc(doc(db, "cfbdPlayers", String(p.id)), {
-      name: `${p.first} ${p.last}`.trim(), firstName: p.first || null, lastName: p.last || null,
-      team: p.team, teamId: p.teamId, position: p.pos || null, jersey: p.no ?? null, provider: "cfbd",
-      wedraftPlayerId: wdId, wedraftSlug: slug, mappingStatus: "verified", mappingSource: "admin",
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    const roster = rosters.find((r) => r.id === p.rosterId);
-    if (roster) {
-      const players = roster.players.map((x) => (String(x.id) === String(p.id) ? { ...x, slug } : x));
-      await setDoc(doc(db, "cfbRosters", roster.id), { players }, { merge: true });
-      setRosters((prev) => prev.map((r) => (r.id === roster.id ? { ...r, players } : r)));
-    }
+    applyRoster(p, await linkRosterPlayer(p, rosters.find((r) => r.id === p.rosterId), wdId, slug));
     setDone((prev) => ({ ...prev, [p.id]: slug }));
   };
 
   const add = async (p) => {
     const { pos, eligible, live } = editOf(p);
     if (!pos || !eligible) { alert("Pick a position and draft class first."); return; }
-    const base = generateSlug(p.first, p.last, pos, eligible);
-    const taken = new Set(allPlayers.map((x) => x.Slug).filter(Boolean));
-    let slug = base;
-    for (let n = 1; taken.has(slug); n += 1) slug = `${base}-${n}`;
-    const stateAbbr = (p.home || "").split(",").pop().trim();
     setBusy(p.id);
     try {
-      const payload = {
-        First: p.first, Last: p.last, HighSchool: "", State: stateNames[stateAbbr] || "",
-        School: p.school || "", Position: pos, Eligible: eligible,
-        Height: heightOf(p.ht), Weight: p.wt ? String(p.wt) : "",
-        Bio: "", Flair: "", Live: live, AdminNotes: "", Flag: "",
-        Slug: slug, updatedAt: serverTimestamp(),
-      };
-      const ref = await addDoc(collection(db, "players"), payload);
-      await link(p, ref.id, slug);
-      onAdded({ id: ref.id, ...payload });
+      const { player, rosterPlayers } = await addRosterPlayer(p, rosters.find((r) => r.id === p.rosterId), { pos, eligible, live }, { allPlayers, generateSlug, stateNames });
+      applyRoster(p, rosterPlayers);
+      setDone((prev) => ({ ...prev, [p.id]: player.Slug }));
+      onAdded(player);
     } catch (e) {
       console.error("CFB universe add error:", e);
       alert("Failed to add — check console.");

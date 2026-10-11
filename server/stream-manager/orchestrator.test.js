@@ -1217,6 +1217,14 @@ test("Start Now on a rehearsal runs it at once with no YouTube calls", async () 
   assert.deepEqual(w.ytCalls, []);
 });
 
+test("Start Now on a waiting game moves a past YouTube start up", async () => {
+  await select("s1");
+  const id = "g401001";
+  await db.doc(`broadcasts/${id}`).update({ scheduledStart: { toMillis: () => clock - 5 * MIN } });
+  await orch.startNow(db, "admin1", { id }, clock);
+  assert.ok(rec(id).scheduledStart.toMillis() >= clock + 2 * MIN);
+});
+
 test("national Start Now: open-ended, its own record, never ends on 'every game final' — only when an admin ends it", async () => {
   await slate([{ id: "401001", status: "final", startDate: iso(K1 - 4 * 60 * MIN) }]); // nothing left to cover
   const r = await national({ startNow: true });
@@ -1224,6 +1232,8 @@ test("national Start Now: open-ended, its own record, never ends on 'every game 
   const d = rec(r.id);
   assert.equal(d.auto.openEnded, true);
   assert.equal(d.auto.endAt, null);
+  // YouTube refuses a start that's already past: never saved as "now"
+  assert.ok(d.scheduledStart.toMillis() >= clock + 2 * MIN, "scheduled a few minutes out");
   assert.deepEqual(await national({ startNow: true }), { id: r.id, already: true }, "a double click is the same record");
   await minute();
   await assert.rejects(orch.selectNational(db, "admin1", { startNow: true }, clock), /already running/);
