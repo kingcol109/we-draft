@@ -145,6 +145,54 @@ also stops itself about 60s before Vercel's 300s limit.
   - Days with no activity aren't stored. Inside a backfilled range, a
     missing day means 0.
 
+### Research tab
+
+Research computes everything from stored data and makes no YouTube calls.
+You filter by draft class (the tagged players' `Eligible`), position, type,
+site tag, on-site status, publish dates, minimum views or text. You also
+pick a basis: lifetime, last 28 days or last 7 days.
+
+- **Watch %** is average view duration ÷ video length. For a group it's
+  weighted by views, which equals total time watched ÷ total runtime of
+  every view. Looping Shorts can go above 100%.
+- **CTR** comes from `ytVideos.reach`, the per-video totals that Sync
+  Historical Data keeps alongside the daily rows. Lifetime totals cover
+  every imported day. The 28-day and 7-day windows use the last 90 days
+  kept in `reach.days`.
+- **Medians** only count a video's own CTR once it has 100+ impressions.
+- **Group sums can overlap.** A video tagged with players from two draft
+  classes counts in both groups.
+
+The per-player rollup (`ytPlayerStats`) is still computed by Sync
+Analytics, but the tab no longer shows it.
+
+### Older CTR: YouTube Studio import (`studio.js`)
+
+The API's impression history starts about 30 days before the reporting job
+was created. For anything older, Research has an **Older CTR from YouTube
+Studio** panel:
+
+1. In Studio, open Analytics → Advanced mode.
+2. Show the Content table with Impressions and Impressions click-through
+   rate, over a range such as Lifetime.
+3. Export it as CSV, unzip the download, and upload `Table data.csv`.
+4. Click **Preview**, then **Import**.
+
+How the import works:
+
+- **The server parses and validates the file.** It finds columns by name
+  and skips the "Total" row.
+- **Preview saves nothing.** It only reports what the import would do.
+- **Import runs under the same sync lock** as the other syncs.
+- **Each video's numbers are stored as one total** for the exported range,
+  in `ytVideos.studioReach`. There's no per-day breakdown.
+- **Each day is counted once.** `reach.after` sums only the API days after
+  the export's end date. Lifetime CTR is the Studio total plus `reach.after`.
+- **A new import replaces the previous one.** Videos missing from the new
+  file lose their old Studio numbers.
+- **The export has to end within the last 80 days,** so it can be joined to
+  the API data exactly. A Lifetime export does this automatically.
+
 ### Impressions and CTR: Reporting API
 
 The Analytics API has no thumbnail-impression metrics; only the Reporting

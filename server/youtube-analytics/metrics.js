@@ -216,6 +216,118 @@ function aggregateReach(csvRows) {
   return acc;
 }
 
+// ── Per-video reach totals (ytVideos.reach) ──
+// { impressions, clicks, ctr, firstDay, lastDay, days: { YYYY-MM-DD: [impressions, clicks] } }
+// clicks = impressions × CTR (views that came from a thumbnail impression).
+// Setting a day REPLACES that day's earlier numbers in the totals (a
+// re-issued Reporting API day), never adds to them. `days` keeps the most
+// recent REACH_KEEP_DAYS — longer than YouTube keeps reports (≤60 days), so
+// a replaced day is always still in the map.
+//
+// `after` ({ cutoff, impressions, clicks }) is set when a YouTube Studio
+// export through `cutoff` has been imported (studio.js): it sums only the
+// API days AFTER the cutoff, so Studio's total + `after` covers each day
+// exactly once.
+const REACH_KEEP_DAYS = 90;
+function emptyReach(cutoff = null) {
+  return { impressions: 0, clicks: 0, ctr: null, firstDay: null, lastDay: null, days: {}, after: cutoff ? { cutoff, impressions: 0, clicks: 0 } : null };
+}
+function applyReachDay(reach, date, impressions, ctr) {
+  const r = reach && reach.days ? { ...reach, days: { ...reach.days }, after: reach.after ? { ...reach.after } : null } : emptyReach();
+  const [oldI, oldC] = r.days[date] || [0, 0];
+  const imp = Number(impressions) || 0;
+  const clicks = imp * (Number(ctr) || 0);
+  r.impressions += imp - oldI;
+  r.clicks += clicks - oldC;
+  if (r.after && date > r.after.cutoff) {
+    r.after.impressions += imp - oldI;
+    r.after.clicks += clicks - oldC;
+  }
+  r.days[date] = [imp, clicks];
+  if (imp > 0) {
+    if (!r.firstDay || date < r.firstDay) r.firstDay = date;
+    if (!r.lastDay || date > r.lastDay) r.lastDay = date;
+  }
+  const keep = Object.keys(r.days).sort().slice(-REACH_KEEP_DAYS);
+  r.days = Object.fromEntries(keep.map((d) => [d, r.days[d]]));
+  r.ctr = r.impressions > 0 ? r.clicks / r.impressions : null;
+  return r;
+}
+// Impressions / CTR over [from, to] from the kept days. null if no day in range.
+function reachWindow(reach, from, to) {
+  let any = false, impressions = 0, clicks = 0;
+  for (const [d, [i, c]] of Object.entries(reach?.days || {})) {
+    if (d < from || d > to) continue;
+    any = true; impressions += i; clicks += c;
+  }
+  return any ? { impressions, clicks, ctr: impressions ? clicks / impressions : null } : null;
+}
+
+// Sets (or clears, cutoff = null) the Studio cutoff on a reach object,
+// summing the API days after it from the kept days. null when an API day
+// after the cutoff has already aged out of `days` (can't be summed exactly).
+function withStudioCutoff(reach, cutoff) {
+  const r = reach && reach.days ? { ...reach, days: { ...reach.days } } : emptyReach();
+  if (!cutoff) return { ...r, after: null };
+  const kept = Object.keys(r.days).sort();
+  if (r.firstDay && r.firstDay <= cutoff && kept.length && kept[0] > addDays(cutoff, 1)) return null;
+  let impressions = 0, clicks = 0;
+  for (const [d, [i, c]] of Object.entries(r.days)) if (d > cutoff) { impressions += i; clicks += c; }
+  return { ...r, after: { cutoff, impressions, clicks } };
+}
+
+// ── YouTube Studio export ("Table data.csv" from Analytics → Advanced
+// mode, grouped by Content) ──
+// Columns are found by name — the video ID column ("Content" / "Video"),
+// "Impressions" and "Impressions click-through rate (%)" — so other columns
+// and their order don't matter. The "Total" row and rows without a video ID
+// are skipped. CTR is a percentage in the export (4.5 = 4.5%).
+function parseStudioTable(text) {
+  const rows = parseCsv(String(text || "").replace(/^﻿/, ""));
+  if (!rows.length) return { error: "The file is empty or isn't a CSV." };
+  const headers = Object.keys(rows[0]);
+  const find = (re, not) => headers.find((h) => re.test(h.trim()) && !(not && not.test(h)));
+  const idCol = find(/^(content|video|video id)$/i);
+  const impCol = find(/^impressions$/i);
+  const ctrCol = find(/click-?through rate/i);
+  const titleCol = find(/^video title$/i);
+  const missing = [!idCol && "Content (video ID)", !impCol && "Impressions", !ctrCol && "Impressions click-through rate (%)"].filter(Boolean);
+  if (missing.length) return { error: `Missing column(s): ${missing.join(", ")}. In Studio's Advanced mode, show the Content table with the Impressions and Impressions click-through rate metrics, export it, and upload "Table data.csv" from the download.`, headers };
+  const num = (s) => {
+    const t = String(s ?? "").replace(/[,%\s]/g, "");
+    if (!t) return null; // blank cell = unknown, not 0
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+  const out = new Map();
+  let skipped = 0;
+  for (const r of rows) {
+    const id = String(r[idCol] || "").trim();
+    if (!ID_RE.test(id)) { skipped++; continue; }
+    const impressions = num(r[impCol]);
+    const pct = num(r[ctrCol]);
+    if (impressions == null || impressions < 0 || (pct != null && (pct < 0 || pct > 100))) { skipped++; continue; }
+    const ctr = pct == null ? null : pct / 100;
+    out.set(id, { videoId: id, title: titleCol ? r[titleCol] || null : null, impressions, ctr, clicks: ctr == null ? 0 : impressions * ctr });
+  }
+  return { rows: [...out.values()], skipped, columns: { id: idCol, impressions: impCol, ctr: ctrCol } };
+}
+
+// Lifetime impressions/CTR for a video: the Studio import (through its
+// cutoff) plus API days after it; either alone if that's all there is.
+function combinedReach(reach, studio) {
+  const api = reach && reach.impressions > 0 ? reach : null;
+  if (!studio) return api ? { impressions: api.impressions, clicks: api.clicks, ctr: api.ctr, from: api.firstDay, to: api.lastDay, sources: ["api"] } : null;
+  const after = reach?.after && reach.after.cutoff === studio.to ? reach.after : null;
+  const impressions = studio.impressions + (after?.impressions || 0);
+  const clicks = studio.clicks + (after?.clicks || 0);
+  return {
+    impressions, clicks, ctr: impressions ? clicks / impressions : null,
+    from: studio.from || null, to: after?.impressions && reach.lastDay > studio.to ? reach.lastDay : studio.to,
+    sources: after?.impressions ? ["studio", "api"] : ["studio"],
+  };
+}
+
 // ── Effective player associations ──
 // A video linked to a legacy videos/{doc}: that doc's playerIds (the
 // editorial record). Otherwise the admin-set ytVideos playerIds.
@@ -258,4 +370,5 @@ module.exports = {
   ID_RE, parseVideoId, parseDuration, pacificDay, addDays, daysBetween, isDay,
   rowsToObjects, normalizeMetrics, ANALYTICS_METRICS, SUMMABLE, sumWindow, firstDays, growthRate,
   RING_MAX, pushRing, ringDelta, parseCsv, aggregateReach, effectivePlayerIds, rollupPlayers,
+  REACH_KEEP_DAYS, emptyReach, applyReachDay, reachWindow, withStudioCutoff, parseStudioTable, combinedReach,
 };

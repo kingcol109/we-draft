@@ -115,3 +115,63 @@ test("rollupPlayers: sums per player, legacy associations win, ignored videos ex
   assert.equal(p1.best.videoId, "b");
   assert.equal(r.get("p2").publicViews, 100, "a 2-player video counts fully for each player");
 });
+
+test("applyReachDay: replaces a day instead of adding; reachWindow sums kept days", () => {
+  let r = m.applyReachDay(null, "2026-10-01", 1000, 0.05);
+  r = m.applyReachDay(r, "2026-10-02", 500, 0.02);
+  assert.equal(r.impressions, 1500);
+  assert.ok(Math.abs(r.clicks - 60) < 1e-9);
+  r = m.applyReachDay(r, "2026-10-01", 1200, 0.05); // re-issued day
+  assert.equal(r.impressions, 1700);
+  assert.ok(Math.abs(r.ctr - 70 / 1700) < 1e-12);
+  assert.deepEqual([r.firstDay, r.lastDay], ["2026-10-01", "2026-10-02"]);
+  assert.equal(m.reachWindow(r, "2026-10-02", "2026-10-02").impressions, 500);
+  assert.equal(m.reachWindow(r, "2026-09-01", "2026-09-30"), null);
+  for (let i = 0; i < 120; i++) r = m.applyReachDay(r, m.addDays("2026-10-03", i), 10, 0.1);
+  assert.equal(Object.keys(r.days).length, m.REACH_KEEP_DAYS, "bounded");
+  assert.equal(r.impressions, 1700 + 1200, "totals keep days that aged out of the map");
+});
+
+test("parseStudioTable: finds columns by name, skips the Total row, reads CTR as a percent", () => {
+  const csv = "﻿" + [
+    "Content,Video title,Video publish time,Duration,Views,Impressions,Impressions click-through rate (%)",
+    "Total,,,,9000,100000,4.5",
+    'E96gYFGv9AM,"Legree, Jesse breakdown",Oct 1 2026,540,600,20000,5',
+    "BBBBBBBBBB2,Other,Oct 5 2026,700,30,1000,",
+    "not-an-id,x,,,,5,1",
+    "",
+  ].join("\n");
+  const p = m.parseStudioTable(csv);
+  assert.equal(p.error, undefined);
+  assert.equal(p.rows.length, 2);
+  assert.equal(p.skipped, 2);
+  const a = p.rows.find((r) => r.videoId === "E96gYFGv9AM");
+  assert.deepEqual([a.impressions, a.ctr, a.clicks, a.title], [20000, 0.05, 1000, "Legree, Jesse breakdown"]);
+  assert.equal(p.rows.find((r) => r.videoId === "BBBBBBBBBB2").ctr, null, "blank CTR stays unknown");
+  assert.match(m.parseStudioTable("Content,Views\nE96gYFGv9AM,5\n").error, /Impressions/);
+});
+
+test("Studio + API reach: each day counted once", () => {
+  // API has 09-20 (before the export's end) and 10-14 (after it).
+  let r = m.applyReachDay(null, "2026-09-20", 1000, 0.1);
+  r = m.applyReachDay(r, "2026-10-14", 500, 0.02);
+  r = m.withStudioCutoff(r, "2026-10-12");
+  assert.deepEqual([r.after.impressions, r.after.clicks], [500, 10]);
+  const studio = { impressions: 50000, clicks: 2500, ctr: 0.05, from: null, to: "2026-10-12" };
+  const c = m.combinedReach(r, studio);
+  assert.equal(c.impressions, 50500, "Studio total + only the API day after its end — 09-20 not added again");
+  assert.deepEqual(c.sources, ["studio", "api"]);
+  assert.equal(c.to, "2026-10-14");
+  // A later API day (and a re-issue of one) lands in "after" too.
+  r = m.applyReachDay(r, "2026-10-15", 100, 0.1);
+  r = m.applyReachDay(r, "2026-10-14", 600, 0.02);
+  assert.equal(r.after.impressions, 700);
+  assert.equal(m.combinedReach(r, studio).impressions, 50700);
+  // Without a Studio import, the API totals stand alone.
+  assert.equal(m.combinedReach(r, null).impressions, 1700);
+  assert.equal(m.combinedReach(null, null), null);
+  // A cutoff can't be set once API days after it have aged out.
+  let old = m.applyReachDay(null, "2026-01-01", 10, 0.1);
+  for (let i = 0; i < 100; i++) old = m.applyReachDay(old, m.addDays("2026-03-01", i), 1, 0);
+  assert.equal(m.withStudioCutoff(old, "2026-01-05"), null);
+});

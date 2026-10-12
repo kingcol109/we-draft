@@ -83,7 +83,9 @@ async function configuredChannel(db) {
 async function writeBatched(db, ops) {
   for (let i = 0; i < ops.length; i += 400) {
     const b = db.batch();
-    for (const o of ops.slice(i, i + 400)) b.set(o.ref, o.data, { merge: o.merge !== false });
+    // update: replaces each named field wholesale (a map field's removed keys
+    // go away, unlike a merge); the doc must exist.
+    for (const o of ops.slice(i, i + 400)) if (o.update) b.update(o.ref, o.data); else b.set(o.ref, o.data, { merge: o.merge !== false });
     await b.commit();
   }
 }

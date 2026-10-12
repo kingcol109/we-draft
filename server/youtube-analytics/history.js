@@ -36,6 +36,9 @@ const { videoDaily, dailyOps, firstWindows, LIFETIME_START } = require("./analyt
 
 const REACH_REPORT = "channel_reach_basic_a1";
 const REPORTING = "ytAnalytics/reporting";
+// Bump to rebuild every video's reach totals from the reports YouTube still
+// offers (the import below then starts from empty totals).
+const REACH_TOTALS_VERSION = 1;
 
 // ── Reporting API ──
 
@@ -80,7 +83,19 @@ async function importReach(ctx, tracked) {
     const day = m.pacificDay(Date.parse(r.startTime) + 12 * 3600e3); // startTime is midnight PT
     if (!byDay.has(day) || r.createTime > byDay.get(day).createTime) byDay.set(day, r);
   }
-  const imported = state.importedDays || {};
+  // Per-video totals (ytVideos.reach) didn't exist before version 1: start
+  // them empty and re-import every report still available.
+  const rebuild = state.totalsVersion !== REACH_TOTALS_VERSION;
+  const imported = rebuild ? {} : state.importedDays || {};
+  // A rebuilt total keeps the video's Studio cutoff (studio.js), so API days
+  // after an imported Studio export are still counted separately.
+  const fresh = (v) => (v.studioReach?.to ? m.emptyReach(v.studioReach.to) : null);
+  const reach = new Map([...tracked].map(([id, v]) => [id, rebuild ? fresh(v) : v.reach || null]));
+  if (rebuild) {
+    await writeBatched(db, [...tracked.keys()].map((id) => ({ ref: db.collection("ytVideos").doc(id), data: { reach: reach.get(id) }, update: true })));
+    await db.doc(REPORTING).update({ totalsVersion: REACH_TOTALS_VERSION, importedDays: {} });
+    ctx.inc("reachTotalsRebuilt");
+  }
   const todo = [...byDay.entries()].filter(([day, r]) => imported[day] !== r.createTime).sort(([a], [b]) => (a < b ? -1 : 1));
   ctx.counts.reportsAvailable = byDay.size;
   if (!reports.length) return { reach: "waiting", message: "The reach reporting job exists; YouTube hasn't generated its first report yet (usually within 48 hours of the job being created)." };
@@ -91,13 +106,29 @@ async function importReach(ctx, tracked) {
     const agg = m.aggregateReach(m.parseCsv(csv));
     const ops = [];
     const perDay = new Map();
+    const changed = new Set();
+    const seen = new Set();
     for (const a of agg.values()) {
       const t = perDay.get(a.date) || { impressions: 0, clicks: 0 };
       t.impressions += a.impressions; t.clicks += a.impressions * (a.impressionsCtr || 0);
       perDay.set(a.date, t);
       if (!tracked.has(a.videoId)) { ctx.inc("reachRowsUntracked"); continue; }
+      seen.add(`${a.videoId}|${a.date}`);
       ops.push({ ref: db.collection("ytVideos").doc(a.videoId).collection("daily").doc(a.date), data: { date: a.date, impressions: a.impressions, impressionsCtr: a.impressionsCtr, reachSource: "reporting-api", reachReportCreateTime: r.createTime } });
+      reach.set(a.videoId, m.applyReachDay(reach.get(a.videoId), a.date, a.impressions, a.impressionsCtr));
+      changed.add(a.videoId);
     }
+    // A re-issued day replaces the old one completely: a video that had
+    // impressions that day but isn't in the new report goes to 0.
+    for (const [id, rc] of reach) {
+      for (const d of Object.keys(rc?.days || {})) {
+        if (d !== day || seen.has(`${id}|${d}`) || !rc.days[d][0]) continue;
+        reach.set(id, m.applyReachDay(rc, d, 0, null));
+        ops.push({ ref: db.collection("ytVideos").doc(id).collection("daily").doc(d), data: { impressions: 0, impressionsCtr: null, reachReportCreateTime: r.createTime } });
+        changed.add(id);
+      }
+    }
+    for (const id of changed) ops.push({ ref: db.collection("ytVideos").doc(id), data: { reach: reach.get(id) }, update: true });
     for (const [date, t] of perDay) {
       ops.push({ ref: db.collection("ytChannelDaily").doc(date), data: { date, impressions: t.impressions, impressionsCtr: t.impressions ? t.clicks / t.impressions : null, reachReportCreateTime: r.createTime } });
     }

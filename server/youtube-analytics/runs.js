@@ -20,7 +20,7 @@ const { httpError } = require("./google");
 const LOCK = "ytAnalytics/lock";
 const STATUS = "ytAnalytics/status";
 const LEASE_MS = 330 * 1000; // > api/youtube-analytics.js maxDuration (300s)
-const OPS = ["videos", "analytics", "history"];
+const OPS = ["videos", "analytics", "history", "studio"]; // studio: the Studio CSV import (studio.js)
 const MAX_ERRORS = 25;
 
 async function acquire(db, op, trigger, uid) {

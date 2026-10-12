@@ -416,6 +416,18 @@ test("reach reports: impressions merged into daily rows; a re-issued day replace
   d = db.data(`ytVideos/${V.V1}/daily/2026-10-09`);
   assert.equal(d.impressions, 1200, "backfilled report replaces the day");
   assert.equal(db.data("ytChannelDaily/2026-10-09").impressions, 1200);
+  const reach = db.data(`ytVideos/${V.V1}`).reach;
+  assert.equal(reach.impressions, 1200, "per-video total replaced, not 1000 + 1200");
+  assert.ok(Math.abs(reach.ctr - 0.05) < 1e-12);
+  // A re-issue that no longer lists V1 for that day zeroes it.
+  yt.files["/r3"] = `date,channel_id,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr
+20261009,${CH},${V.V2},50,0.1
+`;
+  yt.reports.push({ id: "r3", startTime: "2026-10-09T07:00:00Z", createTime: "2026-10-13T00:00:00Z", downloadUrl: "https://youtubereporting.googleapis.com/r3" });
+  await sync("history");
+  assert.equal(db.data(`ytVideos/${V.V1}`).reach.impressions, 0);
+  assert.equal(db.data(`ytVideos/${V.V1}/daily/2026-10-09`).impressions, 0);
+  assert.equal(db.data(`ytVideos/${V.V2}`).reach.impressions, 50);
 });
 
 test("cron runs one due step once the schedule is on", async () => {
@@ -426,4 +438,56 @@ test("cron runs one due step once the schedule is on", async () => {
   assert.equal(db.data("ytAnalytics/status").sync.videos.trigger, "cron");
   const r2 = await call({ method: "GET", auth: "Bearer cron-secret" });
   assert.equal(r2.body.op, "analytics");
+});
+
+// ── YouTube Studio import ──
+const studioCsv = (rows) => ["Content,Video title,Impressions,Impressions click-through rate (%)", "Total,,999999,9", ...rows.map(([id, i, c]) => `${id},t,${i},${c}`), ""].join("\n");
+const TODAY = require("./metrics").pacificDay();
+
+test("studio import: admin only, validated, and a preview writes nothing", async () => {
+  await sync("videos");
+  const body = { action: "studio-import", csv: studioCsv([[V.V1, 20000, 5]]), to: TODAY };
+  assert.equal((await call({ auth: "Bearer tok-user", body })).statusCode, 403);
+  assert.equal((await call({ body: { ...body, to: "2025-01-01" } })).statusCode, 400, "must end within ~80 days");
+  assert.equal((await call({ body: { ...body, from: "2026-12-01", to: "2026-10-01" } })).statusCode, 400);
+  assert.equal((await call({ body: { ...body, csv: "Content,Views\nx,1\n" } })).statusCode, 400);
+  const p = await call({ body: { ...body, preview: true, csv: studioCsv([[V.V1, 20000, 5], ["ZZZZZZZZZZ9", 5, 1]]) } });
+  assert.equal(p.statusCode, 200, JSON.stringify(p.body));
+  assert.deepEqual([p.body.matched, p.body.unmatched, p.body.impressions], [1, 1, 20000]);
+  assert.equal(db.data(`ytVideos/${V.V1}`).studioReach, undefined, "preview saved nothing");
+});
+
+test("studio import joins API days after the export without double counting; re-import replaces", async () => {
+  await sync("videos");
+  const r = await call({ body: { action: "studio-import", csv: studioCsv([[V.V1, 20000, 5], [V.V2, 1000, 2]]), from: null, to: TODAY, fileName: "Table data.csv" } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  let v1 = db.data(`ytVideos/${V.V1}`);
+  assert.deepEqual([v1.studioReach.impressions, v1.studioReach.ctr, v1.studioReach.to], [20000, 0.05, TODAY]);
+  assert.deepEqual([v1.reach.after.cutoff, v1.reach.after.impressions], [TODAY, 0]);
+  assert.equal(db.data("ytAnalytics/status").sync.studio.state, "ok");
+
+  // API reach for a day inside the Studio range: counted in reach totals but not in "after".
+  await sync("history");
+  const csv = (imp) => `date,channel_id,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr
+20261009,${CH},${V.V1},${imp},0.05
+`;
+  yt.files["/r1"] = csv(1000);
+  yt.reports = [{ id: "r1", startTime: "2026-10-09T07:00:00Z", createTime: "2026-10-11T00:00:00Z", downloadUrl: "https://youtubereporting.googleapis.com/r1" }];
+  await sync("history");
+  v1 = db.data(`ytVideos/${V.V1}`);
+  assert.equal(v1.reach.impressions, 1000);
+  assert.equal(v1.reach.after.impressions, 0, "a day already inside the Studio export isn't added on top");
+  assert.equal(require("./metrics").combinedReach(v1.reach, v1.studioReach).impressions, 20000);
+
+  // Re-import without V2: V2's Studio numbers are cleared, V1 replaced.
+  await call({ body: { action: "studio-import", csv: studioCsv([[V.V1, 25000, 4]]), to: TODAY } });
+  assert.equal(db.data(`ytVideos/${V.V1}`).studioReach.impressions, 25000);
+  assert.equal(db.data(`ytVideos/${V.V2}`).studioReach, null);
+});
+
+test("studio import waits for a running sync", async () => {
+  await sync("videos");
+  await db.doc("ytAnalytics/lock").set({ runId: "x", op: "history", startedAt: Date.now(), expiresAt: Date.now() + 60e3 });
+  const r = await call({ body: { action: "studio-import", csv: studioCsv([[V.V1, 20000, 5]]), to: TODAY } });
+  assert.equal(r.statusCode, 409);
 });

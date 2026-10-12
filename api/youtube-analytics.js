@@ -18,6 +18,9 @@
 //   ignore         { videoId, ignored }
 //   publish        { videoId, confirm: true, tags } add to the public site
 //   traffic        { videoId } one video's traffic sources
+//   studio-import  { csv, fileName, from, to, preview } impressions/CTR from a
+//                  YouTube Studio export (server/youtube-analytics/studio.js);
+//                  preview: true parses and matches without saving
 // Reads (status, videos, daily rows, rollups) come straight from Firestore
 // (admin read in firestore.rules); every write goes through here.
 //
@@ -142,6 +145,13 @@ module.exports = async function handler(req, res) {
       case "associate": return res.status(200).json(await require("../server/youtube-analytics/associations").associate(db, uid, body));
       case "ignore": return res.status(200).json(await require("../server/youtube-analytics/associations").setIgnored(db, uid, body));
       case "publish": return res.status(200).json(await require("../server/youtube-analytics/associations").publishToSite(db, uid, body));
+      case "studio-import": {
+        const { runOp } = require("../server/youtube-analytics/runs");
+        const studio = require("../server/youtube-analytics/studio");
+        // A preview writes nothing, so it doesn't take the sync lock.
+        if (body.preview) return res.status(200).json(await studio.importStudio({ db, uid, counts: {}, inc() {}, error() {} }, body));
+        return res.status(200).json(await runOp(db, "studio", { trigger: "manual", uid, budgetMs: 60e3 }, (ctx) => studio.importStudio(ctx, body)));
+      }
       case "traffic": return res.status(200).json(await require("../server/youtube-analytics/analytics").videoTrafficSources(db, body.videoId));
       default: return res.status(400).json({ error: "unknown action" });
     }
