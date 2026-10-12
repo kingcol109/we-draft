@@ -12,6 +12,8 @@ import ArticlesManager from "../components/ArticlesManager";
 import ContentCalendarManager from "../components/ContentCalendarManager";
 import LoadingSpinner from "../components/LoadingSpinner";
 import VideoSuggester from "../components/VideoSuggester";
+import TrendSuggester from "../components/TrendSuggester";
+import VideoWorkshop, { addWorkshopIdea } from "../components/VideoWorkshop";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminStreamManager from "../components/AdminStreamManager";
@@ -245,9 +247,31 @@ function nextFebFirstUTC(from = new Date()) {
   return from < thisYear ? thisYear : new Date(Date.UTC(y + 1, 1, 1));
 }
 
+// Players section: two groups, each with its own sub-tabs. A group's tab
+// reopens its last-used sub-tab.
+const PLAYER_GROUPS = [
+  {
+    key: "data", label: "Data Management", tabs: [
+      { key: "players", label: "Player Data" },
+      { key: "universe", label: "CFB Universe" },
+      { key: "suggestAdds", label: "Suggested Adds" },
+      { key: "portal", label: "Transfer Portal" },
+      { key: "recruits", label: "Recruits" },
+    ],
+  },
+  {
+    key: "content", label: "Content", tabs: [
+      { key: "historical", label: "Historical" },
+      { key: "comps", label: "Comps" },
+      { key: "traits", label: "Traits" },
+      { key: "trends", label: "Trends" },
+      { key: "dummy", label: "Dummy Content" },
+    ],
+  },
+];
+
 const SECTIONS = [
-  { key: "players", label: "Player Data", icon: "🏈", ready: true },
-  { key: "trends", label: "Trends", icon: "📈", ready: true },
+  { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
@@ -534,6 +558,8 @@ function PlayerDataSection() {
   const [removing, setRemoving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [playerDataTab, setPlayerDataTab] = useState("players");
+  // Each PLAYER_GROUPS group's last-used sub-tab.
+  const [groupTab, setGroupTab] = useState({ data: "players", content: "historical" });
   // Transfer Portal — "committed to" school typed while resolving a
   // player's portal status (see handleResolvePortal). Its own piece of
   // state rather than part of formState since it isn't a normal editable
@@ -1267,36 +1293,51 @@ function PlayerDataSection() {
     }
   };
 
+  const activeGroup = PLAYER_GROUPS.find((g) => g.tabs.some((t) => t.key === playerDataTab)) || PLAYER_GROUPS[0];
+
   return (
     <div>
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-        {[
-          { key: "players", label: "Players" },
-          { key: "universe", label: "CFB Universe" },
-          { key: "portal", label: "Transfer Portal" },
-          { key: "recruits", label: "Recruits" },
-          { key: "historical", label: "Historical" },
-          { key: "comps", label: "Comps" },
-          { key: "traits", label: "Traits" },
-          { key: "dummy", label: "Dummy Content" },
-        ].map((t) => (
+        {PLAYER_GROUPS.map((g) => {
+          const active = g.key === activeGroup.key;
+          return (
+            <button
+              key={g.key}
+              onClick={() => setPlayerDataTab(groupTab[g.key])}
+              style={{
+                padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+                textTransform: "uppercase", letterSpacing: "0.05em",
+                border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+                background: active ? BLUE : "#fff",
+                color: active ? "#fff" : BLUE,
+              }}
+            >
+              {g.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", paddingLeft: "12px", borderLeft: "3px solid " + GOLD }}>
+        {activeGroup.tabs.map((t) => (
           <button
             key={t.key}
-            onClick={() => setPlayerDataTab(t.key)}
+            onClick={() => { setPlayerDataTab(t.key); setGroupTab((prev) => ({ ...prev, [activeGroup.key]: t.key })); }}
             style={{
-              padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+              padding: "5px 14px", fontWeight: 900, fontSize: "12px",
               textTransform: "uppercase", letterSpacing: "0.05em",
-              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
-              background: playerDataTab === t.key ? BLUE : "#fff",
-              color: playerDataTab === t.key ? "#fff" : BLUE,
+              border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+              background: playerDataTab === t.key ? GOLD : "#fff",
+              color: playerDataTab === t.key ? "#fff" : "#8a5a00",
             }}
           >
             {t.label}
           </button>
         ))}
       </div>
-      {playerDataTab === "universe" ? (
+      {playerDataTab === "universe" || playerDataTab === "suggestAdds" ? (
         <CfbUniverseSearch
+          key={playerDataTab}
+          mode={playerDataTab === "suggestAdds" ? "suggest" : "search"}
           allPlayers={allPlayers}
           generateSlug={generateSlug}
           stateNames={STATE_NAME_BY_ABBR}
@@ -1312,6 +1353,8 @@ function PlayerDataSection() {
         <CompsSection />
       ) : playerDataTab === "traits" ? (
         <TraitsSection />
+      ) : playerDataTab === "trends" ? (
+        <TrendsSection />
       ) : playerDataTab === "dummy" ? (
         <DummySection />
       ) : (
@@ -3979,7 +4022,7 @@ function HistoricalCompsView({ records }) {
                     </optgroup>
                   ))}
                 </select>
-                <div style={{ fontSize: "11px", color: "#888" }}>Traits come from the Strengths/Weaknesses entered on the recruit in Player Data → Recruits.</div>
+                <div style={{ fontSize: "11px", color: "#888" }}>Traits come from the Strengths/Weaknesses entered on the recruit in Players → Recruits.</div>
               </>
             ) : (
               <>
@@ -6693,6 +6736,7 @@ function TrendsSection() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [showSuggest, setShowSuggest] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -6921,9 +6965,31 @@ function TrendsSection() {
     }
   };
 
+  // A Suggest Trends pick: open him in the edit panel with the suggested
+  // label (null = a cooling trend, opened as-is to review). Not saved until
+  // the admin hits Save.
+  const pickSuggestion = (p, label) => {
+    selectPlayer(p);
+    if (label) setFormState((prev) => ({ ...prev, Trend: label }));
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+        {showSuggest ? (
+          <TrendSuggester players={allPlayers} trendsMap={trendsMap} onPick={pickSuggestion} onClose={() => setShowSuggest(false)} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowSuggest(true)}
+            style={{
+              alignSelf: "flex-start", background: BLUE, color: "#fff", border: "none", borderRadius: "6px",
+              padding: "8px 16px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
+            }}
+          >
+            💡 Suggest Trends
+          </button>
+        )}
         <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
           <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
             <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -7420,6 +7486,18 @@ const BLANK_VIDEO_ITEM = { type: "player", playerId: "", recruitId: "", commitme
 // on this — so untagged content doesn't just vanish once tagging exists.
 const VIDEO_TAGS = ["Draft", "Recruiting", "CFB"];
 
+// Videos section: Video Management (the list + editor) and Video Creation's
+// sub-tabs. A group without tabs is a single tab of its own.
+const VIDEO_GROUPS = [
+  { key: "manage", label: "Video Management" },
+  {
+    key: "create", label: "Video Creation", tabs: [
+      { key: "suggest", label: "Suggest Video" },
+      { key: "workshop", label: "Video Workshop" },
+    ],
+  },
+];
+
 function VideosSection() {
   const [videos, setVideos] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
@@ -7445,7 +7523,10 @@ function VideosSection() {
   const [saveMessage, setSaveMessage] = useState("");
   const [migrating, setMigrating] = useState(false);
   const [migrateMessage, setMigrateMessage] = useState("");
-  const [showSuggest, setShowSuggest] = useState(false);
+  // VIDEO_GROUPS tab: "manage" (the list + editor), "suggest", "workshop".
+  const [videoTab, setVideoTab] = useState("manage");
+  // The workshop idea to open (just added from Suggest Video).
+  const [workshopFocus, setWorkshopFocus] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -7572,8 +7653,20 @@ function VideosSection() {
     setSaveMessage("");
   };
 
-  // A pick from the Suggest panel: a new long-form video with that player
-  // already tagged and the suggested title filled in.
+  // Suggest Video's "+ Create Video": a Video Workshop idea for him with
+  // the suggested title, opened in the workshop.
+  const addSuggestionToWorkshop = async (player, title) => {
+    try {
+      setWorkshopFocus(await addWorkshopIdea(player, title));
+      setVideoTab("workshop");
+    } catch (e) {
+      console.error("Workshop add error:", e);
+      alert("Failed to add to the Video Workshop — check console.");
+    }
+  };
+
+  // The Video Workshop's "Create Video": a new long-form video with that
+  // player already tagged and the working title filled in.
   const startSuggestedVideo = (player, title) => {
     setFormatFilter("videos");
     setSelectedVideo({ id: null, isNew: true });
@@ -7589,7 +7682,7 @@ function VideosSection() {
       items: [{ ...BLANK_VIDEO_ITEM, playerId: player.id }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
     });
     setSaveMessage("");
-    setShowSuggest(false);
+    setVideoTab("manage");
   };
 
   const handleFieldChange = (field, value) => {
@@ -7812,9 +7905,50 @@ function VideosSection() {
     }
   };
 
+  const activeVideoGroup = VIDEO_GROUPS.find((g) => (g.tabs ? g.tabs.some((t) => t.key === videoTab) : g.key === videoTab)) || VIDEO_GROUPS[0];
+
   return (
     <>
-    {showSuggest && (
+    <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+      {VIDEO_GROUPS.map((g) => {
+        const active = g.key === activeVideoGroup.key;
+        return (
+          <button
+            key={g.key}
+            onClick={() => setVideoTab(g.tabs ? (activeVideoGroup.key === g.key ? videoTab : g.tabs[0].key) : g.key)}
+            style={{
+              padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: active ? BLUE : "#fff",
+              color: active ? "#fff" : BLUE,
+            }}
+          >
+            {g.label}
+          </button>
+        );
+      })}
+    </div>
+    {activeVideoGroup.tabs && (
+      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", paddingLeft: "12px", borderLeft: "3px solid " + GOLD }}>
+        {activeVideoGroup.tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setVideoTab(t.key)}
+            style={{
+              padding: "5px 14px", fontWeight: 900, fontSize: "12px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer",
+              background: videoTab === t.key ? GOLD : "#fff",
+              color: videoTab === t.key ? "#fff" : "#8a5a00",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    )}
+    {videoTab === "suggest" && (
       <VideoSuggester
         players={allPlayers}
         videos={videos}
@@ -7823,10 +7957,13 @@ function VideosSection() {
         // A suggestion added to We-Draft from the panel — taggable right away.
         onPlayerAdded={(p) => setAllPlayers((prev) => [...prev, p].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")))}
         onPlayerUpdated={(p) => setAllPlayers((prev) => prev.map((x) => (x.id === p.id ? p : x)))}
-        onCreate={startSuggestedVideo}
-        onClose={() => setShowSuggest(false)}
+        // "+ Create Video" starts a Video Workshop idea.
+        onCreate={addSuggestionToWorkshop}
+        onClose={() => setVideoTab("manage")}
       />
     )}
+    {videoTab === "workshop" && <VideoWorkshop players={allPlayers} focusId={workshopFocus} onCreateVideo={startSuggestedVideo} />}
+    {videoTab === "manage" && (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -7834,24 +7971,11 @@ function VideosSection() {
             Videos
           </div>
           <button
-            onClick={() => setShowSuggest((s) => !s)}
-            disabled={loading}
-            title="Rank trending players by last game, season stats, and page views"
-            style={{
-              marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid " + GOLD,
-              borderRadius: "6px", padding: "5px 11px", fontWeight: 900, fontSize: "11px",
-              textTransform: "uppercase", letterSpacing: "0.04em", cursor: loading ? "default" : "pointer",
-              opacity: loading ? 0.6 : 1,
-            }}
-          >
-            💡 Suggest Video
-          </button>
-          <button
             onClick={migrateLegacyVideos}
             disabled={migrating || loading}
             title="Backfill playerIds on videos still using the old slug-only schema"
             style={{
-              background: "transparent", color: "#fff", border: "2px solid #fff",
+              marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid #fff",
               borderRadius: "6px", padding: "5px 11px", fontWeight: 900, fontSize: "11px",
               textTransform: "uppercase", letterSpacing: "0.04em", cursor: migrating || loading ? "default" : "pointer",
               opacity: migrating || loading ? 0.6 : 1,
@@ -8272,6 +8396,7 @@ function VideosSection() {
         )}
       </div>
     </div>
+    )}
     </>
   );
 }
@@ -13839,7 +13964,6 @@ export default function AdminPanel() {
 
           <div>
             {activeSection === "players" && <PlayerDataSection />}
-            {activeSection === "trends" && <TrendsSection />}
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "branding" && <BrandingSection />}

@@ -20,16 +20,30 @@
 //   - the roster row gets the slug, so the team page's Roster tab links him
 //     right away instead of after the next weekly sync.
 // A same-name We-Draft player shows as a possible match with "Link" (no new
-// profile) and "Add anyway".
+// profile) and "Add anyway" — so does a nickname: same school and last
+// name, first names that fit together (Dom / Dominic, TJ / Tarvos — see
+// firstNamesFit).
+//
+// mode="suggest" (Admin → Players → Data Management → Suggested Adds) swaps
+// the search for a ranked list of roster players not on We-Draft yet: PFF
+// national rank at his position (75%) and season production (25%,
+// seasonStats.js, a percentile within his stat group; OL — no stats — on
+// PFF alone). Only players with a ranked PFF grade (enough snaps) qualify.
+// PFF grades (pffData.js) also set the default We-Draft position (ED →
+// EDGE, DI → DL) and show in the PFF column — admin only; PFF data is never
+// displayed on the public site.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { addDoc, collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { loadPffByCfbdId, PFF_TO_WD, rankPct } from "./pffData";
+import { groupOf, production, statLine } from "./seasonStats";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 const SEASON = 2026;
 const MAX_RESULTS = 60;
+const SUGGEST_COUNT = 50; // per page — "Show more" adds another page
 
 const WD_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB", "K", "P", "LS"];
 // CFBD roster position → We-Draft position. CFBD lumps ends and tackles
@@ -53,6 +67,16 @@ const ELIGIBLE_CHOICES = [SEASON + 1, SEASON + 2, SEASON + 3, SEASON + 4].map(St
 const CLASS = (yr) => (yr == null ? "" : yr > 1000 ? "FR" : ["", "FR", "SO", "JR", "SR"][yr] || "GR");
 const heightOf = (ht) => (ht ? `${Math.floor(ht / 12)}'${ht % 12}"` : "");
 const norm = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+// Nickname check for two first names at the same school with the same last
+// name: one is the start of the other (3+ letters: Dom / Dominic), or one
+// is initials and they share a first letter (TJ / Tarvos, J.J. / Jaylen).
+const isInitials = (s) => /^([A-Z]\.?){2,3}$/.test(String(s || "").trim());
+function firstNamesFit(a, b) {
+  const x = norm(a).replace(/[^a-z]/g, ""), y = norm(b).replace(/[^a-z]/g, "");
+  if (!x || !y || x === y) return false;
+  if (x.length >= 3 && y.length >= 3 && (x.startsWith(y) || y.startsWith(x))) return true;
+  return (isInitials(a) || isInitials(b)) && x[0] === y[0];
+}
 
 // Shared with VideoSuggester.js ("Add to We-Draft & Create Video") — p is a
 // roster row plus its roster's school/team/teamId; roster is that roster
@@ -91,7 +115,7 @@ export async function addRosterPlayer(p, roster, { pos, eligible, live }, { allP
   return { player: { id: ref.id, ...payload }, rosterPlayers };
 }
 
-export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames, onAdded }) {
+export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames, onAdded, mode = "search" }) {
   const [rosters, setRosters] = useState(null); // [{ id, school, players }]
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
@@ -100,6 +124,15 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
   const [busy, setBusy] = useState(null); // cfbd id being written
   const [done, setDone] = useState({}); // cfbd id → slug (added/linked this session)
   const [forceAdd, setForceAdd] = useState({}); // cfbd id → true after "Add anyway"
+  const [pffMap, setPffMap] = useState(null); // cfbd id → PFF record
+  const suggestMode = mode === "suggest";
+  const [posFilter, setPosFilter] = useState("");
+  const [classFilter, setClassFilter] = useState("");
+  const [shown, setShown] = useState(SUGGEST_COUNT);
+  // New filters start back at the first page.
+  useEffect(() => { setShown(SUGGEST_COUNT); }, [schoolFilter, posFilter, classFilter]);
+
+  useEffect(() => { loadPffByCfbdId().then(setPffMap); }, []);
 
   useEffect(() => {
     getDocs(collection(db, "cfbRosters"))
@@ -110,7 +143,8 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
   // Every roster player, flattened once.
   const universe = useMemo(() => (rosters || []).flatMap((r) => r.players.map((p) => ({
     ...p, rosterId: r.id, school: r.school, team: r.team, teamId: r.teamId, key: norm(`${p.first} ${p.last}`),
-  }))), [rosters]);
+    pff: pffMap?.get(String(p.id)) || null,
+  }))), [rosters, pffMap]);
 
   const byName = useMemo(() => {
     const m = new Map();
@@ -121,6 +155,46 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
     });
     return m;
   }, [allPlayers]);
+  const bySchoolLast = useMemo(() => {
+    const m = new Map();
+    allPlayers.forEach((p) => {
+      const k = `${norm(p.School)}|${norm(p.Last)}`;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(p);
+    });
+    return m;
+  }, [allPlayers]);
+  // Same full name anywhere, or a likely nickname at his school.
+  const matchesOf = (p) => [
+    ...(byName.get(p.key) || []),
+    ...(bySchoolLast.get(`${norm(p.school)}|${norm(p.last)}`) || []).filter((w) => firstNamesFit(p.first, w.First)),
+  ];
+
+  // Suggest mode: not on We-Draft, ranked PFF grade, then the filters.
+  const suggestions = useMemo(() => {
+    if (!suggestMode) return [];
+    // Every unadded player with a ranked PFF grade; season production is a
+    // percentile within his stat group across all of them (not just the
+    // filtered few), so a filter doesn't reshuffle the scale.
+    const all = universe
+      .filter((p) => p.pff?.rk != null && !p.slug && !done[p.id])
+      .map((p) => {
+        const wdPos = PFF_TO_WD[p.pff.pos] || POS_MAP[p.pos] || "";
+        const group = groupOf(wdPos);
+        return { ...p, wdPos, group, prod: production(group, p.s) };
+      });
+    const byGroup = new Map();
+    all.forEach((p) => { if (!byGroup.has(p.group)) byGroup.set(p.group, []); byGroup.get(p.group).push(p.prod); });
+    const prodPct = (p) => {
+      const list = byGroup.get(p.group);
+      return list.length > 1 ? list.filter((x) => x < p.prod).length / (list.length - 1) : 0.5;
+    };
+    return all
+      .filter((p) => (!schoolFilter || p.school === schoolFilter) && (!posFilter || p.wdPos === posFilter) && (!classFilter || eligibleFor(p) === classFilter))
+      // OL have no box-score stats — PFF grade alone.
+      .map((p) => ({ ...p, score: Math.round((p.group === "ol" ? rankPct(p.pff) : rankPct(p.pff) * 0.75 + prodPct(p) * 0.25) * 100) }))
+      .sort((a, b) => b.score - a.score);
+  }, [suggestMode, universe, done, schoolFilter, posFilter, classFilter]);
 
   const results = useMemo(() => {
     const t = norm(q);
@@ -131,7 +205,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
       .slice(0, MAX_RESULTS);
   }, [universe, q, schoolFilter]);
 
-  const editOf = (p) => ({ pos: POS_MAP[p.pos] || "", eligible: eligibleFor(p), live: true, ...edits[p.id] });
+  const editOf = (p) => ({ pos: PFF_TO_WD[p.pff?.pos] || POS_MAP[p.pos] || "", eligible: eligibleFor(p), live: true, ...edits[p.id] });
   const setEdit = (p, field, value) => setEdits((prev) => ({ ...prev, [p.id]: { ...editOf(p), ...prev[p.id], [field]: value } }));
 
   const applyRoster = (p, players) => {
@@ -166,6 +240,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
     try { await link(p, wd.id, wd.Slug); } catch (e) { console.error(e); alert("Failed to link — check console."); } finally { setBusy(null); }
   };
 
+  const rows = suggestMode ? suggestions.slice(0, shown) : results;
   const th = { padding: "8px 10px", fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: "#fff", textAlign: "left", whiteSpace: "nowrap" };
   const td = { padding: "8px 10px", fontSize: "13px", borderBottom: "1px solid #eef1f5", verticalAlign: "middle" };
   const sel = { padding: "4px 6px", fontSize: "12px", fontWeight: 700, border: "1px solid #c9d3e0", borderRadius: "5px" };
@@ -174,41 +249,62 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
   return (
     <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
       <div style={{ background: BLUE, padding: "10px 16px", color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-        CFB Universe {rosters ? `· ${universe.length.toLocaleString()} players on ${rosters.length} rosters` : ""}
+        {suggestMode ? "Suggested Adds" : "CFB Universe"} {rosters ? `· ${universe.length.toLocaleString()} players on ${rosters.length} rosters` : ""}
       </div>
       <div style={{ display: "flex", gap: "10px", padding: "12px 16px", background: "#f6f8fb", borderBottom: "1px solid #e3e8ef", flexWrap: "wrap" }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search any college player by name…" autoFocus
-          style={{ flex: 1, minWidth: "240px", padding: "9px 12px", fontSize: "14px", fontWeight: 700, border: `2px solid ${BLUE}`, borderRadius: "8px" }} />
+        {suggestMode ? (
+          <div style={{ flex: 1, minWidth: "240px", display: "flex", alignItems: "center", fontSize: "12px", fontWeight: 800, color: "#3b4756" }}>
+            Not on We-Draft yet, ranked by PFF season grade (75%) and season stats (25%) — OL on PFF alone.
+          </div>
+        ) : (
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search any college player by name…" autoFocus
+            style={{ flex: 1, minWidth: "240px", padding: "9px 12px", fontSize: "14px", fontWeight: 700, border: `2px solid ${BLUE}`, borderRadius: "8px" }} />
+        )}
         <select value={schoolFilter} onChange={(e) => setSchoolFilter(e.target.value)} style={{ ...sel, fontSize: "13px", padding: "8px 10px" }}>
           <option value="">All schools</option>
           {(rosters || []).map((r) => <option key={r.id} value={r.school}>{r.school}</option>)}
         </select>
+        {suggestMode && (
+          <>
+            <select value={posFilter} onChange={(e) => setPosFilter(e.target.value)} style={{ ...sel, fontSize: "13px", padding: "8px 10px" }}>
+              <option value="">All positions</option>
+              {WD_POSITIONS.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+            <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)} style={{ ...sel, fontSize: "13px", padding: "8px 10px" }}>
+              <option value="">All classes</option>
+              {ELIGIBLE_CHOICES.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </>
+        )}
       </div>
 
       {!rosters ? (
         <div style={{ padding: "28px", textAlign: "center", color: "#7a8597", fontWeight: 700 }}>Loading rosters…</div>
       ) : error ? (
         <div style={{ padding: "28px", textAlign: "center", color: "#b23b3b", fontWeight: 700 }}>{error}</div>
-      ) : !results.length ? (
+      ) : !rows.length ? (
         <div style={{ padding: "28px", textAlign: "center", color: "#7a8597", fontWeight: 700 }}>
-          {norm(q).length < 2 && !schoolFilter ? "Type at least 2 letters of a name, or pick a school." : "No players found."}
+          {suggestMode ? (pffMap?.size ? "No unadded players with a ranked PFF grade match those filters." : "No PFF grades loaded yet.")
+            : norm(q).length < 2 && !schoolFilter ? "Type at least 2 letters of a name, or pick a school." : "No players found."}
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
             <thead style={{ background: BLUE }}>
               <tr>
-                <th style={th}>Player</th><th style={th}>School</th><th style={th}>CFBD</th><th style={th}>Class</th>
+                {suggestMode && <th style={th}>Score</th>}
+                <th style={th}>Player</th><th style={th}>School</th><th style={th}>CFBD</th><th style={th}>PFF</th><th style={th}>Class</th>
                 <th style={th}>Ht / Wt</th><th style={th}>Position</th><th style={th}>Draft class</th><th style={th}>Live</th><th style={th} />
               </tr>
             </thead>
             <tbody>
-              {results.map((p) => {
+              {rows.map((p) => {
                 const slug = done[p.id] || p.slug;
-                const matches = byName.get(p.key) || [];
+                const matches = matchesOf(p);
                 const e = editOf(p);
                 return (
                   <tr key={`${p.rosterId}-${p.id}`}>
+                    {suggestMode && <td style={{ ...td, fontWeight: 900, fontSize: "16px", color: BLUE }}>{p.score}</td>}
                     <td style={{ ...td, fontWeight: 900, color: "#1d2733" }}>
                       {p.first} {p.last}
                       {p.no != null && <span style={{ color: "#9aa5b4", fontWeight: 700, marginLeft: "6px" }}>#{p.no}</span>}
@@ -216,6 +312,16 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                     </td>
                     <td style={td}>{p.school}</td>
                     <td style={td}>{p.pos || "—"}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }} title="PFF — admin only">
+                      {p.pff?.rk != null ? (
+                        <>
+                          <span style={{ fontWeight: 900 }}>{p.pff.g}</span>
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#7a8597" }}> #{p.pff.rk}/{p.pff.of} {p.pff.pos}</span>
+                          {!suggestMode && p.pff.w && <div style={{ fontSize: "11px", fontWeight: 700, color: "#7a8597" }}>latest {p.pff.w.g} (wk {p.pff.w.wk})</div>}
+                        </>
+                      ) : "—"}
+                      {suggestMode && statLine(p.group, p.s) ? <div style={{ fontSize: "11px", fontWeight: 700, color: "#3b4756", whiteSpace: "normal", maxWidth: "260px" }}>{statLine(p.group, p.s)}</div> : null}
+                    </td>
                     <td style={td}>{CLASS(p.yr)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{[heightOf(p.ht), p.wt].filter(Boolean).join(" / ") || "—"}</td>
                     {slug ? (
@@ -243,7 +349,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "flex-end" }}>
                               {matches.map((m) => (
                                 <div key={m.id} style={{ display: "flex", gap: "6px", alignItems: "center", fontSize: "11px", fontWeight: 700, color: "#5b6b7f" }}>
-                                  <span>Match: {m.School} · {m.Position} · {m.Eligible}</span>
+                                  <span>Match: {norm(`${m.First} ${m.Last}`) !== p.key ? `${m.First} ${m.Last} · ` : ""}{m.School} · {m.Position} · {m.Eligible}</span>
                                   <button disabled={busy === p.id} onClick={() => linkExisting(p, m)} style={btn("#1f8a4c")}>Link</button>
                                 </div>
                               ))}
@@ -260,7 +366,17 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
               })}
             </tbody>
           </table>
-          {results.length === MAX_RESULTS && (
+          {suggestMode && (
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", fontSize: "12px", fontWeight: 700, color: "#7a8597" }}>
+              Showing {rows.length} of {suggestions.length.toLocaleString()}
+              {rows.length < suggestions.length && (
+                <button onClick={() => setShown((n) => n + SUGGEST_COUNT)} style={{ ...btn(BLUE), padding: "7px 16px", fontSize: "12px" }}>
+                  Show {Math.min(SUGGEST_COUNT, suggestions.length - rows.length)} more
+                </button>
+              )}
+            </div>
+          )}
+          {!suggestMode && results.length === MAX_RESULTS && (
             <div style={{ padding: "8px 16px", fontSize: "12px", fontWeight: 700, color: "#7a8597" }}>Showing the first {MAX_RESULTS} — narrow the search to see more.</div>
           )}
         </div>

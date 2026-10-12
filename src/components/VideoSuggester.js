@@ -1,7 +1,7 @@
 // src/components/VideoSuggester.js
 //
 // Admin → Videos → "Suggest Video": ranks the players most worth a video
-// right now, filtered by position and school level, and explains each pick.
+// right now, filtered by position(s) and school level, and explains each pick.
 // The pool is every FBS roster player (cfbRosters/{teamId}, written weekly
 // by scripts/syncCfbdRosters.js), not just We-Draft profiles — a player
 // with no profile can be added to We-Draft straight from his card (the CFB
@@ -18,6 +18,12 @@
 //   Season      season production (the roster row's season totals, plus any
 //               game played since the roster sync) and a bump for a top-50
 //               national rank (cfbLeaders/current)
+//   PFF grade   his PFF season grade, blended with his latest game's
+//               (pffGrades/{teamId}, scripts/syncPffGrades.js) — only grades
+//               with enough snaps to carry a national rank count. The PFF
+//               focus swaps in one specific grade (pass rush, coverage…)
+//               and keeps only players ranked in it. PFF data is back
+//               office only: never display it on the public site.
 //   Views       player-page views over the last 7 days (analytics/{slug},
 //               scripts/syncGoogleAnalytics.js) — We-Draft players only
 //   Momentum    those 7-day views vs the player's 30-day pace
@@ -34,6 +40,7 @@ import { useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { POS_MAP, eligibleFor, addRosterPlayer } from "./CfbUniverseSearch";
+import { groupOf, production, statLine } from "./seasonStats";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -53,7 +60,7 @@ const RESULT_COUNT = 10;
 const LAST_GAME_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const POSITIONS = ["All", "QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB", "K"];
+const POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB", "K"];
 
 // "Powerhouse" is a judgment call, not a conference — edit this list to
 // change who counts. Everyone else in the P4 conferences is "Other P4"; the
@@ -76,21 +83,45 @@ const LEVEL_LABEL = { powerhouse: "Powerhouse", p4: "Other P4", g5: "G5" };
 // momentum are unknown — scored as average traffic (NO_PAGE), so a Strong
 // Views weight favors players with proven traffic and a Weak one lets
 // stat-only discoveries rise. One with no stats (OL, unlinked) is scored on
-// views + momentum alone.
+// views + momentum alone. A PFF grade (any position, OL included) adds the
+// PFF signal; without one the rest are reweighted without it.
 const NO_PAGE = 0.5;
-const SIGNALS = ["last", "breakout", "season", "views", "momentum"];
+const SIGNALS = ["last", "breakout", "season", "pff", "views", "momentum"];
+const STAT_SIGNALS = ["last", "breakout", "season"];
 const VIEW_SIGNALS = ["views", "momentum"];
-const SIGNAL_LABEL = { last: "Last game", breakout: "Breakout", season: "Season", views: "Views (7d)", momentum: "Momentum" };
+const SIGNAL_LABEL = { last: "Last game", breakout: "Breakout", season: "Season", pff: "PFF grade", views: "Views (7d)", momentum: "Momentum" };
 const SIGNAL_HELP = {
   last: "Production in his team's most recent game",
   breakout: "That game vs his average over the rest of the season",
   season: "Season production + top-50 national rank",
+  pff: "PFF season grade blended with his last game's — or the PFF focus grade",
   views: "Player-page views, last 7 days (We-Draft players only)",
   momentum: "7-day views vs his 30-day pace (We-Draft players only)",
 };
-const STRENGTHS = [{ key: "strong", label: "Strong", value: 3 }, { key: "medium", label: "Medium", value: 2 }, { key: "weak", label: "Weak", value: 1 }];
+const STRENGTHS = [{ key: "max", label: "Max", value: 5 }, { key: "strong", label: "Strong", value: 3 }, { key: "medium", label: "Medium", value: 2 }, { key: "weak", label: "Weak", value: 1 }];
 const STRENGTH_VALUE = Object.fromEntries(STRENGTHS.map((x) => [x.key, x.value]));
-const DEFAULT_STRENGTH = { last: "strong", breakout: "weak", season: "medium", views: "medium", momentum: "weak" };
+// PFF leads; box-score stats still count, lightly.
+const DEFAULT_STRENGTH = { last: "weak", breakout: "weak", season: "weak", pff: "max", views: "medium", momentum: "weak" };
+
+// PFF focus — "overall" is his position grade (blended with his latest
+// game); the rest are the specific grades scripts/syncPffGrades.js SUBS
+// writes (same keys). title: the noun for the title idea.
+const PFF_FOCUS = [
+  { key: "overall", label: "Overall" },
+  { key: "pass", label: "Passing", title: "Passer" },
+  { key: "run", label: "Rushing", title: "Runner" },
+  { key: "route", label: "Route running", title: "Route Runner" },
+  { key: "hands", label: "Hands", title: "Pair of Hands" },
+  { key: "pblk", label: "Pass block", title: "Pass Blocker" },
+  { key: "rblk", label: "Run block", title: "Run Blocker" },
+  { key: "prush", label: "Pass rush", title: "Pass Rusher" },
+  { key: "rdef", label: "Run defense", title: "Run Defender" },
+  { key: "cov", label: "Coverage", title: "Cover Man" },
+  { key: "tkl", label: "Tackling", title: "Tackler" },
+];
+const FOCUS_BY_KEY = Object.fromEntries(PFF_FOCUS.map((f) => [f.key, f]));
+// His grade in a specific focus: [grade, snaps, rank, of] or undefined.
+const focusGrade = (c, focus) => c.pff?.x?.[focus];
 
 function normalizedWeights(strength, keys) {
   const total = keys.reduce((t, k) => t + STRENGTH_VALUE[strength[k]], 0);
@@ -106,8 +137,6 @@ function collegeClasses() {
 }
 
 const n = (v) => (v == null || v === "" ? 0 : Number(v) || 0);
-// Box scores carry kicking as "made/att" strings; season totals as FGM/XPM.
-const made = (v) => n(String(v || "").split("/")[0]);
 const fmt = (v) => Math.round(v).toLocaleString();
 const msOf = (ts) => (ts?.toMillis ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : new Date(ts || 0).getTime() || 0);
 // "3-2" / "3-2-1" → games played.
@@ -118,53 +147,6 @@ function tierOf(school, conf) {
   if (P4_CONFS.has(conf) || school === "Notre Dame") return "p4";
   if (G5_CONFS.has(conf)) return "g5";
   return null;
-}
-
-function groupOf(pos) {
-  const p = (pos || "").toUpperCase();
-  if (p === "QB") return "qb";
-  if (p === "RB" || p === "WR" || p === "TE") return "skill";
-  if (p === "OL") return "ol";
-  if (p === "K") return "k";
-  if (p === "P") return "p";
-  return "def";
-}
-
-// One production number per position group — works on a single game's box
-// score and on season totals (same category/stat keys, apart from kicking).
-function production(group, s) {
-  if (!s) return 0;
-  const pass = s.passing || {}, rush = s.rushing || {}, rec = s.receiving || {};
-  const def = s.defensive || {}, ints = s.interceptions || {}, k = s.kicking || {}, pnt = s.punting || {};
-  switch (group) {
-    case "qb": return n(pass.YDS) * 0.04 + n(pass.TD) * 4 - n(pass.INT) * 2 + n(rush.YDS) * 0.1 + n(rush.TD) * 6;
-    case "skill": return n(rush.YDS) * 0.1 + n(rush.TD) * 6 + n(rec.REC) * 0.5 + n(rec.YDS) * 0.1 + n(rec.TD) * 6;
-    case "def": return n(def.TOT) + n(def.TFL) * 2 + n(def.SACKS) * 3 + n(def.PD) * 1.5 + n(def["QB HUR"]) + n(ints.INT) * 5 + (n(def.TD) + n(ints.TD)) * 6;
-    case "k": return (k.FGM != null ? n(k.FGM) : made(k.FG)) * 3 + (k.XPM != null ? n(k.XPM) : made(k.XP));
-    case "p": return n(pnt.NO) * 0.5 + n(pnt["In 20"]) * 1.5;
-    default: return 0;
-  }
-}
-
-// "312 pass yds, 3 TD, 45 rush yds" — only the stats that are there.
-function statLine(group, s) {
-  if (!s) return "";
-  const pass = s.passing || {}, rush = s.rushing || {}, rec = s.receiving || {};
-  const def = s.defensive || {}, ints = s.interceptions || {}, k = s.kicking || {};
-  const parts = [];
-  const add = (v, label) => { if (n(v) > 0) parts.push(`${fmt(n(v))} ${label}`); };
-  if (group === "qb") {
-    if (pass["C/ATT"]) parts.push(pass["C/ATT"]);
-    add(pass.YDS, "pass yds"); add(pass.TD, "pass TD"); add(pass.INT, "INT"); add(rush.YDS, "rush yds"); add(rush.TD, "rush TD");
-  } else if (group === "skill") {
-    add(rush.YDS, "rush yds"); add(rush.TD, "rush TD"); add(rec.REC, "rec"); add(rec.YDS, "rec yds"); add(rec.TD, "rec TD");
-  } else if (group === "def") {
-    add(def.TOT, "tkl"); add(def.TFL, "TFL"); add(def.SACKS, n(def.SACKS) === 1 ? "sack" : "sacks"); add(def.PD, "PBU"); add(ints.INT, "INT"); add(n(def.TD) + n(ints.TD), "TD");
-  } else if (group === "k") {
-    if (k.FG) parts.push(`${k.FG} FG`); else add(k.FGM, "FG");
-    if (k.LONG) parts.push(`long ${k.LONG}`);
-  }
-  return parts.join(", ");
 }
 
 // cfbLeaders/current (top 50 per category) → athlete id → best rank.
@@ -205,17 +187,21 @@ function titleIdea(c) {
   const possessive = name.endsWith("s") ? `${name}'` : `${name}'s`;
   if (opp && c.breakout >= 1.5) return `${possessive} Breakout Game vs ${opp}: Is He Rising Up Draft Boards?`;
   if (opp && c.lastProd > c.restAvg * 1.2 && c.signals.last >= 0.6) return `${name} Took Over vs ${opp} — Film Breakdown`;
-  if (c.rank || c.signals.season >= 0.7) return `Is ${name} the Best ${c.position} in College Football?`;
+  const fg = focusGrade(c, c.focus);
+  if (fg && fg[2] <= 10) return `Is ${name} the Best ${FOCUS_BY_KEY[c.focus].title} in College Football?`;
+  if (c.rank || c.signals.season >= 0.7 || (c.pff?.rk && c.pff.rk <= 10)) return `Is ${name} the Best ${c.position} in College Football?`;
   return `Why Everyone Is Talking About ${name}`;
 }
 
 export default function VideoSuggester({ players, videos, generateSlug, stateNames, onPlayerAdded, onPlayerUpdated, onCreate, onClose }) {
-  const [position, setPosition] = useState("All");
+  // Selected positions; empty = All.
+  const [positions, setPositions] = useState([]);
   const [levels, setLevels] = useState(["powerhouse", "p4", "g5"]);
   const [includeOutside, setIncludeOutside] = useState(true);
   const classOptions = useMemo(collegeClasses, []);
   const [classes, setClasses] = useState(classOptions);
   const [strength, setStrength] = useState(DEFAULT_STRENGTH);
+  const [focus, setFocus] = useState("overall");
   const [showWeights, setShowWeights] = useState(false);
   const [results, setResults] = useState(null);
   const [running, setRunning] = useState(false);
@@ -223,7 +209,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
   const [error, setError] = useState("");
   const [poolSize, setPoolSize] = useState(0);
   // Session cache: shared docs once, rosters / box scores as filters need them.
-  const cache = useRef({ base: null, rosters: new Map(), boxes: new Map() });
+  const cache = useRef({ base: null, rosters: new Map(), pff: new Map(), boxes: new Map() });
 
   // playerId -> ms of their most recent video.
   const lastVideoMs = useMemo(() => {
@@ -238,6 +224,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
   const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const playersBySlug = useMemo(() => new Map(players.filter((p) => p.Slug).map((p) => [p.Slug, p])), [players]);
 
+  const togglePosition = (pos) => setPositions((prev) => (prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos]));
   const toggleLevel = (key) => setLevels((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   const toggleClass = (cls) => setClasses((prev) => (prev.includes(cls) ? prev.filter((c) => c !== cls) : [...prev, cls]));
 
@@ -290,6 +277,21 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
     }));
   };
 
+  // PFF grades per team (admin-only docs). A failed read just means no PFF
+  // signal for that team.
+  const loadPff = async (teamIds) => {
+    const { pff } = cache.current;
+    await Promise.all(teamIds.filter((id) => !pff.has(id)).map(async (id) => {
+      try {
+        const snap = await getDoc(doc(db, "pffGrades", id));
+        pff.set(id, snap.exists() ? snap.data().players || {} : {});
+      } catch (e) {
+        console.warn("PFF grades unavailable for team", id, e.code || e);
+        pff.set(id, {});
+      }
+    }));
+  };
+
   // Box score → athlete id → stats.
   const loadBoxes = async (gameIds) => {
     const { boxes } = cache.current;
@@ -308,21 +310,25 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
     try {
       const { schools, wdByCfbd, viewsBySlug, ranks, finalsByTeam } = await loadBase();
       const now = Date.now();
-      const posOk = (pos) => position === "All" || pos === position;
+      const posOk = (pos) => !positions.length || positions.includes(pos);
       // Already-drafted classes are out; one past the last option (a
       // far-out Eligible) counts as the last option.
       const lastClass = classOptions[classOptions.length - 1];
       const classOk = (cls) => cls >= classOptions[0] && classes.includes(Math.min(cls, lastClass));
-      const weightsFor = {
-        all: normalizedWeights(strength, SIGNALS),
-        views: normalizedWeights(strength, VIEW_SIGNALS),
+      // Weights over the signals a player has (stats? PFF grade?).
+      const weightsCache = new Map();
+      const weightsOf = (hasStats, hasPff) => {
+        const keys = [...(hasStats ? STAT_SIGNALS : []), ...(hasPff ? ["pff"] : []), ...VIEW_SIGNALS];
+        const k = keys.join();
+        if (!weightsCache.has(k)) weightsCache.set(k, normalizedWeights(strength, keys));
+        return weightsCache.get(k);
       };
 
       const teams = schools
         .map((s) => ({ ...s, tier: tierOf(s.name, s.conf) }))
         .filter((s) => s.tier && levels.includes(s.tier) && s.teamId != null);
       const teamIds = teams.map((t) => String(t.teamId));
-      await loadRosters(teamIds);
+      await Promise.all([loadRosters(teamIds), loadPff(teamIds)]);
 
       // Every final since each roster's season-total sync needs its box score
       // (the latest one for "last game", any others to bring the totals current).
@@ -343,6 +349,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
         const syncMs = msOf(roster.updatedAt);
         const finals = finalsByTeam.get(String(t.teamId)) || [];
         const latest = finals[0] || null;
+        const pffPlayers = cache.current.pff.get(String(t.teamId)) || {};
         (roster.players || []).forEach((rp) => {
           const cfbdId = String(rp.id);
           const wd = playersById.get(wdByCfbd.get(cfbdId)) || (rp.slug ? playersBySlug.get(rp.slug) : null) || null;
@@ -366,7 +373,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
             tier: t.tier, wd, rp, roster, group, stars: rp.stars,
             season: rp.s || null, syncMs, lastLine, lastProd, seasonProd,
             lastGame: lastLine ? latest : null, teamGames: latest ? gamesInRecord(latest.record) : 0,
-            rank: ranks.get(cfbdId) || null,
+            rank: ranks.get(cfbdId) || null, pff: pffPlayers[cfbdId] || null,
             views7: n(pv.last7Days), views30: n(pv.last30Days),
           });
         });
@@ -383,7 +390,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
         pool.push({
           key: `wd-${p.id}`, first: p.First, last: p.Last, position: pos, cls: n(p.Eligible), school: p.School,
           tier: tierBySchool.get(p.School), wd: p, group: groupOf(pos), season: null, lastLine: null, lastProd: 0, seasonProd: 0,
-          lastGame: null, teamGames: 0, rank: null, views7: n(pv.last7Days), views30: n(pv.last30Days),
+          lastGame: null, teamGames: 0, rank: null, pff: null, views7: n(pv.last7Days), views30: n(pv.last30Days),
         });
       });
 
@@ -394,18 +401,24 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
         const pace = c.views30 > 0 ? (c.views30 / 30) * 7 : 0;
         const momentum = pace > 0 ? c.views7 / pace : c.views7 > 0 ? 2 : 0;
         const hasStats = c.group !== "ol" && (c.seasonProd > 0 || c.lastProd > 0);
-        return { ...c, restAvg, breakout, momentum, hasStats };
+        // Only a grade on enough snaps carries a national rank (rk).
+        const hasPff = focus === "overall" ? c.pff?.rk != null : !!focusGrade(c, focus);
+        return { ...c, restAvg, breakout, momentum, hasStats, hasPff, focus };
       })
         // No stats at a position that produces them = not playing; only OL
-        // (no box-score stats at all) can be scored on views alone.
-        .filter((c) => c.hasStats || c.group === "ol");
+        // (no box-score stats at all) can be scored on PFF / views alone.
+        // A specific PFF focus keeps only players ranked in it.
+        .filter((c) => (focus === "overall" ? c.hasStats || c.hasPff || c.group === "ol" : c.hasPff));
 
       const statPool = scored.filter((c) => c.hasStats);
       const viewPool = scored.filter((c) => c.wd && c.views7 > 0);
+      const pffPool = scored.filter((c) => c.hasPff);
       const pct = {
         last: percentiles(statPool.filter((c) => c.lastGame).map((c) => c.lastProd)),
         breakout: percentiles(statPool.filter((c) => c.breakout > 0).map((c) => c.breakout)),
         season: percentiles(statPool.map((c) => c.seasonProd)),
+        pff: percentiles(pffPool.map((c) => (focus === "overall" ? c.pff.g : focusGrade(c, focus)[0]))),
+        pffGame: percentiles(pffPool.filter((c) => c.pff.w).map((c) => c.pff.w.g)),
         views: percentiles(viewPool.map((c) => c.views7)),
         momentum: percentiles(viewPool.map((c) => c.momentum)),
       };
@@ -416,10 +429,13 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
           last: c.lastGame ? pct.last(c.lastProd) : 0,
           breakout: c.breakout > 0 ? pct.breakout(c.breakout) : 0,
           season: c.hasStats ? pct.season(c.seasonProd) * 0.8 + rankBonus * 0.2 : 0,
+          pff: !c.hasPff ? 0
+            : focus !== "overall" ? pct.pff(focusGrade(c, focus)[0])
+            : c.pff.w ? pct.pff(c.pff.g) * 0.7 + pct.pffGame(c.pff.w.g) * 0.3 : pct.pff(c.pff.g),
           views: !c.wd ? NO_PAGE : c.views7 > 0 ? pct.views(c.views7) : 0,
           momentum: !c.wd ? NO_PAGE : c.views7 > 0 ? pct.momentum(c.momentum) : 0,
         };
-        const weights = c.hasStats ? weightsFor.all : weightsFor.views;
+        const weights = weightsOf(c.hasStats, c.hasPff);
         let score = Object.entries(weights).reduce((t, [k, w]) => t + w * signals[k], 0);
         const sinceVideo = c.wd && lastVideoMs.has(c.wd.id) ? now - lastVideoMs.get(c.wd.id) : null;
         const penalty = sinceVideo == null ? 1 : sinceVideo < 14 * DAY_MS ? 0.5 : sinceVideo < 30 * DAY_MS ? 0.8 : 1;
@@ -448,7 +464,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
   const ensureOnWeDraft = async (c) => {
     if (c.wd) return c.wd;
     const pos = POS_MAP[(c.rp.pos || "").toUpperCase()];
-    if (!pos) { alert(`No We-Draft position for "${c.rp.pos || "?"}" — add ${c.first} ${c.last} from Player Data → CFB Universe instead.`); return null; }
+    if (!pos) { alert(`No We-Draft position for "${c.rp.pos || "?"}" — add ${c.first} ${c.last} from Players → CFB Universe instead.`); return null; }
     const eligible = eligibleFor(c.rp);
     if (!window.confirm(`Add ${c.first} ${c.last} (${pos}, ${c.school}, ${eligible} class) to We-Draft? This creates a live player page.`)) return null;
     try {
@@ -507,7 +523,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
     <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden", marginBottom: "18px" }}>
       <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
         <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Suggest a Video</div>
-        <div style={{ color: "#cfe0f5", fontSize: "11px", fontWeight: 700 }}>Every FBS player · last game · season stats · page views</div>
+        <div style={{ color: "#cfe0f5", fontSize: "11px", fontWeight: 700 }}>Every FBS player · last game · season stats · PFF grades · page views</div>
         <button type="button" onClick={onClose} style={{ marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid #fff", borderRadius: "6px", padding: "4px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
           Close
         </button>
@@ -516,8 +532,9 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
       <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "10px", borderBottom: "1px solid #eee" }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
           <span style={{ width: "80px", fontSize: "11px", fontWeight: 900, color: "#7a8597", textTransform: "uppercase" }}>Position</span>
+          <button type="button" onClick={() => setPositions([])} style={chip(!positions.length)}>All</button>
           {POSITIONS.map((p) => (
-            <button key={p} type="button" onClick={() => setPosition(p)} style={chip(position === p)}>{p}</button>
+            <button key={p} type="button" onClick={() => togglePosition(p)} style={chip(positions.includes(p))}>{p}</button>
           ))}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
@@ -555,6 +572,12 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
             ⚙ Weights {showWeights ? "▴" : "▾"}
           </button>
         </div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
+          <span style={{ width: "80px", fontSize: "11px", fontWeight: 900, color: "#7a8597", textTransform: "uppercase" }}>PFF focus</span>
+          {PFF_FOCUS.map((f) => (
+            <button key={f.key} type="button" onClick={() => setFocus(f.key)} style={chip(focus === f.key)}>{f.label}</button>
+          ))}
+        </div>
         {showWeights && (
           <div style={{ background: "#f5f7fa", borderRadius: "8px", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" }}>
             {SIGNALS.map((k) => (
@@ -589,7 +612,7 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
 
       {error && <div style={{ padding: "12px 14px", color: RED, fontWeight: 700, fontSize: "13px" }}>{error}</div>}
       {results && results.length === 0 && (
-        <div style={{ padding: "24px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players with stats or page views match those filters.</div>
+        <div style={{ padding: "24px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No players with stats, PFF grades or page views match those filters.</div>
       )}
       {results && results.length > 0 && (
         <div>
@@ -622,6 +645,14 @@ function SuggestionCard({ c, index, adding, onCreate, onFlag }) {
     reasons.push({ icon: "📊", text: `Season${thru}: ${seasonLine}` });
   }
   if (c.rank) reasons.push({ icon: "🏅", text: c.rank.label });
+  // Admin-only — PFF data never goes on the public site.
+  const fg = focusGrade(c, c.focus);
+  if (fg) reasons.push({ icon: "🎯", text: `PFF ${FOCUS_BY_KEY[c.focus].label.toLowerCase()} grade ${fg[0]} — #${fg[2]} of ${fg[3]} FBS (${fmt(fg[1])} snaps)` });
+  if (c.pff?.rk != null) {
+    const p = c.pff;
+    const game = p.w ? ` · latest game ${p.w.g} (wk ${p.w.wk})` : "";
+    reasons.push({ icon: "🎯", text: `PFF grade ${p.g} — #${p.rk} of ${p.of} FBS ${p.pos}s (${fmt(p.sn)} ${p.cat === "kicking" ? "FG att" : "snaps"})${game}` });
+  }
   if (c.wd && c.views7 > 0) {
     const mom = c.momentum >= 1.3 ? ` — ↑ ${c.momentum.toFixed(1)}× the 30-day pace` : c.momentum > 0 && c.momentum < 0.8 ? ` — cooling (${c.momentum.toFixed(1)}× 30-day pace)` : "";
     reasons.push({ icon: "👀", text: `${fmt(c.views7)} page view${c.views7 === 1 ? "" : "s"} in the last 7 days (${fmt(c.views30)} in 30)${mom}` });
