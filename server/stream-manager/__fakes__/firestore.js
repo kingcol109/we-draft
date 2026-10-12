@@ -1,8 +1,9 @@
 // server/stream-manager/__fakes__/firestore.js
 //
 // In-memory stand-in for the slice of the Admin SDK Firestore API that
-// Stream Manager uses (tests only): doc / collection / where (== and ranges) / limit /
-// get / set (merge) / update (dotted paths) / runTransaction.
+// Stream Manager and YouTube Analytics use (tests only): doc / collection /
+// subcollections / where (== and ranges) / limit / get / set (merge) /
+// update (dotted paths) / runTransaction / batch.
 
 const isPlain = (v) => v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
 const clone = (v) => (Array.isArray(v) ? v.map(clone) : isPlain(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clone(x)])) : v);
@@ -54,6 +55,7 @@ function fakeFirestore(seed = {}) {
         for (const [k, v] of Object.entries(upd)) setPath(d, k, v);
       },
       delete: async () => { store.delete(path); },
+      collection: (name) => collectionRef(`${path}/${name}`),
     };
   }
 
@@ -66,7 +68,7 @@ function fakeFirestore(seed = {}) {
       limit: (n) => query(col, filters, n),
       get: async () => {
         const docs = [...store.keys()]
-          .filter((p) => p.startsWith(`${col}/`) && p.split("/").length === 2)
+          .filter((p) => p.startsWith(`${col}/`) && p.split("/").length === col.split("/").length + 1)
           .filter((p) => filters.every(([f, v, op = "=="]) => OPS[op](getPath(store.get(p), f), v)))
           .slice(0, max)
           .map(snap);
@@ -75,14 +77,27 @@ function fakeFirestore(seed = {}) {
     };
   }
 
-  const db = {
-    store,
-    doc: (path) => docRef(path),
-    collection: (col) => ({
+  function collectionRef(col) {
+    return {
       ...query(col),
       doc: (id) => docRef(`${col}/${id ?? `auto${++autoId}`}`),
       add: async (data) => { const r = docRef(`${col}/auto${++autoId}`); await r.set(data); return r; },
-    }),
+    };
+  }
+
+  const db = {
+    store,
+    doc: (path) => docRef(path),
+    collection: (col) => collectionRef(col),
+    batch() {
+      const ops = [];
+      return {
+        set: (ref, data, opts) => { ops.push(() => ref.set(data, opts)); },
+        update: (ref, upd) => { ops.push(() => ref.update(upd)); },
+        delete: (ref) => { ops.push(() => ref.delete()); },
+        commit: async () => { for (const op of ops) await op(); },
+      };
+    },
     runTransaction(fn) {
       const run = txChain.then(() => fn(tx));
       txChain = run.catch(() => {});

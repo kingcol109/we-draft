@@ -353,6 +353,34 @@ service cloud.firestore {
     match /streamManagerPrivate/{doc} {
       allow read, write: if false;
     }
+    // YouTube Analytics (admin → YouTube Analytics, api/youtube-analytics.js,
+    // server/youtube-analytics/) — private channel analytics, never public.
+    // Admins read; every write goes through the API (admin SDK). The legacy
+    // videos collection stays the editorial record; nothing here replaces it.
+    match /ytVideos/{videoId} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /{sub=**} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+    match /ytChannelDaily/{day} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /ytPlayerStats/{playerId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /ytAnalytics/{doc} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // The encrypted refresh token and OAuth state — server only.
+    match /ytAnalyticsPrivate/{doc} {
+      allow read, write: if false;
+    }
     // Transfer portal sync (server/portal/sync.js, run from the admin
     // panel) — transferPortal/{year} meta + {year}_{n} entry chunks. Admin
     // only both ways; the admin tab writes `dismissed` on the meta doc.

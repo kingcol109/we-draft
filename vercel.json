@@ -1,7 +1,8 @@
 {
   "crons": [
     { "path": "/api/live-ingest", "schedule": "* * * * *" },
-    { "path": "/api/stream-orchestrator", "schedule": "* * * * *" }
+    { "path": "/api/stream-orchestrator", "schedule": "* * * * *" },
+    { "path": "/api/youtube-analytics", "schedule": "23 * * * *" }
   ],
   "functions": {
     "api/live-ingest.js": { "maxDuration": 300, "includeFiles": "src/utils/liveStats.mjs" },
@@ -9,6 +10,7 @@
     "api/live-chat.js": { "maxDuration": 15, "includeFiles": "src/utils/chatFilter.mjs" },
     "api/stream-manager.js": { "maxDuration": 30, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" },
     "api/stream-orchestrator.js": { "maxDuration": 60 },
-    "api/broadcast-agent.js": { "maxDuration": 15 }
+    "api/broadcast-agent.js": { "maxDuration": 15 },
+    "api/youtube-analytics.js": { "maxDuration": 300 }
   }
 }

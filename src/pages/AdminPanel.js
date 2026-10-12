@@ -17,6 +17,7 @@ import VideoWorkshop, { addWorkshopIdea } from "../components/VideoWorkshop";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminStreamManager from "../components/AdminStreamManager";
+import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
@@ -274,6 +275,7 @@ const SECTIONS = [
   { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
+  { key: "youtube", label: "YouTube Analytics", icon: "▶️", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
@@ -7618,8 +7620,10 @@ function VideosSection() {
       PublishAt: toDateTimeLocalValue(v.PublishAt),
       // Every item saved before recruit-tagging existed has no `type` at
       // all — treated as "player" here, same as everywhere else this
-      // field is read.
-      items: [0, 1, 2].map((i) => ({
+      // field is read. At least 3 slots, and one per saved tag beyond that
+      // (YouTube Analytics can tag more than 3 players) — a 4th tag must
+      // never be dropped by opening and saving the video here.
+      items: Array.from({ length: Math.max(3, items.length) }, (_, i) => ({
         type: items[i]?.type === "recruit" ? "recruit" : "player",
         playerId: items[i]?.playerId || "",
         recruitId: items[i]?.recruitId || "",
@@ -8257,11 +8261,10 @@ function VideosSection() {
 
             <div style={{ height: "1px", background: "#eee", margin: "16px 0" }} />
 
-            {[0, 1, 2].map((i) => {
-              const item = formState.items[i];
+            {formState.items.map((item, i) => {
               const isRecruit = item.type === "recruit";
               return (
-              <div key={i} style={{ marginBottom: i < 2 ? "18px" : 0 }}>
+              <div key={i} style={{ marginBottom: i < formState.items.length - 1 ? "18px" : 0 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                   <div style={{ fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em" }}>
                     Tag {i + 1}
@@ -13911,7 +13914,7 @@ function TvChannelsManager() {
 export default function AdminPanel() {
   const { user } = useAuth();
   // ?section=<key> opens that section — Stream Manager's YouTube sign-in
-  // returns to /admin?section=streams.
+  // returns to /admin?section=streams, YouTube Analytics' to ?section=youtube.
   const [activeSection, setActiveSection] = useState(() => {
     const k = new URLSearchParams(window.location.search).get("section");
     return SECTIONS.some((s) => s.key === k) ? k : "players";
@@ -13966,6 +13969,7 @@ export default function AdminPanel() {
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
+            {activeSection === "youtube" && <AdminYouTubeAnalytics />}
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "calendar" && <ContentCalendarManager />}

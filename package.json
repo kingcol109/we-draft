@@ -50,7 +50,8 @@
     "broadcast-worker:ingest-test": "node server/broadcast-worker/ingest-test.js",
     "broadcast-worker:docker-build": "docker build -t we-draft-broadcast-worker server/broadcast-worker",
     "broadcast-worker:docker-test": "node server/broadcast-worker/docker-test.js",
-    "stream-manager:test": "node --test server/stream-manager/compute.test.js server/stream-manager/orchestrator.test.js server/stream-manager/endpoints.test.js server/stream-manager/cancellation.test.js server/stream-manager/metadata.test.js server/stream-manager/thumbnail.test.js server/broadcast-agent/agent.test.js server/broadcast-agent/agent-docker.test.js"
+    "youtube-analytics:test": "node --test server/youtube-analytics/metrics.test.js server/youtube-analytics/sync.test.js",
+    "stream-manager:test":"node --test server/stream-manager/compute.test.js server/stream-manager/orchestrator.test.js server/stream-manager/endpoints.test.js server/stream-manager/cancellation.test.js server/stream-manager/metadata.test.js server/stream-manager/thumbnail.test.js server/broadcast-agent/agent.test.js server/broadcast-agent/agent-docker.test.js"
   },
   "eslintConfig": {
     "extends": [
