@@ -33,6 +33,10 @@
 // a video in the last 30 days is marked down (halved inside 14 days) so the list doesn't
 // keep surfacing the same people.
 //
+// "Grade" scores one searched player on demand: same signals, weights and
+// PFF focus, with his percentiles taken against his position at his school
+// level (all college classes), plus his rank in that pool.
+//
 // Shared data is read on the first Suggest and cached for the session; each
 // school's roster and each game's box score are read the first time a
 // filter needs them.
@@ -193,6 +197,9 @@ function titleIdea(c) {
   return `Why Everyone Is Talking About ${name}`;
 }
 
+// Plain-English read of a 0–100 score (same color bands as the card).
+const verdictOf = (score) => (score >= 70 ? "Strong video candidate" : score >= 45 ? "Decent video candidate" : "Weak video candidate");
+
 export default function VideoSuggester({ players, videos, generateSlug, stateNames, onPlayerAdded, onPlayerUpdated, onCreate, onClose }) {
   // Selected positions; empty = All.
   const [positions, setPositions] = useState([]);
@@ -208,8 +215,14 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
   const [adding, setAdding] = useState(null);
   const [error, setError] = useState("");
   const [poolSize, setPoolSize] = useState(0);
-  // Session cache: shared docs once, rosters / box scores as filters need them.
-  const cache = useRef({ base: null, rosters: new Map(), pff: new Map(), boxes: new Map() });
+  // Grade a player (search at will).
+  const [search, setSearch] = useState("");
+  const [indexReady, setIndexReady] = useState(false);
+  const [graded, setGraded] = useState(null); // { pick, c, rank, of } or { pick, miss }
+  const [grading, setGrading] = useState(false);
+  // Session cache: shared docs once, rosters / box scores as filters need
+  // them, the name index for Grade a player.
+  const cache = useRef({ base: null, rosters: new Map(), pff: new Map(), boxes: new Map(), index: null });
 
   // playerId -> ms of their most recent video.
   const lastVideoMs = useMemo(() => {
@@ -303,148 +316,155 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
     }));
   };
 
+  // Scores every player matching the filters (empty positions = all) and
+  // returns them best first; signals are percentiles within that pool.
+  const scorePool = async ({ positions, levels, classes, includeOutside }) => {
+    const { schools, wdByCfbd, viewsBySlug, ranks, finalsByTeam } = await loadBase();
+    const now = Date.now();
+    const posOk = (pos) => !positions.length || positions.includes(pos);
+    // Already-drafted classes are out; one past the last option (a
+    // far-out Eligible) counts as the last option.
+    const lastClass = classOptions[classOptions.length - 1];
+    const classOk = (cls) => cls >= classOptions[0] && classes.includes(Math.min(cls, lastClass));
+    // Weights over the signals a player has (stats? PFF grade?).
+    const weightsCache = new Map();
+    const weightsOf = (hasStats, hasPff) => {
+      const keys = [...(hasStats ? STAT_SIGNALS : []), ...(hasPff ? ["pff"] : []), ...VIEW_SIGNALS];
+      const k = keys.join();
+      if (!weightsCache.has(k)) weightsCache.set(k, normalizedWeights(strength, keys));
+      return weightsCache.get(k);
+    };
+
+    const teams = schools
+      .map((s) => ({ ...s, tier: tierOf(s.name, s.conf) }))
+      .filter((s) => s.tier && levels.includes(s.tier) && s.teamId != null);
+    const teamIds = teams.map((t) => String(t.teamId));
+    await Promise.all([loadRosters(teamIds), loadPff(teamIds)]);
+
+    // Every final since each roster's season-total sync needs its box score
+    // (the latest one for "last game", any others to bring the totals current).
+    const needBoxes = new Set();
+    teams.forEach((t) => {
+      const roster = cache.current.rosters.get(String(t.teamId));
+      const finals = finalsByTeam.get(String(t.teamId)) || [];
+      finals.forEach((g, i) => { if (i === 0 || g.startMs > msOf(roster?.updatedAt)) needBoxes.add(g.id); });
+    });
+    await loadBoxes([...needBoxes]);
+    const { boxes } = cache.current;
+
+    const seen = new Set(); // We-Draft ids already in the pool
+    const pool = [];
+    teams.forEach((t) => {
+      const roster = cache.current.rosters.get(String(t.teamId));
+      if (!roster) return;
+      const syncMs = msOf(roster.updatedAt);
+      const finals = finalsByTeam.get(String(t.teamId)) || [];
+      const latest = finals[0] || null;
+      const pffPlayers = cache.current.pff.get(String(t.teamId)) || {};
+      (roster.players || []).forEach((rp) => {
+        const cfbdId = String(rp.id);
+        const wd = playersById.get(wdByCfbd.get(cfbdId)) || (rp.slug ? playersBySlug.get(rp.slug) : null) || null;
+        if (!wd && !includeOutside) return;
+        const pos = wd ? (wd.Position || "").toUpperCase() : POS_MAP[(rp.pos || "").toUpperCase()] || (rp.pos || "").toUpperCase();
+        if (!posOk(pos)) return;
+        const cls = wd ? n(wd.Eligible) : n(eligibleFor(rp));
+        if (!classOk(cls)) return;
+        const group = groupOf(pos);
+        const lastLine = latest ? boxes.get(latest.id)?.get(cfbdId) || null : null;
+        const lastProd = production(group, lastLine);
+        // Season production brought current: roster totals + any final
+        // played after that roster's sync.
+        const sinceSync = finals.filter((g) => g.startMs > syncMs).reduce((sum, g) => sum + production(group, boxes.get(g.id)?.get(cfbdId)), 0);
+        const seasonProd = production(group, rp.s) + sinceSync;
+        const pv = wd ? viewsBySlug.get(wd.Slug) || {} : {};
+        if (!rp.s && !lastLine && !n(pv.last7Days)) return;
+        if (wd) seen.add(wd.id);
+        pool.push({
+          key: `${t.teamId}-${cfbdId}`, first: rp.first, last: rp.last, position: pos, cls, school: roster.school || t.name,
+          tier: t.tier, wd, rp, roster, group, stars: rp.stars,
+          season: rp.s || null, syncMs, lastLine, lastProd, seasonProd,
+          lastGame: lastLine ? latest : null, teamGames: latest ? gamesInRecord(latest.record) : 0,
+          rank: ranks.get(cfbdId) || null, pff: pffPlayers[cfbdId] || null,
+          views7: n(pv.last7Days), views30: n(pv.last30Days),
+        });
+      });
+    });
+
+    // We-Draft players with traffic but no roster row (unlinked, or a
+    // school without a mapped roster): views only.
+    const tierBySchool = new Map(teams.map((t) => [t.name, t.tier]));
+    players.forEach((p) => {
+      if (seen.has(p.id) || !p.Slug || !classOk(n(p.Eligible)) || !tierBySchool.has(p.School)) return;
+      const pos = (p.Position || "").toUpperCase();
+      const pv = viewsBySlug.get(p.Slug) || {};
+      if (!posOk(pos) || !n(pv.last7Days)) return;
+      pool.push({
+        key: `wd-${p.id}`, first: p.First, last: p.Last, position: pos, cls: n(p.Eligible), school: p.School,
+        tier: tierBySchool.get(p.School), wd: p, group: groupOf(pos), season: null, lastLine: null, lastProd: 0, seasonProd: 0,
+        lastGame: null, teamGames: 0, rank: null, pff: null, views7: n(pv.last7Days), views30: n(pv.last30Days),
+      });
+    });
+
+    const scored = pool.map((c) => {
+      const restGp = c.lastGame ? c.teamGames - 1 : c.teamGames;
+      const restAvg = restGp > 0 ? Math.max(c.seasonProd - c.lastProd, 0) / restGp : 0;
+      const breakout = c.lastGame && c.lastProd > 0 && restGp > 0 ? c.lastProd / Math.max(restAvg, 1) : 0;
+      const pace = c.views30 > 0 ? (c.views30 / 30) * 7 : 0;
+      const momentum = pace > 0 ? c.views7 / pace : c.views7 > 0 ? 2 : 0;
+      const hasStats = c.group !== "ol" && (c.seasonProd > 0 || c.lastProd > 0);
+      // Only a grade on enough snaps carries a national rank (rk).
+      const hasPff = focus === "overall" ? c.pff?.rk != null : !!focusGrade(c, focus);
+      return { ...c, restAvg, breakout, momentum, hasStats, hasPff, focus };
+    })
+      // No stats at a position that produces them = not playing; only OL
+      // (no box-score stats at all) can be scored on PFF / views alone.
+      // A specific PFF focus keeps only players ranked in it.
+      .filter((c) => (focus === "overall" ? c.hasStats || c.hasPff || c.group === "ol" : c.hasPff));
+
+    const statPool = scored.filter((c) => c.hasStats);
+    const viewPool = scored.filter((c) => c.wd && c.views7 > 0);
+    const pffPool = scored.filter((c) => c.hasPff);
+    const pct = {
+      last: percentiles(statPool.filter((c) => c.lastGame).map((c) => c.lastProd)),
+      breakout: percentiles(statPool.filter((c) => c.breakout > 0).map((c) => c.breakout)),
+      season: percentiles(statPool.map((c) => c.seasonProd)),
+      pff: percentiles(pffPool.map((c) => (focus === "overall" ? c.pff.g : focusGrade(c, focus)[0]))),
+      pffGame: percentiles(pffPool.filter((c) => c.pff.w).map((c) => c.pff.w.g)),
+      views: percentiles(viewPool.map((c) => c.views7)),
+      momentum: percentiles(viewPool.map((c) => c.momentum)),
+    };
+
+    const ranked = scored.map((c) => {
+      const rankBonus = c.rank ? (51 - c.rank.rank) / 50 : 0;
+      const signals = {
+        last: c.lastGame ? pct.last(c.lastProd) : 0,
+        breakout: c.breakout > 0 ? pct.breakout(c.breakout) : 0,
+        season: c.hasStats ? pct.season(c.seasonProd) * 0.8 + rankBonus * 0.2 : 0,
+        pff: !c.hasPff ? 0
+          : focus !== "overall" ? pct.pff(focusGrade(c, focus)[0])
+          : c.pff.w ? pct.pff(c.pff.g) * 0.7 + pct.pffGame(c.pff.w.g) * 0.3 : pct.pff(c.pff.g),
+        views: !c.wd ? NO_PAGE : c.views7 > 0 ? pct.views(c.views7) : 0,
+        momentum: !c.wd ? NO_PAGE : c.views7 > 0 ? pct.momentum(c.momentum) : 0,
+      };
+      const weights = weightsOf(c.hasStats, c.hasPff);
+      let score = Object.entries(weights).reduce((t, [k, w]) => t + w * signals[k], 0);
+      const sinceVideo = c.wd && lastVideoMs.has(c.wd.id) ? now - lastVideoMs.get(c.wd.id) : null;
+      const penalty = sinceVideo == null ? 1 : sinceVideo < 14 * DAY_MS ? 0.5 : sinceVideo < 30 * DAY_MS ? 0.8 : 1;
+      score *= penalty;
+      return { ...c, signals, weights, score: Math.round(score * 100), sinceVideo, penalty };
+    });
+
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked;
+  };
+
   const suggest = async () => {
     setRunning(true);
     setError("");
     setResults(null);
     try {
-      const { schools, wdByCfbd, viewsBySlug, ranks, finalsByTeam } = await loadBase();
-      const now = Date.now();
-      const posOk = (pos) => !positions.length || positions.includes(pos);
-      // Already-drafted classes are out; one past the last option (a
-      // far-out Eligible) counts as the last option.
-      const lastClass = classOptions[classOptions.length - 1];
-      const classOk = (cls) => cls >= classOptions[0] && classes.includes(Math.min(cls, lastClass));
-      // Weights over the signals a player has (stats? PFF grade?).
-      const weightsCache = new Map();
-      const weightsOf = (hasStats, hasPff) => {
-        const keys = [...(hasStats ? STAT_SIGNALS : []), ...(hasPff ? ["pff"] : []), ...VIEW_SIGNALS];
-        const k = keys.join();
-        if (!weightsCache.has(k)) weightsCache.set(k, normalizedWeights(strength, keys));
-        return weightsCache.get(k);
-      };
-
-      const teams = schools
-        .map((s) => ({ ...s, tier: tierOf(s.name, s.conf) }))
-        .filter((s) => s.tier && levels.includes(s.tier) && s.teamId != null);
-      const teamIds = teams.map((t) => String(t.teamId));
-      await Promise.all([loadRosters(teamIds), loadPff(teamIds)]);
-
-      // Every final since each roster's season-total sync needs its box score
-      // (the latest one for "last game", any others to bring the totals current).
-      const needBoxes = new Set();
-      teams.forEach((t) => {
-        const roster = cache.current.rosters.get(String(t.teamId));
-        const finals = finalsByTeam.get(String(t.teamId)) || [];
-        finals.forEach((g, i) => { if (i === 0 || g.startMs > msOf(roster?.updatedAt)) needBoxes.add(g.id); });
-      });
-      await loadBoxes([...needBoxes]);
-      const { boxes } = cache.current;
-
-      const seen = new Set(); // We-Draft ids already in the pool
-      const pool = [];
-      teams.forEach((t) => {
-        const roster = cache.current.rosters.get(String(t.teamId));
-        if (!roster) return;
-        const syncMs = msOf(roster.updatedAt);
-        const finals = finalsByTeam.get(String(t.teamId)) || [];
-        const latest = finals[0] || null;
-        const pffPlayers = cache.current.pff.get(String(t.teamId)) || {};
-        (roster.players || []).forEach((rp) => {
-          const cfbdId = String(rp.id);
-          const wd = playersById.get(wdByCfbd.get(cfbdId)) || (rp.slug ? playersBySlug.get(rp.slug) : null) || null;
-          if (!wd && !includeOutside) return;
-          const pos = wd ? (wd.Position || "").toUpperCase() : POS_MAP[(rp.pos || "").toUpperCase()] || (rp.pos || "").toUpperCase();
-          if (!posOk(pos)) return;
-          const cls = wd ? n(wd.Eligible) : n(eligibleFor(rp));
-          if (!classOk(cls)) return;
-          const group = groupOf(pos);
-          const lastLine = latest ? boxes.get(latest.id)?.get(cfbdId) || null : null;
-          const lastProd = production(group, lastLine);
-          // Season production brought current: roster totals + any final
-          // played after that roster's sync.
-          const sinceSync = finals.filter((g) => g.startMs > syncMs).reduce((sum, g) => sum + production(group, boxes.get(g.id)?.get(cfbdId)), 0);
-          const seasonProd = production(group, rp.s) + sinceSync;
-          const pv = wd ? viewsBySlug.get(wd.Slug) || {} : {};
-          if (!rp.s && !lastLine && !n(pv.last7Days)) return;
-          if (wd) seen.add(wd.id);
-          pool.push({
-            key: `${t.teamId}-${cfbdId}`, first: rp.first, last: rp.last, position: pos, cls, school: roster.school || t.name,
-            tier: t.tier, wd, rp, roster, group, stars: rp.stars,
-            season: rp.s || null, syncMs, lastLine, lastProd, seasonProd,
-            lastGame: lastLine ? latest : null, teamGames: latest ? gamesInRecord(latest.record) : 0,
-            rank: ranks.get(cfbdId) || null, pff: pffPlayers[cfbdId] || null,
-            views7: n(pv.last7Days), views30: n(pv.last30Days),
-          });
-        });
-      });
-
-      // We-Draft players with traffic but no roster row (unlinked, or a
-      // school without a mapped roster): views only.
-      const tierBySchool = new Map(teams.map((t) => [t.name, t.tier]));
-      players.forEach((p) => {
-        if (seen.has(p.id) || !p.Slug || !classOk(n(p.Eligible)) || !tierBySchool.has(p.School)) return;
-        const pos = (p.Position || "").toUpperCase();
-        const pv = viewsBySlug.get(p.Slug) || {};
-        if (!posOk(pos) || !n(pv.last7Days)) return;
-        pool.push({
-          key: `wd-${p.id}`, first: p.First, last: p.Last, position: pos, cls: n(p.Eligible), school: p.School,
-          tier: tierBySchool.get(p.School), wd: p, group: groupOf(pos), season: null, lastLine: null, lastProd: 0, seasonProd: 0,
-          lastGame: null, teamGames: 0, rank: null, pff: null, views7: n(pv.last7Days), views30: n(pv.last30Days),
-        });
-      });
-
-      const scored = pool.map((c) => {
-        const restGp = c.lastGame ? c.teamGames - 1 : c.teamGames;
-        const restAvg = restGp > 0 ? Math.max(c.seasonProd - c.lastProd, 0) / restGp : 0;
-        const breakout = c.lastGame && c.lastProd > 0 && restGp > 0 ? c.lastProd / Math.max(restAvg, 1) : 0;
-        const pace = c.views30 > 0 ? (c.views30 / 30) * 7 : 0;
-        const momentum = pace > 0 ? c.views7 / pace : c.views7 > 0 ? 2 : 0;
-        const hasStats = c.group !== "ol" && (c.seasonProd > 0 || c.lastProd > 0);
-        // Only a grade on enough snaps carries a national rank (rk).
-        const hasPff = focus === "overall" ? c.pff?.rk != null : !!focusGrade(c, focus);
-        return { ...c, restAvg, breakout, momentum, hasStats, hasPff, focus };
-      })
-        // No stats at a position that produces them = not playing; only OL
-        // (no box-score stats at all) can be scored on PFF / views alone.
-        // A specific PFF focus keeps only players ranked in it.
-        .filter((c) => (focus === "overall" ? c.hasStats || c.hasPff || c.group === "ol" : c.hasPff));
-
-      const statPool = scored.filter((c) => c.hasStats);
-      const viewPool = scored.filter((c) => c.wd && c.views7 > 0);
-      const pffPool = scored.filter((c) => c.hasPff);
-      const pct = {
-        last: percentiles(statPool.filter((c) => c.lastGame).map((c) => c.lastProd)),
-        breakout: percentiles(statPool.filter((c) => c.breakout > 0).map((c) => c.breakout)),
-        season: percentiles(statPool.map((c) => c.seasonProd)),
-        pff: percentiles(pffPool.map((c) => (focus === "overall" ? c.pff.g : focusGrade(c, focus)[0]))),
-        pffGame: percentiles(pffPool.filter((c) => c.pff.w).map((c) => c.pff.w.g)),
-        views: percentiles(viewPool.map((c) => c.views7)),
-        momentum: percentiles(viewPool.map((c) => c.momentum)),
-      };
-
-      const ranked = scored.map((c) => {
-        const rankBonus = c.rank ? (51 - c.rank.rank) / 50 : 0;
-        const signals = {
-          last: c.lastGame ? pct.last(c.lastProd) : 0,
-          breakout: c.breakout > 0 ? pct.breakout(c.breakout) : 0,
-          season: c.hasStats ? pct.season(c.seasonProd) * 0.8 + rankBonus * 0.2 : 0,
-          pff: !c.hasPff ? 0
-            : focus !== "overall" ? pct.pff(focusGrade(c, focus)[0])
-            : c.pff.w ? pct.pff(c.pff.g) * 0.7 + pct.pffGame(c.pff.w.g) * 0.3 : pct.pff(c.pff.g),
-          views: !c.wd ? NO_PAGE : c.views7 > 0 ? pct.views(c.views7) : 0,
-          momentum: !c.wd ? NO_PAGE : c.views7 > 0 ? pct.momentum(c.momentum) : 0,
-        };
-        const weights = weightsOf(c.hasStats, c.hasPff);
-        let score = Object.entries(weights).reduce((t, [k, w]) => t + w * signals[k], 0);
-        const sinceVideo = c.wd && lastVideoMs.has(c.wd.id) ? now - lastVideoMs.get(c.wd.id) : null;
-        const penalty = sinceVideo == null ? 1 : sinceVideo < 14 * DAY_MS ? 0.5 : sinceVideo < 30 * DAY_MS ? 0.8 : 1;
-        score *= penalty;
-        return { ...c, signals, weights, score: Math.round(score * 100), sinceVideo, penalty };
-      });
-
-      ranked.sort((a, b) => b.score - a.score);
-      setPoolSize(scored.length);
+      const ranked = await scorePool({ positions, levels, classes, includeOutside });
+      setPoolSize(ranked.length);
       setResults(ranked.slice(0, RESULT_COUNT).map((c) => ({ ...c, title: titleIdea(c) })));
     } catch (e) {
       console.error("Video suggest error:", e);
@@ -454,10 +474,89 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
     }
   };
 
+  // Grade a player: every FBS roster player plus We-Draft players at an FBS
+  // school with no roster row, searchable by name. Built (all rosters read)
+  // the first time the search box is used, then cached.
+  const loadIndex = async () => {
+    if (cache.current.index) return cache.current.index;
+    const { schools, wdByCfbd } = await loadBase();
+    const teams = schools.map((s) => ({ ...s, tier: tierOf(s.name, s.conf) })).filter((s) => s.tier && s.teamId != null);
+    await loadRosters(teams.map((t) => String(t.teamId)));
+    const entries = [];
+    const seen = new Set();
+    teams.forEach((t) => {
+      const roster = cache.current.rosters.get(String(t.teamId));
+      (roster?.players || []).forEach((rp) => {
+        const wd = playersById.get(wdByCfbd.get(String(rp.id))) || (rp.slug ? playersBySlug.get(rp.slug) : null) || null;
+        if (wd) seen.add(wd.id);
+        entries.push({
+          key: `${t.teamId}-${rp.id}`, first: rp.first || "", last: rp.last || "", school: roster.school || t.name, tier: t.tier,
+          position: wd ? (wd.Position || "").toUpperCase() : POS_MAP[(rp.pos || "").toUpperCase()] || (rp.pos || "").toUpperCase(),
+          cls: wd ? n(wd.Eligible) : n(eligibleFor(rp)), onWeDraft: !!wd,
+        });
+      });
+    });
+    const tierBySchool = new Map(teams.map((t) => [t.name, t.tier]));
+    players.forEach((p) => {
+      if (seen.has(p.id) || !tierBySchool.has(p.School)) return;
+      entries.push({
+        key: `wd-${p.id}`, first: p.First || "", last: p.Last || "", school: p.School, tier: tierBySchool.get(p.School),
+        position: (p.Position || "").toUpperCase(), cls: n(p.Eligible), onWeDraft: true,
+      });
+    });
+    cache.current.index = entries;
+    return entries;
+  };
+
+  const warmIndex = () => {
+    if (indexReady) return;
+    loadIndex().then(() => setIndexReady(true)).catch((e) => { console.error("Grade index error:", e); setError("Couldn't load rosters — check console."); });
+  };
+
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!indexReady || q.length < 2) return [];
+    const words = q.split(/\s+/);
+    return cache.current.index
+      .filter((e) => { const name = `${e.first} ${e.last}`.toLowerCase(); return words.every((w) => name.includes(w)); })
+      .sort((a, b) => b.onWeDraft - a.onWeDraft || a.last.localeCompare(b.last))
+      .slice(0, 8);
+  }, [search, indexReady]);
+
+  // Scores him against his position at his school level (all college
+  // classes, current weights + PFF focus) — the same pool the Suggest list
+  // would put him in with those filters.
+  const grade = async (pick) => {
+    setSearch("");
+    setGrading(true);
+    setGraded(null);
+    setError("");
+    try {
+      const ranked = await scorePool({ positions: [pick.position], levels: [pick.tier], classes: classOptions, includeOutside: true });
+      const i = ranked.findIndex((r) => r.key === pick.key);
+      if (i < 0) {
+        const why = pick.cls && pick.cls < classOptions[0] ? `his ${pick.cls} class has already been drafted`
+          : focus !== "overall" ? `he has no ranked PFF ${FOCUS_BY_KEY[focus].label.toLowerCase()} grade (try PFF focus: Overall)`
+          : "he has no stats, PFF grade or page views to score";
+        setGraded({ pick, miss: why });
+      } else {
+        setGraded({ pick, c: { ...ranked[i], title: titleIdea(ranked[i]) }, rank: i + 1, of: ranked.length });
+      }
+    } catch (e) {
+      console.error("Grade player error:", e);
+      setError("Couldn't grade that player — check console.");
+    } finally {
+      setGrading(false);
+    }
+  };
+
   // Not on We-Draft yet: add him (CFB Universe defaults — mapped position,
   // recruiting-class draft class, Live), then open the video form.
   // Swap a result's We-Draft player (just added, or re-flagged) in place.
-  const updateResult = (key, wd) => setResults((prev) => prev && prev.map((r) => (r.key === key ? { ...r, wd } : r)));
+  const updateResult = (key, wd) => {
+    setResults((prev) => prev && prev.map((r) => (r.key === key ? { ...r, wd } : r)));
+    setGraded((prev) => (prev?.c?.key === key ? { ...prev, c: { ...prev.c, wd } } : prev));
+  };
 
   // Returns his We-Draft player, adding him first if he isn't on We-Draft
   // (after a confirm), or null if that's cancelled or fails.
@@ -520,8 +619,8 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
   });
 
   return (
-    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden", marginBottom: "18px" }}>
-      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", marginBottom: "18px" }}>
+      <div style={{ background: BLUE, borderRadius: "8px 8px 0 0", padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
         <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Suggest a Video</div>
         <div style={{ color: "#cfe0f5", fontSize: "11px", fontWeight: 700 }}>Every FBS player · last game · season stats · PFF grades · page views</div>
         <button type="button" onClick={onClose} style={{ marginLeft: "auto", background: "transparent", color: "#fff", border: "2px solid #fff", borderRadius: "6px", padding: "4px 10px", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
@@ -606,6 +705,62 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
                 Reset
               </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", background: "#fafbfd" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", position: "relative" }}>
+          <span style={{ width: "80px", fontSize: "11px", fontWeight: 900, color: "#7a8597", textTransform: "uppercase" }}>Grade</span>
+          <div style={{ position: "relative", flex: 1, minWidth: "220px", maxWidth: "420px" }}>
+            <input
+              type="text"
+              value={search}
+              onFocus={warmIndex}
+              onChange={(e) => { warmIndex(); setSearch(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && matches[0]) grade(matches[0]); }}
+              placeholder={indexReady ? "Search any FBS player…" : "Search any FBS player… (loading rosters)"}
+              style={{ width: "100%", boxSizing: "border-box", padding: "7px 11px", border: "2px solid " + GOLD, borderRadius: "20px", fontSize: "13px", fontWeight: 700, color: INK }}
+            />
+            {matches.length > 0 && (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 1000, marginTop: "4px", background: "#fff", border: "1px solid #dde3ea", borderRadius: "8px", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", overflow: "hidden" }}>
+                {matches.map((m) => (
+                  <button key={m.key} type="button" onClick={() => grade(m)}
+                    style={{ display: "block", width: "100%", textAlign: "left", background: "#fff", border: "none", borderTop: "1px solid #f0f0f0", padding: "7px 11px", cursor: "pointer", fontSize: "13px" }}>
+                    <span style={{ fontWeight: 900, color: INK }}>{m.first} {m.last}</span>
+                    <span style={{ fontWeight: 700, color: "#666", fontSize: "12px" }}> · {m.position} · {m.school}{m.cls ? ` · ${m.cls}` : ""}</span>
+                    {!m.onWeDraft && <span style={{ marginLeft: "6px", fontSize: "10px", fontWeight: 900, color: "#7a8597", textTransform: "uppercase" }}>Not on We-Draft</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <span style={{ fontSize: "11px", fontWeight: 700, color: "#7a8597" }}>
+            {grading ? "Grading…" : "Scored vs his position at his school level, using the weights + PFF focus above"}
+          </span>
+        </div>
+        {graded && (
+          <div style={{ marginTop: "10px", border: "1px solid #dde3ea", borderRadius: "8px", background: "#fff", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 14px", background: "#f5f7fa" }}>
+              {graded.c ? (
+                <span style={{ fontSize: "12px", fontWeight: 900, color: INK }}>
+                  {verdictOf(graded.c.score)} · #{graded.rank} of {graded.of.toLocaleString()} {LEVEL_LABEL[graded.pick.tier]} {graded.pick.position}s
+                </span>
+              ) : (
+                <span style={{ fontSize: "12px", fontWeight: 800, color: RED }}>
+                  Can't grade {graded.pick.first} {graded.pick.last} — {graded.miss}.
+                </span>
+              )}
+              <button type="button" onClick={() => setGraded(null)}
+                style={{ marginLeft: "auto", background: "transparent", color: BLUE, border: "none", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}>
+                Clear
+              </button>
+            </div>
+            {graded.c && (
+              <SuggestionCard c={graded.c} index={graded.rank - 1} adding={adding === graded.c.key}
+                onCreate={() => (graded.c.wd ? onCreate(graded.c.wd, graded.c.title) : addAndCreate(graded.c))}
+                onFlag={(key) => setFlag(graded.c, key)} />
+            )}
           </div>
         )}
       </div>
