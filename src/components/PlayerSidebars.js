@@ -74,6 +74,9 @@ export async function fetchTeammateVideos(player, max = 3) {
 function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
+  // imgur.com/ID.png only redirects to i.imgur.com — skip that round trip.
+  const fileMatch = url.match(/^https?:\/\/imgur\.com\/([A-Za-z0-9]+\.(png|jpe?g|gif|webp))$/i);
+  if (fileMatch) return `https://i.imgur.com/${fileMatch[1]}`;
   const singleMatch = url.match(/^https?:\/\/imgur\.com\/(?!a\/|gallery\/)([A-Za-z0-9]+)$/i);
   if (singleMatch) return `https://i.imgur.com/${singleMatch[1]}.png`;
   if (/^https?:\/\/imgur\.com\/(a|gallery)\//i.test(url)) return "";

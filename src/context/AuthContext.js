@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect } from "react";
 import { auth, provider, db } from "../firebase";
 import {
   signInWithPopup,
+  browserPopupRedirectResolver,
   signOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -31,7 +32,8 @@ export function AuthProvider({ children }) {
 
   // ── Google sign-in (called from inside the modal) ──
   const loginWithGoogle = async () => {
-    await signInWithPopup(auth, provider);
+    // Resolver passed here rather than at init — see firebase.js.
+    await signInWithPopup(auth, provider, browserPopupRedirectResolver);
   };
 
   // ── Email/password sign-up — creates Firestore user doc with empty username ──

@@ -12,6 +12,12 @@ import SimRoute from "./components/SimRoute";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
+import PlayerHeaderShell from "./components/PlayerHeaderShell";
+import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
+
+// A cold landing on /player/:slug starts its player query now, alongside
+// the PlayerProfile chunk download rather than after it.
+prefetchPlayerFromUrl();
 
 // Pages — lazy-loaded per route instead of one bundle everyone downloads
 // upfront. Before this, a first-time visitor to any page (say, a team page)
@@ -169,7 +175,7 @@ function MainLayout() {
                 literal-vs-dynamic parts, not route order, so this coexists
                 cleanly with /community/:year. */}
             <Route path="/community/:year/:position" element={<CommunityBoard />} />
-            <Route path="/player/:slug" element={<PlayerProfile />} />
+            <Route path="/player/:slug" element={<Suspense fallback={<PlayerHeaderShell />}><PlayerProfile /></Suspense>} />
             <Route path="/comparison" element={<Comparison />} />
             {/* /comparison/:slug preloads that prospect — same Slug format
                 /player/:slug uses (e.g. "jeremiah-smith-2027-wr"). */}

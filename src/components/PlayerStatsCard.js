@@ -280,7 +280,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderTop: "1px solid #eef1f5" }}>
                   <div style={{ width: LOGO_CELL, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "3px" }} title={`${g.homeAway === "away" ? "@" : "vs"} ${opp}`}>
                     {g.opponentLogo
-                      ? <img src={g.opponentLogo} alt={opp} style={{ width: "32px", height: "32px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      ? <img src={g.opponentLogo.replace(/^https?:\/\/imgur\.com\/(?=[A-Za-z0-9]+\.(png|jpe?g|gif|webp)$)/i, "https://i.imgur.com/")} alt={opp} style={{ width: "32px", height: "32px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                       : <span style={{ width: "30px", height: "30px", borderRadius: "50%", background: "#eef1f5", color: "#5b6b7f", fontSize: "11px", fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>{opp.slice(0, 2).toUpperCase()}</span>}
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "#8a95a5", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{dateLabel(g.startDate)}</div>
                   </div>

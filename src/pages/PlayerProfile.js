@@ -22,9 +22,11 @@ import {
 import { db } from "../firebase";
 import { cfbdPlayerFor, setLivePlayerFollow } from "../utils/liveFollowSync";
 import { getSiteSnapshot, fetchAds } from "../utils/siteSnapshots";
+import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
 import { STAT_METRICS, readMetric, percentileFromTable } from "../utils/historicalStats";
 import { useAuth } from "../context/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
+import PlayerHeaderShell from "../components/PlayerHeaderShell";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { getAnonId } from "../utils/anonId";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
@@ -68,6 +70,10 @@ const SIDEBAR_NEWS_LIMIT = 8;
 function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
+  // imgur.com/ID.png (no i.) — most stored logos — only redirects to the
+  // i.imgur.com file, an extra round trip per image; go there directly.
+  const fileMatch = url.match(/^https?:\/\/imgur\.com\/([A-Za-z0-9]+\.(png|jpe?g|gif|webp))$/i);
+  if (fileMatch) return `https://i.imgur.com/${fileMatch[1]}`;
   const singleMatch = url.match(/^https?:\/\/imgur\.com\/(?!a\/|gallery\/)([A-Za-z0-9]+)$/i);
   if (singleMatch) return `https://i.imgur.com/${singleMatch[1]}.png`;
   if (/^https?:\/\/imgur\.com\/(a|gallery)\//i.test(url)) return "";
@@ -86,6 +92,15 @@ function sanitizeUrl(url) {
   if (u.includes("drive.google.com")) u = sanitizeGoogleDrive(u);
   if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
   return u;
+}
+
+// Video thumbnails are often full 1920x1080 PNGs (1.5MB+) shown ~230px wide;
+// imgur's "l" variant (640px JPEG) of the same image is a few dozen KB.
+// Hash-style ids are 5 or 7 chars — anything else is left alone.
+function thumbUrl(url) {
+  const u = sanitizeUrl(url);
+  const m = u.match(/^https:\/\/i\.imgur\.com\/([A-Za-z0-9]{5}|[A-Za-z0-9]{7})\.(png|jpe?g)$/i);
+  return m ? `https://i.imgur.com/${m[1]}l.jpg` : u;
 }
 
 const SITE_BLUE = "#0055a5";
@@ -1435,7 +1450,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
                       {activeCard.recentVideo.thumb ? (
                         <img
                           className="wd-video-thumb"
-                          src={sanitizeUrl(activeCard.recentVideo.thumb)}
+                          src={thumbUrl(activeCard.recentVideo.thumb)}
                           alt={activeCard.recentVideo.title || "Video thumbnail"}
                           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
                           referrerPolicy="no-referrer"
@@ -2428,8 +2443,8 @@ export default function PlayerProfile() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const q = query(collection(db,"players"), where("Slug","==",slug));
-        const snap = await getDocs(q);
+        // Usually already in flight since app boot (utils/playerPrefetch.js).
+        const snap = await takePlayerBySlug(slug);
         if (!snap.empty) {
           const d = snap.docs[0];
           const data = {...d.data()};
@@ -2802,7 +2817,9 @@ export default function PlayerProfile() {
         // a random auto-generated ID instead, so a straight doc(db,
         // "schools", player.School) lookup silently found nothing for them
         // and every FCS player fell back to no branding at all.
-        const schoolQuery = await getDocs(query(collection(db, "schools"), where("School", "==", player.School)));
+        // Usually already in flight (utils/playerPrefetch.js chains it on the
+        // player doc) — the hero holds its placeholder until this lands.
+        const schoolQuery = await takeSchoolByName(player.School);
         if (!schoolQuery.empty) {
           const b = schoolQuery.docs[0].data();
           // Dark variant preferred — this now feeds a full-opacity
@@ -3521,7 +3538,12 @@ useEffect(() => {
     catch { return ""; }
   };
 
-  if (!player) return <LoadingSpinner label="Loading Player" size={56} minHeight="calc(100vh / var(--pz, 1))" />;
+  // Header-shaped placeholder (name/class from the slug), not a bare
+  // spinner — the route's Suspense fallback is the same component, so a cold
+  // visit shows one steady header from chunk download through this fetch.
+  // Held until the school's colors/logos are in too, so the placeholder
+  // swaps straight to the team-colored hero instead of site blue first.
+  if (!player || !brandingReady) return <PlayerHeaderShell />;
 
   const gradeIsLocked = player?.Eligible === "2026" && new Date() >= GRADE_LOCK_DATE;
   const isTrendingUp = (trend?.Trend || "").toString().trim().toLowerCase() === "up";
@@ -4224,7 +4246,7 @@ useEffect(() => {
             {v.thumb ? (
               <img
                 className="wd-video-thumb"
-                src={sanitizeUrl(v.thumb)}
+                src={thumbUrl(v.thumb)}
                 alt={v.title || "Video thumbnail"}
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "transform 0.4s ease" }}
                 referrerPolicy="no-referrer"
@@ -4705,10 +4727,10 @@ useEffect(() => {
         className={"mx-auto pb-40" + (modern ? " wdm" : "")}
         style={
           isMobile
-            ? { "--c1": siteC1, "--c2": siteC2, padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
+            ? { "--c1": siteC1, "--c2": siteC2, padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px" }
             // Pulled up under the navbar: the gap above the columns was ~64px
             // (body's navbar padding + the layout's 25px + this padding) — now ~16px.
-            : { "--c1": siteC1, "--c2": siteC2, maxWidth: "1600px", margin: "-24px auto 0", padding: "0 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
+            : { "--c1": siteC1, "--c2": siteC2, maxWidth: "1600px", margin: "-24px auto 0", padding: "0 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center" }
         }
       >
 
