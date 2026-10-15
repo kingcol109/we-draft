@@ -36,7 +36,6 @@ import { usePlayerSidebarData, PlayerVideosCard, PlayerNewsCard } from "../compo
 import PlayerLiveCard from "../components/PlayerLiveCard";
 import { WatchButton } from "./PlayerProfile";
 import { Helmet } from "react-helmet-async";
-import WdWordmark from "../assets/Logo1.png";
 import {
   STAT_METRICS, readMetric, computePositionStats, findComps, isGraded,
   communityTraits, draftedPlayersAsHistorical, TRAIT_WEIGHT, TRAIT_MATCH_TARGET, percentileOf,
@@ -287,6 +286,8 @@ const STACK_BELOW = 1240;
 
 // Height of the top-3 cards' wordmark band (and the tallest a mark can get).
 const WORDMARK_BAND = "120px";
+// Phones: the cards stack one per row, so a shorter band keeps each card compact.
+const WORDMARK_BAND_MOBILE = "64px";
 
 // Left-margin class list: the loaded prospect's own Eligible + Position
 // group, ranked by community grade exactly like PlayerProfile.js's Draft
@@ -600,10 +601,10 @@ function InfoTip({ text, color }) {
   );
 }
 
-const cardStyle = { background: "#fff", borderRadius: "16px", boxShadow: "0 2px 18px rgba(0,40,80,0.10)", overflow: "hidden" };
-const labelStyle = { fontSize: "10px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#888", marginBottom: "5px" };
-const sectionStyle = { fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "10px" };
-const inputStyle = { width: "100%", border: "2px solid #e4e9f0", borderRadius: "8px", padding: "9px 10px", fontWeight: 700, fontSize: "13px", outline: "none", boxSizing: "border-box", fontFamily: "inherit", background: "#fbfcfe" };
+const cardStyle = { background: "#fff", borderRadius: "14px", border: "1px solid #e3e8ef", overflow: "hidden" };
+const labelStyle = { fontSize: "10px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#8a97ab", marginBottom: "5px" };
+const sectionStyle = { fontSize: "12px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: "10px" };
+const inputStyle = { width: "100%", border: "1px solid #d5dce6", borderRadius: "10px", padding: "9px 10px", fontWeight: 600, fontSize: "13px", outline: "none", boxSizing: "border-box", fontFamily: "inherit", background: "#fff" };
 
 export default function Comparison() {
   const { slug: routeSlug } = useParams();
@@ -1115,7 +1116,7 @@ export default function Comparison() {
   const renderMetric = (key) => {
     const m = metricByKey[key];
     const p = parsed[m.key];
-    const selectStyle = { ...inputStyle, flex: 1, padding: "7px 6px", fontSize: "12px", ...(p?.error ? { border: "2px solid #c0392b" } : {}) };
+    const selectStyle = { ...inputStyle, flex: 1, padding: "7px 6px", fontSize: "12px", ...(p?.error ? { border: "1px solid #c0392b" } : {}) };
     let control;
     if (m.format === "height") {
       const { feet, inches, eighths } = decomposeHeight(inputs.height);
@@ -1148,7 +1149,7 @@ export default function Comparison() {
           value={inputs[m.key] || ""}
           onChange={(e) => setInputs((prev) => ({ ...prev, [m.key]: e.target.value }))}
           onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
-          style={p?.error ? { ...inputStyle, border: "2px solid #c0392b" } : inputStyle}
+          style={p?.error ? { ...inputStyle, border: "1px solid #c0392b" } : inputStyle}
         />
       );
     }
@@ -1186,7 +1187,7 @@ export default function Comparison() {
     const draftLine = p.draftPick != null ? `Round ${p.draftRound} Pick ${p.draftPick}` : "Undrafted";
     const rowStyle = {
       display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none",
-      borderBottom: i < classRows.length - 1 ? "1px solid #f0f0f0" : "none",
+      borderBottom: i < classRows.length - 1 ? "1px solid #eef1f5" : "none",
       background: isSelf ? "#fff8e6" : "#fff",
       borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
     };
@@ -1232,11 +1233,10 @@ export default function Comparison() {
     );
   });
   const classCard = (
-    <div style={{ border: `2px solid ${BLUE}`, borderRadius: "8px", overflow: "hidden" }}>
-      <div style={{ backgroundColor: BLUE, padding: "12px 14px", textAlign: "center" }}>
-        <h2 style={{ color: "#fff", fontSize: "20px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", margin: 0 }}>{classLabel}</h2>
+    <div style={{ border: "1px solid #e3e8ef", borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
+      <div style={{ backgroundColor: BLUE, padding: "12px 16px" }}>
+        <h2 style={{ color: "#fff", fontSize: "13px", fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", margin: 0 }}>{classLabel}</h2>
       </div>
-      <div style={{ height: "4px", backgroundColor: GOLD }} />
       <div style={{ background: "#fff" }}>{classListBody}</div>
     </div>
   );
@@ -1258,16 +1258,15 @@ export default function Comparison() {
   const heroWatermark = schoolBranding ? (schoolBranding.WordmarkDark || schoolBranding.Wordmark || "") : "";
 
   return (
-    <div style={{ background: "#f4f7fb", minHeight: "calc(70vh / var(--pz, 1))", paddingBottom: "60px" }}>
+    <div className="wdc" style={{ background: "#f4f6f9", minHeight: "calc(70vh / var(--pz, 1))", paddingBottom: "60px" }}>
       <style>{`
         @keyframes wdCompFadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         /* We-Draft.com Select card — slow gold glow, a rotating gold ring
            around the WD mark, and a shine that sweeps the ribbon. */
         @keyframes wdSelectGlow { 0%, 100% { box-shadow: 0 0 0 0 rgba(244,166,30,0.0), 0 6px 26px rgba(0,48,92,0.22); } 50% { box-shadow: 0 0 22px 2px rgba(244,166,30,0.55), 0 6px 26px rgba(0,48,92,0.22); } }
         @keyframes wdSelectSpin { to { transform: rotate(360deg); } }
-        @keyframes wdSelectShine { 0% { transform: translateX(-120%) skewX(-20deg); } 60%, 100% { transform: translateX(260%) skewX(-20deg); } }
         .wd-comp-card.wd-select-card { animation: wdCompFadeUp 0.4s ease both, wdSelectGlow 3.2s ease-in-out 0.4s infinite; }
-        @media (prefers-reduced-motion: reduce) { .wd-select-card, .wd-select-ring, .wd-select-shine { animation: none !important; } }
+        @media (prefers-reduced-motion: reduce) { .wd-select-card, .wd-select-ring { animation: none !important; } }
         @keyframes wdCompSlideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
         .wd-comp-card { animation: wdCompFadeUp 0.35s ease both; }
         .wd-comp-form { animation: wdCompSlideDown 0.2s ease both; }
@@ -1277,8 +1276,14 @@ export default function Comparison() {
         .wd-comp-search-row:hover { background: #f4f7fb; }
         .wd-comp-profile-btn:hover { background: rgba(255,255,255,0.28); }
         .wd-comp-toggle:hover { opacity: 0.75; }
-        .wd-comp-hero-btn { transition: opacity 0.15s ease; }
-        .wd-comp-hero-btn:hover { opacity: 0.9; }
+        .wd-comp-hero-btn { transition: background 0.15s ease, border-color 0.15s ease, filter 0.15s ease; }
+        .wd-comp-hero-btn.ghost:hover { border-color: #fff !important; background: rgba(255,255,255,0.14) !important; }
+        .wd-comp-hero-btn.fill:hover { filter: brightness(1.1); }
+        body:has(.wdc) { background: #f4f6f9; }
+        /* toolbar Watch button (WatchButton, shared with the player page): same outlined pill */
+        .wdc .wd-watch-btn { animation: none !important; border: 1px solid rgba(255,255,255,0.4) !important; background: rgba(255,255,255,0.06) !important;
+          font-size: 14px !important; font-weight: 800 !important; padding: 8px 16px !important; }
+        .wdc .wd-watch-btn:hover { border-color: #fff !important; background: rgba(255,255,255,0.14) !important; opacity: 1 !important; }
         .wd-comp-hero-school:hover { text-decoration: underline !important; }
         .wd-comp-live:empty { display: none; }
         .wd-comp-row-link:hover { text-decoration: underline !important; }
@@ -1322,11 +1327,12 @@ export default function Comparison() {
           prospect's school colors; site blue/gold before anyone's loaded.
           Differences: no flair badge box on the right, and the prospect
           search added under the name row. ── */}
-      <div style={{ marginBottom: "24px", borderRadius: "8px", overflow: "hidden", border: `3px solid ${heroColor1}` }}>
+      <div style={{ marginBottom: "24px", borderRadius: "16px", overflow: "hidden", border: "1px solid #e3e8ef" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", backgroundColor: heroColor1, padding: isMobile ? "10px 12px" : "12px 20px" }}>
           <button
             onClick={() => navigate(-1)}
-            style={{ border: "2px solid #fff", background: "rgba(255,255,255,0.12)", color: "#fff", fontWeight: 800, fontSize: isMobile ? "14px" : "16px", padding: isMobile ? "7px 12px" : "10px 22px", borderRadius: "8px", cursor: "pointer", letterSpacing: "0.04em", whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start" }}
+            className="wd-comp-hero-btn ghost"
+            style={{ border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.06)", color: "#fff", fontWeight: 800, fontSize: "14px", padding: isMobile ? "7px 12px" : "8px 16px", borderRadius: "999px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start" }}
           >
             ← Back
           </button>
@@ -1350,15 +1356,15 @@ export default function Comparison() {
               />
               <button
                 onClick={clearAll}
-                className="wd-comp-hero-btn"
-                style={{ border: "2px solid #fff", background: "rgba(255,255,255,0.12)", color: "#fff", fontWeight: 900, fontSize: isMobile ? "14px" : "16px", padding: isMobile ? "7px 14px" : "9px 18px", borderRadius: "999px", cursor: "pointer" }}
+                className="wd-comp-hero-btn ghost"
+                style={{ border: "1px solid rgba(255,255,255,0.4)", background: "rgba(255,255,255,0.06)", color: "#fff", fontWeight: 800, fontSize: "14px", padding: isMobile ? "7px 14px" : "8px 16px", borderRadius: "999px", cursor: "pointer" }}
               >
                 {isMobile ? "New" : "Compare Someone Else"}
               </button>
               <Link
                 to={`/player/${loadedPlayer.Slug}`}
-                className="wd-comp-hero-btn"
-                style={{ backgroundColor: heroColor2, border: "2px solid #fff", color: "#fff", fontWeight: 900, fontSize: isMobile ? "14px" : "16px", padding: isMobile ? "7px 14px" : "9px 18px", borderRadius: "999px", textDecoration: "none" }}
+                className="wd-comp-hero-btn fill"
+                style={{ backgroundColor: heroColor2, border: "1px solid rgba(255,255,255,0.6)", color: "#fff", fontWeight: 800, fontSize: "14px", padding: isMobile ? "7px 14px" : "8px 16px", borderRadius: "999px", textDecoration: "none" }}
               >
                 {isMobile ? "Scouting Report" : "View Scouting Report"}
               </Link>
@@ -1472,7 +1478,7 @@ export default function Comparison() {
                     <span style={{ display: "block", marginTop: isMobile ? "2px" : "4px" }}>{loadedPlayer.Last}</span>
                   </h1>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexWrap: "wrap", gap: isMobile ? "6px" : "10px", marginTop: "8px" }}>
-                    <span style={{ background: "rgba(255,255,255,0.14)", border: "2px solid #fff", color: "#fff", fontWeight: 800, letterSpacing: "0.05em", fontSize: isMobile ? "11px" : "17px", padding: isMobile ? "2px 8px" : "3px 16px", borderRadius: "999px" }}>
+                    <span style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.45)", color: "#fff", fontWeight: 800, letterSpacing: "0.05em", fontSize: isMobile ? "11px" : "17px", padding: isMobile ? "2px 8px" : "3px 16px", borderRadius: "999px" }}>
                       {loadedPlayer.Position}
                     </span>
                     <span style={{ color: "rgba(255,255,255,0.4)" }}>·</span>
@@ -1498,7 +1504,7 @@ export default function Comparison() {
                   {drafted && (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexWrap: "wrap", gap: isMobile ? "6px" : "10px", marginTop: "8px" }}>
                       <span style={{
-                        background: heroColor2, border: "2px solid #fff", color: "#fff", borderRadius: "999px",
+                        background: heroColor2, border: "1px solid rgba(255,255,255,0.6)", color: "#fff", borderRadius: "999px",
                         fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap",
                         fontSize: isMobile ? "11px" : "15px", padding: isMobile ? "2px 10px" : "3px 16px",
                         textShadow: "0 1px 3px rgba(0,0,0,0.25)",
@@ -1565,7 +1571,6 @@ export default function Comparison() {
             </div>
           </div>
         </div>
-        <div style={{ height: "4px", background: heroColor2 }} />
       </div>
 
       <div>
@@ -1574,9 +1579,9 @@ export default function Comparison() {
             above the measurement chips. The matching short description
             stays in the quiet section at the bottom of the column. */}
         {seoName && (
-          <h2 style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 900, color: heroColor1, textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", margin: "0 0 14px" }}>
+          <h2 style={{ fontSize: isMobile ? "13px" : "14px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.14em", textAlign: "center", margin: "0 0 14px" }}>
             {seoHeading}
-            <InfoTip color={heroColor1} text={COMP_DISCLAIMER} />
+            <InfoTip color={BLUE} text={COMP_DISCLAIMER} />
           </h2>
         )}
 
@@ -1615,7 +1620,7 @@ export default function Comparison() {
                 {loadedPlayer && (
                   <Link
                     to={`/player/${loadedPlayer.Slug}`}
-                    style={{ border: `2px solid ${BLUE}`, color: BLUE, borderRadius: "999px", padding: "7px 14px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", textDecoration: "none" }}
+                    style={{ border: "1px solid #e3e8ef", color: BLUE, borderRadius: "999px", padding: "8px 15px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", textDecoration: "none" }}
                   >
                     Evaluate {loadedPlayer.Last} →
                   </Link>
@@ -1638,7 +1643,9 @@ export default function Comparison() {
           ) : (
             <div style={{ marginBottom: "24px" }}>
               {submittedMetrics.length > 0 && (
-                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginBottom: "18px" }}>
+                <div style={isMobile
+                  ? { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "6px", marginBottom: "14px" }
+                  : { display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginBottom: "18px" }}>
                   {/* Hover (or tap) fills the chip with school Color1 and
                       swaps the value for the entry's percentile among
                       drafted players at the position — just "97%", in
@@ -1659,9 +1666,9 @@ export default function Comparison() {
                         onClick={() => { if (lastPointerType.current !== "mouse") setActiveChip((c) => (c === m.key ? null : m.key)); }}
                         title={pctRounded == null ? undefined : `${ordinal(pctRounded)} percentile among drafted ${submitted.position}s`}
                         style={{
-                          minWidth: "96px", boxSizing: "border-box", borderRadius: "12px", padding: "10px 18px", textAlign: "center", cursor: "default",
+                          minWidth: isMobile ? 0 : "96px", boxSizing: "border-box", borderRadius: isMobile ? "10px" : "12px", padding: isMobile ? "8px 2px" : "10px 18px", textAlign: "center", cursor: "default",
                           background: active ? heroColor1 : "#fff",
-                          border: `2px solid ${active ? heroColor1 : "#e4e9f0"}`,
+                          border: `1px solid ${active ? heroColor1 : heroColor1 + "66"}`,
                           transition: "background 0.2s ease, border-color 0.2s ease",
                         }}
                       >
@@ -1669,13 +1676,13 @@ export default function Comparison() {
                             cell, only visibility toggled — the chip is always
                             as wide as the wider of the two, so hovering never
                             resizes it (swapping the text did). */}
-                        <div style={{ display: "grid", fontSize: "19px", fontWeight: 900, lineHeight: 1.1 }}>
+                        <div style={{ display: "grid", fontSize: isMobile ? "16px" : "19px", fontWeight: 900, lineHeight: 1.1 }}>
                           <span style={{ gridArea: "1 / 1", color: heroColor1, visibility: active ? "hidden" : "visible" }}>{formatStatValue(m, submitted.values[m.key])}</span>
                           {pctRounded != null && (
                             <span style={{ gridArea: "1 / 1", color: "#fff", visibility: active ? "visible" : "hidden" }} aria-hidden={!active}>{pctRounded}%</span>
                           )}
                         </div>
-                        <div style={{ fontSize: "10px", fontWeight: 900, marginTop: "3px", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap", color: active ? "rgba(255,255,255,0.8)" : "#999", transition: "color 0.2s ease" }}>
+                        <div style={{ fontSize: "10px", fontWeight: 900, marginTop: "3px", textTransform: "uppercase", letterSpacing: isMobile ? "0.03em" : "0.06em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: active ? "rgba(255,255,255,0.8)" : "#8a97ab", transition: "color 0.2s ease" }}>
                           {m.label}
                         </div>
                       </div>
@@ -1683,7 +1690,7 @@ export default function Comparison() {
                   })}
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: isMobile ? "12px" : "16px", marginBottom: "16px" }}>
                 {/* Top 3 — two faces stacked in one grid cell (so the card
                     is always as tall as the taller face and never jumps):
                     the resting face is player info only; hover (or tap)
@@ -1719,7 +1726,35 @@ export default function Comparison() {
                   const draftLine = `${r.record.Year} · Round ${parseInt(r.record.Round, 10)}${r.record.Pick ? `, Pick ${r.record.Pick}` : ""}`;
                   const measured = STAT_METRICS.filter((m) => r.values[m.key] != null);
                   const shared = new Set([...(r.traits?.sharedStrengths || []), ...(r.traits?.sharedWeaknesses || [])]);
-                  const faceStyle = { gridArea: "1 / 1", padding: "22px 20px", transition: "opacity 0.2s ease", display: "flex", flexDirection: "column" };
+                  const faceStyle = { gridArea: "1 / 1", padding: isMobile ? "14px 14px 10px" : "22px 20px", transition: "opacity 0.2s ease", display: "flex", flexDirection: "column" };
+                  // Mobile: the cards stack one per row, so the face not
+                  // showing is dropped instead of sizing the card — the
+                  // card grows on tap rather than always being as tall as
+                  // the detail face.
+                  const faceShown = (shown) => (isMobile && !shown ? { display: "none" } : null);
+                  const wheelSize = isMobile ? 84 : 124;
+                  const wheel = isSelect ? (
+                    <div style={{ position: "relative", width: `${wheelSize}px`, height: `${wheelSize}px`, margin: isMobile ? 0 : "0 auto 16px", flexShrink: 0 }}>
+                      <div className="wd-select-ring" style={{
+                        position: "absolute", inset: 0, borderRadius: "50%",
+                        background: `conic-gradient(${GOLD}, #ffe39a, ${GOLD}, ${NAVY}, ${GOLD})`,
+                        animation: "wdSelectSpin 7s linear infinite",
+                      }} />
+                      <div style={{ position: "absolute", inset: isMobile ? "8px" : "12px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <img src="/wd-icon-512.png" alt="We-Draft.com Select" style={{ width: isMobile ? "58px" : "88px", height: isMobile ? "58px" : "88px", objectFit: "contain" }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      width: `${wheelSize}px`, height: `${wheelSize}px`, borderRadius: "50%", margin: isMobile ? 0 : "0 auto 16px", flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: `conic-gradient(${accent} ${r.similarity * 3.6}deg, #eef1f6 0deg)`,
+                    }}>
+                      <div style={{ width: `${wheelSize - 24}px`, height: `${wheelSize - 24}px`, borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ fontSize: isMobile ? "21px" : "28px", fontWeight: 900, color: accent, letterSpacing: "-0.01em" }}>{r.similarity.toFixed(0)}%</div>
+                      </div>
+                    </div>
+                  );
                   // Comps from the latest drafted class still have a live
                   // player page (their row carries its Slug); older
                   // historical comps don't, so those cards stay non-links.
@@ -1752,58 +1787,34 @@ export default function Comparison() {
                         position: "relative",
                       }}
                     >
-                      {isSelect && (
-                        <div style={{
-                          position: "absolute", top: 0, left: 0, right: 0, height: "19px", zIndex: 2, overflow: "hidden",
-                          background: `linear-gradient(90deg, ${NAVY}, ${BLUE}, ${NAVY})`, borderBottom: `2px solid ${GOLD}`,
-                          display: "flex", alignItems: "center", justifyContent: "center", gap: "7px", pointerEvents: "none",
-                        }}>
-                          <img src={WdWordmark} alt="We-Draft.com" style={{ height: "10px", width: "auto", filter: "brightness(0) invert(1)" }} />
-                          <span style={{ color: GOLD, fontSize: "9px", fontWeight: 900, letterSpacing: "0.16em" }}>SELECT</span>
-                          <span className="wd-select-shine" style={{
-                            position: "absolute", top: 0, bottom: 0, left: 0, width: "40%",
-                            background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent)",
-                            animation: "wdSelectShine 3.6s ease-in-out infinite",
-                          }} />
-                        </div>
-                      )}
                       {/* Resting face — name leads (big, top of the card),
                           then the match wheel, draft line, and the NFL
                           team's wordmark pinned to the bottom. */}
-                      <div style={{ ...faceStyle, opacity: active ? 0 : 1, pointerEvents: active ? "none" : "auto" }} aria-hidden={active}>
-                        {/* First / last always stacked, like the hero's name. */}
-                        <div style={{ fontSize: "clamp(24px, 2.6vw, 30px)", fontWeight: 900, color: nameColor, lineHeight: 1.02, textTransform: "uppercase", letterSpacing: "0.01em", marginBottom: "6px" }}>
-                          {recordNameParts(r.record).filter(Boolean).map((part, pi) => <div key={pi}>{part}</div>)}
+                      <div style={{ ...faceStyle, opacity: active ? 0 : 1, pointerEvents: active ? "none" : "auto", ...faceShown(!active) }} aria-hidden={active}>
+                        {/* Mobile: wheel on the left, name / school / draft
+                            on the right, wordmark band underneath. */}
+                        <div style={isMobile ? { display: "flex", alignItems: "center", gap: "14px", textAlign: "left", marginBottom: "6px" } : { display: "contents" }}>
+                        {isMobile && wheel}
+                        <div style={isMobile ? { minWidth: 0, flex: 1 } : { display: "contents" }}>
+                        {/* First / last stacked on desktop, like the hero's
+                            name; one line (wrapping only if it must) on a
+                            phone, where the card is full width beside the
+                            wheel and has the room. */}
+                        <div style={{ fontSize: isMobile ? "clamp(22px, 7vw, 28px)" : "clamp(24px, 2.6vw, 30px)", fontWeight: 900, color: nameColor, lineHeight: isMobile ? 1.05 : 1.02, textTransform: "uppercase", letterSpacing: "0.01em", marginBottom: isMobile ? "4px" : "6px" }}>
+                          {isMobile
+                            ? recordNameParts(r.record).filter(Boolean).join(" ")
+                            : recordNameParts(r.record).filter(Boolean).map((part, pi) => <div key={pi}>{part}</div>)}
                         </div>
-                        <div style={{ fontSize: "15px", fontWeight: 800, color: "#777", marginBottom: "16px" }}>{r.record.Position} · {r.record.School}</div>
-                        {isSelect ? (
-                          <div style={{ position: "relative", width: "124px", height: "124px", margin: "0 auto 16px" }}>
-                            <div className="wd-select-ring" style={{
-                              position: "absolute", inset: 0, borderRadius: "50%",
-                              background: `conic-gradient(${GOLD}, #ffe39a, ${GOLD}, ${NAVY}, ${GOLD})`,
-                              animation: "wdSelectSpin 7s linear infinite",
-                            }} />
-                            <div style={{ position: "absolute", inset: "12px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <img src="/wd-icon-512.png" alt="We-Draft.com Select" style={{ width: "88px", height: "88px", objectFit: "contain" }} />
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{
-                            width: "124px", height: "124px", borderRadius: "50%", margin: "0 auto 16px",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            background: `conic-gradient(${accent} ${r.similarity * 3.6}deg, #eef1f6 0deg)`,
-                          }}>
-                            <div style={{ width: "100px", height: "100px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <div style={{ fontSize: "28px", fontWeight: 900, color: accent, letterSpacing: "-0.01em" }}>{r.similarity.toFixed(0)}%</div>
-                            </div>
-                          </div>
-                        )}
+                        <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 800, color: "#777", marginBottom: isMobile ? "6px" : "16px" }}>{r.record.Position} · {r.record.School}</div>
+                        {!isMobile && wheel}
                         {/* Draft year on its own line, round/pick underneath. */}
-                        <div style={{ marginBottom: "14px", color: BLUE, lineHeight: 1.1 }}>
-                          <div style={{ fontSize: "24px", fontWeight: 900, letterSpacing: "0.02em" }}>{r.record.Year}</div>
-                          <div style={{ fontSize: "14px", fontWeight: 800, marginTop: "2px" }}>
+                        <div style={{ marginBottom: isMobile ? 0 : "14px", color: BLUE, lineHeight: 1.1 }}>
+                          <div style={{ fontSize: isMobile ? "18px" : "24px", fontWeight: 900, letterSpacing: "0.02em" }}>{r.record.Year}</div>
+                          <div style={{ fontSize: isMobile ? "13px" : "14px", fontWeight: 800, marginTop: "2px" }}>
                             Round {parseInt(r.record.Round, 10)}{r.record.Pick ? ` · Pick ${r.record.Pick}` : ""}
                           </div>
+                        </div>
+                        </div>
                         </div>
                         {/* Wordmark — sized by width, not height: it
                             bleeds 12px into the card's side padding (8px
@@ -1817,11 +1828,11 @@ export default function Comparison() {
                             individual mark is. The text fallback is an SVG
                             sized the same way, with textLength so any
                             nickname runs edge to edge. */}
-                        <div style={{ marginTop: "auto", marginLeft: "-12px", marginRight: "-12px", width: "calc(100% + 24px)", height: WORDMARK_BAND, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ marginTop: "auto", marginLeft: "-12px", marginRight: "-12px", width: "calc(100% + 24px)", height: isMobile ? WORDMARK_BAND_MOBILE : WORDMARK_BAND, display: "flex", alignItems: "center", justifyContent: "center" }}>
                           {restWordmark ? (
                             <TrimmedImg
                               src={sanitizeUrl(restWordmark)} alt={displayTeamName(r.record["NFL Team"])}
-                              style={{ display: "block", width: "100%", height: "auto", maxHeight: WORDMARK_BAND, objectFit: "contain" }}
+                              style={{ display: "block", width: "100%", height: "auto", maxHeight: isMobile ? WORDMARK_BAND_MOBILE : WORDMARK_BAND, objectFit: "contain" }}
                             />
                           ) : wordmarkText && (
                             // Canvas width follows the name's length (~25
@@ -1829,7 +1840,7 @@ export default function Comparison() {
                             // only nudges it to fit instead of visibly
                             // stretching short names like "JETS" — those
                             // just come out taller (up to WORDMARK_BAND).
-                            <svg viewBox={`0 0 ${Math.max(60, wordmarkText.length * 25)} 40`} width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label={wordmarkText} style={{ display: "block", maxHeight: WORDMARK_BAND }}>
+                            <svg viewBox={`0 0 ${Math.max(60, wordmarkText.length * 25)} 40`} width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label={wordmarkText} style={{ display: "block", maxHeight: isMobile ? WORDMARK_BAND_MOBILE : WORDMARK_BAND }}>
                               <text
                                 x={Math.max(60, wordmarkText.length * 25) / 2} y="31" textAnchor="middle"
                                 textLength={Math.max(60, wordmarkText.length * 25) - 4} lengthAdjust="spacingAndGlyphs"
@@ -1843,7 +1854,7 @@ export default function Comparison() {
                       </div>
 
                       {/* Detail face — team color fill, measurements, traits */}
-                      <div style={{ ...faceStyle, opacity: active ? 1 : 0, pointerEvents: active ? "auto" : "none", color: onFill }} aria-hidden={!active}>
+                      <div style={{ ...faceStyle, opacity: active ? 1 : 0, pointerEvents: active ? "auto" : "none", color: onFill, ...faceShown(active) }} aria-hidden={!active}>
                         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px", textAlign: "left" }}>
                           {fillLogo && (
                             <img
@@ -1863,12 +1874,22 @@ export default function Comparison() {
                           )}
                         </div>
 
+                        {/* Select: says so here (no ribbon on the resting face). */}
+                        {isSelect && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "12px", textAlign: "left" }}>
+                            <span style={{ background: GOLD, color: "#121212", fontSize: "11px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", padding: "3px 10px", borderRadius: "999px", whiteSpace: "nowrap" }}>
+                              We-Draft.com Select
+                            </span>
+                            <span style={{ fontSize: "11px", fontWeight: 700, color: onFillMuted }}>Hand-picked by our analysts</span>
+                          </div>
+                        )}
+
                         {measured.length > 0 && (
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px 6px", marginBottom: "12px", paddingBottom: "12px", borderBottom: `1px solid ${onFillMuted}` }}>
                             {measured.map((m) => (
                               <div key={m.key}>
                                 <div style={{ fontSize: "14px", fontWeight: 900 }}>{formatStatValue(m, r.values[m.key])}</div>
-                                <div style={{ fontSize: "9px", fontWeight: 800, color: onFillMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{m.label}</div>
+                                <div style={{ fontSize: "10px", fontWeight: 800, color: onFillMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{m.label}</div>
                               </div>
                             ))}
                           </div>
@@ -1879,7 +1900,7 @@ export default function Comparison() {
                           { label: "Weaknesses", list: r.traits.weaknesses },
                         ].filter(({ list }) => list.length > 0).map(({ label, list }) => (
                           <div key={label} style={{ textAlign: "left", marginBottom: "8px" }}>
-                            <div style={{ fontSize: "9px", fontWeight: 900, color: onFillMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>{label}</div>
+                            <div style={{ fontSize: "10px", fontWeight: 900, color: onFillMuted, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>{label}</div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
                               {list.map((t) => (
                                 <span
@@ -1887,7 +1908,7 @@ export default function Comparison() {
                                   title={shared.has(t) ? "Shared with this prospect" : undefined}
                                   style={{
                                     fontSize: "11px", fontWeight: 800, padding: "3px 8px", borderRadius: "999px",
-                                    border: `1.5px solid ${onFillMuted}`,
+                                    border: `1px solid ${onFillMuted}`,
                                     background: shared.has(t) ? onFill : "transparent",
                                     color: shared.has(t) ? fill : onFill,
                                   }}
@@ -1972,7 +1993,7 @@ export default function Comparison() {
                       const rowStyle = {
                         display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px",
                         padding: isMobile ? "10px 6px" : "12px 10px", borderRadius: "12px", textDecoration: "none",
-                        borderTop: i === 0 ? "none" : "1px solid #f0f2f6",
+                        borderTop: i === 0 ? "none" : "1px solid #eef1f5",
                         "--wd-row-tint": `${accent}14`,
                       };
                       return r.record.Slug ? (
@@ -2023,7 +2044,7 @@ export default function Comparison() {
                     className="wd-comp-chip"
                     style={{
                       padding: "7px 16px", fontWeight: 900, fontSize: "12px", borderRadius: "999px", cursor: "pointer",
-                      border: `2px solid ${position === p ? GOLD : "#e4e9f0"}`,
+                      border: `1px solid ${position === p ? GOLD : "#d5dce6"}`,
                       background: position === p ? GOLD : "#fff", color: position === p ? "#fff" : "#555",
                     }}
                   >
@@ -2096,7 +2117,7 @@ export default function Comparison() {
                                   onClick={() => toggleTrait(trait, kind)}
                                   style={{
                                     padding: "6px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 800,
-                                    border: `2px solid ${isSel ? color : "#e4e9f0"}`,
+                                    border: `1px solid ${isSel ? color : "#d5dce6"}`,
                                     background: isSel ? color : "#fff",
                                     color: isSel ? "#fff" : isOther ? "#ccc" : "#555",
                                     cursor: isOther ? "not-allowed" : "pointer",
@@ -2140,7 +2161,7 @@ export default function Comparison() {
                   style={{
                     flex: 1, background: canSearch ? GOLD : "#ddd", color: "#fff", border: "none", borderRadius: "999px",
                     padding: "14px", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em",
-                    cursor: canSearch ? "pointer" : "not-allowed", boxShadow: canSearch ? "0 6px 18px rgba(246,162,29,0.35)" : "none",
+                    cursor: canSearch ? "pointer" : "not-allowed",
                   }}
                 >
                   Compare
@@ -2174,7 +2195,7 @@ export default function Comparison() {
       {isStacked ? (
         loadedPlayer && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <PlayerVideosCard videos={sidebarVideos} accentColor={heroColor1} />
+            <PlayerVideosCard videos={sidebarVideos} accentColor={BLUE} />
             <PlayerNewsCard news={sidebarNews} />
           </div>
         )
@@ -2183,7 +2204,7 @@ export default function Comparison() {
           {loadedPlayer && (
             <>
               <PlayerLiveCard player={loadedPlayer} />
-              <PlayerVideosCard videos={sidebarVideos} accentColor={heroColor1} />
+              <PlayerVideosCard videos={sidebarVideos} accentColor={BLUE} />
               <PlayerNewsCard news={sidebarNews} />
             </>
           )}

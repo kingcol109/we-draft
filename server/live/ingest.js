@@ -259,8 +259,25 @@ async function schoolsByTeamId(db) {
   return map;
 }
 
+// CFBD venues by id, cached per warm process (one call a day) — the city /
+// state / zip behind each game's venue name, for the game page's SEO
+// location (SportsEvent.location.address). A failed fetch just leaves
+// games without it.
+let venuesCache = null;
+async function venuesById() {
+  if (venuesCache && Date.now() - venuesCache.at < 24 * 3600e3) return venuesCache.map;
+  const map = new Map();
+  try {
+    (await cfbd.venues()).forEach((v) => { if (v?.id != null) map.set(v.id, v); });
+  } catch (e) {
+    if (venuesCache) return venuesCache.map;
+  }
+  venuesCache = { at: Date.now(), map };
+  return map;
+}
+
 // Adds the We-Draft side of each game: schedule26 link (id, slug,
-// featured flags, ranks) and school branding.
+// featured flags, ranks), school branding and the venue's location.
 async function enrich(db, games) {
   const ids = games.map((g) => g.providerGameId);
   const sched = new Map();
@@ -269,6 +286,7 @@ async function enrich(db, games) {
     snap.docs.forEach((d) => sched.set(d.data().CFBDGameId, { id: d.id, ...d.data() }));
   }
   const schools = await schoolsByTeamId(db);
+  const venues = await venuesById();
   // We-Draft's own Top 25 for each game's week (rankings/{Week}; Week 0
   // shares Week 1's poll — same rule as src/utils/rankings.js). A week whose
   // poll isn't published yet (next week's games) uses the most recent poll
@@ -323,8 +341,22 @@ async function enrich(db, games) {
       gameOfWeek: !!s?.GameOfWeek,
       wedraftWeek: s?.Week || null,
       tv: g.tv ?? s?.Channel ?? null,
+      ...venueLocation(venues.get(g.venueId)),
     };
   });
+}
+
+// { venueCity, venueState, venueZip, venueCountry, venueLat, venueLng } — omitted (not null)
+// when the venue's unknown, so a merge never blanks an earlier write.
+function venueLocation(v) {
+  if (!v) return {};
+  const out = {};
+  if (v.city) out.venueCity = v.city;
+  if (v.state) out.venueState = v.state;
+  if (v.zip) out.venueZip = String(v.zip);
+  if (v.countryCode) out.venueCountry = v.countryCode;
+  if (Number.isFinite(v.latitude) && Number.isFinite(v.longitude)) { out.venueLat = v.latitude; out.venueLng = v.longitude; }
+  return out;
 }
 
 async function loadWeekGames(db, wk) {

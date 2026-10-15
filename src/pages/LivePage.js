@@ -3680,6 +3680,20 @@ export default function LivePage() {
   // ── SEO ── one canonical /live page (views and picked games are just
   // state on it). The title names the open game when there is one; the
   // structured data lists the slate as SportsEvents.
+  // A game's venue as schema.org Place — name plus a PostalAddress and
+  // coordinates when the ingester has them (server/live/ingest.js venuesById).
+  const placeOf = (g) => {
+    if (!g?.venue) return null;
+    const address = {
+      "@type": "PostalAddress",
+      ...(g.venueCity ? { addressLocality: g.venueCity } : {}),
+      ...(g.venueState ? { addressRegion: g.venueState } : {}),
+      ...(g.venueZip ? { postalCode: g.venueZip } : {}),
+      ...(g.venueCountry ? { addressCountry: g.venueCountry } : {}),
+    };
+    const geo = g.venueLat != null && g.venueLng != null ? { "@type": "GeoCoordinates", latitude: g.venueLat, longitude: g.venueLng } : null;
+    return { "@type": "Place", name: g.venue, ...(Object.keys(address).length > 1 ? { address } : {}), ...(geo ? { geo } : {}) };
+  };
   const seo = (() => {
     // A game's own page (/live/{slug}): its title follows the game —
     // preview, live score, final — and it's its own canonical.
@@ -3693,12 +3707,15 @@ export default function LivePage() {
       const final = g.status === "final";
       const live = g.status === "in_progress";
       const score = `${teamShort(g.away)} ${g.away?.points ?? 0}, ${teamShort(g.home)} ${g.home?.points ?? 0}`;
+      // " at Ohio Stadium (Columbus, OH)" — empty when the venue's unknown.
+      const cityState = [g.venueCity, g.venueState].filter(Boolean).join(", ");
+      const where = g.venue ? ` at ${g.venue}${cityState ? ` (${cityState})` : ""}` : "";
       const title = final ? `${a} vs ${h} Final Score (${g.away?.points ?? 0}-${g.home?.points ?? 0}): Box Score & Stats ${year} | We-Draft Live`
         : live ? `${a} vs ${h} Live Score & Play-by-Play | We-Draft Live`
         : `${a} vs ${h} ${year} Preview & Prediction | We-Draft Live`;
-      const description = final ? `${a} vs ${h} final score: ${score}${when ? ` (${when})` : ""}. Box score, team and player stats, play-by-play, drive summary and game recap on We-Draft Live.`
-        : live ? `Follow ${a} vs ${h} live: ${score}, ${statusLabel(g)}. Live play-by-play, drive-by-drive updates, game stats and live chat on We-Draft Live.`
-        : `${a} vs ${h} preview${when ? ` — ${when}` : ""}: tale of the tape with team stats and national ranks, team leaders, NFL Draft prospects to watch and community picks. Live scores and play-by-play on game day.`;
+      const description = final ? `${a} vs ${h} final score: ${score}${when ? ` (${when}${where})` : where}. Box score, team and player stats, play-by-play, drive summary and game recap on We-Draft Live.`
+        : live ? `Follow ${a} vs ${h} live${where}: ${score}, ${statusLabel(g)}. Live play-by-play, drive-by-drive updates, game stats and live chat on We-Draft Live.`
+        : `${a} vs ${h} preview${when ? ` — ${when}` : ""}${where}: tale of the tape with team stats and national ranks, team leaders, NFL Draft prospects to watch and community picks. Live scores and play-by-play on game day.`;
       const url = `${LIVE_URL}/${pathSlug}`;
       const team = (t) => ({ "@type": "SportsTeam", name: t?.school || t?.name });
       const jsonLd = {
@@ -3714,7 +3731,7 @@ export default function LivePage() {
         awayTeam: team(g.away),
         homeTeam: team(g.home),
         competitor: [team(g.away), team(g.home)],
-        ...(g.venue ? { location: { "@type": "Place", name: g.venue } } : {}),
+        ...(placeOf(g) ? { location: placeOf(g) } : {}),
       };
       // Link previews (texts, social): the home team's logo, else the away's.
       const image = g.home?.logo || g.away?.logo || g.home?.logoDark || g.away?.logoDark || null;
@@ -3741,6 +3758,7 @@ export default function LivePage() {
       homeTeam: team(g.home),
       competitor: [team(g.away), team(g.home)],
       url: g.slug ? `${LIVE_URL}/${g.slug}` : `${LIVE_URL}?view=game&game=${g.id}`,
+      ...(placeOf(g) ? { location: placeOf(g) } : {}),
     }));
     const jsonLd = {
       "@context": "https://schema.org",

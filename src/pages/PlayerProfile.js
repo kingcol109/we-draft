@@ -189,6 +189,110 @@ const PLAYER_HERO_STYLE = `
   }
 `;
 
+// ── Modern look — /live's design language on a light page: team colors
+// only in the hero (everything below is site blue/gold), 1px hairlines
+// instead of 2–3px borders, one radius scale (10 / 14 / pill), compact
+// left-anchored blue headers, outline-by-default pills, no sub-10px text,
+// clickable headers underlined instead of arrowed. Scoped under .wdm
+// and layered over the existing inline styles (hence !important), so it
+// only applies where the root carries .wdm — see `modern` below. ──
+const MODERN_STYLE = `
+  .wdm {
+    --ink: #0f1b2d; --ink-2: #33415a; --ink-3: #5b6b84; --ink-4: #8a97ab;
+    --line: #e3e8ef; --line-2: #eef1f5; --soft: #f7f9fc;
+  }
+  body:has(.wdm) { background: #f4f6f9; }
+  .wdm .wdm-hero { border: 1px solid var(--line) !important; border-radius: 16px !important; background: #fff; }
+  .wdm .wdm-stripe { display: none !important; }
+
+  /* hero toolbar: outlined pills, filled only when active; Evaluate is the one gold CTA */
+  .wdm .wdm-tb, .wdm .wd-watch-btn {
+    border: 1px solid rgba(255,255,255,0.4) !important; border-radius: 999px !important;
+    font-size: 14px !important; font-weight: 800 !important; padding: 8px 16px !important;
+    transition: background 0.15s, border-color 0.15s !important;
+  }
+  .wdm .wdm-tb:not(.on), .wdm .wd-watch-btn { background: rgba(255,255,255,0.06) !important; }
+  .wdm .wdm-tb:not(.on):hover, .wdm .wd-watch-btn:hover { border-color: #fff !important; background: rgba(255,255,255,0.14) !important; opacity: 1 !important; }
+  .wdm .wd-watch-btn { animation: none !important; }
+  .wdm .wdm-tb-primary { border-color: rgba(255,255,255,0.6) !important; }
+  .wdm .wdm-tb-primary:hover { filter: brightness(1.1); }
+  .wdm .wdm-pospill { border: 1px solid rgba(255,255,255,0.45) !important; background: rgba(255,255,255,0.1) !important; }
+  .wdm .wdm-hero h1 { letter-spacing: -0.005em !important; }
+
+  /* measurables */
+  .wdm .wdm-stats { padding-top: 14px !important; padding-bottom: 18px !important; }
+  .wdm .wdm-pill { border-radius: 10px !important; transition: background 0.15s, border-color 0.15s !important; }
+  .wdm .wdm-pill { border-width: 1px !important; }
+  .wdm .wdm-pill { font-variant-numeric: tabular-nums; }
+  .wdm .wdm-pill:not(.on) .wdm-pill-l { color: var(--ink-4) !important; }
+  .wdm .wdm-noshadow { box-shadow: none !important; }
+  .wdm .wdm-updated { font-style: normal !important; color: var(--ink-4) !important; }
+
+  /* section titles: a quiet eyebrow, not a 22px banner + rule */
+  .wdm .wdm-sectitle { color: ${SITE_BLUE} !important; font-size: 14px !important; letter-spacing: 0.14em !important; margin: 0 0 12px 2px !important; }
+  .wdm .wdm-secbar { display: none !important; }
+
+  /* cards */
+  .wdm .wdm-card { border: 1px solid var(--line) !important; border-radius: 14px !important; background: #fff; }
+  .wdm .wdm-card [style*="border-right: 1px solid rgb(229, 231, 235)"] { border-right-color: var(--line-2) !important; }
+  .wdm .wdm-card [style*="border-bottom: 1px solid rgb(229, 231, 235)"] { border-bottom-color: var(--line-2) !important; }
+  /* card headers: site blue + white text, compact and left-anchored */
+  .wdm .wdm-cardhead { padding: 10px 16px !important; }
+  .wdm .wdm-cardhead .text-white, .wdm .wdm-cardhead > div:first-child { font-size: 14px !important; letter-spacing: 0.08em !important; }
+  .wdm .wdm-cardhead-d { color: rgba(255,255,255,0.75) !important; font-size: 13px !important; }
+  .wdm .wdm-cardhead img { height: 20px !important; }
+
+  /* in-card headings → eyebrows; list items → sentence case, lighter */
+  .wdm .wdm-h { border-bottom: 0 !important; font-size: 12px !important; letter-spacing: 0.14em !important; padding-bottom: 0 !important; }
+  .wdm .wdm-item { color: var(--ink) !important; }
+  .wdm .wdm-item + div, .wdm [style*="border-bottom: 1px solid rgb(240, 240, 240)"] { border-color: var(--line-2) !important; }
+  .wdm .wdm-rank { color: var(--ink-2) !important; font-weight: 700 !important; font-variant-numeric: tabular-nums; }
+  .wdm .wdm-grade { border: 0 !important; border-radius: 12px !important; }
+
+  /* evaluation form */
+  .wdm .wdm-form select, .wdm .wdm-form textarea, .wdm .wdm-form details {
+    border: 1px solid #d5dce6 !important; border-radius: 10px !important; font-weight: 600 !important; background: #fff;
+  }
+  .wdm .wdm-form select:focus, .wdm .wdm-form textarea:focus { outline: none; border-color: var(--c1) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--c1) 18%, transparent); }
+  .wdm .wdm-form details summary { border-radius: 10px; }
+  .wdm .wdm-form button { border-radius: 999px !important; }
+  .wdm .wdm-btn-primary { background: var(--c1) !important; border: 1px solid var(--c1) !important; color: #fff !important; border-radius: 999px !important; box-shadow: none !important; }
+  .wdm .wdm-btn-ghost { background: #fff !important; border: 1px solid var(--line) !important; color: var(--ink-2) !important; border-radius: 999px !important; transition: border-color 0.15s, color 0.15s !important; }
+  .wdm .wdm-btn-ghost:hover { border-color: var(--c1) !important; color: var(--c1) !important; opacity: 1 !important; }
+
+  /* sidebars: site-blue header, compact and left-anchored */
+  .wdm .wdm-col > .rounded-lg { border: 1px solid var(--line) !important; border-radius: 14px !important; background: #fff; }
+  .wdm .wdm-col > .rounded-lg > div:first-child { padding: 12px 16px !important; text-align: left !important; }
+  .wdm .wdm-col > .rounded-lg > div:first-child h2,
+  .wdm .wdm-col > .rounded-lg > div:first-child h2 a { color: #fff !important; font-size: 13px !important; letter-spacing: 0.14em !important; text-align: left !important; }
+  .wdm .wdm-col > .rounded-lg > div:nth-child(2) { display: none !important; }
+  /* clickable headers: underline, no arrow */
+  .wdm .wdm-col > .rounded-lg > div:first-child h2 a span { display: none !important; }
+  .wdm .wdm-col > .rounded-lg > div:first-child h2 a { text-decoration: underline !important; text-underline-offset: 4px; text-decoration-thickness: 2px; text-decoration-color: rgba(255,255,255,0.55) !important; }
+  .wdm .wdm-col > .rounded-lg > div:first-child h2 a:hover { text-decoration-color: #fff !important; }
+  .wdm .wdm-sidelink { background: var(--soft) !important; color: ${SITE_BLUE} !important; border-bottom: 1px solid var(--line-2) !important; font-size: 12px !important; }
+  .wdm .wdm-sidelink:hover { background: #eef3fa !important; }
+  .wdm .wdm-col > .rounded-lg button { background: var(--soft) !important; color: ${SITE_BLUE} !important; border-top: 1px solid var(--line-2) !important; }
+  .wdm .wdm-col > .rounded-lg button:hover { background: #eef3fa !important; }
+  .wdm .wd-trend2-chip { border: 1px solid var(--line) !important; animation: none !important; box-shadow: none !important; }
+  .wdm .wd-trend2-chip-self { border-color: ${SITE_GOLD} !important; }
+  .wdm .wd-trend2-chip:not(:hover) .wd-trend2-name { color: var(--ink) !important; }
+  .wdm .wd-trend2-name { font-size: 15px !important; font-weight: 800 !important; }
+  .wdm .wd-trend2-sub { color: var(--ink-3) !important; font-size: 12px !important; }
+  .wdm .wd-trend2-chip:hover .wd-trend2-sub { color: rgba(255,255,255,0.85) !important; }
+  .wdm .wdm-vtitle { text-transform: none !important; letter-spacing: 0 !important; font-weight: 800 !important; font-size: 14px !important; }
+  .wdm .wdm-ntitle { text-transform: none !important; letter-spacing: 0 !important; font-weight: 700 !important; font-size: 14px !important; line-height: 1.35 !important; color: var(--ink) !important; }
+  .wdm .wdm-date { border: 1px solid var(--line) !important; border-radius: 8px !important; }
+  .wdm .wdm-date > div:first-child { background: var(--soft) !important; padding: 2px 0 !important; }
+  .wdm .wdm-date > div:first-child span { color: var(--ink-4) !important; font-size: 10px !important; }
+  .wdm .wdm-date > div:last-child span { color: var(--ink) !important; font-variant-numeric: tabular-nums; }
+
+  /* no text under 10px */
+  .wdm [style*="font-size: 6px"], .wdm [style*="font-size: 6.5px"], .wdm [style*="font-size: 7px"] { font-size: 9px !important; }
+  .wdm [style*="font-size: 8px"] { font-size: 10px !important; }
+  .wdm [style*="font-size: 9px"] { font-size: 11px !important; }
+`;
+
 // ── Flair → { image, stroke color } config. The image renders in the
 // right-side hero logo square (replacing the second school/CFB logo) and
 // the square gets a border in the matching stroke color. Key must match
@@ -2040,6 +2144,9 @@ const gradeDisplay = (g) => {
 
 export default function PlayerProfile() {
   const { slug } = useParams();
+  // Modern look (MODERN_STYLE) — on for every player; ?modern=0 shows the
+  // old look for comparison.
+  const modern = new URLSearchParams(window.location.search).get("modern") !== "0";
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
   const { user, login } = useAuth();
@@ -2739,6 +2846,9 @@ export default function PlayerProfile() {
 
   const color1 = draftedBy ? branding?.color1 : (branding?.color1 || SITE_BLUE);
   const color2 = draftedBy ? branding?.color2 : (branding?.color2 || SITE_GOLD);
+  // Modern look: team colors stay in the hero; everything below it is site-themed.
+  const siteC1 = modern ? SITE_BLUE : color1;
+  const siteC2 = modern ? SITE_GOLD : color2;
   const teamSlug = branding?.slug || toTeamSlug(player?.School);
 
   useEffect(() => {
@@ -3491,6 +3601,7 @@ useEffect(() => {
         onPointerLeave={(e) => { if (e.pointerType === "mouse") setActivePill((c) => (c === label ? null : c)); }}
         onClick={() => { if (pillPointerType.current !== "mouse" && pctRounded != null) setActivePill((c) => (c === label ? null : label)); }}
         title={pctRounded == null ? undefined : `${pctRounded}${suffix(pctRounded)} percentile among drafted ${player.Position}s`}
+        className={"wdm-pill" + (active ? " on" : "")}
         style={{
           display:"inline-flex", flexDirection:"column", alignItems:"center",
           background: active ? color1 : "#fff", border:`2px solid ${color1}`, borderRadius:"8px",
@@ -3502,12 +3613,12 @@ useEffect(() => {
             toggled, so the pill keeps its size on hover (same as
             Comparison.js's chips). */}
         <span style={{ display:"grid", fontSize:isMobile?"13px":"18px", fontWeight:900, lineHeight:1.1, justifyItems:"center" }}>
-          <span style={{ gridArea:"1 / 1", color:color1, visibility: active ? "hidden" : "visible" }}>{val}</span>
+          <span className="wdm-pill-v" style={{ gridArea:"1 / 1", color:color1, visibility: active ? "hidden" : "visible" }}>{val}</span>
           {pctRounded != null && (
             <span style={{ gridArea:"1 / 1", color:"#fff", visibility: active ? "visible" : "hidden" }} aria-hidden={!active}>{pctRounded}%</span>
           )}
         </span>
-        <span style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color: active ? "rgba(255,255,255,0.8)" : "#888", letterSpacing:"0.08em", marginTop:"3px", textTransform:"uppercase", transition:"color 0.2s ease" }}>{label}</span>
+        <span className="wdm-pill-l" style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color: active ? "rgba(255,255,255,0.8)" : "#888", letterSpacing:"0.08em", marginTop:"3px", textTransform:"uppercase", transition:"color 0.2s ease" }}>{label}</span>
       </div>
     );
   };
@@ -3790,8 +3901,8 @@ useEffect(() => {
 
   const SectionTitle = ({ children }) => (
     <>
-      <h2 className="font-black uppercase mb-2" style={{ color:color1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</h2>
-      <div className="mb-4 rounded-sm" style={{ height:"3px", backgroundColor:color1 }} />
+      <h2 className="font-black uppercase mb-2 wdm-sectitle" style={{ color:siteC1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</h2>
+      <div className="mb-4 rounded-sm wdm-secbar" style={{ height:"3px", backgroundColor:siteC1 }} />
     </>
   );
 
@@ -3829,6 +3940,7 @@ useEffect(() => {
     <>
       <Link
         to={communityYearPath}
+        className="wdm-sidelink"
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
           padding: "10px 14px", textDecoration: "none",
@@ -4146,7 +4258,7 @@ useEffect(() => {
 
             {v.title && (
               <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                <h3 className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
+                <h3 className="font-black uppercase leading-tight wdm-vtitle" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
                   {v.title}
                 </h3>
               </div>
@@ -4157,6 +4269,7 @@ useEffect(() => {
       {visibleVideoCount < playerVideos.length && (
         <button
           onClick={() => setVisibleVideoCount((c) => c + 3)}
+          className="wdm-sidelink"
           style={{
             display: "block", width: "100%",
             padding: "10px 14px",
@@ -4186,7 +4299,7 @@ useEffect(() => {
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
-            <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: `2px solid ${SITE_BLUE}`, background: "#fff", display: "flex", flexDirection: "column" }}>
+            <div className="flex-shrink-0 rounded overflow-hidden wdm-date" style={{ width: 36, border: `2px solid ${SITE_BLUE}`, background: "#fff", display: "flex", flexDirection: "column" }}>
               <div style={{ background: SITE_GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                   {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
@@ -4199,7 +4312,7 @@ useEffect(() => {
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <h3 className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</h3>
+              <h3 className="font-black uppercase leading-tight wdm-ntitle" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</h3>
             </div>
           </Link>
         ))
@@ -4280,6 +4393,7 @@ useEffect(() => {
       </Helmet>
 
       <style>{PLAYER_HERO_STYLE}</style>
+      {modern && <style>{MODERN_STYLE}</style>}
 
       {adData && (
         <style>{`
@@ -4588,13 +4702,13 @@ useEffect(() => {
 
       <div
         ref={mainGridRef}
-        className="mx-auto pb-40"
+        className={"mx-auto pb-40" + (modern ? " wdm" : "")}
         style={
           isMobile
-            ? { padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
+            ? { "--c1": siteC1, "--c2": siteC2, padding: "10px 10px 160px", display: "flex", flexDirection: "column", gap: "24px", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
             // Pulled up under the navbar: the gap above the columns was ~64px
             // (body's navbar padding + the layout's 25px + this padding) — now ~16px.
-            : { maxWidth: "1600px", margin: "-24px auto 0", padding: "0 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
+            : { "--c1": siteC1, "--c2": siteC2, maxWidth: "1600px", margin: "-24px auto 0", padding: "0 60px 160px", display: "grid", gridTemplateColumns: "260px minmax(0, 800px) 260px", gap: "18px", alignItems: "start", justifyContent: "center", opacity:pageVisible?1:0, transform:pageVisible?"translateY(0)":"translateY(8px)", transition:"opacity 0.28s ease, transform 0.28s ease" }
         }
       >
 
@@ -4608,7 +4722,7 @@ useEffect(() => {
             {DraftClassDropdown}
           </div>
         ) : (
-          <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div className="wdm-col" style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
             {TrendingSidebarCard}
             {DraftClassList}
           </div>
@@ -4618,7 +4732,7 @@ useEffect(() => {
         <div>
 
         {/* ===== HERO CARD ===== */}
-        <div className="mb-6 rounded-lg overflow-hidden" style={{ border: `3px solid ${color1}` }}>
+        <div className="mb-6 rounded-lg overflow-hidden wdm-hero" style={{ border: `3px solid ${color1}` }}>
           {/* Toolbar — kept as its own flat color1 bar, formatted exactly as
               before (not part of the gradient hero below it); only the
               up/down vote arrows were dropped, Like stays on its own. */}
@@ -4630,7 +4744,7 @@ useEffect(() => {
               right-hand button group (directly left of Follow), it's just
               two groups pinned to either edge. */}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", backgroundColor:color1, padding:isMobile?"10px 12px":"12px 20px" }}>
-            <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition"
+            <button onClick={()=>navigate(-1)} className="text-white font-extrabold transition wdm-tb"
               style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"8px 16px":"10px 22px", borderRadius:"8px", cursor:"pointer", letterSpacing:"0.04em" }}>
               ← Back
             </button>
@@ -4643,7 +4757,7 @@ useEffect(() => {
               <button
                 onClick={handleToggleLike}
                 title={myReaction.liked ? "Unlike" : "Like"}
-                className="font-extrabold rounded-full transition hover:opacity-90"
+                className={"font-extrabold rounded-full transition hover:opacity-90 wdm-tb" + (myReaction.liked ? " on" : "")}
                 style={{
                   display:"flex", alignItems:"center", gap:"6px",
                   border: "2px solid #fff",
@@ -4670,7 +4784,7 @@ useEffect(() => {
                 <button
                   onClick={handleToggleFollow}
                   title={following ? "Unfollow" : "Follow — get their news in your feed"}
-                  className="font-extrabold rounded-full transition hover:opacity-90"
+                  className={"font-extrabold rounded-full transition hover:opacity-90 wdm-tb" + (following ? " on" : "")}
                   style={{
                     border: "2px solid #fff",
                     background: following ? "#fff" : "rgba(255,255,255,0.12)",
@@ -4713,14 +4827,14 @@ useEffect(() => {
               />}
               {player.Link && String(player.Eligible) === "2026" && !draftedBy && (
                 <button onClick={()=>{ const url=Array.isArray(player.Link)?player.Link[0]:player.Link; window.open(url,"_blank","noopener,noreferrer"); }}
-                  className="text-white font-extrabold rounded-full transition hover:opacity-80"
+                  className="text-white font-extrabold rounded-full transition hover:opacity-80 wdm-tb"
                   style={{ border:"2px solid #fff", background:"rgba(255,255,255,0.12)", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px" }}>
                   Film
                 </button>
               )}
               {!draftedBy && !mobileLiveGame && (
                 <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
-                  className="font-extrabold rounded-full transition hover:opacity-90"
+                  className="font-extrabold rounded-full transition hover:opacity-90 wdm-tb on wdm-tb-primary"
                   style={{ backgroundColor:color2, border:"2px solid #fff", color:"#fff", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px", fontWeight:900 }}>
                   Evaluate
                 </button>
@@ -4859,7 +4973,7 @@ useEffect(() => {
                 <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
               </h1>
               <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:isMobile?"6px":"10px" }}>
-                <span className="font-extrabold rounded-full" style={{ background:"rgba(255,255,255,0.14)", border:"2px solid #fff", color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
+                <span className="font-extrabold rounded-full wdm-pospill" style={{ background:"rgba(255,255,255,0.14)", border:"2px solid #fff", color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
                   {player.Position}
                 </span>
                 <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
@@ -5091,13 +5205,13 @@ useEffect(() => {
           </div>
             </div>
           </div>
-          <div style={{ height: "4px", background: color2 }} />
+          <div className="wdm-stripe" style={{ height: "4px", background: color2 }} />
 
           {/* Physical/Athletic Testing now leads Bio — the numbers read as
               quick-reference stats a visitor scans first, with the prose
               bio underneath for whoever wants the fuller writeup. */}
           {physicalMeasurements.length > 0 && (
-            <div className="bg-white" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px", borderBottom: player.Bio ? "1px solid #eee" : undefined }}>
+            <div className="bg-white wdm-stats" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px", borderBottom: player.Bio ? "1px solid #eee" : undefined }}>
               {isMobile ? (
                 <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
                   {physicalMeasurements.map(renderStatPill)}
@@ -5124,7 +5238,7 @@ useEffect(() => {
                 <div style={{ display: "flex", justifyContent: "center", marginTop: isMobile ? "14px" : "16px" }}>
                   <Link
                     to={`/comparison/${player.Slug}`}
-                    className="transition hover:opacity-90"
+                    className="transition hover:opacity-90 wdm-noshadow"
                     style={{
                       display: "inline-flex", alignItems: "center", gap: "8px",
                       background: color1, color: "#fff", fontWeight: 900, fontSize: isMobile ? "14px" : "16px",
@@ -5151,7 +5265,8 @@ useEffect(() => {
                   type="button"
                   onClick={() => setBioOpen(o => !o)}
                   aria-expanded={bioOpen}
-                  style={{ background: color1, color: "#fff", border: "none", borderRadius: "6px", padding: isMobile ? "8px 14px" : "9px 18px", fontSize: isMobile ? "13px" : "14px", fontWeight: 700, cursor: "pointer" }}
+                  className="wdm-btn-ghost"
+                  style={{ background: siteC1, color: "#fff", border: "none", borderRadius: "6px", padding: isMobile ? "8px 14px" : "9px 18px", fontSize: isMobile ? "13px" : "14px", fontWeight: 700, cursor: "pointer" }}
                 >
                   {bioOpen ? "Hide Bio" : "Show Bio"}
                 </button>
@@ -5161,7 +5276,7 @@ useEffect(() => {
                     gives the bio some visual weight instead of just
                     floating as plain paragraph text. */}
                 {bioOpen && (
-                <div style={{ borderLeft: `4px solid ${color1}`, background: "#fafafa", borderRadius: "0 8px 8px 0", padding: isMobile ? "14px 16px" : "18px 22px" }}>
+                <div style={{ borderLeft: `4px solid ${siteC1}`, background: "#fafafa", borderRadius: "0 8px 8px 0", padding: isMobile ? "14px 16px" : "18px 22px" }}>
                   {/* Same bullet/paragraph renderer as evaluations — a bio
                       written as several newline-separated paragraphs (or with
                       a few • bullet lines for career highlights) now actually
@@ -5187,20 +5302,20 @@ useEffect(() => {
               mentioning them being published. */}
           {pageLastUpdatedMs > 0 && (
             <div className="bg-white" style={{ padding: isMobile ? "6px 16px" : "6px 32px", textAlign: "right", borderTop: "1px solid #eee" }}>
-              <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic" }}>
+              <span className="wdm-updated" style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic" }}>
                 Last updated {new Date(pageLastUpdatedMs).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
               </span>
             </div>
           )}
 
-          <div style={{ height:"5px", backgroundColor:color2 }} />
+          <div className="wdm-stripe" style={{ height:"5px", backgroundColor:siteC2 }} />
         </div>
 
         {/* ===== Community Scouting Report ===== */}
         <div className="mb-8">
           <SectionTitle>Community Scouting Report</SectionTitle>
           {isMobile ? (
-            <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
+            <div className="bg-white rounded-lg overflow-hidden wdm-card" style={{ border:`2px solid ${siteC1}` }}>
               {/* Grade and Class Rank are now matched half-width columns —
                   same footprint as the Strengths/Weaknesses row below —
                   instead of Grade eating most of the row next to a cramped
@@ -5211,7 +5326,7 @@ useEffect(() => {
                   into row one. */}
               <div className="flex" style={{ borderBottom:"1px solid #e5e7eb" }}>
                 <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
-                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Community Grade</h3>
+                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Community Grade</h3>
                   {(() => {
                     // No scored evaluations yet -> represent that as a Watchlist
                     // grade (already a real, selectable grade value) rather than
@@ -5226,7 +5341,7 @@ useEffect(() => {
                             the number sitting on top of the label — same
                             box footprint (padding unchanged), just the
                             internal arrangement and text sizing. */}
-                        <div className="rounded" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", display:"flex", alignItems:"center", gap:"8px" }}>
+                        <div className="rounded wdm-grade" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", display:"flex", alignItems:"center", gap:"8px" }}>
                           <div style={{ fontSize:"32px", fontWeight:900, color:"#fff", lineHeight:1, flexShrink:0 }}>{short}</div>
                           <div style={{ flex:1, fontSize:"9px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", lineHeight:1.3, textAlign:"left" }}>{label}</div>
                         </div>
@@ -5243,9 +5358,9 @@ useEffect(() => {
                   })()}
                 </div>
                 <div className="flex-1 px-3 py-3">
-                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
+                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
                   {(selfIndex >= 0 || classRank) ? (
-                    <div className="text-center" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
+                    <div className="text-center wdm-rank" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
                       {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
                       {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                     </div>
@@ -5254,10 +5369,10 @@ useEffect(() => {
               </div>
               <div className="flex" style={{ borderBottom: community.topFits.length > 0 ? "1px solid #e5e7eb" : "none" }}>
                 <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
-                  <h3 className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
+                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
                   {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
-                      <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
+                      <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
                       {evalCount >= 5 && (
                         <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
                           <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
@@ -5267,10 +5382,10 @@ useEffect(() => {
                   )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                 </div>
                 <div className="flex-1 px-3 py-3">
-                  <h3 className="text-xs font-black uppercase pb-1 mb-2" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Top Weaknesses</h3>
+                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Weaknesses</h3>
                   {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                     <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
-                      <div className="font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
+                      <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
                       {evalCount >= 5 && (
                         <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
                           <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
@@ -5282,7 +5397,7 @@ useEffect(() => {
               </div>
               {community.topFits.length > 0 && (
                 <div className="px-3 py-3">
-                  <h3 className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
+                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
                   {fitLogos.length > 0 ? (
                     <div className="flex flex-wrap justify-center gap-3">
                       {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
@@ -5307,9 +5422,9 @@ useEffect(() => {
                 .wd-scout-fitlogos { flex-direction: row !important; justify-content: center !important; flex-wrap: wrap; }
               }
             `}</style>
-            <div className="flex bg-white rounded-lg overflow-hidden wd-scout-row" style={{ border:`2px solid ${color1}` }}>
+            <div className="flex bg-white rounded-lg overflow-hidden wd-scout-row wdm-card" style={{ border:`2px solid ${siteC1}` }}>
               <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
-                <h3 className="text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Community Grade</h3>
+                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Community Grade</h3>
                 {(() => {
                   // No scored evaluations yet -> represent that as a Watchlist
                   // grade (already a real, selectable grade value) rather than
@@ -5319,7 +5434,7 @@ useEffect(() => {
                   const { short, bg, border } = gradeDisplay(label);
                   return (
                     <>
-                      <div className="rounded text-center" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"10px 14px", width:"110px" }}>
+                      <div className="rounded text-center wdm-grade" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"10px 14px", width:"110px" }}>
                         <div style={{ fontSize:"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
                         <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{label}</div>
                       </div>
@@ -5335,8 +5450,8 @@ useEffect(() => {
                       )}
                       {(selfIndex >= 0 || classRank) && (
                         <div className="mt-4 w-full">
-                          <div className="text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.1em" }}>Class Rank</div>
-                          <div className="text-center" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
+                          <div className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.1em" }}>Class Rank</div>
+                          <div className="text-center wdm-rank" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
                             {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
                             {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                           </div>
@@ -5347,10 +5462,10 @@ useEffect(() => {
                 })()}
               </div>
               <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
-                <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Top Strengths</h3>
+                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Top Strengths</h3>
                 {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
-                    <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
+                    <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
                     {evalCount >= 5 && (
                       <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
                         <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
@@ -5360,10 +5475,10 @@ useEffect(() => {
                 )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
               </div>
               <div className="flex-1 px-5 py-5 wd-scout-weak" style={{ borderRight:"1px solid #e5e7eb" }}>
-                <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Top Weaknesses</h3>
+                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Top Weaknesses</h3>
                 {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
                   <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
-                    <div className="font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
+                    <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
                     {evalCount >= 5 && (
                       <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
                         <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
@@ -5373,7 +5488,7 @@ useEffect(() => {
                 )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
               </div>
               <div className="flex flex-col px-5 py-5 wd-scout-fits" style={{ flex:"0 0 150px" }}>
-                <h3 className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
+                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
                 {fitLogos.length > 0 ? (
                   <div className="flex flex-col items-center justify-start flex-1 gap-3 wd-scout-fitlogos">
                     {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
@@ -5456,10 +5571,10 @@ useEffect(() => {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ background:"#fff", border:`2px solid ${color1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"calc(90vh / var(--pz, 1))", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
+              style={{ background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"calc(90vh / var(--pz, 1))", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
             >
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
-                <div style={{ color:color1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>
+                <div style={{ color:siteC1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>
                 <button
                   onClick={() => setEvalShareOpen(false)}
                   style={{ background:"none", border:"none", color:"#999", fontSize:"22px", cursor:"pointer", lineHeight:1, padding:0 }}
@@ -5480,27 +5595,27 @@ useEffect(() => {
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
                 <a
                   href={`mailto:?subject=${encodeURIComponent(`${player.First} ${player.Last} — Scouting Report`)}&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position}):\nwe-draft.com/player/${slug}`)}`}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:color1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
                 >
                   📧 Email
                 </a>
                 <a
                   href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`My scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position})`)}&url=${encodeURIComponent(`https://we-draft.com/player/${slug}`)}`}
                   target="_blank" rel="noopener noreferrer"
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:color1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
                 >
                   𝕏 X
                 </a>
                 <a
                   href={`sms:?&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last}: we-draft.com/player/${slug}`)}`}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:color1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
                 >
                   💬 Text
                 </a>
                 <button
                   onClick={handleSaveEvalImage}
                   disabled={!evalShareImageUrl}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:color1, border:`2px solid ${color1}`, borderRadius:"8px", padding:"10px", color:"#fff", fontWeight:800, fontSize:"13px", cursor:evalShareImageUrl?"pointer":"default", opacity:evalShareImageUrl?1:0.6 }}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:siteC1, border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:"#fff", fontWeight:800, fontSize:"13px", cursor:evalShareImageUrl?"pointer":"default", opacity:evalShareImageUrl?1:0.6 }}
                 >
                   💾 Save Image
                 </button>
@@ -5522,8 +5637,8 @@ useEffect(() => {
         {/* ===== Evaluation Form ===== */}
         <div ref={evaluationFormRef} className="mb-8">
           <SectionTitle>My Evaluation</SectionTitle>
-          <div className="bg-white rounded-lg overflow-hidden" style={{ border:`2px solid ${color1}` }}>
-            <div className="flex items-center justify-between" style={{ backgroundColor:color1, padding:isMobile?"8px 12px":"10px 20px" }}>
+          <div className="bg-white rounded-lg overflow-hidden wdm-card wdm-form" style={{ border:`2px solid ${siteC1}` }}>
+            <div className="flex items-center justify-between wdm-cardhead" style={{ backgroundColor:siteC1, padding:isMobile?"8px 12px":"10px 20px" }}>
               <div className="font-black uppercase text-white tracking-wide" style={{ fontSize:isMobile?"13px":"18px" }}>
                 {`${player.First||""} ${player.Last||""}`.toUpperCase()}
               </div>
@@ -5532,7 +5647,7 @@ useEffect(() => {
 
             {!user ? (
               <div style={{ padding: isMobile ? "24px 16px" : "36px 32px", textAlign: "center", background: "#fafafa" }}>
-                <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "12px" }}>
+                <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, color: siteC1, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "12px" }}>
                   Create Your Scouting Report
                 </div>
                 <div style={{ fontSize: isMobile ? "14px" : "15px", fontWeight: 700, color: "#666", lineHeight: 1.65, maxWidth: "360px", margin: "0 auto 24px" }}>
@@ -5540,15 +5655,16 @@ useEffect(() => {
                 </div>
                 <button
                   onClick={login}
+                  className="wdm-btn-primary"
                   style={{
-                    backgroundColor: color1, color: "#fff",
-                    border: `3px solid ${color2}`,
+                    backgroundColor: siteC1, color: "#fff",
+                    border: `3px solid ${siteC2}`,
                     borderRadius: "10px",
                     padding: isMobile ? "14px 28px" : "16px 40px",
                     fontWeight: 900, fontSize: isMobile ? "15px" : "17px",
                     textTransform: "uppercase", letterSpacing: "0.08em",
                     cursor: "pointer", width: "100%", maxWidth: "360px",
-                    boxShadow: `0 4px 20px ${color1}33`,
+                    boxShadow: `0 4px 20px ${siteC1}33`,
                   }}
                 >
                   Sign In to Evaluate →
@@ -5573,7 +5689,7 @@ useEffect(() => {
 
                 <div className={isMobile?"flex flex-col gap-4 mb-4":"grid grid-cols-2 gap-6 mb-6"}>
                   <div>
-                    <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>
+                    <div className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>
                       Grade {gradeIsLocked && <span style={{ fontSize:"11px", color:"#aaa", fontWeight:700, textTransform:"none", letterSpacing:0 }}>— locked</span>}
                     </div>
                     {gradeIsLocked ? (
@@ -5581,15 +5697,15 @@ useEffect(() => {
                         <span>🔒</span><span>{grade || "No grade set"}</span>
                       </div>
                     ) : (
-                      <select value={grade} onChange={(e)=>setGrade(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:color1, color:grade?"#111":"#999" }}>
+                      <select value={grade} onChange={(e)=>setGrade(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:siteC1, color:grade?"#111":"#999" }}>
                         <option value="">Select a grade</option>
                         {["Watchlist","Early First Round","Middle First Round","Late First Round","Second Round","Third Round","Fourth Round","Fifth Round","Sixth Round","Seventh Round","UDFA"].map((g)=><option key={g} value={g}>{g}</option>)}
                       </select>
                     )}
                   </div>
                   <div>
-                    <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>Visibility</div>
-                    <select value={visibility} onChange={(e)=>setVisibility(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:color1 }}>
+                    <div className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Visibility</div>
+                    <select value={visibility} onChange={(e)=>setVisibility(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:siteC1 }}>
                       <option value="public">🌍 Public</option>
                       <option value="private">🔒 Private</option>
                     </select>
@@ -5602,15 +5718,15 @@ useEffect(() => {
                     { label:"Weaknesses (max 5)", state:weaknesses, setState:setWeaknesses, other:strengths },
                   ].map(({ label, state, setState, other }) => (
                     <div key={label}>
-                      <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>{label}</div>
-                      <details className="w-full rounded border-2" style={{ borderColor:color1 }}>
+                      <div className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>{label}</div>
+                      <details className="w-full rounded border-2" style={{ borderColor:siteC1 }}>
                         <summary className="cursor-pointer px-3 py-2 bg-white font-bold text-sm" style={{ color:state.length>0?"#111":"#999" }}>
                           {state.length>0 ? state.join(", ") : `Select ${label.split(" ")[0].toLowerCase()}`}
                         </summary>
                         <div className="px-3 py-2 bg-white">
                           {Object.entries(traits).map(([lbl, options]) => (
                             <div key={lbl} className="mb-2">
-                              <p className="font-black text-xs uppercase tracking-wider mb-1" style={{ color:color1 }}>{lbl}</p>
+                              <p className="font-black text-xs uppercase tracking-wider mb-1" style={{ color:siteC1 }}>{lbl}</p>
                               {options.map((trait) => (
                                 <label key={trait} className="block text-sm py-1 cursor-pointer">
                                   <input type="checkbox" checked={state.includes(trait)} disabled={(!state.includes(trait)&&state.length>=5)||other.includes(trait)}
@@ -5627,22 +5743,22 @@ useEffect(() => {
                 </div>
 
                 <div className="mb-4">
-                  <div className="text-sm font-black uppercase pb-2 mb-3" style={{ color:color1, borderBottom:`3px solid ${color1}`, letterSpacing:"0.14em" }}>NFL Fit</div>
-                  <select value={nflFit} onChange={(e)=>setNflFit(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:color1, color:nflFit?"#111":"#999" }}>
+                  <div className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>NFL Fit</div>
+                  <select value={nflFit} onChange={(e)=>setNflFit(e.target.value)} className="w-full rounded px-3 py-2 border-2 font-bold" style={{ borderColor:siteC1, color:nflFit?"#111":"#999" }}>
                     <option value="">Select an NFL team</option>
                     {["Arizona Cardinals","Atlanta Falcons","Baltimore Ravens","Buffalo Bills","Carolina Panthers","Chicago Bears","Cincinnati Bengals","Cleveland Browns","Dallas Cowboys","Denver Broncos","Detroit Lions","Green Bay Packers","Houston Texans","Indianapolis Colts","Jacksonville Jaguars","Kansas City Chiefs","Las Vegas Raiders","Los Angeles Chargers","Los Angeles Rams","Miami Dolphins","Minnesota Vikings","New England Patriots","New Orleans Saints","New York Giants","New York Jets","Philadelphia Eagles","Pittsburgh Steelers","San Francisco 49ers","Seattle Seahawks","Tampa Bay Buccaneers","Tennessee Titans","Washington Commanders"].map((team)=><option key={team} value={team}>{team}</option>)}
                   </select>
                 </div>
 
                 <div className="mb-4">
-                  <div className="flex items-center justify-between pb-2 mb-3" style={{ borderBottom:`3px solid ${color1}` }}>
-                    <div className="text-sm font-black uppercase" style={{ color:color1, letterSpacing:"0.14em" }}>Evaluation</div>
+                  <div className="wdm-h flex items-center justify-between pb-2 mb-3" style={{ borderBottom:`3px solid ${siteC1}` }}>
+                    <div className="wdm-h text-sm font-black uppercase" style={{ color:siteC1, letterSpacing:"0.14em" }}>Evaluation</div>
                     <button
                       type="button"
                       onClick={handleInsertBullet}
                       style={{
                         display: "flex", alignItems: "center", gap: "5px",
-                        background: "#fff", border: `1.5px solid ${color1}`, color: color1,
+                        background: "#fff", border: `1.5px solid ${siteC1}`, color: siteC1,
                         borderRadius: "6px", padding: "4px 10px", fontSize: "11px", fontWeight: 800,
                         textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
                       }}
@@ -5656,7 +5772,7 @@ useEffect(() => {
                     onChange={(e)=>setEvaluation(e.target.value)}
                     placeholder="Write your evaluation... start a line with • or - for bullet points"
                     className="w-full rounded px-3 py-2 h-32 border-2 font-medium"
-                    style={{ borderColor:color1 }}
+                    style={{ borderColor:siteC1 }}
                   />
                   <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
                     Tip: start any line with • or - to make it a bullet point.
@@ -5680,8 +5796,8 @@ useEffect(() => {
                     onClick={handleToggleGameNotes}
                     style={{
                       display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
-                      background: showGameNotes ? color1 : "#fff", color: showGameNotes ? "#fff" : color1,
-                      border: `2px solid ${color1}`, borderRadius: showGameNotes ? "6px 6px 0 0" : "6px", padding: "10px 14px",
+                      background: showGameNotes ? siteC1 : "#fff", color: showGameNotes ? "#fff" : siteC1,
+                      border: `2px solid ${siteC1}`, borderRadius: showGameNotes ? "6px 6px 0 0" : "6px", padding: "10px 14px",
                       fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
                     }}
                   >
@@ -5690,7 +5806,7 @@ useEffect(() => {
                   </button>
 
                   {showGameNotes && (
-                    <div style={{ border: `2px solid ${color1}`, borderTop: "none", borderRadius: "0 0 6px 6px", padding: "12px 14px" }}>
+                    <div style={{ border: `2px solid ${siteC1}`, borderTop: "none", borderRadius: "0 0 6px 6px", padding: "12px 14px" }}>
                       {/* A note with actual text keeps the full tag+note card
                           below; a note that's just a grade with no written
                           note (added without ever filling in the textarea —
@@ -5769,7 +5885,7 @@ useEffect(() => {
                             value={selectedGameId}
                             onChange={(e) => { setSelectedGameId(e.target.value); setNoteTag(""); setNoteText(""); }}
                             className="w-full rounded px-3 py-2 border-2 font-bold"
-                            style={{ borderColor: color1, marginBottom: "8px" }}
+                            style={{ borderColor: siteC1, marginBottom: "8px" }}
                           >
                             <option value="">Select a game...</option>
                             {pickableGames.map((g) => (
@@ -5788,7 +5904,7 @@ useEffect(() => {
                                   value={noteTag}
                                   onChange={(e) => setNoteTag(e.target.value)}
                                   className="w-full rounded px-3 py-2 border-2 font-bold"
-                                  style={{ borderColor: color1, marginBottom: "8px" }}
+                                  style={{ borderColor: siteC1, marginBottom: "8px" }}
                                 >
                                   <option value="">Grade this game (optional)...</option>
                                   {GAME_NOTE_TAGS.map((t) => <option key={t.key} value={t.key}>{t.key}</option>)}
@@ -5798,7 +5914,7 @@ useEffect(() => {
                                   onChange={(e) => setNoteText(e.target.value)}
                                   placeholder={`Optional — a short note on this game (up to ${GAME_NOTE_MAX_WORDS} words)...`}
                                   className="w-full rounded px-3 py-2 border-2 font-medium"
-                                  style={{ borderColor: overLimit ? "#c0392b" : color1, height: "70px" }}
+                                  style={{ borderColor: overLimit ? "#c0392b" : siteC1, height: "70px" }}
                                 />
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "4px" }}>
                                   <span style={{ fontSize: "11px", fontWeight: 700, color: overLimit ? "#c0392b" : "#999" }}>
@@ -5809,7 +5925,7 @@ useEffect(() => {
                                     onClick={() => handleAddGameNote()}
                                     disabled={overLimit || saving}
                                     style={{
-                                      background: color1, color: "#fff", border: `2px solid ${color2}`, borderRadius: "6px",
+                                      background: siteC1, color: "#fff", border: `2px solid ${siteC2}`, borderRadius: "6px",
                                       padding: "7px 16px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
                                       cursor: (overLimit || saving) ? "default" : "pointer",
                                       opacity: (overLimit || saving) ? 0.5 : 1,
@@ -5833,10 +5949,10 @@ useEffect(() => {
                       directly, which would pass the click event itself as
                       overrideGameNotes (now that handleSaveEvaluation takes
                       that param for the add/remove-note auto-save above). */}
-                  <button onClick={() => handleSaveEvaluation()} disabled={saving} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:color1, border:`2px solid ${color2}`, color:"#fff", letterSpacing:"0.08em" }}>
+                  <button onClick={() => handleSaveEvaluation()} disabled={saving} className="wdm-btn-primary w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:siteC1, border:`2px solid ${siteC2}`, color:"#fff", letterSpacing:"0.08em" }}>
                     {saving?"Saving...":"Save Evaluation"}
                   </button>
-                  <button onClick={handleShareEvaluation} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${color1}`, color:color1, letterSpacing:"0.08em" }}>
+                  <button onClick={handleShareEvaluation} className="wdm-btn-ghost w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${siteC1}`, color:siteC1, letterSpacing:"0.08em" }}>
                     Share Evaluation
                   </button>
                   {(lastUpdated || archivedEval) && (
@@ -5904,7 +6020,7 @@ useEffect(() => {
                           {archivedEval.grade === "Watchlist" ? "WATCHLIST" : "ROUND"}
                         </span>
                       </div>
-                      <div style={{ fontSize:isMobile?"13px":"15px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.04em" }}>{archivedEval.grade}</div>
+                      <div style={{ fontSize:isMobile?"13px":"15px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.04em" }}>{archivedEval.grade}</div>
                     </div>
                   );
                 })()}
@@ -5912,17 +6028,17 @@ useEffect(() => {
                   <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:"12px" }}>
                     {archivedEval.strengths?.length > 0 && (
                       <div>
-                        <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Strengths</div>
+                        <div className="wdm-h" style={{ fontSize:"10px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${siteC1}`, paddingBottom:"4px", marginBottom:"8px" }}>Strengths</div>
                         {archivedEval.strengths.map((s,i) => (
-                          <div key={i} style={{ fontSize:isMobile?"12px":"13px", fontWeight:800, color:"#222", textTransform:"uppercase", letterSpacing:"0.04em", padding:"3px 0", borderBottom:i<archivedEval.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>
+                          <div key={i} className="wdm-item sm" style={{ fontSize:isMobile?"12px":"13px", fontWeight:800, color:"#222", textTransform:"uppercase", letterSpacing:"0.04em", padding:"3px 0", borderBottom:i<archivedEval.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>
                         ))}
                       </div>
                     )}
                     {archivedEval.weaknesses?.length > 0 && (
                       <div>
-                        <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Weaknesses</div>
+                        <div className="wdm-h" style={{ fontSize:"10px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${siteC1}`, paddingBottom:"4px", marginBottom:"8px" }}>Weaknesses</div>
                         {archivedEval.weaknesses.map((w,i) => (
-                          <div key={i} style={{ fontSize:isMobile?"12px":"13px", fontWeight:800, color:"#222", textTransform:"uppercase", letterSpacing:"0.04em", padding:"3px 0", borderBottom:i<archivedEval.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>
+                          <div key={i} className="wdm-item sm" style={{ fontSize:isMobile?"12px":"13px", fontWeight:800, color:"#222", textTransform:"uppercase", letterSpacing:"0.04em", padding:"3px 0", borderBottom:i<archivedEval.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>
                         ))}
                       </div>
                     )}
@@ -5930,13 +6046,13 @@ useEffect(() => {
                 )}
                 {archivedEval.nflFit && (
                   <div>
-                    <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>NFL Fit</div>
+                    <div className="wdm-h" style={{ fontSize:"10px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${siteC1}`, paddingBottom:"4px", marginBottom:"8px" }}>NFL Fit</div>
                     <div style={{ fontSize:isMobile?"13px":"14px", fontWeight:800, color:"#333" }}>{archivedEval.nflFit}</div>
                   </div>
                 )}
                 {archivedEval.evaluation && (
                   <div>
-                    <div style={{ fontSize:"10px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${color1}`, paddingBottom:"4px", marginBottom:"8px" }}>Scout's Take</div>
+                    <div className="wdm-h" style={{ fontSize:"10px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`2px solid ${siteC1}`, paddingBottom:"4px", marginBottom:"8px" }}>Scout's Take</div>
                     <div style={{ fontStyle:"italic", fontSize:isMobile?"13px":"15px", color:"#222", lineHeight:1.6 }}>
                       {renderEvaluationText(archivedEval.evaluation, "archived")}
                     </div>
@@ -5956,14 +6072,14 @@ useEffect(() => {
           {publicFeed.length > 0 ? (
             <>
               {publicFeed.slice(0, visibleCount).map((ev) => (
-                <div key={ev.uid} className="bg-white rounded-lg overflow-hidden mb-4" style={{ border:`2px solid ${color1}` }}>
-                  <div className="flex items-center justify-between px-3 py-2" style={{ backgroundColor:color1 }}>
+                <div key={ev.uid} className="bg-white rounded-lg overflow-hidden mb-4 wdm-card wdm-feed" style={{ border:`2px solid ${siteC1}` }}>
+                  <div className="flex items-center justify-between px-3 py-2 wdm-cardhead" style={{ backgroundColor:siteC1 }}>
                     <div className="flex items-center gap-2">
                       <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"13px":"17px" }}>
                         <VerifiedNameBadge uid={ev.uid} name={ev.username} verified={!!ev.verified} size={16} />
                       </span>
                     </div>
-                    {ev.updatedAt && <span style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
+                    {ev.updatedAt && <span className="wdm-cardhead-d" style={{ color:"rgba(255,255,255,0.85)", fontSize:"13px", fontWeight:700 }}>{renderDate(ev.updatedAt)}</span>}
                   </div>
                   {isMobile ? (
                     <div>
@@ -5974,15 +6090,15 @@ useEffect(() => {
                               (padding + minWidth unchanged), number bigger
                               and on the left instead of stacked above the
                               written grade. */}
-                          <div className="rounded flex-shrink-0" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", minWidth:"60px", display:"flex", alignItems:"center", gap:"6px" }}>
+                          <div className="rounded flex-shrink-0 wdm-grade" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", minWidth:"60px", display:"flex", alignItems:"center", gap:"6px" }}>
                             <div style={{ fontSize:"28px", fontWeight:900, color:"#fff", lineHeight:1, flexShrink:0 }}>{short}</div>
                             <div style={{ fontSize:"7px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", lineHeight:1.3 }}>{ev.grade}</div>
                           </div>
                           {ev.nflFit && (
                             <div className="flex flex-col items-center">
-                              <div style={{ fontSize:"8px", fontWeight:800, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"3px" }}>NFL Fit</div>
+                              <div style={{ fontSize:"8px", fontWeight:800, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"3px" }}>NFL Fit</div>
                               {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} style={{ width:"36px", height:"36px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
-                                : <div style={{ fontSize:"10px", fontWeight:800, color:color1, textAlign:"center" }}>{ev.nflFit}</div>}
+                                : <div style={{ fontSize:"10px", fontWeight:800, color:siteC1, textAlign:"center" }}>{ev.nflFit}</div>}
                             </div>
                           )}
                         </div>
@@ -5990,68 +6106,68 @@ useEffect(() => {
                       {(ev.strengths?.length > 0 || ev.weaknesses?.length > 0) && (
                         <div className="flex" style={{ borderBottom:ev.evaluation?"1px solid #e5e7eb":"none" }}>
                           {ev.strengths?.length > 0 && <div className="flex-1 px-3 py-2" style={{ borderRight:ev.weaknesses?.length>0?"1px solid #e5e7eb":"none" }}>
-                            <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`1px solid ${color1}`, paddingBottom:"3px", marginBottom:"4px" }}>Strengths</div>
-                            {ev.strengths.map((s,i) => <div key={i} style={{ fontSize:"10px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"2px 0" }}>{s}</div>)}
+                            <div className="wdm-h" style={{ fontSize:"8px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`1px solid ${siteC1}`, paddingBottom:"3px", marginBottom:"4px" }}>Strengths</div>
+                            {ev.strengths.map((s,i) => <div key={i} className="wdm-item sm" style={{ fontSize:"10px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"2px 0" }}>{s}</div>)}
                           </div>}
                           {ev.weaknesses?.length > 0 && <div className="flex-1 px-3 py-2">
-                            <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`1px solid ${color1}`, paddingBottom:"3px", marginBottom:"4px" }}>Weaknesses</div>
-                            {ev.weaknesses.map((w,i) => <div key={i} style={{ fontSize:"10px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"2px 0" }}>{w}</div>)}
+                            <div className="wdm-h" style={{ fontSize:"8px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", borderBottom:`1px solid ${siteC1}`, paddingBottom:"3px", marginBottom:"4px" }}>Weaknesses</div>
+                            {ev.weaknesses.map((w,i) => <div key={i} className="wdm-item sm" style={{ fontSize:"10px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"2px 0" }}>{w}</div>)}
                           </div>}
                         </div>
                       )}
-                      {ev.evaluation && <div className="px-3 py-3" style={{ borderLeft: `3px solid ${color1}`, margin: "0 8px 8px", borderRadius: "0 4px 4px 0", background: "#fafafa" }}>
-                        <div style={{ fontSize:"8px", fontWeight:900, color:color1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"6px" }}>Scout's Take</div>
+                      {ev.evaluation && <div className="px-3 py-3" style={{ borderLeft: `3px solid ${siteC1}`, margin: "0 8px 8px", borderRadius: "0 4px 4px 0", background: "#fafafa" }}>
+                        <div className="wdm-h" style={{ fontSize:"8px", fontWeight:900, color:siteC1, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"6px" }}>Scout's Take</div>
                         <div style={{ fontSize:"13px", fontWeight:600, color:"#111", lineHeight:1.65 }}>
-                          <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-m-${ev.uid}`} color={color1} />
+                          <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-m-${ev.uid}`} color={siteC1} />
                         </div>
                       </div>}
-                      <GameNotesFeedSection gameNotes={ev.gameNotes} color={color1} mobile />
+                      <GameNotesFeedSection gameNotes={ev.gameNotes} color={siteC1} mobile />
                     </div>
                   ) : (
                     <div>
                       <div className="flex gap-0">
                         {ev.grade && (() => { const { short, bg, border } = gradeDisplay(ev.grade); return (
                           <div className="flex flex-col items-center justify-center text-center px-4 py-4" style={{ flex:"0 0 130px", borderRight:"1px solid #e5e7eb" }}>
-                            <div className="font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Grade</div>
-                            <div className="rounded w-full text-center" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"8px 10px" }}>
+                            <div className="wdm-h font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Grade</div>
+                            <div className="rounded w-full text-center wdm-grade" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"8px 10px" }}>
                               <div style={{ fontSize:"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
                               <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{ev.grade}</div>
                             </div>
                           </div>
                         ); })()}
                         {ev.strengths?.length > 0 && <div className="flex-1 px-4 py-4" style={{ borderRight:"1px solid #e5e7eb" }}>
-                          <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Strengths</div>
-                          {ev.strengths.map((s,i) => <div key={i} className="font-black uppercase py-1" style={{ fontSize:"14px", color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>)}
+                          <div className="wdm-h font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Strengths</div>
+                          {ev.strengths.map((s,i) => <div key={i} className="wdm-item font-black uppercase py-1" style={{ fontSize:"14px", color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.strengths.length-1?"1px solid #f0f0f0":"none" }}>{s}</div>)}
                         </div>}
                         {ev.weaknesses?.length > 0 && <div className="flex-1 px-4 py-4" style={{ borderRight:ev.nflFit||ev.evaluation?"1px solid #e5e7eb":"none" }}>
-                          <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Weaknesses</div>
-                          {ev.weaknesses.map((w,i) => <div key={i} className="font-black uppercase py-1" style={{ fontSize:"14px", color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>)}
+                          <div className="wdm-h font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Weaknesses</div>
+                          {ev.weaknesses.map((w,i) => <div key={i} className="wdm-item font-black uppercase py-1" style={{ fontSize:"14px", color:"#222", letterSpacing:"0.06em", borderBottom:i<ev.weaknesses.length-1?"1px solid #f0f0f0":"none" }}>{w}</div>)}
                         </div>}
                         {ev.nflFit && <div className="flex flex-col items-center justify-center px-4 py-4" style={{ flex:"0 0 120px", borderRight:ev.evaluation?"1px solid #e5e7eb":"none" }}>
-                          <div className="font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
+                          <div className="wdm-h font-black uppercase pb-1 mb-3 w-full text-center" style={{ fontSize:"14px", color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>NFL Fit</div>
                           {feedLogoCache[ev.nflFit] ? <img src={sanitizeUrl(feedLogoCache[ev.nflFit])} alt={ev.nflFit} title={ev.nflFit} className="object-contain" style={{ width:"52px", height:"52px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} />
-                            : <div className="font-black uppercase text-center" style={{ fontSize:"13px", color:color1, letterSpacing:"0.04em", lineHeight:1.4 }}>{ev.nflFit}</div>}
+                            : <div className="font-black uppercase text-center" style={{ fontSize:"13px", color:siteC1, letterSpacing:"0.04em", lineHeight:1.4 }}>{ev.nflFit}</div>}
                         </div>}
                       </div>
                       {ev.evaluation && <>
                         <div style={{ height:"1px", backgroundColor:"#e5e7eb", margin:"0 16px" }} />
                         <div className="px-4 py-4">
-                          <div className="font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:color1, borderBottom:`2px solid ${color1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
-                          <div style={{ borderLeft:`3px solid ${color1}`, paddingLeft:"14px", background:"#fafafa", borderRadius:"0 4px 4px 0", padding:"10px 14px" }}>
+                          <div className="wdm-h font-black uppercase pb-1 mb-3" style={{ fontSize:"14px", color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Scout's Take</div>
+                          <div style={{ borderLeft:`3px solid ${siteC1}`, paddingLeft:"14px", background:"#fafafa", borderRadius:"0 4px 4px 0", padding:"10px 14px" }}>
                             <div style={{ fontSize:"16px", fontWeight:600, color:"#111", lineHeight:1.7 }}>
-                              <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-d-${ev.uid}`} color={color1} />
+                              <TruncatedEvaluationText text={ev.evaluation} keyPrefix={`feed-d-${ev.uid}`} color={siteC1} />
                             </div>
                           </div>
                         </div>
                       </>}
                       {Array.isArray(ev.gameNotes) && ev.gameNotes.length > 0 && <div style={{ height:"1px", backgroundColor:"#e5e7eb", margin:"0 16px" }} />}
-                      <GameNotesFeedSection gameNotes={ev.gameNotes} color={color1} />
+                      <GameNotesFeedSection gameNotes={ev.gameNotes} color={siteC1} />
                     </div>
                   )}
                 </div>
               ))}
               {visibleCount < publicFeed.length && (
-                <button onClick={()=>setVisibleCount((prev)=>prev+3)} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:color1, border:`2px solid ${color2}`, color:"#fff", letterSpacing:"0.08em" }}>
+                <button onClick={()=>setVisibleCount((prev)=>prev+3)} className="wdm-btn-ghost w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:siteC1, border:`2px solid ${siteC2}`, color:"#fff", letterSpacing:"0.08em" }}>
                   Show More
                 </button>
               )}
@@ -6066,13 +6182,13 @@ useEffect(() => {
 
         {/* ===== RIGHT COLUMN: Videos + Stats + In The News ===== */}
         {isMobile ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          <div className="wdm-col" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             {playerVideos.length > 0 && VideosSidebar}
             <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
             {NewsSidebar}
           </div>
         ) : (
-          <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+          <div className="wdm-col" style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
             <PlayerLiveCard player={player} />
             {playerVideos.length > 0 && VideosSidebar}
             <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />

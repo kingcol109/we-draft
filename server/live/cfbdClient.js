@@ -109,6 +109,9 @@ const cfbd = {
   // Team season totals, one row per team per stat (opponents' too: "…Opponent").
   seasonTeamStats: (params) => get("/stats/season", params),
   roster: (params) => get("/roster", params),
+  // Every venue: [{ id, name, city, state, zip, countryCode, ... }] — joins
+  // to /games rows by venueId (game pages' SEO location).
+  venues: () => get("/venues"),
   // Transfer portal for one season: [{ season, firstName, lastName, position, origin, destination, transferDate, rating, stars, eligibility }] — no player id.
   portal: (params) => get("/player/portal", params),
   // Recruits for one class: [{ id, athleteId, year, ranking, name, position, stars, rating, committedTo, ... }]

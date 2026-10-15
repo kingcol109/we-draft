@@ -10,7 +10,7 @@
 //   { provider, providerGameId, season, week, seasonType, startDate (ISO),
 //     startTimeTBD, neutralSite, status: "scheduled" | "in_progress" | "final",
 //     period, clock, possession: "home" | "away" | null, down, distance,
-//     yardsToGoal, situation, lastPlayText, tv, venue,
+//     yardsToGoal, situation, lastPlayText, tv, venue, venueId,
 //     home: { providerTeamId, name, classification, points, lineScores },
 //     away: { ... } }
 //   Fields a source doesn't carry are left undefined (not null) so a merge
@@ -70,6 +70,7 @@ function gameFromCfbdGame(g, nowMs = Date.now()) {
     startTimeTBD: !!g.startTimeTBD,
     neutralSite: !!g.neutralSite,
     venue: g.venue || null,
+    venueId: g.venueId ?? undefined,
     status,
     home: { providerTeamId: g.homeId, name: g.homeTeam, classification: g.homeClassification || null, points: g.homePoints ?? null, lineScores: g.homeLineScores || null },
     away: { providerTeamId: g.awayId, name: g.awayTeam, classification: g.awayClassification || null, points: g.awayPoints ?? null, lineScores: g.awayLineScores || null },

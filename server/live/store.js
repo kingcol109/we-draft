@@ -366,6 +366,14 @@ function slateGame(id, g, rosters, records) {
     // parser reads everything from its text.
     lastPlay: g.lastPlayText ? compactPresentation(presentPlay({ text: g.lastPlayText, type: null }, rosters ? { rosters } : {})) : null,
     tv: g.tv ?? null,
+    // Where it's played — the game page's SEO location (SportsEvent.location).
+    venue: g.venue || null,
+    venueCity: g.venueCity || null,
+    venueState: g.venueState || null,
+    venueZip: g.venueZip || null,
+    venueCountry: g.venueCountry || null,
+    venueLat: g.venueLat ?? null,
+    venueLng: g.venueLng ?? null,
     featured: !!g.featured,
     // schedule26 link — lets /live match a user's We-Pick Ranked 6
     // (wePickSubmissions/{week}/entries/{uid}.gameIds) to slate games.

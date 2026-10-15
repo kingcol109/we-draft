@@ -26,7 +26,6 @@ import { collection, getDocs, query, where, orderBy, limit } from "firebase/fire
 import { db } from "../firebase";
 
 const SITE_BLUE = "#0055a5";
-const SITE_GOLD = "#f6a21d";
 const SIDEBAR_NEWS_LIMIT = 8;
 const VIDEO_FALLBACK_SCAN = 30;
 
@@ -257,21 +256,23 @@ export function usePlayerSidebarData(player) {
   return { news, videos, watchClips };
 }
 
-// Same shell as PlayerProfile.js's SidebarCard.
-// `to`: makes the header a link (Videos → /videos).
+// Same shell as PlayerProfile.js's sidebar cards: compact left-anchored
+// site-blue header, 1px hairline border.
+// `to`: makes the header a link (Videos → /videos), shown by an underline.
 function SidebarCard({ title, children, to }) {
   return (
-    <div className="rounded-lg overflow-hidden" style={{ border: `2px solid ${SITE_BLUE}` }}>
-      <div style={{ backgroundColor: SITE_BLUE, padding: "12px 14px", textAlign: "center" }}>
-        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
+    <div style={{ border: "1px solid #e3e8ef", borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
+      <div style={{ backgroundColor: SITE_BLUE, padding: "12px 16px" }}>
+        <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.14em" }}>
           {to ? (
-            <Link to={to} title={`All ${title.toLowerCase()}`} style={{ color: "#fff", textDecoration: "none" }}>
-              {title} <span style={{ color: SITE_GOLD, fontSize: "16px" }}>→</span>
+            <Link to={to} title={`All ${title.toLowerCase()}`} className="wd-side-head-link"
+              style={{ color: "#fff", textDecoration: "underline", textUnderlineOffset: "4px", textDecorationThickness: "2px" }}>
+              {title}
             </Link>
           ) : title}
         </h2>
+        <style>{".wd-side-head-link { text-decoration-color: rgba(255,255,255,0.55) !important; } .wd-side-head-link:hover { text-decoration-color: #fff !important; }"}</style>
       </div>
-      <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
       <div style={{ background: "#fff" }}>{children}</div>
     </div>
   );
@@ -279,8 +280,8 @@ function SidebarCard({ title, children, to }) {
 
 const footerButtonStyle = {
   display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", width: "100%",
-  padding: "10px 14px", textDecoration: "none", background: SITE_BLUE, color: SITE_GOLD,
-  border: "none", cursor: "pointer", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em",
+  padding: "10px 14px", textDecoration: "none", background: "#f7f9fc", color: SITE_BLUE,
+  border: "none", borderTop: "1px solid #eef1f5", cursor: "pointer", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em",
 };
 
 export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
@@ -296,7 +297,7 @@ export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
       {videos.slice(0, visibleCount).map((v, i, arr) => (
         <a
           key={v.id} href={sanitizeUrl(v.video)} target="_blank" rel="noopener noreferrer" className="wd-video-card"
-          style={{ display: "block", position: "relative", textDecoration: "none", borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none" }}
+          style={{ display: "block", position: "relative", textDecoration: "none", borderBottom: i < arr.length - 1 ? "1px solid #eef1f5" : "none" }}
         >
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
             {v.thumb ? (
@@ -324,7 +325,7 @@ export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
             </div>
             {v.title && (
               <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                <h3 className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>{v.title}</h3>
+                <h3 className="leading-tight" style={{ color: "#fff", fontSize: "14px", fontWeight: 800, textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>{v.title}</h3>
               </div>
             )}
           </div>
@@ -334,8 +335,8 @@ export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
         <button
           onClick={() => setVisibleCount((c) => c + 3)}
           style={{ ...footerButtonStyle, display: "block" }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = SITE_BLUE; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#eef3fa"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
         >
           Show More Videos ▾
         </button>
@@ -353,24 +354,24 @@ export function PlayerNewsCard({ news }) {
       ) : shown.map((n, i) => (
         <Link
           key={n.slug || n.id} to={`/news/${n.slug}`}
-          style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < shown.length - 1 ? "1px solid #f0f0f0" : "none" }}
+          style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < shown.length - 1 ? "1px solid #eef1f5" : "none" }}
           onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
         >
-          <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: `2px solid ${SITE_BLUE}`, background: "#fff", display: "flex", flexDirection: "column" }}>
-            <div style={{ background: SITE_GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+          <div className="flex-shrink-0 overflow-hidden" style={{ width: 36, border: "1px solid #e3e8ef", borderRadius: "8px", background: "#fff", display: "flex", flexDirection: "column" }}>
+            <div style={{ background: "#f7f9fc", lineHeight: 1, padding: "2px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: "10px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                 {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
               </span>
             </div>
             <div style={{ padding: "3px 0 2px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontSize: "15px", fontWeight: 900, color: SITE_BLUE, lineHeight: 1 }}>
+              <span style={{ fontSize: "15px", fontWeight: 900, color: "#0f1b2d", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
                 {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
               </span>
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h3 className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</h3>
+            <h3 style={{ color: "#0f1b2d", fontWeight: 700, fontSize: "14px", lineHeight: 1.35 }}>{n.title}</h3>
           </div>
         </Link>
       ))}
