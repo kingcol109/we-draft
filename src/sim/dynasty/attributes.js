@@ -26,7 +26,7 @@ export const ATTR_LABELS = {
   routeShort: "Short Routes",
   routeMid: "Intermediate Routes",
   routeDeep: "Deep Routes",
-  ballTracking: "Ball Tracking",
+  ballTracking: "Ball Tracking", // also LB / DB: reading a thrown ball's flight
   // OL
   passBlockPower: "Pass Block Power",
   passBlockFinesse: "Pass Block Finesse",
@@ -62,7 +62,7 @@ const QB = ["armStrength", "accShort", "accMid", "accDeep", "throwOnRun"];
 const SKILL = ["contactBalance", "hands", "contestedCatch", "routeShort", "routeMid", "routeDeep", "ballTracking"];
 const OL = ["passBlockPower", "passBlockFinesse", "runBlock", "handUse"];
 const RUSH = ["speedRush", "powerRush", "handUse", "runDefense"];
-const COVER = ["zone", "man"];
+const COVER = ["zone", "man", "ballTracking"];
 const DEF = ["angleTackling", "tackling"];
 const KICK = ["kickPower", "kickAccuracy"];
 
@@ -122,7 +122,7 @@ export const STARTER_MEAN = {
   C: { explosiveness: 60, longSpeed: 50, cod: 52, saq: 62, strength: 85, instincts: 76 },
   EDGE: { explosiveness: 84, longSpeed: 80, cod: 74, saq: 78, strength: 78, instincts: 70 },
   DL: { explosiveness: 76, longSpeed: 62, cod: 58, saq: 70, strength: 89, instincts: 70, speedRush: 64 },
-  LB: { explosiveness: 82, longSpeed: 81, cod: 77, saq: 80, strength: 70, instincts: 74, man: 64 },
+  LB: { explosiveness: 82, longSpeed: 81, cod: 77, saq: 80, strength: 70, instincts: 74, man: 64, ballTracking: 64 },
   CB: { explosiveness: 87, longSpeed: 91, cod: 89, saq: 89, strength: 48, instincts: 70, tackling: 64, angleTackling: 66 },
   S: { explosiveness: 85, longSpeed: 88, cod: 84, saq: 85, strength: 58, instincts: 74, man: 66 },
   K: { explosiveness: 50, longSpeed: 55, cod: 50, saq: 50, strength: 40, instincts: 60, kickPower: 80, kickAccuracy: 80 },
@@ -146,9 +146,9 @@ export const OVR_WEIGHTS = {
   C: { passBlockPower: 1.8, passBlockFinesse: 1.6, runBlock: 2, handUse: 1.6, strength: 1.5, instincts: 1.4, saq: 0.5, explosiveness: 0.4 },
   EDGE: { speedRush: 2, powerRush: 1.5, handUse: 1.3, runDefense: 1.2, explosiveness: 1.5, saq: 0.8, cod: 0.7, longSpeed: 0.5, strength: 0.8, tackling: 0.6, angleTackling: 0.4, instincts: 0.6 },
   DL: { powerRush: 2, runDefense: 2, handUse: 1.5, strength: 1.8, speedRush: 0.8, explosiveness: 1, saq: 0.6, tackling: 0.6, instincts: 0.6 },
-  LB: { tackling: 1.5, angleTackling: 1.3, zone: 1.3, man: 0.8, instincts: 1.5, longSpeed: 1, explosiveness: 1, cod: 0.6, saq: 0.6, strength: 0.6 },
-  CB: { man: 2, zone: 1.5, longSpeed: 1.8, cod: 1.5, saq: 1.2, explosiveness: 1, instincts: 0.8, tackling: 0.4, angleTackling: 0.4 },
-  S: { zone: 2, man: 1, instincts: 1.5, longSpeed: 1.3, explosiveness: 0.8, cod: 0.8, tackling: 1, angleTackling: 1, saq: 0.6 },
+  LB: { tackling: 1.5, angleTackling: 1.3, zone: 1.3, man: 0.8, ballTracking: 0.3, instincts: 1.5, longSpeed: 1, explosiveness: 1, cod: 0.6, saq: 0.6, strength: 0.6 },
+  CB: { man: 2, zone: 1.5, ballTracking: 1, longSpeed: 1.8, cod: 1.5, saq: 1.2, explosiveness: 1, instincts: 0.8, tackling: 0.4, angleTackling: 0.4 },
+  S: { zone: 2, man: 1, ballTracking: 1, instincts: 1.5, longSpeed: 1.3, explosiveness: 0.8, cod: 0.8, tackling: 1, angleTackling: 1, saq: 0.6 },
   K: { kickPower: 1, kickAccuracy: 1.2 },
   P: { kickPower: 1.2, kickAccuracy: 1 },
   LS: { instincts: 1, strength: 1 },

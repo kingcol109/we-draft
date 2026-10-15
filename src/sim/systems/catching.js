@@ -24,7 +24,15 @@ function quality(p, b, d, reach, tracking, now) {
   const from = Math.atan2(-b.vy, -b.vx); // direction the ball arrives from
   const faceAlign = Math.cos(angDiff(from, p.facing)); // +1 = arriving in front of him
   const fDist = 1 - 0.45 * clamp((d - 0.3) / Math.max(0.01, reach - 0.3), 0, 1);
-  const fOrient = tracking ? 0.55 + 0.45 * clamp((faceAlign + 0.3) / 1.3, 0, 1) : 0.25;
+  // In front of him: hands to it. Across his body: harder. Coming from
+  // behind — a deep ball he's running under, head turned, chest downfield —
+  // is an over-the-shoulder catch, and that's ball tracking: a good tracker
+  // looks it in like a ball in front of him; a poor one fights it.
+  const front = 0.55 + 0.45 * clamp((faceAlign + 0.3) / 1.3, 0, 1);
+  const trk = p.traits.tracking ?? 1;
+  const shoulder = clamp(1 - 0.18 / (trk * trk), 0.4, 0.97);
+  const behind = clamp((Math.acos(clamp(faceAlign, -1, 1)) - Math.PI / 2) / (Math.PI / 4), 0, 1);
+  const fOrient = tracking ? front + (shoulder - front) * behind : 0.25;
   const fSpeed = speed > 28 ? 0.85 : 1;
   const fHeight = b.z > 2.5 ? 0.75 : b.z < 0.5 ? 0.7 : 1;
   return {

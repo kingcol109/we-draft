@@ -156,8 +156,10 @@ function updateBallPerception(p, world, dt) {
     world.log(p, "Acquired the ball", `watched ${bk.watch.toFixed(2)}s`);
   }
   // Prediction: exact ballistics from what's seen, plus a landing error that
-  // shrinks the longer the ball is tracked.
-  const k = Math.exp(-(bk.watch * track) / TUNING.ball.trackingTau);
+  // shrinks the longer the ball is tracked. Ball tracking counts twice: a
+  // good tracker starts closer (engine: the first read) and closes the rest
+  // faster; a poor one is still drifting onto it as it comes down.
+  const k = Math.exp(-(bk.watch * track * track) / TUNING.ball.trackingTau);
   const raw = predictPath(b, world.t);
   const T = raw.length ? raw[raw.length - 1].at - world.t : 1;
   bk.path = raw.map((s) => {

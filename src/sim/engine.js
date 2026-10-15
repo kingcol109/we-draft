@@ -434,6 +434,7 @@ export class SimEngine {
       const bk = freshBallKnowledge();
       bk.throwCue = visibility(p, qb.x, qb.y, 1.8, this.players, "QB");
       bk.noise = { x: 0, y: 0 }; // a short toss: no misjudging where it's going
+      bk.run = { x: p.x, y: p.y, vx: p.vx, vy: p.vy, t: this.t };
       p.perception.ball = bk;
     }
     const key = this.zone && this.zone.optionKeyId;
@@ -582,14 +583,23 @@ export class SimEngine {
     // How well did each player see the release? Receivers know the timing;
     // defenders only know it if they saw it. Everyone still has to *see the
     // ball* to acquire it, and their first read of it is off by a bit.
+    // The first read is mostly a misjudged *depth* — long or short is the
+    // hard part of reading a throw, its line is easy — and how far off it
+    // is comes down to ball tracking (dynasty: receivers and DBs).
+    const dir = Math.atan2(b.vy, b.vx);
     for (const p of this.players) {
       if (p.id === "QB") continue;
       const bk = freshBallKnowledge();
       // Only a player who actually saw the release gets the head start.
       bk.throwCue = visibility(p, qb.x, qb.y, 1.8, this.players, "QB");
-      const a = this.rng() * Math.PI * 2;
-      const mag = TUNING.ball.predictionNoise * (0.4 + 0.6 * this.rng());
+      const track = p.traits.tracking ?? 1;
+      const mag = (TUNING.ball.predictionNoise * (0.4 + 0.6 * this.rng())) / track;
+      const u = this.rng(); // long or short (u < ½), and a little off the line
+      const a = dir + (u < 0.5 ? 0 : Math.PI) + (((u * 2) % 1) - 0.5) * 0.9;
       bk.noise = { x: Math.cos(a) * mag, y: Math.sin(a) * mag };
+      // Where his route was taking him as it left the QB's hand — the run
+      // the throw was led to (ai/common.js runs him under it from there).
+      bk.run = { x: p.x, y: p.y, vx: p.vx, vy: p.vy, t: this.t };
       p.perception.ball = bk;
     }
     const R = Math.hypot(tx - qb.x, ty - qb.y);

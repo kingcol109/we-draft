@@ -83,6 +83,37 @@ function bodyShift(attr, dw, dh) {
   }
 }
 
+// Attributes added after leagues were already generated (DB ball tracking)
+// draw from their own stream, seeded by the player, so adding one doesn't
+// reshuffle every rating rolled after it — the same seed is still the same
+// league. Also how a saved league gets the new rating (estimated talent).
+export const LATE_ATTRS = { LB: ["ballTracking"], CB: ["ballTracking"], S: ["ballTracking"] };
+function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+export function lateRating(pos, attr, talent, seed, id) {
+  const r = mulberry32(hashSeed(`${seed}:${id}:${attr}`));
+  const v = starterMean(pos, attr) + talent * loading(pos, attr) + ATTR_SD * gauss(r);
+  return Math.round(clamp(soften(v), 1, 99));
+}
+
+// A rostered player's talent (rating points over an average starter),
+// read back from the ratings he has — for adding a late attribute to a
+// league that's already been generated.
+export function estimateTalent(pos, ratings) {
+  let s = 0;
+  let ws = 0;
+  for (const [a, v] of Object.entries(ratings)) {
+    if ((LATE_ATTRS[pos] || []).includes(a)) continue;
+    const l = loading(pos, a);
+    s += l * (v - starterMean(pos, a));
+    ws += l * l;
+  }
+  return ws ? s / ws : 0;
+}
+
 const NUMBERS = {
   QB: [1, 19], RB: [20, 49], WR: [10, 19, 80, 89], TE: [80, 89, 40, 49], OT: [60, 79], OG: [60, 79], C: [50, 79],
   EDGE: [90, 99, 50, 59], DL: [90, 99, 70, 79], LB: [40, 59], CB: [20, 39], S: [20, 49], K: [1, 19], P: [1, 19], LS: [40, 69],
@@ -154,8 +185,13 @@ export function generateLeague({ teams, names, measurables = DEFAULT_MEASURABLES
         const weight = Math.round(clamp(M.w[0] + M.w[1] * zw, M.w[0] - 3 * M.w[1], M.w[0] + 3 * M.w[1]));
         const dh = height - M.h[0];
         const dw = weight - M.w[0];
+        const id = `${abbr}-${String(++n).padStart(2, "0")}`;
         const ratings = {};
         for (const a of POSITION_ATTRS[pos]) {
+          if ((LATE_ATTRS[pos] || []).includes(a)) {
+            ratings[a] = lateRating(pos, a, talent, seed, id);
+            continue;
+          }
           const v = starterMean(pos, a) + talent * loading(pos, a) + bodyShift(a, dw, dh) + ATTR_SD * gauss(rng);
           ratings[a] = Math.round(clamp(soften(v), 1, 99));
         }
@@ -173,7 +209,7 @@ export function generateLeague({ teams, names, measurables = DEFAULT_MEASURABLES
         }
         const { first, last } = newName();
         group.push({
-          id: `${abbr}-${String(++n).padStart(2, "0")}`,
+          id,
           first, last, pos, number: jersey(pos, used, rng),
           age, exp, height, weight, ratings, ovr: overall(pos, ratings),
         });

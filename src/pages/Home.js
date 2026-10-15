@@ -7,34 +7,64 @@
 // reversible switch, no code deploy needed either direction. Defaults to
 // off-season if the config doc doesn't exist yet or the read fails for any
 // reason, since that's the design that's actually been live.
+//
+// The shared hero (HomeHero.js) renders on the first paint — it never waits
+// on config/home. The sections below it do, unless this browser has seen
+// the mode before: the last-seen mode (localStorage) renders straight away
+// and config/home just confirms it in the background, swapping designs only
+// if an admin flipped it since.
 import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import HomeHero from "./HomeHero";
 import HomeOffSeason from "./HomeOffSeason";
 import HomeInSeason from "./HomeInSeason";
 
+const MODE_KEY = "homeMode";
+
+function cachedMode() {
+  try {
+    const m = localStorage.getItem(MODE_KEY);
+    return m === "inseason" || m === "offseason" ? m : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
-  // null = not yet resolved. Rendering nothing for that brief instant
-  // (rather than picking a default and possibly flashing the wrong design)
-  // is a fine tradeoff here — this is a single-doc read that resolves in a
-  // beat, not something worth a loading skeleton over.
-  const [mode, setMode] = useState(null);
+  // null = not yet known (first visit in this browser) — the hero still
+  // shows, only the sections below wait.
+  const [mode, setMode] = useState(cachedMode);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   useEffect(() => {
     let alive = true;
     const fetchMode = async () => {
+      let next = "offseason";
       try {
         const snap = await getDoc(doc(db, "config", "home"));
-        const next = snap.exists() && snap.data().mode === "inseason" ? "inseason" : "offseason";
-        if (alive) setMode(next);
-      } catch (e) {
-        if (alive) setMode("offseason");
+        if (snap.exists() && snap.data().mode === "inseason") next = "inseason";
+      } catch {
+        // keep the off-season default
       }
+      try { localStorage.setItem(MODE_KEY, next); } catch {}
+      if (alive) setMode(next);
     };
     fetchMode();
     return () => { alive = false; };
   }, []);
 
-  if (mode === null) return null;
-  return mode === "inseason" ? <HomeInSeason /> : <HomeOffSeason />;
+  return (
+    <div style={{ width: "100%", padding: isMobile ? "10px 10px 60px" : "20px 4% 60px", fontFamily: "'Arial Black', Arial, sans-serif", boxSizing: "border-box" }}>
+      <HomeHero mode={mode || "offseason"} />
+      {mode === "inseason" && <HomeInSeason />}
+      {mode === "offseason" && <HomeOffSeason />}
+    </div>
+  );
 }

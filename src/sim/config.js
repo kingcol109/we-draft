@@ -96,8 +96,8 @@ export const TUNING = {
     maxAngle: 30 * DEG, // long hold — the arc of the softest ball
     inherit: 0.85, // share of the QB's own velocity the ball keeps
     snapTime: 0.32,
-    predictionNoise: 2.4, // yd of landing-point error before a player has watched the ball
-    trackingTau: 0.35, // s of watching to cut that error by ~63%
+    predictionNoise: 2.6, // yd of landing-point error (mostly depth) before a player has watched the ball — ÷ ball tracking
+    trackingTau: 0.55, // s of watching to cut that error by ~63% — ÷ ball tracking²
   },
 
   catch: {

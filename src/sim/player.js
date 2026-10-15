@@ -22,6 +22,7 @@ export function freshBallKnowledge() {
     throwCue: 0, // how well the QB's release was seen
     noise: { x: 0, y: 0 }, // initial misjudgment of where it'll land
     path: null, // this player's own predicted trajectory (absolute times)
+    run: null, // where he was and how he was moving at the release
   };
 }
 

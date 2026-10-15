@@ -13,7 +13,7 @@
 // Skills scale the position's archetype (a guard's hands stay a guard's
 // hands), 1.0 at the position's average-starter rating:
 //   instincts → reaction, recognition, vision · hands, contact balance,
-//   contested catch, ball tracking, route running (short / intermediate /
+//   contested catch, ball tracking (receivers and DBs), route running (short / intermediate /
 //   deep) · pass-block power / finesse, drive, hand use · speed / power
 //   rush, run defense · zone instincts / man technique (baked in for the
 //   coverage he's playing) · angle tackling, tackling technique ·
@@ -112,6 +112,9 @@ export function traitsFor(player, slot) {
   if (R.zone != null) {
     t.zone = skill(pos, R, "zone", 0.1);
     t.man = skill(pos, R, "man", 0.1);
+    // Reading a thrown ball's flight — its own skill, not his coverage
+    // technique: a DB can blanket a route and still misjudge a deep ball.
+    t.tracking = skill(pos, R, "ballTracking", 0.12);
     if (cover === "zone") {
       recognition *= t.zone; // reading the QB, passing off routes
       reaction = clamp(reaction * (0.6 + 0.4 * t.zone), 0.6, 1.45);
