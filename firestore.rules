@@ -58,7 +58,21 @@ service cloud.firestore {
         // Auth account (see that file's own DummyEvaluationsSection
         // comment) — request.auth.uid can never equal that synthetic id,
         // so without this the admin-authored write would be denied outright.
-        allow write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+        //
+        // This canonical copy is public-read (Community Grade and the
+        // strengths/weaknesses/NFL fit aggregates count private evals too),
+        // and rules can't hide single fields of a readable doc, so the doc
+        // itself must hold nothing private: never an email, and for a
+        // private eval only the aggregate fields — its written take and
+        // game notes live on the owner-only users/ mirror (see
+        // src/utils/evaluationCopies.js). An empty evaluation string /
+        // gameNotes array still passes (a Watchlist add writes evaluation: "").
+        allow create, update: if ((request.auth != null && request.auth.uid == uid) || isAdmin())
+                              && request.resource.data.get("email", "") == ""
+                              && (request.resource.data.get("visibility", "") == "public"
+                                  || (request.resource.data.get("evaluation", "") == ""
+                                      && request.resource.data.get("gameNotes", []).size() == 0));
+        allow delete: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       }
       match /reactions/{uid} {
         allow read: if true;
@@ -119,15 +133,19 @@ service cloud.firestore {
     // whole query rather than partially filtering it — that's what an
     // earlier, conditional version of this rule was doing wrong.
     //
-    // This doesn't expose anything new: "evaluations" exists at two paths —
+    // "evaluations" exists at two paths —
     //   - players/{playerId}/evaluations/{uid}   (canonical, already
     //     `allow read: if true` via the nested match block above)
-    //   - users/{uid}/evaluations/{playerId}      (private mirror)
-    // PlayerProfile.js's handleSaveEvaluation writes the identical evalData
-    // object to both on every save, so the mirror was never actually more
-    // sensitive than the already-public canonical copy. ──
+    //   - users/{uid}/evaluations/{playerId}      (owner-only mirror)
+    // A recursive wildcard also matches direct reads, so an unconditional
+    // rule here made every user's mirror world-readable — including a
+    // private eval's written take, which only the mirror carries. Non-admins
+    // therefore only get public evals through this rule: the home page's
+    // Recent Evals query (where visibility == "public") is still provable,
+    // and the Admin Panel's unfiltered scans pass via isAdmin(), which
+    // depends only on the requester, not on any document. ──
     match /{path=**}/evaluations/{evalId} {
-      allow read: if true;
+      allow read: if isAdmin() || resource.data.get("visibility", "") == "public";
     }
 
     // ── Same collection-group gap as evaluations above, for "reactions" —
@@ -665,8 +683,11 @@ service cloud.firestore {
       match /evaluations/{playerId} {
         // isAdmin() bypass — same Dummy Content reasoning as
         // players/{id}/evaluations/{uid} above; this is that same write's
-        // private mirror.
-        allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+        // private mirror. A *public* mirror is also readable by anyone via
+        // the {path=**}/evaluations rule further up, so no email here either.
+        allow read, delete: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+        allow create, update: if ((request.auth != null && request.auth.uid == uid) || isAdmin())
+                              && request.resource.data.get("email", "") == "";
       }
       match /archivedEvaluations/{playerId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;

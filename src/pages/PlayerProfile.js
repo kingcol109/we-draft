@@ -59,6 +59,8 @@ import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
 import { fetchTeammateVideos } from "../components/PlayerSidebars";
 import { cssRect, viewportCssWidth, withoutPageZoom } from "../utils/pageZoom";
+import { canonicalEvalData } from "../utils/evaluationCopies";
+import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -1995,11 +1997,16 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
 // real bullet lists; everything else renders as normal paragraphs. Used
 // anywhere a saved evaluation is displayed (Scout's Take, public feed,
 // archived snapshot, export card) so plain text still works unchanged.
-function renderEvaluationText(text, keyPrefix = "ev") {
+// hideFromLine: when set, every line at or past that index (0-based, raw
+// "\n"-split lines, same count TruncatedEvaluationText uses) still renders
+// but with display:none — so collapsed text stays in the DOM for crawlers
+// instead of being cut out, and looks exactly like the old sliced version.
+function renderEvaluationText(text, keyPrefix = "ev", hideFromLine = null) {
   if (!text) return null;
   const lines = text.split("\n");
   const blocks = [];
   let currentList = [];
+  const isHidden = (lineIdx) => hideFromLine != null && lineIdx >= hideFromLine;
 
   const flushList = () => {
     if (currentList.length > 0) {
@@ -2011,10 +2018,11 @@ function renderEvaluationText(text, keyPrefix = "ev") {
             paddingLeft: "20px",
             listStyleType: "disc",
             listStylePosition: "outside",
+            ...(currentList.every((item) => isHidden(item.lineIdx)) ? { display: "none" } : {}),
           }}
         >
           {currentList.map((item, i) => (
-            <li key={i} style={{ display: "list-item", marginBottom: "4px" }}>{item}</li>
+            <li key={i} style={{ display: isHidden(item.lineIdx) ? "none" : "list-item", marginBottom: "4px" }}>{item.text}</li>
           ))}
         </ul>
       );
@@ -2022,15 +2030,15 @@ function renderEvaluationText(text, keyPrefix = "ev") {
     }
   };
 
-  lines.forEach((line) => {
+  lines.forEach((line, lineIdx) => {
     const trimmed = line.trim();
     const bulletMatch = trimmed.match(/^[•\-*]\s+(.*)/);
     if (bulletMatch) {
-      currentList.push(bulletMatch[1]);
+      currentList.push({ text: bulletMatch[1], lineIdx });
     } else {
       flushList();
       if (trimmed) {
-        blocks.push(<p key={`${keyPrefix}-p-${blocks.length}`} style={{ margin: "0 0 8px 0" }}>{trimmed}</p>);
+        blocks.push(<p key={`${keyPrefix}-p-${blocks.length}`} style={{ margin: "0 0 8px 0", ...(isHidden(lineIdx) ? { display: "none" } : {}) }}>{trimmed}</p>);
       }
     }
   });
@@ -2043,16 +2051,16 @@ const PUBLIC_EVAL_LINE_LIMIT = 8;
 // ── Truncates a public evaluation to PUBLIC_EVAL_LINE_LIMIT lines (not
 // characters) with a Show More/Less toggle. Line-based so a bulleted
 // evaluation never gets cut mid-bullet — each hidden/shown unit is always a
-// whole line. Only used in the Public Evaluations feed. ──
+// whole line. Collapsed lines are hidden with CSS, not removed, so the full
+// Scout's Take is in the DOM (and the prerendered HTML) before any click.
+// Only used in the Public Evaluations feed. ──
 function TruncatedEvaluationText({ text, keyPrefix, color }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
-  const lines = text.split("\n");
-  const isLong = lines.length > PUBLIC_EVAL_LINE_LIMIT;
-  const displayText = !isLong || expanded ? text : lines.slice(0, PUBLIC_EVAL_LINE_LIMIT).join("\n");
+  const isLong = text.split("\n").length > PUBLIC_EVAL_LINE_LIMIT;
   return (
     <>
-      {renderEvaluationText(displayText, keyPrefix)}
+      {renderEvaluationText(text, keyPrefix, isLong && !expanded ? PUBLIC_EVAL_LINE_LIMIT : null)}
       {isLong && (
         <button
           onClick={() => setExpanded((e) => !e)}
@@ -3014,7 +3022,14 @@ useEffect(() => {
           const pubWithNames = pubEvals
             .map((ev) => ({ ...ev, username:uMap[ev.uid]?.name||"Anonymous User", verified:uMap[ev.uid]?.verified||false }))
             .sort((a,b) => { if (a.verified&&!b.verified) return -1; if (!a.verified&&b.verified) return 1; return toMs(b.updatedAt)-toMs(a.updatedAt); });
-          const totalReports = evalsSnap.size;
+          // Strength/weakness bar denominator. A Watchlist eval left without
+          // any strengths/weaknesses is just a bookmark, so it shouldn't
+          // dilute the percentages; one that did pick traits still counts.
+          const totalReports = evalsSnap.docs.filter((d) => {
+            const data = d.data();
+            if (data.grade !== "Watchlist") return true;
+            return (data.strengths?.length || 0) + (data.weaknesses?.length || 0) > 0;
+          }).length || 1;
           const dedupedS = Object.entries(sC).filter(([term,count]) => count >= (wC[term] ?? -Infinity));
           const dedupedW = Object.entries(wC).filter(([term,count]) => count > (sC[term] ?? -Infinity));
           setCommunity({
@@ -3482,13 +3497,13 @@ useEffect(() => {
         savedGrade = existing.exists() ? (existing.data().grade || grade) : grade;
       }
       const evalData = {
-        uid:user.uid, email:user.email, playerId:player.id,
+        uid:user.uid, playerId:player.id,
         playerName:`${player.First||""} ${player.Last||""}`.trim(),
         grade: savedGrade, strengths, weaknesses, nflFit, evaluation, visibility,
         gameNotes: overrideGameNotes ?? gameNotes,
         updatedAt:serverTimestamp(),
       };
-      await setDoc(doc(db,"players",player.id,"evaluations",user.uid), evalData);
+      await setDoc(doc(db,"players",player.id,"evaluations",user.uid), canonicalEvalData(evalData));
       await setDoc(doc(db,"users",user.uid,"evaluations",player.id), evalData);
       confetti({ particleCount:140, spread:75, origin:{y:0.65}, colors:[color1,color2,"#ffffff"] });
       setLastUpdated(Date.now());
@@ -3559,23 +3574,19 @@ useEffect(() => {
   // heroCollegeLogo). No flair means no box at all, drafted or not.
   const hasRightBoxContent = !!flairInfo;
 
-  const buildMetaDescription = () => {
-    const name = `${player.First || ""} ${player.Last || ""}`.trim();
-    const prefix = [player.School, player.Position].filter(Boolean).join(" ");
-
-    // Try to pull first 12 words from the top public evaluation
-    const latestEval = publicFeed[0]?.evaluation?.trim();
-    if (latestEval) {
-      const words = latestEval.split(/\s+/);
-      const first12 = words.slice(0, 12).join(" ");
-      const snippet = first12 + (words.length > 12 ? "..." : "");
-      return `${prefix ? prefix + ": " : ""}${snippet} View the full evaluation, grades, measurables, and film.`;
-    }
-
-    // Fallback: no evaluations yet
-    return `${prefix ? prefix + " — " : ""}Read ${name}'s scouting report, including strengths, weaknesses, NFL projection, current draft grade, measurables, and the latest evaluations from We Draft.`;
-  };
-  const metaDescription = buildMetaDescription();
+  // Built from the player record + community aggregates only (all loaded
+  // before prerenderReady), never from an evaluation's written text.
+  const metaDescription = buildPlayerMetaDescription({
+    name: `${player.First || ""} ${player.Last || ""}`.trim(),
+    school: player.School,
+    position: player.Position,
+    classYear: player.Eligible,
+    height: formatHeightForDisplay(player.Height),
+    weight: player.Weight,
+    communityGrade: community.avgGrade != null ? gradeLabels[Math.round(community.avgGrade)] : "",
+    hasTraits: community.topStrengths.length > 0 || community.topWeaknesses.length > 0,
+    publicEvalCount: publicFeed.length,
+  });
 
   // ── "Last updated" stamp — the most recent of: the player record itself
   // being edited (player.updatedAt), any scouting evaluation on this player
@@ -6093,8 +6104,10 @@ useEffect(() => {
           <SectionTitle>Public Evaluations</SectionTitle>
           {publicFeed.length > 0 ? (
             <>
-              {publicFeed.slice(0, visibleCount).map((ev) => (
-                <div key={ev.uid} className="bg-white rounded-lg overflow-hidden mb-4 wdm-card wdm-feed" style={{ border:`2px solid ${siteC1}` }}>
+              {/* Every public eval renders; ones past visibleCount are only
+                  hidden with CSS so crawlers still get the full feed. */}
+              {publicFeed.map((ev, feedIdx) => (
+                <div key={ev.uid} className="bg-white rounded-lg overflow-hidden mb-4 wdm-card wdm-feed" style={{ border:`2px solid ${siteC1}`, ...(feedIdx >= visibleCount ? { display:"none" } : {}) }}>
                   <div className="flex items-center justify-between px-3 py-2 wdm-cardhead" style={{ backgroundColor:siteC1 }}>
                     <div className="flex items-center gap-2">
                       <span className="font-black text-white uppercase tracking-wide" style={{ fontSize:isMobile?"13px":"17px" }}>

@@ -8,6 +8,7 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo2 from "../assets/Logo2.png";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
+import { canonicalEvalData } from "../utils/evaluationCopies";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -911,14 +912,14 @@ export default function CommunityBoard() {
     setAddingId(p.id);
     try {
       const evalData = {
-        uid: user.uid, email: user.email,
+        uid: user.uid,
         playerId: p.id,
         playerName: (p.First || "") + " " + (p.Last || ""),
         grade: "Watchlist", strengths: [], weaknesses: [],
         nflFit: "", evaluation: "", visibility: "private",
         updatedAt: serverTimestamp(),
       };
-      await setDoc(doc(db, "players", p.id, "evaluations", user.uid), evalData);
+      await setDoc(doc(db, "players", p.id, "evaluations", user.uid), canonicalEvalData(evalData));
       await setDoc(doc(db, "users", user.uid, "evaluations", p.id), evalData);
       setBoardMap((prev) => new Map([...prev, [p.id, "Watchlist"]]));
     } catch (err) {

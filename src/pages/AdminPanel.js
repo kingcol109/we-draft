@@ -23,6 +23,7 @@ import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findCom
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
 import verifiedBadge from "../assets/verified.png";
 import { unzoomTransform } from "../utils/pageZoom";
+import { canonicalEvalData } from "../utils/evaluationCopies";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -4756,7 +4757,14 @@ function DummyEvaluationsSection() {
     setEvalsLoading(true);
     try {
       const snap = await getDocs(collection(db, "players", playerId, "evaluations"));
-      const dummies = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((e) => e.isDummy);
+      const canonical = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((e) => e.isDummy);
+      // A private dummy's written evaluation lives only on its users/ mirror
+      // (see utils/evaluationCopies.js), so editing pulls it from there.
+      const dummies = await Promise.all(canonical.map(async (e) => {
+        if (e.visibility === "public") return e;
+        const m = await getDoc(doc(db, "users", e.id, "evaluations", playerId));
+        return m.exists() ? { ...e, evaluation: m.data().evaluation || "" } : e;
+      }));
       // Username lives on the companion users/{dummyUid} doc, same place
       // PlayerProfile.js's own public-feed username lookup reads it from —
       // batch-fetched here purely so this list can show it without a
@@ -4827,7 +4835,7 @@ function DummyEvaluationsSection() {
       // this becomes the dummy's stand-in "uid" everywhere below.
       const dummyUid = editingId || doc(collection(db, "players", selectedPlayer.id, "evaluations")).id;
       const evalData = {
-        uid: dummyUid, email: "", playerId: selectedPlayer.id,
+        uid: dummyUid, playerId: selectedPlayer.id,
         playerName: `${selectedPlayer.First || ""} ${selectedPlayer.Last || ""}`.trim(),
         grade: formState.grade, strengths: formState.strengths, weaknesses: formState.weaknesses,
         nflFit: formState.nflFit, evaluation: formState.evaluation, visibility: formState.visibility,
@@ -4835,7 +4843,7 @@ function DummyEvaluationsSection() {
       };
       await Promise.all([
         setDoc(doc(db, "users", dummyUid), { username: formState.username.trim(), verified: false, isDummy: true, updatedAt: serverTimestamp() }, { merge: true }),
-        setDoc(doc(db, "players", selectedPlayer.id, "evaluations", dummyUid), evalData),
+        setDoc(doc(db, "players", selectedPlayer.id, "evaluations", dummyUid), canonicalEvalData(evalData)),
         setDoc(doc(db, "users", dummyUid, "evaluations", selectedPlayer.id), evalData),
       ]);
       setEditingId(null);

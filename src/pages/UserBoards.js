@@ -8,6 +8,7 @@ import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import BoardsMarginSidebars from "../components/BoardsMarginSidebars";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
+import { canonicalEvalData } from "../utils/evaluationCopies";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -324,13 +325,13 @@ export default function UserBoards() {
     setAddingId(p.id);
     try {
       const evalData = {
-        uid: user.uid, email: user.email, playerId: p.id,
+        uid: user.uid, playerId: p.id,
         playerName: `${p.First || ""} ${p.Last || ""}`.trim(),
         grade: "Watchlist", strengths: [], weaknesses: [],
         nflFit: "", evaluation: "", visibility: "private",
         updatedAt: serverTimestamp(),
       };
-      await setDoc(doc(db, "players", p.id, "evaluations", user.uid), evalData);
+      await setDoc(doc(db, "players", p.id, "evaluations", user.uid), canonicalEvalData(evalData));
       await setDoc(doc(db, "users", user.uid, "evaluations", p.id), evalData);
       setBoardMap((prev) => new Map([...prev, [p.id, "Watchlist"]]));
     } catch (err) { console.error(err); alert("Failed to add player. Try again."); }
