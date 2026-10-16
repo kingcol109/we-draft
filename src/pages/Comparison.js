@@ -36,6 +36,7 @@ import { usePlayerSidebarData, PlayerVideosCard, PlayerNewsCard } from "../compo
 import PlayerLiveCard from "../components/PlayerLiveCard";
 import { WatchButton } from "./PlayerProfile";
 import { Helmet } from "react-helmet-async";
+import { buildComparisonMeta, describeComps } from "../utils/comparisonMeta";
 import {
   STAT_METRICS, readMetric, computePositionStats, findComps, isGraded,
   communityTraits, draftedPlayersAsHistorical, TRAIT_WEIGHT, TRAIT_MATCH_TARGET, percentileOf,
@@ -646,6 +647,15 @@ export default function Comparison() {
   const [toYear, setToYear] = useState("");
   const [loadStatus, setLoadStatus] = useState("");
   const [slugNotFound, setSlugNotFound] = useState(false);
+  // Load failures, kept apart from "not found" / "no matches" so the page
+  // never presents a failed load as a finished (empty) result.
+  const [slugLoadError, setSlugLoadError] = useState(false);
+  const [traitsLoadError, setTraitsLoadError] = useState(false);
+  const [poolErrors, setPoolErrors] = useState({}); // position -> true if its pool failed to load
+  // Which school / Select id the async lookups below have finished for —
+  // part of the prerenderReady gate (og:image and result #1 depend on them).
+  const [brandingFor, setBrandingFor] = useState(null);
+  const [selectDoneFor, setSelectDoneFor] = useState(null);
   const [submitted, setSubmitted] = useState(null);
   // abbr -> nfl/{abbr} doc data, fetched lazily as top-3 results reference
   // them and cached for the rest of the session (see the effect below).
@@ -710,7 +720,7 @@ export default function Comparison() {
   // results/percentiles) — usually the same one. A /comparison/:slug visit
   // waits for the prospect to resolve first, so it never reads the default
   // "WR" pool for, say, a QB.
-  const awaitingSlug = !!routeSlug && !loadedPlayer && !slugNotFound;
+  const awaitingSlug = !!routeSlug && !loadedPlayer && !slugNotFound && !slugLoadError;
   const neededPositions = awaitingSlug ? [] : [...new Set([position, submitted?.position].filter(Boolean))];
   useEffect(() => {
     if (!featureChecked || !featureEnabled) return;
@@ -718,7 +728,10 @@ export default function Comparison() {
     neededPositions.filter((pos) => !(pos in poolByPos)).forEach((pos) => {
       fetchPositionPool(pos)
         .then((rows) => { if (!cancelled) setPoolByPos((prev) => ({ ...prev, [pos]: rows })); })
-        .catch((e) => { console.error("Comparison pool fetch error:", e); if (!cancelled) setPoolByPos((prev) => ({ ...prev, [pos]: [] })); });
+        .catch((e) => {
+          console.error("Comparison pool fetch error:", e);
+          if (!cancelled) { setPoolErrors((prev) => ({ ...prev, [pos]: true })); setPoolByPos((prev) => ({ ...prev, [pos]: [] })); }
+        });
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -738,9 +751,10 @@ export default function Comparison() {
   useEffect(() => {
     if (!loadedPlayer?.School) { setSchoolBranding(null); return; }
     let cancelled = false;
-    getDocs(query(collection(db, "schools"), where("School", "==", loadedPlayer.School)))
-      .then((snap) => { if (!cancelled) setSchoolBranding(snap.empty ? null : snap.docs[0].data()); })
-      .catch((e) => { console.error("Comparison school-branding fetch error:", e); if (!cancelled) setSchoolBranding(null); });
+    const school = loadedPlayer.School;
+    getDocs(query(collection(db, "schools"), where("School", "==", school)))
+      .then((snap) => { if (!cancelled) { setSchoolBranding(snap.empty ? null : snap.docs[0].data()); setBrandingFor(school); } })
+      .catch((e) => { console.error("Comparison school-branding fetch error:", e); if (!cancelled) { setSchoolBranding(null); setBrandingFor(school); } });
     return () => { cancelled = true; };
   }, [loadedPlayer?.School]);
   useEffect(() => {
@@ -799,8 +813,8 @@ export default function Comparison() {
     if (!selectId) { setSelectRecord(null); return; }
     let cancelled = false;
     getDoc(doc(db, "historical", selectId))
-      .then((snap) => { if (!cancelled) setSelectRecord(snap.exists() ? { id: snap.id, ...snap.data() } : null); })
-      .catch((e) => { console.error("Comparison We-Draft Select fetch error:", e); if (!cancelled) setSelectRecord(null); });
+      .then((snap) => { if (!cancelled) { setSelectRecord(snap.exists() ? { id: snap.id, ...snap.data() } : null); setSelectDoneFor(selectId); } })
+      .catch((e) => { console.error("Comparison We-Draft Select fetch error:", e); if (!cancelled) { setSelectRecord(null); setSelectDoneFor(selectId); } });
     return () => { cancelled = true; };
   }, [selectId]);
 
@@ -822,6 +836,7 @@ export default function Comparison() {
     setWeaknesses([]);
     setTraitCounts(null);
     setSubjectRound(null);
+    setTraitsLoadError(false);
     setLoadStatus("Loading traits…");
     navigate(`/comparison/${player.Slug}`, { replace: true });
     try {
@@ -857,7 +872,7 @@ export default function Comparison() {
       setCalcOpen(false);
     } catch (e) {
       console.error("Comparison traits fetch error:", e);
-      if (seq === loadSeq.current) setLoadStatus("Couldn't load traits.");
+      if (seq === loadSeq.current) { setLoadStatus("Couldn't load traits."); setTraitsLoadError(true); }
     }
   };
 
@@ -869,12 +884,18 @@ export default function Comparison() {
     if (!featureChecked || !featureEnabled) return;
     if (!routeSlug || loadedPlayer?.Slug === routeSlug) return;
     let cancelled = false;
+    setSlugLoadError(false);
     getDocs(query(collection(db, "players"), where("Slug", "==", routeSlug))).then((snap) => {
       if (cancelled) return;
       if (snap.empty) { setSlugNotFound(true); setLoadStatus("Player not found."); return; }
       setSlugNotFound(false);
       loadPlayer({ id: snap.docs[0].id, ...snap.docs[0].data() });
-    }).catch((e) => console.error("Comparison slug lookup error:", e));
+    }).catch((e) => {
+      // Was log-only, which left awaitingSlug true and the page on its
+      // spinner forever.
+      console.error("Comparison slug lookup error:", e);
+      if (!cancelled) { setSlugLoadError(true); setLoadStatus("Couldn't load this player."); }
+    });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [featureChecked, featureEnabled, routeSlug]);
@@ -1047,13 +1068,49 @@ export default function Comparison() {
   // noindex,follow. ──
   const seoName = loadedPlayer ? `${loadedPlayer.First || ""} ${loadedPlayer.Last || ""}`.trim() : "";
   const seoSlug = loadedPlayer?.Slug || routeSlug || "";
-  const seoHeading = seoName ? `${seoName} NFL Player Comparison and Measurements` : "NFL Player Comparisons and Measurements";
-  const seoTitle = `${seoHeading} | We-Draft`;
-  const seoDescription = seoName
-    ? `Compare ${seoName} to similar NFL players using physical measurements, athletic testing, playing traits, and historical draft data.`
-    : "Compare college football prospects to similar NFL players using measurements, athletic testing, playing traits, and historical draft data.";
+  const poolFailed = !!(submitted && poolErrors[submitted.position]);
+  const resultsReady = !!(loadedPlayer && submitted && resultsPool && !poolFailed);
+  const { heading: seoHeading, title: seoTitle, description: seoDescription } = buildComparisonMeta({
+    name: seoName,
+    school: loadedPlayer?.School || "",
+    position: loadedPlayer?.Position || "",
+    compNames: resultsReady ? results.slice(0, 3).map((r) => recordName(r.record)) : [],
+  });
   const seoUrl = seoSlug ? `${SITE_URL}/comparison/${seoSlug}` : `${SITE_URL}/comparison`;
   const seoIndexable = !slugNotFound;
+  // Prerender.io turns this into the HTTP status it returns to the crawler
+  // (middleware.js passes the status through): an unknown slug is a real
+  // 404, and a failed load is a 503 so the error page isn't cached or
+  // indexed in place of the real comparison.
+  const loadFailed = slugLoadError || traitsLoadError || poolFailed;
+  const prerenderStatus = slugNotFound ? "404" : loadFailed ? "503" : null;
+
+  // ── prerenderReady (see public/index.html) — this page never set it, so
+  // Prerender.io had no signal and fell back to its own timeout, which can
+  // snapshot the spinner. Same shape as PlayerProfile.js: reset per slug
+  // with the same 8s safety cap every page uses, then flip true once the
+  // page is genuinely finished — prospect resolved (or not found / failed),
+  // results computed for it, and the og:image / We-Draft Select lookups
+  // settled. The flip waits one animation frame so react-helmet-async has
+  // written this render's <title>/<meta> into the head first. ──
+  const brandingSettled = !loadedPlayer?.School || brandingFor === loadedPlayer.School;
+  const selectSettled = !selectId || selectDoneFor === selectId;
+  // (Not found / failed still waits for `pool`: until it lands the whole
+  // page is the full-screen spinner, not the notice.)
+  const pageSettled = featureChecked && featureEnabled && (routeSlug
+    ? ((slugNotFound || slugLoadError) && pool !== null)
+      || (loadedPlayer?.Slug === routeSlug && brandingSettled && (traitsLoadError || (!!submitted && resultsPool !== null && selectSettled)))
+    : pool !== null);
+  useEffect(() => {
+    window.prerenderReady = false;
+    const safetyTimer = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(safetyTimer);
+  }, [routeSlug]);
+  useEffect(() => {
+    if (!pageSettled) return;
+    const frame = requestAnimationFrame(() => { window.prerenderReady = true; });
+    return () => cancelAnimationFrame(frame);
+  }, [pageSettled]);
   // Social image: the school logo this page's own hero already shows (there
   // is no player photo in the data model — same reasoning as
   // PlayerProfile.js's Helmet), falling back to the site logo like
@@ -1064,6 +1121,7 @@ export default function Comparison() {
       <title>{seoTitle}</title>
       <meta name="description" content={seoDescription} />
       <meta name="robots" content={seoIndexable ? "index, follow" : "noindex, follow"} />
+      {prerenderStatus && <meta name="prerender-status-code" content={prerenderStatus} />}
       <link rel="canonical" href={seoUrl} />
       <meta property="og:type" content="website" />
       <meta property="og:title" content={seoTitle} />
@@ -1634,9 +1692,20 @@ export default function Comparison() {
         {/* A search on a position whose pool is still loading (e.g. the
             calculator switched to a new position) — spinner, not a false
             "no matches". */}
+        {(slugNotFound || slugLoadError || traitsLoadError) && (
+          <div className="wd-comp-card" style={{ ...cardStyle, padding: "28px", textAlign: "center", color: "#777", fontWeight: 700, marginBottom: "20px" }}>
+            {slugNotFound
+              ? "We couldn't find a prospect at this link. Search for a player above, or enter measurements in the calculator below."
+              : `Couldn't load ${seoName ? `${seoName}'s` : "this"} comparison right now. Please try again in a moment.`}
+          </div>
+        )}
         {submitted && !resultsPool && <LoadingSpinner label="Loading" size={32} minHeight="120px" />}
         {submitted && resultsPool && (
-          results.length === 0 ? (
+          poolFailed ? (
+            <div className="wd-comp-card" style={{ ...cardStyle, padding: "40px", textAlign: "center", color: "#999", fontWeight: 700, marginBottom: "20px" }}>
+              Couldn&apos;t load the historical {submitted.position} data right now. Please try again in a moment.
+            </div>
+          ) : results.length === 0 ? (
             <div className="wd-comp-card" style={{ ...cardStyle, padding: "40px", textAlign: "center", color: "#999", fontWeight: 700, marginBottom: "20px" }}>
               No graded {submitted.position}s match yet — try widening the height window or clearing a measurement.
             </div>
@@ -2177,14 +2246,54 @@ export default function Comparison() {
             earns nothing anyway), but parked at the bottom of the main
             column in a quiet style so it doesn't disrupt the page's design.
             Its heading (seoHeading) sits under the hero instead. */}
-        {seoName && (
-          <section style={{ padding: "4px 6px 8px" }}>
-            <p style={{ fontSize: "12px", fontWeight: 600, color: "#98a1b3", lineHeight: 1.6, margin: 0 }}>
-              See how {seoName} compares to past NFL Draft picks using physical measurements, athletic testing, and playing traits.
-              The players above have the most similar profiles based on We-Draft&apos;s comparison model and historical draft data.
-            </p>
-          </section>
-        )}
+        {seoName && resultsReady && results.length > 0 && (() => {
+          // Everything here restates the model's own inputs and output
+          // (findComps in utils/historicalStats.js) — the measurements it
+          // compared, its per-metric gaps, the traits it matched on.
+          const metricLabels = submittedMetrics.map((m) => m.label);
+          const usedTraits = Number(submitted.traitWeight) > 0 && (submitted.strengths.length + submitted.weaknesses.length) > 0;
+          const heightFiltered = submitted.heightWindowSd != null && submitted.values.height != null;
+          const roundNudge = submitted.subjectRound >= 1 && submitted.subjectRound <= 3;
+          const classText = submitted.classMode === "custom"
+            ? (effectiveFromYear && effectiveToYear ? ` from the ${effectiveFromYear}–${effectiveToYear} draft classes` : "")
+            : (recWindow ? ` from the ${recWindow.coreFrom}–${recWindow.to} draft classes, plus select earlier players` : "");
+          const listText = (items) => (items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+          const lines = describeComps(results.slice(0, 3), submitted.values, STAT_METRICS, formatStatValue);
+          const p = { fontSize: "12px", fontWeight: 600, color: "#98a1b3", lineHeight: 1.6, margin: "0 0 8px" };
+          return (
+            <section style={{ padding: "4px 6px 8px" }}>
+              <h2 style={{ fontSize: "12px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 6px" }}>
+                How {seoName}&apos;s comparisons work
+              </h2>
+              <p style={p}>
+                {seoName}{metricLabels.length > 0 ? `'s ${listText(metricLabels).toLowerCase()} ${metricLabels.length === 1 ? "is" : "are"}` : " is"} compared with drafted {submitted.position}s{classText}.
+                {metricLabels.length > 0 && " Each gap is scaled by how much that measurement varies among drafted players at the position, so every measurement counts on the same scale."}
+                {usedTraits && ` The strengths and weaknesses the We-Draft community tagged most often for ${seoName} count as one more factor, weighted by how often each was tagged.`}
+                {heightFiltered && " Only players in a similar height range are considered."}
+                {roundNudge && " Players drafted in the first three rounds get a small edge in close calls."}
+                {" "}The match percentage summarizes how close the overall profile is.
+              </p>
+              <ul style={{ ...p, paddingLeft: "18px" }}>
+                {lines.map((d) => (
+                  <li key={d.record.id || recordName(d.record)}>
+                    {d.record.Slug
+                      ? <Link to={`/player/${d.record.Slug}`} style={{ color: "#7d879a", fontWeight: 800 }}>{recordName(d.record)}</Link>
+                      : <strong style={{ fontWeight: 800 }}>{recordName(d.record)}</strong>}
+                    {d.record.Year ? ` (${d.record.Year}${d.record.Round ? `, Round ${parseInt(d.record.Round, 10)}` : ""}${d.record["NFL Team"] ? `, ${displayTeamName(d.record["NFL Team"])}` : ""})` : ""}
+                    {d.select ? ": We-Draft.com Select, hand-picked by our analysts." : `: ${d.similarity}% match.`}
+                    {d.closest.length > 0 && ` Closest on ${listText(d.closest.map((c) => `${c.label.toLowerCase()} (${c.comp} vs. ${c.prospect})`))}.`}
+                    {d.sharedStrengths.length > 0 && ` Shared strengths: ${listText(d.sharedStrengths)}.`}
+                    {d.sharedWeaknesses.length > 0 && ` Shared weaknesses: ${listText(d.sharedWeaknesses)}.`}
+                  </li>
+                ))}
+              </ul>
+              <p style={{ ...p, margin: 0 }}>
+                For grades, evaluations and film, see{" "}
+                <Link to={`/player/${loadedPlayer.Slug}`} style={{ color: "#7d879a", fontWeight: 800 }}>{seoName}&apos;s scouting report</Link>.
+              </p>
+            </section>
+          );
+        })()}
       </div>
       </div>
       {/* Right column — Playing now (while his team is live), Videos + In

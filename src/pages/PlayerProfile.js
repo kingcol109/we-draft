@@ -61,6 +61,7 @@ import { fetchTeammateVideos } from "../components/PlayerSidebars";
 import { cssRect, viewportCssWidth, withoutPageZoom } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
+import { classSnapshotRanks } from "../utils/classRanks";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -3213,12 +3214,13 @@ useEffect(() => {
             });
           }
           setDraftClassPlayers(rows);
-          const selfCr = (selfRow || hidden).cr ?? null;
-          // Position rank = 1 + position-group players ranked ahead of him
-          // overall (cr is the grade-ranked overall class rank), however
-          // the list itself happens to be ordered.
-          setPositionRank(selfCr != null ? rows.filter((r) => !r.isSelf && r.overallRank != null && r.overallRank < selfCr).length + 1 : null);
-          setClassRank(selfCr);
+          // Position rank = 1 + position-group players ranked ahead overall
+          // (cr is the grade-ranked overall class rank), however the list
+          // itself happens to be ordered. Shared with CommunityBoard.js's
+          // rank chips (utils/classRanks.js) so both show the same numbers.
+          const selfRanks = classSnapshotRanks(snapDoc)[player.id] || {};
+          setPositionRank(selfRanks.positionRank ?? null);
+          setClassRank(selfRanks.classRank ?? null);
           setClassSize((snapDoc.classSize || 0) + (hidden ? 1 : 0));
           setDraftClassLoading(false);
           return;
@@ -3636,22 +3638,22 @@ useEffect(() => {
         title={pctRounded == null ? undefined : `${pctRounded}${suffix(pctRounded)} percentile among drafted ${player.Position}s`}
         className={"wdm-pill" + (active ? " on" : "")}
         style={{
-          display:"inline-flex", flexDirection:"column", alignItems:"center",
+          display:"inline-flex", flexDirection:"row", alignItems:"baseline", gap:"6px",
           background: active ? color1 : "#fff", border:`2px solid ${color1}`, borderRadius:"8px",
-          padding:isMobile?"5px 10px":"7px 16px", minWidth:isMobile?"52px":"68px",
+          padding: isMobile ? "3px 8px" : "4px 12px",
           transition:"background 0.2s ease", cursor:"default",
         }}
       >
         {/* Value and percentile share one grid cell with only visibility
             toggled, so the pill keeps its size on hover (same as
             Comparison.js's chips). */}
-        <span style={{ display:"grid", fontSize:isMobile?"13px":"18px", fontWeight:900, lineHeight:1.1, justifyItems:"center" }}>
+        <span style={{ display:"grid", fontSize: isMobile ? "13px" : "16px", fontWeight:900, lineHeight:1.1, justifyItems:"center" }}>
           <span className="wdm-pill-v" style={{ gridArea:"1 / 1", color:color1, visibility: active ? "hidden" : "visible" }}>{val}</span>
           {pctRounded != null && (
             <span style={{ gridArea:"1 / 1", color:"#fff", visibility: active ? "visible" : "hidden" }} aria-hidden={!active}>{pctRounded}%</span>
           )}
         </span>
-        <span className="wdm-pill-l" style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color: active ? "rgba(255,255,255,0.8)" : "#888", letterSpacing:"0.08em", marginTop:"3px", textTransform:"uppercase", transition:"color 0.2s ease" }}>{label}</span>
+        <span className="wdm-pill-l" style={{ fontSize:isMobile?"9px":"11px", fontWeight:800, color: active ? "rgba(255,255,255,0.8)" : "#888", letterSpacing:"0.08em", textTransform:"uppercase", transition:"color 0.2s ease" }}>{label}</span>
       </div>
     );
   };
@@ -3932,9 +3934,16 @@ useEffect(() => {
     );
   };
 
-  const SectionTitle = ({ children }) => (
+  const SectionTitle = ({ children, right }) => (
     <>
-      <h2 className="font-black uppercase mb-2 wdm-sectitle" style={{ color:siteC1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</h2>
+      {right ? (
+        <div className="flex items-center justify-between mb-2" style={{ gap: "10px" }}>
+          <h2 className="font-black uppercase wdm-sectitle" style={{ color:siteC1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em", margin: 0 }}>{children}</h2>
+          {right}
+        </div>
+      ) : (
+        <h2 className="font-black uppercase mb-2 wdm-sectitle" style={{ color:siteC1, fontSize:isMobile?"17px":"22px", letterSpacing:"0.08em" }}>{children}</h2>
+      )}
       <div className="mb-4 rounded-sm wdm-secbar" style={{ height:"3px", backgroundColor:siteC1 }} />
     </>
   );
@@ -4374,6 +4383,271 @@ useEffect(() => {
   // hero has no flair badge box to fall back on, so this is the only
   // college branding on the page at that point.
   const heroCollegeLogo = draftedBy ? (branding?.cfbLogo || "") : "";
+
+  // Find Comparison — a compact pill beside the Community Scouting Report
+  // heading (null when the feature is off or the player has no slug).
+  const findComparisonLink = comparisonEnabled && player.Slug ? (
+    <Link
+      to={`/comparison/${player.Slug}`}
+      className="transition hover:opacity-90 wdm-noshadow"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0,
+        background: color1, color: "#fff", fontWeight: 900, fontSize: isMobile ? "11px" : "13px",
+        textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
+        padding: isMobile ? "7px 12px" : "8px 18px", borderRadius: "999px", textDecoration: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+      }}
+    >
+      🔎 Find Comparison
+    </Link>
+  ) : null;
+  // The strip along the bottom of the Community Scouting Report card: a
+  // "Measurements" label + one-line stat pills, then the last-updated
+  // stamp and a small Show Bio on the right (wraps on narrow phones), with
+  // the bio opening underneath. Rendered whenever any of those exist, so a
+  // player with no measurements on file still gets Show Bio / the stamp.
+  const hasMeasurements = physicalMeasurements.length > 0;
+  const measurementsBlock = (hasMeasurements || player.Bio || pageLastUpdatedMs > 0) && (
+    <div className="bg-white wdm-stats" style={{ padding: isMobile ? "6px 10px" : "6px 16px" }}>
+      <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap: isMobile ? "6px 8px" : "8px 14px" }}>
+        {hasMeasurements && (
+          <>
+            <h3 className="wdm-h font-black uppercase" style={{ color:siteC1, fontSize: isMobile ? "11px" : "13px", letterSpacing:"0.14em", margin:0, flexShrink:0 }}>Measurements</h3>
+            <div style={{ display:"flex", flexWrap:"wrap", gap: isMobile ? "5px" : "7px" }}>
+              {physicalMeasurements.map(renderStatPill)}
+              {hasAthletic && athleticMeasurements.map(renderStatPill)}
+            </div>
+          </>
+        )}
+        {(player.Bio || pageLastUpdatedMs > 0) && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+            {pageLastUpdatedMs > 0 && (
+              <span className="wdm-updated" style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic", whiteSpace: "nowrap" }}>
+                Last updated {new Date(pageLastUpdatedMs).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+              </span>
+            )}
+            {player.Bio && (
+              <button
+                type="button"
+                onClick={() => setBioOpen((o) => !o)}
+                aria-expanded={bioOpen}
+                className="transition hover:opacity-90"
+                style={{
+                  background: "#fff", color: color1, border: `1.5px solid ${color1}`, fontWeight: 800, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer",
+                  padding: "4px 12px", borderRadius: "999px",
+                }}
+              >
+                {bioOpen ? "Hide Bio" : "Show Bio"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {player.Bio && bioOpen && (
+        <div style={{ maxWidth: "760px", margin: "10px auto 0", borderLeft: `4px solid ${siteC1}`, background: "#fafafa", borderRadius: "0 8px 8px 0", padding: isMobile ? "14px 16px" : "18px 22px" }}>
+          {/* Same bullet/paragraph renderer as evaluations, so a multi-
+              paragraph or bulleted bio renders as such. */}
+          <div style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 600, color: "#1a1a1a", lineHeight: 1.7, textAlign: "left" }}>
+            {renderEvaluationText(player.Bio, "bio")}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+  const communityScoutingSection = (
+          <div>
+            <SectionTitle right={findComparisonLink}>Community Scouting Report</SectionTitle>
+            {isMobile ? (
+              <div className="bg-white rounded-lg overflow-hidden wdm-card" style={{ border:`2px solid ${siteC1}` }}>
+                {/* Grade and Class Rank are now matched half-width columns —
+                    same footprint as the Strengths/Weaknesses row below —
+                    instead of Grade eating most of the row next to a cramped
+                    fixed-width NFL Fits column. NFL Fits drops out entirely
+                    when the player has none (no reason to reserve space for
+                    an empty list); when it does exist it gets its own full-
+                    width row below Strengths/Weaknesses instead of squeezing
+                    into row one. */}
+                <div className="flex" style={{ borderBottom:"1px solid #e5e7eb" }}>
+                  <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
+                    <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Community Grade</h3>
+                    {(() => {
+                      // No scored evaluations yet -> represent that as a Watchlist
+                      // grade (already a real, selectable grade value) rather than
+                      // a blank "no grade" state, since that's what it means.
+                      const hasGrade = community.avgGrade != null;
+                      const label = hasGrade ? gradeLabels[Math.round(community.avgGrade)] : "Watchlist";
+                      const { short, bg, border } = gradeDisplay(label);
+                      return (
+                        <div>
+                          {/* Big number left, written label stacked to its
+                              right (wraps across lines as needed) instead of
+                              the number sitting on top of the label — same
+                              box footprint (padding unchanged), just the
+                              internal arrangement and text sizing. */}
+                          <div className="rounded wdm-grade" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", display:"flex", alignItems:"center", gap:"8px" }}>
+                            <div style={{ fontSize:"32px", fontWeight:900, color:"#fff", lineHeight:1, flexShrink:0 }}>{short}</div>
+                            <div style={{ flex:1, fontSize:"9px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", lineHeight:1.3, textAlign:"left" }}>{label}</div>
+                          </div>
+                          {hasGrade && (
+                            <div className="mt-2">
+                              <div style={{ height:"5px", background:"#eee", borderRadius:"3px", position:"relative", overflow:"hidden" }}>
+                                <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"3px" }} />
+                              </div>
+                              <div className="flex justify-between mt-1" style={{ fontSize:"8px", color:"#bbb", fontWeight:700 }}><span>1st</span><span>UDFA</span></div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex-1 px-3 py-3">
+                    <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
+                    {(selfIndex >= 0 || classRank) ? (
+                      <div className="text-center wdm-rank" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
+                        {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                        {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
+                      </div>
+                    ) : <p className="italic text-gray-400 text-xs text-center">Not ranked</p>}
+                  </div>
+                </div>
+                <div className="flex" style={{ borderBottom: community.topFits.length > 0 ? "1px solid #e5e7eb" : "none" }}>
+                  <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
+                    <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
+                    {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
+                      <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
+                        <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
+                        {evalCount >= 5 && (
+                          <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
+                            <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
+                          </div>
+                        )}
+                      </div>
+                    )) : <p className="italic text-gray-400 text-xs">None yet</p>}
+                  </div>
+                  <div className="flex-1 px-3 py-3">
+                    <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Weaknesses</h3>
+                    {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
+                      <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
+                        <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
+                        {evalCount >= 5 && (
+                          <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
+                            <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
+                          </div>
+                        )}
+                      </div>
+                    )) : <p className="italic text-gray-400 text-xs">None yet</p>}
+                  </div>
+                </div>
+                {community.topFits.length > 0 && (
+                  <div className="px-3 py-3">
+                    <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
+                    {fitLogos.length > 0 ? (
+                      <div className="flex flex-wrap justify-center gap-3">
+                        {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        {community.topFits.map((t,i) => <p key={i} className="text-xs font-bold text-gray-600 text-center">{t}</p>)}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {measurementsBlock && <div style={{ borderTop: "1px solid #e5e7eb" }}>{measurementsBlock}</div>}
+              </div>
+            ) : (
+              <div style={{ containerType:"inline-size" }}>
+              {/* When the center column is narrow (laptop widths), NFL Fits
+                  drops to its own full-width row instead of being clipped. */}
+              <style>{`
+                @container (max-width: 700px) {
+                  .wd-scout-row { flex-wrap: wrap; }
+                  .wd-scout-weak { border-right: 0 !important; }
+                  .wd-scout-fits { flex: 1 1 100% !important; border-top: 1px solid #e5e7eb; }
+                  .wd-scout-fitlogos { flex-direction: row !important; justify-content: center !important; flex-wrap: wrap; }
+                }
+              `}</style>
+              <div className="flex bg-white rounded-lg overflow-hidden wd-scout-row wdm-card" style={{ border:`2px solid ${siteC1}`, flexWrap: "wrap" }}>
+                <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
+                  <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Community Grade</h3>
+                  {(() => {
+                    // No scored evaluations yet -> represent that as a Watchlist
+                    // grade (already a real, selectable grade value) rather than
+                    // a blank "no grade" state, since that's what it means.
+                    const hasGrade = community.avgGrade != null;
+                    const label = hasGrade ? gradeLabels[Math.round(community.avgGrade)] : "Watchlist";
+                    const { short, bg, border } = gradeDisplay(label);
+                    return (
+                      <>
+                        <div className="rounded text-center wdm-grade" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"10px 14px", width:"110px" }}>
+                          <div style={{ fontSize:"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
+                          <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{label}</div>
+                        </div>
+                        {hasGrade && (
+                          <div className="mt-4 w-full">
+                            <div className="flex justify-between mb-1" style={{ fontSize:"9px", fontWeight:800, color:"#bbb", letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                              <span>1st Rd</span><span>UDFA</span>
+                            </div>
+                            <div style={{ height:"8px", background:"#eee", borderRadius:"4px", position:"relative", overflow:"hidden" }}>
+                              <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"4px" }} />
+                            </div>
+                          </div>
+                        )}
+                        {(selfIndex >= 0 || classRank) && (
+                          <div className="mt-4 w-full">
+                            <div className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.1em" }}>Class Rank</div>
+                            <div className="text-center wdm-rank" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
+                              {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                              {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
+                  <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Top Strengths</h3>
+                  {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
+                    <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
+                      <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
+                      {evalCount >= 5 && (
+                        <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
+                          <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
+                        </div>
+                      )}
+                    </div>
+                  )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
+                </div>
+                <div className="flex-1 px-5 py-5 wd-scout-weak" style={{ borderRight:"1px solid #e5e7eb" }}>
+                  <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Top Weaknesses</h3>
+                  {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
+                    <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
+                      <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
+                      {evalCount >= 5 && (
+                        <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
+                          <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
+                        </div>
+                      )}
+                    </div>
+                  )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
+                </div>
+                <div className="flex flex-col px-5 py-5 wd-scout-fits" style={{ flex:"0 0 150px" }}>
+                  <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
+                  {fitLogos.length > 0 ? (
+                    <div className="flex flex-col items-center justify-start flex-1 gap-3 wd-scout-fitlogos">
+                      {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
+                    </div>
+                  ) : community.topFits.length > 0 ? (
+                    <div className="flex flex-col gap-1">{community.topFits.map((t,i) => <p key={i} className="text-sm font-bold text-gray-600">{t}</p>)}</div>
+                  ) : <p className="italic text-gray-400 text-sm">No fits yet</p>}
+                </div>
+                {measurementsBlock && <div style={{ flex: "1 1 100%", borderTop: "1px solid #e5e7eb" }}>{measurementsBlock}</div>}
+              </div>
+              </div>
+            )}
+          </div>
+  );
 
   return (
     <>
@@ -5240,299 +5514,14 @@ useEffect(() => {
           </div>
           <div className="wdm-stripe" style={{ height: "4px", background: color2 }} />
 
-          {/* Physical/Athletic Testing now leads Bio — the numbers read as
-              quick-reference stats a visitor scans first, with the prose
-              bio underneath for whoever wants the fuller writeup. */}
-          {physicalMeasurements.length > 0 && (
-            <div className="bg-white wdm-stats" style={{ padding:isMobile?"6px 10px 12px":"8px 24px 16px", borderBottom: player.Bio ? "1px solid #eee" : undefined }}>
-              {isMobile ? (
-                <div style={{ display:"flex", flexWrap:"wrap", gap:"5px", justifyContent:"center" }}>
-                  {physicalMeasurements.map(renderStatPill)}
-                  {hasAthletic && athleticMeasurements.map(renderStatPill)}
-                </div>
-              ) : (
-                <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"center", gap:0 }}>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                    <div style={{ display:"flex", gap:"7px", flexWrap:"wrap", justifyContent:"center" }}>
-                      {physicalMeasurements.map(renderStatPill)}
-                    </div>
-                  </div>
-                  {hasAthletic && <div style={{ width:"1px", background:"#e0e0e0", alignSelf:"stretch", margin:"0", flexShrink:0 }} />}
-                  {hasAthletic && (
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                      <div style={{ display:"flex", gap:"7px", flexWrap:"wrap", justifyContent:"center" }}>
-                        {athleticMeasurements.map(renderStatPill)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-              {comparisonEnabled && player.Slug && (
-                <div style={{ display: "flex", justifyContent: "center", marginTop: isMobile ? "14px" : "16px" }}>
-                  <Link
-                    to={`/comparison/${player.Slug}`}
-                    className="transition hover:opacity-90 wdm-noshadow"
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: "8px",
-                      background: color1, color: "#fff", fontWeight: 900, fontSize: isMobile ? "14px" : "16px",
-                      textTransform: "uppercase", letterSpacing: "0.06em",
-                      padding: isMobile ? "11px 22px" : "13px 30px", borderRadius: "999px", textDecoration: "none",
-                      boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-                    }}
-                  >
-                    🔎 Find Comparison
-                  </Link>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Community Scouting Report leads the card, right under the hero
+              banner — Find Comparison beside its heading, and the
+              measurements, last-updated stamp and Show Bio along its bottom
+              edge (measurementsBlock below the card's columns). */}
+          <div className="bg-white" style={{ padding: isMobile ? "10px 10px 8px" : "16px 24px 10px" }}>{communityScoutingSection}</div>
 
-          {player.Bio && (
-            <div className="bg-white" style={{ padding: bioOpen ? (isMobile ? "14px 16px" : "20px 32px") : (isMobile ? "8px 16px" : "10px 32px") }}>
-              <div style={{ maxWidth: "760px", marginLeft: "auto", marginRight: "auto" }}>
-                {/* No "Bio" heading and tight padding while collapsed — the
-                    whole point of hiding the bio is to get the Community
-                    Scouting Report on screen without scrolling. */}
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: bioOpen ? "12px" : 0 }}>
-                <button
-                  type="button"
-                  onClick={() => setBioOpen(o => !o)}
-                  aria-expanded={bioOpen}
-                  className="wdm-btn-ghost"
-                  style={{ background: siteC1, color: "#fff", border: "none", borderRadius: "6px", padding: isMobile ? "8px 14px" : "9px 18px", fontSize: isMobile ? "13px" : "14px", fontWeight: 700, cursor: "pointer" }}
-                >
-                  {bioOpen ? "Hide Bio" : "Show Bio"}
-                </button>
-                </div>
-                {/* Same colored pull-quote treatment "Scout's Take" uses in
-                    evaluations — a team-color accent border + tinted card
-                    gives the bio some visual weight instead of just
-                    floating as plain paragraph text. */}
-                {bioOpen && (
-                <div style={{ borderLeft: `4px solid ${siteC1}`, background: "#fafafa", borderRadius: "0 8px 8px 0", padding: isMobile ? "14px 16px" : "18px 22px" }}>
-                  {/* Same bullet/paragraph renderer as evaluations — a bio
-                      written as several newline-separated paragraphs (or with
-                      a few • bullet lines for career highlights) now actually
-                      renders as such, instead of collapsing into one run-on
-                      paragraph since a plain <p> ignores newlines in its
-                      string content. */}
-                  <div style={{ fontSize: isMobile ? "14px" : "16px", fontWeight: 600, color: "#1a1a1a", lineHeight: 1.7, textAlign: "left" }}>
-                    {renderEvaluationText(player.Bio, "bio")}
-                  </div>
-                </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Last-updated stamp — moved inside the hero card itself (a thin
-              footer strip, same border/background language as the rest of
-              the card) instead of floating as its own element in the gap
-              below the card, so it reads as attached to the player info it
-              describes rather than an orphaned label. See pageLastUpdatedMs
-              above: the most recent of the player record being edited, any
-              evaluation on this player changing, or a news/article
-              mentioning them being published. */}
-          {pageLastUpdatedMs > 0 && (
-            <div className="bg-white" style={{ padding: isMobile ? "6px 16px" : "6px 32px", textAlign: "right", borderTop: "1px solid #eee" }}>
-              <span className="wdm-updated" style={{ fontSize: "11px", fontWeight: 700, color: "#aaa", fontStyle: "italic" }}>
-                Last updated {new Date(pageLastUpdatedMs).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-              </span>
-            </div>
-          )}
 
           <div className="wdm-stripe" style={{ height:"5px", backgroundColor:siteC2 }} />
-        </div>
-
-        {/* ===== Community Scouting Report ===== */}
-        <div className="mb-8">
-          <SectionTitle>Community Scouting Report</SectionTitle>
-          {isMobile ? (
-            <div className="bg-white rounded-lg overflow-hidden wdm-card" style={{ border:`2px solid ${siteC1}` }}>
-              {/* Grade and Class Rank are now matched half-width columns —
-                  same footprint as the Strengths/Weaknesses row below —
-                  instead of Grade eating most of the row next to a cramped
-                  fixed-width NFL Fits column. NFL Fits drops out entirely
-                  when the player has none (no reason to reserve space for
-                  an empty list); when it does exist it gets its own full-
-                  width row below Strengths/Weaknesses instead of squeezing
-                  into row one. */}
-              <div className="flex" style={{ borderBottom:"1px solid #e5e7eb" }}>
-                <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
-                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Community Grade</h3>
-                  {(() => {
-                    // No scored evaluations yet -> represent that as a Watchlist
-                    // grade (already a real, selectable grade value) rather than
-                    // a blank "no grade" state, since that's what it means.
-                    const hasGrade = community.avgGrade != null;
-                    const label = hasGrade ? gradeLabels[Math.round(community.avgGrade)] : "Watchlist";
-                    const { short, bg, border } = gradeDisplay(label);
-                    return (
-                      <div>
-                        {/* Big number left, written label stacked to its
-                            right (wraps across lines as needed) instead of
-                            the number sitting on top of the label — same
-                            box footprint (padding unchanged), just the
-                            internal arrangement and text sizing. */}
-                        <div className="rounded wdm-grade" style={{ backgroundColor:bg, border:`2px solid ${border}`, padding:"6px 10px", display:"flex", alignItems:"center", gap:"8px" }}>
-                          <div style={{ fontSize:"32px", fontWeight:900, color:"#fff", lineHeight:1, flexShrink:0 }}>{short}</div>
-                          <div style={{ flex:1, fontSize:"9px", fontWeight:800, color:"rgba(255,255,255,0.85)", textTransform:"uppercase", lineHeight:1.3, textAlign:"left" }}>{label}</div>
-                        </div>
-                        {hasGrade && (
-                          <div className="mt-2">
-                            <div style={{ height:"5px", background:"#eee", borderRadius:"3px", position:"relative", overflow:"hidden" }}>
-                              <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"3px" }} />
-                            </div>
-                            <div className="flex justify-between mt-1" style={{ fontSize:"8px", color:"#bbb", fontWeight:700 }}><span>1st</span><span>UDFA</span></div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-                <div className="flex-1 px-3 py-3">
-                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
-                  {(selfIndex >= 0 || classRank) ? (
-                    <div className="text-center wdm-rank" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
-                      {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
-                      {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
-                    </div>
-                  ) : <p className="italic text-gray-400 text-xs text-center">Not ranked</p>}
-                </div>
-              </div>
-              <div className="flex" style={{ borderBottom: community.topFits.length > 0 ? "1px solid #e5e7eb" : "none" }}>
-                <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
-                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
-                  {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
-                    <div key={i} className="py-1" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
-                      <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{s.term}</div>
-                      {evalCount >= 5 && (
-                        <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
-                          <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
-                        </div>
-                      )}
-                    </div>
-                  )) : <p className="italic text-gray-400 text-xs">None yet</p>}
-                </div>
-                <div className="flex-1 px-3 py-3">
-                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Weaknesses</h3>
-                  {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
-                    <div key={i} className="py-1" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
-                      <div className="wdm-item sm font-black uppercase" style={{ fontSize:"10px", color:"#222", letterSpacing:"0.04em" }}>{w.term}</div>
-                      {evalCount >= 5 && (
-                        <div style={{ height:"3px", background:"#eee", borderRadius:"2px", marginTop:"3px", overflow:"hidden" }}>
-                          <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
-                        </div>
-                      )}
-                    </div>
-                  )) : <p className="italic text-gray-400 text-xs">None yet</p>}
-                </div>
-              </div>
-              {community.topFits.length > 0 && (
-                <div className="px-3 py-3">
-                  <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
-                  {fitLogos.length > 0 ? (
-                    <div className="flex flex-wrap justify-center gap-3">
-                      {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-1">
-                      {community.topFits.map((t,i) => <p key={i} className="text-xs font-bold text-gray-600 text-center">{t}</p>)}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ containerType:"inline-size" }}>
-            {/* When the center column is narrow (laptop widths), NFL Fits
-                drops to its own full-width row instead of being clipped. */}
-            <style>{`
-              @container (max-width: 700px) {
-                .wd-scout-row { flex-wrap: wrap; }
-                .wd-scout-weak { border-right: 0 !important; }
-                .wd-scout-fits { flex: 1 1 100% !important; border-top: 1px solid #e5e7eb; }
-                .wd-scout-fitlogos { flex-direction: row !important; justify-content: center !important; flex-wrap: wrap; }
-              }
-            `}</style>
-            <div className="flex bg-white rounded-lg overflow-hidden wd-scout-row wdm-card" style={{ border:`2px solid ${siteC1}` }}>
-              <div className="flex flex-col items-center text-center px-6 py-5" style={{ flex:"0 0 210px", borderRight:"1px solid #e5e7eb" }}>
-                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-4 w-full text-center" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Community Grade</h3>
-                {(() => {
-                  // No scored evaluations yet -> represent that as a Watchlist
-                  // grade (already a real, selectable grade value) rather than
-                  // a blank "no grade" state, since that's what it means.
-                  const hasGrade = community.avgGrade != null;
-                  const label = hasGrade ? gradeLabels[Math.round(community.avgGrade)] : "Watchlist";
-                  const { short, bg, border } = gradeDisplay(label);
-                  return (
-                    <>
-                      <div className="rounded text-center wdm-grade" style={{ backgroundColor:bg, border:`3px solid ${border}`, padding:"10px 14px", width:"110px" }}>
-                        <div style={{ fontSize:"36px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em" }}>{short}</div>
-                        <div style={{ fontSize:"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", marginTop:"3px" }}>{label}</div>
-                      </div>
-                      {hasGrade && (
-                        <div className="mt-4 w-full">
-                          <div className="flex justify-between mb-1" style={{ fontSize:"9px", fontWeight:800, color:"#bbb", letterSpacing:"0.06em", textTransform:"uppercase" }}>
-                            <span>1st Rd</span><span>UDFA</span>
-                          </div>
-                          <div style={{ height:"8px", background:"#eee", borderRadius:"4px", position:"relative", overflow:"hidden" }}>
-                            <div style={{ position:"absolute", left:`${((parseFloat(community.avgGrade)-1)/9)*92}%`, width:"8%", height:"100%", backgroundColor:bg, borderRadius:"4px" }} />
-                          </div>
-                        </div>
-                      )}
-                      {(selfIndex >= 0 || classRank) && (
-                        <div className="mt-4 w-full">
-                          <div className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.1em" }}>Class Rank</div>
-                          <div className="text-center wdm-rank" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
-                            {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
-                            {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-              <div className="flex-1 px-5 py-5" style={{ borderRight:"1px solid #e5e7eb" }}>
-                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Top Strengths</h3>
-                {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
-                  <div key={i} className="py-2" style={{ borderBottom:i<community.topStrengths.length-1?"1px solid #f0f0f0":"none" }}>
-                    <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{s.term}</div>
-                    {evalCount >= 5 && (
-                      <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
-                        <div style={{ width:`${barPct(s.pct)}%`, height:"100%", backgroundColor:"#16a34a", borderRadius:"2px" }} />
-                      </div>
-                    )}
-                  </div>
-                )) : <p className="italic text-gray-400 text-sm">No strengths yet</p>}
-              </div>
-              <div className="flex-1 px-5 py-5 wd-scout-weak" style={{ borderRight:"1px solid #e5e7eb" }}>
-                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>Top Weaknesses</h3>
-                {community.topWeaknesses.length > 0 ? community.topWeaknesses.map((w,i) => (
-                  <div key={i} className="py-2" style={{ borderBottom:i<community.topWeaknesses.length-1?"1px solid #f0f0f0":"none" }}>
-                    <div className="wdm-item font-black uppercase text-sm" style={{ color:"#222", letterSpacing:"0.06em" }}>{w.term}</div>
-                    {evalCount >= 5 && (
-                      <div style={{ height:"4px", background:"#eee", borderRadius:"2px", marginTop:"4px", overflow:"hidden" }}>
-                        <div style={{ width:`${barPct(w.pct)}%`, height:"100%", backgroundColor:"#dc2626", borderRadius:"2px" }} />
-                      </div>
-                    )}
-                  </div>
-                )) : <p className="italic text-gray-400 text-sm">No weaknesses yet</p>}
-              </div>
-              <div className="flex flex-col px-5 py-5 wd-scout-fits" style={{ flex:"0 0 150px" }}>
-                <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
-                {fitLogos.length > 0 ? (
-                  <div className="flex flex-col items-center justify-start flex-1 gap-3 wd-scout-fitlogos">
-                    {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
-                  </div>
-                ) : community.topFits.length > 0 ? (
-                  <div className="flex flex-col gap-1">{community.topFits.map((t,i) => <p key={i} className="text-sm font-bold text-gray-600">{t}</p>)}</div>
-                ) : <p className="italic text-gray-400 text-sm">No fits yet</p>}
-              </div>
-            </div>
-            </div>
-          )}
         </div>
 
         {/* ===== Hidden Export Card ===== */}

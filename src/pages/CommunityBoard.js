@@ -6,9 +6,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
-import Logo2 from "../assets/Logo2.png";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { canonicalEvalData } from "../utils/evaluationCopies";
+import { getSiteSnapshot } from "../utils/siteSnapshots";
+import { classSnapshotRanks, compareRanks } from "../utils/classRanks";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -41,6 +42,77 @@ const commGradeOrder = [
   "Early First Round", "Middle First Round", "Late First Round",
   "Second Round", "Third Round", "Fourth Round",
   "Fifth Round", "Sixth Round", "Seventh Round", "UDFA",
+];
+
+// ── Modern look — the player page's design language (PlayerProfile.js's
+// MODERN_STYLE): light page, 1px hairlines instead of 2–3px blue/gold
+// borders, one radius scale (10 / 14 / pill), compact left-anchored blue
+// headers, outline-by-default pills (filled only when active), no gold
+// stripes, no sub-10px text. Scoped under .wdb and layered over the
+// existing inline styles (hence !important); ?modern=0 shows the old look. ──
+const BOARD_MODERN_STYLE = `
+  .wdb {
+    --ink: #0f1b2d; --ink-2: #33415a; --ink-3: #5b6b84; --ink-4: #8a97ab;
+    --line: #e3e8ef; --line-2: #eef1f5; --soft: #f7f9fc;
+  }
+  body:has(.wdb) { background: #f4f6f9; }
+  .wdb .wdb-stripe { display: none !important; }
+  .wdb .wdb-hero { border: 1px solid var(--line) !important; border-radius: 16px !important; }
+
+  /* pills & buttons: outlined by default, filled blue only when active */
+  .wdb .wdb-pill {
+    border: 1px solid var(--line) !important; border-radius: 999px !important;
+    background: #fff !important; color: ${BLUE} !important; font-weight: 800 !important;
+    transition: background 0.15s, border-color 0.15s, color 0.15s !important;
+  }
+  .wdb .wdb-pill:hover { border-color: ${BLUE} !important; }
+  .wdb .wdb-pill.on { background: ${BLUE} !important; border-color: ${BLUE} !important; color: #fff !important; }
+  /* class (year) + position pills: gold when selected */
+  .wdb .wdb-pill.wdb-sel.on { background: ${GOLD} !important; border-color: ${GOLD} !important; color: #fff !important; }
+  .wdb .wdb-pill.wdb-sel:hover { border-color: ${GOLD} !important; }
+  .wdb .wdb-sidehead-link:hover { text-decoration-color: #fff !important; }
+  .wdb .wdb-menu { border: 1px solid var(--line) !important; border-radius: 12px !important; box-shadow: 0 10px 30px rgba(15, 27, 45, 0.12) !important; }
+  .wdb .wdb-menu > div:first-child, .wdb .wdb-menu > div:first-child span { color: #fff !important; font-size: 12px !important; letter-spacing: 0.14em !important; }
+  .wdb .wdb-input { border: 1px solid #d5dce6 !important; border-radius: 10px !important; font-weight: 600 !important; color: var(--ink) !important; background: #fff; }
+  .wdb .wdb-input:focus { outline: none; border-color: ${BLUE} !important; box-shadow: 0 0 0 3px rgba(0, 85, 165, 0.15); }
+
+  /* rankings card */
+  .wdb .wdb-card { border: 1px solid var(--line) !important; border-radius: 14px !important; background: #fff; }
+  .wdb .wdb-cardhead { padding: 10px 16px !important; }
+  .wdb .wdb-cardhead > div:first-child { color: #fff !important; font-size: 14px !important; letter-spacing: 0.08em !important; }
+  .wdb .wdb-colhead { background: var(--soft) !important; border-bottom: 1px solid var(--line) !important; padding: 10px 20px !important; }
+  .wdb .wdb-colhead button { color: var(--ink-3) !important; opacity: 1 !important; font-size: 12px !important; letter-spacing: 0.12em !important; }
+  .wdb .wdb-colhead button[aria-pressed="true"] { color: ${GOLD} !important; }
+  .wdb .wdb-row { border-bottom: 1px solid var(--line-2) !important; }
+  .wdb .wdb-grade { border: 0 !important; border-radius: 10px !important; }
+  .wdb .wdb-plus { border: 1px solid var(--line) !important; border-radius: 10px !important; }
+  .wdb .wdb-plus:hover, .wdb .wdb-plus:focus-visible { border-color: ${BLUE} !important; }
+
+  /* sidebars: site-blue header, compact and left-anchored */
+  .wdb .wdb-side { border: 1px solid var(--line) !important; border-radius: 14px !important; background: #fff; }
+  .wdb .wdb-sidehead { padding: 12px 16px !important; text-align: left !important; }
+  .wdb .wdb-sidehead > div { font-size: 13px !important; letter-spacing: 0.14em !important; text-align: left !important; }
+  .wdb .wdb-date { border: 1px solid var(--line) !important; border-radius: 8px !important; }
+  .wdb .wdb-date > div:first-child { background: var(--soft) !important; padding: 2px 0 !important; }
+  .wdb .wdb-date > div:first-child span { color: var(--ink-4) !important; font-size: 10px !important; }
+  .wdb .wdb-date > div:last-child span { color: var(--ink) !important; font-variant-numeric: tabular-nums; }
+  .wdb .wdb-ntitle { text-transform: none !important; letter-spacing: 0 !important; font-weight: 700 !important; font-size: 14px !important; line-height: 1.35 !important; color: var(--ink) !important; }
+  .wdb .wdb-vtitle { text-transform: none !important; letter-spacing: 0 !important; font-weight: 800 !important; font-size: 14px !important; }
+
+  /* no text under 10px (grade badges keep their own fixed scale) */
+  .wdb [style*="font-size: 6px"]:not(.wdb-grade *), .wdb [style*="font-size: 7px"]:not(.wdb-grade *) { font-size: 9px !important; }
+  .wdb [style*="font-size: 8px"]:not(.wdb-grade *) { font-size: 10px !important; }
+  .wdb [style*="font-size: 9px"]:not(.wdb-grade *) { font-size: 11px !important; }
+`;
+
+// Mobile sort menu — the same keys the desktop column headers sort by.
+const MOBILE_SORTS = [
+  { value: "ClassRank:asc", label: "Class Rank (CRK)" },
+  { value: "PositionRank:asc", label: "Position Rank (PRK)" },
+  { value: "CommunityGrade:asc", label: "Comm Grade" },
+  { value: "MyGrade:asc", label: "My Grade" },
+  { value: "Player:asc", label: "Name" },
+  { value: "Pick:asc", label: "Draft Pick", only: (is2026) => is2026 },
 ];
 
 const gradeScale = {
@@ -127,7 +199,7 @@ const GradeBadge = ({ grade, small = false }) => {
   const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
   const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
   return (
-    <div style={{
+    <div className="wdb-grade" style={{
       display: "inline-flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", backgroundColor: gd.bg, border: "2px solid " + gd.border,
       borderRadius: "5px", width: w, height: h, flexShrink: 0, gap: "1px",
@@ -139,7 +211,7 @@ const GradeBadge = ({ grade, small = false }) => {
   );
 };
 
-const PlusBadge = ({ onClick, loading, small = false, user, login }) => {
+const PlusBadge = ({ onClick, loading, small = false, user, login, label }) => {
   const w = small ? "48px" : "64px";
   const h = small ? "40px" : "52px";
   const [hovered, setHovered] = useState(false);
@@ -153,7 +225,14 @@ const PlusBadge = ({ onClick, loading, small = false, user, login }) => {
   return (
     <div style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
       <div
+        className="wdb-plus"
+        role="button"
+        tabIndex={0}
+        aria-label={label || "Add to board"}
         onClick={handleClick}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick(); } }}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -199,6 +278,50 @@ const PlusBadge = ({ onClick, loading, small = false, user, login }) => {
   );
 };
 
+// Class rank (blue), then position rank (gold), e.g. "#12" · "#3" — the same numbers
+// the player's profile shows (utils/classRanks.js). Both chips are a fixed
+// size and both slots are always reserved (an unavailable rank leaves its
+// slot empty, never a 0), so every name starts in the same column and the
+// chips never run into it. RANK_CHIP holds the sizes so the desktop column
+// headers can line up with them.
+const RANK_CHIP = {
+  desktop: { classW: 46, posW: 46, gap: 12, h: 24, font: 13 },
+  mobile: { classW: 36, posW: 36, gap: 6, h: 20, font: 11 },
+};
+const rankSlotWidth = (s) => s.classW + s.gap + s.posW;
+// Desktop position-label column, between the rank chips and the name.
+const POS_COL_W = 60;
+// Desktop school-logo column, between the position label and the name.
+const LOGO_COL_W = 40;
+const RankChips = ({ classRank, positionRank, position, small = false }) => {
+  const s = small ? RANK_CHIP.mobile : RANK_CHIP.desktop;
+  const chip = {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    height: s.h + "px", padding: 0, boxSizing: "border-box", flexShrink: 0, overflow: "hidden",
+    borderRadius: "5px", fontSize: s.font + "px", fontWeight: 900, lineHeight: 1,
+    whiteSpace: "nowrap", letterSpacing: "0.02em", fontFamily: "Arial, sans-serif",
+  };
+  return (
+    <span style={{ display: "inline-flex", gap: s.gap + "px", flexShrink: 0, width: rankSlotWidth(s) + "px" }}>
+      {classRank ? (
+        <span title={"Class rank " + classRank} aria-label={"Class rank " + classRank} style={{ ...chip, width: s.classW + "px", background: BLUE, color: "#fff" }}>
+          #{classRank}
+        </span>
+      ) : <span aria-hidden="true" style={{ width: s.classW + "px", flexShrink: 0 }} />}
+      {positionRank && position ? (
+        <span title={position + " rank " + positionRank} aria-label={position + " rank " + positionRank} style={{ ...chip, width: s.posW + "px", background: "#fff7e8", color: "#7a4a00", border: "1.5px solid " + GOLD }}>
+          #{positionRank}
+        </span>
+      ) : <span aria-hidden="true" style={{ width: s.posW + "px", flexShrink: 0 }} />}
+    </span>
+  );
+};
+
+// No community grade yet shows the Watchlist badge (same convention as
+// PlayerProfile.js). Display only — sorting and the Comm Grade filter still
+// treat the player as ungraded.
+const displayCommGrade = (g) => (gradeScale[g] ? g : "Watchlist");
+
 const formatHeight = (inches) => {
   if (!inches) return "-";
   const ft = Math.floor(inches / 12);
@@ -231,6 +354,7 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
         onClick={() => setOpen(!open)}
+        className={"wdb-pill" + (selected.length > 0 ? " on" : "")}
         style={{
           padding: "8px 16px", fontWeight: 900, fontSize: "13px",
           textTransform: "uppercase", letterSpacing: "0.05em",
@@ -241,7 +365,7 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
         {title}{selected.length > 0 ? " (" + selected.length + ")" : ""} ▾
       </button>
       {open && (
-        <div style={{
+        <div className="wdb-menu" style={{
           position: "absolute", top: "calc(100% + 6px)", left: 0,
           zIndex: 50, width: "220px", maxHeight: "300px", overflowY: "auto",
           background: "#fff", border: "2px solid " + GOLD, borderRadius: "8px",
@@ -258,7 +382,7 @@ function DropdownChecklist({ title, options, selected, setSelected, ordered = fa
               <button onClick={() => setSelected([])} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontWeight: 800, fontSize: "12px", textDecoration: "underline" }}>Clear</button>
             </div>
           </div>
-          <div style={{ height: "3px", background: GOLD, flexShrink: 0 }} />
+          <div className="wdb-stripe" style={{ height: "3px", background: GOLD, flexShrink: 0 }} />
           <div style={{ padding: "10px 12px" }}>
             {sorted.map((o) => (
               <label key={o} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", cursor: "pointer", fontSize: "14px", fontWeight: 700 }}>
@@ -302,8 +426,8 @@ function PositionFilterBar({ options, selected, setSelected, isMobile, eligibleY
       overflowX: isMobile ? "auto" : "visible",
       WebkitOverflowScrolling: "touch",
       gap: isMobile ? "5px" : "8px",
-      justifyContent: "center",
-      marginBottom: isMobile ? "8px" : "18px",
+      justifyContent: isMobile ? "flex-start" : "center",
+      marginBottom: isMobile ? "8px" : "12px",
     }}>
       {options.map((pos) => {
         const active = selected.includes(pos);
@@ -311,11 +435,19 @@ function PositionFilterBar({ options, selected, setSelected, isMobile, eligibleY
           <Link
             key={pos}
             to={`/community/${eligibleYear}/${pos.toLowerCase()}`}
-            onClick={(e) => { e.preventDefault(); toggle(pos); }}
+            // Plain left-clicks toggle in place; a modified/middle click
+            // (open in new tab/window) is left to the browser — before,
+            // preventDefault blocked that too.
+            onClick={(e) => {
+              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault(); toggle(pos);
+            }}
+            aria-pressed={active}
+            className={"wdb-pill wdb-sel" + (active ? " on" : "")}
             style={{
               flexShrink: 0,
-              padding: isMobile ? "7px 10px" : "14px 32px",
-              fontWeight: 900, fontSize: isMobile ? "12px" : "19px",
+              padding: isMobile ? "7px 10px" : "8px 18px",
+              fontWeight: 900, fontSize: isMobile ? "12px" : "15px",
               textTransform: "uppercase", letterSpacing: "0.05em",
               border: (isMobile ? "2px" : "3px") + " solid " + GOLD, borderRadius: isMobile ? "8px" : "10px", cursor: "pointer",
               background: active ? BLUE : "#fff",
@@ -347,6 +479,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
         onClick={() => setOpen((v) => !v)}
+        className={"wdb-pill wdb-sel" + (isArchive ? " on" : "")}
         style={{
           border: "2px solid " + GOLD, borderRadius: "20px",
           padding: "6px 18px", fontWeight: 900, fontSize: "14px",
@@ -361,7 +494,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
       </button>
 
       {open && (
-        <div style={{
+        <div className="wdb-menu" style={{
           position: "absolute", top: "calc(100% + 8px)", left: "50%",
           transform: "translateX(-50%)",
           zIndex: 50, minWidth: "160px",
@@ -371,7 +504,7 @@ function ArchiveDropdown({ eligibleYear, onSelect }) {
           <div style={{ background: BLUE, padding: "8px 14px", fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
             Past Draft Classes
           </div>
-          <div style={{ height: "3px", background: GOLD }} />
+          <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
           {ARCHIVE_YEARS.map((yr) => (
             <div
               key={yr}
@@ -419,6 +552,7 @@ function YearDropdown({ eligibleYear, onSelect }) {
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
         onClick={() => setOpen((v) => !v)}
+        className="wdb-pill"
         style={{
           padding: "8px 16px", fontWeight: 900, fontSize: "13px",
           textTransform: "uppercase", letterSpacing: "0.05em",
@@ -430,7 +564,7 @@ function YearDropdown({ eligibleYear, onSelect }) {
       </button>
 
       {open && (
-        <div style={{
+        <div className="wdb-menu" style={{
           position: "absolute", top: "calc(100% + 8px)", left: "50%",
           transform: "translateX(-50%)",
           zIndex: 50, minWidth: "200px",
@@ -440,7 +574,7 @@ function YearDropdown({ eligibleYear, onSelect }) {
           <div style={{ background: BLUE, padding: "8px 14px", fontSize: "11px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
             Draft Year
           </div>
-          <div style={{ height: "3px", background: GOLD }} />
+          <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
           {years.map((yr) => {
             const isArchiveYr = ARCHIVE_YEARS.includes(yr);
             const active = eligibleYear === yr;
@@ -474,6 +608,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
     <div ref={dropdownRef} style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
       <button
         onClick={() => setOpen((prev) => !prev)}
+        className="wdb-pill"
         style={{
           padding: isMobile ? "8px 14px" : "8px 16px",
           fontWeight: 900, fontSize: isMobile ? "12px" : "13px",
@@ -486,7 +621,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
       </button>
 
       {open && (
-        <div style={{
+        <div className="wdb-menu" style={{
           position: "absolute", top: "calc(100% + 6px)", left: 0,
           zIndex: 50, minWidth: "180px",
           background: "#fff", border: "2px solid " + GOLD, borderRadius: "8px",
@@ -495,7 +630,7 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
           <div style={{ background: BLUE, padding: "8px 12px", fontSize: "12px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             My Board
           </div>
-          <div style={{ height: "3px", background: GOLD }} />
+          <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
           <div
             onClick={() => { setOpen(false); onMyBoards(); }}
             style={{
@@ -527,15 +662,21 @@ function BoardDropdown({ dropdownRef, open, setOpen, isMobile, onNavigate, onMyB
   );
 }
 
-function SidebarCard({ title, color1, color2, children }) {
+// `to` makes the header title itself a link, underlined like the player
+// page's clickable sidebar headers (e.g. Videos -> /videos).
+function SidebarCard({ title, to, color1, color2, children }) {
   return (
-    <div className="rounded-lg overflow-hidden" style={{ border: "2px solid " + color1 }}>
-      <div style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
+    <div className="rounded-lg overflow-hidden wdb-side" style={{ border: "2px solid " + color1 }}>
+      <div className="wdb-sidehead" style={{ backgroundColor: color1, padding: "12px 14px", textAlign: "center" }}>
         <div className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
-          {title}
+          {to ? (
+            <Link to={to} className="wdb-sidehead-link" style={{ color: "#fff", textDecoration: "underline", textUnderlineOffset: "4px", textDecorationThickness: "2px", textDecorationColor: "rgba(255,255,255,0.55)" }}>
+              {title}
+            </Link>
+          ) : title}
         </div>
       </div>
-      <div style={{ height: "4px", backgroundColor: color2 }} />
+      <div className="wdb-stripe" style={{ height: "4px", backgroundColor: color2 }} />
       <div style={{ background: "#fff" }}>{children}</div>
     </div>
   );
@@ -653,8 +794,11 @@ export default function CommunityBoard() {
   const [boardMap, setBoardMap] = useState(new Map());
   const [addingId, setAddingId] = useState(null);
 
-  const [sortKey, setSortKey] = useState("CommunityGrade");
+  // null = this page's default sort (see defaultSortKey below), so the
+  // default always follows the current page instead of a stale choice.
+  const [sortKey, setSortKey] = useState(null);
   const [sortOrder, setSortOrder] = useState("asc");
+  const [filtersOpen, setFiltersOpen] = useState(false); // mobile filter panel
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
@@ -678,10 +822,22 @@ export default function CommunityBoard() {
       setSelectedMyGrades([]);
       setShowAvailableOnly(false);
       setShowInactive(false);
-      setSortKey("CommunityGrade");
-      setSortOrder("asc");
     }
   }, [eligibleYear]);
+
+  // ── Context-aware default sort. A single-position page
+  // (/community/2027/wr) ranks by position rank; a class page
+  // (/community, /community/2028) — and a multi-position deep link like
+  // /community/2027/dl,edge, where DL1 and EDGE1 can't be ordered against
+  // each other — ranks by class rank. Any change of page (year or
+  // position, including the position chips, which change the URL) drops a
+  // manual column sort back to that page's default. ──
+  const defaultSortKey = positionParams.length === 1 ? "PositionRank" : "ClassRank";
+  const effectiveSortKey = sortKey || defaultSortKey;
+  useEffect(() => {
+    setSortKey(null);
+    setSortOrder("asc");
+  }, [eligibleYear, position]);
 
   const programmaticNavRef = useRef(false);
 
@@ -868,9 +1024,34 @@ export default function CommunityBoard() {
 
         // Phase 2 — community grades: one snapshot read for the whole class
         // (utils/communityGrades.js), not one evaluations query per player.
-        const avgs = await averageGradesFor(basePlayers.map((p) => p.id));
+        // Alongside it, the class/position rank chips: the same weekly
+        // class_{year}_{pos} snapshot docs PlayerProfile.js's Class Rank box
+        // reads (one per position in the class, cached for the session), so
+        // the board and each profile show identical ranks. A missing doc or
+        // player just means no chip for them.
+        const classPositions = [...new Set(basePlayers.map((p) => p.Position).filter(Boolean))];
+        const [avgs, rankDocs] = await Promise.all([
+          averageGradesFor(basePlayers.map((p) => p.id)),
+          Promise.all(classPositions.map((pos) => getSiteSnapshot(`class_${eligibleYear}_${pos}`))),
+        ]);
+        const ranks = Object.assign({}, ...rankDocs.map(classSnapshotRanks));
+        // School logos for the desktop rows: the same snapshot rows carry
+        // each school's logo (lg); only schools missing from them get a
+        // batched schools lookup (same "in" chunks PlayerProfile.js uses).
+        const logoBySchool = {};
+        rankDocs.forEach((d) => (d?.rows || []).forEach((r) => { if (r.s && r.lg) logoBySchool[r.s] = r.lg; }));
+        const missingSchools = [...new Set(basePlayers.map((p) => p.School).filter((s) => s && !(s in logoBySchool)))];
+        try {
+          const chunks = [];
+          for (let i = 0; i < missingSchools.length; i += 10) chunks.push(missingSchools.slice(i, i + 10));
+          const snaps = await Promise.all(chunks.map((c) => getDocs(query(collection(db, "schools"), where("School", "in", c)))));
+          snaps.forEach((s) => s.docs.forEach((d) => { const sd = d.data(); if (sd.School) logoBySchool[sd.School] = sd.Logo1 || ""; }));
+        } catch (e) { console.error("Board school logo fetch error:", e); }
         const withGrades = basePlayers.map((p) => {
           p.CommunityGrade = gradeLabel(avgs[p.id]) || "-";
+          p.ClassRank = ranks[p.id]?.classRank ?? null;
+          p.PositionRank = ranks[p.id]?.positionRank ?? null;
+          p.SchoolLogo = logoBySchool[p.School] || "";
           return p;
         });
 
@@ -931,7 +1112,7 @@ export default function CommunityBoard() {
   };
 
   const handleSort = (key) => {
-    if (sortKey === key) setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    if (effectiveSortKey === key) { setSortKey(key); setSortOrder(sortOrder === "asc" ? "desc" : "asc"); }
     else { setSortKey(key); setSortOrder("asc"); }
   };
 
@@ -939,10 +1120,14 @@ export default function CommunityBoard() {
     setSelectedSchools([]); setSelectedPositions([]);
     setSelectedCommGrades([]); setSelectedMyGrades([]);
     setSearchQuery(""); setShowAvailableOnly(false); setShowInactive(false);
-    setSortKey("CommunityGrade"); setSortOrder("asc");
+    setSortKey(null); setSortOrder("asc");
   };
 
   const is2026 = eligibleYear === "2026";
+  // Rank columns only when this board has ranks at all (an archive year
+  // with no class snapshot has none — no point reserving empty slots).
+  const showRanks = players.some((p) => p.ClassRank || p.PositionRank);
+  const activeFilterCount = selectedSchools.length + selectedMyGrades.length + selectedCommGrades.length + (showAvailableOnly ? 1 : 0);
   const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
 
   // Every filter except the live/inactive one, applied first — this is what
@@ -964,7 +1149,25 @@ export default function CommunityBoard() {
   const inactiveHiddenCount = visibleFilteredPlayers.filter((p) => p.Live === false).length;
   const filteredPlayers = visibleFilteredPlayers.filter((p) => showInactive ? true : p.Live !== false);
 
+  // Ties (and unranked players, which always go last): community grade,
+  // then name — a fixed order, so equal ranks never shuffle between renders.
+  const byGradeThenName = (a, b) => {
+    const g = compareRanks(gradeScale[a.CommunityGrade], gradeScale[b.CommunityGrade]);
+    if (g !== 0) return g;
+    return (a.Last || "").localeCompare(b.Last || "") || (a.First || "").localeCompare(b.First || "");
+  };
+  const sortKeyNow = effectiveSortKey;
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
+    if (sortKeyNow === "ClassRank" || sortKeyNow === "PositionRank") {
+      const field = sortKeyNow;
+      const r = compareRanks(a[field], b[field], sortOrder);
+      if (r !== 0) return r;
+      // Position rank restarts per position on a multi-position view —
+      // class rank orders equal position ranks before the grade fallback.
+      const c = field === "PositionRank" ? compareRanks(a.ClassRank, b.ClassRank, sortOrder) : 0;
+      return c !== 0 ? c : byGradeThenName(a, b);
+    }
+    const sortKey = sortKeyNow;
     if (sortKey === "CommunityGrade") {
       const aV = gradeScale[a.CommunityGrade];
       const bV = gradeScale[b.CommunityGrade];
@@ -1037,7 +1240,7 @@ export default function CommunityBoard() {
     return [...groups][0];
   })();
   const statsButton = statsGroup && (
-    <Link to={`/cfb/stats/${statsGroup}?class=${eligibleYear}`} style={{
+    <Link to={`/cfb/stats/${statsGroup}?class=${eligibleYear}`} className="wdb-pill" style={{
       padding: "8px 16px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
       color: "#fff", background: BLUE, border: "2px solid " + GOLD, borderRadius: "8px", whiteSpace: "nowrap",
       textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box",
@@ -1064,7 +1267,7 @@ export default function CommunityBoard() {
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
-            <div className="flex-shrink-0 rounded overflow-hidden" style={{ width: 36, border: "2px solid " + BLUE, background: "#fff", display: "flex", flexDirection: "column" }}>
+            <div className="flex-shrink-0 rounded overflow-hidden wdb-date" style={{ width: 36, border: "2px solid " + BLUE, background: "#fff", display: "flex", flexDirection: "column" }}>
               <div style={{ background: GOLD, lineHeight: 1, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                   {n.publishedAt && n.publishedAt.toDate ? n.publishedAt.toDate().toLocaleDateString(undefined, { month: "short" }) : ""}
@@ -1077,7 +1280,7 @@ export default function CommunityBoard() {
               </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="font-black uppercase leading-tight" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
+              <div className="font-black uppercase leading-tight wdb-ntitle" style={{ color: "#222", letterSpacing: "0.03em", fontSize: "12px" }}>{n.title}</div>
             </div>
           </Link>
         ))
@@ -1086,26 +1289,7 @@ export default function CommunityBoard() {
   );
 
   const VideosSidebar = (
-    <SidebarCard title="Videos" color1={BLUE} color2={GOLD}>
-      {/* Above the video list itself (below the card's own "Videos" title)
-          rather than after it, community-board-only placement — links to
-          the full site-wide feed, not more of this fixed
-          SIDEBAR_VIDEO_LIMIT list. */}
-      <Link
-        to="/videos"
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
-          padding: "10px 14px", textDecoration: "none",
-          background: BLUE, color: GOLD,
-          fontWeight: 900, fontSize: "12px",
-          textTransform: "uppercase", letterSpacing: "0.1em",
-          borderBottom: "1px solid rgba(255,255,255,0.15)",
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
-      >
-        View More Videos →
-      </Link>
+    <SidebarCard title="Videos" to="/videos" color1={BLUE} color2={GOLD}>
       {sidebarVideos.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No videos yet.</div>
       ) : (
@@ -1169,7 +1353,7 @@ export default function CommunityBoard() {
 
                 {v.title && (
                   <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                    <div className="font-black uppercase leading-tight" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
+                    <div className="font-black uppercase leading-tight wdb-vtitle" style={{ color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)" }}>
                       {v.title}
                     </div>
                   </div>
@@ -1184,27 +1368,25 @@ export default function CommunityBoard() {
 
   const MainContent = (
     <div style={{ fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      <div style={{ marginBottom: "20px", border: "3px solid " + BLUE, borderRadius: "12px", overflow: "hidden" }}>
+      {/* Compact header — no site logo (the navbar already carries it);
+          the title names the board being viewed. */}
+      <div className="wdb-hero" style={{ marginBottom: isMobile ? "10px" : "14px", border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{
-          background: BLUE, padding: isMobile ? "18px 14px" : "24px 20px",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+          background: BLUE, padding: isMobile ? "10px 12px" : "14px 20px",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: "4px",
         }}>
-          <img src={Logo2} alt="We-Draft.com" style={{ height: isMobile ? "36px" : "48px", objectFit: "contain" }} />
           <h1 style={{
-            fontSize: isMobile ? "34px" : "56px", fontWeight: 900, textTransform: "uppercase",
-            letterSpacing: "0.04em", color: "#fff", lineHeight: 1, textAlign: "center", width: "100%",
+            fontSize: isMobile ? "22px" : "36px", fontWeight: 900, textTransform: "uppercase",
+            letterSpacing: "0.03em", color: "#fff", lineHeight: 1.05, textAlign: "center", width: "100%",
             margin: 0,
-            minHeight: isMobile ? "72px" : "120px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            textShadow: "-1px -1px 0 " + GOLD + ", 1px -1px 0 " + GOLD + ", -1px 1px 0 " + GOLD + ", 1px 1px 0 " + GOLD + ", 0 -1px 0 " + GOLD + ", 0 1px 0 " + GOLD + ", -1px 0 0 " + GOLD + ", 1px 0 0 " + GOLD,
           }}>
-            {positionLabel ? (eligibleYear + " " + positionLabel + " Rankings") : (eligibleYear + " Community Board")}
+            {eligibleYear + " "}<span style={{ color: GOLD }}>{positionLabel || "Draft Class"}</span>{" Rankings"}
           </h1>
-          <div style={{ fontSize: isMobile ? "12px" : "14px", fontWeight: 700, color: "rgba(255,255,255,0.75)", letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center", lineHeight: 1.4, minHeight: isMobile ? "34px" : "20px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {positionLabel ? (eligibleYear + " NFL Draft " + positionLabel + " Board — We-Draft.com User Grades") : (eligibleYear + " NFL Draft Community Board — We-Draft.com User Grades")}
+          <div style={{ fontSize: isMobile ? "10px" : "12px", fontWeight: 700, color: "rgba(255,255,255,0.8)", letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center", lineHeight: 1.3 }}>
+            {eligibleYear + " NFL Draft " + (positionLabel ? positionLabel + " Board" : "Community Board") + " · Ranked by Community Grades"}
           </div>
         </div>
-        <div style={{ height: "4px", background: GOLD }} />
+        <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
       </div>
 
       {/* Draft Year — desktop only up here now; on mobile the year filter
@@ -1214,17 +1396,19 @@ export default function CommunityBoard() {
           below) and there wasn't room for both a standalone year row and a
           standalone position row on a narrow screen. */}
       {!isMobile && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
             <ArchiveDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
             {ACTIVE_YEARS.map((yr) => (
               <Link
                 key={yr}
                 to={yearPath(yr)}
+                aria-current={eligibleYear === yr ? "page" : undefined}
+                className={"wdb-pill wdb-sel" + (eligibleYear === yr ? " on" : "")}
                 style={{
-                  border: "3px solid " + GOLD, borderRadius: "24px",
-                  padding: "14px 40px",
-                  fontWeight: 900, fontSize: "22px",
+                  border: "2px solid " + GOLD, borderRadius: "20px",
+                  padding: "7px 24px",
+                  fontWeight: 900, fontSize: "16px",
                   background: eligibleYear === yr ? BLUE : "#fff",
                   color: eligibleYear === yr ? "#fff" : BLUE,
                   transition: "background 0.15s, color 0.15s",
@@ -1247,11 +1431,11 @@ export default function CommunityBoard() {
       )}
 
       {is2029Empty ? (
-        <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
-          <div style={{ background: BLUE, padding: "8px 16px" }}>
+        <div className="wdb-card" style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+          <div className="wdb-cardhead" style={{ background: BLUE, padding: "8px 16px" }}>
             <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2029 Draft Class</div>
           </div>
-          <div style={{ height: "3px", background: GOLD }} />
+          <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
           <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
             <div style={{ fontSize: "40px", marginBottom: "16px" }}>🏈</div>
             <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>
@@ -1274,10 +1458,27 @@ export default function CommunityBoard() {
                   unpredictably. Search and Reset get their own clean rows
                   below since a growing text input doesn't belong in a
                   fixed-column button grid. */}
+              {/* Always-visible row: year, the collapsible Filters toggle
+                  (count of active filters on it), and sort — so the board
+                  itself stays above the fold instead of under a tall grid. */}
               <div className="wd-mobile-filter-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "8px" }}>
-                {/* Position moved up to its own full chip bar (see
-                    PositionFilterBar above) — Year takes this slot instead. */}
                 <YearDropdown eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
+                <button
+                  onClick={() => setFiltersOpen((o) => !o)}
+                  aria-expanded={filtersOpen}
+                  aria-controls="wd-board-filters"
+                  className={"wdb-pill" + (filtersOpen || activeFilterCount ? " on" : "")}
+                  style={{
+                    padding: "8px 12px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
+                    color: filtersOpen || activeFilterCount ? "#fff" : BLUE, background: filtersOpen || activeFilterCount ? BLUE : "#fff",
+                    border: "2px solid " + GOLD, borderRadius: "8px", cursor: "pointer", whiteSpace: "nowrap",
+                  }}
+                >
+                  Filters{activeFilterCount ? " (" + activeFilterCount + ")" : ""} {filtersOpen ? "▴" : "▾"}
+                </button>
+              </div>
+              {filtersOpen && (
+              <div id="wd-board-filters" className="wd-mobile-filter-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "8px" }}>
                 {statsButton}
                 <DropdownChecklist title="School" options={allSchools} selected={selectedSchools} setSelected={setSelectedSchools} />
                 <DropdownChecklist title="My Grade" options={gradeOrder} selected={selectedMyGrades} setSelected={setSelectedMyGrades} ordered />
@@ -1293,6 +1494,7 @@ export default function CommunityBoard() {
                 {is2026 && (
                   <button
                     onClick={() => setShowAvailableOnly((v) => !v)}
+                    className={"wdb-pill" + (showAvailableOnly ? " on" : "")}
                     style={{
                       padding: "8px 16px", fontWeight: 900, fontSize: "13px",
                       textTransform: "uppercase", letterSpacing: "0.05em",
@@ -1305,16 +1507,30 @@ export default function CommunityBoard() {
                   </button>
                 )}
               </div>
-              {/* Position — mobile-only fix: its own centered row under
-                  "My Board", above the search box, using the K/P-dropped
-                  mobilePositions list. Desktop's chip row stays up top
-                  (unchanged, see above) with the full allPositions list. */}
+              )}
+              {/* Position — mobile-only fix: its own row above the search
+                  box, using the K/P-dropped mobilePositions list (scrolls
+                  sideways if it still doesn't fit). Desktop's chip row stays
+                  up top with the full allPositions list. */}
               <PositionFilterBar options={mobilePositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
-                style={{ display: "block", width: "100%", boxSizing: "border-box", border: "2px solid " + GOLD, borderRadius: "8px", padding: "10px 14px", fontWeight: 700, fontSize: "14px", color: BLUE, outline: "none", marginBottom: "6px" }} />
-              <div style={{ textAlign: "center" }}>
-                <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset Filters</button>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input type="search" className="wdb-input" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..." aria-label="Search players"
+                  style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "14px", color: BLUE, outline: "none" }} />
+                <select
+                  value={effectiveSortKey + ":" + sortOrder}
+                  onChange={(e) => { const [k, o] = e.target.value.split(":"); setSortKey(k); setSortOrder(o); }}
+                  aria-label="Sort players"
+                  className="wdb-input"
+                  style={{ flexShrink: 0, maxWidth: "46%", border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 6px", fontWeight: 800, fontSize: "12px", color: BLUE, background: "#fff" }}
+                >
+                  {MOBILE_SORTS.filter((s) => !s.only || s.only(is2026)).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
               </div>
+              {(activeFilterCount > 0 || searchQuery) && (
+                <div style={{ textAlign: "center", marginTop: "4px" }}>
+                  <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#777", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset Filters</button>
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
@@ -1333,6 +1549,7 @@ export default function CommunityBoard() {
               {is2026 && (
                 <button
                   onClick={() => setShowAvailableOnly((v) => !v)}
+                    className={"wdb-pill" + (showAvailableOnly ? " on" : "")}
                   style={{
                     padding: "8px 16px", fontWeight: 900, fontSize: "13px",
                     textTransform: "uppercase", letterSpacing: "0.05em",
@@ -1344,14 +1561,14 @@ export default function CommunityBoard() {
                   {showAvailableOnly ? "✓ Available" : "Available"}
                 </button>
               )}
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
+              <input type="text" className="wdb-input" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..."
                 style={{ border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 14px", fontWeight: 700, fontSize: "13px", color: BLUE, outline: "none", width: "280px" }} />
               <button onClick={resetFilters} style={{ background: "none", border: "none", color: "#999", fontSize: "12px", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Reset</button>
             </div>
           )}
 
-          <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
-            <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="wdb-card" style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+            <div className="wdb-cardhead" style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 {selectedPositions.length > 0
                   ? (eligibleYear + " " + selectedPositions.map((p) => POSITION_LABELS[p] || p).join(" / ") + " Rankings")
@@ -1381,7 +1598,7 @@ export default function CommunityBoard() {
                 )}
               </div>
             </div>
-            <div style={{ height: "3px", background: GOLD }} />
+            <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
 
             {isMobile ? (
               <div style={{ maxHeight: "calc(70vh / var(--pz, 1))", overflowY: "auto" }}>
@@ -1398,7 +1615,7 @@ export default function CommunityBoard() {
                   const c1 = (teamData && teamData.Color1) || BLUE;
                   const c2 = (teamData && teamData.Color2) || GOLD;
                   return (
-                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderBottom: "1px solid " + GOLD }}>
+                    <div key={p.id} className="wdb-row" style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 8px 8px 10px", background: "#fff", borderBottom: "1px solid " + GOLD }}>
                       {is2026 && draft && (
                         <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: "3px" }}>
                           <div style={{ width: 32, height: 32, borderRadius: "6px", background: c1, border: "2px solid " + c2, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -1413,22 +1630,30 @@ export default function CommunityBoard() {
                         </div>
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <Link
-                          to={"/player/" + p.Slug}
-                          style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2 }}
-                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-                        >
-                          {(p.First || "") + " " + (p.Last || "")}
-                        </Link>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#555", marginTop: "3px" }}>
-                          {p.Position || "—"} · {p.School || "—"}
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                          {showRanks && (
+                            <RankChips classRank={p.ClassRank} positionRank={p.PositionRank} position={p.Position} small />
+                          )}
+                          <Link
+                            to={"/player/" + p.Slug}
+                            style={{ color: BLUE, fontWeight: 900, fontSize: "15px", textDecoration: "none", display: "block", lineHeight: 1.2, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+                          >
+                            {(p.First || "") + " " + (p.Last || "")}
+                          </Link>
                         </div>
-                        {(p.HeightInches || p.Weight) && (
-                          <div style={{ fontSize: "11px", color: "#aaa", fontWeight: 700, marginTop: "2px" }}>
-                            {p.HeightInches ? formatHeight(p.HeightInches) : ""}{p.HeightInches && p.Weight ? " · " : ""}{p.Weight ? (p.Weight + " lbs") : ""}
-                          </div>
-                        )}
+                        {/* Position · school · size on one line — truncates
+                            instead of wrapping so every row stays the same
+                            compact height. */}
+                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#555", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {p.Position || "—"} · {p.School || "—"}
+                          {(p.HeightInches || p.Weight) && (
+                            <span style={{ color: "#888" }}>
+                              {" · "}{p.HeightInches ? formatHeight(p.HeightInches) : ""}{p.HeightInches && p.Weight ? ", " : ""}{p.Weight ? (p.Weight + " lbs") : ""}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
                         <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>My</div>
@@ -1437,12 +1662,12 @@ export default function CommunityBoard() {
                         ) : onBoard ? (
                           <GradeBadge grade={myGrade} small />
                         ) : (
-                          <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small user={user} login={login} />
+                          <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} small user={user} login={login} label={"Add " + ((p.First || "") + " " + (p.Last || "")).trim() + " to your board"} />
                         )}
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
                         <div style={{ fontSize: "8px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>Comm</div>
-                        <GradeBadge grade={p.CommunityGrade} small />
+                        <GradeBadge grade={displayCommGrade(p.CommunityGrade)} small />
                       </div>
                     </div>
                   );
@@ -1451,11 +1676,15 @@ export default function CommunityBoard() {
             ) : (
               <div style={{ maxHeight: "760px", overflowY: "auto" }}>
                 {(() => {
-                  const SortLabel = ({ sortK, label, align = "center", width }) => {
-                    const active = sortKey === sortK;
+                  const SortLabel = ({ sortK, label, align = "center", width, title }) => {
+                    const active = effectiveSortKey === sortK;
                     return (
-                      <div
+                      <button
+                        type="button"
                         onClick={() => handleSort(sortK)}
+                        title={title}
+                        aria-label={"Sort by " + (title || label)}
+                        aria-pressed={active}
                         onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.opacity = active ? "1" : "0.72"; }}
                         style={{
@@ -1468,17 +1697,18 @@ export default function CommunityBoard() {
                           cursor: "pointer", userSelect: "none",
                           opacity: active ? 1 : 0.72,
                           transition: "opacity 0.15s ease, color 0.15s ease",
+                          background: "none", border: "none", padding: 0, fontFamily: "inherit",
                         }}
                       >
                         <span style={{ whiteSpace: "nowrap" }}>{label}</span>
-                        <span style={{ fontSize: "10px", opacity: active ? 1 : 0.5 }}>
+                        <span aria-hidden="true" style={{ fontSize: "10px", opacity: active ? 1 : 0.5 }}>
                           {active ? (sortOrder === "asc" ? "▲" : "▼") : "▲"}
                         </span>
-                      </div>
+                      </button>
                     );
                   };
                   return (
-                    <div style={{
+                    <div className="wdb-colhead" style={{
                       position: "sticky", top: 0, zIndex: 10,
                       display: "flex", alignItems: "center", gap: "16px",
                       background: "linear-gradient(135deg, " + BLUE + ", #003d7a)",
@@ -1486,16 +1716,25 @@ export default function CommunityBoard() {
                     }}>
                       {is2026 && <SortLabel sortK="Pick" label="Pick" width="64px" />}
                       {is2026 && <div style={{ width: "56px", flexShrink: 0 }} />}
-                      <SortLabel sortK="Player" label="Player" align="left" />
-                      <SortLabel sortK="Position" label="Pos" width="84px" />
-                      <SortLabel sortK="MyGrade" label="My Grade" width="140px" />
-                      <SortLabel sortK="CommunityGrade" label="Comm Grade" width="140px" />
-                      <SortLabel sortK="Height" label="HT" width="70px" />
-                      <SortLabel sortK="Weight" label="WT" width="70px" />
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "14px" }}>
+                        {showRanks && (
+                          <div style={{ width: rankSlotWidth(RANK_CHIP.desktop) + "px", display: "flex", gap: RANK_CHIP.desktop.gap + "px", flexShrink: 0 }}>
+                            <SortLabel sortK="ClassRank" label="CRK" title="Class Rank" width={RANK_CHIP.desktop.classW + "px"} />
+                            <SortLabel sortK="PositionRank" label="PRK" title="Position Rank" width={RANK_CHIP.desktop.posW + "px"} />
+                          </div>
+                        )}
+                        <SortLabel sortK="Position" label="Pos" title="Position" width={POS_COL_W + "px"} />
+                        <div aria-hidden="true" style={{ width: LOGO_COL_W + "px", flexShrink: 0 }} />
+                        <SortLabel sortK="Player" label="Player" align="left" />
+                      </div>
+                      <SortLabel sortK="MyGrade" label="My Grade" width="104px" />
+                      <SortLabel sortK="CommunityGrade" label="Comm Grade" width="104px" />
+                      <SortLabel sortK="Height" label="HT" width="60px" />
+                      <SortLabel sortK="Weight" label="WT" width="60px" />
                     </div>
                   );
                 })()}
-                <div style={{ height: "3px", background: GOLD }} />
+                <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
 
                 {listLoading ? ListSpinner : sortedPlayers.length === 0 ? (
                   <div style={{ padding: "32px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#fff" }}>
@@ -1512,6 +1751,7 @@ export default function CommunityBoard() {
                   return (
                     <div
                       key={p.id}
+                      className="wdb-row"
                       style={{ display: "flex", alignItems: "center", gap: "16px", padding: "11px 20px", background: "#fff", borderBottom: "1px solid #eee", transition: "background 0.12s" }}
                       onMouseEnter={(e) => { e.currentTarget.style.background = "#f3f8ff"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
@@ -1534,49 +1774,58 @@ export default function CommunityBoard() {
                         </div>
                       )}
 
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <Link
-                          to={"/player/" + p.Slug}
-                          style={{ color: BLUE, fontWeight: 900, fontSize: "27px", textDecoration: "none", display: "block", lineHeight: 1.15 }}
-                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-                        >
-                          {(p.First || "") + " " + (p.Last || "")}
-                        </Link>
-                        {p.School && (
-                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "3px" }}>
-                            {p.School}
-                          </div>
-                        )}
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "14px" }}>
+                        {showRanks && <RankChips classRank={p.ClassRank} positionRank={p.PositionRank} position={p.Position} />}
+                        {/* Position label sits directly left of the name. */}
+                        <div style={{ width: POS_COL_W + "px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                          {p.Position ? (
+                            <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "6px 0", width: "100%", textAlign: "center", borderRadius: "6px", textTransform: "uppercase" }}>
+                              {p.Position}
+                            </span>
+                          ) : <span style={{ color: "#ddd" }}>—</span>}
+                        </div>
+                        {/* School logo between position and name (the school
+                            name text was dropped — the logo carries it, with
+                            the name as alt/tooltip). Fixed slot so names stay
+                            in one column with or without a logo. */}
+                        <div style={{ width: LOGO_COL_W + "px", height: LOGO_COL_W + "px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {p.SchoolLogo && (
+                            <img src={sanitizeUrl(p.SchoolLogo)} alt={p.School || ""} title={p.School || undefined} loading="lazy"
+                              style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+                              onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                          )}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <Link
+                            to={"/player/" + p.Slug}
+                            style={{ color: BLUE, fontWeight: 900, fontSize: "28px", textDecoration: "none", display: "block", lineHeight: 1.1, overflowWrap: "break-word" }}
+                            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+                          >
+                            {(p.First || "") + " " + (p.Last || "")}
+                          </Link>
+                        </div>
                       </div>
 
-                      <div style={{ width: "84px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                        {p.Position ? (
-                          <span style={{ fontSize: "14px", fontWeight: 900, color: BLUE, background: "#eaf1ff", padding: "6px 12px", borderRadius: "6px", textTransform: "uppercase" }}>
-                            {p.Position}
-                          </span>
-                        ) : <span style={{ color: "#ddd" }}>—</span>}
-                      </div>
-
-                      <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                      <div style={{ width: "104px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
                         {isAdding ? (
                           <div style={{ width: "64px", height: "52px", border: "2px solid " + BLUE, borderRadius: "5px", opacity: 0.4 }} />
                         ) : onBoard ? (
                           <GradeBadge grade={myGrade} />
                         ) : (
-                          <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} user={user} login={login} />
+                          <PlusBadge onClick={() => handleAddToBoard(p)} loading={isAdding} user={user} login={login} label={"Add " + ((p.First || "") + " " + (p.Last || "")).trim() + " to your board"} />
                         )}
                       </div>
 
-                      <div style={{ width: "140px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
-                        <GradeBadge grade={p.CommunityGrade} />
+                      <div style={{ width: "104px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                        <GradeBadge grade={displayCommGrade(p.CommunityGrade)} />
                       </div>
 
-                      <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
+                      <div style={{ width: "60px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
                         {p.HeightInches ? formatHeight(p.HeightInches) : (p.Height || "-")}
                       </div>
 
-                      <div style={{ width: "70px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
+                      <div style={{ width: "60px", flexShrink: 0, textAlign: "center", fontSize: "20px", fontWeight: 900, color: "#333" }}>
                         {p.Weight || "-"}
                       </div>
                     </div>
@@ -1596,9 +1845,14 @@ export default function CommunityBoard() {
     </div>
   );
 
+  // Modern look (BOARD_MODERN_STYLE) — on by default; ?modern=0 shows the
+  // old look for comparison.
+  const modern = typeof window === "undefined" || new URLSearchParams(window.location.search).get("modern") !== "0";
+
   return (
     <>
       {SeoTags}
+      {modern && <style>{BOARD_MODERN_STYLE}</style>}
 
       {/* Mobile filter grid — every button (Position/School/My Grade/Comm
           Grade/Board/Available) is a different shared component with its
@@ -1626,13 +1880,13 @@ export default function CommunityBoard() {
       )}
 
       {isMobile ? (
-        <div style={{ padding: "4px 10px 60px", display: "flex", flexDirection: "column", gap: "24px" }}>
+        <div className={modern ? "wdb" : undefined} style={{ padding: "4px 10px 60px", display: "flex", flexDirection: "column", gap: "24px" }}>
           <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{MainContent}</div>
           {sidebarNews.length > 0 && <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{NewsSidebar}</div>}
           {sidebarVideos.length > 0 && <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{VideosSidebar}</div>}
         </div>
       ) : (
-        <div style={{ maxWidth: "1900px", margin: "0 auto", padding: "6px 24px 60px", display: "grid", gridTemplateColumns: "280px minmax(0, 1300px) 280px", gap: "20px", alignItems: "start" }}>
+        <div className={modern ? "wdb" : undefined} style={{ maxWidth: "1900px", margin: "0 auto", padding: "6px 24px 60px", display: "grid", gridTemplateColumns: "280px minmax(0, 1300px) 280px", gap: "20px", alignItems: "start" }}>
           <div style={{ position: "sticky", top: "20px" }}>{NewsSidebar}</div>
           <div>{MainContent}</div>
           <div style={{ position: "sticky", top: "20px" }}>{VideosSidebar}</div>
