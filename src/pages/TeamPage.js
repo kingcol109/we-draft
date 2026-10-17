@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { isLiveTeamFollowed, setLiveTeamFollow } from "../utils/liveFollowSync";
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import TeamStats, { playersWithStats } from "../components/TeamStats";
+import TeamInsights from "../components/TeamInsights";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { Helmet } from "react-helmet-async";
 import EliteFlair from "../assets/elite.png";
@@ -31,6 +32,12 @@ import { cssRect } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
+// Player page's modern palette (PlayerProfile.js MODERN_STYLE): hairline,
+// row divider, soft fill, ink.
+const SIDE_LINE = "#e3e8ef";
+const SIDE_LINE_2 = "#eef1f5";
+const SIDE_SOFT = "#f7f9fc";
+const SIDE_INK = "#0f1b2d";
 
 // ── Flair -> { image, stroke color, description } — mirrors the map on
 // PlayerProfile.js so a flair means the same thing everywhere it shows up. ──
@@ -112,20 +119,40 @@ const toTeamSlug = (school) => {
   return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
 };
 
-// ── Shared sidebar card shell ──
-function SidebarCard({ title, color1, color2, children, headerRight }) {
+// ── Shared sidebar card shell — the player page's modern sidebar look
+// (1px hairline, 14px radius, compact left-anchored header, no accent
+// stripe), but in the team's own color instead of site blue. ──
+// `accent`: optional stroke color under the header (Videos uses the team's
+// secondary).
+function SidebarCard({ title, color1, children, headerRight, accent }) {
   return (
-    <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
-      <div style={{ backgroundColor: color1, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+    <div style={{ border: `1px solid ${SIDE_LINE}`, borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
+      <div style={{ backgroundColor: color1, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+        <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.14em", textTransform: "uppercase", textAlign: "left" }}>
           {title}
         </div>
         {headerRight && headerRight}
       </div>
-      <div style={{ height: "4px", backgroundColor: color2 }} />
-      <div style={{ background: "#fff" }}>{children}</div>
+      {accent && <div style={{ height: "3px", backgroundColor: accent }} />}
+      <div>{children}</div>
     </div>
   );
+}
+
+// Clickable sidebar-header link: underlined instead of arrowed, same as the
+// player page's sidebar headers.
+const sideHeaderLinkStyle = {
+  color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap",
+  textDecoration: "underline", textUnderlineOffset: "4px", textDecorationThickness: "2px", textDecorationColor: "rgba(255,255,255,0.55)",
+};
+
+// Perceived brightness of a #rgb / #rrggbb color (0–1); anything else → 0.
+function colorLightness(c) {
+  let h = (c || "").trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+  if (!/^[0-9a-f]{6}$/i.test(h)) return 0;
+  const n = parseInt(h, 16);
+  return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
 }
 
 function GradeBadge({ grade }) {
@@ -735,7 +762,7 @@ function ArchiveFilters({ allYears, allRounds, allPositions, allArchive, color1,
 function MainContent({
   school, canonicalSchool, color1, color2, isMobile,
   activeTab, setActiveTab, prospects, archivePlayers, historicalPlayers,
-  draftMap, nflTeams, totalProspects,
+  draftMap, nflTeams, totalProspects, fcs, schedule, currentTop25, schoolsMap,
 }) {
   const totalArchive = archivePlayers.length + historicalPlayers.length;
 
@@ -823,6 +850,17 @@ function MainContent({
         }}>
           Prospects ({totalProspects})
         </button>
+        {!fcs && cfbdTeamId != null && (
+          <button onClick={() => setActiveTab("insights")} style={{
+            padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
+            fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+            border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+            background: activeTab === "insights" ? color1 : "#fff",
+            color: activeTab === "insights" ? "#fff" : color1,
+          }}>
+            Insights
+          </button>
+        )}
         {roster && (
           <button onClick={() => setActiveTab("roster")} style={{
             padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
@@ -909,6 +947,15 @@ function MainContent({
           </div>
         );
       })()}
+
+      {/* ── INSIGHTS TAB ── */}
+      {activeTab === "insights" && !fcs && cfbdTeamId != null && (
+        <TeamInsights
+          school={school} canonicalSchool={canonicalSchool}
+          color1={color1} color2={color2} isMobile={isMobile}
+          schedule={schedule} currentTop25={currentTop25} schoolsMap={schoolsMap}
+        />
+      )}
 
       {/* ── ROSTER TAB ── */}
       {activeTab === "roster" && roster && (
@@ -1438,6 +1485,15 @@ export default function TeamPage() {
 
   const color1 = branding?.color1 || BLUE;
   const color2 = branding?.color2 || GOLD;
+  // Sidebars wear the team's colors. A near-white primary can't carry the
+  // white header text, so it falls back to the secondary, then site blue;
+  // the accent (current-team row) is whichever team color is left, unless
+  // that's near-white too.
+  const sideC1 = colorLightness(color1) < 0.75 ? color1 : colorLightness(color2) < 0.75 ? color2 : BLUE;
+  const sideAccentRaw = sideC1 === color1 ? color2 : color1;
+  const sideC2 = colorLightness(sideAccentRaw) < 0.9 ? sideAccentRaw : GOLD;
+  const sideTint = `color-mix(in srgb, ${sideC1} 7%, #fff)`;
+  const sideSelfTint = `color-mix(in srgb, ${sideC2} 14%, #fff)`;
   const totalProspects = PROSPECT_YEARS.reduce((acc, yr) => acc + (prospects[yr]?.length || 0), 0);
 
   // Blocks first paint only until branding (the school doc itself) has
@@ -1466,11 +1522,9 @@ export default function TeamPage() {
   const ConferenceSidebar = (
     <SidebarCard
       title={school?.Conference || "Conference"}
-      color1={BLUE} color2={GOLD}
+      color1={sideC1}
       headerRight={
-        <Link to="/cfb" style={{ color: GOLD, fontSize: "11px", fontWeight: 900, textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
-          More →
-        </Link>
+        <Link to="/cfb" style={sideHeaderLinkStyle}>More</Link>
       }
     >
       {conferenceTeams.length === 0 ? (
@@ -1481,9 +1535,9 @@ export default function TeamPage() {
           const rowStyle = {
             display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
             textDecoration: "none",
-            background: isSelf ? "#fff8e6" : "#fff",
-            borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
-            borderBottom: i < conferenceTeams.length - 1 ? "1px solid #f0f0f0" : "none",
+            background: isSelf ? sideSelfTint : "#fff",
+            borderLeft: isSelf ? `4px solid ${sideC2}` : "4px solid transparent",
+            borderBottom: i < conferenceTeams.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
             transition: "background 0.12s",
           };
           const rowContent = (
@@ -1492,7 +1546,7 @@ export default function TeamPage() {
                 <div style={{
                   width: "28px", height: "28px", flexShrink: 0, display: "flex",
                   alignItems: "center", justifyContent: "center",
-                  background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+                  background: SIDE_SOFT, borderRadius: "6px", padding: "2px",
                 }}>
                   <img
                     src={sanitizeUrl(team.Logo1)}
@@ -1505,7 +1559,7 @@ export default function TeamPage() {
               ) : (
                 <div style={{
                   width: "28px", height: "28px", flexShrink: 0, borderRadius: "4px",
-                  background: team.Color1 || BLUE, display: "flex", alignItems: "center",
+                  background: team.Color1 || sideC1, display: "flex", alignItems: "center",
                   justifyContent: "center", color: "#fff", fontSize: "10px", fontWeight: 900,
                 }}>
                   {team.School.charAt(0)}
@@ -1513,13 +1567,13 @@ export default function TeamPage() {
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontWeight: 900, fontSize: "13px", color: BLUE, lineHeight: 1.2,
+                  fontWeight: 900, fontSize: "13px", color: SIDE_INK, lineHeight: 1.2,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
                   {team.School}
                 </div>
                 {team.Mascot && (
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#888", lineHeight: 1.2 }}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", lineHeight: 1.2 }}>
                     {team.Mascot}
                   </div>
                 )}
@@ -1534,7 +1588,7 @@ export default function TeamPage() {
               key={team.Slug || team.School}
               to={`/team/${team.Slug || toTeamSlug(team.School)}`}
               style={rowStyle}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
               {rowContent}
@@ -1558,11 +1612,9 @@ export default function TeamPage() {
   const Top25Sidebar = (
     <SidebarCard
       title="Top 25"
-      color1={BLUE} color2={GOLD}
+      color1={sideC1}
       headerRight={
-        <Link to="/cfb" style={{ color: GOLD, fontSize: "11px", fontWeight: 900, textDecoration: "none", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
-          Full Poll →
-        </Link>
+        <Link to="/cfb" style={sideHeaderLinkStyle}>Full Poll</Link>
       }
     >
       {top25Entries.length === 0 ? (
@@ -1573,21 +1625,21 @@ export default function TeamPage() {
           const rowStyle = {
             display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
             textDecoration: "none",
-            background: isSelf ? "#fff8e6" : "#fff",
-            borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
-            borderBottom: i < top25Entries.length - 1 ? "1px solid #f0f0f0" : "none",
+            background: isSelf ? sideSelfTint : "#fff",
+            borderLeft: isSelf ? `4px solid ${sideC2}` : "4px solid transparent",
+            borderBottom: i < top25Entries.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
             transition: "background 0.12s",
           };
           const rowContent = (
             <>
-              <div style={{ flexShrink: 0, width: "20px", textAlign: "center", fontWeight: 900, fontSize: "12px", color: "#999" }}>
+              <div style={{ flexShrink: 0, width: "20px", textAlign: "center", fontWeight: 900, fontSize: "12px", color: "#33415a", fontVariantNumeric: "tabular-nums" }}>
                 {team.Rank}
               </div>
               {team.Logo1 ? (
                 <div style={{
                   width: "28px", height: "28px", flexShrink: 0, display: "flex",
                   alignItems: "center", justifyContent: "center",
-                  background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+                  background: SIDE_SOFT, borderRadius: "6px", padding: "2px",
                 }}>
                   <img
                     src={sanitizeUrl(team.Logo1)}
@@ -1600,7 +1652,7 @@ export default function TeamPage() {
               ) : (
                 <div style={{
                   width: "28px", height: "28px", flexShrink: 0, borderRadius: "4px",
-                  background: team.Color1 || BLUE, display: "flex", alignItems: "center",
+                  background: team.Color1 || sideC1, display: "flex", alignItems: "center",
                   justifyContent: "center", color: "#fff", fontSize: "10px", fontWeight: 900,
                 }}>
                   {team.School.charAt(0)}
@@ -1608,7 +1660,7 @@ export default function TeamPage() {
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontWeight: 900, fontSize: "13px", color: BLUE, lineHeight: 1.2,
+                  fontWeight: 900, fontSize: "13px", color: SIDE_INK, lineHeight: 1.2,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}>
                   {team.School}
@@ -1624,7 +1676,7 @@ export default function TeamPage() {
               key={team.School}
               to={`/team/${team.Slug || toTeamSlug(team.School)}`}
               style={rowStyle}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
               {rowContent}
@@ -1665,16 +1717,16 @@ export default function TeamPage() {
   const ownCurrentRank = currentTop25[canonicalSchool] ?? null;
 
   const ScheduleSidebar = (
-    <SidebarCard title={`${ARCHIVE_YEAR} Schedule`} color1={BLUE} color2={GOLD}>
+    <SidebarCard title={`${ARCHIVE_YEAR} Schedule`} color1={sideC1}>
       {hasAnyScores && (
         <div style={{
           padding: "10px 14px", textAlign: "center",
-          background: "#f7f8fa", borderBottom: "1px solid #f0f0f0",
+          background: SIDE_SOFT, borderBottom: `1px solid ${SIDE_LINE_2}`,
         }}>
-          <span style={{ fontSize: "10px", fontWeight: 900, color: "#999", textTransform: "uppercase", letterSpacing: "0.08em", marginRight: "8px" }}>
+          <span style={{ fontSize: "11px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase", letterSpacing: "0.12em", marginRight: "8px" }}>
             Record
           </span>
-          <span style={{ fontSize: "18px", fontWeight: 900, color: BLUE, letterSpacing: "0.02em" }}>
+          <span style={{ fontSize: "18px", fontWeight: 900, color: sideC1, letterSpacing: "0.02em", fontVariantNumeric: "tabular-nums" }}>
             {recordLabel}
           </span>
         </div>
@@ -1722,12 +1774,12 @@ export default function TeamPage() {
           const rowStyle2 = {
             display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
             background: "#fff", textDecoration: "none",
-            borderBottom: i < schedule.length - 1 ? "1px solid #f0f0f0" : "none",
+            borderBottom: i < schedule.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
           };
           const rowContent2 = (
             <>
               <div style={{ flexShrink: 0, width: "34px", textAlign: "center" }}>
-                <div style={{ fontSize: "9px", fontWeight: 900, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                <div style={{ fontSize: "11px", fontWeight: 900, color: "#8a97ab", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   {g.Week ? g.Week.replace("Week ", "Wk ") : ""}
                 </div>
               </div>
@@ -1735,7 +1787,7 @@ export default function TeamPage() {
                 <div style={{
                   width: "26px", height: "26px", flexShrink: 0, display: "flex",
                   alignItems: "center", justifyContent: "center",
-                  background: "#f5f5f5", borderRadius: "4px", padding: "2px",
+                  background: SIDE_SOFT, borderRadius: "6px", padding: "2px",
                 }}>
                   <img
                     src={sanitizeUrl(opponentData.Logo1)}
@@ -1761,12 +1813,12 @@ export default function TeamPage() {
                 }}>
                   <span style={{ color: "#888", fontWeight: 700 }}>{(isHome || g.Neutral) ? "vs " : "@ "}</span>
                   {opponentRank && <span style={{ color: "#999" }}>#{opponentRank} </span>}
-                  <span style={{ color: (hasGamePage || isClickable) ? BLUE : "#444" }}>
+                  <span style={{ color: (hasGamePage || isClickable) ? SIDE_INK : "#5b6b84" }}>
                     {(opponentData?.Short || opponentName).toUpperCase()}
                   </span>
                   {g.Neutral ? <span style={{ color: "#bbb", fontWeight: 700 }}> (N)</span> : null}
                 </div>
-                <div style={{ fontSize: "10px", fontWeight: 700, color: resultLabel ? resultColor : "#aaa", lineHeight: 1.3 }}>
+                <div style={{ fontSize: "11px", fontWeight: 800, color: resultLabel ? resultColor : "#8a97ab", lineHeight: 1.3, fontVariantNumeric: "tabular-nums" }}>
                   {resultLabel || dateLabel}
                 </div>
               </div>
@@ -1779,7 +1831,7 @@ export default function TeamPage() {
                 key={g.id || i}
                 to={scheduleGameHref(g)}
                 style={rowStyle2}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
               >
                 {rowContent2}
@@ -1792,7 +1844,7 @@ export default function TeamPage() {
                 key={g.id || i}
                 to={`/team/${opponentData.Slug || toTeamSlug(opponentData.School)}`}
                 style={rowStyle2}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
               >
                 {rowContent2}
@@ -1809,7 +1861,7 @@ export default function TeamPage() {
   // Slug1/2/3 references a player on this team's roster. Starts at 3, can be
   // expanded 3-at-a-time up to VIDEO_MAX_TOTAL. ──
   const VideosSidebar = (
-    <SidebarCard title="Videos" color1={BLUE} color2={GOLD}>
+    <SidebarCard title="Videos" color1={sideC1} accent={sideC2}>
       {teamVideos.slice(0, visibleVideoCount).map((v, i, arr) => (
         <a
           key={v.id}
@@ -1821,7 +1873,7 @@ export default function TeamPage() {
             display: "block",
             position: "relative",
             textDecoration: "none",
-            borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+            borderBottom: i < arr.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
           }}
         >
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: "#111", overflow: "hidden" }}>
@@ -1856,12 +1908,12 @@ export default function TeamPage() {
                 boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
               }}
             >
-              <span style={{ color: BLUE, fontSize: "18px", marginLeft: "3px" }}>▶</span>
+              <span style={{ color: sideC1, fontSize: "18px", marginLeft: "3px" }}>▶</span>
             </div>
 
             {v.title && (
               <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "10px 12px" }}>
-                <div style={{ fontWeight: 900, textTransform: "uppercase", color: "#fff", fontSize: "13px", letterSpacing: "0.03em", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.25 }}>
+                <div style={{ fontWeight: 800, color: "#fff", fontSize: "14px", textShadow: "0 1px 4px rgba(0,0,0,0.7)", lineHeight: 1.25 }}>
                   {v.title}
                 </div>
               </div>
@@ -1875,13 +1927,13 @@ export default function TeamPage() {
           style={{
             display: "block", width: "100%",
             padding: "10px 14px",
-            background: BLUE, color: GOLD,
-            border: "none", cursor: "pointer",
+            background: SIDE_SOFT, color: sideC1,
+            border: "none", borderTop: `1px solid ${SIDE_LINE_2}`, cursor: "pointer",
             fontWeight: 900, fontSize: "12px",
             textTransform: "uppercase", letterSpacing: "0.1em",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = SIDE_SOFT; }}
         >
           Show More Videos ▾
         </button>
@@ -1892,7 +1944,7 @@ export default function TeamPage() {
   // Starts at 3, expandable up to NEWS_LIMIT (everything already fetched) —
   // same "Show More" idiom as VideosSidebar above.
   const NewsSidebar = (
-    <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
+    <SidebarCard title="In The News" color1={sideC1}>
       {teamNews.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>No recent news.</div>
       ) : (
@@ -1904,26 +1956,26 @@ export default function TeamPage() {
               style={{
                 display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px",
                 textDecoration: "none", background: "#fff",
-                borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+                borderBottom: i < arr.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
             >
-              <div style={{ flexShrink: 0, width: 36, border: `2px solid ${BLUE}`, borderRadius: "4px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                <div style={{ background: GOLD, padding: "1px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: "8px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+              <div style={{ flexShrink: 0, width: 38, border: `1px solid ${SIDE_LINE}`, borderRadius: "8px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <div style={{ background: sideC1, padding: "2px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.03em" }}>
                     {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { month: "short" })}
                   </span>
                 </div>
                 <div style={{ padding: "2px 0", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: "15px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>
+                  <span style={{ fontSize: "15px", fontWeight: 900, color: SIDE_INK, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
                     {n.publishedAt?.toDate?.().toLocaleDateString(undefined, { day: "numeric" })}
                   </span>
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 900, fontSize: "12px", color: "#222", lineHeight: 1.3, letterSpacing: "0.02em" }}>
+                <div style={{ fontWeight: 700, fontSize: "14px", color: SIDE_INK, lineHeight: 1.35 }}>
                   {n.titleShort || n.title}
                 </div>
               </div>
@@ -1935,13 +1987,13 @@ export default function TeamPage() {
               style={{
                 display: "block", width: "100%",
                 padding: "10px 14px",
-                background: BLUE, color: GOLD,
-                border: "none", cursor: "pointer",
+                background: SIDE_SOFT, color: sideC1,
+                border: "none", borderTop: `1px solid ${SIDE_LINE_2}`, cursor: "pointer",
                 fontWeight: 900, fontSize: "12px",
                 textTransform: "uppercase", letterSpacing: "0.1em",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#003a7a"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = BLUE; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = sideTint; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = SIDE_SOFT; }}
             >
               Show More News ▾
             </button>
@@ -2022,33 +2074,33 @@ export default function TeamPage() {
                   historicalPlayers={historicalPlayers}
                   draftMap={draftMap} nflTeams={nflTeams}
                   totalProspects={totalProspects}
+                  fcs={fcs} schedule={schedule} currentTop25={currentTop25} schoolsMap={schoolsMap}
                 />
-                <details style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-                  <summary style={{ backgroundColor: BLUE, padding: "10px 14px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
-                    <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                <details style={{ border: `1px solid ${SIDE_LINE}`, borderRadius: "14px", overflow: "hidden", background: "#fff" }}>
+                  <summary style={{ backgroundColor: sideC1, padding: "12px 16px", cursor: "pointer", listStyle: "none", userSelect: "none" }}>
+                    <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.14em", textTransform: "uppercase" }}>
                       {fcs ? "Top 25" : `${school?.Conference || "Conference"} Teams`} ▾
                     </div>
                   </summary>
-                  <div style={{ height: "4px", backgroundColor: GOLD }} />
                   <div style={{ background: "#fff" }}>
                     {(fcs ? top25Entries : conferenceTeams).map((team, i, arr) => {
                       const isSelf = team.School === canonicalSchool;
                       const rowStyle = {
                         display: "flex", alignItems: "center", gap: "10px", padding: "9px 12px",
                         textDecoration: "none",
-                        background: isSelf ? "#fff8e6" : "#fff",
-                        borderLeft: isSelf ? `4px solid ${GOLD}` : "4px solid transparent",
-                        borderBottom: i < arr.length - 1 ? "1px solid #f0f0f0" : "none",
+                        background: isSelf ? sideSelfTint : "#fff",
+                        borderLeft: isSelf ? `4px solid ${sideC2}` : "4px solid transparent",
+                        borderBottom: i < arr.length - 1 ? `1px solid ${SIDE_LINE_2}` : "none",
                       };
                       const rowContent = (
                         <>
-                          {fcs && <span style={{ flexShrink: 0, width: "16px", textAlign: "center", fontWeight: 900, fontSize: "11px", color: "#999" }}>{team.Rank}</span>}
+                          {fcs && <span style={{ flexShrink: 0, width: "16px", textAlign: "center", fontWeight: 900, fontSize: "11px", color: "#33415a" }}>{team.Rank}</span>}
                           {team.Logo1 ? (
-                            <div style={{ width: "24px", height: "24px", flexShrink: 0, background: "#f5f5f5", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <div style={{ width: "24px", height: "24px", flexShrink: 0, background: SIDE_SOFT, borderRadius: "5px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                               <img src={sanitizeUrl(team.Logo1)} alt={team.School} loading="lazy" style={{ width: "20px", height: "20px", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
                             </div>
                           ) : null}
-                          <span style={{ fontWeight: 900, fontSize: "13px", color: BLUE }}>{team.School}</span>
+                          <span style={{ fontWeight: 900, fontSize: "13px", color: SIDE_INK }}>{team.School}</span>
                           {!isSelf && <span style={{ color: "#ccc", fontSize: "14px", marginLeft: "auto" }}>›</span>}
                         </>
                       );
@@ -2094,6 +2146,7 @@ export default function TeamPage() {
                   historicalPlayers={historicalPlayers}
                   draftMap={draftMap} nflTeams={nflTeams}
                   totalProspects={totalProspects}
+                  fcs={fcs} schedule={schedule} currentTop25={currentTop25} schoolsMap={schoolsMap}
                 />
               )}
             </div>

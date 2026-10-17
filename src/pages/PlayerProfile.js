@@ -394,6 +394,9 @@ const toTeamSlug = (school) => {
   return school.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
 };
 
+// "WRs", "QBs" — but the line groups (OL, DL, IOL) read as plural already.
+const pluralPos = (pos) => (!pos ? "" : /^(I?OL|DL)$/i.test(pos) ? pos : `${pos}s`);
+
 const formatEligible = (eligible) => {
   if (!eligible) return "";
   const match = String(eligible).match(/^(\d{4})s$/i);
@@ -452,6 +455,25 @@ function SidebarCard({ title, color1, color2, children, to }) {
       <div style={{ height: "4px", backgroundColor: color2 }} />
       <div style={{ background: "#fff" }}>{children}</div>
     </div>
+  );
+}
+
+// ── Class rank as a stat (mobile Community Scouting Report): big rank
+// number beside its field on one line ("of 120 2027 WRs") — instead of a
+// "4 / 120 2027 WRs" text line. Renders two cells of its parent's
+// two-column grid, so stacked ranks share columns: numbers right-aligned
+// in one, labels lined up in the other. ──
+function RankStat({ rank, of, label, color }) {
+  return (
+    <>
+      <div style={{ fontSize:"28px", fontWeight:900, color:"#0f1b2d", lineHeight:1, fontVariantNumeric:"tabular-nums", textAlign:"right" }}>
+        #{rank}
+      </div>
+      <div style={{ minWidth:0, textAlign:"left", fontSize:"13px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+        <span style={{ fontWeight:800, color:"#5b6b84", fontVariantNumeric:"tabular-nums" }}>of {of}</span>{" "}
+        <span style={{ fontWeight:900, color, textTransform:"uppercase", letterSpacing:"0.04em" }}>{label}</span>
+      </div>
+    </>
   );
 }
 
@@ -3635,7 +3657,7 @@ useEffect(() => {
         onPointerEnter={(e) => { if (e.pointerType === "mouse" && pctRounded != null) setActivePill(label); }}
         onPointerLeave={(e) => { if (e.pointerType === "mouse") setActivePill((c) => (c === label ? null : c)); }}
         onClick={() => { if (pillPointerType.current !== "mouse" && pctRounded != null) setActivePill((c) => (c === label ? null : label)); }}
-        title={pctRounded == null ? undefined : `${pctRounded}${suffix(pctRounded)} percentile among drafted ${player.Position}s`}
+        title={pctRounded == null ? undefined : `${pctRounded}${suffix(pctRounded)} percentile among drafted ${pluralPos(player.Position)}`}
         className={"wdm-pill" + (active ? " on" : "")}
         style={{
           display:"inline-flex", flexDirection:"row", alignItems:"baseline", gap:"6px",
@@ -4127,7 +4149,7 @@ useEffect(() => {
     <details style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
       <summary style={{
         backgroundColor: SITE_BLUE,
-        padding: "14px",
+        padding: "8px 14px",
         cursor: "pointer",
         listStyle: "none",
         display: "flex",
@@ -4219,28 +4241,6 @@ useEffect(() => {
     <SidebarCard title="🔥 Trending" color1={SITE_BLUE} color2={SITE_GOLD}>
       {TrendingListContent}
     </SidebarCard>
-  ) : null;
-
-  const TrendingSidebarDropdown = showTrendingSidebar ? (
-    <details style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
-      <summary style={{
-        backgroundColor: SITE_BLUE,
-        padding: "10px 14px",
-        cursor: "pointer",
-        listStyle: "none",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        userSelect: "none",
-      }}>
-        <h2 style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          🔥 Trending ▾
-        </h2>
-        <span style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "18px" }}>⬇</span>
-      </summary>
-      <div style={{ height: "4px", backgroundColor: SITE_GOLD }} />
-      {TrendingListContent}
-    </details>
   ) : null;
 
   // ── Videos sidebar — only rendered at all when the player has at least one
@@ -4504,9 +4504,13 @@ useEffect(() => {
                   <div className="flex-1 px-3 py-3">
                     <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
                     {(selfIndex >= 0 || classRank) ? (
-                      <div className="text-center wdm-rank" style={{ fontSize:"11px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.6 }}>
-                        {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
-                        {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
+                      <div style={{ display:"grid", gridTemplateColumns:"auto minmax(0, auto)", justifyContent:"center", alignItems:"center", columnGap:"8px", rowGap:"8px" }}>
+                        {selfIndex >= 0 && (
+                          <RankStat rank={positionRank ?? selfIndex+1} of={draftClassPlayers.length} label={`${formatEligible(player.Eligible)} ${pluralPos(player.Position)}`} color={siteC1} />
+                        )}
+                        {classRank && (
+                          <RankStat rank={classRank} of={classSize} label={`${formatEligible(player.Eligible)} Prospects`} color={siteC1} />
+                        )}
                       </div>
                     ) : <p className="italic text-gray-400 text-xs text-center">Not ranked</p>}
                   </div>
@@ -4597,7 +4601,7 @@ useEffect(() => {
                           <div className="mt-4 w-full">
                             <div className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.1em" }}>Class Rank</div>
                             <div className="text-center wdm-rank" style={{ fontSize:"13px", fontWeight:900, color:"#444", letterSpacing:"0.02em", lineHeight:1.7 }}>
-                              {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {player.Position}s</div>}
+                              {selfIndex >= 0 && <div>{positionRank ?? selfIndex+1} / {draftClassPlayers.length} {formatEligible(player.Eligible)} {pluralPos(player.Position)}</div>}
                               {classRank && <div>{classRank} / {classSize} {formatEligible(player.Eligible)} Prospects</div>}
                             </div>
                           </div>
@@ -5021,10 +5025,7 @@ useEffect(() => {
 
         {/* ===== LEFT COLUMN: Trending + Draft Class ===== */}
         {isMobile ? (
-          // Trending dropdown moved out of here — on mobile it now sits
-          // further down the main column, between Community Scouting
-          // Report and My Evaluation (see the Evaluation Form section
-          // below), instead of crowding the very top of the page.
+          // No Trending on mobile — only the desktop sidebar shows it.
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {DraftClassDropdown}
           </div>
@@ -5643,16 +5644,6 @@ useEffect(() => {
                 </button>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Trending dropdown, mobile only — dropped here (between Community
-            Scouting Report above and My Evaluation below) instead of at the
-            very top of the page; see the left-column block above where it
-            used to render for desktop's sticky-sidebar version. */}
-        {isMobile && TrendingSidebarDropdown && (
-          <div className="mb-8">
-            {TrendingSidebarDropdown}
           </div>
         )}
 

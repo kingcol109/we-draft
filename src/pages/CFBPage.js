@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { cfbSeo } from "../utils/cfbSeo";
 import { scheduleGameHref } from "../utils/live";
@@ -49,6 +49,206 @@ const gameSortMs = (g) => {
   const mins = timeToMinutes(g.Time);
   return toMs(g.Date) + (mins != null ? mins * 60000 : 0);
 };
+
+// Schedule dates are stored as UTC midnight (hence timeZone: "UTC" on every
+// date display here), so the day bucket comes off the UTC date. "~" sorts
+// after every real date, so date-less games land at the end.
+const dayKey = (g) => {
+  const d = g.Date?.toDate?.();
+  return d && !isNaN(d) ? d.toISOString().slice(0, 10) : "~";
+};
+const localDayKey = (offsetDays = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const dayLabel = (k) => {
+  if (k === "~") return { label: "Date TBD" };
+  const d = new Date(`${k}T00:00:00Z`);
+  const label = d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
+  const tag = k === localDayKey(0) ? "Today" : k === localDayKey(1) ? "Tomorrow" : k === localDayKey(-1) ? "Yesterday" : null;
+  return { label, tag };
+};
+// Team colors are admin-entered hex — tint only when it's actually #rrggbb.
+const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
+
+const chipStyle = (bg, color = "#fff") => ({
+  display: "inline-flex", alignItems: "center", gap: "5px",
+  background: bg, color, fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
+  textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
+});
+
+function ScoreTeamLine({ school, data, score, rank, scored, live, won, lost, color }) {
+  const faded = lost && !live;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: "12px", padding: "8px 14px",
+      background: won ? `linear-gradient(to right, ${tint(color, "1f")}, rgba(255,255,255,0) 70%)` : "transparent",
+    }}>
+      {data?.Logo1 ? (
+        <img
+          src={data.Logo1}
+          alt=""
+          className="wd-sc-logo"
+          loading="lazy"
+          style={{ width: "42px", height: "42px", objectFit: "contain", flexShrink: 0, opacity: faded ? 0.55 : 1, filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18))" }}
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+        />
+      ) : (
+        <div style={{ width: "42px", height: "42px", flexShrink: 0, borderRadius: "50%", background: color || "#ddd", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: "15px", fontWeight: 900 }}>
+          {(school || "?").charAt(0)}
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "7px" }}>
+        {rank && (
+          <span style={{ flexShrink: 0, fontSize: "11px", fontWeight: 900, color: SITE_BLUE, background: "#fff4e0", border: `1px solid ${SITE_GOLD}`, borderRadius: "6px", padding: "1px 5px" }}>
+            {rank}
+          </span>
+        )}
+        <span style={{
+          fontWeight: 900, fontSize: "16px", color: faded ? "#a8b0bb" : "#1a1f2b",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {school}
+        </span>
+      </div>
+      {scored && (
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+          <span
+            key={live ? `${school}-${score}` : "static"}
+            className={live ? "wd-score-pop" : undefined}
+            style={{ fontWeight: 900, fontSize: "28px", lineHeight: 1, fontVariantNumeric: "tabular-nums", color: faded ? "#c2c8d0" : won ? SITE_BLUE : "#1a1f2b" }}
+          >
+            {score}
+          </span>
+          <span style={{ width: "8px", color: SITE_GOLD, fontSize: "12px" }}>{won ? "◀" : ""}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One school on the Teams tab — team-color panel with the logo (dark
+// variant, since it sits on the team's color), a Top 25 pill when ranked,
+// and the name on a white footer.
+function TeamCard({ team, rank, isMobile }) {
+  const primary = team.Color1 || SITE_BLUE;
+  const secondary = team.Color2 || SITE_GOLD;
+  const logoSrc = team.LogoDark || team.Logo1 || "";
+  const logoSize = isMobile ? "58px" : "80px";
+  return (
+    <Link to={`/team/${team.Slug}`} className="wd-tc">
+      <div
+        className="wd-tc-panel"
+        style={{
+          position: "relative", overflow: "hidden",
+          height: isMobile ? "80px" : "108px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          // Soft spotlight behind the logo, darker toward the edges.
+          background: `radial-gradient(circle at 50% 42%, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,0.28) 100%), ${primary}`,
+        }}
+      >
+        {rank && (
+          <span style={{
+            position: "absolute", top: "6px", left: "6px", zIndex: 1,
+            fontSize: isMobile ? "10px" : "11px", fontWeight: 900, color: SITE_BLUE,
+            background: "#fff4e0", border: `1px solid ${SITE_GOLD}`, borderRadius: "6px", padding: "1px 5px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+          }}>
+            #{rank}
+          </span>
+        )}
+        {logoSrc ? (
+          <img
+            src={logoSrc}
+            alt={team.School}
+            className="wd-tc-logo"
+            loading="lazy"
+            style={{ position: "relative", width: logoSize, height: logoSize, objectFit: "contain", filter: "drop-shadow(0 3px 6px rgba(0,0,0,0.4))" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
+        ) : (
+          <div className="wd-tc-logo" style={{
+            position: "relative", width: logoSize, height: logoSize, borderRadius: "50%", background: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: primary, fontSize: isMobile ? "16px" : "20px", fontWeight: 900,
+          }}>
+            {team.School.charAt(0)}
+          </div>
+        )}
+      </div>
+      <div style={{ height: "3px", background: secondary }} />
+      <div style={{
+        padding: isMobile ? "7px 4px" : "9px 8px", textAlign: "center",
+        fontSize: isMobile ? "10px" : "12px", fontWeight: 900, color: "#1a1f2b",
+        textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      }}>
+        {team.School}
+      </div>
+    </Link>
+  );
+}
+
+// One game on the Full Schedule — team-color band, big logos and scores,
+// a pulsing ring + score pop while live, and Top 25 / Upset callouts.
+function ScoreCard({ g, s, away, home, awayRank, homeRank, channelShort }) {
+  const awayColor = away?.Color1 || "#ccc";
+  const homeColor = home?.Color1 || "#ccc";
+  const done = s.scored && !s.live;
+  const timeStr = formatTime12h(g.Time);
+  const bothRanked = !!(homeRank && awayRank);
+  const winnerRank = s.homeWon ? homeRank : s.awayWon ? awayRank : null;
+  const loserRank = s.homeWon ? awayRank : s.awayWon ? homeRank : null;
+  const upset = done && !!loserRank && (!winnerRank || winnerRank > loserRank);
+
+  let status;
+  if (s.live) {
+    status = <span style={chipStyle("#d62828")}><span className="wd-live-dot" style={{ background: "#fff" }} />{s.label || "LIVE"}</span>;
+  } else if (done) {
+    // Provider-final labels carry a date the day header already shows.
+    status = <span style={chipStyle("#1a1f2b")}>{(s.label || "FINAL").split(" · ")[0]}</span>;
+  } else {
+    status = (
+      <span style={{ fontWeight: 900, fontSize: "13px", color: "#1a1f2b", whiteSpace: "nowrap" }}>
+        {timeStr || "Time TBD"}
+      </span>
+    );
+  }
+
+  return (
+    <Link
+      to={scheduleGameHref(g) || "#"}
+      className={`wd-sc${s.live ? " wd-sc-live" : g.GameOfWeek ? " wd-sc-gotw" : g.Featured ? " wd-sc-featured" : ""}`}
+      style={{ pointerEvents: g.Slug ? "auto" : "none" }}
+    >
+      <div style={{ height: "6px", background: `linear-gradient(100deg, ${awayColor} 0 50%, ${homeColor} 50% 100%)` }} />
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 14px 4px", minHeight: "30px" }}>
+        {status}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "5px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {upset && <span style={chipStyle("#d62828")}>⚡ Upset</span>}
+          {g.GameOfWeek ? <span style={chipStyle("#7c3aed")}>GOTW</span>
+            : g.Featured ? <span style={chipStyle(SITE_GOLD)}>Featured</span> : null}
+          {bothRanked && !upset && <span style={chipStyle("#fff4e0", SITE_BLUE)}>🏆 Top 25 Clash</span>}
+        </div>
+      </div>
+      <div style={{ padding: "2px 0 6px" }}>
+        <ScoreTeamLine school={g.Away} data={away} score={s.away} rank={awayRank} scored={s.scored} live={s.live} won={s.awayWon} lost={s.homeWon} color={away?.Color1} />
+        <ScoreTeamLine school={g.Home} data={home} score={s.home} rank={homeRank} scored={s.scored} live={s.live} won={s.homeWon} lost={s.awayWon} color={home?.Color1} />
+      </div>
+      {(channelShort || g.Slug) && (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 14px", borderTop: "1px solid #eef1f5", background: "#fafbfd", fontSize: "11px", fontWeight: 900, color: "#8a95a5", marginTop: "auto" }}>
+          {channelShort && <span>📺 {channelShort}</span>}
+          {g.Slug && (
+            <span style={{ marginLeft: "auto", color: SITE_BLUE, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              {s.live ? "Follow Live →" : done ? "Game Recap →" : "Preview →"}
+            </span>
+          )}
+        </div>
+      )}
+    </Link>
+  );
+}
 
 export default function CFBPage() {
   // Tab lives in the URL (/cfb, /cfb/schedule[/:week], /cfb/stats[/:cat]) instead of local
@@ -207,12 +407,55 @@ export default function CFBPage() {
     });
   }, [gamesForWeek, rankedOnly, currentRankMap]);
 
+  // Upcoming / Completed sub-tab of Full Schedule, in the query string
+  // (?view=) so it's linkable. With none given it picks whichever side
+  // actually has games — a fully-played week opens straight to its scores.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewParam = searchParams.get("view");
+  const { liveGames, upcomingGames, completedGames } = useMemo(() => {
+    const live = [], upcoming = [], completed = [];
+    visibleGames.forEach((g) => {
+      const s = scheduleScore(g, liveById);
+      if (s.live) live.push({ g, s });
+      else if (s.scored) completed.push({ g, s });
+      else upcoming.push({ g, s });
+    });
+    return { liveGames: live, upcomingGames: upcoming, completedGames: completed };
+  }, [visibleGames, liveById]);
+  const scheduleView = viewParam === "completed" || viewParam === "upcoming" ? viewParam
+    : liveGames.length + upcomingGames.length === 0 && completedGames.length > 0 ? "completed" : "upcoming";
+
+  // Day-grouped sections for the active view: live games first, then
+  // upcoming days soonest-first; completed days most-recent-first.
+  const scheduleSections = useMemo(() => {
+    const byDay = (list) => {
+      const map = new Map();
+      list.forEach((entry) => {
+        const k = dayKey(entry.g);
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push(entry);
+      });
+      return Array.from(map.entries()).map(([k, games]) => ({ key: k, ...dayLabel(k), games }));
+    };
+    if (scheduleView === "completed") {
+      return byDay(completedGames).sort((a, b) => b.key.localeCompare(a.key));
+    }
+    const days = byDay(upcomingGames).sort((a, b) => a.key.localeCompare(b.key));
+    return liveGames.length ? [{ key: "live", label: "Live Now", live: true, games: liveGames }, ...days] : days;
+  }, [scheduleView, liveGames, upcomingGames, completedGames]);
+
   const grouped = conferenceOrder.reduce((acc, conf) => {
     acc[conf] = schools
       .filter((s) => s.Conference === conf)
       .sort((a, b) => a.School.localeCompare(b.School));
     return acc;
   }, {});
+
+  // Conference filter on the Teams tab, in the query string (?conf=) like
+  // the schedule's ?view= — anything unrecognized falls back to All.
+  const confParam = searchParams.get("conf");
+  const activeConf = conferenceOrder.includes(confParam) ? confParam : "All";
+  const visibleConfs = activeConf === "All" ? conferenceOrder : [activeConf];
 
   // SEO: each view's own title / description / canonical (utils/cfbSeo.js)
   // — static, so it's right from the first render, spinner included.
@@ -254,82 +497,85 @@ export default function CFBPage() {
         </h1>
       )}
       <style>{`
-        .team-card {
-          transition: box-shadow 0.18s ease;
+        /* ===== Teams grid cards ===== */
+        .wd-tc {
+          position: relative; display: flex; flex-direction: column;
+          border-radius: 12px; overflow: hidden; text-decoration: none; background: #fff;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2;
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
-        .team-card:hover {
-          /* No transform here on purpose — the old translateY/scale lift
-             visually enlarged the whole chip on hover, which is exactly
-             the "box growing" this was supposed to not do. A shadow alone
-             still reads as hover feedback without touching the box's size
-             or position. */
-          box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-          opacity: 1 !important;
+        .wd-tc:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 14px 30px rgba(0,40,90,0.18), 0 0 0 1px #d3dcea;
         }
-        /* Logo lives in its own absolutely-positioned layer, back at its
-           original resting inset (top:8px, sides:6px, bottom reserving
-           room for the name below it) — all four sides now animate
-           together toward a near-zero inset on hover, so the layer
-           actually expands to cover nearly the entire box in every
-           direction at once, not just downward. Equal insets on all sides
-           at the end of the animation keeps it symmetric. */
-        .team-logo-wrap {
-          transition: top 0.22s ease, bottom 0.22s ease, left 0.22s ease, right 0.22s ease;
+        .wd-tc-logo { transition: transform 0.22s ease; }
+        .wd-tc:hover .wd-tc-logo { transform: scale(1.16) rotate(-5deg); }
+        /* Light sweep across the color panel on hover. */
+        .wd-tc-panel::after {
+          content: ""; position: absolute; top: 0; bottom: 0; left: -60%; width: 40%;
+          background: linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%);
+          transform: skewX(-18deg); pointer-events: none;
         }
-        .team-card:hover .team-logo-wrap {
-          top: 3px;
-          bottom: 3px;
-          left: 3px;
-          right: 3px;
+        .wd-tc:hover .wd-tc-panel::after { animation: wdTcShine 0.7s ease-out; }
+        @keyframes wdTcShine {
+          from { left: -60%; }
+          to { left: 130%; }
         }
-        /* The logo itself sits at a small, fixed size at rest — the same
-           ballpark as the old fixed-px logo before this hover redesign —
-           and jumps to nearly the full size of its (also-growing) wrapper
-           on hover, so the two effects compound into a big, obvious
-           change. !important is needed here because it's overriding an
-           inline style, not another class. */
-        .team-logo {
-          transition: width 0.22s ease, height 0.22s ease;
+        .wd-conf-tab { transition: background 0.15s ease, color 0.15s ease; }
+        @media (prefers-reduced-motion: reduce) {
+          .wd-tc, .wd-tc-logo { transition: none !important; }
+          .wd-tc:hover { transform: none; }
+          .wd-tc:hover .wd-tc-panel::after { animation: none; }
         }
-        .team-card:hover .team-logo {
-          width: 100% !important;
-          height: 100% !important;
+        /* ===== Full Schedule scoreboards ===== */
+        .wd-sc {
+          position: relative; display: flex; flex-direction: column;
+          background: #fff; border-radius: 12px; overflow: hidden; text-decoration: none;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2;
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
-        /* Name + accent bar fade out together on hover instead of moving —
-           they sit in their own absolutely-positioned layer at the bottom,
-           independent of the logo layer growing underneath/behind them. */
-        .team-card-info {
-          transition: opacity 0.18s ease;
+        .wd-sc:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 14px 30px rgba(0,40,90,0.16), 0 0 0 1px #d3dcea;
         }
-        .team-card:hover .team-card-info {
-          opacity: 0;
+        .wd-sc-logo { transition: transform 0.2s ease; }
+        .wd-sc:hover .wd-sc-logo { transform: scale(1.12) rotate(-4deg); }
+        @keyframes wdScLive {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(214,40,40,0.5), 0 6px 18px rgba(214,40,40,0.14); }
+          50% { box-shadow: 0 0 0 2px rgba(214,40,40,0.95), 0 8px 26px rgba(214,40,40,0.3); }
         }
-        .team-accent {
-          transition: height 0.18s ease;
+        .wd-sc-live { animation: wdScLive 2s ease-in-out infinite; }
+        /* Same Featured gold / Game of the Week purple tiers as the game
+           page (GamePage.js), as an outer ring now that rows are cards. */
+        @keyframes wdScFeatured {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(246,162,29,0.35), 0 4px 14px rgba(246,162,29,0.1); }
+          50% { box-shadow: 0 0 0 2px rgba(246,162,29,0.8), 0 6px 20px rgba(246,162,29,0.22); }
         }
-        .wd-schedule-row {
-          transition: background 0.15s ease;
+        .wd-sc-featured { animation: wdScFeatured 2.2s ease-in-out infinite; }
+        @keyframes wdScGotw {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(124,58,237,0.35), 0 4px 14px rgba(124,58,237,0.1); }
+          50% { box-shadow: 0 0 0 2px rgba(124,58,237,0.75), 0 6px 22px rgba(124,58,237,0.22); }
         }
-        .wd-schedule-row:hover {
-          background: #f7f9fc !important;
+        .wd-sc-gotw { animation: wdScGotw 3.4s ease-in-out infinite; }
+        @keyframes wdLiveDot {
+          0% { box-shadow: 0 0 0 0 rgba(214,40,40,0.6); }
+          100% { box-shadow: 0 0 0 7px rgba(214,40,40,0); }
         }
-        @keyframes wdFeaturedRowGlow {
-          0%, 100% { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.35); }
-          50% { box-shadow: inset 0 0 0 2px rgba(246,162,29,0.75); }
+        .wd-live-dot {
+          width: 8px; height: 8px; border-radius: 50%; background: #d62828;
+          display: inline-block; flex-shrink: 0; animation: wdLiveDot 1.4s ease-out infinite;
         }
-        .wd-schedule-row-featured {
-          animation: wdFeaturedRowGlow 2.2s ease-in-out infinite;
+        /* Keyed on the score itself, so it replays every time a live
+           score changes. */
+        @keyframes wdScorePop {
+          0% { transform: scale(1.4); color: #d62828; }
+          100% { transform: scale(1); }
         }
-        /* Game of the Week — same higher tier as the individual game page's
-           ribbon (GamePage.js), shown instead of the Featured glow rather
-           than alongside it. Slower/calmer than an early GamePage.js pass
-           at this same fire-toned glow, which read as too frantic there. */
-        @keyframes wdGotwRowGlow {
-          0%, 100% { box-shadow: inset 0 0 0 2px rgba(124,58,237,0.35); }
-          50% { box-shadow: inset 0 0 0 2px rgba(124,58,237,0.7); }
-        }
-        .wd-schedule-row-gotw {
-          animation: wdGotwRowGlow 3.4s ease-in-out infinite;
+        .wd-score-pop { display: inline-block; animation: wdScorePop 0.6s ease-out; }
+        .wd-view-tab { transition: background 0.15s ease, color 0.15s ease; }
+        @media (prefers-reduced-motion: reduce) {
+          .wd-sc, .wd-sc-logo, .wd-live-dot, .wd-score-pop { animation: none !important; transition: none !important; }
+          .wd-sc:hover { transform: none; }
         }
       `}</style>
       {/* ===== Page Header ===== */}
@@ -385,165 +631,84 @@ export default function CFBPage() {
         ))}
       </div>
 
-      {/* ===== Conference Sections ===== */}
-      {activeTab === "teams" && conferenceOrder.map((conf) => {
-        const teams = grouped[conf];
-        if (!teams || teams.length === 0) return null;
-
-        return (
-          <div key={conf} style={{ marginBottom: isMobile ? "28px" : "40px" }}>
-
-            {/* Conference header */}
-            <div style={{ marginBottom: isMobile ? "10px" : "14px" }}>
-              <div
+      {/* ===== Conference filter ===== */}
+      {activeTab === "teams" && (
+        <div
+          role="tablist"
+          style={{
+            display: "flex", flexWrap: "wrap", padding: "4px", gap: "4px", marginBottom: isMobile ? "20px" : "28px",
+            background: "#eef3f9", borderRadius: "12px",
+          }}
+        >
+          {["All", ...conferenceOrder.filter((c) => grouped[c]?.length)].map((c) => {
+            const on = activeConf === c;
+            const count = c === "All" ? schools.length : grouped[c].length;
+            return (
+              <button
+                key={c}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                className="wd-conf-tab"
+                onClick={() => setSearchParams(c === "All" ? {} : { conf: c }, { replace: true })}
                 style={{
-                  fontSize: isMobile ? "16px" : "20px",
-                  fontWeight: 900,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  color: SITE_BLUE,
-                  marginBottom: "5px",
+                  display: "inline-flex", alignItems: "center", gap: "6px",
+                  padding: isMobile ? "7px 10px" : "8px 14px", border: "none", borderRadius: "9px", cursor: "pointer",
+                  fontWeight: 900, fontSize: isMobile ? "11px" : "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+                  background: on ? SITE_BLUE : "transparent", color: on ? "#fff" : SITE_BLUE,
+                  boxShadow: on ? "0 3px 10px rgba(0,85,165,0.3)" : "none", whiteSpace: "nowrap",
                 }}
               >
+                {c}
+                <span style={{
+                  padding: "1px 6px", borderRadius: "20px", fontSize: "10px",
+                  background: on ? SITE_GOLD : "#fff", color: on ? "#fff" : SITE_BLUE,
+                }}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ===== Conference Sections ===== */}
+      {activeTab === "teams" && visibleConfs.map((conf) => {
+        const teams = grouped[conf];
+        if (!teams || teams.length === 0) return null;
+        const rankedCount = teams.filter((t) => currentRankMap[t.School]).length;
+
+        return (
+          <section key={conf} style={{ marginBottom: isMobile ? "26px" : "36px" }}>
+            {/* Conference header — same look as the schedule's day headers */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: isMobile ? "10px" : "14px" }}>
+              <div style={{
+                fontWeight: 900, fontSize: isMobile ? "16px" : "20px", textTransform: "uppercase", letterSpacing: "0.08em",
+                color: SITE_BLUE, whiteSpace: "nowrap",
+              }}>
                 {conf}
               </div>
-              <div
-                style={{
-                  height: "3px",
-                  backgroundColor: SITE_BLUE,
-                  borderRadius: "2px",
-                }}
-              />
+              {rankedCount > 0 && (
+                <span style={chipStyle("#fff4e0", SITE_BLUE)}>🏆 {rankedCount} Ranked</span>
+              )}
+              <div style={{ flex: 1, height: "2px", background: `linear-gradient(to right, ${SITE_GOLD}, rgba(246,162,29,0))` }} />
+              <div style={{ fontSize: "11px", fontWeight: 900, color: "#9aa5b4", whiteSpace: "nowrap" }}>
+                {teams.length} Team{teams.length !== 1 ? "s" : ""}
+              </div>
             </div>
 
-            {/* Teams grid */}
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: isMobile
-                  ? "repeat(3, 1fr)"
-                  : "repeat(auto-fill, minmax(140px, 1fr))",
-                gap: isMobile ? "8px" : "12px",
+                gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(auto-fill, minmax(150px, 1fr))",
+                gap: isMobile ? "10px" : "14px",
               }}
             >
-              {teams.map((team) => {
-                const slug = team.Slug;
-
-                const primary = team.Color1 || SITE_BLUE;
-                const secondary = team.Color2 || SITE_GOLD;
-
-                const logoSrc = team.LogoDark || team.Logo1 || "";
-
-                return (
-                  <Link
-                    key={team.id}
-                    to={`/team/${slug}`}
-                    className="team-card"
-                    style={{
-                      position: "relative",
-                      // Fixed height (not content-sized) so the hover
-                      // animation below — the logo layer growing as the
-                      // name/accent layer fades — never changes the chip's
-                      // own footprint in the grid.
-                      height: isMobile ? "84px" : "104px",
-                      borderRadius: "8px",
-                      backgroundColor: primary,
-                      border: `2px solid ${secondary}`,
-                      textDecoration: "none",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {/* Logo layer, resting in its original spot (top:8px,
-                        sides:6px, bottom reserving room for the name below
-                        it). On hover all four sides animate toward a near-
-                        zero inset (see .team-logo-wrap above), expanding
-                        this layer — and the logo filling it — to cover
-                        nearly the entire box. Dark variant preferred now
-                        that the chip's own background is the team's color
-                        instead of white, same convention used everywhere
-                        else colored backgrounds sit behind a logo. */}
-                    <div
-                      className="team-logo-wrap"
-                      style={{
-                        position: "absolute", left: "6px", right: "6px", top: "8px",
-                        bottom: isMobile ? "26px" : "32px",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}
-                    >
-                      {logoSrc ? (
-                        <img
-                          src={logoSrc}
-                          alt={team.School}
-                          className="team-logo"
-                          style={{
-                            width: isMobile ? "36px" : "48px",
-                            height: isMobile ? "36px" : "48px",
-                            objectFit: "contain",
-                            filter: "drop-shadow(0 2px 5px rgba(0,0,0,0.35))",
-                          }}
-                          loading="lazy"
-                          onError={(e) => { e.currentTarget.style.display = "none"; }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: isMobile ? "36px" : "48px",
-                            height: isMobile ? "36px" : "48px",
-                            borderRadius: "50%",
-                            backgroundColor: "#fff",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: primary,
-                            fontSize: isMobile ? "10px" : "12px",
-                            fontWeight: 900,
-                          }}
-                        >
-                          {team.School.charAt(0)}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Name + accent bar layer — fades out on hover (see
-                        .team-card:hover .team-card-info) instead of moving,
-                        independent of the logo layer growing behind it. */}
-                    <div
-                      className="team-card-info"
-                      style={{
-                        position: "absolute", left: 0, right: 0, bottom: 0,
-                        padding: isMobile ? "0 6px 8px" : "0 10px 10px",
-                        display: "flex", flexDirection: "column", alignItems: "center",
-                        gap: isMobile ? "4px" : "6px", textAlign: "center",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: isMobile ? "10px" : "12px",
-                          fontWeight: 900,
-                          color: "#fff",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.04em",
-                          lineHeight: 1.2,
-                          textShadow: "0 1px 3px rgba(0,0,0,0.35)",
-                        }}
-                      >
-                        {team.School}
-                      </div>
-                      <div
-                        className="team-accent"
-                        style={{
-                          width: "100%",
-                          height: "3px",
-                          backgroundColor: secondary,
-                          borderRadius: "2px",
-                        }}
-                      />
-                    </div>
-                  </Link>
-                );
-              })}
+              {teams.map((team) => (
+                <TeamCard key={team.id} team={team} rank={currentRankMap[team.School]} isMobile={isMobile} />
+              ))}
             </div>
-          </div>
+          </section>
         );
       })}
 
@@ -591,118 +756,98 @@ export default function CFBPage() {
                 </button>
               </div>
 
-              {visibleGames.length === 0 ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>
-                  {rankedOnly ? `No ranked-team games found for ${selectedWeek}.` : `No games found for ${selectedWeek}.`}
+              {/* Upcoming / Completed toggle — live games count as upcoming
+                  (they're not done yet) and lead that tab. */}
+              <div
+                role="tablist"
+                style={{
+                  display: "inline-flex", padding: "4px", gap: "4px", marginBottom: "18px",
+                  background: "#eef3f9", borderRadius: "12px", maxWidth: "100%",
+                }}
+              >
+                {[
+                  { key: "upcoming", label: "Upcoming", count: liveGames.length + upcomingGames.length },
+                  { key: "completed", label: "Completed", count: completedGames.length },
+                ].map((t) => {
+                  const on = scheduleView === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={on}
+                      className="wd-view-tab"
+                      onClick={() => setSearchParams({ view: t.key }, { replace: true })}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "8px",
+                        padding: isMobile ? "9px 14px" : "10px 20px", border: "none", borderRadius: "9px", cursor: "pointer",
+                        fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
+                        background: on ? SITE_BLUE : "transparent", color: on ? "#fff" : SITE_BLUE,
+                        boxShadow: on ? "0 3px 10px rgba(0,85,165,0.3)" : "none",
+                      }}
+                    >
+                      {t.key === "upcoming" && liveGames.length > 0 && <span className="wd-live-dot" />}
+                      {t.label}
+                      <span style={{
+                        minWidth: "22px", padding: "2px 7px", borderRadius: "20px", fontSize: "11px",
+                        background: on ? SITE_GOLD : "#fff", color: on ? "#fff" : SITE_BLUE,
+                      }}>
+                        {t.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {scheduleSections.length === 0 ? (
+                <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px", background: "#f7f9fc", borderRadius: "12px" }}>
+                  {scheduleView === "completed"
+                    ? `No completed ${rankedOnly ? "ranked-team " : ""}games yet for ${selectedWeek}.`
+                    : `No upcoming ${rankedOnly ? "ranked-team " : ""}games left in ${selectedWeek}.`}
                 </div>
               ) : (
-                <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-                  <div style={{ background: SITE_BLUE, padding: "10px 16px" }}>
-                    <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                      {selectedWeek} · {visibleGames.length} Game{visibleGames.length !== 1 ? "s" : ""}{rankedOnly ? " (Ranked)" : ""}
-                    </div>
-                  </div>
-                  <div style={{ height: "3px", background: SITE_GOLD }} />
-                  {visibleGames.map((g, i) => {
-                    const d = g.Date?.toDate?.();
-                    const timeStr = formatTime12h(g.Time);
-                    // Admin final if set, else the live score (if any).
-                    const s = scheduleScore(g, liveById);
-                    const played = s.scored;
-                    const away = schoolsByName[g.Away];
-                    const home = schoolsByName[g.Home];
-                    const awayWon = s.awayWon;
-                    const homeWon = s.homeWon;
-
-                    const awayColor = away?.Color1 || "#ccc";
-                    const homeColor = home?.Color1 || "#ccc";
-                    const { homeRank, awayRank } = ranksForGame(g, currentRankMap);
-                    const channelShort = g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : "";
-
-                    const TeamRow = ({ school, data, score, won, rank }) => (
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        {data?.Logo1 ? (
-                          <img src={data.Logo1} alt="" style={{ width: "36px", height: "36px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                        ) : (
-                          <div style={{ width: "36px", height: "36px", flexShrink: 0, borderRadius: "6px", background: "#eee", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa", fontSize: "13px", fontWeight: 900 }}>
-                            {(school || "?").charAt(0)}
-                          </div>
-                        )}
-                        <span style={{ fontWeight: 900, fontSize: "15px", color: played && !s.live ? (won ? "#222" : "#999") : "#222" }}>
-                          {rank && <span style={{ color: "#aaa" }}>#{rank} </span>}
-                          {school}
-                        </span>
-                        {played && (
-                          <span style={{ marginLeft: "auto", fontWeight: 900, fontSize: "18px", color: s.live ? "#222" : won ? SITE_BLUE : "#bbb", fontVariantNumeric: "tabular-nums" }}>{score}</span>
-                        )}
+                scheduleSections.map((sec) => (
+                  <section key={sec.key} style={{ marginBottom: isMobile ? "22px" : "30px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                      {sec.live && <span className="wd-live-dot" />}
+                      <div style={{
+                        fontWeight: 900, fontSize: isMobile ? "14px" : "16px", textTransform: "uppercase", letterSpacing: "0.08em",
+                        color: sec.live ? "#d62828" : SITE_BLUE, whiteSpace: "nowrap",
+                      }}>
+                        {sec.label}
                       </div>
-                    );
-
-                    return (
-                      <Link
-                        key={g.id}
-                        to={scheduleGameHref(g) || "#"}
-                        className={`wd-schedule-row${g.GameOfWeek ? " wd-schedule-row-gotw" : g.Featured ? " wd-schedule-row-featured" : ""}`}
-                        style={{
-                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px",
-                          padding: "14px 16px 14px 20px", textDecoration: "none",
-                          // A thin two-tone sliver (away color on top, home
-                          // color on bottom) at the row's left edge — the same
-                          // team-color association the game page's hero makes,
-                          // just compressed down to a 4px accent instead of a
-                          // full banner.
-                          background: `linear-gradient(to bottom, ${awayColor} 50%, ${homeColor} 50%) left / 4px 100% no-repeat, #fff`,
-                          borderBottom: i < visibleGames.length - 1 ? "1px solid #f0f0f0" : "none",
-                          pointerEvents: g.Slug ? "auto" : "none",
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
-                          <TeamRow school={g.Away} data={away} score={s.away} won={awayWon} rank={awayRank} />
-                          <TeamRow school={g.Home} data={home} score={s.home} won={homeWon} rank={homeRank} />
-                        </div>
-                        <div style={{ fontSize: "12px", fontWeight: 700, color: "#aaa", flexShrink: 0, textAlign: "right" }}>
-                          {g.GameOfWeek ? (
-                            <span style={{
-                              display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
-                              background: "#7c3aed", color: "#fff",
-                              fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
-                              textTransform: "uppercase", letterSpacing: "0.05em",
-                            }}>
-                              GOTW
-                            </span>
-                          ) : g.Featured && (
-                            <span style={{
-                              display: "inline-flex", alignItems: "center", gap: "3px", marginBottom: "5px",
-                              background: "#f6a21d", color: "#fff",
-                              fontWeight: 900, fontSize: "10px", padding: "3px 9px", borderRadius: "20px",
-                              textTransform: "uppercase", letterSpacing: "0.05em",
-                            }}>
-                              Featured
-                            </span>
-                          )}
-                          {s.live || s.liveFinal ? (
-                            // Live: quarter + clock in red; provider-final
-                            // (not yet admin-finalized): FINAL.
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px", fontSize: "15px", fontWeight: 900, color: s.live ? "#d62828" : "#555", lineHeight: 1.25, fontVariantNumeric: "tabular-nums" }}>
-                              {s.live && <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#d62828", display: "inline-block" }} />}
-                              {s.label}
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: "16px", fontWeight: 900, color: "#555", lineHeight: 1.25 }}>
-                              {d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : "TBD"}
-                              {timeStr && <div>{timeStr}</div>}
-                            </div>
-                          )}
-                          {channelShort && (
-                            <div style={{ fontSize: "11px", fontWeight: 700, color: "#bbb", marginTop: "3px" }}>
-                              📺 {channelShort}
-                            </div>
-                          )}
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
+                      {sec.tag && (
+                        <span style={{ background: SITE_GOLD, color: "#fff", fontWeight: 900, fontSize: "10px", padding: "3px 8px", borderRadius: "20px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                          {sec.tag}
+                        </span>
+                      )}
+                      <div style={{ flex: 1, height: "2px", background: sec.live ? "rgba(214,40,40,0.25)" : `linear-gradient(to right, ${SITE_GOLD}, rgba(246,162,29,0))` }} />
+                      <div style={{ fontSize: "11px", fontWeight: 900, color: "#9aa5b4", whiteSpace: "nowrap" }}>
+                        {sec.games.length} Game{sec.games.length !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    <div style={{
+                      display: "grid", gap: isMobile ? "12px" : "16px",
+                      gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))",
+                    }}>
+                      {sec.games.map(({ g, s }) => {
+                        const { homeRank, awayRank } = ranksForGame(g, currentRankMap);
+                        return (
+                          <ScoreCard
+                            key={g.id}
+                            g={g}
+                            s={s}
+                            away={schoolsByName[g.Away]}
+                            home={schoolsByName[g.Home]}
+                            awayRank={awayRank}
+                            homeRank={homeRank}
+                            channelShort={g.Channel ? (channelsByName[g.Channel]?.Short || g.Channel) : ""}
+                          />
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))
               )}
             </>
           )}
