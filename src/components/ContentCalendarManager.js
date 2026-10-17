@@ -27,6 +27,10 @@
 //     read-only/not draggable/no note here — moving when a video or
 //     article actually goes live (or annotating it) is the Videos/Articles
 //     tabs' own job, not this calendar's.
+//   - Video concepts (Videos → Video Creation → Concepts, VideoConcepts.js)
+//     with a date — dotted border + 💡. Draggable like manual plans (a drop
+//     rewrites that videoConcepts doc's own `date`); editing anything else
+//     about them is the Concepts tab's job.
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
@@ -224,6 +228,7 @@ export default function ContentCalendarManager() {
   // each becomes a display entry.
   const [videos, setVideos] = useState([]);
   const [articles, setArticles] = useState([]);
+  const [concepts, setConcepts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dragMessage, setDragMessage] = useState("");
 
@@ -255,13 +260,16 @@ export default function ContentCalendarManager() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [playerSnap, recruitSnap, teamSnap, calSnap, videoSnap, articleSnap] = await Promise.all([
+        const [playerSnap, recruitSnap, teamSnap, calSnap, videoSnap, articleSnap, conceptSnap] = await Promise.all([
           getDocs(collection(db, "players")),
           getDocs(collection(db, "recruits")),
           getDocs(collection(db, "schools")),
           getDocs(query(collection(db, "contentCalendar"))),
           getDocs(collection(db, "videos")),
           getDocs(collection(db, "articles")),
+          // Concepts are a nice-to-have here — a failed read shouldn't
+          // blank the whole calendar.
+          getDocs(collection(db, "videoConcepts")).catch((e) => { console.error("Calendar concepts fetch error:", e); return { docs: [] }; }),
         ]);
         setPlayers(playerSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setRecruits(recruitSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -269,6 +277,7 @@ export default function ContentCalendarManager() {
         setEntries(calSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setVideos(videoSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setArticles(articleSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setConcepts(conceptSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       } catch (e) {
         console.error("Content calendar fetch error:", e);
       } finally {
@@ -334,6 +343,22 @@ export default function ContentCalendarManager() {
     }).filter(Boolean);
   }, [articles, playersById]);
 
+  // Dated video concepts (VideoConcepts.js) — the concept's own title, or
+  // its one player's name when it has no title yet.
+  const conceptEntries = useMemo(() => {
+    return concepts.map((c) => {
+      if (c.kind !== "video") return null;
+      const dateKey = dateKeyFromTimestamp(c.date);
+      if (!dateKey) return null;
+      let subjectLabel = c.title || "";
+      if (!subjectLabel && (c.playerIds || []).length === 1) {
+        const person = playersById.get(c.playerIds[0]);
+        if (person) subjectLabel = `${person.First || ""} ${person.Last || ""}`.trim();
+      }
+      return { id: `concept:${c.id}`, refId: c.id, source: "concept", type: "video", subjectLabel: subjectLabel || "Concept", dateKey, raw: c };
+    }).filter(Boolean);
+  }, [concepts, playersById]);
+
   // Every chip the grid actually renders — manual plans plus the pulled-in
   // real content above, merged into one shape so the grid/drag-drop code
   // below doesn't need to special-case where an entry came from. `raw`
@@ -343,8 +368,8 @@ export default function ContentCalendarManager() {
       id: `manual:${e.id}`, refId: e.id, source: "manual", type: e.type,
       subjectLabel: e.subjectLabel, dateKey: dateKeyFromTimestamp(e.date), raw: e,
     }));
-    return [...manual, ...videoEntries, ...articleEntries];
-  }, [entries, videoEntries, articleEntries]);
+    return [...manual, ...conceptEntries, ...videoEntries, ...articleEntries];
+  }, [entries, conceptEntries, videoEntries, articleEntries]);
 
   // Grouped by "YYYY-MM-DD" for O(1) lookup per grid cell, rather than
   // filtering the whole displayEntries array once per day rendered.
@@ -363,14 +388,21 @@ export default function ContentCalendarManager() {
   // for the other two). Each draggable chip stashes its own doc id via the
   // native HTML5 drag payload (dataTransfer); a day cell's onDrop reads it
   // back and rewrites that contentCalendar doc's own `date` field.
-  const handleDropOnDate = async (refId, cellDate, currentKey) => {
+  // Concept chips drag too — same payload plus source, writing
+  // videoConcepts/{id}.date instead.
+  const handleDropOnDate = async (refId, cellDate, currentKey, source) => {
     const y = cellDate.getUTCFullYear(), m = cellDate.getUTCMonth(), d = cellDate.getUTCDate();
     const targetKey = dateKeyUTC(y, m, d);
     if (targetKey === currentKey) return; // dropped back on its own day — nothing to do
     try {
       const newDate = new Date(Date.UTC(y, m, d));
-      await updateDoc(doc(db, "contentCalendar", refId), { date: newDate });
-      setEntries((prev) => prev.map((e) => (e.id === refId ? { ...e, date: newDate } : e)));
+      if (source === "concept") {
+        await updateDoc(doc(db, "videoConcepts", refId), { date: newDate, updatedAt: serverTimestamp() });
+        setConcepts((prev) => prev.map((c) => (c.id === refId ? { ...c, date: newDate } : c)));
+      } else {
+        await updateDoc(doc(db, "contentCalendar", refId), { date: newDate });
+        setEntries((prev) => prev.map((e) => (e.id === refId ? { ...e, date: newDate } : e)));
+      }
       setDragMessage("Moved.");
     } catch (e) {
       console.error("Content calendar reschedule error:", e);
@@ -565,6 +597,10 @@ export default function ContentCalendarManager() {
             <span style={{ width: "9px", height: "9px", borderRadius: "3px", background: "#888", border: "1px dashed #666", display: "inline-block" }} />
             <span style={{ fontSize: "10px", fontWeight: 700, color: "#888" }}>🔗 Pulled from feed</span>
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+            <span style={{ width: "9px", height: "9px", borderRadius: "3px", background: "#888", border: "1px dotted #666", display: "inline-block" }} />
+            <span style={{ fontSize: "10px", fontWeight: 700, color: "#888" }}>💡 Video concept</span>
+          </div>
           <span style={{ fontSize: "10px", fontWeight: 700, color: "#bbb", fontStyle: "italic", marginLeft: "auto" }}>
             Drag a planned entry to a different day to reschedule it
           </span>
@@ -595,8 +631,8 @@ export default function ContentCalendarManager() {
                   const raw = e.dataTransfer.getData("text/plain");
                   if (!raw) return;
                   try {
-                    const { refId, dateKey } = JSON.parse(raw);
-                    handleDropOnDate(refId, cell.cellDate, dateKey);
+                    const { refId, dateKey, source } = JSON.parse(raw);
+                    handleDropOnDate(refId, cell.cellDate, dateKey, source);
                   } catch { /* malformed payload — ignore */ }
                 }}
                 style={{
@@ -646,17 +682,19 @@ export default function ContentCalendarManager() {
                   {dayEntries.map((entry) => {
                     const style = CONTENT_TYPE_BY_KEY[entry.type] || CONTENT_TYPES[0];
                     const isManual = entry.source === "manual";
-                    const note = isManual ? entry.raw?.note : "";
-                    const tooltip = [`${style.label} — ${entry.subjectLabel}`, isManual ? "Added manually" : "Pulled from its own feed"];
+                    const isConcept = entry.source === "concept";
+                    const draggable = isManual || isConcept;
+                    const note = isManual ? entry.raw?.note : isConcept ? entry.raw?.notes : "";
+                    const tooltip = [`${style.label} — ${entry.subjectLabel}`, isManual ? "Added manually" : isConcept ? "Video concept (edit in Videos → Concepts)" : "Pulled from its own feed"];
                     if (note) tooltip.push(note);
                     return (
                       <div
                         key={entry.id}
-                        draggable={isManual}
-                        onDragStart={isManual ? (e) => {
+                        draggable={draggable}
+                        onDragStart={draggable ? (e) => {
                           e.stopPropagation();
                           e.dataTransfer.effectAllowed = "move";
-                          e.dataTransfer.setData("text/plain", JSON.stringify({ refId: entry.refId, dateKey: entry.dateKey }));
+                          e.dataTransfer.setData("text/plain", JSON.stringify({ refId: entry.refId, dateKey: entry.dateKey, source: entry.source }));
                         } : undefined}
                         onClick={(e) => { e.stopPropagation(); if (isManual) selectEntry(entry.raw); }}
                         title={tooltip.join(" — ")}
@@ -665,12 +703,12 @@ export default function ContentCalendarManager() {
                           width: "100%", minWidth: 0, boxSizing: "border-box",
                           background: style.color, color: "#fff", borderRadius: "4px",
                           padding: "2px 6px", fontSize: "10px", fontWeight: 800,
-                          cursor: isManual ? "grab" : "default",
+                          cursor: draggable ? "grab" : "default",
                           // Solid border = added manually here; dashed,
                           // slightly faded = pulled in from the Videos/
                           // Articles feed on its own — see the legend above.
-                          border: isManual ? "1px solid rgba(255,255,255,0.4)" : "1px dashed rgba(255,255,255,0.55)",
-                          opacity: isManual ? 1 : 0.82,
+                          border: isManual ? "1px solid rgba(255,255,255,0.4)" : isConcept ? "1px dotted rgba(255,255,255,0.9)" : "1px dashed rgba(255,255,255,0.55)",
+                          opacity: draggable ? 1 : 0.82,
                         }}
                       >
                         <span style={{ flexShrink: 0 }}>{style.icon}</span>
@@ -678,7 +716,8 @@ export default function ContentCalendarManager() {
                           {truncateLabel(entry.subjectLabel)}
                         </span>
                         {note && <span style={{ flexShrink: 0 }} title="Has a note">📝</span>}
-                        {!isManual && <span style={{ flexShrink: 0, opacity: 0.85 }} title="Pulled from its own feed">🔗</span>}
+                        {isConcept && <span style={{ flexShrink: 0 }} title="Video concept">💡</span>}
+                        {!isManual && !isConcept && <span style={{ flexShrink: 0, opacity: 0.85 }} title="Pulled from its own feed">🔗</span>}
                       </div>
                     );
                   })}

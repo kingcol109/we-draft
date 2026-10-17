@@ -113,14 +113,12 @@ function fitHeadline(text, g) {
   return { text: t, size: t.length > 30 ? " xs" : t.length > 22 ? " sm" : "" };
 }
 
-// pc: one color for both rows (gameday previews: the home team's) — then
-// the away logo is on another team's color and takes its dark-background
-// version, the home logo its own-color one.
-function BugTeam({ g, side, live, lose, win, scored, pc = null }) {
+// Each row in its own team's color, previews included.
+function BugTeam({ g, side, live, lose, win, scored }) {
   const t = g[side] || {};
   return (
-    <div className={`nr-team${lose ? " lose" : ""}${win ? " win" : ""}${scored ? " hot" : ""}`} style={{ "--pc": pc || panelColor(t) }}>
-      <Logo team={t} className="nr-logo" onColor={!pc || side === "home"} />
+    <div className={`nr-team${lose ? " lose" : ""}${win ? " win" : ""}${scored ? " hot" : ""}`} style={{ "--pc": panelColor(t) }}>
+      <Logo team={t} className="nr-logo" onColor />
       <div className="nr-name">
         {t.rank ? <span className="rank bc-disp">#{t.rank}</span> : null}
         <span className="school bc-disp bc-ell">{teamShort(t) || teamName(t)}</span>
@@ -134,7 +132,7 @@ function BugTeam({ g, side, live, lose, win, scored, pc = null }) {
   );
 }
 
-function Bug({ card, hot, now, roll = "", gameday = false }) {
+function Bug({ card, hot, now, roll = "" }) {
   const { game: g, kind } = card;
   const live = kind === "live";
   const hp = g.home?.points ?? 0;
@@ -147,12 +145,10 @@ function Bug({ card, hot, now, roll = "", gameday = false }) {
   const down = off && /^[1-4](st|nd|rd|th) & ([1-9]\d?|goal)\b/i.test(g.situation || "") ? g.situation : null;
   const tv = channel(g);
   const status = kind === "upcoming" ? `Kickoff ${label}` : label;
-  // Gameday previews: the whole chip in the home team's color.
-  const pc = gameday && kind === "upcoming" ? panelColor(g.home) : null;
   return (
     <div className={`nr-bug ${kind}${card.close ? " close" : ""}${hot ? " hot" : ""}${roll}`}>
-      <BugTeam g={g} side="away" live={live} lose={lose === "away"} win={lose === "home"} scored={hot?.side === "away"} pc={pc} />
-      <BugTeam g={g} side="home" live={live} lose={lose === "home"} win={lose === "away"} scored={hot?.side === "home"} pc={pc} />
+      <BugTeam g={g} side="away" live={live} lose={lose === "away"} win={lose === "home"} scored={hot?.side === "away"} />
+      <BugTeam g={g} side="home" live={live} lose={lose === "home"} win={lose === "away"} scored={hot?.side === "home"} />
       <div className="nr-foot">
         <span className={`st${live ? " on" : ""}`}>{status}</span>
         {tv && <span className="ch">{tv}</span>}
@@ -168,7 +164,7 @@ function Bug({ card, hot, now, roll = "", gameday = false }) {
 // scoreboard drum turning over. Close games hold their slots, so they
 // never move.
 const ROLL_MS = 1400; // the last slot's roll, its stagger included
-function Slot({ card, hot, now, i, gameday }) {
+function Slot({ card, hot, now, i }) {
   const key = card ? String(card.game.id) : "empty";
   // out: the face rolling away ({ card } — card null for an empty slot)
   const [roll, setRoll] = useState({ key, out: null, n: 0 });
@@ -180,7 +176,7 @@ function Slot({ card, hot, now, i, gameday }) {
     const t = setTimeout(() => setRoll((r) => ({ ...r, out: null })), ROLL_MS);
     return () => clearTimeout(t);
   }, [roll.n]); // eslint-disable-line react-hooks/exhaustive-deps
-  const face = (c, cls, h) => (c ? <Bug card={c} hot={h} now={now} roll={cls} gameday={gameday} />
+  const face = (c, cls, h) => (c ? <Bug card={c} hot={h} now={now} roll={cls} />
     : <div className={`nr-bug empty${cls}`}><img src={WD_ICON} alt="" /></div>);
   return (
     <div className="nr-slot" style={{ "--i": i }}>
@@ -197,7 +193,7 @@ function Rail({ s }) {
     <div className={`nr-rail${s.gameday ? " gd" : ""}`}>
       {Array.from({ length: NATIONAL_PER_PAGE }, (_, k) => {
         const c = cards[k] || null;
-        return <Slot key={k} card={c} hot={c ? s.hot.get(String(c.game.id)) : null} now={s.now} i={k} gameday={s.gameday} />;
+        return <Slot key={k} card={c} hot={c ? s.hot.get(String(c.game.id)) : null} now={s.now} i={k} />;
       })}
     </div>
   );

@@ -14,6 +14,8 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import VideoSuggester from "../components/VideoSuggester";
 import TrendSuggester from "../components/TrendSuggester";
 import VideoWorkshop, { addWorkshopIdea } from "../components/VideoWorkshop";
+import VideoConcepts from "../components/VideoConcepts";
+import DraftOrderEditor from "../components/DraftOrderEditor";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminStreamManager from "../components/AdminStreamManager";
@@ -267,6 +269,7 @@ const PLAYER_GROUPS = [
       { key: "comps", label: "Comps" },
       { key: "traits", label: "Traits" },
       { key: "trends", label: "Trends" },
+      { key: "draftOrder", label: "Draft Order" },
       { key: "dummy", label: "Dummy Content" },
     ],
   },
@@ -1358,6 +1361,8 @@ function PlayerDataSection() {
         <TraitsSection />
       ) : playerDataTab === "trends" ? (
         <TrendsSection />
+      ) : playerDataTab === "draftOrder" ? (
+        <DraftOrderEditor />
       ) : playerDataTab === "dummy" ? (
         <DummySection />
       ) : (
@@ -7504,6 +7509,7 @@ const VIDEO_GROUPS = [
     key: "create", label: "Video Creation", tabs: [
       { key: "suggest", label: "Suggest Video" },
       { key: "workshop", label: "Video Workshop" },
+      { key: "concepts", label: "Concepts" },
     ],
   },
 ];
@@ -7533,7 +7539,8 @@ function VideosSection() {
   const [saveMessage, setSaveMessage] = useState("");
   const [migrating, setMigrating] = useState(false);
   const [migrateMessage, setMigrateMessage] = useState("");
-  // VIDEO_GROUPS tab: "manage" (the list + editor), "suggest", "workshop".
+  // VIDEO_GROUPS tab: "manage" (the list + editor), "suggest", "workshop",
+  // "concepts".
   const [videoTab, setVideoTab] = useState("manage");
   // The workshop idea to open (just added from Suggest Video).
   const [workshopFocus, setWorkshopFocus] = useState(null);
@@ -7692,6 +7699,27 @@ function VideosSection() {
       GenThumb: "",
       PublishAt: "",
       items: [{ ...BLANK_VIDEO_ITEM, playerId: player.id }, { ...BLANK_VIDEO_ITEM }, { ...BLANK_VIDEO_ITEM }],
+    });
+    setSaveMessage("");
+    setVideoTab("manage");
+  };
+
+  // Concepts' "Create Video" — up to three of the concept's players tagged,
+  // its title, and its date (today if it has none).
+  const startConceptVideo = ({ playerIds, title, date }) => {
+    const ids = (playerIds || []).filter((id) => playersById.has(id)).slice(0, 3);
+    setFormatFilter("videos");
+    setSelectedVideo({ id: null, isNew: true });
+    setFormState({
+      Video: "",
+      Date: date || toDateInputValue(new Date()),
+      Short: false,
+      Tags: ["CFB"],
+      GameSlug: "",
+      GenTitle: title || "",
+      GenThumb: "",
+      PublishAt: "",
+      items: [0, 1, 2].map((i) => ({ ...BLANK_VIDEO_ITEM, playerId: ids[i] || "" })),
     });
     setSaveMessage("");
     setVideoTab("manage");
@@ -7975,6 +8003,7 @@ function VideosSection() {
       />
     )}
     {videoTab === "workshop" && <VideoWorkshop players={allPlayers} focusId={workshopFocus} onCreateVideo={startSuggestedVideo} />}
+    {videoTab === "concepts" && <VideoConcepts players={allPlayers} onCreateVideo={startConceptVideo} />}
     {videoTab === "manage" && (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>

@@ -260,8 +260,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     match /draftOrder/{pick} { allow read, write: if true; }
-    match /draftOrder2027/{pick} { allow read, write: if true; }
-    match /draftOrder2028/{pick} { allow read, write: if true; }
+    // Projected orders — edited in Admin → Players → Content → Draft Order
+    // (components/DraftOrderEditor.js); Create Mock reads them.
+    match /draftOrder2027/{pick} { allow read: if true; allow write: if isAdmin(); }
+    match /draftOrder2028/{pick} { allow read: if true; allow write: if isAdmin(); }
     match /historical/{doc} { allow read, write: if true; }
     // Precomputed per-position comparison data (one doc per position +
     // _meta) — read by the public Comparison.js page, rebuilt from the
@@ -347,6 +349,12 @@ service cloud.firestore {
     // Workshop, components/VideoWorkshop.js) — admin-only; kept talking
     // points can include PFF data.
     match /videoWorkshop/{id} {
+      allow read, write: if isAdmin();
+    }
+    // Video concepts and series (Admin → Videos → Video Creation → Concepts,
+    // components/VideoConcepts.js) — admin-only planning; dated video
+    // concepts also show on the admin Content Calendar.
+    match /videoConcepts/{id} {
       allow read, write: if isAdmin();
     }
     // Team trivia (admin Branding > Trivia) — rotated into We-Draft Live's

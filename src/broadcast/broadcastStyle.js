@@ -586,8 +586,8 @@ export const NATIONAL_STYLE = `
 .nr-rail.gd .nr-bug.upcoming .nr-team { filter: none; }
 
 /* ── Gameday: the matchup preview (main panel) and its tale of the tape ── */
-.nr-pre-body .wash { background: linear-gradient(100deg, color-mix(in srgb, var(--ac) 85%, transparent) 0%, transparent 46%),
-  linear-gradient(260deg, color-mix(in srgb, var(--hc) 70%, transparent) 0%, transparent 46%); }
+/* one wash in the home team's color, like the Final panel's winner wash */
+.nr-pre-body .wash { background: linear-gradient(100deg, color-mix(in srgb, var(--hc) 90%, transparent) 0%, color-mix(in srgb, var(--hc) 45%, transparent) 45%, transparent 80%); }
 .nr-pre-body .mid { gap: 4px; }
 .nr-pre-body .tags { margin-bottom: 4px; }
 .nr-pre .tm { display: flex; align-items: center; gap: 14px; height: 84px; min-width: 0; }
