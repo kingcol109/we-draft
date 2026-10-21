@@ -10,24 +10,29 @@
 // anyway, so team selection here is always random — pass a contentRef to
 // whatever element the ads should center themselves around and this handles
 // the rest (fetch, layout measurement, resize, hover states).
-import { useEffect, useRef, useState } from "react";
+//
+// preferSchool (team pages) defaults the cards to that school's CFB ad
+// (cfbAds, edited in AdminAdsManager.js) — the cards then wear the school's
+// colors. The bottom NFL team grid stays the visitor's way to switch, and
+// only ever lists NFL ads; the school is a default, not a 33rd option.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { db } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 import HomageLogo from "../assets/homagelogo.png";
-import { fetchAds } from "../utils/siteSnapshots";
+import { fetchAds, fetchCfbAds, fetchAdTeamLogos } from "../utils/siteSnapshots";
 import { cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
-const NFL_TEAM_ABBRS = [
+export const NFL_TEAM_ABBRS = [
   "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE",
   "DAL","DEN","DET","GB","HOU","IND","JAX","KC",
   "LV","LAC","LAR","MIA","MIN","NE","NO","NYG",
   "NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS",
 ];
 
-function teamNameFromAbbr(abbr) {
+export function teamNameFromAbbr(abbr) {
   const map = {
     ARI:"Arizona Cardinals",ATL:"Atlanta Falcons",BAL:"Baltimore Ravens",BUF:"Buffalo Bills",
     CAR:"Carolina Panthers",CHI:"Chicago Bears",CIN:"Cincinnati Bengals",CLE:"Cleveland Browns",
@@ -41,9 +46,17 @@ function teamNameFromAbbr(abbr) {
   return map[abbr] || abbr;
 }
 
+// A cfbAds row carries School instead of Team.
+export const isCfbAd = (ad) => !!ad?.School && !ad?.Team;
+export const adTeamLabel = (ad) => (isCfbAd(ad) ? ad.School : teamNameFromAbbr(ad.Team) || ad.Team);
+
 function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
+  // imgur.com/xxxx.png (how most logos/wordmarks are stored) only 302s to
+  // the i.imgur.com CDN — go straight there and skip the redirect.
+  const directMatch = url.match(/^https?:\/\/imgur\.com\/([A-Za-z0-9]+\.(png|jpe?g|gif|webp))$/i);
+  if (directMatch) return `https://i.imgur.com/${directMatch[1]}`;
   const singleMatch = url.match(/^https?:\/\/imgur\.com\/(?!a\/|gallery\/)([A-Za-z0-9]+)$/i);
   if (singleMatch) return `https://i.imgur.com/${singleMatch[1]}.png`;
   if (/^https?:\/\/imgur\.com\/(a|gallery)\//i.test(url)) return "";
@@ -55,13 +68,186 @@ function sanitizeGoogleDrive(url) {
   if (m) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
   return url;
 }
-function sanitizeUrl(url) {
+export function sanitizeUrl(url) {
   let u = (url || "").trim();
   if (!u) return "";
   if (u.includes("imgur.com")) u = sanitizeImgur(u);
   if (u.includes("drive.google.com")) u = sanitizeGoogleDrive(u);
   if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
   return u;
+}
+
+// Logo for one picker button, falling back to the abbreviation when there's
+// no logo (or it fails to load).
+function PickerMark({ abbr, logo, dim }) {
+  const [failed, setFailed] = useState(false);
+  if (!logo || failed) return abbr;
+  return (
+    <img
+      src={sanitizeUrl(logo)} alt={abbr}
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      style={{ display:"block", width:"100%", height:"20px", objectFit:"contain", filter: dim ? "grayscale(1)" : "none", opacity: dim ? 0.35 : 1 }}
+    />
+  );
+}
+
+// The 8×4 grid of all 32 NFL teams under the left card's product shot —
+// shared with PlayerProfile.js's own copy of these cards. teamLogos comes
+// from the _ads snapshot (fetchAdTeamLogos); teams without an ad stay
+// disabled. Active is outlined rather than filled so the logo stays legible.
+export function NflTeamPicker({ allAds, activeTeam, teamLogos = {}, onPick }) {
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:"5px" }}>
+      {NFL_TEAM_ABBRS.map((abbr) => {
+        const teamAd = allAds.find((a) => a.Team === abbr);
+        const isActive = activeTeam === abbr;
+        const logo = teamLogos[abbr];
+        return (
+          <button
+            key={abbr}
+            type="button"
+            disabled={!teamAd}
+            title={teamNameFromAbbr(abbr)}
+            aria-label={teamNameFromAbbr(abbr)}
+            className={teamAd ? "wd-team-btn" : ""}
+            onClick={() => { if (teamAd) onPick(teamAd); }}
+            style={{
+              fontSize:"8.5px", fontWeight:900,
+              padding: logo ? "3px 2px" : "5px 0", borderRadius:"4px",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              minHeight:"28px",
+              border:`1px solid ${isActive ? "#c8102e" : "#eee"}`,
+              boxShadow: isActive ? "0 0 0 1px #c8102e" : "none",
+              background: isActive ? "#fdecef" : teamAd ? "#fff" : "#f6f6f6",
+              color: teamAd ? "#333" : "#ccc",
+              cursor: teamAd ? "pointer" : "not-allowed",
+              transition: "transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
+            }}
+          >
+            <PickerMark abbr={abbr} logo={logo} dim={!teamAd} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Sizing for the two fixed rail cards, shared with PlayerProfile.js's own
+// copy of them. Each card is laid out at AD_BASE_WIDTH and then scaled as a
+// whole (transform, so type, logos, buttons and images all grow together)
+// to the largest size that fits both the gutter's width and the viewport's
+// height — on a big monitor the cards fill the empty gutters instead of
+// sitting at a fixed 240px, and a short window shrinks them rather than
+// cutting the taller (right) card off. Both cards share one scale so they
+// stay a matched pair; each is centered vertically on its own height.
+//
+// offsetHeight (layout height, unaffected by the transform) is what's
+// measured, so scaling never feeds back into the measurement. Callback refs
+// (refFor) re-attach the ResizeObserver whenever a card's node is replaced
+// — both callers define the cards as inner components, which remount on
+// re-render — and pick up height changes from switching teams (1 vs 2
+// gallery images, logo or not).
+const AD_BASE_WIDTH = 200;
+const AD_MIN_SCALE = 0.7;   // 140px — the old minimum width
+const AD_MAX_SCALE = 1.75;  // 350px — past this the product shots get soft
+const AD_MIN_GUTTER = 160;  // below this, no room for a card at all
+const AD_VIEWPORT_MARGIN = 20;
+
+export function useMarginAdFit({ contentRef, horizontalPadding, isMobile, watch = [] }) {
+  const [gutters, setGutters] = useState(null); // { left, right } in CSS px, null = hidden
+  const [heights, setHeights] = useState({ left: 0, right: 0 });
+  const [viewH, setViewH] = useState(() => viewportCssHeight());
+  // Bottom edge of the fixed site navbar — the cards fit (and center) in
+  // the space below it, not the whole viewport.
+  const [topInset, setTopInset] = useState(0);
+  const nodes = useRef({ left: null, right: null });
+  const ro = useRef(null);
+
+  const measureHeights = useCallback(() => {
+    const next = { left: nodes.current.left?.offsetHeight || 0, right: nodes.current.right?.offsetHeight || 0 };
+    setHeights((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+  }, []);
+
+  const refs = useMemo(() => {
+    const make = (side) => (el) => {
+      const prev = nodes.current[side];
+      if (prev === el) return;
+      if (!ro.current) ro.current = new ResizeObserver(measureHeights);
+      if (prev) ro.current.unobserve(prev);
+      nodes.current[side] = el;
+      // observe() fires once right away, measuring the new node. No
+      // measuring on detach: a remount detaches then re-attaches in the same
+      // commit, and a 0 height in between would re-render (remount) again.
+      if (el) ro.current.observe(el);
+    };
+    return { left: make("left"), right: make("right") };
+  }, [measureHeights]);
+  useEffect(() => () => ro.current?.disconnect(), []);
+
+  const recompute = () => {
+    setViewH(viewportCssHeight());
+    const nav = document.querySelector("nav");
+    setTopInset(nav ? Math.max(0, Math.round(cssRect(nav).bottom)) : 0);
+    if (isMobile || !contentRef.current) { setGutters(null); return; }
+    const rect = cssRect(contentRef.current);
+    const left = Math.max(0, rect.left + horizontalPadding);
+    const right = Math.max(0, viewportCssWidth() - (rect.right - horizontalPadding));
+    if (Math.min(left, right) < AD_MIN_GUTTER) { setGutters(null); return; }
+    setGutters((prev) => (prev && prev.left === left && prev.right === right ? prev : { left, right }));
+  };
+
+  useEffect(() => {
+    const handler = () => recompute();
+    window.addEventListener("resize", handler);
+    window.addEventListener("pagezoomchange", handler);
+    // The content ref has no real size until it renders — a couple of
+    // delayed retries cover fonts/images nudging the layout after mount.
+    recompute();
+    const t1 = setTimeout(recompute, 200);
+    const t2 = setTimeout(recompute, 800);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("pagezoomchange", handler);
+      clearTimeout(t1); clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, ...watch]);
+
+  let scale = 1;
+  if (gutters) {
+    const minGutter = Math.min(gutters.left, gutters.right);
+    // Breathing room either side grows with the gutter (8px → 40px).
+    const pad = Math.max(8, Math.min(40, minGutter * 0.1));
+    const byWidth = (minGutter - 2 * pad) / AD_BASE_WIDTH;
+    const tallest = Math.max(heights.left, heights.right);
+    const byHeight = tallest ? (viewH - topInset - 2 * AD_VIEWPORT_MARGIN) / tallest : byWidth;
+    scale = Math.max(AD_MIN_SCALE, Math.min(AD_MAX_SCALE, byWidth, byHeight));
+  }
+
+  // Hidden (opacity 0) until the card's height is known, so it never
+  // flashes at a guessed position first.
+  const styleFor = (side, visible) => {
+    const h = heights[side];
+    const offset = Math.max(8, ((gutters?.[side] || 0) - AD_BASE_WIDTH * scale) / 2);
+    const top = h ? topInset + Math.max(AD_VIEWPORT_MARGIN, (viewH - topInset - h * scale) / 2) : 0;
+    return {
+      position: "fixed",
+      top: `${top}px`,
+      [side]: `${offset}px`,
+      width: `${AD_BASE_WIDTH}px`,
+      transform: `scale(${scale})`,
+      transformOrigin: `top ${side}`,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      zIndex: 5,
+      opacity: visible && h ? 1 : 0,
+      transition: "opacity 0.7s ease",
+    };
+  };
+
+  return { show: !!gutters, refFor: (side) => refs[side], styleFor, recompute };
 }
 
 /**
@@ -77,110 +263,80 @@ function sanitizeUrl(url) {
  *   PlayerProfile.js's own drafted-team/affiliate priority). Falls back to
  *   random when that team has no ad; switching it later (a different
  *   player loaded in place) switches the ad too.
+ * @param {string} [preferSchool] - optional schools-doc School name whose
+ *   CFB ad (if it has one) wins over preferTeam and random.
+ * @param {object} [schoolBranding] - that school's doc (Color1/Color2/
+ *   Logo1/Mascot) if the page already has it, saving a read.
  */
-export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "" }) {
+// ── Which ad to show, shared by MarginAds (the desktop rails) and pages
+// that show the phone card themselves (Comparison.js → AdBanner.js
+// MobileAdCard). Priority: preferSchool's CFB ad, then preferTeam's NFL ad,
+// then random; setAdData is the visitor's own pick (the rails' logo grid,
+// the phone card's dropdown). Nothing is fetched while !enabled.
+// adTeamBranding is the selected team's nfl/schools doc, tagged with the
+// team it belongs to so brandingReady can tell a stale one (still the
+// previous team's colors) from the current one. ──
+export function useAdSelection({ enabled = true, preferTeam = "", preferSchool = "", schoolBranding = null }) {
   const [allAds, setAllAds] = useState([]);
   const [adData, setAdData] = useState(null);
+  const [schoolAd, setSchoolAd] = useState(null);
+  const [adTeamLogos, setAdTeamLogos] = useState({});
   const [adVisible, setAdVisible] = useState(false);
   const [adTeamBranding, setAdTeamBranding] = useState(null);
-  const [adLayout, setAdLayout] = useState({ width: 140, leftGutter: 0, rightGutter: 0 });
-  const [showMarginAds, setShowMarginAds] = useState(false);
-  // Measured card heights, clamped into the viewport (see clampAdTop below)
-  // — null until the first measurement lands, during which
-  // marginAdPositionStyle falls back to the old blind top:50%/translateY
-  // centering. That gap is invisible in practice: the card stays at
-  // opacity:0 (see adVisible) until well after mount, and a ResizeObserver
-  // reports the real height on the very first layout pass.
-  const [leftAdTop, setLeftAdTop] = useState(null);
-  const [rightAdTop, setRightAdTop] = useState(null);
-  const leftAdRef = useRef(null);
-  const rightAdRef = useRef(null);
-
-  const recomputeAdLayout = () => {
-    if (isMobile || !contentRef.current) { setShowMarginAds(false); return; }
-    const rect = cssRect(contentRef.current);
-    const visibleLeftEdge = rect.left + horizontalPadding;
-    const visibleRightEdge = rect.right - horizontalPadding;
-    const leftGutter = Math.max(0, visibleLeftEdge);
-    const rightGutter = Math.max(0, viewportCssWidth() - visibleRightEdge);
-    const minGutter = Math.min(leftGutter, rightGutter);
-    const MIN_USABLE_GUTTER = 160;
-    if (minGutter < MIN_USABLE_GUTTER) { setShowMarginAds(false); return; }
-    const width = Math.max(140, Math.min(240, minGutter - 16));
-    setAdLayout({ width, leftGutter, rightGutter });
-    setShowMarginAds(true);
-  };
-
-  useEffect(() => {
-    const handler = () => recomputeAdLayout();
-    window.addEventListener("resize", handler);
-    // The ref has no real size until content actually renders — a couple of
-    // delayed retries cover fonts/images nudging the layout after mount.
-    recomputeAdLayout();
-    const t1 = setTimeout(recomputeAdLayout, 200);
-    const t2 = setTimeout(recomputeAdLayout, 800);
-    return () => { window.removeEventListener("resize", handler); clearTimeout(t1); clearTimeout(t2); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMobile]);
-
-  // Keeps each card's top edge inside the viewport — centering it when it
-  // fits (same math top:50%/translateY(-50%) produces), otherwise pinning
-  // it AD_VIEWPORT_MARGIN below the top instead of letting it center past
-  // the top edge, which is what was cutting the taller right card off. Runs
-  // off a ResizeObserver (not just window resize) since the two cards
-  // aren't the same height and that height changes with which ad/gallery
-  // is showing (see MarginAdTeamCard's 1-vs-2-image layout) — a plain
-  // resize listener would miss a height change from switching teams.
-  useEffect(() => {
-    if (!showMarginAds) { setLeftAdTop(null); setRightAdTop(null); return; }
-    const AD_VIEWPORT_MARGIN = 20;
-    const clampTop = (height) => {
-      if (!height) return null;
-      const centered = (viewportCssHeight() - height) / 2;
-      return Math.max(AD_VIEWPORT_MARGIN, Math.min(centered, viewportCssHeight() - height - AD_VIEWPORT_MARGIN));
-    };
-    const measure = () => {
-      if (leftAdRef.current) setLeftAdTop(clampTop(cssRect(leftAdRef.current).height));
-      if (rightAdRef.current) setRightAdTop(clampTop(cssRect(rightAdRef.current).height));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (leftAdRef.current) ro.observe(leftAdRef.current);
-    if (rightAdRef.current) ro.observe(rightAdRef.current);
-    window.addEventListener("resize", measure);
-    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
-  }, [showMarginAds, adData, adTeamBranding]);
 
   // Fetch ads and pick one — preferTeam's if it has one, otherwise random.
   useEffect(() => {
-    if (isMobile) return;
+    if (!enabled) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
         // One read from the weekly ads snapshot (utils/siteSnapshots.js),
         // falling back to the ads collection if it's missing.
-        const ads = await fetchAds();
+        const [ads, logos] = await Promise.all([fetchAds(), fetchAdTeamLogos()]);
+        if (!cancelled) setAdTeamLogos(logos);
         if (!cancelled && ads.length > 0) {
           setAllAds(ads);
           const preferred = preferTeam ? ads.find((a) => a.Team === preferTeam) : null;
-          setAdData(preferred || ads[Math.floor(Math.random() * ads.length)]);
+          // A school ad that already landed (effect below) keeps its spot.
+          setAdData((cur) => cur || preferred || ads[Math.floor(Math.random() * ads.length)]);
         }
       } catch (e) { /* ads are non-critical — fail silently */ }
     }, 1000);
     return () => { cancelled = true; clearTimeout(t); };
     // preferTeam changes after the fetch are handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMobile]);
+  }, [enabled]);
 
   // preferTeam resolving (or changing) after the ads are already loaded —
   // e.g. the page's school doc arriving a beat after this fetch, or a
   // different player loaded in place. Leaves the current ad alone when the
   // new team has none.
   useEffect(() => {
-    if (!preferTeam || !allAds.length) return;
+    if (schoolAd || !preferTeam || !allAds.length) return;
     const preferred = allAds.find((a) => a.Team === preferTeam);
     if (preferred) setAdData(preferred);
-  }, [preferTeam, allAds]);
+  }, [preferTeam, allAds, schoolAd]);
+
+  // preferSchool's CFB ad, whenever the school resolves or changes.
+  useEffect(() => {
+    if (!enabled || !preferSchool) { setSchoolAd(null); return; }
+    let cancelled = false;
+    fetchCfbAds().then((rows) => {
+      if (!cancelled) setSchoolAd(rows.find((a) => a.School === preferSchool) || null);
+    });
+    return () => { cancelled = true; };
+  }, [enabled, preferSchool]);
+
+  // Show it — or, when the page moved on to a school with no ad, drop the
+  // previous school's ad back to an NFL one.
+  useEffect(() => {
+    if (schoolAd) { setAdData(schoolAd); return; }
+    setAdData((cur) => {
+      if (!isCfbAd(cur) || !allAds.length) return cur;
+      return (preferTeam && allAds.find((a) => a.Team === preferTeam)) || allAds[Math.floor(Math.random() * allAds.length)];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schoolAd]);
 
   useEffect(() => {
     if (!adData) return;
@@ -189,45 +345,43 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
   }, [adData]);
 
   useEffect(() => {
-    if (!adData?.Team) { setAdTeamBranding(null); return; }
+    if (!adData?.Team && !isCfbAd(adData)) { setAdTeamBranding(null); return; }
+    const key = adData.Team || adData.School;
+    if (isCfbAd(adData) && schoolBranding?.School === adData.School) { setAdTeamBranding({ ...schoolBranding, _for: key }); return; }
     let cancelled = false;
     (async () => {
       try {
+        if (isCfbAd(adData)) {
+          const snap = await getDocs(query(collection(db, "schools"), where("School", "==", adData.School), limit(1)));
+          if (!cancelled) setAdTeamBranding(snap.empty ? { _for: key } : { ...snap.docs[0].data(), _for: key });
+          return;
+        }
         const snap = await getDoc(doc(db, "nfl", adData.Team));
-        if (!cancelled) setAdTeamBranding(snap.exists() ? snap.data() : null);
+        if (!cancelled) setAdTeamBranding(snap.exists() ? { ...snap.data(), _for: key } : { _for: key });
       } catch (e) {
-        if (!cancelled) setAdTeamBranding(null);
+        // Still tagged, so a waiting card shows (in site colors) instead of never.
+        if (!cancelled) setAdTeamBranding({ _for: key });
       }
     })();
     return () => { cancelled = true; };
-  }, [adData?.Team]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adData?.Team, adData?.School, schoolBranding]);
 
-  const marginAdPositionStyle = (side, topPx) => {
-    const gutter = side === "left" ? adLayout.leftGutter : adLayout.rightGutter;
-    const offset = Math.max(8, (gutter - adLayout.width) / 2);
-    return {
-      position: "fixed",
-      // A measured, clamped pixel top (see the ResizeObserver effect above)
-      // once it's available; the old blind top:50%/translateY(-50%)
-      // centering only as a brief fallback before that first measurement.
-      top: topPx != null ? `${topPx}px` : "50%",
-      [side]: `${offset}px`,
-      transform: topPx != null ? "none" : "translateY(-50%)",
-      width: `${adLayout.width}px`,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      zIndex: 5,
-      opacity: adVisible ? 1 : 0,
-      transition: "opacity 0.7s ease",
-    };
-  };
+  const brandingReady = !!adData && adTeamBranding?._for === (adData.Team || adData.School);
+  return { allAds, adData, setAdData, adTeamLogos, adVisible, adTeamBranding, brandingReady };
+}
+
+export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "", preferSchool = "", schoolBranding = null }) {
+  const { allAds, adData, setAdData, adTeamLogos, adVisible, adTeamBranding } =
+    useAdSelection({ enabled: !isMobile, preferTeam, preferSchool, schoolBranding });
+  const fit = useMarginAdFit({ contentRef, horizontalPadding, isMobile });
+  const showMarginAds = fit.show;
 
   const MarginAd = ({ side }) => {
     if (!adData) return null;
-    const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
+    const teamLabel = adTeamLabel(adData);
     return (
-      <div className="wd-margin-ad" ref={leftAdRef} style={marginAdPositionStyle(side, leftAdTop)}>
+      <div className="wd-margin-ad" ref={fit.refFor(side)} style={fit.styleFor(side, adVisible)}>
         <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
         </div>
@@ -257,33 +411,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
           </a>
 
           <div style={{ padding:"10px 10px 6px", borderTop:"1px solid #f3f3f3" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:"5px" }}>
-              {NFL_TEAM_ABBRS.map((abbr) => {
-                const teamAd = allAds.find((a) => a.Team === abbr);
-                const isActive = adData.Team === abbr;
-                return (
-                  <button
-                    key={abbr}
-                    type="button"
-                    disabled={!teamAd}
-                    title={teamNameFromAbbr(abbr)}
-                    className={teamAd ? "wd-team-btn" : ""}
-                    onClick={() => { if (teamAd) setAdData(teamAd); }}
-                    style={{
-                      fontSize:"8.5px", fontWeight:900,
-                      padding:"5px 0", borderRadius:"4px",
-                      border:`1px solid ${isActive ? "#c8102e" : "#eee"}`,
-                      background: isActive ? "#c8102e" : teamAd ? "#fff" : "#f6f6f6",
-                      color: isActive ? "#fff" : teamAd ? "#333" : "#ccc",
-                      cursor: teamAd ? "pointer" : "not-allowed",
-                      transition: "transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
-                    }}
-                  >
-                    {abbr}
-                  </button>
-                );
-              })}
-            </div>
+            <NflTeamPicker allAds={allAds} activeTeam={adData.Team} teamLogos={adTeamLogos} onPick={setAdData} />
           </div>
 
           <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
@@ -320,7 +448,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
 
   const MarginAdTeamCard = ({ side }) => {
     if (!adData) return null;
-    const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
+    const teamLabel = adTeamLabel(adData);
     const tColor1 = adTeamBranding?.Color1 || SITE_BLUE;
     const tColor2 = adTeamBranding?.Color2 || SITE_GOLD;
     const tLogo = adTeamBranding?.Logo1 || adTeamBranding?.Logo2 || "";
@@ -328,7 +456,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     const displayImages = gallery.length > 0 ? gallery : (adData.Image1 ? [adData.Image1] : []);
 
     return (
-      <div className="wd-margin-ad" ref={rightAdRef} style={marginAdPositionStyle(side, rightAdTop)}>
+      <div className="wd-margin-ad" ref={fit.refFor(side)} style={fit.styleFor(side, adVisible)}>
         <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
         </div>
@@ -343,9 +471,12 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
         >
           <div style={{ background:`linear-gradient(135deg, ${tColor1}, ${tColor1}cc)`, padding:"12px 10px", display:"flex", alignItems:"center", justifyContent:"center" }}>
             {(() => {
+              // NFL: "Arizona" / "Cardinals". CFB: school / mascot, or the
+              // school alone on the big line when there's no mascot.
               const parts = teamLabel.split(" ");
-              const nickname = parts.pop();
-              const cityLine = parts.join(" ");
+              const cfb = isCfbAd(adData);
+              const nickname = cfb ? (adTeamBranding?.Mascot || teamLabel) : parts.pop();
+              const cityLine = cfb ? (adTeamBranding?.Mascot ? teamLabel : "") : parts.join(" ");
               return (
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center", lineHeight:1.15 }}>
                   <div style={{ fontSize:"12px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>

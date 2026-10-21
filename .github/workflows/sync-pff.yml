@@ -4,7 +4,8 @@ name: Sync PFF Grades
 # games by early in the week (Sunday's CFBD sync would catch them half done).
 # scripts/syncPffGrades.js writes pffGrades/{teamId} (season + latest-game
 # PFF grades, matched to cfbRosters players) for the Admin Panel's Suggest
-# Video. ~20 PFF calls. PFF data is back office only — never displayed on
+# Video; scripts/syncPffNflRosters.js writes pffNflRosters/{abbr} (NFL depth
+# charts) for Admin → Research. ~75 PFF calls in all. PFF data is back office only — never displayed on
 # the public site. Idempotent; also runnable on demand via workflow_dispatch.
 #
 # Needs repo secrets GOOGLE_SERVICE_ACCOUNT_KEY (already used by the other
@@ -32,6 +33,16 @@ jobs:
 
       - name: Sync PFF grades
         run: node scripts/syncPffGrades.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          PFF_API_KEY: ${{ secrets.PFF_API_KEY }}
+
+      # NFL depth charts with grades + ages for Admin → Research
+      # (scripts/syncPffNflRosters.js, pffNflRosters/{abbr}). ~51 calls.
+      # Then derives the public snap-order depth charts (nflDepthOrder) and
+      # team needs (nflTeamNeeds) — scripts/nflTeamNeeds.js, no PFF calls.
+      - name: Sync PFF NFL rosters
+        run: node scripts/syncPffNflRosters.js
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           PFF_API_KEY: ${{ secrets.PFF_API_KEY }}

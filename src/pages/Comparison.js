@@ -29,7 +29,8 @@ import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { collection, getDocs, query, where, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
-import MarginAds from "../components/MarginAds";
+import MarginAds, { useAdSelection, teamNameFromAbbr } from "../components/MarginAds";
+import { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { usePlayerSidebarData, PlayerVideosCard, PlayerNewsCard } from "../components/PlayerSidebars";
 // "Playing now" + Follow Live while the loaded prospect's team is on the
 // field — the same card / button as their player page.
@@ -800,6 +801,16 @@ export default function Comparison() {
     })();
     return () => { cancelled = true; };
   }, [loadedPlayer?.Slug, loadedPlayer?.Eligible]);
+
+  // ── Homage ads — same priority as PlayerProfile.js's: the drafting team
+  // for a drafted prospect; otherwise the college's own CFB ad if it has
+  // one, then its NFL affiliate (schools/{School}.NFL); random last.
+  // Desktop: MarginAds' rails (no in-content banner on this page). Phones:
+  // MobileAdCard between the top-3 comps and More Matches, driven by its
+  // own selection here (MarginAds fetches nothing on phones). ──
+  const adPreferTeam = drafted?.team || schoolBranding?.NFL || "";
+  const adPreferSchool = drafted ? "" : schoolBranding?.School || "";
+  const phoneAd = useAdSelection({ enabled: isMobile, preferTeam: adPreferTeam, preferSchool: adPreferSchool, schoolBranding });
 
   // ── We-Draft.com Select — an admin hand-picked top comp (players/{id}.
   // WeDraftSelect = { id: historical doc id, label }, set from the admin
@@ -2008,6 +2019,23 @@ export default function Comparison() {
                 })}
               </div>
 
+              {/* Phone Homage card, between the top 3 and More Matches. */}
+              {isMobile && (phoneAd.adData ? (
+                <div style={{ marginBottom: "16px" }}>
+                  <MobileAdCard
+                    ad={phoneAd.adData}
+                    branding={phoneAd.adTeamBranding}
+                    label={phoneAd.adData.School || teamNameFromAbbr(phoneAd.adData.Team)}
+                    allAds={phoneAd.allAds}
+                    onPick={phoneAd.setAdData}
+                    visible={phoneAd.adVisible && phoneAd.brandingReady}
+                  />
+                </div>
+              ) : (
+                // Holds the card's height (+ "Sponsored" label) while it loads.
+                <div aria-hidden="true" style={{ height: `${MOBILE_AD_HEIGHT + 17}px`, marginBottom: "16px" }} />
+              ))}
+
               {/* ── More Matches (4-10) — same design language as the top-3
                   cards rather than a data table: each comp is its own row
                   in their NFL team's colors — team logo, big bold name in
@@ -2320,10 +2348,9 @@ export default function Comparison() {
         </div>
       )}
       </div>
-      {/* Ads lead with the loaded prospect's college's NFL affiliate
-          (schools/{School}.NFL — same affiliate PlayerProfile.js's own ads
-          prioritize for an undrafted prospect); random otherwise. */}
-      <MarginAds contentRef={mainGridRef} isMobile={isStacked} horizontalPadding={60} preferTeam={drafted?.team || schoolBranding?.NFL || ""} />
+      {/* Desktop rails — see adPreferTeam/adPreferSchool above. */}
+      <MarginAds contentRef={mainGridRef} isMobile={isStacked} horizontalPadding={60}
+        preferTeam={adPreferTeam} preferSchool={adPreferSchool} schoolBranding={schoolBranding} />
     </div>
   );
 }

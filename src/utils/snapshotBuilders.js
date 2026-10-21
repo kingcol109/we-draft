@@ -255,8 +255,13 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
     });
   });
 
-  // ── Ads (only complete ones, same filter every reader applies) ──
-  docs.push({ id: "_ads", data: { version, rows: ads.filter((a) => a.Link && a.Image1) } });
+  // ── Ads (only complete, unpaused ones, same filter every reader applies) ──
+  // teamLogos: { [abbr]: Logo1 } for the NFL team picker under the cards.
+  docs.push({ id: "_ads", data: {
+    version,
+    rows: ads.filter((a) => a.Active !== false && a.Link && a.Image1),
+    teamLogos: Object.fromEntries(nflTeams.map((t) => [t.id, t.Logo1 || t.LogoDark || ""]).filter(([, l]) => l)),
+  } });
 
   // ── Navbar ticker's draft lines: rounds 1-2 in pick order, same text ──
   const parts = [];

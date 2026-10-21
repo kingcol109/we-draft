@@ -8,6 +8,7 @@ import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
+import MarginAds from "../components/MarginAds";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { useAuth } from "../context/AuthContext";
 import { getAnonId } from "../utils/anonId";
@@ -194,7 +195,58 @@ const HERO_STYLE = `
     0%, 100% { opacity: 0.7; }
     50%      { opacity: 1; }
   }
+  .wd-nfl-chip { transition: transform 0.16s ease, box-shadow 0.16s ease; }
+  .wd-nfl-chip:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(0,40,90,0.14), 0 0 0 1px #d3dcea !important; }
+  .wd-nfl-plus { transition: background 0.16s ease, transform 0.16s ease; }
+  .wd-nfl-plus:hover { transform: translateY(-2px); }
+  @media (prefers-reduced-motion: reduce) {
+    .wd-nfl-chip, .wd-nfl-plus { transition: none !important; }
+    .wd-nfl-chip:hover, .wd-nfl-plus:hover { transform: none; }
+  }
 `;
+
+// Depth chart order — nflDepthOrder/{abbr} (scripts/nflTeamNeeds.js) is the
+// team's player names by season snaps, most first. Names are matched to the
+// ESPN roster loosely: punctuation and suffixes (Jr., III) dropped, then
+// first initial + last name as a fallback ("Ken Walker" / "Kenneth Walker").
+// Order only — snaps are never shown.
+const depthNameKey = (name) => String(name || "").toLowerCase()
+  .replace(/[^a-z\s-]/g, "").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/[\s-]+/g, " ").trim();
+const initialKey = (name) => {
+  const parts = depthNameKey(name).split(" ");
+  return parts.length > 1 ? `${parts[0][0]} ${parts.slice(1).join(" ")}` : parts[0];
+};
+function depthRanker(order) {
+  const full = new Map();
+  const initial = new Map();
+  (order || []).forEach((n, i) => {
+    if (!full.has(depthNameKey(n))) full.set(depthNameKey(n), i);
+    if (!initial.has(initialKey(n))) initial.set(initialKey(n), i);
+  });
+  return (p) => full.get(depthNameKey(p.fullName)) ?? initial.get(initialKey(p.fullName)) ?? Infinity;
+}
+
+// Team colors are admin-entered hex — tint only when it's actually #rrggbb.
+const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
+
+// Section heading — title with a team-color rule fading out beside it
+// (CFBPage.js's conference header look), optional count on the right.
+function SectionTitle({ children, color1, color2, right, isMobile, sub = false }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: sub ? 10 : 14 }}>
+      <div style={{
+        fontWeight: 900, fontSize: sub ? (isMobile ? 13 : 14) : (isMobile ? 18 : 22), whiteSpace: "nowrap",
+        textTransform: "uppercase", letterSpacing: sub ? "0.1em" : "0.08em", color: color1,
+      }}>
+        {children}
+      </div>
+      <div style={{ flex: 1, height: sub ? 2 : 3, borderRadius: 2, background: `linear-gradient(to right, ${color2}, ${tint(color2, "00")})` }} />
+      {right != null && (
+        <div style={{ fontSize: 11, fontWeight: 900, color: "#9aa5b4", whiteSpace: "nowrap" }}>{right}</div>
+      )}
+    </div>
+  );
+}
 
 function sanitizeUrl(url) {
   if (!url) return "";
@@ -244,6 +296,11 @@ export default function NFLTeamPage() {
   const [boardModalStrengthFilter, setBoardModalStrengthFilter] = useState(new Set());
   const [boardModalFilterPanel, setBoardModalFilterPanel] = useState(null);
   const [roster, setRoster] = useState([]);
+  // nflDepthOrder/{abbr}.order — see depthRanker above.
+  const [depthOrder, setDepthOrder] = useState(null);
+  // The page's content column — MarginAds centers its Homage rails in the
+  // gutters beside it.
+  const contentRef = useRef(null);
   const [rosterLoading, setRosterLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [hoveredId, setHoveredId] = useState(null);
@@ -462,6 +519,16 @@ export default function NFLTeamPage() {
     return () => { cancelled = true; };
   }, [boardModal]);
 
+  // Snap order for the depth chart — missing (or unreadable) just leaves
+  // each group in ESPN's own order.
+  useEffect(() => {
+    if (!teamKey) return;
+    setDepthOrder(null);
+    getDoc(doc(db, "nflDepthOrder", teamKey))
+      .then((snap) => setDepthOrder(snap.exists() ? snap.data().order || [] : []))
+      .catch((e) => { console.error("Depth order fetch error:", e); setDepthOrder([]); });
+  }, [teamKey]);
+
   // Load ESPN roster
   useEffect(() => {
     if (!teamKey) return;
@@ -625,11 +692,17 @@ export default function NFLTeamPage() {
     setHoveredId(null);
   };
 
-  // Group roster by position group
+  // Group roster by position group, each in depth chart (snap) order —
+  // anyone not in nflDepthOrder keeps ESPN's order after everyone who is.
+  const depthRank = depthRanker(depthOrder);
   const groupedRoster = {};
   const allGroupedPositions = new Set(Object.values(POSITION_GROUPS).flat());
   Object.entries(POSITION_GROUPS).forEach(([group, positions]) => {
-    const members = roster.filter((p) => positions.includes(p.position));
+    const members = roster
+      .map((p, i) => ({ p, i, r: depthRank(p) }))
+      .filter(({ p }) => positions.includes(p.position))
+      .sort((a, b) => a.r - b.r || a.i - b.i)
+      .map(({ p }) => p);
     if (members.length > 0) groupedRoster[group] = members;
   });
   const ungrouped = roster.filter((p) => !allGroupedPositions.has(p.position));
@@ -686,7 +759,10 @@ export default function NFLTeamPage() {
         <meta name="twitter:description" content={metaDescription} />
       </Helmet>
 
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      {/* Defaults to this team's own Homage ad. */}
+      <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={24} preferTeam={teamKey} />
+
+      <div ref={contentRef} style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "24px 24px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
 
         {/* ===== HERO ===== */}
         {/* Same recipe/layout as TeamPage.js's college HeroCard: a
@@ -786,13 +862,7 @@ export default function NFLTeamPage() {
             not color alone — so it reads correctly even for a color-blind
             viewer or in a screen reader. */}
         <div style={{ marginBottom: 32 }}>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: c1, marginBottom: 5 }}>
-              Team Needs
-            </div>
-            <div style={{ height: 3, background: c1, borderRadius: 2, marginBottom: 3 }} />
-            <div style={{ height: 3, background: c2, borderRadius: 2 }} />
-          </div>
+          <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Team Needs</SectionTitle>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
             Rate how badly this team needs to address each position, from No Need to Extreme Need. Come back and change your vote anytime.
           </div>
@@ -805,15 +875,15 @@ export default function NFLTeamPage() {
               const myRating = myNeedVote[pos];
 
               return (
-                <div key={pos} style={{ border: `2px solid ${c1}`, borderRadius: 8, overflow: "hidden", background: "#fff" }}>
+                <div key={pos} style={{ borderRadius: 12, overflow: "hidden", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px" }}>
                     <span style={{ fontWeight: 900, fontSize: 13, color: c1, letterSpacing: "0.04em" }}>{pos}</span>
                     <span style={{ fontSize: 10, fontWeight: 700, color: "#999" }}>
                       {ratings.length > 0 ? `${avg.toFixed(1)}/5 · ${ratings.length} vote${ratings.length !== 1 ? "s" : ""}` : "No votes yet"}
                     </span>
                   </div>
-                  <div style={{ height: 5, background: "#eee", position: "relative" }}>
-                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: c1, transition: "width 0.2s" }} />
+                  <div style={{ height: 5, background: "#eef1f5", position: "relative" }}>
+                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: `linear-gradient(to right, ${c1}, ${c2})`, transition: "width 0.2s" }} />
                   </div>
                   <div style={{ display: "flex", gap: 4, padding: "8px 10px" }}>
                     {NEED_LEVELS.map(({ v, label }) => {
@@ -825,7 +895,7 @@ export default function NFLTeamPage() {
                           disabled={needsLoading}
                           title={label}
                           style={{
-                            flex: 1, border: `2px solid ${c1}`, borderRadius: 6,
+                            flex: 1, border: `1.5px solid ${active ? c1 : tint(c1, "55")}`, borderRadius: 999,
                             padding: isMobile ? "6px 2px" : "6px 4px",
                             background: active ? c1 : "#fff",
                             color: active ? "#fff" : c1,
@@ -845,16 +915,14 @@ export default function NFLTeamPage() {
           </div>
         </div>
 
-        {/* ===== ROSTER ===== */}
+        {/* ===== DEPTH CHART ===== */}
+        {/* ESPN's roster by position group, each group in depth chart order
+            — season snaps (nflDepthOrder, see depthRanker above), never
+            shown. */}
         <div style={{ marginBottom: 32 }}>
-          {/* Section title */}
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: c1, marginBottom: 5 }}>
-              2026 Roster
-            </div>
-            <div style={{ height: 3, background: c1, borderRadius: 2, marginBottom: 3 }} />
-            <div style={{ height: 3, background: c2, borderRadius: 2 }} />
-          </div>
+          <SectionTitle color1={c1} color2={c2} isMobile={isMobile} right={roster.length ? `${roster.length} Players` : null}>
+            2026 Depth Chart
+          </SectionTitle>
 
           {rosterLoading ? (
             <LoadingSpinner label="Loading roster" size={28} minHeight="140px" />
@@ -862,103 +930,34 @@ export default function NFLTeamPage() {
             <div style={{ padding: 40, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 14 }}>Roster unavailable.</div>
           ) : (
             Object.entries(groupedRoster).map(([group, players]) => (
-              <div key={group} style={{ marginBottom: 24 }}>
-                {/* Position group header with count */}
-                <div style={{ fontSize: 13, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: c1, borderBottom: `2px solid ${c1}`, paddingBottom: 4, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span>{group}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#aaa", letterSpacing: 0 }}>{players.length}</span>
-                </div>
+              <div key={group} style={{ marginBottom: isMobile ? 20 : 26 }}>
+                <SectionTitle color1={c1} color2={c2} isMobile={isMobile} sub right={players.length}>{group}</SectionTitle>
 
-                {/* Player grid */}
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(6, 1fr)", gap: 8 }}>
-                  {players.map((player) => {
-                    const isHovered = hoveredId === player.id;
-                    const expStr = player.experience === 0 ? "Rookie" : player.experience === 1 ? "1st yr" : player.experience != null ? `${player.experience} yrs` : null;
-                    const weightClean = player.weight ? player.weight.toString().replace(/\s*lbs\.?/i, "").trim() : null;
-
-                    return (
-                      <div
-                        key={player.id}
-                        onMouseEnter={() => handleMouseEnter(player.id)}
-                        onMouseLeave={handleMouseLeave}
-                        style={{ position: "relative", background: "#fff", border: `2px solid ${c1}`, borderRadius: 8, overflow: "visible", cursor: "default" }}
-                      >
-                        {/* Top bar */}
-                        <div style={{ background: c1, padding: "4px 6px", display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: "6px 6px 0 0" }}>
-                          <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", letterSpacing: "0.06em" }}>{player.position}</span>
-                          {player.jersey && <span style={{ fontSize: 9, fontWeight: 900, color: "rgba(255,255,255,0.8)" }}>#{player.jersey}</span>}
-                        </div>
-
-                        {/* Name — no headshot/logo art, just the name as the
-                            card's own content, given more breathing room
-                            than it had as a caption under a photo. */}
-                        <div style={{ padding: isMobile ? "12px 6px" : "16px 8px", textAlign: "center" }}>
-                          <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, color: c1, lineHeight: 1.25, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                            {player.firstName}
-                          </div>
-                          <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 900, color: c1, lineHeight: 1.25, textTransform: "uppercase", letterSpacing: "0.03em" }}>
-                            {player.lastName}
-                          </div>
-                          {expStr && (
-                            <div style={{ fontSize: 9, fontWeight: 700, color: "#aaa", marginTop: 4 }}>{expStr}</div>
-                          )}
-                        </div>
-
-                        {/* Hover tooltip — team colored */}
-                        {isHovered && (
-                          <div style={{
-                            position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
-                            background: c1, borderRadius: 8, overflow: "hidden",
-                            width: 190, zIndex: 100,
-                            boxShadow: `0 6px 20px rgba(0,0,0,0.3)`,
-                            border: `2px solid ${c2}`,
-                            pointerEvents: "none",
-                          }}>
-                            {/* Header bar */}
-                            <div style={{ background: c2, padding: "5px 10px" }}>
-                              <div style={{ fontWeight: 900, fontSize: 12, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>
-                                {player.fullName}
-                              </div>
-                            </div>
-                            {/* Bio */}
-                            <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 3 }}>
-                              {[
-                                player.position ? { label: "POS", value: player.position } : null,
-                                player.age ? { label: "AGE", value: player.age } : null,
-                                player.height ? { label: "HT", value: player.height } : null,
-                                weightClean ? { label: "WT", value: `${weightClean} lbs` } : null,
-                                player.college ? { label: "COLLEGE", value: player.college } : null,
-                              ].filter(Boolean).map(({ label, value }) => (
-                                <div key={label} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                                  <span style={{ fontSize: 8, fontWeight: 900, color: c2, textTransform: "uppercase", letterSpacing: "0.1em", flexShrink: 0, minWidth: 40 }}>{label}</span>
-                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>{value}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {/* "+" tile — same grid cell as every player above it, so
-                      it stretches to match their height for free (grid's
-                      default align-items:stretch). Pops up that group's
-                      2027 board right here instead of navigating away (see
-                      boardModal above) — omitted for a group with no board
-                      equivalent. */}
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fill, minmax(200px, 1fr))", gap: isMobile ? 8 : 10 }}>
+                  {players.map((player) => (
+                    <DepthChip
+                      key={player.id} player={player} color1={c1} color2={c2} isMobile={isMobile}
+                      hovered={hoveredId === player.id}
+                      onMouseEnter={() => handleMouseEnter(player.id)} onMouseLeave={handleMouseLeave}
+                    />
+                  ))}
+                  {/* "+" tile — pops up that group's 2027 board right here
+                      instead of navigating away (see boardModal above) —
+                      omitted for a group with no board equivalent. */}
                   {ROSTER_GROUP_TO_BOARD_POSITIONS[group] && (
                     <button
+                      className="wd-nfl-plus"
                       onClick={() => setBoardModal({ positions: ROSTER_GROUP_TO_BOARD_POSITIONS[group], label: ROSTER_GROUP_TO_BOARD_POSITIONS[group].join(" / ") })}
                       title={`See the 2027 ${ROSTER_GROUP_TO_BOARD_POSITIONS[group].join(" / ")} board`}
                       style={{
-                        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                        height: "100%", minHeight: isMobile ? 70 : 86,
-                        background: c1, border: `2px solid ${c1}`, borderRadius: 8,
-                        color: "#fff", cursor: "pointer", boxSizing: "border-box",
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                        minHeight: isMobile ? 56 : 62, padding: "8px 10px",
+                        background: tint(c1, "0d"), border: `2px dashed ${tint(c1, "66")}`, borderRadius: 10,
+                        color: c1, cursor: "pointer", boxSizing: "border-box", fontFamily: "inherit",
                       }}
                     >
-                      <span style={{ fontSize: isMobile ? 38 : 46, fontWeight: 900, lineHeight: 1 }}>+</span>
-                      <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 4, textAlign: "center" }}>
+                      <span style={{ fontSize: isMobile ? 22 : 26, fontWeight: 900, lineHeight: 1 }}>+</span>
+                      <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                         2027 Board
                       </span>
                     </button>
@@ -977,15 +976,11 @@ export default function NFLTeamPage() {
             History" archive is, just built around one fixed NFL team
             instead of one fixed college. See draftArchive/archiveSchoolLogos
             above for how the two sources are combined. */}
-        <div ref={picksRef} style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: isMobile ? 18 : 22, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: c1, marginBottom: 5 }}>
-            Draft Archive
-          </div>
-          <div style={{ height: 3, background: c1, borderRadius: 2, marginBottom: 3 }} />
-          <div style={{ height: 3, background: c2, borderRadius: 2 }} />
+        <div ref={picksRef} style={{ scrollMarginTop: 80 }}>
+          <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Draft Archive</SectionTitle>
         </div>
 
-        <div style={{ border: `2px solid ${c1}`, borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2" }}>
           <div style={{ background: c1, padding: "8px 16px" }}>
             <div style={{ color: c2, fontWeight: 900, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>
               {loading ? "Loading…" : `${draftArchive.length} Pick${draftArchive.length !== 1 ? "s" : ""}`}
@@ -1155,6 +1150,86 @@ export default function NFLTeamPage() {
         </div>
       )}
     </>
+  );
+}
+
+// ── One depth chart player: jersey badge in the team colors, name, and a
+// position chip + experience line; hovering (desktop) opens his bio card. ──
+function DepthChip({ player, color1, color2, isMobile, hovered, onMouseEnter, onMouseLeave }) {
+  const expStr = player.experience === 0 ? "Rookie" : player.experience != null ? `${player.experience} yr${player.experience !== 1 ? "s" : ""} exp` : null;
+  const weightClean = player.weight ? player.weight.toString().replace(/\s*lbs\.?/i, "").trim() : null;
+  return (
+    <div
+      className="wd-nfl-chip"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      style={{
+        position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 8 : 10,
+        padding: isMobile ? "8px" : "9px 10px", background: "#fff", borderRadius: 10, minWidth: 0,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2", cursor: "default",
+      }}
+    >
+      <div style={{
+        flexShrink: 0, width: isMobile ? 34 : 40, height: isMobile ? 34 : 40, borderRadius: 9,
+        background: `linear-gradient(145deg, ${color1}, ${color1} 60%, ${color2})`,
+        boxShadow: `inset 0 -3px 0 ${color2}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: "#fff", fontWeight: 900, fontSize: isMobile ? 14 : 16, fontVariantNumeric: "tabular-nums",
+        textShadow: "0 1px 2px rgba(0,0,0,0.35)",
+      }}>
+        {player.jersey || "–"}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: isMobile ? 9 : 10, fontWeight: 700, color: "#6b7685", textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {player.firstName}
+        </div>
+        <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {player.lastName}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, minWidth: 0 }}>
+          {player.position && (
+            <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 900, color: color1, background: tint(color1, "14"), border: `1px solid ${tint(color1, "40")}`, borderRadius: 4, padding: "1px 5px", letterSpacing: "0.05em" }}>
+              {player.position}
+            </span>
+          )}
+          {expStr && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: "#9aa5b4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{expStr}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Hover bio card — team colored */}
+      {hovered && (
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
+          background: color1, borderRadius: 10, overflow: "hidden",
+          width: 200, zIndex: 100,
+          boxShadow: "0 10px 26px rgba(0,0,0,0.3)",
+          border: `2px solid ${color2}`,
+          pointerEvents: "none",
+        }}>
+          <div style={{ background: color2, padding: "6px 10px" }}>
+            <div style={{ fontWeight: 900, fontSize: 12, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>
+              {player.fullName}
+            </div>
+          </div>
+          <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 3 }}>
+            {[
+              player.position ? { label: "POS", value: player.position } : null,
+              player.age ? { label: "AGE", value: player.age } : null,
+              player.height ? { label: "HT", value: player.height } : null,
+              weightClean ? { label: "WT", value: `${weightClean} lbs` } : null,
+              player.college ? { label: "COLLEGE", value: player.college } : null,
+            ].filter(Boolean).map(({ label, value }) => (
+              <div key={label} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 8, fontWeight: 900, color: color2, textTransform: "uppercase", letterSpacing: "0.1em", flexShrink: 0, minWidth: 40 }}>{label}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

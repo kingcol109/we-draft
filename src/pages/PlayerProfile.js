@@ -21,7 +21,9 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { cfbdPlayerFor, setLivePlayerFollow } from "../utils/liveFollowSync";
-import { getSiteSnapshot, fetchAds } from "../utils/siteSnapshots";
+import { getSiteSnapshot, fetchAds, fetchCfbAds, fetchAdTeamLogos } from "../utils/siteSnapshots";
+import { NflTeamPicker, useMarginAdFit } from "../components/MarginAds";
+import AdBanner, { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
 import { STAT_METRICS, readMetric, percentileFromTable } from "../utils/historicalStats";
 import { useAuth } from "../context/AuthContext";
@@ -58,7 +60,7 @@ import ProvenFlair from "../assets/proven.png";
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
 import { fetchTeammateVideos } from "../components/PlayerSidebars";
-import { cssRect, viewportCssWidth, withoutPageZoom } from "../utils/pageZoom";
+import { cssRect, withoutPageZoom } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 import { classSnapshotRanks } from "../utils/classRanks";
@@ -404,6 +406,9 @@ const formatEligible = (eligible) => {
   return String(eligible);
 };
 
+// A cfbAds row carries School instead of Team (same as MarginAds.js).
+const isCfbAd = (ad) => !!ad?.School && !ad?.Team;
+
 function teamNameFromAbbr(abbr) {
   const map = {
     ARI:"Arizona Cardinals",ATL:"Atlanta Falcons",BAL:"Baltimore Ravens",BUF:"Buffalo Bills",
@@ -428,15 +433,6 @@ const teamNameToAbbr = {
   "New York Jets":"NYJ","Philadelphia Eagles":"PHI","Pittsburgh Steelers":"PIT","San Francisco 49ers":"SF",
   "Seattle Seahawks":"SEA","Tampa Bay Buccaneers":"TB","Tennessee Titans":"TEN","Washington Commanders":"WAS",
 };
-
-// ── All 32 NFL team abbreviations, ordered to fill an 8x4 grid exactly —
-// used by the margin ad's team picker. ──
-const NFL_TEAM_ABBRS = [
-  "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE",
-  "DAL","DEN","DET","GB","HOU","IND","JAX","KC",
-  "LV","LAC","LAR","MIA","MIN","NE","NO","NYG",
-  "NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS",
-];
 
 // ── Shared sidebar shell ──
 // `to`: makes the header a link (Videos → /videos).
@@ -2327,12 +2323,14 @@ export default function PlayerProfile() {
   // an assumed 1600px — that guess doesn't account for padding, box-sizing,
   // or the scrollbar, which is why it kept hugging the edge incorrectly. ──
   const mainGridRef = useRef(null);
-  const [showMarginAds, setShowMarginAds] = useState(false);
   const [adData, setAdData] = useState(null);
   const [allAds, setAllAds] = useState([]);
+  const [adTeamLogos, setAdTeamLogos] = useState({});
+  // false until the first ad fetch settles — AdBanner's slot holds its
+  // height until then so the evaluation form below doesn't jump.
+  const [adsResolved, setAdsResolved] = useState(false);
   const [adVisible, setAdVisible] = useState(false);
   const [adTeamBranding, setAdTeamBranding] = useState(null);
-  const [adLayout, setAdLayout] = useState({ width: 140, leftGutter: 0, rightGutter: 0 });
 
   // ── Draft class sidebar ──
   const [draftClassPlayers, setDraftClassPlayers] = useState([]);
@@ -2353,35 +2351,19 @@ export default function PlayerProfile() {
   const [trendingTop5, setTrendingTop5] = useState([]);
   const [trendingLoaded, setTrendingLoaded] = useState(false);
 
-  // ── Measures the real left/right gutter around the content grid (the
-  // space actually left over, not an estimate) and derives the ad card's
-  // width + per-side offset so it centers itself in whatever room truly
-  // exists, symmetrically, on both sides. The grid has its own 60px
-  // horizontal padding (see the style below) — the visible sidebar starts
-  // 60px inside the measured box edge, not flush with it, so that padding
-  // has to be subtracted or the ad ends up centered against invisible
-  // padding instead of the actual visible content, making it look like it's
-  // hugging the outer browser edge. ──
+  // ── Margin ad placement + size, measured off the content grid's real
+  // gutters (shared with MarginAds.js — see useMarginAdFit). The grid has
+  // its own 60px horizontal padding (see the style below), so the visible
+  // sidebar starts 60px inside the measured box edge; that padding is
+  // subtracted or the ad would center against invisible padding. Re-measured
+  // once pageVisible flips true, since the grid has no real size before. ──
   const CONTENT_H_PADDING = 60;
-  const recomputeAdLayout = () => {
-    if (isMobile || !mainGridRef.current) { setShowMarginAds(false); return; }
-    const rect = cssRect(mainGridRef.current);
-    const visibleLeftEdge = rect.left + CONTENT_H_PADDING;
-    const visibleRightEdge = rect.right - CONTENT_H_PADDING;
-    const leftGutter = Math.max(0, visibleLeftEdge);
-    const rightGutter = Math.max(0, viewportCssWidth() - visibleRightEdge);
-    const minGutter = Math.min(leftGutter, rightGutter);
-    const MIN_USABLE_GUTTER = 160; // below this, there's no sensible room for a card + breathing room
-    if (minGutter < MIN_USABLE_GUTTER) { setShowMarginAds(false); return; }
-    const width = Math.max(140, Math.min(240, minGutter - 16));
-    setAdLayout({ width, leftGutter, rightGutter });
-    setShowMarginAds(true);
-  };
+  const adFit = useMarginAdFit({ contentRef: mainGridRef, horizontalPadding: CONTENT_H_PADDING, isMobile, watch: [pageVisible] });
+  const showMarginAds = adFit.show;
 
   useEffect(() => {
     const handler = () => {
       setIsMobile(window.innerWidth < 768);
-      recomputeAdLayout();
     };
     window.addEventListener("resize", handler);
 
@@ -2399,16 +2381,6 @@ export default function PlayerProfile() {
       .catch((e) => { console.error("Comparison feature-flag fetch error:", e); if (!cancelled) setComparisonEnabled(false); });
     return () => { cancelled = true; };
   }, []);
-
-  // ── The grid ref has no real size until content actually renders — recompute
-  // once pageVisible flips true (and again shortly after, in case fonts/images
-  // still nudge the layout). ──
-  useEffect(() => {
-    if (!pageVisible) return;
-    recomputeAdLayout();
-    const t = setTimeout(recomputeAdLayout, 300);
-    return () => clearTimeout(t);
-  }, [pageVisible]);
 
   // Skews raw percentages so bars read as "more filled" at a glance — a low
   // exponent (< 0.5) pushes small percentages up more aggressively than a
@@ -2517,31 +2489,44 @@ export default function PlayerProfile() {
   // last network call the page makes: waits for pageVisible (so it never
   // competes with real content), then adds its own delay on top. Selection
   // priority: (1) the team that actually drafted this player, if drafted —
-  // feels intentional rather than random; (2) the player's college's NFL
+  // feels intentional rather than random; (1b) undrafted: the player's own
+  // school's CFB ad (cfbAds, AdminAdsManager.js) — a default only, never
+  // added to the NFL team grid, so the visitor can still switch to any NFL
+  // team and there's no way back to it but a reload; (2) the player's college's NFL
   // affiliate (Schools sheet's NFL column — a scouting/feeder relationship,
   // not a draft outcome) for undrafted prospects; (3) random, as a last
   // resort. Fails silently — an ad that doesn't load should never be
   // visible as a broken/blank state. ──
   useEffect(() => {
-    if (isMobile || !showMarginAds || !pageVisible) return;
+    // Not gated on the rails being visible: AdBanner (above My Evaluation)
+    // shows this same ad on desktops too narrow for the rails, and
+    // MobileAdCard takes that spot on phones.
+    if (!pageVisible) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
         // One read from the weekly ads snapshot (see utils/siteSnapshots.js
         // — falls back to the ads collection if it's missing).
-        const ads = await fetchAds();
-        if (!cancelled && ads.length > 0) {
+        const [ads, cfbAds, logos] = await Promise.all([
+          fetchAds(),
+          !draftedBy && branding?.school ? fetchCfbAds() : [],
+          fetchAdTeamLogos(),
+        ]);
+        if (!cancelled) setAdTeamLogos(logos);
+        const schoolAd = cfbAds.find((a) => a.School === branding?.school) || null;
+        if (!cancelled && (ads.length > 0 || schoolAd)) {
           setAllAds(ads);
           const draftedAd = draftedBy ? ads.find((a) => a.Team === draftedBy) : null;
           const affiliateAd = !draftedAd && branding?.nflAffiliate
             ? ads.find((a) => a.Team === branding.nflAffiliate)
             : null;
-          setAdData(draftedAd || affiliateAd || ads[Math.floor(Math.random() * ads.length)]);
+          setAdData(draftedAd || schoolAd || affiliateAd || ads[Math.floor(Math.random() * ads.length)]);
         }
       } catch (e) { /* ads are non-critical — fail silently */ }
+      if (!cancelled) setAdsResolved(true);
     }, 1500);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [isMobile, showMarginAds, pageVisible, draftedBy, branding?.nflAffiliate]);
+  }, [pageVisible, draftedBy, branding?.nflAffiliate, branding?.school]);
 
   useEffect(() => {
     if (!adData) return;
@@ -2551,20 +2536,34 @@ export default function PlayerProfile() {
 
   // ── The right-side ad card is stylized to whichever team is currently
   // selected (shared `adData` state, driven by the left card's picker) —
-  // pull that team's real Color1/Color2/Logo from the nfl collection. ──
+  // pull that team's real Color1/Color2/Logo from the nfl collection.
+  // Tagged with the team it belongs to (_for): the rail cards keep the
+  // previous team's colors for the moment a switch takes, while AdBanner
+  // waits for a match rather than showing mismatched colors. ──
   useEffect(() => {
+    // A CFB ad is always this player's own school — reuse its branding.
+    if (isCfbAd(adData)) {
+      setAdTeamBranding(branding ? {
+        Color1: branding.color1, Color2: branding.color2, Logo1: branding.logo1, LogoDark: branding.logoDark,
+        Wordmark: branding.wordmark, WordmarkDark: branding.wordmarkDark, Mascot: branding.mascot,
+        _for: adData.School,
+      } : null);
+      return;
+    }
     if (!adData?.Team) { setAdTeamBranding(null); return; }
     let cancelled = false;
     (async () => {
       try {
         const snap = await getDoc(doc(db, "nfl", adData.Team));
-        if (!cancelled) setAdTeamBranding(snap.exists() ? snap.data() : null);
+        if (!cancelled) setAdTeamBranding(snap.exists() ? { ...snap.data(), _for: adData.Team } : { _for: adData.Team });
       } catch (e) {
-        if (!cancelled) setAdTeamBranding(null);
+        // Still tagged, so AdBanner shows (in site colors) instead of waiting forever.
+        if (!cancelled) setAdTeamBranding({ _for: adData.Team });
       }
     })();
     return () => { cancelled = true; };
-  }, [adData?.Team]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adData?.Team, adData?.School, branding]);
 
   useEffect(() => {
     if (!slug) return;
@@ -2863,7 +2862,7 @@ export default function PlayerProfile() {
           // in the app already uses (see AdminPanel.js's team preview).
           cfbLogoRef.current = b.LogoDark || b.Logo1 || "";
           schoolSlugRef.current = b.Slug || "";
-          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logoDark:b.LogoDark||"", wordmark:b.Wordmark||"", wordmarkDark:b.WordmarkDark||"", slug:b.Slug||"", nflAffiliate:b.NFL||"" });
+          setBranding({ color1:b.Color1||SITE_BLUE, color2:b.Color2||SITE_GOLD, logo1:b.Logo1||"", logoDark:b.LogoDark||"", wordmark:b.Wordmark||"", wordmarkDark:b.WordmarkDark||"", slug:b.Slug||"", nflAffiliate:b.NFL||"", school:b.School||"", mascot:b.Mascot||"" });
         } else { setBranding(null); }
       } catch(e) { setBranding(null); }
       finally {
@@ -3680,27 +3679,6 @@ useEffect(() => {
     );
   };
 
-  // ── Shared fixed-position placement for both margin ad cards, derived from
-  // the measured gutter (see recomputeAdLayout above). Kept as one function
-  // so the left and right cards always use identical positioning math. ──
-  const marginAdPositionStyle = (side) => {
-    const gutter = side === "left" ? adLayout.leftGutter : adLayout.rightGutter;
-    const offset = Math.max(8, (gutter - adLayout.width) / 2);
-    return {
-      position: "fixed",
-      top: "50%",
-      [side]: `${offset}px`,
-      transform: "translateY(-50%)",
-      width: `${adLayout.width}px`,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      zIndex: 5,
-      opacity: adVisible ? 1 : 0,
-      transition: "opacity 0.7s ease",
-    };
-  };
-
   // ── Sponsored margin ad card — lives entirely outside the content grid via
   // position:fixed, so it never competes with the page layout for space.
   // Outer wrapper is a div rather than an anchor because it now contains a
@@ -3712,11 +3690,12 @@ useEffect(() => {
   // right card (MarginAdTeamCard, below) just follows whatever this picks. ──
   const MarginAd = ({ side }) => {
     if (!adData) return null;
-    const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
+    const teamLabel = isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team;
     return (
       <div
         className="wd-margin-ad"
-        style={marginAdPositionStyle(side)}
+        ref={adFit.refFor(side)}
+        style={adFit.styleFor(side, adVisible)}
       >
         <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
@@ -3755,33 +3734,7 @@ useEffect(() => {
 
           {/* Always-visible 8x4 grid of all 32 NFL teams, directly under the product shot */}
           <div style={{ padding:"10px 10px 6px", borderTop:"1px solid #f3f3f3" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:"5px" }}>
-              {NFL_TEAM_ABBRS.map((abbr) => {
-                const teamAd = allAds.find((a) => a.Team === abbr);
-                const isActive = adData.Team === abbr;
-                return (
-                  <button
-                    key={abbr}
-                    type="button"
-                    disabled={!teamAd}
-                    title={teamNameFromAbbr(abbr)}
-                    className={teamAd ? "wd-team-btn" : ""}
-                    onClick={() => { if (teamAd) setAdData(teamAd); }}
-                    style={{
-                      fontSize:"8.5px", fontWeight:900,
-                      padding:"5px 0", borderRadius:"4px",
-                      border:`1px solid ${isActive ? "#c8102e" : "#eee"}`,
-                      background: isActive ? "#c8102e" : teamAd ? "#fff" : "#f6f6f6",
-                      color: isActive ? "#fff" : teamAd ? "#333" : "#ccc",
-                      cursor: teamAd ? "pointer" : "not-allowed",
-                      transition: "transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
-                    }}
-                  >
-                    {abbr}
-                  </button>
-                );
-              })}
-            </div>
+            <NflTeamPicker allAds={allAds} activeTeam={adData.Team} teamLogos={adTeamLogos} onPick={setAdData} />
           </div>
 
           <a
@@ -3829,7 +3782,7 @@ useEffect(() => {
   // cards read as complementary rather than duplicates of each other. ──
   const MarginAdTeamCard = ({ side }) => {
     if (!adData) return null;
-    const teamLabel = teamNameFromAbbr(adData.Team) || adData.Team;
+    const teamLabel = isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team;
     const tColor1 = adTeamBranding?.Color1 || SITE_BLUE;
     const tColor2 = adTeamBranding?.Color2 || SITE_GOLD;
     const tLogo = adTeamBranding?.Logo1 || adTeamBranding?.Logo2 || "";
@@ -3839,7 +3792,8 @@ useEffect(() => {
     return (
       <div
         className="wd-margin-ad"
-        style={marginAdPositionStyle(side)}
+        ref={adFit.refFor(side)}
+        style={adFit.styleFor(side, adVisible)}
       >
         <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
@@ -3855,9 +3809,12 @@ useEffect(() => {
         >
           <div style={{ background:`linear-gradient(135deg, ${tColor1}, ${tColor1}cc)`, padding:"12px 10px", display:"flex", alignItems:"center", justifyContent:"center" }}>
             {(() => {
+              // NFL: "Arizona" / "Cardinals". CFB: school / mascot, or the
+              // school alone on the big line when there's no mascot.
               const parts = teamLabel.split(" ");
-              const nickname = parts.pop();
-              const cityLine = parts.join(" ");
+              const cfb = isCfbAd(adData);
+              const nickname = cfb ? (adTeamBranding?.Mascot || teamLabel) : parts.pop();
+              const cityLine = cfb ? (adTeamBranding?.Mascot ? teamLabel : "") : parts.join(" ");
               return (
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center", lineHeight:1.15 }}>
                   <div style={{ fontSize:"12px", fontWeight:900, color:"#fff", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
@@ -5645,6 +5602,35 @@ useEffect(() => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ===== Homage ad — same ad the margin rails are showing. Desktop:
+            the wordmark banner. Phones (no rails): MobileAdCard, with the
+            product shot and its own team dropdown. ===== */}
+        {adData ? (
+          <div className="mb-8">
+            {isMobile ? (
+              <MobileAdCard
+                ad={adData}
+                branding={adTeamBranding}
+                label={isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team}
+                allAds={allAds}
+                onPick={setAdData}
+                visible={adVisible && adTeamBranding?._for === (adData.Team || adData.School)}
+              />
+            ) : (
+              <AdBanner
+                ad={adData}
+                branding={adTeamBranding}
+                label={isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team}
+                isMobile={false}
+                visible={adVisible && adTeamBranding?._for === (adData.Team || adData.School)}
+              />
+            )}
+          </div>
+        ) : !adsResolved && (
+          // Holds the ad's height (+ its "Sponsored" label) until it loads.
+          <div className="mb-8" aria-hidden="true" style={{ height: isMobile ? `${MOBILE_AD_HEIGHT + 17}px` : "131px" }} />
         )}
 
         {/* ===== Evaluation Form ===== */}

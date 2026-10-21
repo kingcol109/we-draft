@@ -345,6 +345,23 @@ service cloud.firestore {
     match /pffGrades/{teamId} {
       allow read, write: if isAdmin();
     }
+    // PFF NFL depth charts (scripts/syncPffNflRosters.js, admin SDK) — back
+    // office only (Admin Panel → Research); same never-public rule.
+    match /pffNflRosters/{abbr} {
+      allow read, write: if isAdmin();
+    }
+    // Derived from pffNflRosters by scripts/nflTeamNeeds.js (admin SDK) —
+    // no PFF numbers in either, so they're public: nflDepthOrder is each
+    // team's player names in snap order (NFLTeamPage.jsx's depth chart
+    // sorts by it), nflTeamNeeds one need label per position.
+    match /nflDepthOrder/{abbr} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /nflTeamNeeds/{abbr} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Video Workshop ideas (Admin → Videos → Video Creation → Video
     // Workshop, components/VideoWorkshop.js) — admin-only; kept talking
     // points can include PFF data.
@@ -597,7 +614,16 @@ service cloud.firestore {
     match /rankings/{doc} { allow read, write: if true; }
     match /rivalries/{doc} { allow read, write: if true; }
     match /videos/{doc} { allow read, write: if true; }
-    match /ads/{doc} { allow read, write: if true; }
+    // Homage margin ads — NFL (ads/{abbr}) and CFB (cfbAds/{schools doc
+    // id}), edited only from Admin → Ads (AdminAdsManager.js).
+    match /ads/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /cfbAds/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Reusable nested rule shape for a likeable, commentable public content
     // doc — same likes/comments/replies structure as schedule26/{doc}'s own
     // hype/comments above (see the detailed reasoning there), just under a

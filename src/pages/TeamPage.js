@@ -11,6 +11,7 @@ import { isLiveTeamFollowed, setLiveTeamFollow } from "../utils/liveFollowSync";
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import TeamStats, { playersWithStats } from "../components/TeamStats";
 import TeamInsights from "../components/TeamInsights";
+import MarginAds from "../components/MarginAds";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { Helmet } from "react-helmet-async";
 import EliteFlair from "../assets/elite.png";
@@ -1038,6 +1039,9 @@ export default function TeamPage() {
   // (not just a local variable in the load effect) since the render below
   // needs it too.
   const [fcs, setFcs] = useState(false);
+  // The page's content column — MarginAds centers its Homage rails in the
+  // gutters beside it (only on screens wide enough to have them).
+  const contentRef = useRef(null);
   const [conferenceTeams, setConferenceTeams] = useState([]);
   const [teamNews, setTeamNews] = useState([]);
   const [schedule, setSchedule] = useState([]);
@@ -2046,7 +2050,11 @@ export default function TeamPage() {
         `}</style>
       )}
 
-      <div style={{
+      {/* Defaults to this school's CFB ad, then its NFL affiliate's. */}
+      <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={40}
+        preferSchool={school?.School || ""} preferTeam={school?.NFL || ""} schoolBranding={school} />
+
+      <div ref={contentRef} style={{
         maxWidth: "1600px", margin: "0 auto",
         padding: isMobile ? "10px 10px 60px" : "24px 40px 60px",
         fontFamily: "'Arial Black', Arial, sans-serif",

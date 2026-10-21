@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { cfbSeo } from "../utils/cfbSeo";
@@ -7,6 +7,7 @@ import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import LoadingSpinner from "../components/LoadingSpinner";
 import CfbLeaders from "../components/CfbLeaders";
+import MarginAds from "../components/MarginAds";
 import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
 // We-Draft Live scores for in-progress / just-finished games (one listener
 // on liveSlate/current — see hooks/useLiveSlate.js).
@@ -289,6 +290,9 @@ export default function CFBPage() {
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== "undefined" && window.innerWidth < 768
   );
+  // The 1200px content column — MarginAds centers its Homage rails in the
+  // gutters beside it, on every tab (Teams, Schedule, Stats).
+  const contentRef = useRef(null);
 
   const conferenceOrder = [
     "ACC",
@@ -480,6 +484,7 @@ export default function CFBPage() {
 
   return (
     <div
+      ref={contentRef}
       style={{
         maxWidth: "1200px",
         margin: "0 auto",
@@ -853,6 +858,8 @@ export default function CFBPage() {
           )}
         </div>
       )}
+      {/* NFL ads only (random team) — no college ads on the CFB pages. */}
+      <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={24} />
     </div>
   );
 }

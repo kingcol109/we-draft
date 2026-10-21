@@ -20,12 +20,15 @@ import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
+import AdminAdsManager from "../components/AdminAdsManager";
+import AdminResearch from "../components/AdminResearch";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
 import verifiedBadge from "../assets/verified.png";
 import { unzoomTransform } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
+import { loadImageAsPngBlob } from "../utils/clipboardImage";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -280,6 +283,7 @@ const SECTIONS = [
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "youtube", label: "YouTube Analytics", icon: "▶️", ready: true },
+  { key: "research", label: "Research", icon: "🔬", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
@@ -289,7 +293,7 @@ const SECTIONS = [
   { key: "sim", label: "Football Sim", icon: "🧪", ready: true },
   { key: "streams", label: "Stream Manager", icon: "📡", ready: true },
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
-  { key: "ads", label: "Ads", icon: "🎯", ready: false },
+  { key: "ads", label: "Ads", icon: "🎯", ready: true },
 ];
 
 function SidebarNav({ active, setActive, badgeCounts }) {
@@ -11319,47 +11323,6 @@ const CHECKER_BG = {
   backgroundPosition: "0 0, 0 6px, 6px -6px, -6px 0px",
 };
 
-// Many of the logo URLs stored in schools/nfl are bare "imgur.com/xxx.png"
-// links — Imgur happily serves the raw image bytes from that host (that's
-// why the <img> previews render fine), but it caps that domain's
-// Access-Control-Allow-Origin to https://imgur.com itself, which blocks the
-// cross-origin canvas read a clipboard-image-copy needs. The i.imgur.com
-// CDN subdomain serves the identical bytes with a permissive CORS header,
-// so rewrite to it before fetching. No-op for every other host.
-function corsFriendlyImageUrl(url) {
-  return url.replace(/^(https?:\/\/)imgur\.com\//i, "$1i.imgur.com/");
-}
-
-// ── Draws a (possibly cross-origin) logo URL onto a canvas and exports it
-// as a PNG blob, so it can be written to the clipboard as actual image data
-// rather than just a URL string — the point being to paste straight into
-// Canva/Photoshop/etc. Requires the image host to serve CORS headers
-// (Access-Control-Allow-Origin); if it doesn't, the canvas comes back
-// "tainted" and toBlob throws a SecurityError, which the caller treats as a
-// normal copy failure rather than crashing. ──
-function loadImageAsPngBlob(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        canvas.getContext("2d").drawImage(img, 0, 0);
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error("Canvas failed to export the image."));
-        }, "image/png");
-      } catch (e) {
-        reject(e);
-      }
-    };
-    img.onerror = () => reject(new Error("Image failed to load for clipboard copy."));
-    img.src = corsFriendlyImageUrl(url);
-  });
-}
-
 // `status` drives both the label and color: "idle" | "copying" | "copied" | "failed".
 function CopyButton({ onClick, disabled, status, idleLabel }) {
   const isBusy = status === "copying";
@@ -14007,6 +13970,7 @@ export default function AdminPanel() {
             {activeSection === "videos" && <VideosSection />}
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "youtube" && <AdminYouTubeAnalytics />}
+            {activeSection === "research" && <AdminResearch />}
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "calendar" && <ContentCalendarManager />}
@@ -14016,7 +13980,7 @@ export default function AdminPanel() {
             {activeSection === "sim" && <SimLabPane />}
             {activeSection === "streams" && <AdminStreamManager />}
             {activeSection === "sync" &&<ComingSoonPane label="Sync / System Status" />}
-            {activeSection === "ads" && <ComingSoonPane label="Ads Management" />}
+            {activeSection === "ads" && <AdminAdsManager />}
           </div>
         </div>
       </div>
