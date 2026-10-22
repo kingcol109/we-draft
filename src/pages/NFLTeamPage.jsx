@@ -1,8 +1,7 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useState, useEffect, useRef, useMemo } from "react";
-import ReactDOM from "react-dom";
 import {
-  doc, getDoc, setDoc, collection, query, where, getDocs, orderBy, serverTimestamp,
+  doc, getDoc, collection, query, where, getDocs, orderBy,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import Logo1 from "../assets/Logo1.png";
@@ -10,9 +9,8 @@ import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
-import { useAuth } from "../context/AuthContext";
-import { getAnonId } from "../utils/anonId";
-import { cssRect } from "../utils/pageZoom";
+import DraftArchiveList, { ArchiveFilterButton, useSchoolLogos } from "../components/DraftArchiveList";
+import { ROLE_BY_KEY, isOpenStint, stintYearSpan, groupStints } from "../utils/coachHistory";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -59,18 +57,6 @@ const gradeDisplay = (g) => {
   };
   return map[g] || map["Watchlist"];
 };
-
-// ── Team Needs vote — the nine positions visitors rate, and the 1-5 need
-// scale each gets rated on. Mirrors firestore.rules' teamNeeds/{team}/
-// votes/{uid} field list/range exactly (see isValidNeedRating there). ──
-const NEED_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "LB", "CB", "DB"];
-const NEED_LEVELS = [
-  { v: 1, label: "None" },
-  { v: 2, label: "Low" },
-  { v: 3, label: "Med" },
-  { v: 4, label: "High" },
-  { v: 5, label: "Extreme" },
-];
 
 // ESPN team ID map (abbreviation → ESPN numeric ID)
 const ESPN_TEAM_IDS = {
@@ -119,67 +105,115 @@ const ROSTER_GROUP_TO_BOARD_POSITIONS = {
   "Defensive Backs": ["DB"],
 };
 
-// Stat labels by position group
-function getStatLabels(pos) {
-  const p = pos?.toUpperCase();
-  if (p === "QB") return { passYds: "Pass Yds", passTDs: "Pass TDs", ints: "INTs", compPct: "Comp%" };
-  if (["RB", "FB"].includes(p)) return { rushYds: "Rush Yds", rushTDs: "Rush TDs", rec: "Rec", recYds: "Rec Yds" };
-  if (["WR", "TE"].includes(p)) return { rec: "Rec", recYds: "Rec Yds", recTDs: "Rec TDs", targets: "Targets" };
-  if (["K"].includes(p)) return { fgMade: "FG Made", fgAtt: "FG Att", xpMade: "XP Made", longFG: "Long FG" };
-  if (["P"].includes(p)) return { punts: "Punts", puntAvg: "Avg", inside20: "In 20", touchbacks: "TBs" };
-  // Default: defensive
-  return { tackles: "Tackles", sacks: "Sacks", tfl: "TFL", ints: "INTs" };
+// ── Season stats for the player card — ESPN's per-athlete season totals
+// (regular season), fetched on hover/tap. The season rolls over in
+// September; before a player has a line for it (week 1 not played, or
+// he hasn't appeared yet) the card falls back to the previous season. ──
+const currentSeason = () => {
+  const d = new Date();
+  return d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1;
+};
+const OL_POSITIONS = ["OL", "OT", "OG", "C", "CTR", "OC", "LT", "RT", "LG", "RG", "G", "T"];
+
+// ESPN categories → { category: { statName: value } }, names lowercased.
+function indexStats(categories) {
+  const out = {};
+  (categories || []).forEach((c) => {
+    const bucket = (out[String(c.name || "").toLowerCase()] = {});
+    (c.stats || []).forEach((st) => { if (st.value != null) bucket[st.name] = Number(st.value); });
+  });
+  return out;
 }
 
-function parseStats(statsData, pos) {
-  // statisticslog returns { splits: { categories: [...] } } or categories directly
-  const cats = statsData?.splits?.categories || statsData?.categories || [];
-  if (!cats.length) return null;
+const fmtStat = (v, decimals = 0) => (v == null || Number.isNaN(v) ? null : decimals ? v.toFixed(decimals) : String(Math.round(v)));
+const ratio = (a, b) => (a == null || b == null ? null : `${Math.round(a)}/${Math.round(b)}`);
 
-  const find = (catName, statName) => {
-    const cat = cats.find((c) => c.name === catName || c.displayName === catName);
-    if (!cat) return null;
-    const stat = cat.stats?.find((s) => s.name === statName || s.abbreviation === statName);
-    return stat?.value != null ? (Number.isInteger(stat.value) ? stat.value : parseFloat(stat.value).toFixed(1)) : null;
-  };
+// The handful of numbers that matter for a player's position, as
+// [{ label, value }] — empties dropped. Games played always leads.
+function statLine(pos, s) {
+  const g = (cat, name) => s[cat]?.[name];
+  const p = String(pos || "").toUpperCase();
+  let rows;
+  if (p === "QB") rows = [
+    ["CMP/ATT", ratio(g("passing", "completions"), g("passing", "passingAttempts"))],
+    ["YDS", fmtStat(g("passing", "passingYards"))],
+    ["TD", fmtStat(g("passing", "passingTouchdowns"))],
+    ["INT", fmtStat(g("passing", "interceptions"))],
+    ["RTG", fmtStat(g("passing", "QBRating"), 1)],
+  ];
+  else if (["RB", "FB", "HB"].includes(p)) rows = [
+    ["CAR", fmtStat(g("rushing", "rushingAttempts"))],
+    ["YDS", fmtStat(g("rushing", "rushingYards"))],
+    ["AVG", fmtStat(g("rushing", "yardsPerRushAttempt"), 1)],
+    ["REC", fmtStat(g("receiving", "receptions"))],
+    ["TD", fmtStat((g("rushing", "rushingTouchdowns") || 0) + (g("receiving", "receivingTouchdowns") || 0))],
+  ];
+  else if (["WR", "TE"].includes(p)) rows = [
+    ["TGT", fmtStat(g("receiving", "receivingTargets"))],
+    ["REC", fmtStat(g("receiving", "receptions"))],
+    ["YDS", fmtStat(g("receiving", "receivingYards"))],
+    ["AVG", fmtStat(g("receiving", "yardsPerReception"), 1)],
+    ["TD", fmtStat(g("receiving", "receivingTouchdowns"))],
+  ];
+  else if (["K", "PK"].includes(p)) rows = [
+    ["FG", ratio(g("kicking", "fieldGoalsMade"), g("kicking", "fieldGoalAttempts"))],
+    ["FG%", fmtStat(g("kicking", "fieldGoalPct"), 1)],
+    ["LNG", fmtStat(g("kicking", "longFieldGoalMade"))],
+    ["XP", ratio(g("kicking", "extraPointsMade"), g("kicking", "extraPointAttempts"))],
+    ["PTS", fmtStat(g("scoring", "totalPoints"))],
+  ];
+  else if (p === "P") rows = [
+    ["PUNTS", fmtStat(g("punting", "punts"))],
+    ["AVG", fmtStat(g("punting", "grossAvgPuntYards"), 1)],
+    ["NET", fmtStat(g("punting", "netAvgPuntYards"), 1)],
+    ["IN 20", fmtStat(g("punting", "puntsInside20"))],
+    ["LNG", fmtStat(g("punting", "longPunt"))],
+  ];
+  else if (OL_POSITIONS.includes(p) || p === "LS") rows = [];
+  else rows = [
+    ["TKL", fmtStat(g("defensive", "totalTackles"))],
+    ["TFL", fmtStat(g("defensive", "tacklesForLoss"), g("defensive", "tacklesForLoss") % 1 ? 1 : 0)],
+    ["SACK", fmtStat(g("defensive", "sacks"), g("defensive", "sacks") % 1 ? 1 : 0)],
+    ["INT", fmtStat(g("defensiveinterceptions", "interceptions"))],
+    ["PD", fmtStat(g("defensive", "passesDefended"))],
+  ];
+  return [["GP", fmtStat(g("general", "gamesPlayed"))], ...rows]
+    .filter(([, v]) => v != null)
+    .map(([label, value]) => ({ label, value }));
+}
 
-  const p = pos?.toUpperCase();
-  if (p === "QB") return {
-    passYds: find("passing", "passingYards"),
-    passTDs: find("passing", "passingTouchdowns"),
-    ints: find("passing", "interceptions"),
-    compPct: find("passing", "completionPct"),
-  };
-  if (["RB", "FB"].includes(p)) return {
-    rushYds: find("rushing", "rushingYards"),
-    rushTDs: find("rushing", "rushingTouchdowns"),
-    rec: find("receiving", "receptions"),
-    recYds: find("receiving", "receivingYards"),
-  };
-  if (["WR", "TE"].includes(p)) return {
-    rec: find("receiving", "receptions"),
-    recYds: find("receiving", "receivingYards"),
-    recTDs: find("receiving", "receivingTouchdowns"),
-    targets: find("receiving", "receivingTargets"),
-  };
-  if (p === "K") return {
-    fgMade: find("kicking", "FGM"),
-    fgAtt: find("kicking", "FGA"),
-    xpMade: find("kicking", "EPM"),
-    longFG: find("kicking", "longFieldGoal"),
-  };
-  if (p === "P") return {
-    punts: find("punting", "punts"),
-    puntAvg: find("punting", "grossAvgPuntYards"),
-    inside20: find("punting", "puntInside20"),
-    touchbacks: find("punting", "puntTouchbacks"),
-  };
-  return {
-    tackles: find("defensive", "totalTackles"),
-    sacks: find("defensive", "sacks"),
-    tfl: find("defensive", "tacklesForLoss"),
-    ints: find("defensive", "interceptions"),
-  };
+// Roster status — ESPN's roster comes in groups (offense/defense/
+// specialTeam, injuredReserveOrOut, suspended, practiceSquad), and active
+// players can carry an injury designation. statusTag turns that into the
+// chip's tag: { short, label, tone } or null for a healthy active player.
+const ROSTER_GROUP_STATUS = { injuredReserveOrOut: "reserve", suspended: "suspended", practiceSquad: "ps" };
+const STATUS_TIER = { active: 0, reserve: 1, suspended: 1, ps: 2 };
+const STATUS_TONES = {
+  out: { bg: "#c0392b", fg: "#fff" },
+  warn: { bg: "#e0a100", fg: "#fff" },
+  ps: { bg: "#fff", fg: "#5f6b7a", border: "#b8c1cc" },
+};
+function statusTag(player) {
+  const inj = player.injury || "";
+  if (player.rosterStatus === "ps") return { short: "PS", label: "Practice Squad", tone: "ps" };
+  if (player.rosterStatus === "suspended") return { short: "SUSP", label: "Suspended", tone: "out" };
+  if (player.rosterStatus === "reserve") {
+    if (/injured reserve/i.test(inj)) return { short: "IR", label: "Injured Reserve", tone: "out" };
+    if (/physically unable|pup/i.test(inj)) return { short: "PUP", label: "Physically Unable to Perform", tone: "out" };
+    return { short: "OUT", label: inj || "Reserve / Out", tone: "out" };
+  }
+  if (!inj) return null;
+  if (/^out$/i.test(inj)) return { short: "OUT", label: "Out", tone: "out" };
+  if (/questionable/i.test(inj)) return { short: "Q", label: "Questionable", tone: "warn" };
+  if (/doubtful/i.test(inj)) return { short: "D", label: "Doubtful", tone: "warn" };
+  return { short: inj.slice(0, 3).toUpperCase(), label: inj, tone: "warn" };
+}
+
+// ESPN headshots are 350×254 PNGs — its image combiner serves a card-sized
+// copy instead of the full-size download.
+function headshotUrl(href, w) {
+  const m = /^https?:\/\/a\.espncdn\.com(\/i\/headshots\/[^?]+)/.exec(href || "");
+  return m ? `https://a.espncdn.com/combiner/i?img=${m[1]}&w=${w}&h=${Math.round(w * 254 / 350)}&scale=crop&cquality=60` : href;
 }
 
 // Hero "energy" overlays — same drifting yard-line texture + breathing
@@ -196,7 +230,7 @@ const HERO_STYLE = `
     50%      { opacity: 1; }
   }
   .wd-nfl-chip { transition: transform 0.16s ease, box-shadow 0.16s ease; }
-  .wd-nfl-chip:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(0,40,90,0.14), 0 0 0 1px #d3dcea !important; }
+  .wd-nfl-chip:hover { transform: translateY(-2px); }
   .wd-nfl-plus { transition: background 0.16s ease, transform 0.16s ease; }
   .wd-nfl-plus:hover { transform: translateY(-2px); }
   @media (prefers-reduced-motion: reduce) {
@@ -225,6 +259,19 @@ function depthRanker(order) {
   });
   return (p) => full.get(depthNameKey(p.fullName)) ?? initial.get(initialKey(p.fullName)) ?? Infinity;
 }
+
+// We-Draft profile links — roster players matched to players/{id} docs by
+// name (same loose keys as the depth order), guarded by college when both
+// sides have one so a same-named prospect never links to the wrong page.
+// Only classes whose draft has already happened count (the draft is in late
+// April), so every drafted class — and its undrafted signings — links
+// automatically as it reaches the league.
+const lastDraftYear = () => {
+  const d = new Date();
+  return d.getMonth() >= 4 ? d.getFullYear() : d.getFullYear() - 1;
+};
+const schoolKey = (s) => String(s || "").toLowerCase().replace(/[^a-z]/g, "");
+const stripSuffix = (last) => String(last || "").replace(/\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i, "").trim();
 
 // Team colors are admin-entered hex — tint only when it's actually #rrggbb.
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
@@ -256,10 +303,9 @@ function sanitizeUrl(url) {
 }
 
 export default function NFLTeamPage() {
-  const { teamId } = useParams();
+  const { teamId, tab: tabParam } = useParams();
   const navigate = useNavigate();
   const teamKey = teamId?.toUpperCase();
-  const { user } = useAuth();
 
   const [team, setTeam] = useState(null);
   const [picks, setPicks] = useState([]);
@@ -270,19 +316,6 @@ export default function NFLTeamPage() {
   // here by "NFL Team" (a full "City Team" name string, not the
   // abbreviation this page's own teamKey is) instead of by School.
   const [historicalPicks, setHistoricalPicks] = useState([]);
-  // College logos for the Draft Archive rows below — batched "in" query
-  // against schools/{name}, same Logo1-on-white-background preference
-  // PlayerProfile.js's own class-list rows use (see that file's own
-  // comment on why Logo1 specifically, not LogoDark-first).
-  const [archiveSchoolLogos, setArchiveSchoolLogos] = useState({});
-  // "Team Needs" vote — see NEED_POSITIONS/NEED_LEVELS above and
-  // firestore.rules' teamNeeds/{team}/votes/{uid}. needVotes is every
-  // voter's doc (aggregated into a per-position average below);
-  // myNeedVote is just this visitor's own ratings, keyed by position, so
-  // their current picks stay highlighted and can be changed anytime.
-  const [needVotes, setNeedVotes] = useState([]);
-  const [myNeedVote, setMyNeedVote] = useState({});
-  const [needsLoading, setNeedsLoading] = useState(true);
   // "+" tile board popup — { positions, label } while open, null when
   // closed. Pops up in place instead of navigating away (see
   // ROSTER_GROUP_TO_BOARD_POSITIONS above for the group→position(s) map).
@@ -298,6 +331,8 @@ export default function NFLTeamPage() {
   const [roster, setRoster] = useState([]);
   // nflDepthOrder/{abbr}.order — see depthRanker above.
   const [depthOrder, setDepthOrder] = useState(null);
+  // ESPN athlete id → We-Draft player Slug (see lastDraftYear above).
+  const [profileSlugs, setProfileSlugs] = useState({});
   // The page's content column — MarginAds centers its Homage rails in the
   // gutters beside it.
   const contentRef = useRef(null);
@@ -306,12 +341,20 @@ export default function NFLTeamPage() {
   const [hoveredId, setHoveredId] = useState(null);
   const [statsCache, setStatsCache] = useState({});
   const [statsLoading, setStatsLoading] = useState({});
+  const [sheetPlayer, setSheetPlayer] = useState(null);
+  // Page tab — /nfl/{team}/staff, /nfl/{team}/archive, the depth chart at
+  // the bare /nfl/{team}.
+  const tab = ["staff", "archive"].includes(tabParam) ? tabParam : "roster";
+  const setTab = (t) => navigate(`/nfl/${teamId}${t === "roster" ? "" : `/${t}`}`, { replace: true });
+  // coaches/{slug} docs currently on this team (see utils/coachHistory.js).
+  const [staff, setStaff] = useState([]);
+  const [staffLoading, setStaffLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   // Mobile "stuck loading forever" watchdog — see the hook's own comment.
   useMobileStuckPageWatchdog(!team && loading, teamKey, { enabled: isMobile });
   const [seoDataReady, setSeoDataReady] = useState(false);
   const hoverTimeout = useRef(null);
-  const picksRef = useRef(null);
+  const tabsRef = useRef(null);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -406,52 +449,6 @@ export default function NFLTeamPage() {
     loadData();
   }, [teamKey]);
 
-  // Load Team Needs votes — whole subcollection (aggregated client-side
-  // into needAverages below, same "read it all, compute totals in the
-  // browser" pattern PlayerProfile.js's own reactions/evaluations use).
-  // Refetches on `user` too so logging in/out re-resolves which doc (real
-  // uid vs anon id) counts as "mine".
-  useEffect(() => {
-    if (!teamKey) return;
-    setNeedsLoading(true);
-    (async () => {
-      try {
-        const snap = await getDocs(collection(db, "teamNeeds", teamKey, "votes"));
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setNeedVotes(docs);
-        const myId = user ? user.uid : getAnonId();
-        const mine = docs.find((d) => d.id === myId);
-        setMyNeedVote(mine || {});
-      } catch (e) {
-        console.error("Team needs fetch error:", e);
-        setNeedVotes([]);
-        setMyNeedVote({});
-      } finally {
-        setNeedsLoading(false);
-      }
-    })();
-  }, [teamKey, user]);
-
-  // Rate (or re-rate) one position — optimistic local update of both the
-  // visitor's own picks and the aggregate array, then a merge write so
-  // only this one field changes on their doc (leaving any other
-  // positions they've already rated untouched).
-  const handleRateNeed = (position, value) => {
-    if (!teamKey) return;
-    const myId = user ? user.uid : getAnonId();
-    setMyNeedVote((prev) => ({ ...prev, [position]: value }));
-    setNeedVotes((prev) => {
-      const idx = prev.findIndex((v) => v.id === myId);
-      if (idx === -1) return [...prev, { id: myId, [position]: value }];
-      const next = [...prev];
-      next[idx] = { ...next[idx], [position]: value };
-      return next;
-    });
-    setDoc(doc(db, "teamNeeds", teamKey, "votes", myId), {
-      uid: myId, [position]: value, updatedAt: serverTimestamp(),
-    }, { merge: true }).catch((e) => console.error("Team needs vote error:", e));
-  };
-
   // "+" tile board popup — fetches the 2027 class for whichever
   // position(s) boardModal names, same "read players, average each one's
   // evaluations client-side" pattern PlayerProfile.js's own draft-class
@@ -510,7 +507,7 @@ export default function NFLTeamPage() {
         });
         if (!cancelled) setBoardModalPlayers(list);
       } catch (e) {
-        console.error("Team needs board popup fetch error:", e);
+        console.error("Board popup fetch error:", e);
         if (!cancelled) setBoardModalPlayers([]);
       } finally {
         if (!cancelled) setBoardModalLoading(false);
@@ -518,6 +515,48 @@ export default function NFLTeamPage() {
     })();
     return () => { cancelled = true; };
   }, [boardModal]);
+
+  // Current staff — anyone whose derived CurrentTeams includes this team.
+  useEffect(() => {
+    if (!teamKey) return;
+    let cancelled = false;
+    setStaffLoading(true);
+    getDocs(query(collection(db, "coaches"), where("CurrentTeams", "array-contains", teamKey)))
+      .then((snap) => { if (!cancelled) setStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); })
+      .catch((e) => { console.error("Staff fetch error:", e); if (!cancelled) setStaff([]); })
+      .finally(() => { if (!cancelled) setStaffLoading(false); });
+    return () => { cancelled = true; };
+  }, [teamKey]);
+
+  // Match the roster to We-Draft player pages — batched by last name
+  // ("in" takes 30 at a time), with and without a Jr./III suffix since
+  // either side may carry it.
+  useEffect(() => {
+    if (!roster.length) return;
+    let cancelled = false;
+    const lasts = [...new Set(roster.flatMap((p) => [p.lastName, stripSuffix(p.lastName)]).filter(Boolean))];
+    const chunks = [];
+    for (let i = 0; i < lasts.length; i += 30) chunks.push(lasts.slice(i, i + 30));
+    Promise.all(chunks.map((chunk) => getDocs(query(collection(db, "players"), where("Last", "in", chunk)))))
+      .then((snaps) => {
+        const maxYear = lastDraftYear();
+        const candidates = snaps.flatMap((snap) => snap.docs.map((d) => d.data()))
+          .filter((d) => d.Slug && d.Live !== false && parseInt(d.Eligible) <= maxYear);
+        const found = {};
+        roster.forEach((p) => {
+          const matches = candidates.filter((d) => {
+            const name = `${d.First || ""} ${d.Last || ""}`;
+            if (depthNameKey(name) !== depthNameKey(p.fullName) && initialKey(name) !== initialKey(p.fullName)) return false;
+            return !d.School || !p.college || schoolKey(d.School) === schoolKey(p.college);
+          });
+          const best = matches.find((d) => d.School && p.college) || matches[0];
+          if (best) found[p.id] = best.Slug;
+        });
+        if (!cancelled) setProfileSlugs(found);
+      })
+      .catch((e) => console.error("Roster profile match error:", e));
+    return () => { cancelled = true; };
+  }, [roster]);
 
   // Snap order for the depth chart — missing (or unreadable) just leaves
   // each group in ESPN's own order.
@@ -539,7 +578,7 @@ export default function NFLTeamPage() {
       try {
         const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnId}/roster`);
         const data = await res.json();
-        // ESPN returns athletes grouped by position groups
+        // ESPN returns athletes grouped by roster status (see statusTag)
         const athletes = (data.athletes || []).flatMap((group) =>
           (group.items || []).map((a) => ({
             id: a.id,
@@ -554,6 +593,9 @@ export default function NFLTeamPage() {
             experience: a.experience?.years ?? null,
             college: a.college?.name || "",
             headshot: a.headshot?.href || null,
+            rosterStatus: ROSTER_GROUP_STATUS[group.position] || "active",
+            injury: a.injuries?.[0]?.status || null,
+            injuryDate: a.injuries?.[0]?.date || null,
           }))
         );
         setRoster(athletes);
@@ -602,88 +644,36 @@ export default function NFLTeamPage() {
     );
   }, [picks, playersBySlug, historicalPicks]);
 
-  // College logos for the rows above — batched "in" query, same chunked
-  // pattern used elsewhere (e.g. PlayerProfile.js's class-list rows),
-  // fetched only for schools not already cached. archiveSchoolLogosRef
-  // mirrors the state so this can check "already have or already tried"
-  // without listing archiveSchoolLogos itself as a dependency — same
-  // reasoning as WatchButton's own schoolLogoRef in PlayerProfile.js
-  // (depending on the state directly would re-run this effect right after
-  // its own setState, if only to find nothing left to fetch).
-  const archiveSchoolLogosRef = useRef({});
-  useEffect(() => { archiveSchoolLogosRef.current = archiveSchoolLogos; }, [archiveSchoolLogos]);
-  useEffect(() => {
-    const schoolNames = [...new Set(draftArchive.map((e) => e.school).filter(Boolean))]
-      .filter((s) => !(s in archiveSchoolLogosRef.current));
-    if (schoolNames.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const chunks = [];
-        for (let i = 0; i < schoolNames.length; i += 10) chunks.push(schoolNames.slice(i, i + 10));
-        const snaps = await Promise.all(
-          chunks.map((chunk) => getDocs(query(collection(db, "schools"), where("School", "in", chunk))))
-        );
-        const found = {};
-        snaps.forEach((snap) => snap.docs.forEach((d) => {
-          const data = d.data();
-          if (data.School) found[data.School] = data.Logo1 || "";
-        }));
-        schoolNames.forEach((s) => { if (!(s in found)) found[s] = ""; }); // no match — cache empty, don't retry
-        if (!cancelled) setArchiveSchoolLogos((prev) => ({ ...prev, ...found }));
-      } catch (e) {
-        console.error("Draft archive school logo fetch error:", e);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [draftArchive]);
+  // College logos for the archive rows (schools/{name}.Logo1).
+  const archiveSchoolLogos = useSchoolLogos(draftArchive.map((e) => e.school));
 
-  // Fetch stats for a player on hover — only show 2025 season stats
-  const fetchStats = async (athleteId) => {
+  // Season stats for one player, on first hover/tap — the current season's
+  // regular-season totals, else last season's (see currentSeason above).
+  // Cached as { season, line } or null when neither season has anything.
+  const fetchStats = async (athleteId, position) => {
     if (statsCache[athleteId] !== undefined || statsLoading[athleteId]) return;
     setStatsLoading((prev) => ({ ...prev, [athleteId]: true }));
+    let result = null;
     try {
-      const res = await fetch(
-        `https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/athletes/${athleteId}/statisticslog`
-      );
-      const data = await res.json();
-      const entries = data?.entries || [];
-
-      // Only use a 2025 regular season entry — never fall back to 2024
-      const entry2025 = entries.find((e) => {
-        const seasonRef = e?.season?.$ref || e?.seasonType?.$ref || "";
-        const year = e?.season?.year || e?.year;
-        const typeName = e?.type?.name || e?.seasonType?.name || "";
-        return (
-          (year === 2025 || seasonRef.includes("/2025/")) &&
-          (typeName.toLowerCase().includes("regular") || typeName === "" || typeName.toLowerCase().includes("season"))
-        );
-      });
-
-      if (entry2025?.statistics) {
-        // statistics may itself be a $ref — follow it if so
-        if (entry2025.statistics.$ref) {
-          const res2 = await fetch(entry2025.statistics.$ref);
-          const data2 = await res2.json();
-          setStatsCache((prev) => ({ ...prev, [athleteId]: data2 }));
-        } else {
-          setStatsCache((prev) => ({ ...prev, [athleteId]: entry2025.statistics }));
-        }
-      } else {
-        // No 2025 entry — store null so tooltip shows no stats
-        setStatsCache((prev) => ({ ...prev, [athleteId]: null }));
+      const season = currentSeason();
+      for (const yr of [season, season - 1]) {
+        const res = await fetch(`https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/${yr}/types/2/athletes/${athleteId}/statistics/0`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const stats = indexStats(data?.splits?.categories);
+        if (!stats.general?.gamesPlayed) continue;
+        result = { season: yr, line: statLine(position, stats) };
+        break;
       }
-    } catch {
-      setStatsCache((prev) => ({ ...prev, [athleteId]: null }));
-    } finally {
-      setStatsLoading((prev) => ({ ...prev, [athleteId]: false }));
-    }
+    } catch { /* network/CORS failure — card just shows no stats */ }
+    setStatsCache((prev) => ({ ...prev, [athleteId]: result }));
+    setStatsLoading((prev) => ({ ...prev, [athleteId]: false }));
   };
 
-  const handleMouseEnter = (athleteId) => {
+  const handleMouseEnter = (player) => {
     hoverTimeout.current = setTimeout(() => {
-      setHoveredId(athleteId);
-      fetchStats(athleteId);
+      setHoveredId(player.id);
+      fetchStats(player.id, player.position);
     }, 200);
   };
 
@@ -692,7 +682,14 @@ export default function NFLTeamPage() {
     setHoveredId(null);
   };
 
-  // Group roster by position group, each in depth chart (snap) order —
+  // Mobile has no hover — a tap opens the same card as a bottom sheet.
+  const openPlayerSheet = (player) => {
+    setSheetPlayer(player);
+    fetchStats(player.id, player.position);
+  };
+
+  // Group roster by position group — active players first, then IR/
+  // suspended, then the practice squad, each in depth chart (snap) order;
   // anyone not in nflDepthOrder keeps ESPN's order after everyone who is.
   const depthRank = depthRanker(depthOrder);
   const groupedRoster = {};
@@ -701,11 +698,17 @@ export default function NFLTeamPage() {
     const members = roster
       .map((p, i) => ({ p, i, r: depthRank(p) }))
       .filter(({ p }) => positions.includes(p.position))
-      .sort((a, b) => a.r - b.r || a.i - b.i)
+      .sort((a, b) => STATUS_TIER[a.p.rosterStatus] - STATUS_TIER[b.p.rosterStatus] || a.r - b.r || a.i - b.i)
       .map(({ p }) => p);
     if (members.length > 0) groupedRoster[group] = members;
   });
   const ungrouped = roster.filter((p) => !allGroupedPositions.has(p.position));
+  const countBy = (...st) => roster.filter((p) => st.includes(p.rosterStatus)).length;
+  const rosterCount = [
+    `${countBy("active")} Active`,
+    countBy("reserve", "suspended") ? `${countBy("reserve", "suspended")} Reserve` : null,
+    countBy("ps") ? `${countBy("ps")} PS` : null,
+  ].filter(Boolean).join(" · ");
   if (ungrouped.length > 0) groupedRoster["Other"] = ungrouped;
 
   // Blocks first paint only until the team doc itself resolves (the single
@@ -725,7 +728,7 @@ export default function NFLTeamPage() {
   const c2 = team.Color2 || GOLD;
   const teamName = `${team.City} ${team.Team}`.trim();
   const metaDescription = `${teamName} NFL Draft Hub — mock drafts, player grades, and draft archives for the ${teamName}.`;
-  const pageUrl = `https://we-draft.com/nfl/${teamId}`;
+  const pageUrl = `https://we-draft.com/nfl/${teamId}${tab === "roster" ? "" : `/${tab}`}`;
   // LogoDark/WordmarkDark are the dark-background-safe branding variants
   // (see AdminPanel.js's branding manager) — read straight and better
   // against the hero's saturated team-color gradient than the plain Logo1
@@ -837,7 +840,7 @@ export default function NFLTeamPage() {
               </div>
             </div>
             <button
-              onClick={() => picksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              onClick={() => { setTab("archive"); tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
               style={{
                 flexShrink: 0, background: c2, color: "#fff",
                 border: "2px solid #fff", borderRadius: isMobile ? 6 : 8,
@@ -853,74 +856,36 @@ export default function NFLTeamPage() {
           </div>
         </div>
 
-        {/* ===== TEAM NEEDS ===== */}
-        {/* Open to every visitor, account or not (see handleRateNeed/
-            useEffect above) — a rating auto-saves the moment it's clicked,
-            no separate submit step, and can be changed anytime by just
-            clicking a different level. Magnitude (the community average)
-            is shown as a bar sized by length plus its own numeric label —
-            not color alone — so it reads correctly even for a color-blind
-            viewer or in a screen reader. */}
-        <div style={{ marginBottom: 32 }}>
-          <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Team Needs</SectionTitle>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#888", marginBottom: 12, lineHeight: 1.5 }}>
-            Rate how badly this team needs to address each position, from No Need to Extreme Need. Come back and change your vote anytime.
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 10 }}>
-            {NEED_POSITIONS.map((pos) => {
-              const ratings = needVotes.map((v) => v[pos]).filter((v) => typeof v === "number");
-              const avg = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
-              const pct = (avg / 5) * 100;
-              const myRating = myNeedVote[pos];
-
-              return (
-                <div key={pos} style={{ borderRadius: 12, overflow: "hidden", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px" }}>
-                    <span style={{ fontWeight: 900, fontSize: 13, color: c1, letterSpacing: "0.04em" }}>{pos}</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "#999" }}>
-                      {ratings.length > 0 ? `${avg.toFixed(1)}/5 · ${ratings.length} vote${ratings.length !== 1 ? "s" : ""}` : "No votes yet"}
-                    </span>
-                  </div>
-                  <div style={{ height: 5, background: "#eef1f5", position: "relative" }}>
-                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: `linear-gradient(to right, ${c1}, ${c2})`, transition: "width 0.2s" }} />
-                  </div>
-                  <div style={{ display: "flex", gap: 4, padding: "8px 10px" }}>
-                    {NEED_LEVELS.map(({ v, label }) => {
-                      const active = myRating === v;
-                      return (
-                        <button
-                          key={v}
-                          onClick={() => handleRateNeed(pos, v)}
-                          disabled={needsLoading}
-                          title={label}
-                          style={{
-                            flex: 1, border: `1.5px solid ${active ? c1 : tint(c1, "55")}`, borderRadius: 999,
-                            padding: isMobile ? "6px 2px" : "6px 4px",
-                            background: active ? c1 : "#fff",
-                            color: active ? "#fff" : c1,
-                            fontWeight: 900, fontSize: isMobile ? 9 : 10,
-                            cursor: needsLoading ? "default" : "pointer",
-                            textTransform: "uppercase", letterSpacing: "0.02em",
-                          }}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        {/* ===== TABS ===== */}
+        <div ref={tabsRef} role="tablist" style={{ scrollMarginTop: 80, display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 18 : 24, borderBottom: `3px solid ${tint(c1, "1f")}` }}>
+          {[["roster", "Depth Chart"], ["staff", "Staff"], ["archive", "Draft Archive"]].map(([key, label]) => {
+            const active = tab === key;
+            return (
+              <button
+                key={key} role="tab" aria-selected={active}
+                onClick={() => setTab(key)}
+                style={{
+                  flex: isMobile ? 1 : "0 0 auto", marginBottom: -3,
+                  padding: isMobile ? "10px 6px" : "11px 22px",
+                  background: active ? c1 : "transparent", color: active ? "#fff" : c1,
+                  border: "none", borderBottom: `3px solid ${active ? c2 : "transparent"}`,
+                  borderRadius: "8px 8px 0 0", cursor: "pointer", fontFamily: "inherit",
+                  fontWeight: 900, fontSize: isMobile ? 11 : 13, textTransform: "uppercase", letterSpacing: "0.07em",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         {/* ===== DEPTH CHART ===== */}
         {/* ESPN's roster by position group, each group in depth chart order
             — season snaps (nflDepthOrder, see depthRanker above), never
             shown. */}
-        <div style={{ marginBottom: 32 }}>
-          <SectionTitle color1={c1} color2={c2} isMobile={isMobile} right={roster.length ? `${roster.length} Players` : null}>
+        {tab === "roster" && <div style={{ marginBottom: 32 }}>
+          <SectionTitle color1={c1} color2={c2} isMobile={isMobile} right={roster.length ? rosterCount : null}>
             2026 Depth Chart
           </SectionTitle>
 
@@ -938,7 +903,10 @@ export default function NFLTeamPage() {
                     <DepthChip
                       key={player.id} player={player} color1={c1} color2={c2} isMobile={isMobile}
                       hovered={hoveredId === player.id}
-                      onMouseEnter={() => handleMouseEnter(player.id)} onMouseLeave={handleMouseLeave}
+                      stats={statsCache[player.id]} statsLoading={!!statsLoading[player.id]}
+                      onMouseEnter={() => handleMouseEnter(player)} onMouseLeave={handleMouseLeave}
+                      onTap={() => openPlayerSheet(player)}
+                      profileSlug={profileSlugs[player.id]}
                     />
                   ))}
                   {/* "+" tile — pops up that group's 2027 board right here
@@ -966,7 +934,19 @@ export default function NFLTeamPage() {
               </div>
             ))
           )}
-        </div>
+        </div>}
+
+        {/* ===== STAFF ===== */}
+        {tab === "staff" && (
+          <div style={{ marginBottom: 32 }}>
+            <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Coaching Staff &amp; Front Office</SectionTitle>
+            {staffLoading ? (
+              <LoadingSpinner label="Loading staff" size={28} minHeight="140px" />
+            ) : (
+              <StaffList staff={staff} teamKey={teamKey} color1={c1} color2={c2} isMobile={isMobile} />
+            )}
+          </div>
+        )}
 
         {/* ===== DRAFT ARCHIVE ===== */}
         {/* Every pick this team has actually made — 2026 (the just-
@@ -976,9 +956,8 @@ export default function NFLTeamPage() {
             History" archive is, just built around one fixed NFL team
             instead of one fixed college. See draftArchive/archiveSchoolLogos
             above for how the two sources are combined. */}
-        <div ref={picksRef} style={{ scrollMarginTop: 80 }}>
-          <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Draft Archive</SectionTitle>
-        </div>
+        {tab === "archive" && <>
+        <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Draft Archive</SectionTitle>
 
         <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2" }}>
           <div style={{ background: c1, padding: "8px 16px" }}>
@@ -995,12 +974,30 @@ export default function NFLTeamPage() {
           ) : (
             <DraftArchiveList
               archive={draftArchive} schoolLogos={archiveSchoolLogos}
-              navigate={navigate} isMobile={isMobile} color1={c1} color2={c2}
+              isMobile={isMobile} color1={c1} color2={c2}
             />
           )}
         </div>
+        </>}
 
       </div>
+
+      {/* ===== MOBILE PLAYER SHEET ===== */}
+      {sheetPlayer && (
+        <div
+          onClick={() => setSheetPlayer(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, padding: "0 10px 14px", boxSizing: "border-box" }}>
+            <PlayerCard
+              player={sheetPlayer} color1={c1} color2={c2}
+              stats={statsCache[sheetPlayer.id]} statsLoading={!!statsLoading[sheetPlayer.id]}
+              onClose={() => setSheetPlayer(null)}
+              profileSlug={profileSlugs[sheetPlayer.id]}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ===== "+" TILE BOARD POPUP ===== */}
       {boardModal && (
@@ -1153,29 +1150,67 @@ export default function NFLTeamPage() {
   );
 }
 
-// ── One depth chart player: jersey badge in the team colors, name, and a
-// position chip + experience line; hovering (desktop) opens his bio card. ──
-function DepthChip({ player, color1, color2, isMobile, hovered, onMouseEnter, onMouseLeave }) {
-  const expStr = player.experience === 0 ? "Rookie" : player.experience != null ? `${player.experience} yr${player.experience !== 1 ? "s" : ""} exp` : null;
-  const weightClean = player.weight ? player.weight.toString().replace(/\s*lbs\.?/i, "").trim() : null;
+// ── One depth chart player: jersey badge in the team colors, name, and
+// position + experience. Hovering (desktop) opens his
+// PlayerCard above the chip — or below it near the top of the window; a tap
+// (mobile) opens the same card as a bottom sheet instead. ──
+const expLabel = (exp) => (exp === 0 ? "Rookie" : exp != null ? `${exp} yr${exp !== 1 ? "s" : ""} exp` : null);
+
+function DepthChip({ player, color1, color2, isMobile, hovered, stats, statsLoading, onMouseEnter, onMouseLeave, onTap, profileSlug }) {
+  const chipRef = useRef(null);
+  const [place, setPlace] = useState({ below: false, align: "center" });
+  const expStr = expLabel(player.experience);
+  const tag = statusTag(player);
+  // Off the active roster: IR/suspended chips go grey, practice squad gets
+  // an outlined number instead of the solid team-color one.
+  const inactive = player.rosterStatus === "reserve" || player.rosterStatus === "suspended";
+  const ps = player.rosterStatus === "ps";
+
+  const handleEnter = () => {
+    if (isMobile) return;
+    const r = chipRef.current?.getBoundingClientRect();
+    if (r) {
+      setPlace({
+        below: r.top < 340,
+        align: r.left < 60 ? "left" : window.innerWidth - r.right < 60 ? "right" : "center",
+      });
+    }
+    onMouseEnter();
+  };
+
+  const cardPos = {
+    ...(place.below ? { top: "calc(100% + 8px)" } : { bottom: "calc(100% + 8px)" }),
+    ...(place.align === "left" ? { left: 0 } : place.align === "right" ? { right: 0 } : { left: "50%", transform: "translateX(-50%)" }),
+  };
+
+  // Desktop: a player with a We-Draft page is a real link to it. Mobile
+  // keeps the tap-for-card sheet, which carries the profile link instead.
+  const linked = profileSlug && !isMobile;
+  const Wrapper = linked ? Link : "div";
+
   return (
-    <div
+    <Wrapper
+      ref={chipRef}
       className="wd-nfl-chip"
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      style={{
-        position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 8 : 10,
-        padding: isMobile ? "8px" : "9px 10px", background: "#fff", borderRadius: 10, minWidth: 0,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2", cursor: "default",
+      {...(linked ? { to: `/player/${profileSlug}` } : {})}
+      onMouseEnter={handleEnter}
+      onMouseLeave={isMobile ? undefined : onMouseLeave}
+      onClick={isMobile ? onTap : undefined}
+      style={{ textDecoration: "none", color: "inherit",
+        position: "relative", zIndex: hovered ? 30 : undefined,
+        display: "flex", alignItems: "center", gap: isMobile ? 8 : 10,
+        padding: isMobile ? "8px" : "9px 10px", background: inactive ? "#f6f7f9" : "#fff", borderRadius: 12, minWidth: 0,
+        boxShadow: hovered ? `0 10px 22px rgba(0,40,90,0.14), 0 0 0 1.5px ${color1}` : "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2",
+        cursor: isMobile || linked ? "pointer" : "default",
       }}
     >
       <div style={{
         flexShrink: 0, width: isMobile ? 34 : 40, height: isMobile ? 34 : 40, borderRadius: 9,
-        background: `linear-gradient(145deg, ${color1}, ${color1} 60%, ${color2})`,
-        boxShadow: `inset 0 -3px 0 ${color2}`,
+        background: inactive ? "#aab3bf" : ps ? "#fff" : color1,
+        border: ps ? `2px solid ${tint(color1, "80")}` : "none", boxSizing: "border-box",
         display: "flex", alignItems: "center", justifyContent: "center",
-        color: "#fff", fontWeight: 900, fontSize: isMobile ? 14 : 16, fontVariantNumeric: "tabular-nums",
-        textShadow: "0 1px 2px rgba(0,0,0,0.35)",
+        color: ps ? color1 : "#fff", fontWeight: 900, fontSize: isMobile ? 14 : 16, fontVariantNumeric: "tabular-nums",
+        textShadow: ps ? "none" : "0 1px 2px rgba(0,0,0,0.35)",
       }}>
         {player.jersey || "–"}
       </div>
@@ -1183,262 +1218,298 @@ function DepthChip({ player, color1, color2, isMobile, hovered, onMouseEnter, on
         <div style={{ fontSize: isMobile ? 9 : 10, fontWeight: 700, color: "#6b7685", textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {player.firstName}
         </div>
-        <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 900, color: inactive ? "#6b7685" : "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {player.lastName}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, minWidth: 0 }}>
           {player.position && (
-            <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 900, color: color1, background: tint(color1, "14"), border: `1px solid ${tint(color1, "40")}`, borderRadius: 4, padding: "1px 5px", letterSpacing: "0.05em" }}>
+            <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 900, color: "#fff", background: inactive ? "#aab3bf" : color1, borderRadius: 4, padding: "1px 5px", letterSpacing: "0.05em" }}>
               {player.position}
             </span>
           )}
+          {tag && <StatusPill tag={tag} />}
           {expStr && (
             <span style={{ fontSize: 9, fontWeight: 700, color: "#9aa5b4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{expStr}</span>
           )}
         </div>
       </div>
 
-      {/* Hover bio card — team colored */}
-      {hovered && (
-        <div style={{
-          position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
-          background: color1, borderRadius: 10, overflow: "hidden",
-          width: 200, zIndex: 100,
-          boxShadow: "0 10px 26px rgba(0,0,0,0.3)",
-          border: `2px solid ${color2}`,
-          pointerEvents: "none",
-        }}>
-          <div style={{ background: color2, padding: "6px 10px" }}>
-            <div style={{ fontWeight: 900, fontSize: 12, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2 }}>
-              {player.fullName}
-            </div>
+      {hovered && !isMobile && (
+        <div style={{ position: "absolute", ...cardPos, width: 300, zIndex: 100, pointerEvents: "none" }}>
+          <PlayerCard player={player} color1={color1} color2={color2} stats={stats} statsLoading={statsLoading} profileSlug={profileSlug} />
+        </div>
+      )}
+    </Wrapper>
+  );
+}
+
+function StatusPill({ tag }) {
+  const t = STATUS_TONES[tag.tone];
+  return (
+    <span title={tag.label} style={{
+      flexShrink: 0, fontSize: 9, fontWeight: 900, letterSpacing: "0.05em", borderRadius: 4, padding: "1px 5px",
+      color: t.fg, background: t.bg, boxShadow: t.border ? `inset 0 0 0 1px ${t.border}` : "none",
+    }}>
+      {tag.short}
+    </span>
+  );
+}
+
+// ── Player card — the depth chart hover popup (desktop) and tap sheet
+// (mobile): team-color header with the headshot, bio tiles, then this
+// season's stat line (see statLine above). ──
+function PlayerCard({ player, color1, color2, stats, statsLoading, onClose, profileSlug }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const weightClean = player.weight ? player.weight.toString().replace(/\s*lbs\.?/i, "").trim() : null;
+  const bio = [
+    player.age ? ["Age", player.age] : null,
+    player.height ? ["Ht", player.height] : null,
+    weightClean ? ["Wt", weightClean] : null,
+    ["Exp", player.experience === 0 ? "R" : player.experience ?? "–"],
+  ].filter(Boolean);
+  const photo = !imgFailed && player.headshot ? headshotUrl(player.headshot, 260) : null;
+  const tag = statusTag(player);
+  const injuryDate = player.injuryDate && player.rosterStatus !== "ps"
+    ? new Date(player.injuryDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 16px 40px rgba(0,0,0,0.28), 0 0 0 1px rgba(0,0,0,0.06)", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{
+        position: "relative", minHeight: 104, overflow: "hidden",
+        background: [
+          "linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28))",
+          `linear-gradient(120deg, ${color1} 0%, ${color1} 45%, ${color2} 100%)`,
+        ].join(", "),
+      }}>
+        {player.jersey && (
+          <div aria-hidden="true" style={{ position: "absolute", right: photo ? 108 : 14, top: -6, fontSize: 84, fontWeight: 900, color: "#fff", opacity: 0.12, lineHeight: 1 }}>
+            {player.jersey}
           </div>
-          <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 3 }}>
-            {[
-              player.position ? { label: "POS", value: player.position } : null,
-              player.age ? { label: "AGE", value: player.age } : null,
-              player.height ? { label: "HT", value: player.height } : null,
-              weightClean ? { label: "WT", value: `${weightClean} lbs` } : null,
-              player.college ? { label: "COLLEGE", value: player.college } : null,
-            ].filter(Boolean).map(({ label, value }) => (
-              <div key={label} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 8, fontWeight: 900, color: color2, textTransform: "uppercase", letterSpacing: "0.1em", flexShrink: 0, minWidth: 40 }}>{label}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>{value}</span>
+        )}
+        {photo && (
+          <img
+            src={photo} alt="" onError={() => setImgFailed(true)}
+            style={{ position: "absolute", right: -6, bottom: 0, height: 104, width: "auto", filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.35))" }}
+          />
+        )}
+        <div style={{ position: "relative", padding: "14px 14px 12px", paddingRight: photo ? 140 : 14 }}>
+          <div style={{ fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.8)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {[player.jersey ? `#${player.jersey}` : null, player.position].filter(Boolean).join(" · ")}
+          </div>
+          <div style={{ marginTop: 3, fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.1 }}>
+            {player.firstName}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.05, textShadow: "0 2px 6px rgba(0,0,0,0.35)", wordBreak: "break-word" }}>
+            {player.lastName}
+          </div>
+          {player.college && (
+            <div style={{ marginTop: 6, fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.8)" }}>{player.college}</div>
+          )}
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose} aria-label="Close"
+            style={{ position: "absolute", top: 6, right: 8, background: "rgba(0,0,0,0.35)", border: "none", borderRadius: 999, width: 28, height: 28, color: "#fff", fontSize: 18, lineHeight: 1, cursor: "pointer", zIndex: 2 }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      <div style={{ height: 3, background: color2 }} />
+
+      {tag && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 12px",
+          background: tag.tone === "ps" ? "#f3f5f8" : tag.tone === "warn" ? "#fdf5e1" : "#fbeceb",
+          color: tag.tone === "ps" ? "#5f6b7a" : tag.tone === "warn" ? "#8a6100" : "#a12d22",
+          fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase",
+        }}>
+          <span>{tag.label}</span>
+          {injuryDate && <span style={{ fontWeight: 700, letterSpacing: "0.04em" }}>{injuryDate}</span>}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${bio.length}, 1fr)`, borderBottom: "1px solid #eef1f5" }}>
+        {bio.map(([label, value], i) => (
+          <div key={label} style={{ padding: "8px 4px", textAlign: "center", borderLeft: i ? "1px solid #eef1f5" : "none" }}>
+            <div style={{ fontSize: 13, fontWeight: 900, color: "#1a1f2b", whiteSpace: "nowrap" }}>{value}</div>
+            <div style={{ fontSize: 8, fontWeight: 900, color: "#9aa5b4", letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 1 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: "10px 12px 12px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 7 }}>
+          <span style={{ fontSize: 10, fontWeight: 900, color: color1, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {stats ? `${stats.season} Season` : "Season Stats"}
+          </span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#9aa5b4" }}>Regular season</span>
+        </div>
+        {statsLoading || stats === undefined ? (
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa5b4", padding: "8px 0" }}>Loading stats…</div>
+        ) : !stats ? (
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#9aa5b4", padding: "8px 0" }}>No regular-season stats yet.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+            {stats.line.map(({ label, value }) => (
+              <div key={label} style={{ background: tint(color1, "0d"), borderRadius: 8, padding: "7px 4px", textAlign: "center" }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: "#1a1f2b", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>{value}</div>
+                <div style={{ fontSize: 8, fontWeight: 900, color: color1, letterSpacing: "0.1em", marginTop: 2 }}>{label}</div>
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Hover card: the chip itself is the link, so just say so. Sheet
+          (onClose set): an actual button. */}
+      {profileSlug && (onClose ? (
+        <Link
+          to={`/player/${profileSlug}`}
+          style={{ display: "block", margin: "0 12px 12px", padding: "10px", borderRadius: 8, background: color1, color: "#fff", textAlign: "center", textDecoration: "none", fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}
+        >
+          View We-Draft Profile →
+        </Link>
+      ) : (
+        <div style={{ padding: "7px 12px", borderTop: "1px solid #eef1f5", fontSize: 9, fontWeight: 900, color: color1, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>
+          Click for We-Draft profile →
         </div>
-      )}
+      ))}
     </div>
   );
 }
 
-// ── Draft Archive filter bar + rows — same Year/Round/Position
-// multi-select shape as TeamPage.js's own ArchiveFilters, adapted here
-// since that component isn't exported and this page's rows are shaped
-// differently (a college logo per row, since the NFL team is fixed here
-// rather than the college). ──
-function DraftArchiveList({ archive, schoolLogos, navigate, isMobile, color1, color2 }) {
-  const [selectedYears, setSelectedYears] = useState(new Set());
-  const [selectedRounds, setSelectedRounds] = useState(new Set());
-  const [selectedPositions, setSelectedPositions] = useState(new Set());
-  const [openPanel, setOpenPanel] = useState(null);
+// ── Staff tab — everyone coaches/{slug} lists as currently holding a
+// tracked job (HC/OC/DC/GM, see TRACKED_ROLES in utils/coachHistory.js) on
+// this team, head coach first, each with their career path newest-first. ──
+const STAFF_ROLE_ORDER = ["HC", "IHC", "GM", "OC", "DC"];
 
-  const toggle = (setFn, val) => setFn((prev) => {
-    const next = new Set(prev);
-    next.has(val) ? next.delete(val) : next.add(val);
-    return next;
-  });
-  const clearAll = () => { setSelectedYears(new Set()); setSelectedRounds(new Set()); setSelectedPositions(new Set()); setOpenPanel(null); };
-  const hasFilters = selectedYears.size > 0 || selectedRounds.size > 0 || selectedPositions.size > 0;
+function StaffList({ staff, teamKey, color1, color2, isMobile }) {
+  const people = staff
+    .map((person) => {
+      const roles = (person.Current || []).filter((c) => c.Team === teamKey).map((c) => c.Role)
+        .sort((a, b) => STAFF_ROLE_ORDER.indexOf(a) - STAFF_ROLE_ORDER.indexOf(b));
+      return { person, roles };
+    })
+    .filter(({ roles }) => roles.length)
+    .sort((a, b) => STAFF_ROLE_ORDER.indexOf(a.roles[0]) - STAFF_ROLE_ORDER.indexOf(b.roles[0]));
 
-  const allYears = [...new Set(archive.map((e) => e.year))].sort((a, b) => b - a);
-  const allRounds = [...new Set(archive.map((e) => e.round).filter(Boolean))].sort((a, b) => a - b);
-  const POS_ORDER = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB", "K", "P", "LS"];
-  const allPositions = [...new Set(archive.map((e) => e.position).filter(Boolean))].sort((a, b) => {
-    const ai = POS_ORDER.indexOf(a), bi = POS_ORDER.indexOf(b);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return a.localeCompare(b);
-  });
-
-  const filtered = archive.filter((e) => {
-    if (selectedYears.size > 0 && !selectedYears.has(e.year)) return false;
-    if (selectedRounds.size > 0 && !selectedRounds.has(e.round)) return false;
-    if (selectedPositions.size > 0 && !selectedPositions.has(e.position)) return false;
-    return true;
-  });
-
-  if (archive.length === 0) {
-    return <div style={{ padding: 32, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 14, background: "#fff" }}>No picks on record</div>;
+  if (!people.length) {
+    return <div style={{ padding: 40, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 14 }}>Staff not on file yet.</div>;
   }
-
   return (
-    <>
-      {openPanel && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setOpenPanel(null)} onTouchStart={() => setOpenPanel(null)} />
-      )}
-
-      <div style={{
-        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-        padding: isMobile ? "10px 12px" : "10px 18px",
-        background: "#f7f8fa", borderBottom: "1px solid #e8e8e8",
-        position: "relative", zIndex: 100,
-      }}>
-        <span style={{ fontSize: 11, fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Filter:</span>
-        <ArchiveFilterButton label="Year" options={allYears} panelKey="year" activeSet={selectedYears}
-          onToggle={(v) => toggle(setSelectedYears, v)} onClearGroup={() => setSelectedYears(new Set())}
-          color1={color1} color2={color2} openPanel={openPanel} setOpenPanel={setOpenPanel} />
-        <ArchiveFilterButton label="Round" options={allRounds} panelKey="round" activeSet={selectedRounds}
-          onToggle={(v) => toggle(setSelectedRounds, v)} onClearGroup={() => setSelectedRounds(new Set())}
-          color1={color1} color2={color2} openPanel={openPanel} setOpenPanel={setOpenPanel} />
-        <ArchiveFilterButton label="Position" options={allPositions} panelKey="pos" activeSet={selectedPositions}
-          onToggle={(v) => toggle(setSelectedPositions, v)} onClearGroup={() => setSelectedPositions(new Set())}
-          color1={color1} color2={color2} openPanel={openPanel} setOpenPanel={setOpenPanel} />
-        {hasFilters && (
-          <button onClick={clearAll} style={{ border: "2px solid #ccc", borderRadius: 6, padding: "5px 12px", fontWeight: 900, fontSize: 11, color: "#888", background: "#fff", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Clear All
-          </button>
-        )}
-        <span style={{ marginLeft: isMobile ? 0 : "auto", width: isMobile ? "100%" : "auto", fontSize: 11, fontWeight: 700, color: "#aaa" }}>
-          {filtered.length} pick{filtered.length !== 1 ? "s" : ""}
-        </span>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div style={{ padding: "40px 24px", textAlign: "center", background: "#fff" }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
-          <div style={{ fontSize: 15, fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em" }}>No results</div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#888", marginTop: 6 }}>Try adjusting your filters.</div>
-        </div>
-      ) : (
-        filtered.map((entry) => {
-          const logo = schoolLogos[entry.school];
-          return (
-            <div
-              key={entry.key}
-              onClick={() => entry.slug && navigate(`/player/${entry.slug}`)}
-              style={{
-                display: "flex", alignItems: "center", gap: isMobile ? 10 : 14,
-                padding: isMobile ? "10px 12px" : "12px 16px",
-                borderBottom: "1px solid #f0f0f0",
-                background: "#fff", cursor: entry.slug ? "pointer" : "default",
-              }}
-              onMouseEnter={(e) => { if (entry.slug) e.currentTarget.style.background = "#f0f5ff"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-            >
-              <div style={{ flexShrink: 0, width: isMobile ? 34 : 40, textAlign: "center" }}>
-                <span style={{ fontSize: isMobile ? 13 : 15, fontWeight: 900, color: "#444" }}>{entry.year}</span>
-              </div>
-
-              <div style={{
-                flexShrink: 0, width: isMobile ? 46 : 56, height: isMobile ? 46 : 56,
-                borderRadius: 8, background: color1, border: `2px solid ${color2}`,
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff",
-              }}>
-                <div style={{ fontSize: isMobile ? 16 : 20, fontWeight: 900, lineHeight: 1 }}>{entry.pick !== 9999 ? entry.pick : "—"}</div>
-                <div style={{ fontSize: 8, fontWeight: 800, opacity: 0.7, textTransform: "uppercase" }}>Rd {entry.round || "—"}</div>
-              </div>
-
-              {!isMobile && (
-                <div style={{ flexShrink: 0, width: 36, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {logo ? (
-                    <div style={{ width: 32, height: 32, background: "#f5f5f5", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", padding: 2 }}>
-                      <img src={sanitizeUrl(logo)} alt={entry.school} loading="lazy" style={{ width: 28, height: 28, objectFit: "contain" }} onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
-                    </div>
-                  ) : <div style={{ width: 32 }} />}
-                </div>
-              )}
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {entry.playerName || "—"}
-                </div>
-                <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: "#555", marginTop: 2 }}>
-                  {[entry.position, entry.school].filter(Boolean).join(" · ") || "—"}
-                </div>
-              </div>
-
-              {entry.slug && <div style={{ flexShrink: 0, fontSize: 18, color: color2, fontWeight: 900 }}>→</div>}
-            </div>
-          );
-        })
-      )}
-    </>
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: isMobile ? 12 : 16, alignItems: "start" }}>
+      {people.map(({ person, roles }) => (
+        <StaffCard key={person.id} person={person} roles={roles} teamKey={teamKey} color1={color1} color2={color2} isMobile={isMobile} />
+      ))}
+    </div>
   );
 }
 
-// ── Filter dropdown — renders via portal to escape overflow:hidden
-// ancestors, same mechanics as TeamPage.js's own FilterButton. ──
-function ArchiveFilterButton({ label, options, panelKey, activeSet, onToggle, onClearGroup, color1, color2, openPanel, setOpenPanel }) {
-  const isOpen = openPanel === panelKey;
-  const hasActive = activeSet.size > 0;
-  const btnRef = useRef(null);
-  const [dropdownStyle, setDropdownStyle] = useState({});
-
-  useEffect(() => {
-    if (isOpen && btnRef.current) {
-      const rect = cssRect(btnRef.current);
-      setDropdownStyle({
-        position: "fixed", top: rect.bottom + 6, left: rect.left, zIndex: 99999,
-        background: "#fff", border: `2px solid ${color1}`, borderRadius: 8,
-        boxShadow: "0 4px 20px rgba(0,0,0,0.18)", minWidth: 160, overflow: "hidden",
-      });
-    }
-  }, [isOpen, color1]);
-
-  const dropdown = isOpen ? ReactDOM.createPortal(
-    <div style={dropdownStyle}>
-      <div style={{ background: color1, padding: "6px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 10, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
-        {activeSet.size > 0 && (
-          <button onClick={(e) => { e.stopPropagation(); onClearGroup(); }} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", fontSize: 10, cursor: "pointer", fontWeight: 700 }}>Clear</button>
-        )}
-      </div>
-      <div style={{ height: 2, background: color2 }} />
-      <div style={{ maxHeight: 220, overflowY: "auto" }}>
-        {options.map((val) => {
-          const checked = activeSet.has(val);
-          return (
-            <label key={val} onClick={() => onToggle(val)} style={{
-              display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer",
-              borderBottom: "1px solid #f0f0f0", background: checked ? `${color1}0d` : "#fff", transition: "background 0.1s",
-            }}>
-              <div style={{ width: 16, height: 16, borderRadius: 3, flexShrink: 0, border: `2px solid ${checked ? color1 : "#ccc"}`, background: checked ? color1 : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {checked && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "#333", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {panelKey === "round" ? `Round ${val}` : val}
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </div>,
-    document.body
-  ) : null;
+// One person: role pills + name + "Since" in a team-color header, college,
+// then the career path — NFL head coach/coordinator/GM jobs bold, the
+// current job(s) here dated in the team color.
+function StaffCard({ person, roles, teamKey, color1, color2, isMobile }) {
+  const [expanded, setExpanded] = useState(false);
+  const stints = [...(person.Stints || [])].reverse();
+  const isHere = (s) => s.Level === "NFL" && s.Team === teamKey && isOpenStint(s);
+  const since = stints
+    .filter((s) => isHere(s) && s.Roles?.some((r) => roles.includes(r)))
+    .map((s) => s.StartYear).filter(Boolean).sort((a, b) => a - b)[0];
+  const groups = groupStints(stints);
+  // Head coaches and GMs get a /staff/ draft-history page.
+  const hasPage = roles.some((r) => ["HC", "IHC", "GM"].includes(r));
+  const SHOWN = 4;
+  const visible = expanded ? groups : groups.slice(0, SHOWN);
+  const facts = [
+    person.College ? ["College", person.College] : null,
+  ].filter(Boolean);
 
   return (
-    <div style={{ position: "relative" }}>
-      <button
-        ref={btnRef}
-        onClick={() => setOpenPanel(isOpen ? null : panelKey)}
-        style={{
-          display: "flex", alignItems: "center", gap: 5,
-          border: `2px solid ${hasActive ? color1 : "#d0d0d0"}`, borderRadius: 6, padding: "5px 10px",
-          fontWeight: 900, fontSize: 11, color: hasActive ? color1 : "#666",
-          background: hasActive ? `${color1}10` : "#fff", cursor: "pointer",
-          textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
-        }}
-      >
-        {label}
-        {hasActive && (
-          <span style={{ background: color1, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 900 }}>{activeSet.size}</span>
+    <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2" }}>
+      <div style={{
+        padding: isMobile ? "12px 14px" : "14px 18px",
+        background: [
+          "linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3))",
+          `linear-gradient(120deg, ${color1} 0%, ${color1} 50%, ${color2} 100%)`,
+        ].join(", "),
+      }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {roles.map((r) => (
+            <span key={r} style={{ fontSize: 10, fontWeight: 900, color: "#fff", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 999, padding: "2px 10px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              {ROLE_BY_KEY[r]?.label || r}
+            </span>
+          ))}
+        </div>
+        <div style={{ marginTop: 8, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.1, textShadow: "0 2px 6px rgba(0,0,0,0.35)" }}>
+            {hasPage ? (
+              <Link to={`/staff/${person.id}`} style={{ color: "inherit", textDecoration: "none" }}>{person.Name}</Link>
+            ) : person.Name}
+          </div>
+          {since && (
+            <div style={{ flexShrink: 0, fontSize: 10, fontWeight: 900, color: "rgba(255,255,255,0.85)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Since {since}
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={{ height: 3, background: color2 }} />
+
+      {hasPage && (
+        <Link
+          to={`/staff/${person.id}`}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: isMobile ? "9px 14px" : "9px 18px", background: tint(color1, "0d"), borderBottom: "1px solid #eef1f5", color: color1, textDecoration: "none", fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}
+        >
+          <span>Draft History</span>
+          <span>→</span>
+        </Link>
+      )}
+
+      {facts.length > 0 && (
+        <div style={{ padding: isMobile ? "10px 14px" : "10px 18px", display: "flex", flexDirection: "column", gap: 4, borderBottom: "1px solid #eef1f5" }}>
+          {facts.map(([label, value]) => (
+            <div key={label} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+              <span style={{ flexShrink: 0, width: 54, fontSize: 9, fontWeight: 900, color: color1, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#3a4352", lineHeight: 1.35, fontFamily: "Arial, sans-serif" }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ padding: isMobile ? "10px 14px 12px" : "12px 18px 14px" }}>
+        <div style={{ fontSize: 10, fontWeight: 900, color: "#9aa5b4", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Career Path</div>
+        {visible.map((g, gi) => (
+          <div key={gi} style={{ padding: "7px 0", borderTop: gi ? "1px solid #eef1f5" : "none" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "#1a1f2b", fontFamily: "Arial, sans-serif", lineHeight: 1.3 }}>{g.org}</span>
+              {g.span && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 900, color: "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>{g.span}</span>}
+            </div>
+            {g.stints.map((s, i) => {
+              const key = s.Level === "NFL" && s.Roles?.some((r) => STAFF_ROLE_ORDER.includes(r));
+              return (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "2px 0" }}>
+                  <span style={{ flexShrink: 0, width: isMobile ? 84 : 96, fontSize: 11, fontWeight: 900, color: isHere(s) ? color1 : "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>
+                    {stintYearSpan(s)}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontFamily: "Arial, sans-serif", lineHeight: 1.35, fontWeight: key ? 700 : 400, color: key ? "#1a1f2b" : "#5a6474" }}>
+                    {s.Title || s.Roles?.map((r) => ROLE_BY_KEY[r]?.label || r).join(" / ")}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {groups.length > SHOWN && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            style={{ marginTop: 6, background: "none", border: "none", padding: 0, color: color1, fontWeight: 900, fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "inherit" }}
+          >
+            {expanded ? "Show less ↑" : `Full career (${groups.length} stops) ↓`}
+          </button>
         )}
-        <span style={{ fontSize: 8, color: "#aaa", marginLeft: 2 }}>{isOpen ? "▲" : "▼"}</span>
-      </button>
-      {dropdown}
+      </div>
     </div>
   );
 }

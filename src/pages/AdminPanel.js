@@ -21,6 +21,7 @@ import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
+import AdminCoachHistory from "../components/AdminCoachHistory";
 import AdminResearch from "../components/AdminResearch";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
@@ -284,6 +285,7 @@ const SECTIONS = [
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "youtube", label: "YouTube Analytics", icon: "▶️", ready: true },
   { key: "research", label: "Research", icon: "🔬", ready: true },
+  { key: "coaches", label: "Coach History", icon: "📋", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
@@ -14009,6 +14011,7 @@ export default function AdminPanel() {
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "youtube" && <AdminYouTubeAnalytics />}
             {activeSection === "research" && <AdminResearch />}
+            {activeSection === "coaches" && <AdminCoachHistory />}
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "calendar" && <ContentCalendarManager />}

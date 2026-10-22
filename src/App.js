@@ -43,6 +43,8 @@ const CFBPage = lazy(() => import("./pages/CFBPage"));
 // Teams
 const TeamPage = lazy(() => import("./pages/TeamPage"));
 const NFLTeamPage = lazy(() => import("./pages/NFLTeamPage"));
+// /staff/{slug} — current head coaches' and GMs' draft histories.
+const StaffPage = lazy(() => import("./pages/StaffPage"));
 // High school team pages — in development, deliberately unlisted (see that
 // file's own top comment): noindexed and never linked from anywhere else
 // on the site, reachable only via a direct URL.
@@ -184,7 +186,8 @@ function MainLayout() {
             <Route path="/player2/:slug" element={<RedirectPlayer2 />} />
             <Route path="/team/:teamId" element={<TeamPage />} />
             <Route path="/hs/:slug" element={<HighSchoolTeamPage />} />
-            <Route path="/nfl/:teamId" element={<NFLTeamPage />} />
+            <Route path="/nfl/:teamId/:tab?" element={<NFLTeamPage />} />
+            <Route path="/staff/:slug/:tab?" element={<StaffPage />} />
             <Route path="/boards" element={<UserBoards />} />
             <Route path="/boards/feed" element={<MyFeed />} />
             <Route path="/profile" element={<UserProfile />} />

@@ -624,6 +624,17 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Generic (not team-tied) links stored from Admin → Ads → Links. Admin
+    // only for now — open read up once they start showing as ads on-site.
+    match /adLinks/{doc} {
+      allow read, write: if isAdmin();
+    }
+    // NFL coach/coordinator/GM career histories, one doc per person —
+    // edited from Admin → Coach History (AdminCoachHistory.js).
+    match /coaches/{slug} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // Reusable nested rule shape for a likeable, commentable public content
     // doc — same likes/comments/replies structure as schedule26/{doc}'s own
     // hype/comments above (see the detailed reasoning there), just under a

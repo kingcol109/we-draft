@@ -14,12 +14,16 @@
 //   Active    false pauses the ad without deleting it (missing = live)
 //   updatedAt ISO string
 //
+// The Links tab is separate: `adLinks/{auto id}` — generic links not tied
+// to any team (Name, Link, DisplayText, Description, createdAt/updatedAt).
+// Storage only for now; nothing on the site reads them yet.
+//
 // Readers go through a compSnapshots doc first (NFL: _ads, see
 // utils/siteSnapshots.js fetchAds), which otherwise only refreshes with the
 // weekly job — so every save here also rewrites the league's snapshot from
 // the full list already loaded, and the change is live on the next page load.
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { COMP_SNAPSHOT_VERSION } from "../utils/historicalStats";
 import { copyImageToClipboard } from "../utils/clipboardImage";
@@ -87,7 +91,7 @@ const LEAGUES = {
   },
 };
 
-const LEAGUE_TABS = Object.entries(LEAGUES).map(([key, cfg]) => ({ key, label: cfg.label }));
+const LEAGUE_TABS = [...Object.entries(LEAGUES).map(([key, cfg]) => ({ key, label: cfg.label })), { key: "links", label: "Links" }];
 
 function adStatus(ad) {
   if (!ad) return { key: "none", label: "No ad", color: "#ccc" };
@@ -268,7 +272,216 @@ export default function AdminAdsManager() {
         ))}
       </div>
       {/* key={league} remounts so nothing carries across collections. */}
-      <LeagueAdsPane key={league} league={league} />
+      {league === "links" ? <GenericLinksPane /> : <LeagueAdsPane key={league} league={league} />}
+    </div>
+  );
+}
+
+const LINKS_COLLECTION = "adLinks";
+
+function linkDraftFrom(link) {
+  return {
+    Name: link?.Name || "",
+    Link: link?.Link || "",
+    DisplayText: link?.DisplayText || "",
+    Description: link?.Description || "",
+  };
+}
+
+// Generic links — a flat, admin-named list not tied to any team. "new" is
+// the selection id for an unsaved link.
+function GenericLinksPane() {
+  const [links, setLinks] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
+  const [draft, setDraft] = useState(linkDraftFrom(null));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    getDocs(collection(db, LINKS_COLLECTION))
+      .then((snap) => {
+        if (!alive) return;
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setLinks(list);
+        setSelectedId(list.length ? [...list].sort((a, b) => (a.Name || "").localeCompare(b.Name || ""))[0].id : "new");
+      })
+      .catch((e) => {
+        console.error("Links load error:", e);
+        if (alive) { setLoadError(e.message); setLinks([]); setSelectedId("new"); }
+      });
+    return () => { alive = false; };
+  }, []);
+
+  const saved = (selectedId && selectedId !== "new" && links?.find((l) => l.id === selectedId)) || null;
+  useEffect(() => { setDraft(linkDraftFrom(saved)); }, [selectedId, saved]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(linkDraftFrom(saved));
+
+  const select = (id) => {
+    if (id === selectedId) return;
+    if (dirty && !window.confirm("Discard unsaved changes to this link?")) return;
+    setSelectedId(id);
+    setMessage("");
+  };
+
+  const save = async () => {
+    const clean = Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, v.trim()]));
+    if (!clean.Name || !clean.Link) { setMessage("Failed: a name and URL are required."); return; }
+    setSaving(true);
+    setMessage("");
+    try {
+      const now = new Date().toISOString();
+      if (saved) {
+        const data = { ...clean, createdAt: saved.createdAt || now, updatedAt: now };
+        await setDoc(doc(db, LINKS_COLLECTION, saved.id), data);
+        setLinks((prev) => prev.map((l) => (l.id === saved.id ? { id: saved.id, ...data } : l)));
+      } else {
+        const data = { ...clean, createdAt: now, updatedAt: now };
+        const ref = await addDoc(collection(db, LINKS_COLLECTION), data);
+        setLinks((prev) => [...prev, { id: ref.id, ...data }]);
+        setSelectedId(ref.id);
+      }
+      setMessage(`Saved ${clean.Name}.`);
+    } catch (e) {
+      console.error("Link save error:", e);
+      setMessage(`Failed: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!saved || !window.confirm(`Delete "${saved.Name}"? This can't be undone.`)) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await deleteDoc(doc(db, LINKS_COLLECTION, saved.id));
+      setLinks((prev) => prev.filter((l) => l.id !== saved.id));
+      setSelectedId("new");
+      setMessage(`Deleted ${saved.Name}.`);
+    } catch (e) {
+      console.error("Link delete error:", e);
+      setMessage(`Failed: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!links) return <div style={{ padding: "40px", textAlign: "center", fontWeight: 800, color: "#888" }}>Loading links…</div>;
+
+  const box = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "16px" };
+  const label = { fontSize: "11px", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#666", marginBottom: "4px" };
+  const hint = { fontSize: "11px", fontWeight: 700, color: "#999", marginTop: "4px" };
+  const input = { width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: "6px", fontSize: "13px" };
+  const q = search.trim().toLowerCase();
+  const shown = [...links]
+    .sort((a, b) => (a.Name || "").localeCompare(b.Name || ""))
+    .filter((l) => !q || [l.Name, l.Link, l.DisplayText, l.Description].some((v) => (v || "").toLowerCase().includes(q)));
+  const linkUrl = draft.Link.trim() ? sanitizeUrl(draft.Link) : "";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      {loadError && <div style={{ ...box, color: RED, fontWeight: 800 }}>Couldn't load links: {loadError}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: "14px", alignItems: "start" }}>
+        {/* Link list */}
+        <div style={{ ...box, padding: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          <button
+            onClick={() => select("new")}
+            style={{
+              padding: "9px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em",
+              border: "2px dashed " + GOLD, borderRadius: "8px", cursor: "pointer",
+              background: selectedId === "new" ? "#fff8e6" : "#fff", color: BLUE,
+            }}
+          >
+            + New Link
+          </button>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`Search ${links.length} links…`} style={input} />
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "72vh", overflowY: "auto" }}>
+            {shown.map((l) => {
+              const isSel = l.id === selectedId;
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => select(l.id)}
+                  style={{
+                    textAlign: "left", padding: "8px 10px", borderRadius: "8px", cursor: "pointer",
+                    border: `2px solid ${isSel ? BLUE : "#e5e7eb"}`, background: isSel ? "#eaf1ff" : "#fff",
+                  }}
+                >
+                  <div style={{ fontSize: "13px", fontWeight: 900, color: "#111" }}>{l.Name || "Untitled"}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.Link}</div>
+                </button>
+              );
+            })}
+            {!shown.length && <div style={{ padding: "20px", textAlign: "center", fontSize: "12px", fontWeight: 800, color: "#aaa" }}>{links.length ? "No matches." : "No links yet."}</div>}
+          </div>
+        </div>
+
+        {/* Editor */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 }}>
+          <div style={box}>
+            <div style={{ fontSize: "18px", fontWeight: 900, color: "#111" }}>{saved ? saved.Name || "Untitled" : "New link"}</div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "#888" }}>
+              {saved?.updatedAt ? `Last saved ${new Date(saved.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}` : "Not saved yet"}
+            </div>
+          </div>
+
+          <div style={{ ...box, display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div>
+              <div style={label}>Name</div>
+              <input value={draft.Name} onChange={(e) => setDraft((d) => ({ ...d, Name: e.target.value }))} placeholder="e.g. Fanatics — Jerseys" style={input} />
+              <div style={hint}>Admin-side label for finding this link. Required.</div>
+            </div>
+            <div>
+              <div style={label}>URL</div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input value={draft.Link} onChange={(e) => setDraft((d) => ({ ...d, Link: e.target.value }))} placeholder="https://…" style={{ ...input, flex: 1, minWidth: 0 }} />
+                <a href={linkUrl || undefined} target="_blank" rel="noopener noreferrer"
+                  style={{ ...smallBtn("#fff", linkUrl ? BLUE : "#bbb", linkUrl ? BLUE : "#e5e7eb"), textDecoration: "none", display: "flex", alignItems: "center", pointerEvents: linkUrl ? "auto" : "none" }}>
+                  Test ↗
+                </a>
+              </div>
+              <div style={hint}>Required.</div>
+            </div>
+            <div>
+              <div style={label}>Display text</div>
+              <input value={draft.DisplayText} onChange={(e) => setDraft((d) => ({ ...d, DisplayText: e.target.value }))} placeholder="e.g. Shop NFL jerseys →" style={input} />
+              <div style={hint}>What the link would say if it's shown on the site.</div>
+            </div>
+            <div>
+              <div style={label}>Description</div>
+              <textarea value={draft.Description} onChange={(e) => setDraft((d) => ({ ...d, Description: e.target.value }))} rows={4} placeholder="What it is, commission terms, where it could go…" style={{ ...input, resize: "vertical", fontFamily: "inherit" }} />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              onClick={save}
+              disabled={saving || !dirty}
+              style={{
+                padding: "10px 24px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em",
+                border: "2px solid " + BLUE, borderRadius: "8px", cursor: saving ? "wait" : dirty ? "pointer" : "default",
+                background: dirty && !saving ? BLUE : "#eee", color: dirty && !saving ? "#fff" : "#999",
+              }}
+            >
+              {saving ? "Saving…" : saved ? "Save" : "Add Link"}
+            </button>
+            {dirty && !saving && (
+              <button onClick={() => setDraft(linkDraftFrom(saved))} style={smallBtn("#fff", "#666", "#d1d5db")}>Revert</button>
+            )}
+            {saved && (
+              <button onClick={remove} disabled={saving} style={{ ...smallBtn("#fff", RED, RED), marginLeft: "auto" }}>Delete</button>
+            )}
+            {message && (
+              <span style={{ fontSize: "12px", fontWeight: 800, color: message.startsWith("Failed") ? RED : GREEN }}>{message}</span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
