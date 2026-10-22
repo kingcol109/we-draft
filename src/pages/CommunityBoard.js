@@ -10,7 +10,7 @@ import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog"
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { classSnapshotRanks, compareRanks } from "../utils/classRanks";
-import MarginAds from "../components/MarginAds";
+import { SideRailAd } from "../components/MarginAds";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -747,9 +747,6 @@ export default function CommunityBoard() {
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
   const boardDropdownRef = useRef(null);
-  // Desktop 3-column grid — MarginAds centers its Homage rails in the
-  // gutters beside it (only on screens wide enough to have any).
-  const boardGridRef = useRef(null);
 
   const [draftMap, setDraftMap] = useState({});
   const [nflTeams, setNflTeams] = useState({});
@@ -1890,14 +1887,13 @@ export default function CommunityBoard() {
           {sidebarVideos.length > 0 && <div style={{ maxWidth: "700px", margin: "0 auto", width: "100%" }}>{VideosSidebar}</div>}
         </div>
       ) : (
-        <div ref={boardGridRef} className={modern ? "wdb" : undefined} style={{ maxWidth: "1900px", margin: "0 auto", padding: "6px 24px 60px", display: "grid", gridTemplateColumns: "280px minmax(0, 1300px) 280px", gap: "20px", alignItems: "start" }}>
-          <div style={{ position: "sticky", top: "20px" }}>{NewsSidebar}</div>
+        <div className={modern ? "wdb" : undefined} style={{ maxWidth: "1900px", margin: "0 auto", padding: "6px 24px 60px", display: "grid", gridTemplateColumns: "280px minmax(0, 1300px) 280px", gap: "20px", alignItems: "start" }}>
+          {/* Left column is the ad rail; News only shows in the mobile stack. */}
+          <div style={{ position: "sticky", top: "20px" }}><SideRailAd isMobile={isMobile} /></div>
           <div>{MainContent}</div>
           <div style={{ position: "sticky", top: "20px" }}>{VideosSidebar}</div>
         </div>
       )}
-      {/* NFL ads only (random team) — no college ads on the board. */}
-      <MarginAds contentRef={boardGridRef} isMobile={isMobile} horizontalPadding={24} />
     </>
   );
 }

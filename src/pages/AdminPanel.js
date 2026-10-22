@@ -7498,6 +7498,10 @@ function GameLookupCombobox({ gameSlug, onChange, games, placeholder = "Search t
 // form flags that and offers a one-click refresh (see the "commitment
 // changed" note below).
 const BLANK_VIDEO_ITEM = { type: "player", playerId: "", recruitId: "", commitment: "", title: "", thumb: "" };
+// The editor opens with 3 tag slots; "+ Add Tag" expands it one slot at a
+// time up to MAX_VIDEO_TAGS.
+const DEFAULT_VIDEO_TAGS = 3;
+const MAX_VIDEO_TAGS = 10;
 
 // A video with no Tags at all (every video created before this field
 // existed) is treated as CFB by VideosPage.js's own filter and never
@@ -7642,7 +7646,7 @@ function VideosSection() {
       // field is read. At least 3 slots, and one per saved tag beyond that
       // (YouTube Analytics can tag more than 3 players) — a 4th tag must
       // never be dropped by opening and saving the video here.
-      items: Array.from({ length: Math.max(3, items.length) }, (_, i) => ({
+      items: Array.from({ length: Math.max(DEFAULT_VIDEO_TAGS, items.length) }, (_, i) => ({
         type: items[i]?.type === "recruit" ? "recruit" : "player",
         playerId: items[i]?.playerId || "",
         recruitId: items[i]?.recruitId || "",
@@ -7731,6 +7735,15 @@ function VideosSection() {
 
   const handleFieldChange = (field, value) => {
     setFormState((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleAddItem = () => {
+    setFormState((prev) => prev.items.length >= MAX_VIDEO_TAGS ? prev : { ...prev, items: [...prev.items, { ...BLANK_VIDEO_ITEM }] });
+  };
+
+  // Only slots past the default 3 can be removed — the first 3 are always shown.
+  const handleRemoveItem = (index) => {
+    setFormState((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
   };
 
   const handleItemChange = (index, field, value) => {
@@ -8311,6 +8324,16 @@ function VideosSection() {
                     Tag {i + 1}
                   </div>
                   <div style={{ display: "flex", gap: "4px" }}>
+                    {i >= DEFAULT_VIDEO_TAGS && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveItem(i)}
+                        title="Remove this tag"
+                        style={{ padding: "3px 8px", fontWeight: 900, fontSize: "10px", border: "2px solid #c0392b", borderRadius: "14px", cursor: "pointer", background: "#fff", color: "#c0392b" }}
+                      >
+                        ✕
+                      </button>
+                    )}
                     {["player", "recruit"].map((t) => (
                       <button
                         key={t}
@@ -8400,6 +8423,21 @@ function VideosSection() {
               </div>
               );
             })}
+
+            {formState.items.length < MAX_VIDEO_TAGS && (
+              <button
+                type="button"
+                onClick={handleAddItem}
+                style={{
+                  width: "100%", marginTop: "14px",
+                  background: "#fff", color: BLUE, border: "2px dashed " + GOLD,
+                  borderRadius: "8px", padding: "9px", fontWeight: 900, fontSize: "12px",
+                  textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer",
+                }}
+              >
+                + Add Tag ({formState.items.length}/{MAX_VIDEO_TAGS})
+              </button>
+            )}
 
             <button
               onClick={handleSave}

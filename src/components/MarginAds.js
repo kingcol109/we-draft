@@ -371,6 +371,102 @@ export function useAdSelection({ enabled = true, preferTeam = "", preferSchool =
   return { allAds, adData, setAdData, adTeamLogos, adVisible, adTeamBranding, brandingReady };
 }
 
+// The plain (picker) card — the left fixed rail, and on its own the inline
+// column ad (SideRailAd below).
+function PickerAdCard({ adData, allAds, adTeamLogos, setAdData, rootRef, style }) {
+  const teamLabel = adTeamLabel(adData);
+  return (
+    <div className="wd-margin-ad" ref={rootRef} style={style}>
+      <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
+        Sponsored
+      </div>
+      <div
+        className="wd-margin-ad-card"
+        style={{
+          width:"100%", borderRadius:"14px", overflow:"hidden",
+          border:"1px solid #eee", background:"#fff",
+          boxShadow:"0 4px 18px rgba(0,0,0,0.08)",
+          transition:"box-shadow 0.2s ease, transform 0.2s ease",
+        }}
+      >
+        <div style={{ padding:"9px 10px", borderBottom:"1px solid #f3f3f3" }}>
+          <div style={{ fontSize:"9px", fontWeight:900, color:"#c8102e", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
+            {teamLabel}
+          </div>
+        </div>
+
+        <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block" }}>
+          <img
+            src={sanitizeUrl(adData.Image1)}
+            alt={`${teamLabel} throwback gear`}
+            style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+            loading="lazy" fetchpriority="low" referrerPolicy="no-referrer"
+            onError={(e)=>{e.currentTarget.style.display="none";}}
+          />
+        </a>
+
+        <div style={{ padding:"10px 10px 6px", borderTop:"1px solid #f3f3f3" }}>
+          <NflTeamPicker allAds={allAds} activeTeam={adData.Team} teamLogos={adTeamLogos} onPick={setAdData} />
+        </div>
+
+        <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
+          <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:"1px solid #f3f3f3" }}>
+            <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
+              Officially Licensed Throwback Apparel
+            </div>
+            <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
+              All 32 NFL Teams + MLB, NBA, NHL &amp; More
+            </div>
+            <div
+              className="wd-margin-ad-cta"
+              style={{
+                display:"inline-flex", alignItems:"center", gap:"4px",
+                background:"#c8102e", color:"#fff",
+                fontSize:"10px", fontWeight:900,
+                padding:"7px 16px", borderRadius:"20px",
+                textTransform:"uppercase", letterSpacing:"0.05em",
+                transition:"background 0.15s ease",
+              }}
+            >
+              Shop Now →
+            </div>
+          </div>
+        </a>
+
+        <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:"1px solid #f3f3f3" }}>
+          <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const AD_HOVER_CSS = `
+  .wd-margin-ad:hover .wd-margin-ad-card { box-shadow: 0 8px 26px rgba(0,0,0,0.14); transform: translateY(-2px); }
+  .wd-margin-ad:hover .wd-margin-ad-cta { background: #a10d24; }
+  .wd-margin-ad:hover .wd-margin-ad-cta-team { filter: brightness(0.85); }
+  .wd-team-btn:hover { border-color: #c8102e !important; box-shadow: 0 2px 8px rgba(200,16,46,0.25); transform: translateY(-1px); }
+  .wd-team-btn:active { transform: translateY(0) scale(0.94); }
+`;
+
+// One ad card laid out in the page's own flow (e.g. a sidebar column)
+// instead of the fixed gutter rails — fills its container's width. Same
+// ad selection as MarginAds; renders nothing until an ad loads.
+export function SideRailAd({ isMobile, preferTeam = "", preferSchool = "", schoolBranding = null }) {
+  const { allAds, adData, setAdData, adTeamLogos, adVisible } =
+    useAdSelection({ enabled: !isMobile, preferTeam, preferSchool, schoolBranding });
+  if (isMobile || !adData) return null;
+  return (
+    <>
+      <style>{AD_HOVER_CSS}</style>
+      <PickerAdCard
+        adData={adData} allAds={allAds} adTeamLogos={adTeamLogos} setAdData={setAdData}
+        style={{ display:"flex", flexDirection:"column", alignItems:"center", opacity: adVisible ? 1 : 0, transition:"opacity 0.7s ease" }}
+      />
+    </>
+  );
+}
+
 export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "", preferSchool = "", schoolBranding = null }) {
   const { allAds, adData, setAdData, adTeamLogos, adVisible, adTeamBranding } =
     useAdSelection({ enabled: !isMobile, preferTeam, preferSchool, schoolBranding });
@@ -379,70 +475,11 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
 
   const MarginAd = ({ side }) => {
     if (!adData) return null;
-    const teamLabel = adTeamLabel(adData);
     return (
-      <div className="wd-margin-ad" ref={fit.refFor(side)} style={fit.styleFor(side, adVisible)}>
-        <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
-          Sponsored
-        </div>
-        <div
-          className="wd-margin-ad-card"
-          style={{
-            width:"100%", borderRadius:"14px", overflow:"hidden",
-            border:"1px solid #eee", background:"#fff",
-            boxShadow:"0 4px 18px rgba(0,0,0,0.08)",
-            transition:"box-shadow 0.2s ease, transform 0.2s ease",
-          }}
-        >
-          <div style={{ padding:"9px 10px", borderBottom:"1px solid #f3f3f3" }}>
-            <div style={{ fontSize:"9px", fontWeight:900, color:"#c8102e", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
-              {teamLabel}
-            </div>
-          </div>
-
-          <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block" }}>
-            <img
-              src={sanitizeUrl(adData.Image1)}
-              alt={`${teamLabel} throwback gear`}
-              style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
-              loading="lazy" fetchpriority="low" referrerPolicy="no-referrer"
-              onError={(e)=>{e.currentTarget.style.display="none";}}
-            />
-          </a>
-
-          <div style={{ padding:"10px 10px 6px", borderTop:"1px solid #f3f3f3" }}>
-            <NflTeamPicker allAds={allAds} activeTeam={adData.Team} teamLogos={adTeamLogos} onPick={setAdData} />
-          </div>
-
-          <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
-            <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:"1px solid #f3f3f3" }}>
-              <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
-                Officially Licensed Throwback Apparel
-              </div>
-              <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
-                All 32 NFL Teams + MLB, NBA, NHL &amp; More
-              </div>
-              <div
-                className="wd-margin-ad-cta"
-                style={{
-                  display:"inline-flex", alignItems:"center", gap:"4px",
-                  background:"#c8102e", color:"#fff",
-                  fontSize:"10px", fontWeight:900,
-                  padding:"7px 16px", borderRadius:"20px",
-                  textTransform:"uppercase", letterSpacing:"0.05em",
-                  transition:"background 0.15s ease",
-                }}
-              >
-                Shop Now →
-              </div>
-            </div>
-          </a>
-
-          <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:"1px solid #f3f3f3" }}>
-            <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
-          </div>
-        </div>
-      </div>
+      <PickerAdCard
+        adData={adData} allAds={allAds} adTeamLogos={adTeamLogos} setAdData={setAdData}
+        rootRef={fit.refFor(side)} style={fit.styleFor(side, adVisible)}
+      />
     );
   };
 
@@ -559,13 +596,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
 
   return (
     <>
-      <style>{`
-        .wd-margin-ad:hover .wd-margin-ad-card { box-shadow: 0 8px 26px rgba(0,0,0,0.14); transform: translateY(-2px); }
-        .wd-margin-ad:hover .wd-margin-ad-cta { background: #a10d24; }
-        .wd-margin-ad:hover .wd-margin-ad-cta-team { filter: brightness(0.85); }
-        .wd-team-btn:hover { border-color: #c8102e !important; box-shadow: 0 2px 8px rgba(200,16,46,0.25); transform: translateY(-1px); }
-        .wd-team-btn:active { transform: translateY(0) scale(0.94); }
-      `}</style>
+      <style>{AD_HOVER_CSS}</style>
       <MarginAd side="left" />
       <MarginAdTeamCard side="right" />
     </>
