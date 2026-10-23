@@ -287,9 +287,10 @@ const footerButtonStyle = {
   border: "none", borderTop: "1px solid #eef1f5", cursor: "pointer", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em",
 };
 
-export function PlayerVideosCard({ videos, accentColor = SITE_BLUE }) {
-  const [visibleCount, setVisibleCount] = useState(3);
-  useEffect(() => { setVisibleCount(3); }, [videos]);
+// initialCount: videos shown before "Show More" (the draft order page shows 6).
+export function PlayerVideosCard({ videos, accentColor = SITE_BLUE, initialCount = 3 }) {
+  const [visibleCount, setVisibleCount] = useState(initialCount);
+  useEffect(() => { setVisibleCount(initialCount); }, [videos, initialCount]);
   if (!videos.length) return null;
   return (
     <SidebarCard title="Videos" to="/videos">

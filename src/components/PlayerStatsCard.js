@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, doc as fsDoc, getDoc, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { textOn } from "../utils/teamColors";
 
 const SEASON = 2026;
 // Game log: the whole season is loaded; the latest GAME_LOG_SHOWN show until
@@ -324,7 +325,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
             {data.games.length > GAME_LOG_SHOWN && (
               <button onClick={() => setShowAll((v) => !v)} style={{
                 display: "block", width: "100%", padding: "10px 14px", border: "none", cursor: "pointer",
-                background: color1, color: color2, fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em",
+                background: color1, color: textOn(color1, color2), fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em",
               }}>
                 {showAll ? "Show less" : `Show more (${data.games.length - GAME_LOG_SHOWN})`}
               </button>

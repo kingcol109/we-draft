@@ -64,6 +64,7 @@ import { cssRect, withoutPageZoom } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 import { classSnapshotRanks } from "../utils/classRanks";
+import { readableOn, textOn } from "../utils/teamColors";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -443,7 +444,7 @@ function SidebarCard({ title, color1, color2, children, to }) {
         <h2 className="font-black uppercase" style={{ color: "#fff", fontSize: "20px", letterSpacing: "0.08em", textAlign: "center" }}>
           {to ? (
             <Link to={to} title={`All ${title.toLowerCase()}`} style={{ color: "#fff", textDecoration: "none" }}>
-              {title} <span style={{ color: color2, fontSize: "16px" }}>→</span>
+              {title} <span style={{ color: textOn(color1, color2), fontSize: "16px" }}>→</span>
             </Link>
           ) : title}
         </h2>
@@ -1408,7 +1409,7 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
               )}
-              <div style={{ fontSize: "10px", fontWeight: 900, color: activeColor2, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>Now Watching</div>
+              <div style={{ fontSize: "10px", fontWeight: 900, color: readableOn(activeColor2, "#111111"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "8px" }}>Now Watching</div>
               <div style={{ fontSize: "26px", fontWeight: 900, lineHeight: 1.1, textTransform: "uppercase", marginBottom: "10px" }}>{activeClip.playerName || "—"}</div>
               {(activeClip.playerPosition || activeClip.playerSchool) && (
                 <div style={{ fontSize: "14px", fontWeight: 700, color: "rgba(255,255,255,0.8)", marginBottom: "4px" }}>
@@ -2193,6 +2194,10 @@ export default function PlayerProfile() {
   const [player, setPlayer] = useState(null);
   const { user, login } = useAuth();
   const evaluationFormRef = useRef(null);
+  // Scouting tabs under the hero — "community" (Community Scouting Report,
+  // the default on every player) or "mine" (My Evaluation).
+  const [scoutTab, setScoutTab] = useState("community");
+  useEffect(() => { setScoutTab("community"); }, [slug]);
   const exportCardRef = useRef(null);
   // Share-evaluation modal — see handleShareEvaluation. null until a share
   // image has actually been generated; evalShareOpen gates the dialog
@@ -3381,6 +3386,27 @@ useEffect(() => {
     fetch();
   }, [community.topFits]);
 
+  // We-Draft.com NFL fits — teams whose current GM/HC/coordinators' draft
+  // history this prospect fits Very Strong or better (the team pages'
+  // Targets-tab staff score, precomputed weekly into
+  // compSnapshots/_nflFits — see utils/draftProfiles.js). Shown first in the
+  // NFL Fits column, above the community's picks. Logos ride on the _ads
+  // snapshot the margin ads already read.
+  const [wdFits, setWdFits] = useState([]);
+  const [wdFitLogos, setWdFitLogos] = useState({});
+  useEffect(() => {
+    if (!player?.id) { setWdFits([]); return; }
+    let cancelled = false;
+    setWdFits([]);
+    getSiteSnapshot("_nflFits").then((snap) => {
+      const rows = snap?.rows?.[player.id] || [];
+      if (cancelled) return;
+      setWdFits(rows);
+      if (rows.length) fetchAdTeamLogos().then((l) => { if (!cancelled) setWdFitLogos(l); });
+    });
+    return () => { cancelled = true; };
+  }, [player?.id]);
+
   // Same share-modal pattern WePickHub.js's own share buttons use: build the
   // image first, show it in a preview dialog, then offer Email/X/Text/Save
   // from there — instead of silently downloading a file the moment the
@@ -4351,11 +4377,11 @@ useEffect(() => {
         display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0,
         background: color1, color: "#fff", fontWeight: 900, fontSize: isMobile ? "11px" : "13px",
         textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
-        padding: isMobile ? "7px 12px" : "8px 18px", borderRadius: "999px", textDecoration: "none",
+        padding: isMobile ? "6px 10px" : "8px 18px", borderRadius: "999px", textDecoration: "none",
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
       }}
     >
-      🔎 Find Comparison
+      🔎 {isMobile ? "Compare" : "Find Comparison"}
     </Link>
   ) : null;
   // The strip along the bottom of the Community Scouting Report card: a
@@ -4412,9 +4438,62 @@ useEffect(() => {
       )}
     </div>
   );
+  // We-Draft.com fits for the NFL Fits column: each team's logo, linking to
+  // its team page — unlabeled, the hover says it's a We-Draft.com fit. The column holds three teams in
+  // all — the community's picks take room first, so it's 3 We-Draft fits
+  // with none from the community, 2 alongside one, and 1 alongside two or
+  // more. `row` lays them out side by side (mobile / narrow) instead of
+  // stacked.
+  const hasAnyFits = wdFits.length > 0 || community.topFits.length > 0;
+  const wdFitsShown = wdFits.slice(0, community.topFits.length >= 2 ? 1 : community.topFits.length === 1 ? 2 : 3);
+  const renderWdFits = (size, row) => wdFitsShown.length > 0 && (
+    <div style={{ width: "100%" }}>
+      <div className={row ? "" : "wd-scout-fitlogos"} style={{ display: "flex", flexDirection: row ? "row" : "column", flexWrap: row ? "wrap" : "nowrap", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+        {wdFitsShown.map(({ t }) => {
+          return (
+            <Link key={t} to={`/nfl/${t.toLowerCase()}`} title={`We-Draft.com fit: ${teamNameFromAbbr(t)}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", textDecoration: "none" }}>
+              {wdFitLogos[t]
+                ? <img src={sanitizeUrl(wdFitLogos[t])} alt={teamNameFromAbbr(t)} style={{ width: size, height: size, objectFit: "contain" }} loading="lazy" referrerPolicy="no-referrer" />
+                : <span style={{ width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 900, color: "#9aa5b4" }}>{t}</span>}
+            </Link>
+          );
+        })}
+      </div>
+      {community.topFits.length > 0 && <div style={{ height: "12px" }} />}
+    </div>
+  );
+  // The tab row: both tabs where the section heading used to be, Find
+  // Comparison still on the right.
+  const scoutTabs = (
+    <>
+      {/* One row, never wrapping — on phones the labels and the Find
+          Comparison pill shorten to fit. */}
+      <div className="flex items-center justify-between mb-2" style={{ gap: "10px", flexWrap: "nowrap" }}>
+        <div role="tablist" style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? "10px" : "24px", minWidth: 0 }}>
+          {[["community", isMobile ? "Community" : "Community Scouting Report"], ["mine", "My Evaluation"]].map(([key, label]) => {
+            const on = scoutTab === key;
+            return (
+              <button
+                key={key} role="tab" aria-selected={on} onClick={() => setScoutTab(key)}
+                className="font-black uppercase"
+                style={{
+                  background: "none", border: "none", margin: 0, padding: "0 0 5px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                  color: on ? siteC1 : "#9aa5b4", fontSize: isMobile ? "12px" : modern ? "14px" : "22px", letterSpacing: isMobile ? "0.06em" : modern ? "0.1em" : "0.08em",
+                  borderBottom: `3px solid ${on ? siteC2 : "transparent"}`, transition: "color 0.15s ease",
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {findComparisonLink}
+      </div>
+      <div className="mb-4 rounded-sm wdm-secbar" style={{ height:"3px", backgroundColor:siteC1 }} />
+    </>
+  );
   const communityScoutingSection = (
           <div>
-            <SectionTitle right={findComparisonLink}>Community Scouting Report</SectionTitle>
             {isMobile ? (
               <div className="bg-white rounded-lg overflow-hidden wdm-card" style={{ border:`2px solid ${siteC1}` }}>
                 {/* Grade and Class Rank are now matched half-width columns —
@@ -4472,7 +4551,7 @@ useEffect(() => {
                     ) : <p className="italic text-gray-400 text-xs text-center">Not ranked</p>}
                   </div>
                 </div>
-                <div className="flex" style={{ borderBottom: community.topFits.length > 0 ? "1px solid #e5e7eb" : "none" }}>
+                <div className="flex" style={{ borderBottom: hasAnyFits ? "1px solid #e5e7eb" : "none" }}>
                   <div className="flex-1 px-3 py-3" style={{ borderRight:"1px solid #e5e7eb" }}>
                     <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Top Strengths</h3>
                     {community.topStrengths.length > 0 ? community.topStrengths.map((s,i) => (
@@ -4500,10 +4579,11 @@ useEffect(() => {
                     )) : <p className="italic text-gray-400 text-xs">None yet</p>}
                   </div>
                 </div>
-                {community.topFits.length > 0 && (
+                {hasAnyFits && (
                   <div className="px-3 py-3">
                     <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
-                    {fitLogos.length > 0 ? (
+                    {renderWdFits("40px", true)}
+                    {community.topFits.length === 0 ? null : fitLogos.length > 0 ? (
                       <div className="flex flex-wrap justify-center gap-3">
                         {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
                       </div>
@@ -4595,13 +4675,14 @@ useEffect(() => {
                 </div>
                 <div className="flex flex-col px-5 py-5 wd-scout-fits" style={{ flex:"0 0 150px" }}>
                   <h3 className="wdm-h text-sm font-black uppercase pb-2 mb-3" style={{ color:siteC1, borderBottom:`3px solid ${siteC1}`, letterSpacing:"0.14em" }}>NFL Fits</h3>
+                  {renderWdFits("64px", false)}
                   {fitLogos.length > 0 ? (
                     <div className="flex flex-col items-center justify-start flex-1 gap-3 wd-scout-fitlogos">
                       {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} className="object-contain" style={{ width:"80px", height:"80px" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
                     </div>
                   ) : community.topFits.length > 0 ? (
                     <div className="flex flex-col gap-1">{community.topFits.map((t,i) => <p key={i} className="text-sm font-bold text-gray-600">{t}</p>)}</div>
-                  ) : <p className="italic text-gray-400 text-sm">No fits yet</p>}
+                  ) : !wdFits.length && <p className="italic text-gray-400 text-sm">No fits yet</p>}
                 </div>
                 {measurementsBlock && <div style={{ flex: "1 1 100%", borderTop: "1px solid #e5e7eb" }}>{measurementsBlock}</div>}
               </div>
@@ -5097,13 +5178,6 @@ useEffect(() => {
                   Film
                 </button>
               )}
-              {!draftedBy && !mobileLiveGame && (
-                <button onClick={()=>evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"})}
-                  className="font-extrabold rounded-full transition hover:opacity-90 wdm-tb on wdm-tb-primary"
-                  style={{ backgroundColor:color2, border:"2px solid #fff", color:"#fff", fontSize:isMobile?"14px":"16px", padding:isMobile?"7px 14px":"9px 18px", fontWeight:900 }}>
-                  Evaluate
-                </button>
-              )}
             </div>
           </div>
 
@@ -5476,166 +5550,12 @@ useEffect(() => {
               banner — Find Comparison beside its heading, and the
               measurements, last-updated stamp and Show Bio along its bottom
               edge (measurementsBlock below the card's columns). */}
-          <div className="bg-white" style={{ padding: isMobile ? "10px 10px 8px" : "16px 24px 10px" }}>{communityScoutingSection}</div>
-
-
-          <div className="wdm-stripe" style={{ height:"5px", backgroundColor:siteC2 }} />
-        </div>
-
-        {/* ===== Hidden Export Card ===== */}
-        {/* Same overall vibe as before (light card, color1/color2 branding)
-            but sleeker: rounded throughout instead of hard rectangular
-            borders, Grade/Strengths/Weaknesses/NFL Fit sit in their own
-            soft rounded panels with breathing room between them instead of
-            thin dividers crammed edge-to-edge, and the header/footer get a
-            subtle gradient for depth instead of a flat fill. The footer
-            also no longer just repeats "WE-DRAFT.COM" from the header —
-            it's the player's own shareable URL instead, actual information
-            rather than the same wordmark twice. */}
-        <div style={{ position:"absolute", left:"-9999px", top:0 }}>
-          <div ref={exportCardRef} style={{ width:"700px", backgroundColor:"#ffffff", borderRadius:"28px", overflow:"hidden", boxShadow:"0 24px 60px rgba(0,0,0,0.22)", border:"1px solid rgba(0,0,0,0.06)", fontFamily:"'Arial Black', Arial, sans-serif" }}>
-            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"20px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ color:color2, fontSize:"26px", fontWeight:900, letterSpacing:"0.16em", textTransform:"uppercase" }}>WE-DRAFT.COM</div>
-            </div>
-            <div style={{ height:"4px", background:`linear-gradient(90deg, ${color2}, ${color1})` }} />
-            <div style={{ padding:"32px 32px 20px", textAlign:"center" }}>
-              <div style={{ fontSize:"52px", fontWeight:900, color:color1, lineHeight:1.05, letterSpacing:"0.01em", textTransform:"uppercase" }}>{player.First} {player.Last}</div>
-              <div style={{ fontSize:"12px", fontWeight:700, color:"#aaa", letterSpacing:"0.12em", textTransform:"uppercase", marginTop:"10px" }}>Scouted by {scoutName}</div>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
-                <span style={{ backgroundColor:color1, color:"#fff", fontWeight:900, fontSize:"14px", padding:"6px 18px", borderRadius:"20px", letterSpacing:"0.05em" }}>{player.Position}</span>
-                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
-                <span style={{ color:color1, fontWeight:900, fontSize:"18px" }}>{player.School}</span>
-                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
-                <span style={{ color:"#888", fontWeight:800, fontSize:"18px" }}>{formatEligible(player.Eligible)}</span>
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:"12px", padding:"4px 24px 24px", alignItems:"stretch" }}>
-              <div style={{ flex:"0 0 150px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"14px" }}>Grade</div>
-                {grade ? <GradeBadge g={grade} large={true} /> : <div style={{ color:"#ccc", fontSize:"13px", fontStyle:"italic" }}>No grade</div>}
-              </div>
-              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Strengths</div>
-                {strengths.length > 0 ? strengths.map((s,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<strengths.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{s}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
-              </div>
-              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Weaknesses</div>
-                {weaknesses.length > 0 ? weaknesses.map((w,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<weaknesses.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{w}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
-              </div>
-              {nflFit && (
-                <div style={{ flex:"0 0 110px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center" }}>
-                  <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px", textAlign:"center" }}>NFL Fit</div>
-                  <div style={{ fontSize:"12px", fontWeight:900, color:color1, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.04em", lineHeight:1.3 }}>{nflFit}</div>
-                </div>
-              )}
-            </div>
-            {evaluation && (
-              <div style={{ margin:"0 24px 28px", background:`${color1}0d`, borderLeft:`4px solid ${color2}`, borderRadius:"0 16px 16px 0", padding:"18px 22px" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"8px" }}>Scout's Take</div>
-                <div style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.7 }}>
-                  {renderEvaluationText(evaluation, "export")}
-                </div>
-              </div>
-            )}
-            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ color:color2, fontSize:"18px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase" }}>Create Player Evaluations on We-Draft.com</div>
-            </div>
-          </div>
-        </div>
-
-        {/* ===== Share Evaluation Modal ===== */}
-        {evalShareOpen && (
-          <div
-            onClick={() => setEvalShareOpen(false)}
-            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{ background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"calc(90vh / var(--pz, 1))", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
-            >
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
-                <div style={{ color:siteC1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>
-                <button
-                  onClick={() => setEvalShareOpen(false)}
-                  style={{ background:"none", border:"none", color:"#999", fontSize:"22px", cursor:"pointer", lineHeight:1, padding:0 }}
-                >
-                  ×
-                </button>
-              </div>
-              <div style={{ borderRadius:"10px", overflow:"hidden", border:"1px solid #eee", marginBottom:"16px", background:"#fafafa", minHeight:"160px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                {evalShareImageUrl ? (
-                  <img src={evalShareImageUrl} alt="Evaluation preview" style={{ width:"100%", display:"block" }} />
-                ) : (
-                  <div style={{ padding:"50px 0", color:"#999", fontSize:"13px", fontWeight:700 }}>Building image…</div>
-                )}
-              </div>
-              <div style={{ fontSize:"11px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:"8px" }}>
-                Share to
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                <a
-                  href={`mailto:?subject=${encodeURIComponent(`${player.First} ${player.Last} — Scouting Report`)}&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position}):\nwe-draft.com/player/${slug}`)}`}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
-                >
-                  📧 Email
-                </a>
-                <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`My scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position})`)}&url=${encodeURIComponent(`https://we-draft.com/player/${slug}`)}`}
-                  target="_blank" rel="noopener noreferrer"
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
-                >
-                  𝕏 X
-                </a>
-                <a
-                  href={`sms:?&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last}: we-draft.com/player/${slug}`)}`}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
-                >
-                  💬 Text
-                </a>
-                <button
-                  onClick={handleSaveEvalImage}
-                  disabled={!evalShareImageUrl}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:siteC1, border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:"#fff", fontWeight:800, fontSize:"13px", cursor:evalShareImageUrl?"pointer":"default", opacity:evalShareImageUrl?1:0.6 }}
-                >
-                  💾 Save Image
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ===== Homage ad — same ad the margin rails are showing. Desktop:
-            the wordmark banner. Phones (no rails): MobileAdCard, with the
-            product shot and its own team dropdown. ===== */}
-        {adData ? (
-          <div className="mb-8">
-            {isMobile ? (
-              <MobileAdCard
-                ad={adData}
-                branding={adTeamBranding}
-                label={isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team}
-                allAds={allAds}
-                onPick={setAdData}
-                visible={adVisible && adTeamBranding?._for === (adData.Team || adData.School)}
-              />
-            ) : (
-              <AdBanner
-                ad={adData}
-                branding={adTeamBranding}
-                label={isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team}
-                isMobile={false}
-                visible={adVisible && adTeamBranding?._for === (adData.Team || adData.School)}
-              />
-            )}
-          </div>
-        ) : !adsResolved && (
-          // Holds the ad's height (+ its "Sponsored" label) until it loads.
-          <div className="mb-8" aria-hidden="true" style={{ height: isMobile ? `${MOBILE_AD_HEIGHT + 17}px` : "131px" }} />
-        )}
-
-        {/* ===== Evaluation Form ===== */}
-        <div ref={evaluationFormRef} className="mb-8">
-          <SectionTitle>My Evaluation</SectionTitle>
+          {/* Tabs: Community Scouting Report (always the default) and My
+              Evaluation — the evaluation form, one click away instead of
+              below the ad. */}
+          <div ref={evaluationFormRef} className="bg-white" style={{ padding: isMobile ? "10px 10px 8px" : "16px 24px 10px", scrollMarginTop: "80px" }}>
+            {scoutTabs}
+            {scoutTab === "mine" ? (
           <div className="bg-white rounded-lg overflow-hidden wdm-card wdm-form" style={{ border:`2px solid ${siteC1}` }}>
             <div className="flex items-center justify-between wdm-cardhead" style={{ backgroundColor:siteC1, padding:isMobile?"8px 12px":"10px 20px" }}>
               <div className="font-black uppercase text-white tracking-wide" style={{ fontSize:isMobile?"13px":"18px" }}>
@@ -5966,7 +5886,163 @@ useEffect(() => {
               </div>
             )}
           </div>
+            ) : communityScoutingSection}
+          </div>
+
+
+          <div className="wdm-stripe" style={{ height:"5px", backgroundColor:siteC2 }} />
         </div>
+
+        {/* ===== Hidden Export Card ===== */}
+        {/* Same overall vibe as before (light card, color1/color2 branding)
+            but sleeker: rounded throughout instead of hard rectangular
+            borders, Grade/Strengths/Weaknesses/NFL Fit sit in their own
+            soft rounded panels with breathing room between them instead of
+            thin dividers crammed edge-to-edge, and the header/footer get a
+            subtle gradient for depth instead of a flat fill. The footer
+            also no longer just repeats "WE-DRAFT.COM" from the header —
+            it's the player's own shareable URL instead, actual information
+            rather than the same wordmark twice. */}
+        <div style={{ position:"absolute", left:"-9999px", top:0 }}>
+          <div ref={exportCardRef} style={{ width:"700px", backgroundColor:"#ffffff", borderRadius:"28px", overflow:"hidden", boxShadow:"0 24px 60px rgba(0,0,0,0.22)", border:"1px solid rgba(0,0,0,0.06)", fontFamily:"'Arial Black', Arial, sans-serif" }}>
+            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"20px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ color:textOn(color1, color2), fontSize:"26px", fontWeight:900, letterSpacing:"0.16em", textTransform:"uppercase" }}>WE-DRAFT.COM</div>
+            </div>
+            <div style={{ height:"4px", background:`linear-gradient(90deg, ${color2}, ${color1})` }} />
+            <div style={{ padding:"32px 32px 20px", textAlign:"center" }}>
+              <div style={{ fontSize:"52px", fontWeight:900, color:color1, lineHeight:1.05, letterSpacing:"0.01em", textTransform:"uppercase" }}>{player.First} {player.Last}</div>
+              <div style={{ fontSize:"12px", fontWeight:700, color:"#aaa", letterSpacing:"0.12em", textTransform:"uppercase", marginTop:"10px" }}>Scouted by {scoutName}</div>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
+                <span style={{ backgroundColor:color1, color:"#fff", fontWeight:900, fontSize:"14px", padding:"6px 18px", borderRadius:"20px", letterSpacing:"0.05em" }}>{player.Position}</span>
+                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
+                <span style={{ color:color1, fontWeight:900, fontSize:"18px" }}>{player.School}</span>
+                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
+                <span style={{ color:"#888", fontWeight:800, fontSize:"18px" }}>{formatEligible(player.Eligible)}</span>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:"12px", padding:"4px 24px 24px", alignItems:"stretch" }}>
+              <div style={{ flex:"0 0 150px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"14px" }}>Grade</div>
+                {grade ? <GradeBadge g={grade} large={true} /> : <div style={{ color:"#ccc", fontSize:"13px", fontStyle:"italic" }}>No grade</div>}
+              </div>
+              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Strengths</div>
+                {strengths.length > 0 ? strengths.map((s,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<strengths.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{s}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
+              </div>
+              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Weaknesses</div>
+                {weaknesses.length > 0 ? weaknesses.map((w,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<weaknesses.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{w}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
+              </div>
+              {nflFit && (
+                <div style={{ flex:"0 0 110px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center" }}>
+                  <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px", textAlign:"center" }}>NFL Fit</div>
+                  <div style={{ fontSize:"12px", fontWeight:900, color:color1, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.04em", lineHeight:1.3 }}>{nflFit}</div>
+                </div>
+              )}
+            </div>
+            {evaluation && (
+              <div style={{ margin:"0 24px 28px", background:`${color1}0d`, borderLeft:`4px solid ${color2}`, borderRadius:"0 16px 16px 0", padding:"18px 22px" }}>
+                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"8px" }}>Scout's Take</div>
+                <div style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.7 }}>
+                  {renderEvaluationText(evaluation, "export")}
+                </div>
+              </div>
+            )}
+            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ color:textOn(color1, color2), fontSize:"18px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase" }}>Create Player Evaluations on We-Draft.com</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ===== Share Evaluation Modal ===== */}
+        {evalShareOpen && (
+          <div
+            onClick={() => setEvalShareOpen(false)}
+            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"calc(90vh / var(--pz, 1))", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
+            >
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
+                <div style={{ color:siteC1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>
+                <button
+                  onClick={() => setEvalShareOpen(false)}
+                  style={{ background:"none", border:"none", color:"#999", fontSize:"22px", cursor:"pointer", lineHeight:1, padding:0 }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ borderRadius:"10px", overflow:"hidden", border:"1px solid #eee", marginBottom:"16px", background:"#fafafa", minHeight:"160px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {evalShareImageUrl ? (
+                  <img src={evalShareImageUrl} alt="Evaluation preview" style={{ width:"100%", display:"block" }} />
+                ) : (
+                  <div style={{ padding:"50px 0", color:"#999", fontSize:"13px", fontWeight:700 }}>Building image…</div>
+                )}
+              </div>
+              <div style={{ fontSize:"11px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:"8px" }}>
+                Share to
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
+                <a
+                  href={`mailto:?subject=${encodeURIComponent(`${player.First} ${player.Last} — Scouting Report`)}&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position}):\nwe-draft.com/player/${slug}`)}`}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                >
+                  📧 Email
+                </a>
+                <a
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`My scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position})`)}&url=${encodeURIComponent(`https://we-draft.com/player/${slug}`)}`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                >
+                  𝕏 X
+                </a>
+                <a
+                  href={`sms:?&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last}: we-draft.com/player/${slug}`)}`}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
+                >
+                  💬 Text
+                </a>
+                <button
+                  onClick={handleSaveEvalImage}
+                  disabled={!evalShareImageUrl}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:siteC1, border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:"#fff", fontWeight:800, fontSize:"13px", cursor:evalShareImageUrl?"pointer":"default", opacity:evalShareImageUrl?1:0.6 }}
+                >
+                  💾 Save Image
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== Homage ad — same ad the margin rails are showing. Desktop:
+            the wordmark banner. Phones (no rails): MobileAdCard, with the
+            product shot and its own team dropdown. ===== */}
+        {adData ? (
+          <div className="mb-8">
+            {isMobile ? (
+              <MobileAdCard
+                ad={adData}
+                branding={adTeamBranding}
+                label={isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team}
+                allAds={allAds}
+                onPick={setAdData}
+                visible={adVisible && adTeamBranding?._for === (adData.Team || adData.School)}
+              />
+            ) : (
+              <AdBanner
+                ad={adData}
+                branding={adTeamBranding}
+                label={isCfbAd(adData) ? adData.School : teamNameFromAbbr(adData.Team) || adData.Team}
+                isMobile={false}
+                visible={adVisible && adTeamBranding?._for === (adData.Team || adData.School)}
+              />
+            )}
+          </div>
+        ) : !adsResolved && (
+          // Holds the ad's height (+ its "Sponsored" label) until it loads.
+          <div className="mb-8" aria-hidden="true" style={{ height: isMobile ? `${MOBILE_AD_HEIGHT + 17}px` : "131px" }} />
+        )}
 
         {/* ===== Archived Evaluation ===== */}
         {user && archivedEval && (

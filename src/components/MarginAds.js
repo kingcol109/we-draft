@@ -467,10 +467,12 @@ export function SideRailAd({ isMobile, preferTeam = "", preferSchool = "", schoo
   );
 }
 
-export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "", preferSchool = "", schoolBranding = null }) {
+// watch: values that change the content element's width without a resize
+// (re-measures the gutters when they change).
+export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "", preferSchool = "", schoolBranding = null, watch = [] }) {
   const { allAds, adData, setAdData, adTeamLogos, adVisible, adTeamBranding } =
     useAdSelection({ enabled: !isMobile, preferTeam, preferSchool, schoolBranding });
-  const fit = useMarginAdFit({ contentRef, horizontalPadding, isMobile });
+  const fit = useMarginAdFit({ contentRef, horizontalPadding, isMobile, watch });
   const showMarginAds = fit.show;
 
   const MarginAd = ({ side }) => {

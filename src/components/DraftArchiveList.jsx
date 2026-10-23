@@ -6,16 +6,19 @@
 // name + position/school; a row with a We-Draft slug links to the player.
 //
 // Entry shape: { key, year, round, pick (null/9999 when unknown),
-//   playerName, position, school, slug, teamLogo?, note? }
+//   playerName, position, school, slug, teamLogo?, note?, color1?, color2? }
 // teamLogo shows under the year (for lists spanning several teams); note is
-// appended to the position/school line.
+// appended to the position/school line; color1/color2 override the list's
+// colors for that row's pick chip and name (the drafting team's, when a
+// list spans several teams).
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import { cssRect } from "../utils/pageZoom";
+import { readableOn } from "../utils/teamColors";
 
 // Team colors are admin-entered hex — tint only when it's actually #rrggbb.
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
@@ -27,10 +30,10 @@ function sanitizeUrl(url) {
   return /^https?:\/\//i.test(u) ? u : `https://${u}`;
 }
 
-// College logos (schools/{name}.Logo1) for a list of school names — batched
-// "in" queries of 10, only for names not already fetched. A miss caches as
-// "" so it isn't retried.
-export function useSchoolLogos(schools) {
+// College branding (schools/{name} docs: Logo1, LogoDark, Color1, Color2…)
+// for a list of school names — batched "in" queries of 10, only for names
+// not already fetched. A miss caches as null so it isn't retried.
+export function useSchools(schools) {
   const [logos, setLogos] = useState({});
   const logosRef = useRef({});
   useEffect(() => { logosRef.current = logos; }, [logos]);
@@ -46,15 +49,21 @@ export function useSchoolLogos(schools) {
         const found = {};
         snaps.forEach((snap) => snap.docs.forEach((d) => {
           const data = d.data();
-          if (data.School) found[data.School] = data.Logo1 || "";
+          if (data.School) found[data.School] = data;
         }));
-        names.forEach((s) => { if (!(s in found)) found[s] = ""; });
+        names.forEach((s) => { if (!(s in found)) found[s] = null; });
         if (!cancelled) setLogos((prev) => ({ ...prev, ...found }));
       })
       .catch((e) => console.error("School logo fetch error:", e));
     return () => { cancelled = true; };
   }, [key]);
   return logos;
+}
+
+// { [school]: Logo1 or "" } — see useSchools.
+export function useSchoolLogos(schools) {
+  const docs = useSchools(schools);
+  return useMemo(() => Object.fromEntries(Object.entries(docs).map(([s, d]) => [s, d?.Logo1 || ""])), [docs]);
 }
 
 // Round big, overall pick under it — first-rounders solid team color.
@@ -155,6 +164,8 @@ export default function DraftArchiveList({ archive, schoolLogos, isMobile, color
       ) : (
         filtered.map((entry) => {
           const logo = schoolLogos[entry.school];
+          const rowColor1 = entry.color1 || color1;
+          const rowColor2 = entry.color2 || color2;
           return (
             <div
               key={entry.key}
@@ -173,7 +184,7 @@ export default function DraftArchiveList({ archive, schoolLogos, isMobile, color
                 {entry.teamLogo && <img src={sanitizeUrl(entry.teamLogo)} alt="" style={{ width: 20, height: 20, objectFit: "contain" }} />}
               </div>
 
-              <PickChip round={entry.round} pick={entry.pick} color1={color1} color2={color2} isMobile={isMobile} />
+              <PickChip round={entry.round} pick={entry.pick} color1={rowColor1} color2={rowColor2} isMobile={isMobile} />
 
               <div style={{ flexShrink: 0, width: logoSize, height: logoSize, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {logo && (
@@ -184,7 +195,7 @@ export default function DraftArchiveList({ archive, schoolLogos, isMobile, color
               </div>
 
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 900, color: rowColor1, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {entry.playerName || "—"}
                 </div>
                 <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: "#555", marginTop: 2 }}>
@@ -192,7 +203,7 @@ export default function DraftArchiveList({ archive, schoolLogos, isMobile, color
                 </div>
               </div>
 
-              {entry.slug && <div style={{ flexShrink: 0, fontSize: 18, color: color2, fontWeight: 900 }}>→</div>}
+              {entry.slug && <div style={{ flexShrink: 0, fontSize: 18, color: readableOn(rowColor2, "#ffffff"), fontWeight: 900 }}>→</div>}
             </div>
           );
         })

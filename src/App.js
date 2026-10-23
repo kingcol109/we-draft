@@ -65,6 +65,7 @@ const DraftTracker = lazy(() => import("./pages/DraftTracker"));
 
 // NFL Hub
 const NFLPage = lazy(() => import("./pages/NFLPage"));
+const DraftOrderPage = lazy(() => import("./pages/DraftOrderPage"));
 
 // Articles
 const ArticlePage = lazy(() => import("./pages/ArticlePage"));
@@ -167,6 +168,8 @@ function MainLayout() {
             <Route path="/cfb/stats" element={<CFBPage />} />
             <Route path="/cfb/stats/:cat" element={<CFBPage />} />
             <Route path="/nfl" element={<NFLPage />} />
+            {/* The upcoming drafts' full projected order. */}
+            <Route path="/draftorder" element={<DraftOrderPage />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsArticle />} />
             <Route path="/community" element={<CommunityBoard />} />

@@ -26,7 +26,8 @@
 //   Org         the org's name AS IT WAS then ("Oakland Raiders", "Ohio State")
 //   Team        NFL franchise abbr as it is today (LV for Oakland) — NFL only,
 //               so stints line up with draft data regardless of relocations
-//   Title       title as written in the bio ("Passing Game Coordinator/QB Coach")
+//   Title       title as written in the bio ("Passing Game Coordinator/QB Coach");
+//               for a PLAYER stint, the position played ("Quarterback")
 //   Roles       [ROLE key] — the standardized version of Title; a title with
 //               two hats gets two keys (AHC + DB)
 //   StartYear   first SEASON in the job (a Jan 2022 hire → 2022)
@@ -97,6 +98,10 @@ export const ROLES = [
   { key: "PERSONNEL", label: "Personnel Assistant / Coordinator", group: "Front Office", side: "Front Office" },
   { key: "CAP", label: "Salary Cap / Football Admin", group: "Front Office", side: "Front Office" },
   { key: "FO_OTHER", label: "Other Front Office Role", group: "Front Office", side: "Front Office" },
+
+  // Their own playing days — Title holds the position ("Quarterback").
+  // Never tracked or credited with draft picks.
+  { key: "PLAYER", label: "Player", group: "Playing", side: "All" },
 ];
 
 export const ROLE_BY_KEY = Object.fromEntries(ROLES.map((r) => [r.key, r]));
@@ -215,6 +220,8 @@ export function normalizeStint(raw, i = 0) {
   return { stint: s, warnings };
 }
 
+export const isPlayerStint = (s) => (s.Roles || []).includes("PLAYER");
+
 export const isOpenStint = (s) => (s.EndYear === null || s.EndYear === undefined) && !s.EndUnknown;
 
 export function deriveCurrent(stints) {
@@ -265,7 +272,9 @@ export function normalizeCoach(raw) {
 }
 
 // Same span without months, for public pages: "2019–2021", "2019–present".
+// Undated (common for playing days: "Harvard, four-year starter") → "".
 export function stintYearSpan(s) {
+  if (!s.StartYear && !s.EndYear) return "";
   const start = s.StartYear || "?";
   if (isOpenStint(s)) return `${start}–present`;
   if (s.EndUnknown) return `${start}–?`;
@@ -277,10 +286,13 @@ export function stintYearSpan(s) {
 // organization: the org's name once, then each job held there. NFL stints
 // group by franchise, so a run that spans a relocation or rename (San Diego
 // → Los Angeles Chargers) stays one block under the newest name used.
+// Playing days never share a block with jobs — someone who played and then
+// coached at BYU gets a playing block and a coaching block.
 export function groupStints(stints) {
   const groups = [];
   stints.forEach((s) => {
-    const key = s.Level === "NFL" && s.Team ? `NFL:${s.Team}` : `${s.Level}:${String(s.Org || "").toLowerCase()}`;
+    const org = s.Level === "NFL" && s.Team ? `NFL:${s.Team}` : `${s.Level}:${String(s.Org || "").toLowerCase()}`;
+    const key = `${isPlayerStint(s) ? "play" : "job"}|${org}`;
     const last = groups[groups.length - 1];
     if (last && last.key === key) last.stints.push(s);
     else groups.push({ key, org: s.Org, stints: [s] });

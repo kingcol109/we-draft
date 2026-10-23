@@ -30,6 +30,7 @@ import ProvenFlair from "../assets/proven.png";
 import { fetchAllRankMaps, ranksForGame, currentRankMap, RANKINGS_LIMIT } from "../utils/rankings";
 import { scheduleGameHref } from "../utils/live";
 import { cssRect } from "../utils/pageZoom";
+import { textOn } from "../utils/teamColors";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -228,7 +229,9 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
         onClick={clickable ? () => onSort(key) : undefined}
         style={{
           flexShrink: 0, width,
-          fontSize: "11px", fontWeight: 900, color: active ? color2 : "#fff",
+          fontSize: "11px", fontWeight: 900, color: textOn(color1, color2),
+          // The active sort column is underlined rather than recolored.
+          textDecoration: active ? "underline" : "none", textDecorationThickness: "2px", textUnderlineOffset: "4px",
           textTransform: "uppercase", letterSpacing: "0.1em", textAlign: "center",
           cursor: clickable ? "pointer" : "default", userSelect: "none",
           display: "flex", alignItems: "center", justifyContent: "center", gap: "3px",
@@ -261,7 +264,8 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
         onClick={onSort ? () => onSort("Player") : undefined}
         style={{
           flex: 1, minWidth: 0, fontSize: "11px", fontWeight: 900,
-          color: sortKey === "Player" ? color2 : "#fff",
+          color: textOn(color1, color2),
+          textDecoration: sortKey === "Player" ? "underline" : "none", textDecorationThickness: "2px", textUnderlineOffset: "4px",
           textTransform: "uppercase", letterSpacing: "0.1em",
           cursor: onSort ? "pointer" : "default", userSelect: "none",
           display: "flex", alignItems: "center", gap: "3px",
@@ -283,8 +287,8 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
             cursor: onSort ? "pointer" : "default", userSelect: "none",
           }}
         >
-          <div style={{ fontSize: "10px", fontWeight: 900, color: sortKey === "CommGrade" ? color2 : "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>We-Draft</div>
-          <div style={{ fontSize: "10px", fontWeight: 900, color: sortKey === "CommGrade" ? color2 : "#fff", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "3px", justifyContent: "center" }}>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: textOn(color1, color2), textDecoration: sortKey === "CommGrade" ? "underline" : "none", textDecorationThickness: "2px", textUnderlineOffset: "3px", textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap" }}>We-Draft</div>
+          <div style={{ fontSize: "10px", fontWeight: 900, color: textOn(color1, color2), textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "3px", justifyContent: "center" }}>
             <span>Grade</span>
             {onSort && (
               <span style={{ fontSize: "9px", opacity: sortKey === "CommGrade" ? 1 : 0.5 }}>

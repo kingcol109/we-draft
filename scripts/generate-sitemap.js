@@ -99,6 +99,12 @@ async function getAllTeams() {
   const snapshot = await getDocs(colRef);
   return snapshot.docs;
 }
+// Current head coaches / GMs — the ones with /staff/ pages.
+async function getCurrentStaff() {
+  const q = query(collection(db, "coaches"), where("Status", "==", "current"));
+  const snapshot = await getDocs(q);
+  return snapshot.docs;
+}
 async function getAllGames() {
   const colRef = collection(db, "schedule26");
   const snapshot = await getDocs(colRef);
@@ -272,6 +278,7 @@ for (const doc of allTeams) {
     { path: "/community", priority: 0.8, lastmod: today },
     { path: "/boards", priority: 0.8, lastmod: today },
     { path: "/comparison", priority: 0.7, lastmod: today },
+    { path: "/draftorder", priority: 0.8, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
     // We-Pick lives inside We-Draft Live now (/live/we-pick…); the old
     // /we-pick URLs just redirect there, so only the new ones are listed.
@@ -322,9 +329,55 @@ for (const doc of allTeams) {
   }
 
   /* =========================
+     NFL TEAM + STAFF PAGES
+     /nfl/{abbr} (Targets) with its Projected Picks / Staff / Depth Chart /
+     Draft History tabs
+     (NFLTeamPage.jsx), and /staff/{slug} with its tabs (StaffPage.jsx) for
+     every current head coach and GM. NFL_TEAM_ABBRS must match
+     src/utils/coachHistory.js by hand (same reason as the community lists
+     above).
+  ========================= */
+  const NFL_TEAM_ABBRS = [
+    "ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC",
+    "LV", "LAC", "LAR", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS",
+  ];
+  const nflPages = NFL_TEAM_ABBRS.flatMap((abbr) => {
+    const base = `/nfl/${abbr.toLowerCase()}`;
+    return [
+      { path: base, priority: 0.7, lastmod: today },
+      { path: `${base}/picks`, priority: 0.6, lastmod: today },
+      { path: `${base}/staff`, priority: 0.55, lastmod: today },
+      { path: `${base}/depth`, priority: 0.55, lastmod: today },
+      { path: `${base}/history`, priority: 0.5, lastmod: today },
+    ];
+  });
+
+  console.log("🔄 Fetching current staff from Firestore...");
+  const staffDocs = await getCurrentStaff();
+  const staffPages = [];
+  for (const docSnap of staffDocs) {
+    const data = docSnap.data();
+    const slug = docSnap.id;
+    const hasPage = (data.Current || []).some((c) => ["HC", "IHC", "GM"].includes(c.Role));
+    if (!hasPage) continue;
+    if (!isValidSlug(slug)) {
+      console.warn("⚠️ Skipping invalid staff slug:", slug);
+      continue;
+    }
+    const lastmod = typeof data.updatedAt === "string" ? data.updatedAt.split("T")[0] : today;
+    staffPages.push(
+      { path: `/staff/${slug}`, priority: 0.65, lastmod },
+      { path: `/staff/${slug}/targets`, priority: 0.55, lastmod },
+      { path: `/staff/${slug}/record`, priority: 0.5, lastmod },
+      { path: `/staff/${slug}/career`, priority: 0.45, lastmod },
+    );
+  }
+  console.log(`✅ Found ${staffPages.length / 4} staff pages.`);
+
+  /* =========================
      BUILD XML
   ========================= */
-const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages]
+const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages]
     .map(
       (u) => `
   <url>

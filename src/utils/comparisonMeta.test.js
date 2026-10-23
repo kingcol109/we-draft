@@ -39,6 +39,16 @@ describe("buildComparisonMeta", () => {
     expect(m.description).not.toMatch(/undefined|null/);
   });
 
+  test("undrafted prospect (NFL Fit tab): title and description name the team fits", () => {
+    const m = buildComparisonMeta({ name: "Keyjuan Brown", school: "Florida", position: "RB", nflFits: true });
+    expect(m.title).toBe("Keyjuan Brown Player Comparison and NFL Team Fits");
+    expect(m.heading).toBe("Keyjuan Brown Player Comparison and NFL Team Fits");
+    expect(m.description).toMatch(/NFL teams' draft history he fits best/);
+    const withComps = buildComparisonMeta({ name: "Keyjuan Brown", school: "Florida", position: "RB", nflFits: true, compNames: ["Alvin Kamara"] });
+    expect(withComps.description).toBe("Keyjuan Brown (Florida RB) player comparisons and NFL team fits from measurements and traits. Closest historical match: Alvin Kamara.");
+    expect(withComps.description.length).toBeLessThanOrEqual(160);
+  });
+
   test("different prospects get different descriptions", () => {
     expect(buildComparisonMeta({ name: "A B", school: "X" }).description).not.toBe(buildComparisonMeta({ name: "C D", school: "Y" }).description);
   });

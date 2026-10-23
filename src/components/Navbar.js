@@ -16,6 +16,8 @@ import {
 import { db } from "../firebase";
 import { doc as fsDoc, onSnapshot as fsOnSnapshot } from "firebase/firestore";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
+import { fetchNflBranding } from "../utils/draftProfileData";
+import { NFL_DIVISIONS } from "./NFLTeamRail";
 
 const FALLBACK_MESSAGE =
   "WELCOME TO WE-DRAFT.COM - CREATE DRAFT EVALUATIONS, VIEW COMMUNITY GRADES, DISCOVER HIDDEN GEMS, AND MORE - FOLLOW US ON INSTAGRAM AND X @WEDRAFTSITE FOR DAILY DRAFT CONTENT";
@@ -44,6 +46,11 @@ export default function Navbar() {
   const [schools, setSchools] = useState([]);
   const [cfbOpen, setCfbOpen] = useState(false);
   const [cfbTimeout, setCfbTimeout] = useState(null);
+  // NFL dropdown — team logos/names from the shared _nflBranding snapshot,
+  // read the first time it opens (one cached read).
+  const [nflOpen, setNflOpen] = useState(false);
+  const [nflTimeout, setNflTimeout] = useState(null);
+  const [nflTeams, setNflTeams] = useState(null);
   const [communityOpen, setCommunityOpen] = useState(false);
   const [communityTimeout, setCommunityTimeout] = useState(null);
   const [boardsOpen, setBoardsOpen] = useState(false);
@@ -186,6 +193,10 @@ export default function Navbar() {
       })
       .finally(() => setSchoolsLoading(false));
   }, [cfbOpen]);
+  useEffect(() => {
+    if (!nflOpen || nflTeams) return;
+    fetchNflBranding().then(setNflTeams).catch((e) => console.error("Error loading NFL teams:", e));
+  }, [nflOpen, nflTeams]);
 
   /* ======================
      PENDING FRIEND REQUESTS (Profile badge)
@@ -541,6 +552,64 @@ export default function Navbar() {
               )}
             </div>
 
+            {/* ── NFL DROPDOWN — all 32 teams by division (same panel as CFB) ── */}
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
+              onMouseLeave={() => { const t = setTimeout(() => setNflOpen(false), 150); setNflTimeout(t); }}
+            >
+              <Link to="/nfl" style={baseStyle}>NFL</Link>
+
+              {nflOpen && (
+                <div
+                  onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
+                  onMouseLeave={() => setNflOpen(false)}
+                  style={{
+                    position: "fixed", top: "60px", left: "50%", transform: "translateX(-50%)",
+                    width: "min(640px, 96vw)", maxHeight: "480px", background: "#ffffff",
+                    border: "2px solid #0055a5", borderRadius: "10px", boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                    zIndex: 10002, overflow: "hidden", display: "flex", flexDirection: "column",
+                  }}
+                >
+                  <div style={{ backgroundColor: "#0055a5", padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+                    <div style={{ color: "#f6a21d", fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>NFL Teams</div>
+                    <span style={{ display: "flex", gap: "14px" }}>
+                      <Link to="/draftorder" onClick={() => setNflOpen(false)}
+                        style={{ color: "#fff", fontSize: "11px", fontWeight: 900, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                        Draft Order →
+                      </Link>
+                      <Link to="/nfl" onClick={() => setNflOpen(false)}
+                        style={{ color: "rgba(255,255,255,0.8)", fontSize: "11px", fontWeight: 800, letterSpacing: "0.06em", textDecoration: "underline", whiteSpace: "nowrap" }}>
+                        View All →
+                      </Link>
+                    </span>
+                  </div>
+                  <div style={{ height: "3px", backgroundColor: "#f6a21d", flexShrink: 0 }} />
+                  <div style={{ overflowY: "auto", padding: "10px 12px", flex: 1, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: "14px" }}>
+                    {NFL_DIVISIONS.map(([division, abbrs]) => (
+                      <div key={division} style={{ marginBottom: "12px" }}>
+                        <div style={{ fontSize: "10px", fontWeight: 900, color: "#0055a5", textTransform: "uppercase", letterSpacing: "0.12em", borderBottom: "2px solid #0055a5", paddingBottom: "3px", marginBottom: "6px" }}>
+                          {division}
+                        </div>
+                        {abbrs.map((abbr) => {
+                          const t = nflTeams?.[abbr];
+                          return (
+                            <Link key={abbr} to={`/nfl/${abbr.toLowerCase()}`} className="cfb-team-link" onClick={() => setNflOpen(false)}>
+                              {t?.Logo1 && (
+                                <img src={t.Logo1} alt="" loading="lazy" style={{ width: "18px", height: "18px", objectFit: "contain", flexShrink: 0 }}
+                                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                              )}
+                              {t ? `${t.City} ${t.Team}`.trim() : abbr}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
 
             <Link to="/watch" style={baseStyle}>▶ Watch</Link>
@@ -597,6 +666,7 @@ export default function Navbar() {
               { path: "/community", label: "Community Board" },
               { path: wePickHref(), label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
+              { path: "/nfl", label: "NFL Teams" },
               { path: "/mocks", label: "Mock Drafts" },
               { path: "/watch", label: "▶ Watch" },
             ].map((l) => (

@@ -264,6 +264,9 @@ service cloud.firestore {
     // (components/DraftOrderEditor.js); Create Mock reads them.
     match /draftOrder2027/{pick} { allow read: if true; allow write: if isAdmin(); }
     match /draftOrder2028/{pick} { allow read: if true; allow write: if isAdmin(); }
+    // Upcoming drafts, one doc per year (utils/draftOrder.js) — Admin → Draft
+    // Order and scripts/refreshDraftOrder.mjs write them.
+    match /draftOrders/{year} { allow read: if true; allow write: if isAdmin(); }
     match /historical/{doc} { allow read, write: if true; }
     // Precomputed per-position comparison data (one doc per position +
     // _meta) — read by the public Comparison.js page, rebuilt from the

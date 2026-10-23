@@ -13,6 +13,7 @@ import { useRef } from "react";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ShareMockButton from "../components/ShareMockButton";
+import { picksFromOrder, followsOrder, withEffectiveOrder, orderFromLegacyPicks, ORDER_YEAR } from "../utils/draftOrder";
 
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
@@ -165,8 +166,23 @@ export default function CreateMock() {
           "2026": "draftOrder",
         };
         const orderCollection = orderCollectionMap[draftClass] || "draftOrder";
-        const draftSnap = await getDocs(collection(db, orderCollection));
-        const loaded = draftSnap.docs.map((d) => d.data())
+        // Upcoming drafts live in one draftOrders/{year} doc now (all seven
+        // rounds — see utils/draftOrder.js); the old per-pick collection is
+        // the fallback for a year not saved in that format yet.
+        // A later draft follows the upcoming draft's order with its own trades.
+        let rawPicks = null;
+        if (draftClass !== "2026") {
+          const read = async (y) => { const s = await getDoc(doc(db, "draftOrders", y)); return s.exists() ? s.data() : null; };
+          let own = await read(draftClass);
+          const base = followsOrder(draftClass) ? await read(ORDER_YEAR) : own;
+          if (base?.order?.length) {
+            // A later draft not saved in the new format yet keeps its old trades.
+            if (!own && followsOrder(draftClass)) own = { trades: orderFromLegacyPicks((await getDocs(collection(db, orderCollection))).docs.map((d) => d.data())).trades };
+            rawPicks = picksFromOrder(withEffectiveOrder(draftClass, own, base));
+          }
+        }
+        if (!rawPicks) rawPicks = (await getDocs(collection(db, orderCollection))).docs.map((d) => d.data());
+        const loaded = rawPicks
           .sort((a, b) => a.Pick - b.Pick)
           .map((d) => ({
             pickNumber: d.Pick,

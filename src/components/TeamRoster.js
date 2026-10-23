@@ -9,6 +9,7 @@
 // and hideStars (no recruiting stars column there).
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { textOn } from "../utils/teamColors";
 
 const POS_ORDER = ["QB", "RB", "FB", "WR", "TE", "OL", "OT", "OG", "C", "IOL", "DL", "DE", "DT", "NT", "EDGE", "LB", "OLB", "ILB", "DB", "CB", "S", "FS", "SS", "K", "PK", "P", "LS", "ATH"];
 const UNIT = {
@@ -129,7 +130,9 @@ export default function TeamRoster({ roster, color1, color2, isMobile, dark = fa
             <div key={c.key} onClick={() => onSort(c.key)} style={{
               ...cellBox(c), cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: "3px",
               justifyContent: c.flex || c.left ? "flex-start" : "center",
-              fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: active ? color2 : "#fff",
+              fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: textOn(color1, color2),
+              // The active sort column is underlined rather than recolored.
+              textDecoration: active ? "underline" : "none", textDecorationThickness: "2px", textUnderlineOffset: "4px",
             }}>
               <span>{c.label}</span>
               <span style={{ fontSize: "9px", opacity: active ? 1 : 0.5 }}>{active && !asc ? "▼" : "▲"}</span>

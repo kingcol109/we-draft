@@ -14,8 +14,10 @@ const TARGET_LENGTH = 160;
  * @param {string} [p.school]
  * @param {string} [p.position]
  * @param {string[]} [p.compNames] closest comps in the order shown (only once results exist)
+ * @param {boolean}  [p.nflFits]   the page has an NFL Fit tab (undrafted prospect) — the
+ *                                 title and description then name the team fits too
  */
-export function buildComparisonMeta({ name = "", school = "", position = "", compNames = [] } = {}) {
+export function buildComparisonMeta({ name = "", school = "", position = "", compNames = [], nflFits = false } = {}) {
   name = name.trim();
   if (!name) {
     const heading = "NFL Player Comparisons and Measurements";
@@ -25,12 +27,16 @@ export function buildComparisonMeta({ name = "", school = "", position = "", com
       description: "Compare college football prospects to historical NFL Draft picks using physical measurements, athletic testing, and playing traits.",
     };
   }
-  const heading = `${name} NFL Player Comparisons and Measurements`;
+  const heading = nflFits ? `${name} Player Comparison and NFL Team Fits` : `${name} NFL Player Comparisons and Measurements`;
   const identity = [school.trim(), position.trim()].filter(Boolean).join(" ");
-  const base = `Compare ${name}${identity ? `, ${identity},` : ""} to historical NFL Draft picks using physical measurements, athletic testing, and playing traits.`;
+  const base = nflFits
+    ? `Compare ${name}${identity ? `, ${identity},` : ""} to historical NFL Draft picks and see which NFL teams' draft history he fits best, using measurements, athletic testing, and playing traits.`
+    : `Compare ${name}${identity ? `, ${identity},` : ""} to historical NFL Draft picks using physical measurements, athletic testing, and playing traits.`;
   // With comps to name, a tighter lead leaves room for them — the names are
   // the most specific (and most searched) thing this page has.
-  const compsLead = `${name}${identity ? ` (${identity})` : ""} NFL player comparisons based on measurements, athletic testing and traits.`;
+  const compsLead = nflFits
+    ? `${name}${identity ? ` (${identity})` : ""} player comparisons and NFL team fits from measurements and traits.`
+    : `${name}${identity ? ` (${identity})` : ""} NFL player comparisons based on measurements, athletic testing and traits.`;
   const comps = compNames.map((c) => (c || "").trim()).filter(Boolean);
   let description = base;
   for (let n = Math.min(3, comps.length); n > 0; n--) {
@@ -38,7 +44,9 @@ export function buildComparisonMeta({ name = "", school = "", position = "", com
     const candidate = `${compsLead} Closest historical ${n === 1 ? "match" : "matches"}: ${list}.`;
     if (candidate.length <= TARGET_LENGTH) { description = candidate; break; }
   }
-  return { heading, title: `${heading} | We-Draft`, description };
+  // A prospect's title is the heading as-is (same as the player pages'
+  // titles); everything else keeps the site suffix.
+  return { heading, title: nflFits ? heading : `${heading} | We-Draft`, description };
 }
 
 /**

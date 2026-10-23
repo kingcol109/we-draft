@@ -1,0 +1,462 @@
+{
+  "_format": "slug → [[Level, Org (name at the time), Position, StartYear, EndYear, Notes]]. Converted from each coach's PlayingCareer note; years left null when the note doesn't give them.",
+  "aaron-glenn": [
+    ["College", "Navarro College", "Cornerback", 1990, 1991, ""],
+    ["College", "Texas A&M", "Cornerback", 1992, 1993, "Two-time All-American"],
+    ["NFL", "New York Jets", "Cornerback", 1994, 2001, "1st round, 12th overall (1994)"],
+    ["NFL", "Houston Texans", "Cornerback", 2002, 2004, ""],
+    ["NFL", "Dallas Cowboys", "Cornerback", 2005, 2006, ""],
+    ["NFL", "Jacksonville Jaguars", "Cornerback", 2007, 2007, ""],
+    ["NFL", "New Orleans Saints", "Cornerback", 2008, 2008, ""]
+  ],
+  "adam-peters": [
+    ["College", "West Valley College", "Tight End", 1997, 1998, ""],
+    ["College", "UCLA", "Defensive End", 1999, 2001, ""]
+  ],
+  "adam-stenavich": [
+    ["College", "Michigan", "Offensive Tackle", 2002, 2005, "First-team All-Big Ten twice"],
+    ["NFL", "Carolina Panthers", "Offensive Tackle", 2006, 2006, "Training camp (undrafted free agent)"],
+    ["NFL", "Green Bay Packers", "Offensive Tackle", 2006, 2006, "Practice squad"],
+    ["Other", "Amsterdam Admirals (NFL Europa)", "Offensive Tackle", 2007, 2007, ""],
+    ["NFL", "Dallas Cowboys", "Offensive Tackle", 2008, 2008, "Training camp"],
+    ["NFL", "Houston Texans", "Offensive Tackle", 2008, 2009, "Practice squad"]
+  ],
+  "aden-durde": [
+    ["Other", "Scottish Claymores (NFL Europe)", "Linebacker", null, null, ""],
+    ["Other", "Hamburg Sea Devils (NFL Europe)", "Linebacker", null, null, "2007 World Bowl champion; six NFL Europe seasons in all"],
+    ["NFL", "Carolina Panthers", "Linebacker", 2005, 2005, "Practice squad"],
+    ["NFL", "Kansas City Chiefs", "Linebacker", 2008, 2008, "Practice squad"]
+  ],
+  "al-golden": [
+    ["College", "Penn State", "Tight End", 1988, 1991, "Two-year starter; captain of the 1991 Fiesta Bowl team"],
+    ["NFL", "New England Patriots", "Tight End", 1992, 1992, ""]
+  ],
+  "andrew-berry": [
+    ["College", "Harvard", "Cornerback", null, null, "Four-year starter; three-time All-Ivy, All-American"]
+  ],
+  "andrew-janocko": [
+    ["College", "Pittsburgh", "Quarterback / Holder", null, null, "Three-year letterman (walk-on, later scholarship)"]
+  ],
+  "andy-reid": [
+    ["College", "Glendale Community College", "Offensive Tackle / Guard", null, null, ""],
+    ["College", "BYU", "Offensive Tackle / Guard", 1979, 1981, ""]
+  ],
+  "anthony-campanile": [
+    ["College", "Rutgers", "Safety / Linebacker", 2002, 2004, ""]
+  ],
+  "anthony-weaver": [
+    ["College", "Notre Dame", "Defensive End", null, null, "Four-year starter; All-American, 2001 captain and MVP"],
+    ["NFL", "Baltimore Ravens", "Defensive End", 2002, 2005, "2nd round, 52nd overall (2002)"],
+    ["NFL", "Houston Texans", "Defensive End", 2006, 2008, ""]
+  ],
+  "ben-johnson": [
+    ["College", "North Carolina", "Quarterback", 2004, 2007, ""]
+  ],
+  "bobby-slowik": [
+    ["College", "Michigan Tech", "Wide Receiver", null, null, "All-GLIAC 2008"]
+  ],
+  "brad-holmes": [
+    ["College", "North Carolina A&T", "Defensive Tackle", null, null, "Four-year letterman and captain; 1999 MEAC / Black College national champions"]
+  ],
+  "brad-idzik": [
+    ["College", "Lehigh", "Wide Receiver", 2010, 2010, ""],
+    ["College", "Wake Forest", "Wide Receiver", 2011, 2014, ""]
+  ],
+  "brandon-staley": [
+    ["College", "Dayton", "Quarterback", 2001, 2004, ""],
+    ["College", "Mercyhurst", "Quarterback", 2005, 2005, ""]
+  ],
+  "brett-veach": [
+    ["College", "Delaware", "Wide Receiver", null, null, "Four-year letterman"]
+  ],
+  "brian-angelichio": [
+    ["College", "St. Lawrence", "Linebacker", 1991, 1994, "Four-year starter; also baseball captain"]
+  ],
+  "brian-daboll": [
+    ["College", "Rochester", "Safety", null, null, "Two-year starter (graduated 1997)"]
+  ],
+  "brian-fleury": [
+    ["College", "Maryland", "Quarterback", 1998, 1998, ""],
+    ["College", "Towson", "Quarterback", 1999, 2002, "Undrafted (2003)"]
+  ],
+  "brian-flores": [
+    ["College", "Boston College", "Linebacker", null, null, "Four years"]
+  ],
+  "brian-schottenheimer": [
+    ["College", "Kansas", "Quarterback", 1992, 1992, ""],
+    ["College", "Florida", "Quarterback", 1994, 1996, "Backup on the 1996 national title team"]
+  ],
+  "chris-ballard": [
+    ["College", "Wisconsin", "Wide Receiver", null, null, ""]
+  ],
+  "chris-oleary": [
+    ["College", "Indiana State", "Wide Receiver", 2010, 2014, "Redshirted 2010"]
+  ],
+  "chris-shula": [
+    ["College", "Miami (OH)", "Linebacker", 2004, 2008, ""]
+  ],
+  "christian-parker": [
+    ["College", "Richmond", "Player", null, null, "Two-time CAA champion"]
+  ],
+  "dan-campbell": [
+    ["College", "Texas A&M", "Tight End", null, null, "Four-year letterman"],
+    ["NFL", "New York Giants", "Tight End", 1999, 2002, "3rd round (1999)"],
+    ["NFL", "Dallas Cowboys", "Tight End", 2003, 2005, ""],
+    ["NFL", "Detroit Lions", "Tight End", 2006, 2008, ""],
+    ["NFL", "New Orleans Saints", "Tight End", 2009, 2009, ""]
+  ],
+  "dan-morgan": [
+    ["College", "Miami (FL)", "Linebacker", 1997, 2000, "Nagurski, Bednarik and Butkus winner; College Football Hall of Fame"],
+    ["NFL", "Carolina Panthers", "Linebacker", 2001, 2007, "1st round, 11th overall (2001); Pro Bowl 2004"]
+  ],
+  "dan-pitcher": [
+    ["College", "SUNY Cortland", "Quarterback", 2008, 2011, "Starter 2009–11; Gagliardi Trophy finalist as a senior"]
+  ],
+  "dan-quinn": [
+    ["College", "Salisbury State", "Defensive Line", null, null, "Four-year letterman; two-time co-captain (1992–93)"]
+  ],
+  "daronte-jones": [
+    ["College", "Morgan State", "Cornerback", null, null, "Four seasons (graduated 2001)"]
+  ],
+  "darren-mougey": [
+    ["College", "San Diego State", "Quarterback / Wide Receiver", 2004, 2008, "QB first three seasons, WR final two"],
+    ["NFL", "Atlanta Falcons", "Wide Receiver", 2009, 2009, "Training camp (undrafted free agent)"],
+    ["NFL", "Arizona Cardinals", "Wide Receiver", 2010, 2010, "Training camp"]
+  ],
+  "dave-canales": [
+    ["College", "Azusa Pacific", "Wide Receiver", 1999, 2003, "Two-time captain"]
+  ],
+  "david-blough": [
+    ["College", "Purdue", "Quarterback", 2015, 2018, ""],
+    ["NFL", "Detroit Lions", "Quarterback", 2019, 2021, ""],
+    ["NFL", "Arizona Cardinals", "Quarterback", 2022, 2022, ""],
+    ["NFL", "Detroit Lions", "Quarterback", 2023, 2023, ""]
+  ],
+  "davis-webb": [
+    ["College", "Texas Tech", "Quarterback", 2013, 2015, ""],
+    ["College", "California", "Quarterback", 2016, 2016, "Graduate transfer"],
+    ["NFL", "New York Giants", "Quarterback", 2017, 2017, "3rd round, 87th overall (2017)"],
+    ["NFL", "New York Jets", "Quarterback", 2018, 2018, ""],
+    ["NFL", "Buffalo Bills", "Quarterback", 2019, 2021, ""],
+    ["NFL", "New York Giants", "Quarterback", 2022, 2022, ""]
+  ],
+  "declan-doyle": [
+    ["College", "Iowa Western Community College", "Baseball", null, null, "Team captain 2015, before transferring to Iowa"]
+  ],
+  "demeco-ryans": [
+    ["College", "Alabama", "Linebacker", 2002, 2005, "Unanimous All-American; SEC Defensive Player of the Year 2005"],
+    ["NFL", "Houston Texans", "Linebacker", 2006, 2011, "2nd round, 33rd overall (2006); 2006 Defensive Rookie of the Year; All-Pro 2007"],
+    ["NFL", "Philadelphia Eagles", "Linebacker", 2012, 2015, ""]
+  ],
+  "dennard-wilson": [
+    ["College", "Maryland", "Defensive Back", null, null, "Three-year starter and captain"],
+    ["NFL", "Washington Redskins", "Defensive Back", 2004, 2004, "Practice squad (rookie free agent)"]
+  ],
+  "dennis-allen": [
+    ["College", "Texas A&M", "Safety", null, null, "Started his final 21 games"],
+    ["NFL", "Buffalo Bills", "Safety", null, null, "Training camp (undrafted free agent)"]
+  ],
+  "doug-nussmeier": [
+    ["College", "Idaho", "Quarterback", 1989, 1993, "1993 Walter Payton Award"],
+    ["NFL", "New Orleans Saints", "Quarterback", 1994, 1997, "4th round, 116th overall (1994)"],
+    ["NFL", "Indianapolis Colts", "Quarterback", 1998, 1998, ""],
+    ["Other", "BC Lions (CFL)", "Quarterback", 2000, 2000, ""]
+  ],
+  "drew-petzing": [
+    ["College", "Middlebury", "Defensive Back", null, null, "Two years (injuries ended his career)"]
+  ],
+  "duke-tobin": [
+    ["College", "Illinois", "Quarterback", null, null, ""],
+    ["College", "Colorado", "Quarterback", null, null, ""],
+    ["Other", "Orlando Predators (Arena Football)", "Quarterback", 1994, 1994, ""],
+    ["Other", "Memphis Pharaohs (Arena Football)", "Quarterback", 1995, 1995, ""]
+  ],
+  "ejiro-evero": [
+    ["College", "UC Davis", "Safety", 1999, 2000, ""],
+    ["College", "UC Davis", "Safety", 2002, 2003, "Three-year starter, two-time captain; Division II All-American"]
+  ],
+  "eric-bieniemy": [
+    ["College", "Colorado", "Running Back", null, null, ""],
+    ["NFL", "San Diego Chargers", "Running Back", 1991, 1994, "2nd round, 39th overall (1991)"],
+    ["NFL", "Cincinnati Bengals", "Running Back", 1995, 1998, ""],
+    ["NFL", "Philadelphia Eagles", "Running Back", 1999, 1999, ""]
+  ],
+  "eric-decosta": [
+    ["College", "Colby College", "Linebacker", null, null, "Three-year letterman and senior captain (graduated 1992)"]
+  ],
+  "frank-reich": [
+    ["College", "Maryland", "Quarterback", 1982, 1984, ""],
+    ["NFL", "Buffalo Bills", "Quarterback", 1985, 1994, ""],
+    ["NFL", "Carolina Panthers", "Quarterback", 1995, 1995, ""],
+    ["NFL", "New York Jets", "Quarterback", 1996, 1996, ""],
+    ["NFL", "Detroit Lions", "Quarterback", 1997, 1998, ""]
+  ],
+  "george-paton": [
+    ["College", "UCLA", "Defensive Back", 1988, 1991, "Four-year letterman"],
+    ["Other", "Pro football in Italy and Austria", "Defensive Back", null, null, ""]
+  ],
+  "grant-udinski": [
+    ["College", "Davidson", "Tight End", null, null, "One season"],
+    ["College", "Towson", "Defensive End", 2016, 2018, ""]
+  ],
+  "gus-bradley": [
+    ["College", "North Dakota State", "Safety / Punter", 1984, 1988, "Three Division II national titles"]
+  ],
+  "ian-cunningham": [
+    ["College", "Virginia", "Offensive Line", null, null, ""],
+    ["NFL", "Kansas City Chiefs", "Offensive Line", 2008, 2008, "Undrafted free agent"]
+  ],
+  "james-gladstone": [
+    ["College", "Westminster College", "Wide Receiver", null, null, "Two-time captain (graduated 2013)"]
+  ],
+  "jason-licht": [
+    ["College", "Nebraska", "Linebacker / Guard", 1989, 1991, ""],
+    ["College", "Nebraska Wesleyan", "Defensive Tackle", null, null, "All-conference"]
+  ],
+  "jeff-hafley": [
+    ["College", "Siena", "Wide Receiver", 1997, 2000, "Four-year letterman"]
+  ],
+  "jeff-ulbrich": [
+    ["College", "San Jose State", "Linebacker", null, null, "Redshirt"],
+    ["College", "Gavilan College", "Linebacker", null, null, ""],
+    ["College", "Hawaii", "Linebacker", null, null, "All-WAC"],
+    ["NFL", "San Francisco 49ers", "Linebacker", 2000, 2009, "3rd round, 86th overall (2000)"]
+  ],
+  "jerry-jones": [
+    ["College", "Arkansas", "Player", null, null, "Co-captain of the 1964 national championship team"]
+  ],
+  "jesse-minter": [
+    ["College", "Mount St. Joseph", "Wide Receiver", 2002, 2005, "Division III"]
+  ],
+  "jim-bob-cooter": [
+    ["College", "Tennessee", "Quarterback", 2002, 2006, ""]
+  ],
+  "jim-harbaugh": [
+    ["College", "Michigan", "Quarterback", null, null, "First-team All-American; 3rd in 1986 Heisman voting"],
+    ["NFL", "Chicago Bears", "Quarterback", 1987, null, "1st round, 25th overall (1987)"],
+    ["NFL", "Indianapolis Colts", "Quarterback", null, null, "1995 Pro Bowl and Comeback Player of the Year"],
+    ["NFL", "San Diego Chargers", "Quarterback", 1999, 2000, ""]
+  ],
+  "jim-leonhard": [
+    ["College", "Wisconsin", "Safety", null, null, "Walk-on; first-team All-America, first-team All-Big Ten 2002–04"],
+    ["NFL", "Buffalo Bills", "Safety", 2005, 2007, "Undrafted free agent"],
+    ["NFL", "Baltimore Ravens", "Safety", 2008, 2008, ""],
+    ["NFL", "New York Jets", "Safety", 2009, 2011, ""],
+    ["NFL", "Denver Broncos", "Safety", 2012, 2012, ""],
+    ["NFL", "Buffalo Bills", "Safety", 2013, 2013, ""],
+    ["NFL", "Cleveland Browns", "Safety", 2014, 2014, ""]
+  ],
+  "joe-brady": [
+    ["College", "William & Mary", "Wide Receiver", 2009, 2012, ""]
+  ],
+  "joe-schoen": [
+    ["College", "DePauw", "Quarterback / Wide Receiver", null, null, "QB as a freshman, then WR; senior captain"]
+  ],
+  "john-harbaugh": [
+    ["College", "Miami (OH)", "Defensive Back", null, null, ""]
+  ],
+  "john-lynch": [
+    ["College", "Stanford", "Safety", null, null, "Played for Bill Walsh; also baseball (1992 MLB 2nd-round pick)"],
+    ["NFL", "Tampa Bay Buccaneers", "Safety", 1993, 2003, "3rd round, 82nd overall (1993); Super Bowl XXXVII champion"],
+    ["NFL", "Denver Broncos", "Safety", 2004, 2007, ""]
+  ],
+  "john-schneider": [
+    ["College", "St. Thomas (MN)", "Player", null, null, "One season before a shoulder injury"]
+  ],
+  "john-spytek": [
+    ["College", "Michigan", "Linebacker", 1999, 2002, ""]
+  ],
+  "jon-eric-sullivan": [
+    ["College", "South Carolina", "Wide Receiver", 1995, 1997, ""],
+    ["College", "Gardner-Webb", "Wide Receiver", 1998, 1999, ""]
+  ],
+  "jonathan-gannon": [
+    ["College", "Louisville", "Safety", null, null, "Redshirt freshman in 2002; career ended by a hip injury"]
+  ],
+  "josh-mcdaniels": [
+    ["College", "John Carroll", "Quarterback / Wide Receiver", 1995, 1998, ""]
+  ],
+  "kellen-moore": [
+    ["College", "Boise State", "Quarterback", 2007, 2011, "50-3 as a starter (NCAA wins record)"],
+    ["NFL", "Detroit Lions", "Quarterback", 2012, 2014, "Undrafted"],
+    ["NFL", "Dallas Cowboys", "Quarterback", 2015, 2017, ""]
+  ],
+  "kelvin-sheppard": [
+    ["College", "LSU", "Linebacker", 2007, 2010, "All-SEC; captain 2010"],
+    ["NFL", "Buffalo Bills", "Linebacker", 2011, null, "3rd round, 68th overall (2011)"],
+    ["NFL", "Indianapolis Colts", "Linebacker", null, null, ""],
+    ["NFL", "Miami Dolphins", "Linebacker", null, null, ""],
+    ["NFL", "New York Giants", "Linebacker", null, null, ""],
+    ["NFL", "Detroit Lions", "Linebacker", null, null, "NFL career 2011–18"]
+  ],
+  "kevin-oconnell": [
+    ["College", "San Diego State", "Quarterback", null, null, "Four-year captain"],
+    ["NFL", "New England Patriots", "Quarterback", 2008, 2008, "3rd round, 94th overall (2008)"],
+    ["NFL", "Detroit Lions", "Quarterback", 2009, 2009, ""],
+    ["NFL", "New York Jets", "Quarterback", 2009, 2009, ""],
+    ["NFL", "Miami Dolphins", "Quarterback", null, null, ""],
+    ["NFL", "New York Jets", "Quarterback", null, null, ""],
+    ["NFL", "San Diego Chargers", "Quarterback", null, null, "NFL career 2008–12"]
+  ],
+  "kevin-stefanski": [
+    ["College", "Penn", "Safety", 2000, 2004, ""]
+  ],
+  "klayton-adams": [
+    ["College", "Boise State", "Center", null, null, "WAC champions 2003–04; second-team All-WAC 2004"]
+  ],
+  "klint-kubiak": [
+    ["College", "Colorado State", "Safety", null, null, "Four-year letterman and senior captain"]
+  ],
+  "kwesi-adofo-mensah": [
+    ["College", "Princeton", "JV Basketball", null, null, ""]
+  ],
+  "kyle-shanahan": [
+    ["College", "Duke", "Wide Receiver", 1998, 1998, ""],
+    ["College", "Texas", "Wide Receiver", 1999, 2002, ""]
+  ],
+  "les-snead": [
+    ["College", "Auburn", "Tight End", 1992, 1993, "11-0 in 1993"]
+  ],
+  "liam-coen": [
+    ["College", "UMass", "Quarterback", null, null, "School records in completions, passing yards and TDs (graduated 2008)"]
+  ],
+  "matt-burke": [
+    ["College", "Dartmouth", "Safety", null, null, "1996 undefeated Ivy League champions"]
+  ],
+  "matt-lafleur": [
+    ["College", "Western Michigan", "Wide Receiver", 1998, 1999, ""],
+    ["College", "Saginaw Valley State", "Quarterback", 2000, 2002, ""],
+    ["Other", "Omaha Beef (National Indoor Football League)", "Quarterback", 2003, 2003, ""],
+    ["Other", "Billings Outlaws (National Indoor Football League)", "Quarterback", 2004, 2004, ""]
+  ],
+  "matt-nagy": [
+    ["College", "Delaware", "Quarterback", null, null, "School career passing leader; 2000 third-team All-American"],
+    ["Other", "New York Dragons (Arena Football)", "Quarterback", null, null, ""],
+    ["Other", "Carolina Cobras (Arena Football)", "Quarterback", null, null, ""],
+    ["Other", "Georgia Force (Arena Football)", "Quarterback", null, null, ""],
+    ["Other", "Columbus Destroyers (Arena Football)", "Quarterback", null, null, "Arena Football League career 2002–08"]
+  ],
+  "mike-borgonzi": [
+    ["College", "Brown", "Fullback", 1998, 2001, "Four-year starter; three-time All-Ivy"]
+  ],
+  "mike-lafleur": [
+    ["College", "Elmhurst", "Quarterback / Safety", null, null, "Starting QB 2006; captain as a safety 2008"]
+  ],
+  "mike-macdonald": [
+    ["Other", "Centennial High School (Roswell, GA)", "Football and Baseball", null, null, ""]
+  ],
+  "mike-mcdaniel": [
+    ["College", "Yale", "Wide Receiver", 2001, 2004, ""]
+  ],
+  "mike-vrabel": [
+    ["College", "Ohio State", "Defensive End", 1993, 1996, "Consensus All-American 1996"],
+    ["NFL", "Pittsburgh Steelers", "Linebacker", 1997, 2000, "3rd round, 91st overall (1997)"],
+    ["NFL", "New England Patriots", "Linebacker", 2001, 2008, "Three Super Bowl wins (2001, 2003, 2004); Pro Bowl and All-Pro 2007"],
+    ["NFL", "Kansas City Chiefs", "Linebacker", 2009, 2010, ""]
+  ],
+  "monti-ossenfort": [
+    ["College", "Minnesota-Morris", "Quarterback", null, null, "Four-year letterman and two-year starter"]
+  ],
+  "nate-scheelhaase": [
+    ["College", "Illinois", "Quarterback", 2009, 2013, "School career total-offense leader"]
+  ],
+  "nathaniel-hackett": [
+    ["College", "UC Davis", "Linebacker / Long Snapper", 1998, 2002, ""]
+  ],
+  "nick-caserio": [
+    ["College", "John Carroll", "Quarterback", null, null, "Four-year starter (33-7-2); two-time captain"]
+  ],
+  "nick-rallis": [
+    ["College", "Minnesota", "Linebacker", 2012, 2016, ""]
+  ],
+  "nick-sirianni": [
+    ["College", "Mount Union", "Wide Receiver", null, null, "Three-year starter; Division III national champions 2000–02"],
+    ["Other", "Canton Legends (Atlantic Indoor Football League)", "Wide Receiver", 2005, 2005, ""]
+  ],
+  "nolan-teasley": [
+    ["College", "Central Washington", "Running Back", null, null, "Graduated 2007"]
+  ],
+  "pete-carmichael": [
+    ["College", "Boston College", "Baseball", null, null, "Four-year letterman; senior captain and team MVP"]
+  ],
+  "press-taylor": [
+    ["College", "Butler Community College", "Quarterback", 2007, 2008, "Two JUCO national titles"],
+    ["College", "Marshall", "Quarterback", 2009, 2010, ""]
+  ],
+  "rob-leonard": [
+    ["College", "Washington & Jefferson", "Safety / Linebacker", null, null, "Freshman season"],
+    ["College", "NC State", "Safety / Linebacker", null, null, "Walk-on; three-year letterman"]
+  ],
+  "robert-saleh": [
+    ["College", "Northern Michigan", "Tight End", null, null, "Four-year starter"]
+  ],
+  "ryan-poles": [
+    ["College", "Boston College", "Offensive Tackle", 2003, 2007, "Blocked for Matt Ryan"],
+    ["NFL", "Chicago Bears", "Offensive Tackle", 2008, 2008, "Undrafted free agent"]
+  ],
+  "sean-duggan": [
+    ["College", "Boston College", "Linebacker", 2011, 2014, "Team captain as a senior"]
+  ],
+  "sean-mannion": [
+    ["College", "Oregon State", "Quarterback", 2011, 2014, "Four-year starter; school passing records"],
+    ["NFL", "St. Louis Rams", "Quarterback", 2015, 2015, "3rd round, 89th overall (2015)"],
+    ["NFL", "Los Angeles Rams", "Quarterback", 2016, 2018, ""],
+    ["NFL", "Minnesota Vikings", "Quarterback", 2019, 2021, ""],
+    ["NFL", "Seattle Seahawks", "Quarterback", 2021, 2023, ""],
+    ["NFL", "Minnesota Vikings", "Quarterback", 2023, 2023, ""]
+  ],
+  "sean-mcvay": [
+    ["College", "Miami (OH)", "Wide Receiver", 2004, 2007, ""]
+  ],
+  "sean-payton": [
+    ["College", "Eastern Illinois", "Quarterback", 1982, 1986, "Three-time AP All-American"],
+    ["NFL", "Chicago Bears", "Quarterback", 1987, 1987, ""],
+    ["Other", "Chicago Bruins (Arena Football)", "Quarterback", 1987, 1987, ""],
+    ["Other", "Ottawa Rough Riders (CFL)", "Quarterback", 1987, 1987, ""]
+  ],
+  "shane-steichen": [
+    ["College", "UNLV", "Quarterback", 2003, 2006, "Four-year letterman"]
+  ],
+  "steve-spagnuolo": [
+    ["College", "Springfield College", "Wide Receiver", null, null, "Two-year starter"]
+  ],
+  "todd-bowles": [
+    ["College", "Temple", "Defensive Back", null, null, ""],
+    ["NFL", "Washington Redskins", "Defensive Back", 1986, 1990, "Undrafted; Super Bowl XXII starter"],
+    ["NFL", "San Francisco 49ers", "Defensive Back", 1991, 1991, ""],
+    ["NFL", "Washington Redskins", "Defensive Back", 1992, 1993, ""]
+  ],
+  "todd-monken": [
+    ["College", "Knox College", "Quarterback", null, null, "Three-year letterman"]
+  ],
+  "tommy-rees": [
+    ["College", "Notre Dame", "Quarterback", null, null, "23-8 as a starter (graduated 2013)"]
+  ],
+  "travis-switzer": [
+    ["College", "Akron", "Center", null, null, "Four seasons; 36 consecutive starts"]
+  ],
+  "vance-joseph": [
+    ["College", "Colorado", "Quarterback / Running Back", 1990, 1994, "1990 national champions"],
+    ["NFL", "New York Jets", "Cornerback", 1995, 1995, "College free agent"],
+    ["NFL", "Indianapolis Colts", "Cornerback", 1996, 1996, ""],
+    ["NFL", "Denver Broncos", "Cornerback", 1997, 1997, "Preseason"]
+  ],
+  "wes-phillips": [
+    ["College", "UTEP", "Quarterback", 1999, 2001, "Three-year letterman"],
+    ["Other", "San Diego Riptide (af2)", "Quarterback", null, null, ""]
+  ],
+  "zac-robinson": [
+    ["College", "Oklahoma State", "Quarterback", 2005, 2009, "Three-year starter"],
+    ["NFL", "New England Patriots", "Quarterback", 2010, null, "7th round, 240th overall (2010)"],
+    ["NFL", "Seattle Seahawks", "Quarterback", null, null, ""],
+    ["NFL", "Detroit Lions", "Quarterback", null, null, ""],
+    ["NFL", "Cincinnati Bengals", "Quarterback", null, null, ""]
+  ],
+  "zac-taylor": [
+    ["College", "Wake Forest", "Quarterback", 2002, 2003, ""],
+    ["College", "Butler County Community College", "Quarterback", 2004, 2004, ""],
+    ["College", "Nebraska", "Quarterback", 2005, 2006, "Big 12 Offensive Player of the Year 2006"],
+    ["NFL", "Tampa Bay Buccaneers", "Quarterback", 2007, 2007, "College free agent (waived before camp)"],
+    ["Other", "Winnipeg Blue Bombers (CFL)", "Quarterback", 2007, 2007, "Did not play"]
+  ]
+}

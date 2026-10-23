@@ -49,6 +49,38 @@
 //                           active class, best first: years { [Eligible]:
 //                           [{ i, F, L, P, S, E, sl, g }] } — the home page
 //                           boards and the margin sidebar's leaderboard.
+//   _nflFits                Player pages' "We-Draft.com NFL Fit" card:
+//                           rows { [playerId]: [{ t: team, s: score }, …] } —
+//                           every active prospect's Very Strong-or-better
+//                           staff fits (utils/draftProfiles.js
+//                           buildProspectTeamFits). Only built when the
+//                           caller passes `coaches`.
+//   nflFit_{Position}       Comparison.js's NFL Fit tab: rows
+//                           { [playerId]: [{ a: team, s, GM, HC, OC, DC }] }
+//                           — every active prospect at the position against
+//                           all 32 staffs — plus staff { [team]: { [slot]:
+//                           { n, id } } } for the names (see
+//                           buildProspectTeamFits). Also only with `coaches`.
+//   _staffTargets           Staff pages' Top Draft Targets + meta
+//                           description: rows { [coachId]: [{ i, F, L, P,
+//                           S, sl, s }] } — each current head coach's and
+//                           GM's best fits in the next class (see
+//                           buildStaffTargets). Also only with `coaches`.
+//   teamTargets_{TEAM}      NFL team page's Targets tab (+ its SEO): members
+//                           [{ slot, id, n, picks }], rows [{ i, F, L, P, S,
+//                           E, sl, lg, s, GM, HC, OC, DC }] (every active
+//                           prospect, best staff fit first), matches
+//                           [{ i, sl, pn, pl, y, pt, r, s, k }]. Only with
+//                           `coaches`, like everything below.
+//   prospects_{Position}    Staff pages' Targets matching: rows [{ i, F, L,
+//                           S, E, sl, lg, H, W, cs, cw }] (cs/cw: community
+//                           strengths/weaknesses, top 3).
+//   staffPicks_{coachId}    Staff page pick history: rows (pick rows, rec
+//                           trimmed to measurements + traits) + schoolLogos.
+//   _staffRail              Current coaches { id, Name, Current } for the
+//                           staff pages' side rail.
+//   _nflBranding            teams { [abbr]: { City, Team, Color1, Color2,
+//                           Logo1, LogoDark, Wordmark, WordmarkDark } }.
 //   _meta                   Summary for the admin panel.
 // _grades and _top are also rebuilt on their own, more often, by
 // scripts/buildGradeSnapshots.mjs (buildGradeSnapshotDocs below) so
@@ -57,6 +89,8 @@ import {
   COMP_SNAPSHOT_VERSION, encodeCompSnapshotRows, draftedPlayersAsHistorical,
   communityTraits, isGraded, positionPercentileTables,
 } from "./historicalStats.js";
+import { NFL_TEAMS, NFL_TEAM_ABBRS, draftCredits, creditForPick } from "./coachHistory.js";
+import { historicalPickRows, currentPickRows, buildProspectTeamFits, nflFitRowsFrom, buildStaffTargets, pageScopes } from "./draftProfiles.js";
 
 // Same scale PlayerProfile.js / Comparison.js rank the class list by.
 const GRADE_SCALE = {
@@ -139,10 +173,12 @@ const byDocId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
  * @param {object[]} [input.nflTeams]   nfl docs, { id: abbreviation, ...data }
  *                                       (team logos for the drafted class's
  *                                       class lists)
+ * @param {object[]} [input.coaches]  current coaches docs, { id, ...data }
+ *                                       (staff for _nflFits; skipped without)
  * @param {string}   input.latestDraftYear  e.g. "2026"
  * @param {string[]} input.activeYears  e.g. ["2027","2028","2029"]
  */
-export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsByPlayerId, schools, ads, nflTeams = [], latestDraftYear, activeYears }) {
+export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsByPlayerId, schools, ads, nflTeams = [], coaches = null, latestDraftYear, activeYears }) {
   const docs = [];
   const version = COMP_SNAPSHOT_VERSION;
   const evalsOf = (id) => evalsByPlayerId[id] || [];
@@ -159,17 +195,19 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
   const pool = [...historical.filter((r) => String(r.Year) !== String(latestDraftYear)), ...latestRows];
   const positions = [...new Set(pool.map((r) => r.Position).filter(Boolean))].sort();
   const positionSummary = {};
+  const pctByPos = {};
   positions.forEach((pos) => {
     const rows = encodeCompSnapshotRows(pool.filter((r) => r.Position === pos));
     positionSummary[pos] = { rows: rows.length, graded: rows.filter((r) => r.S).length };
     docs.push({ id: pos, data: { version, position: pos, rows } });
     const posPool = pool.filter((r) => r.Position === pos);
+    pctByPos[pos] = positionPercentileTables(posPool);
     docs.push({
       id: `pct_${pos}`,
       data: {
         version, position: pos,
         cutoffs: {
-          all: positionPercentileTables(posPool),
+          all: pctByPos[pos],
           [String(latestDraftYear)]: positionPercentileTables(posPool.filter((r) => Number(r.Year) < Number(latestDraftYear))),
         },
       },
@@ -277,13 +315,141 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
 
   docs.push(...buildGradeSnapshotDocs({ players, evalsByPlayerId, activeYears }));
 
+  // ── Player-page NFL fits ──
+  // Same inputs the team page's Targets tab reads live: every pick row,
+  // community traits as _grades stores them (top 3 each way), and the
+  // active prospects by position.
+  let nflFitPlayers = null;
+  if (coaches) {
+    const latest = Number(latestDraftYear);
+    const community = {};
+    const top3 = (id) => {
+      const { strengths, weaknesses } = communityTraits(evalsOf(id));
+      return { strengths: strengths.slice(0, 3), weaknesses: weaknesses.slice(0, 3) };
+    };
+    const nameToAbbr = Object.fromEntries(Object.entries(NFL_TEAMS).map(([abbr, name]) => [name, abbr]));
+    const bySlug = Object.fromEntries(players.filter((p) => p.Slug).map((p) => [p.Slug, p]));
+    const order = draftOrder.filter((o) => typeof o.Selection === "string" && o.Selection.trim());
+    const rows = [
+      ...historicalPickRows(historical.map((h) => ({ id: h.id, data: h })), nameToAbbr, latest),
+      ...currentPickRows(order, bySlug, latest),
+    ];
+    rows.forEach((p) => { if (p.year === latest && p.rec?.id) community[p.rec.id] = top3(p.rec.id); });
+    const prospectsByPos = {};
+    players
+      .filter((p) => activeYears.includes(String(p.Eligible)) && p.Live !== false && p.Slug && p.Position)
+      .forEach((p) => { (prospectsByPos[p.Position] || (prospectsByPos[p.Position] = [])).push({ ...p, community: top3(p.id) }); });
+    const { fits, staff: fitStaff, teams: teamDetail } = buildProspectTeamFits({
+      rows, community, staff: coaches, teams: NFL_TEAM_ABBRS, prospectsByPos, pctByPos, firstYear: 2000, latestYear: latest,
+    });
+    const fitRows = nflFitRowsFrom(fits);
+    nflFitPlayers = Object.keys(fitRows).length;
+    docs.push({ id: "_nflFits", data: { version, rows: fitRows } });
+    Object.keys(prospectsByPos).forEach((pos) => {
+      const posRows = {};
+      prospectsByPos[pos].forEach((p) => { if (fits[p.id]) posRows[p.id] = fits[p.id]; });
+      if (Object.keys(posRows).length) docs.push({ id: `nflFit_${pos}`, data: { version, position: pos, rows: posRows, staff: fitStaff } });
+    });
+    // ── Team pages' Targets tab, precomputed: every active prospect's staff
+    // fit for the team (with each staffer's part), its draft-history
+    // matches, and the staff strip — the page filters by class/position and
+    // ranks from here instead of querying players + history live.
+    const logoOf = (school) => logoBySchool[school] || "";
+    const prospectById = {};
+    Object.values(prospectsByPos).flat().forEach((p) => { prospectById[p.id] = p; });
+    const perTeam = {};
+    Object.entries(fits).forEach(([id, teamsFit]) => {
+      teamsFit.forEach((t) => { (perTeam[t.a] || (perTeam[t.a] = [])).push({ id, t }); });
+    });
+    Object.entries(teamDetail).forEach(([team, detail]) => {
+      const rowsForTeam = (perTeam[team] || []).map(({ id, t }) => {
+        const p = prospectById[id];
+        const { a: _team, ...scores } = t;
+        return { i: id, F: p.First || "", L: p.Last || "", P: p.Position || "", S: p.School || "", E: String(p.Eligible), sl: p.Slug, lg: logoOf(p.School), ...scores };
+      }).sort((x, y) => y.s - x.s);
+      docs.push({ id: `teamTargets_${team}`, data: { version, team, eligible: String(activeYears[0]), members: detail.members, rows: rowsForTeam, matches: detail.matches } });
+    });
+
+    // ── Prospects by position — what the staff pages' Targets matching
+    // needs about each active prospect (height, weight, community traits,
+    // school logo), instead of a players query + the _grades doc. ──
+    Object.entries(prospectsByPos).forEach(([pos, list]) => {
+      docs.push({ id: `prospects_${pos}`, data: { version, position: pos, rows: list.map((p) => ({
+        i: p.id, F: p.First || "", L: p.Last || "", S: p.School || "", E: String(p.Eligible), sl: p.Slug, lg: logoOf(p.School),
+        H: p.Height ?? null, W: p.Weight ?? null, cs: p.community.strengths, cw: p.community.weaknesses,
+      })) } });
+    });
+
+    // ── Staff pages' pick history: each current head coach's / GM's
+    // credited picks (any scope — the page's role toggles filter further),
+    // trimmed to what the page reads, plus the school logos its lists show.
+    // Replaces querying every pick of every team they've worked for. ──
+    const KEEP = ["Height", "Weight", "Arm Length", "Hand Size", "40 Yard ", "40 Yard", "Vertical", "Broad", "Bench", "3-Cone", "Shuttle"];
+    const trimRec = (p) => {
+      const rec = {};
+      KEEP.forEach((k) => { if (p.rec?.[k] != null && p.rec[k] !== "") rec[k] = p.rec[k]; });
+      // The latest class's traits are the community's (no admin grade yet).
+      const c = p.year === latest ? community[p.rec?.id] : null;
+      const S = c ? c.strengths : p.rec?.Strengths;
+      const W = c ? c.weaknesses : p.rec?.Weaknesses;
+      if (Array.isArray(S) && S.length) rec.Strengths = S;
+      if (Array.isArray(W) && W.length) rec.Weaknesses = W;
+      return rec;
+    };
+    const ALL_CREDIT_SCOPES = ["hc", "gm", "coordinator", "frontOffice"];
+    coaches.filter((person) => pageScopes(person).length).forEach((person) => {
+      const credits = draftCredits(person.Stints, 2000, latest);
+      const mine = rows.filter((p) => creditForPick(credits, ALL_CREDIT_SCOPES, p.team, p.year, p.position));
+      const schoolLogos = {};
+      mine.forEach((p) => { if (p.school && !(p.school in schoolLogos)) schoolLogos[p.school] = logoOf(p.school); });
+      docs.push({ id: `staffPicks_${person.id}`, data: { version, rows: mine.map((p) => ({
+        key: p.key, year: p.year, team: p.team, round: p.round, pick: p.pick, player: p.player,
+        position: p.position, school: p.school, slug: p.slug, rec: trimRec(p),
+      })), schoolLogos } });
+    });
+
+    // ── Small shared lookups: current staff (staff pages' side rail) and
+    // NFL team branding (staff pages, the team directory rail). ──
+    docs.push({ id: "_staffRail", data: { version, rows: coaches.map((p) => ({ id: p.id, Name: p.Name || "", Current: p.Current || [] })) } });
+    docs.push({ id: "_nflBranding", data: { version, teams: Object.fromEntries(nflTeams.map((t) => [t.id, {
+      City: t.City || "", Team: t.Team || "", Color1: t.Color1 || "", Color2: t.Color2 || "", Logo1: t.Logo1 || "", LogoDark: t.LogoDark || "",
+      Wordmark: t.Wordmark || "", WordmarkDark: t.WordmarkDark || "",
+    }])) } });
+
+    // The next class only (activeYears[0]) — the one a staff is drafting from.
+    const nextClass = Object.fromEntries(Object.entries(prospectsByPos)
+      .map(([pos, list]) => [pos, list.filter((p) => String(p.Eligible) === String(activeYears[0]))]));
+    docs.push({ id: "_staffTargets", data: {
+      version, eligible: String(activeYears[0]),
+      rows: buildStaffTargets({ rows, community, staff: coaches, prospectsByPos: nextClass, pctByPos, firstYear: 2000, latestYear: latest }),
+    } });
+  }
+
   const gradedComps = Object.values(positionSummary).reduce((a, s) => a + s.graded, 0);
   docs.push({
     id: "_meta",
     data: {
       version, positions: positionSummary, searchRows: searchRows.length, classLists: classListCount,
       ads: ads.length, gradedComps, gradedHistorical: historical.filter(isGraded).length,
+      ...(nflFitPlayers != null ? { nflFitPlayers } : {}),
     },
   });
   return docs;
+}
+
+// Writers commit the docs in chunks: a whole build is several MB, and one
+// Firestore commit is capped at 10 MiB / 500 writes. → [[{ id, data }]]
+export const SNAPSHOT_COMMIT_BYTES = 3 * 1024 * 1024;
+export function snapshotCommitChunks(docs, maxBytes = SNAPSHOT_COMMIT_BYTES, maxDocs = 400) {
+  const chunks = [];
+  let cur = [];
+  let bytes = 0;
+  docs.forEach((d) => {
+    const size = JSON.stringify(d.data).length;
+    if (cur.length && (bytes + size > maxBytes || cur.length >= maxDocs)) { chunks.push(cur); cur = []; bytes = 0; }
+    cur.push(d);
+    bytes += size;
+  });
+  if (cur.length) chunks.push(cur);
+  return chunks;
 }

@@ -25,7 +25,7 @@ import AdminCoachHistory from "../components/AdminCoachHistory";
 import AdminResearch from "../components/AdminResearch";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
-import { buildSiteSnapshotDocs } from "../utils/snapshotBuilders";
+import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../utils/snapshotBuilders";
 import verifiedBadge from "../assets/verified.png";
 import { unzoomTransform } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
@@ -3549,12 +3549,13 @@ function CompSnapshotRebuild({ records }) {
     setMessage("");
     try {
       setMessage("Reading players…");
-      const [playerSnap, orderSnap, schoolSnap, adSnap, nflSnap] = await Promise.all([
+      const [playerSnap, orderSnap, schoolSnap, adSnap, nflSnap, coachSnap] = await Promise.all([
         getDocs(collection(db, "players")),
         getDocs(collection(db, "draftOrder")),
         getDocs(collection(db, "schools")),
         getDocs(collection(db, "ads")),
         getDocs(collection(db, "nfl")),
+        getDocs(query(collection(db, "coaches"), where("Status", "==", "current"))),
       ]);
       const players = playerSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const evalsByPlayerId = {};
@@ -3573,6 +3574,7 @@ function CompSnapshotRebuild({ records }) {
         schools: schoolSnap.docs.map((d) => d.data()),
         ads: adSnap.docs.map((d) => d.data()),
         nflTeams: nflSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        coaches: coachSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         latestDraftYear: LATEST_DRAFT_YEAR,
         activeYears: ACTIVE_YEARS,
       });
@@ -3581,10 +3583,14 @@ function CompSnapshotRebuild({ records }) {
         if (bytes > COMP_SNAPSHOT_MAX_BYTES) throw new Error(`${id} is ${Math.round(bytes / 1024)}KB — too large for one document`);
       });
 
-      setMessage("Writing…");
-      const batch = writeBatch(db);
-      built.forEach(({ id, data }) => batch.set(doc(db, "compSnapshots", id), { ...data, builtAt: serverTimestamp(), builtBy: "admin" }));
-      await batch.commit();
+      // Several MB in all — committed in chunks under Firestore's per-commit cap.
+      const chunks = snapshotCommitChunks(built);
+      for (let i = 0; i < chunks.length; i += 1) {
+        setMessage(`Writing… ${i + 1}/${chunks.length}`);
+        const batch = writeBatch(db);
+        chunks[i].forEach(({ id, data }) => batch.set(doc(db, "compSnapshots", id), { ...data, builtAt: serverTimestamp(), builtBy: "admin" }));
+        await batch.commit();
+      }
 
       const m = built.find((d) => d.id === "_meta").data;
       setMeta({ ...m, builtAt: new Date(), builtBy: "admin" });

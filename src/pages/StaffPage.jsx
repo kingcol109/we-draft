@@ -1,24 +1,32 @@
-import { useParams, Link } from "react-router-dom";
-import { useState, useEffect, useMemo } from "react";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { useParams, Link, Navigate } from "react-router-dom";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
+import { doc, getDoc } from "firebase/firestore";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
-import DraftArchiveList, { useSchoolLogos } from "../components/DraftArchiveList";
+import DraftArchiveList, { useSchoolLogos, useSchools } from "../components/DraftArchiveList";
 import { viewportCssWidth } from "../utils/pageZoom";
 import {
   ROLE_BY_KEY, NFL_TEAMS, CREDIT_SCOPES, POSITION_SIDE,
-  draftCredits, creditForPick, stintYearSpan, groupStints, isOpenStint,
+  draftCredits, creditForPick, stintYearSpan, groupStints, isOpenStint, isPlayerStint,
 } from "../utils/coachHistory";
+import { STAT_METRICS, percentileFromTable } from "../utils/historicalStats";
+import { PROFILE_SKIP, buildProfile, scoreProspects, fitScore, pageScopes } from "../utils/draftProfiles";
+import { fetchStaffPickRows, fetchProspects, fetchPctTables, fetchNflBranding, fetchCurrentStaff } from "../utils/draftProfileData";
+import { getSiteSnapshot } from "../utils/siteSnapshots";
+import { textOn } from "../utils/teamColors";
 
 // ── /staff/{slug} — a current head coach's or GM's draft history ──
 // Every pick their team made while they held a creditable job there (see
 // draftCredits/creditForPick in utils/coachHistory.js), from the
 // "historical" collection (2000 → last year) plus draftOrder's just-finished
 // draft. Default view is the years in their current job (HC or GM); other roles
-// can be switched on. A second tab (/staff/{slug}/career) lays
-// out their whole career, and the left rail links to the other current head
-// coaches or GMs.
+// can be switched on. Tabs: Draft Insights (/staff/{slug}) for the top-down
+// numbers, Draft Record (/staff/{slug}/record) for every pick, Targets
+// (/staff/{slug}/targets) for a per-position profile of who they draft and
+// the prospects who fit it, and
+// Career Path (/staff/{slug}/career) for their whole career. The left rail links to
+// the other current head coaches or GMs.
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -29,10 +37,18 @@ const FIRST_DRAFT_YEAR = 2000;
 const PAGE_ROLES = ["HC", "IHC", "GM"];
 const POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB", "K", "P", "LS"];
 const ROUNDS = [1, 2, 3, 4, 5, 6, 7];
+// [key, label, URL suffix] — the URL's :tab param is the suffix.
+const TABS = [
+  ["draft", "Draft Insights", ""], ["record", "Draft Record", "/record"],
+  ["targets", "Targets", "/targets"], ["career", "Career Path", "/career"],
+];
+const TAB_SUFFIX = Object.fromEntries(TABS.map(([key, , suffix]) => [key, suffix]));
+// Phones: four full labels don't fit across one row.
+const MOBILE_TAB_LABELS = { draft: "Insights", record: "Record", targets: "Targets", career: "Career" };
 
+const isHex = (hex) => /^#[0-9a-f]{6}$/i.test(hex || "");
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
 const alphaHex = (a) => Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, "0");
-const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
 
 function SectionTitle({ children, color1, color2, right, isMobile }) {
   return (
@@ -41,16 +57,11 @@ function SectionTitle({ children, color1, color2, right, isMobile }) {
         {children}
       </div>
       <div style={{ flex: 1, height: 3, borderRadius: 2, background: `linear-gradient(to right, ${color2}, ${tint(color2, "00")})` }} />
-      {right != null && <div style={{ fontSize: 11, fontWeight: 900, color: "#9aa5b4", whiteSpace: "nowrap" }}>{right}</div>}
+      {right != null && !isMobile && <div style={{ fontSize: 11, fontWeight: 900, color: "#9aa5b4", whiteSpace: "nowrap" }}>{right}</div>}
     </div>
   );
 }
 
-// The credit scope(s) of the job(s) a page is for: "hc" for a head coach
-// (interim included), "gm" for a GM, both for someone holding both.
-const pageScopes = (person) => [...new Set((person?.Current || [])
-  .map((c) => (c.Role === "GM" ? "gm" : c.Role === "HC" || c.Role === "IHC" ? "hc" : null))
-  .filter(Boolean))];
 
 // The page column is centered; the rail hangs in the left margin beside it
 // when the window has room for both (else it sits beside the column, in
@@ -62,9 +73,33 @@ const railFitsInMargin = () => viewportCssWidth() >= COLUMN_WIDTH + 2 * (RAIL_WI
 
 const card = { background: "#fff", borderRadius: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2" };
 
+// Page titles — the Draft Insights one is the page's search title.
+const TAB_TITLES = {
+  draft: (n) => `${n} Draft Targets and Pick History`,
+  record: (n) => `${n} Draft Record and Pick History`,
+  targets: (n) => `${n} Draft Targets by Position`,
+  career: (n) => `${n} Career Path`,
+};
+
+// Meta description for the draft tabs: the job, then as many of their top
+// prospect fits (compSnapshots/_staffTargets) as fit in ~160 characters —
+// so searches pairing the staffer with a prospect find the page.
+const META_LENGTH = 160;
+function targetsDescription(name, job, eligible, targets) {
+  const lead = `${name}'s NFL draft targets and pick history as ${job}.`;
+  const label = (t) => `${t.F} ${t.L} (${[t.S, t.P].filter(Boolean).join(" ")})`;
+  for (let n = Math.min(3, targets.length); n > 0; n--) {
+    const names = targets.slice(0, n).map(label);
+    const list = n === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[n - 1]}`;
+    const text = `${lead} Top ${eligible} prospect fits: ${list}.`;
+    if (text.length <= META_LENGTH) return text;
+  }
+  return `${lead} Every pick by round, position and school, plus the ${eligible} prospects who fit.`;
+}
+
 export default function StaffPage() {
   const { slug, tab: tabParam } = useParams();
-  const tab = tabParam === "career" ? "career" : "draft";
+  const tab = TABS.some(([key]) => key !== "draft" && key === tabParam) ? tabParam : "draft";
   // Every current HC/GM, for the left rail — loaded once, not per person.
   const [allStaff, setAllStaff] = useState([]);
   const [person, setPerson] = useState(null);
@@ -72,8 +107,17 @@ export default function StaffPage() {
   const [teams, setTeams] = useState({});
   const [picks, setPicks] = useState([]);
   const [picksLoading, setPicksLoading] = useState(true);
+  // School logos for the pick lists, when the snapshot supplied them (null =
+  // look them up live).
+  const [pickLogos, setPickLogos] = useState(null);
   // Credit scopes shown — starts as the page's own job(s) (see pageScopes).
   const [scopes, setScopes] = useState([]);
+  // Pick number → trade value (config/draftTradeChart, written by
+  // scripts/importDraftTradeChart.mjs) — weights the "Most Valued" tile.
+  const [tradeValues, setTradeValues] = useState(null);
+  // Top prospect fits — compSnapshots/_staffTargets (see buildStaffTargets
+  // in utils/draftProfiles.js): { eligible, rows: { [coachId]: [...] } }.
+  const [targetsDoc, setTargetsDoc] = useState(null);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const [railInMargin, setRailInMargin] = useState(() => typeof window !== "undefined" && railFitsInMargin());
 
@@ -88,25 +132,31 @@ export default function StaffPage() {
   }, []);
 
   useEffect(() => {
-    getDocs(query(collection(db, "coaches"), where("Status", "==", "current")))
-      .then((snap) => setAllStaff(snap.docs.map((d) => ({ id: d.id, ...d.data() }))))
-      .catch((e) => console.error("Staff rail load error:", e));
+    fetchCurrentStaff().then(setAllStaff).catch((e) => console.error("Staff rail load error:", e));
   }, []);
 
-  // Person + every team's branding (32 small docs — the tenure list and
-  // draft rows show each team's logo).
+  useEffect(() => {
+    getSiteSnapshot("_staffTargets").then((snap) => setTargetsDoc(snap || { rows: {} }));
+  }, []);
+
+  useEffect(() => {
+    getDoc(doc(db, "config", "draftTradeChart"))
+      .then((snap) => setTradeValues(snap.exists() ? snap.data().values || {} : {}))
+      .catch((e) => { console.error("Trade chart load error:", e); setTradeValues({}); });
+  }, []);
+
+  // Person + every team's branding (the tenure list and draft rows show each
+  // team's logo) — branding from the shared _nflBranding snapshot.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([getDoc(doc(db, "coaches", slug)), getDocs(collection(db, "nfl"))])
-      .then(([snap, nflSnap]) => {
+    Promise.all([getDoc(doc(db, "coaches", slug)), fetchNflBranding()])
+      .then(([snap, branding]) => {
         if (cancelled) return;
         const data = snap.exists() ? { id: snap.id, ...snap.data() } : null;
         setPerson(data);
         setScopes(pageScopes(data));
-        const t = {};
-        nflSnap.docs.forEach((d) => { t[d.id] = d.data(); });
-        setTeams(t);
+        setTeams(branding);
       })
       .catch((e) => { console.error("Staff page load error:", e); if (!cancelled) setPerson(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -118,57 +168,17 @@ export default function StaffPage() {
     [person]
   );
 
-  // Every pick by every team they were ever credited with (any scope), so
-  // flipping a scope toggle is instant — filtering happens below.
+  // Every pick they're credited with under any scope, so flipping a scope
+  // toggle is instant — filtering happens below. One read normally
+  // (staffPicks_{id}, which also carries the lists' school logos).
   useEffect(() => {
     if (!person) return;
     let cancelled = false;
-    const abbrs = [...new Set(credits.map((c) => c.team))];
-    if (!abbrs.length) { setPicks([]); setPicksLoading(false); return; }
     setPicksLoading(true);
     (async () => {
       try {
-        const names = abbrs.map((a) => NFL_TEAMS[a]).filter(Boolean);
-        const nameToAbbr = Object.fromEntries(abbrs.map((a) => [NFL_TEAMS[a], a]));
-        const histSnaps = await Promise.all(chunk(names, 30).map((c) => getDocs(query(collection(db, "historical"), where("NFL Team", "in", c)))));
-        // Same dedup as NFLTeamPage.jsx's archive: one row per year+pick and
-        // per year+name.
-        const seen = new Set();
-        const hist = [];
-        histSnaps.flatMap((s) => s.docs).forEach((d) => {
-          const h = d.data();
-          const year = parseInt(h.Year);
-          if (!year || year >= DRAFT_ORDER_YEAR) return;
-          const pick = parseInt(h.Pick);
-          const name = String(h.Player || "").trim().toLowerCase();
-          const k1 = pick && pick !== 999 ? `${year}-${pick}` : null;
-          const k2 = name ? `${year}-${name}` : null;
-          if ((k1 && seen.has(k1)) || (k2 && seen.has(k2))) return;
-          if (k1) seen.add(k1);
-          if (k2) seen.add(k2);
-          hist.push({
-            key: d.id, year, team: nameToAbbr[h["NFL Team"]],
-            round: parseInt(h.Round) || null, pick: pick && pick !== 999 ? pick : null,
-            player: h.Player || "", position: h.Position || "", school: h.School || "", slug: null,
-          });
-        });
-
-        // The just-finished draft: draftOrder selections → players docs.
-        const orderSnaps = await Promise.all(chunk(abbrs, 30).map((c) => getDocs(query(collection(db, "draftOrder"), where("Team", "in", c)))));
-        const order = orderSnaps.flatMap((s) => s.docs.map((d) => d.data())).filter((o) => typeof o.Selection === "string" && o.Selection.trim());
-        const slugs = [...new Set(order.map((o) => o.Selection))];
-        const playerSnaps = await Promise.all(chunk(slugs, 30).map((c) => getDocs(query(collection(db, "players"), where("Slug", "in", c)))));
-        const bySlug = {};
-        playerSnaps.forEach((s) => s.docs.forEach((d) => { const p = d.data(); bySlug[p.Slug] = p; }));
-        const current = order.filter((o) => bySlug[o.Selection]).map((o) => {
-          const p = bySlug[o.Selection];
-          return {
-            key: `cur-${o.Selection}`, year: DRAFT_ORDER_YEAR, team: o.Team,
-            round: parseInt(o.Round) || null, pick: parseInt(o.Pick) || null,
-            player: `${p.First || ""} ${p.Last || ""}`.trim(), position: p.Position || "", school: p.School || "", slug: p.Slug,
-          };
-        });
-        if (!cancelled) setPicks([...hist, ...current]);
+        const { rows, schoolLogos: logos } = await fetchStaffPickRows(person.id, credits);
+        if (!cancelled) { setPicks(rows); setPickLogos(logos); }
       } catch (e) {
         console.error("Staff draft history error:", e);
         if (!cancelled) setPicks([]);
@@ -184,6 +194,8 @@ export default function StaffPage() {
     .filter((p) => p.credit)
     .sort((a, b) => b.year - a.year || (a.pick ?? 999) - (b.pick ?? 999)), [picks, credits, scopes]);
 
+  // The Targets tab used to be /players (Player Info) — send old links on.
+  if (tabParam === "players") return <Navigate replace to={`/staff/${slug}/targets`} />;
   if (loading && !person) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   const currentJobs = (person?.Current || []).filter((c) => PAGE_ROLES.includes(c.Role));
@@ -197,11 +209,18 @@ export default function StaffPage() {
   const c2 = home.Color2 || GOLD;
   const homeName = NFL_TEAMS[homeAbbr] || homeAbbr;
   const roleLabel = [...new Set(currentJobs.map((c) => ROLE_BY_KEY[c.Role]?.label || c.Role))].join(" & ");
-  const pageUrl = `https://we-draft.com/staff/${person.id}${tab === "career" ? "/career" : ""}`;
+  const pageUrl = `https://we-draft.com/staff/${person.id}${TAB_SUFFIX[tab]}`;
+  const targets = targetsDoc?.rows?.[person.id] || [];
+  const targetsYear = targetsDoc?.eligible || "2027";
+  const job = `${roleLabel.toLowerCase()} of the ${homeName}`;
   const metaDescription = tab === "career"
-    ? `${person.Name}'s coaching and front office career — every stop before becoming ${roleLabel} of the ${homeName}.`
-    : `${person.Name}'s NFL draft history — every pick as ${roleLabel} of the ${homeName} and before, by round and position.`;
-  const pageTitle = `${person.Name} ${tab === "career" ? "Career Path" : "Draft History"}`;
+    ? `${person.Name}'s coaching and front office career — every stop before becoming ${job}.`
+    : tab === "record"
+      ? `${person.Name}'s NFL draft record and pick history — every pick as ${job} and before.`
+      : targets.length
+        ? targetsDescription(person.Name, job, targetsYear, targets)
+        : `${person.Name}'s NFL draft targets and pick history as ${job} — every pick by round, position and school.`;
+  const pageTitle = TAB_TITLES[tab](person.Name);
   const railRole = currentJobs.some((c) => c.Role === "GM") && !currentJobs.some((c) => c.Role === "HC" || c.Role === "IHC") ? "gm" : "hc";
 
   const defaults = pageScopes(person);
@@ -254,9 +273,11 @@ export default function StaffPage() {
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 14 : 24 }}>
             {(home.LogoDark || home.Logo1) && (
-              <img src={home.LogoDark || home.Logo1} alt={homeName}
-                style={{ flexShrink: 0, width: isMobile ? 64 : 110, height: isMobile ? 64 : 110, objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }}
-                onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              <Link to={`/nfl/${homeAbbr.toLowerCase()}`} title={homeName} style={{ flexShrink: 0, display: "flex" }}>
+                <img src={home.LogoDark || home.Logo1} alt={homeName}
+                  style={{ width: isMobile ? 64 : 110, height: isMobile ? 64 : 110, objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              </Link>
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, color: "rgba(255,255,255,0.85)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
@@ -274,7 +295,7 @@ export default function StaffPage() {
 
         {/* ===== TABS ===== */}
         <div role="tablist" style={{ display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 16 : 20, borderBottom: `3px solid ${tint(c1, "1f")}` }}>
-          {[["draft", "Draft History", ""], ["career", "Career Path", "/career"]].map(([key, label, suffix]) => {
+          {TABS.map(([key, label, suffix]) => {
             const active = tab === key;
             return (
               <Link
@@ -282,12 +303,12 @@ export default function StaffPage() {
                 style={{
                   flex: isMobile ? 1 : "0 0 auto", marginBottom: -3, textAlign: "center", textDecoration: "none",
                   padding: isMobile ? "10px 6px" : "11px 22px",
-                  background: active ? c1 : "transparent", color: active ? "#fff" : c1,
+                  background: active ? c1 : "transparent", color: active ? textOn(c1, c2) : c1,
                   borderBottom: `3px solid ${active ? c2 : "transparent"}`, borderRadius: "8px 8px 0 0",
                   fontWeight: 900, fontSize: isMobile ? 11 : 13, textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap",
                 }}
               >
-                {label}
+                {isMobile ? MOBILE_TAB_LABELS[key] : label}
               </Link>
             );
           })}
@@ -321,14 +342,18 @@ export default function StaffPage() {
         </div>
 
         {picksLoading ? (
-          <LoadingSpinner label="Loading draft history" size={28} minHeight="200px" />
+          <LoadingSpinner label="Loading draft picks" size={28} minHeight="200px" />
         ) : !credited.length ? (
           <div style={{ ...card, padding: 40, textAlign: "center", color: "#9aa5b4", fontStyle: "italic", fontSize: 14, fontFamily: "Arial, sans-serif" }}>
             No picks on file for these roles yet{available.length > 1 && scopes.length < available.length ? " — try adding another role above." : "."}
           </div>
+        ) : tab === "record" ? (
+          <DraftRecord key={person.id} picks={credited} teams={teams} defaults={defaults} logos={pickLogos} color1={c1} color2={c2} isMobile={isMobile} />
+        ) : tab === "targets" ? (
+          <PlayerInfo key={person.id} picks={credited} teams={teams} defaults={defaults} logos={pickLogos} color1={c1} color2={c2} isMobile={isMobile} />
         ) : (
           <>
-            <SummaryTiles picks={credited} color1={c1} isMobile={isMobile} />
+            <SummaryTiles picks={credited} tradeValues={tradeValues} color1={c1} isMobile={isMobile} />
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.55fr) minmax(0, 1fr)", gap: 20, marginTop: 24, alignItems: "start" }}>
               <div>
                 <SectionTitle color1={c1} color2={c2} isMobile={isMobile}>Position by Round</SectionTitle>
@@ -339,7 +364,11 @@ export default function StaffPage() {
                 <div style={{ ...card, padding: "6px 14px" }}>
                   {tenures.map((t, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: i ? "1px solid #f0f2f5" : "none" }}>
-                      {teams[t.team]?.Logo1 && <img src={teams[t.team].Logo1} alt="" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} />}
+                      {teams[t.team]?.Logo1 && (
+                        <Link to={`/nfl/${t.team.toLowerCase()}`} title={NFL_TEAMS[t.team]} style={{ display: "flex", flexShrink: 0 }}>
+                          <img src={teams[t.team].Logo1} alt={NFL_TEAMS[t.team]} style={{ width: 26, height: 26, objectFit: "contain" }} />
+                        </Link>
+                      )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 900, color: "#1a1f2b" }}>{NFL_TEAMS[t.team]}</div>
                         <div style={{ fontSize: 11, color: "#6b7685", fontFamily: "Arial, sans-serif" }}>
@@ -356,14 +385,47 @@ export default function StaffPage() {
                 </div>
               </div>
             </div>
-
-            <div style={{ marginTop: 28 }}>
-              <DraftRecord key={person.id} picks={credited} teams={teams} defaults={defaults} color1={c1} color2={c2} isMobile={isMobile} />
-            </div>
           </>
         )}
 
         </>)}
+
+        {/* Draft targets in words — visible (text hidden from visitors is
+            treated as spam by search engines), but parked at the bottom of
+            the column in a quiet style so the layout doesn't change. Same
+            approach as Comparison.js's "How … comparisons work" section.
+            Names the staffer's top prospect fits (_staffTargets) so
+            searches pairing the two find the page. */}
+        {tab !== "career" && targets.length > 0 && (
+          <section style={{ padding: "28px 6px 4px" }}>
+            <h2 style={{ fontSize: 13, fontWeight: 900, color: "#5f6b7a", textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 8px" }}>
+              {person.Name}&apos;s {targetsYear} draft targets
+            </h2>
+            <p style={{ fontSize: 14, fontWeight: 600, color: "#4a5466", lineHeight: 1.65, margin: 0, fontFamily: "Arial, sans-serif" }}>
+              Based on the players {person.Name} has drafted as {job} and before, the {targetsYear} prospects who best fit
+              {" "}{person.Name}&apos;s draft history are{" "}
+              {targets.map((t, i) => (
+                <Fragment key={t.i}>
+                  {i > 0 && (i < targets.length - 1 ? ", " : targets.length === 2 ? " and " : ", and ")}
+                  <Link to={`/player/${t.sl}`} style={{ color: "#1a1f2b", fontWeight: 800, textDecoration: "underline", textDecorationColor: "#c9d3e0", textUnderlineOffset: 3 }}>{t.F} {t.L}</Link>
+                  {` (${[t.S, t.P].filter(Boolean).join(" ")})`}
+                </Fragment>
+              ))}
+              . Fits compare each prospect&apos;s height, weight and community-graded traits with {person.Name}&apos;s picks at the position.
+            </p>
+            {tab !== "targets" && (
+              <Link
+                to={`/staff/${person.id}/targets`}
+                style={{
+                  display: "inline-block", marginTop: 12, padding: "8px 16px", borderRadius: 999, border: `2px solid ${c1}`,
+                  color: c1, background: "#fff", textDecoration: "none", fontSize: 12, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase",
+                }}
+              >
+                View More →
+              </Link>
+            )}
+          </section>
+        )}
         </div>
         {isMobile && <StaffRail staff={allStaff} teams={teams} currentId={person.id} defaultRole={railRole} tab={tab} color1={c1} />}
       </div>
@@ -405,7 +467,7 @@ function StaffRail({ staff, teams, currentId, defaultRole, tab, color1 }) {
           const active = person.id === currentId;
           return (
             <Link
-              key={`${person.id}-${team}`} to={`/staff/${person.id}${tab === "career" ? "/career" : ""}`}
+              key={`${person.id}-${team}`} to={`/staff/${person.id}${TAB_SUFFIX[tab]}`}
               style={{
                 display: "flex", alignItems: "center", gap: 9, padding: "6px 10px", textDecoration: "none",
                 background: active ? tint(color1, "14") : "transparent", borderLeft: `3px solid ${active ? color1 : "transparent"}`,
@@ -428,30 +490,63 @@ function StaffRail({ staff, teams, currentId, defaultRole, tab, color1 }) {
   );
 }
 
-// ── Headline numbers ──
-function SummaryTiles({ picks, color1, isMobile }) {
+// ── Headline numbers. "Most Valued" is the position the picks spent the
+// most draft capital on — each pick weighted by the trade chart (picks past
+// the chart's end get its last value). ──
+function SummaryTiles({ picks, tradeValues, color1, isMobile }) {
   const drafts = new Set(picks.map((p) => p.year)).size;
-  const known = picks.filter((p) => p.pick);
-  const avgPick = known.length ? Math.round(known.reduce((a, p) => a + p.pick, 0) / known.length) : null;
-  const posCounts = {};
-  picks.forEach((p) => { posCounts[p.position] = (posCounts[p.position] || 0) + 1; });
-  const topPos = Object.entries(posCounts).sort((a, b) => b[1] - a[1])[0];
-  const tiles = [
-    ["Drafts", drafts],
-    ["Picks", picks.length],
-    ["1st Rounders", picks.filter((p) => p.round === 1).length],
-    ["Day 1–2 Picks", picks.filter((p) => p.round && p.round <= 3).length],
-    ["Avg Pick", avgPick ?? "–"],
-    ["Most Drafted", topPos ? `${topPos[0]} (${topPos[1]})` : "–"],
+  const chart = tradeValues || {};
+  const floor = Math.min(...Object.values(chart).filter((v) => typeof v === "number"), Infinity);
+  const valueOf = (pick) => (pick ? chart[pick] ?? (Number.isFinite(floor) ? floor : 0) : 0);
+  const posValue = {};
+  picks.forEach((p) => { if (p.position) posValue[p.position] = (posValue[p.position] || 0) + valueOf(p.pick); });
+  const topPos = Object.entries(posValue).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0];
+  const totalValue = Object.values(posValue).reduce((a, v) => a + v, 0);
+  // Earliest pick; the most recent draft wins a tie.
+  const top = picks.filter((p) => p.pick).sort((a, b) => a.pick - b.pick || b.year - a.year)[0];
+  const years = [...new Set(picks.map((p) => p.year))].sort((x, y) => x - y);
+  const firsts = picks.filter((p) => p.round === 1).length;
+  const perDraft = drafts ? Math.round((picks.length / drafts) * 10) / 10 : 0;
+  // Every cell is label / value / detail, so the strip reads as one row.
+  const cells = [
+    { label: "Drafts", value: drafts, detail: years.length > 1 ? `${years[0]}–${years[years.length - 1]}` : years[0] },
+    { label: "Picks", value: picks.length, detail: `${perDraft} per draft` },
+    { label: "1st Rounders", value: firsts, detail: picks.length ? `${Math.round((firsts / picks.length) * 100)}% of picks` : "" },
+    {
+      label: "Most Valued", value: !tradeValues ? "…" : topPos ? topPos[0] : "–",
+      detail: topPos && totalValue ? `${Math.round((topPos[1] / totalValue) * 100)}% of draft value` : "",
+    },
+    {
+      label: "Highest Drafted", wide: true,
+      value: !top ? "–" : top.slug
+        ? <Link to={`/player/${top.slug}`} style={{ color: "inherit", textDecoration: "none" }}>{top.player}</Link>
+        : top.player,
+      detail: top ? `#${top.pick} overall · ${top.year}${top.position ? ` · ${top.position}` : ""}` : "",
+    },
   ];
+  // Mobile: a 6-column grid — counts three across, then the two feature cells.
+  const span = (i) => (i < 4 ? 2 : 4);
   return (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(6, 1fr)", gap: isMobile ? 8 : 12 }}>
-      {tiles.map(([label, value]) => (
-        <div key={label} style={{ ...card, padding: isMobile ? "10px 6px" : "14px 10px", textAlign: "center" }}>
-          <div style={{ fontSize: isMobile ? 18 : 26, fontWeight: 900, color: "#1a1f2b", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>{value}</div>
-          <div style={{ fontSize: 9, fontWeight: 900, color: color1, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 4 }}>{label}</div>
-        </div>
-      ))}
+    <div style={{ ...card, overflow: "hidden", borderTop: `3px solid ${color1}` }}>
+      <div style={{
+        display: "grid", gap: 1, background: "#eef1f5",
+        gridTemplateColumns: isMobile ? "repeat(6, minmax(0, 1fr))" : "repeat(3, minmax(0, 0.8fr)) minmax(0, 1fr) minmax(0, 1.9fr)",
+      }}>
+        {cells.map((c, i) => (
+          <div key={c.label} style={{ background: "#fff", padding: isMobile ? "12px 12px" : "16px 20px", minWidth: 0, gridColumn: isMobile ? `span ${span(i)}` : "auto" }}>
+            <div style={{ fontSize: 10, fontWeight: 900, color: color1, letterSpacing: "0.1em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{c.label}</div>
+            <div style={{
+              fontSize: isMobile ? 20 : 26, fontWeight: 900, color: "#1a1f2b", fontVariantNumeric: "tabular-nums", lineHeight: 1.15, marginTop: 6,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
+              {c.value}
+            </div>
+            <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 700, color: "#5f6b7a", fontFamily: "Arial, sans-serif", marginTop: 5, paddingTop: 5, borderTop: `1px solid ${tint(color1, "1f")}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minHeight: 14 }}>
+              {c.detail || " "}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -478,7 +573,7 @@ function RoundMatrix({ picks, color1, isMobile }) {
         <thead>
           <tr>
             <th style={{ ...th, textAlign: "left" }}>Pos</th>
-            {ROUNDS.map((r) => <th key={r} style={th}>Rd {r}</th>)}
+            {ROUNDS.map((r) => <th key={r} style={th}>{isMobile ? `R${r}` : `Rd ${r}`}</th>)}
             <th style={th}>Tot</th>
           </tr>
         </thead>
@@ -556,22 +651,27 @@ function TopSchools({ picks, color1 }) {
 // ── Draft Record — every credited pick in the same list as the NFL team
 // page's Draft Archive (components/DraftArchiveList.jsx). A team logo sits
 // under the year once the record spans more than one team, and picks
-// credited outside the page's own job say which role they came from. ──
-function DraftRecord({ picks, teams, defaults, color1, color2, isMobile }) {
-  const schoolLogos = useSchoolLogos(picks.map((p) => p.school));
+// credited outside the page's own job say which role they came from. Each
+// row wears its drafting team's colors. ──
+function DraftRecord({ picks, teams, defaults, logos, color1, color2, isMobile, title = "Draft Record" }) {
+  // Logos come with the snapshot; looked up only on the live fallback.
+  const lookedUp = useSchoolLogos(logos ? [] : picks.map((p) => p.school));
+  const schoolLogos = logos || lookedUp;
   const multiTeam = new Set(picks.map((p) => p.team)).size > 1;
   const entries = picks.map((p) => ({
     key: p.key, year: p.year, round: p.round, pick: p.pick,
     playerName: p.player, position: p.position, school: p.school, slug: p.slug,
     teamLogo: multiTeam ? teams[p.team]?.Logo1 : null,
+    color1: isHex(teams[p.team]?.Color1) ? teams[p.team].Color1 : null,
+    color2: isHex(teams[p.team]?.Color2) ? teams[p.team].Color2 : null,
     note: defaults.includes(p.credit.scope) ? null : `as ${ROLE_BY_KEY[p.credit.role]?.label || p.credit.role}`,
   }));
   return (
     <div>
-      <SectionTitle color1={color1} color2={color2} isMobile={isMobile}>Draft Record</SectionTitle>
+      <SectionTitle color1={color1} color2={color2} isMobile={isMobile}>{title}</SectionTitle>
       <div style={{ ...card, overflow: "hidden" }}>
         <div style={{ background: color1, padding: "8px 16px" }}>
-          <div style={{ color: color2, fontWeight: 900, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+          <div style={{ color: textOn(color1, color2), fontWeight: 900, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>
             {picks.length} Pick{picks.length !== 1 ? "s" : ""}
           </div>
         </div>
@@ -582,26 +682,317 @@ function DraftRecord({ picks, teams, defaults, color1, color2, isMobile }) {
   );
 }
 
+// ── Targets tab — one profile per position they've drafted: the
+// traits their picks shared (Strengths = valued, Weaknesses = tolerated),
+// the picks' average measurements (hover/tap for the percentile among every
+// drafted player at the position, compSnapshots/pct_{Position}), the picks
+// themselves, and on request the prospects who best fit the profile. ──
+const PROSPECT_YEARS = ["2027", "2028", "2029"];
+const PHYSICAL_KEYS = ["height", "weight", "arm", "hand"];
+const ATHLETIC_KEYS = ["forty", "vertical", "broad", "threeCone", "shuttle", "bench"];
+const SHORT_LABEL = { height: "Height", weight: "Weight", arm: "Arm", hand: "Hand", forty: "40 Yd", vertical: "Vert", broad: "Broad", threeCone: "3-Cone", shuttle: "Shuttle", bench: "Bench" };
+// The profile keeps every trait (the match uses MATCH_TRAITS of them, see
+// utils/draftProfiles.js); the lists show only the top few.
+const TRAITS_SHOWN = 3;
+const MATCH_LIMIT = 5;
+
+const ordinal = (n) => (n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+
+// An average, so rounded to read cleanly: nearest inch, except arm and hand
+// to the nearest quarter. Percentiles still use the unrounded average.
+const QUARTERS = ["", " 1/4", " 1/2", " 3/4"];
+function formatAverage(metric, v) {
+  if (metric.format === "height" || metric.format === "feetInches") {
+    const t = Math.round(v);
+    return `${Math.floor(t / 12)}'${t % 12}"`;
+  }
+  if (metric.format === "inches") {
+    const q = Math.round(v * 4);
+    return `${Math.floor(q / 4)}${QUARTERS[q % 4]}"`;
+  }
+  if (metric.suffix) return `${Math.round(v)}${metric.suffix}`;
+  return metric.decimals === 0 ? String(Math.round(v)) : v.toFixed(metric.decimals ?? 1);
+}
+
+function PlayerInfo({ picks, teams, defaults, logos, color1, color2, isMobile }) {
+  const positions = useMemo(() => {
+    const counts = {};
+    picks.forEach((p) => { if (p.position && !PROFILE_SKIP.includes(p.position)) counts[p.position] = (counts[p.position] || 0) + 1; });
+    const order = (pos) => (POSITIONS.includes(pos) ? POSITIONS.indexOf(pos) : POSITIONS.length);
+    return Object.entries(counts).sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]));
+  }, [picks]);
+  // Starts on QB — or, if they've never drafted one, the position they've
+  // drafted most.
+  const [position, setPosition] = useState("QB");
+  const pos = positions.some(([p]) => p === position) ? position
+    : positions.length ? [...positions].sort((a, b) => b[1] - a[1])[0][0] : null;
+  const posPicks = useMemo(() => picks.filter((p) => p.position === pos), [picks, pos]);
+
+  const [pctTables, setPctTables] = useState(null);
+  useEffect(() => {
+    if (!pos) return;
+    let cancelled = false;
+    setPctTables(null);
+    fetchPctTables(pos).then((t) => { if (!cancelled) setPctTables(t); });
+    return () => { cancelled = true; };
+  }, [pos]);
+
+  // The latest class's community traits are already on each pick's rec
+  // (see fetchStaffPickRows), so no community lookup here.
+  const profile = useMemo(() => buildProfile(posPicks, {}, DRAFT_ORDER_YEAR), [posPicks]);
+
+  if (!pos) return null;
+  const plural = `${pos}s`;
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
+        {positions.map(([p, n]) => {
+          const on = p === pos;
+          return (
+            <button
+              key={p} onClick={() => setPosition(p)} aria-pressed={on}
+              style={{
+                border: `2px solid ${on ? color1 : tint(color1, "33")}`, borderRadius: 8, padding: isMobile ? "6px 10px" : "7px 14px",
+                background: on ? color1 : "#fff", color: on ? "#fff" : color1, cursor: "pointer",
+                fontFamily: "inherit", fontWeight: 900, fontSize: 12, letterSpacing: "0.04em",
+              }}
+            >
+              {p} <span style={{ opacity: 0.7, fontSize: 11 }}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20 }}>
+        <TraitList
+          title="Traits Valued" rows={profile.strengths} graded={profile.graded} plural={plural} color1={color1} color2={color2} isMobile={isMobile}
+          blurb={`Strengths that show up most in the ${plural} they've drafted.`}
+        />
+        <TraitList
+          title="Traits Not Valued" rows={profile.weaknesses} graded={profile.graded} plural={plural} color1={color1} color2={color2} isMobile={isMobile}
+          blurb={`Weaknesses they've most often been willing to live with.`}
+        />
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <SectionTitle color1={color1} color2={color2} isMobile={isMobile} right="Hover for percentile">Average Measurements</SectionTitle>
+        <AverageMeasurements averages={profile.averages} pctTables={pctTables} total={posPicks.length} pos={pos} color1={color1} isMobile={isMobile} />
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <ProspectMatches key={pos} position={pos} profile={profile} pctTables={pctTables} color1={color1} color2={color2} isMobile={isMobile} />
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <DraftRecord picks={posPicks} teams={teams} defaults={defaults} logos={logos} color1={color1} color2={color2} isMobile={isMobile} title={`${pos} Picks`} />
+      </div>
+    </div>
+  );
+}
+
+function TraitList({ title, blurb, rows, graded, plural, color1, color2, isMobile }) {
+  const shown = rows.slice(0, TRAITS_SHOWN);
+  return (
+    <div>
+      <SectionTitle color1={color1} color2={color2} isMobile={isMobile} right={graded ? `${graded} graded` : null}>{title}</SectionTitle>
+      <div style={{ ...card, padding: isMobile ? "12px 14px" : "14px 18px" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#5f6b7a", fontFamily: "Arial, sans-serif", lineHeight: 1.4, paddingBottom: 10, marginBottom: 4, borderBottom: "1px solid #f0f2f5" }}>
+          {blurb}
+        </div>
+        {!shown.length ? (
+          <div style={{ padding: "10px 0", color: "#9aa5b4", fontStyle: "italic", fontSize: 13, fontFamily: "Arial, sans-serif" }}>
+            No graded {plural} yet.
+          </div>
+        ) : shown.map(([trait, n]) => (
+          <div key={trait} title={`${n} of ${graded} graded ${plural}`} style={{ padding: "9px 0" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: isMobile ? 15 : 17, fontWeight: 900, color: "#1a1f2b", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{trait}</span>
+              <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 900, color: "#3a4352", fontVariantNumeric: "tabular-nums" }}>
+                {n} of {graded}
+              </span>
+            </div>
+            <div style={{ height: 10, background: "#f0f2f5", borderRadius: 5, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(n / graded) * 100}%`, background: color1, borderRadius: 5 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Pills in the player page's style: hover (tap on touch) fills the pill and
+// swaps the value for its percentile.
+function AverageMeasurements({ averages, pctTables, total, pos, color1, isMobile }) {
+  const [active, setActive] = useState(null);
+  const pointer = useRef("mouse");
+  const group = (label, keys) => {
+    const shown = keys.filter((k) => averages[k]);
+    if (!shown.length) return null;
+    return (
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 900, color: "#6b7685", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>{label}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {shown.map((k) => {
+            const m = STAT_METRICS.find((x) => x.key === k);
+            const { value, n } = averages[k];
+            const pct = percentileFromTable(value, pctTables?.[k], m.lowerIsBetter);
+            const rounded = pct == null ? null : Math.min(99, Math.max(1, Math.round(pct)));
+            const on = active === k && rounded != null;
+            return (
+              <div
+                key={k}
+                onPointerDown={(e) => { pointer.current = e.pointerType; }}
+                onPointerEnter={(e) => { if (e.pointerType === "mouse" && rounded != null) setActive(k); }}
+                onPointerLeave={(e) => { if (e.pointerType === "mouse") setActive((c) => (c === k ? null : c)); }}
+                onClick={() => { if (pointer.current !== "mouse" && rounded != null) setActive((c) => (c === k ? null : k)); }}
+                title={`Average of ${n} pick${n === 1 ? "" : "s"}${rounded == null ? "" : ` · ${rounded}${ordinal(rounded)} percentile among drafted ${pos}s`}`}
+                style={{
+                  display: "inline-flex", alignItems: "baseline", gap: 6, cursor: "default",
+                  background: on ? color1 : "#fff", border: `2px solid ${color1}`, borderRadius: 8,
+                  padding: isMobile ? "3px 8px" : "4px 12px", transition: "background 0.2s ease",
+                }}
+              >
+                <span style={{ display: "grid", fontSize: isMobile ? 13 : 16, fontWeight: 900, lineHeight: 1.1, justifyItems: "center", fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ gridArea: "1 / 1", color: color1, visibility: on ? "hidden" : "visible" }}>{formatAverage(m, value)}</span>
+                  {rounded != null && <span style={{ gridArea: "1 / 1", color: "#fff", visibility: on ? "visible" : "hidden" }} aria-hidden={!on}>{rounded}%</span>}
+                </span>
+                <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 800, color: on ? "rgba(255,255,255,0.8)" : "#888", letterSpacing: "0.08em", textTransform: "uppercase" }}>{SHORT_LABEL[k]}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const physical = group("Physical", PHYSICAL_KEYS);
+  const athletic = group("Athletic", ATHLETIC_KEYS);
+  return (
+    <div style={{ ...card, padding: isMobile ? 14 : "16px 20px", display: "grid", gap: 16 }}>
+      {physical || athletic ? <>{physical}{athletic}</> : (
+        <div style={{ color: "#9aa5b4", fontStyle: "italic", fontSize: 13, fontFamily: "Arial, sans-serif" }}>No measurements on file for these {pos}s.</div>
+      )}
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#5f6b7a", fontFamily: "Arial, sans-serif" }}>
+        Averages across their {total} {pos} pick{total === 1 ? "" : "s"}; percentiles rank each average among every drafted {pos}.
+      </div>
+    </div>
+  );
+}
+
+// Prospects scored against the profile (scoreProspects in
+// utils/draftProfiles.js — height, weight and traits). 2027 loads with the
+// tab; other classes join when toggled on.
+function ProspectMatches({ position, profile, pctTables, color1, color2, isMobile }) {
+  const [years, setYears] = useState(["2027"]);
+  const [loaded, setLoaded] = useState({ status: "loading", prospects: [] });
+  // At least one class stays on.
+  const toggleYear = (y) => setYears((prev) => (prev.includes(y) ? (prev.length > 1 ? prev.filter((x) => x !== y) : prev) : [...prev, y].sort()));
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded((prev) => ({ ...prev, status: "loading" }));
+    Promise.all(years.map((y) => fetchProspects(y, position)))
+      .then((lists) => { if (!cancelled) setLoaded({ status: "done", prospects: lists.flat() }); })
+      .catch((e) => { console.error("Prospect match error:", e); if (!cancelled) setLoaded({ status: "error", prospects: [] }); });
+    return () => { cancelled = true; };
+  }, [years, position]);
+
+  const results = useMemo(() => {
+    if (loaded.status !== "done" || !pctTables) return [];
+    return scoreProspects(profile, loaded.prospects, pctTables, position, { limit: MATCH_LIMIT });
+  }, [loaded, pctTables, profile, position]);
+  const status = loaded.status === "done" && !pctTables ? "loading" : loaded.status;
+  // Logos ride on the prospects snapshot; looked up only on the live fallback.
+  const lookedUp = useSchoolLogos(results.filter((r) => !r.record.logo).map((r) => r.record.School));
+  const schoolLogos = { ...lookedUp, ...Object.fromEntries(results.filter((r) => r.record.logo).map((r) => [r.record.School, r.record.logo])) };
+
+  const chip = (on) => ({
+    border: `2px solid ${on ? color1 : tint(color1, "33")}`, borderRadius: 999, padding: "5px 12px",
+    background: on ? tint(color1, "14") : "#fff", color: color1, cursor: "pointer",
+    fontFamily: "inherit", fontWeight: 900, fontSize: 11, letterSpacing: "0.05em",
+  });
+
+  return (
+    <div>
+      <SectionTitle color1={color1} color2={color2} isMobile={isMobile}>Prospect Matches</SectionTitle>
+      <div style={{ ...card, overflow: "hidden" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: isMobile ? "12px 14px" : "14px 20px", borderBottom: "1px solid #eef1f5" }}>
+          <span style={{ fontSize: 11, fontWeight: 900, color: "#6b7685", letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 4 }}>Classes</span>
+          {PROSPECT_YEARS.map((y) => (
+            <button key={y} onClick={() => toggleYear(y)} aria-pressed={years.includes(y)} style={chip(years.includes(y))}>
+              {years.includes(y) ? "✓ " : "+ "}{y}
+            </button>
+          ))}
+        </div>
+        {status === "loading" && <LoadingSpinner label="Finding matches" size={24} minHeight="120px" />}
+        {status === "error" && <div style={{ padding: 20, color: "#b42318", fontSize: 13, fontFamily: "Arial, sans-serif" }}>Couldn't load prospects — try again.</div>}
+        {status === "done" && !results.length && (
+          <div style={{ padding: 20, color: "#9aa5b4", fontStyle: "italic", fontSize: 13, fontFamily: "Arial, sans-serif" }}>No {position} prospects with enough data to match yet.</div>
+        )}
+        {status === "done" && results.map(({ record: p, similarity, traits }, i) => {
+          const shared = traits ? [...traits.sharedStrengths, ...traits.sharedWeaknesses] : [];
+          return (
+            <Link
+              key={p.id} to={`/player/${p.Slug}`}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: isMobile ? "10px 14px" : "10px 20px", borderTop: i ? "1px solid #f0f2f5" : "none", textDecoration: "none" }}
+            >
+              <span style={{ width: 18, flexShrink: 0, fontSize: 12, fontWeight: 900, color: "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
+              <span title={p.School} style={{ flexShrink: 0, width: isMobile ? 34 : 40, height: isMobile ? 34 : 40, borderRadius: 6, background: "#f5f6f8", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, boxSizing: "border-box" }}>
+                {schoolLogos[p.School] && <img src={schoolLogos[p.School]} alt={p.School} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: isMobile ? 16 : 19, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {`${p.First || ""} ${p.Last || ""}`.trim()}
+                </span>
+                <span style={{ display: "block", marginTop: 2, fontSize: 11, fontWeight: 700, color: "#5f6b7a", fontFamily: "Arial, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {[p.Eligible, ...shared].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+              <span style={{ flexShrink: 0, textAlign: "right" }}>
+                <span style={{ display: "block", fontSize: 16, fontWeight: 900, color: color1, fontVariantNumeric: "tabular-nums" }}>{Math.round(fitScore(similarity))}</span>
+                <span style={{ display: "block", fontSize: 9, fontWeight: 900, color: "#9aa5b4", letterSpacing: "0.1em", textTransform: "uppercase" }}>Fit</span>
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Career Path tab — every stop, newest first, one block per
 // uninterrupted run with an organization (groupStints): logo, name, level,
 // span, then each job held there. NFL head coach / coordinator / GM jobs are
-// bold. College logos come from schools/{name} when one matches. ──
+// bold; playing days are tagged PLAYER, with their notes (draft slot,
+// honors) shown. Each stop wears its own organization's colors — the NFL
+// team's, or schools/{name}'s for a college (neutral when neither has any);
+// a current stop's marker fills with that color and its dark logo. The
+// summary tiles count the coaching/front office career only. ──
 const KEY_ROLES = ["HC", "IHC", "GM", "OC", "DC"];
 const LEVEL_LABEL = { NFL: "NFL", College: "College", Other: "Other" };
+const NEUTRAL = "#5f6b7a";
 
 function CareerPath({ person, teams, color1, color2, isMobile }) {
   const groups = useMemo(() => groupStints([...(person.Stints || [])].reverse()), [person]);
-  const schoolLogos = useSchoolLogos(groups.filter((g) => g.stints[0].Level === "College").map((g) => g.org));
+  // First stop that's only playing days — the "Playing Career" divider
+  // goes above it.
+  const playStart = groups.findIndex((g) => g.stints.every(isPlayerStint));
+  const schools = useSchools(groups.filter((g) => g.stints[0].Level === "College").map((g) => g.org));
 
-  const stints = person.Stints || [];
+  const stints = (person.Stints || []).filter((s) => !isPlayerStint(s));
   const firstYear = Math.min(...stints.map((s) => s.StartYear).filter(Boolean));
+  // Through this year when they're still working, else their last listed year.
+  const lastYear = stints.some(isOpenStint) ? new Date().getFullYear() : Math.max(...stints.map((s) => s.EndYear || s.StartYear).filter(Boolean));
+  const yearsActive = Number.isFinite(firstYear) && Number.isFinite(lastYear) ? lastYear - firstYear + 1 : null;
   const nflTeams = new Set(stints.filter((s) => s.Level === "NFL" && s.Team).map((s) => s.Team)).size;
-  const hcJobs = groups.filter((g) => g.stints.some((s) => s.Level === "NFL" && s.Roles?.some((r) => r === "HC" || r === "IHC"))).length;
+  const careerGroups = groups.filter((g) => g.stints.some((s) => !isPlayerStint(s)));
+  const hcJobs = careerGroups.filter((g) => g.stints.some((s) => s.Level === "NFL" && s.Roles?.some((r) => r === "HC" || r === "IHC"))).length;
   const facts = [
-    ["Stops", groups.length],
+    ["Stops", careerGroups.length],
     ["NFL Teams", nflTeams],
     ["NFL HC Jobs", hcJobs],
-    ["Since", Number.isFinite(firstYear) ? firstYear : "–"],
+    ["Years Active", yearsActive ?? "–"],
   ];
 
   return (
@@ -627,38 +1018,66 @@ function CareerPath({ person, teams, color1, color2, isMobile }) {
         {groups.map((g, gi) => {
           const level = g.stints[0].Level;
           const team = level === "NFL" ? g.stints[0].Team : null;
-          const logo = team ? teams[team]?.Logo1 : schoolLogos[g.org];
+          const brand = team ? teams[team] : level === "College" ? schools[g.org] : null;
           const current = g.stints.some(isOpenStint);
+          const gc1 = isHex(brand?.Color1) ? brand.Color1 : NEUTRAL;
+          const gc2 = isHex(brand?.Color2) ? brand.Color2 : "#e6ebf2";
+          // Filled marker for a current stop — needs the dark-background logo.
+          const filled = current && isHex(brand?.Color1);
+          const logo = filled ? brand.LogoDark || brand.Logo1 : brand?.Logo1;
           const size = isMobile ? 44 : 56;
           return (
-            <div key={gi} style={{ position: "relative", display: "flex", gap: isMobile ? 12 : 18, marginBottom: 14 }}>
-              <div style={{
-                position: "relative", zIndex: 1, flexShrink: 0, width: size, height: size, borderRadius: "50%", background: "#fff",
-                boxShadow: `0 0 0 3px ${current ? color1 : "#e6ebf2"}, 0 2px 6px rgba(0,0,0,0.08)`,
-                display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
-              }}>
-                {logo
-                  ? <img src={logo} alt="" style={{ width: "72%", height: "72%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                  : <span style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, color: "#9aa5b4" }}>{(team || g.org || "?").replace(/[^A-Za-z ]/g, "").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase()}</span>}
+            <Fragment key={gi}>
+            {gi === playStart && (
+              // Sits on the rail: the pill's white ring breaks the line.
+              <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 10, margin: "6px 0 16px" }}>
+                <span style={{
+                  marginLeft: isMobile ? 0 : 4, fontSize: 10, fontWeight: 900, color: "#fff", background: "#7a8594",
+                  boxShadow: "0 0 0 4px #fff", borderRadius: 999, padding: "4px 12px", letterSpacing: "0.1em", textTransform: "uppercase", whiteSpace: "nowrap",
+                }}>
+                  Playing Career
+                </span>
+                <span style={{ flex: 1, height: 2, borderRadius: 1, background: "#dfe4ea" }} />
               </div>
-              <div style={{ ...card, flex: 1, minWidth: 0, padding: isMobile ? "10px 12px" : "12px 18px", boxShadow: current ? `0 1px 3px rgba(0,0,0,0.07), 0 0 0 1.5px ${color1}` : card.boxShadow }}>
+            )}
+            <div style={{ position: "relative", display: "flex", gap: isMobile ? 12 : 18, marginBottom: 14 }}>
+              {(() => {
+                const marker = (
+                <div style={{
+                  position: "relative", zIndex: 1, flexShrink: 0, width: size, height: size, borderRadius: "50%", background: filled ? gc1 : "#fff",
+                  boxShadow: `0 0 0 3px ${filled ? gc2 : current ? gc1 : "#e6ebf2"}, 0 2px 6px rgba(0,0,0,0.08)`,
+                  display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                }}>
+                  {logo
+                    ? <img src={logo} alt="" style={{ width: "72%", height: "72%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    : <span style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, color: filled ? "#fff" : "#9aa5b4" }}>{(team || g.org || "?").replace(/[^A-Za-z ]/g, "").split(" ").filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase()}</span>}
+                </div>
+                );
+                // An NFL stop's marker links to that team's page.
+                return team
+                  ? <Link to={`/nfl/${team.toLowerCase()}`} title={NFL_TEAMS[team] || g.org} style={{ position: "relative", zIndex: 1, flexShrink: 0, display: "flex", alignSelf: "flex-start", borderRadius: "50%" }}>{marker}</Link>
+                  : marker;
+              })()}
+              <div style={{ ...card, flex: 1, minWidth: 0, padding: isMobile ? "10px 12px" : "12px 18px", boxShadow: current ? `0 1px 3px rgba(0,0,0,0.07), 0 0 0 1.5px ${gc1}` : card.boxShadow }}>
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: isMobile ? 15 : 18, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em", lineHeight: 1.2 }}>{g.org}</span>
-                    <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 900, color: level === "NFL" ? "#fff" : "#6b7685", background: level === "NFL" ? color1 : "#eef1f5", borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em" }}>
+                    <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 900, color: brand ? "#fff" : "#6b7685", background: brand ? gc1 : "#eef1f5", borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em" }}>
                       {LEVEL_LABEL[level] || level}
                     </span>
                   </div>
-                  {g.span && <span style={{ fontSize: 12, fontWeight: 900, color: current ? color1 : "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>{g.span}</span>}
+                  {g.span && <span style={{ fontSize: 12, fontWeight: 900, color: current ? gc1 : "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>{g.span}</span>}
                 </div>
                 <div style={{ marginTop: 6 }}>
                   {g.stints.map((s, i) => {
                     const key = s.Level === "NFL" && s.Roles?.some((r) => KEY_ROLES.includes(r));
                     return (
                       <div key={i} style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "4px 0", borderTop: i ? "1px solid #f3f5f8" : "none" }}>
-                        <span style={{ flexShrink: 0, width: isMobile ? 92 : 110, fontSize: 11, fontWeight: 900, color: isOpenStint(s) ? color1 : "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>{stintYearSpan(s)}</span>
+                        <span style={{ flexShrink: 0, width: isMobile ? 92 : 110, fontSize: 11, fontWeight: 900, color: isOpenStint(s) ? gc1 : "#9aa5b4", fontVariantNumeric: "tabular-nums" }}>{stintYearSpan(s)}</span>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontFamily: "Arial, sans-serif", lineHeight: 1.4, fontWeight: key ? 700 : 400, color: key ? "#1a1f2b" : "#4a5466" }}>
+                          {isPlayerStint(s) && <span style={{ marginRight: 6, fontSize: 9, fontWeight: 900, color: "#fff", background: "#7a8594", borderRadius: 4, padding: "1px 5px", letterSpacing: "0.06em", fontFamily: "'Arial Black', Arial, sans-serif", verticalAlign: "1px" }}>PLAYER</span>}
                           {s.Title || (s.Roles || []).map((r) => ROLE_BY_KEY[r]?.label || r).join(" / ")}
+                          {isPlayerStint(s) && s.Notes && <span style={{ display: "block", fontSize: 11, color: "#7a8594", fontWeight: 400 }}>{s.Notes}</span>}
                         </span>
                       </div>
                     );
@@ -666,6 +1085,7 @@ function CareerPath({ person, teams, color1, color2, isMobile }) {
                 </div>
               </div>
             </div>
+            </Fragment>
           );
         })}
       </div>

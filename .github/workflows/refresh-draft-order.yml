@@ -1,0 +1,34 @@
+name: Refresh Draft Order
+
+# Tuesdays at 10:00 UTC (5am ET / 6am EDT — after Monday Night Football;
+# GitHub Actions schedules always run in UTC). Re-sorts the next draft's
+# order (draftOrders/{year}) from the season's results — see
+# scripts/refreshDraftOrder.mjs. Leaves trades alone, and skips a year an
+# admin has set to manual in Admin → Draft Order. Also runnable on demand
+# via workflow_dispatch.
+on:
+  schedule:
+    - cron: "0 10 * * 2"
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      # Node 22: the script imports the app's own ESM utils directly (same
+      # as build-site-snapshots.yml).
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Refresh draft order
+        run: node scripts/refreshDraftOrder.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

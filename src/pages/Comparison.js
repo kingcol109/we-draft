@@ -44,6 +44,7 @@ import {
   decodeCompSnapshotRows, COMP_SNAPSHOT_VERSION, recommendedCompWindow, inRecommendedWindow, doubleExtendedFor,
 } from "../utils/historicalStats";
 import { cssRect } from "../utils/pageZoom";
+import NflFitView from "../components/NflFitView";
 
 const BLUE = "#0055a5";
 const NAVY = "#00305c";
@@ -683,6 +684,10 @@ export default function Comparison() {
   const { news: sidebarNews, videos: sidebarVideos, watchClips } = usePlayerSidebarData(loadedPlayer);
   const lastPointerType = useRef("mouse");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  // Page tabs for a loaded prospect: "comps" (historical comparisons — the
+  // default) or "nfl" (NFL Fit, see components/NflFitView.jsx).
+  const [view, setView] = useState("comps");
+  useEffect(() => { setView("comps"); }, [routeSlug]);
   // Below STACK_BELOW the 260 | 800 | 260 grid (+ 60px side padding + gaps)
   // would crush the middle column (~220px at a 900px tablet), so the page
   // stacks into one centered column — class dropdown, main, right column —
@@ -741,6 +746,7 @@ export default function Comparison() {
   const resultsPool = submitted ? (poolByPos[submitted.position] || null) : null;
 
   const cutoffYear = compCutoffYear(loadedPlayer);
+  const hasNflFitTab = !!loadedPlayer && ACTIVE_YEARS.includes(String(loadedPlayer.Eligible)) && POSITION_ORDER.includes(loadedPlayer.Position);
   const years = useMemo(() => gradedClassYears(pool, cutoffYear), [pool, cutoffYear]);
   const recWindow = useMemo(() => recommendedCompWindow(pool, cutoffYear), [pool, cutoffYear]);
   const effectiveFromYear = fromYear || defaultFromYear(years, recWindow);
@@ -1086,6 +1092,7 @@ export default function Comparison() {
     school: loadedPlayer?.School || "",
     position: loadedPlayer?.Position || "",
     compNames: resultsReady ? results.slice(0, 3).map((r) => recordName(r.record)) : [],
+    nflFits: hasNflFitTab,
   });
   const seoUrl = seoSlug ? `${SITE_URL}/comparison/${seoSlug}` : `${SITE_URL}/comparison`;
   const seoIndexable = !slugNotFound;
@@ -1654,6 +1661,30 @@ export default function Comparison() {
           </h2>
         )}
 
+        {/* ── Tabs — only for a loaded, still-undrafted prospect at a
+            position NFL staffs are profiled at (not specialists). ── */}
+        {hasNflFitTab && (
+          <div role="tablist" style={{ display: "flex", gap: isMobile ? "16px" : "26px", justifyContent: "center", margin: "0 0 18px", borderBottom: "1px solid #e3e8ef" }}>
+            {[["comps", "Player Comps"], ["nfl", "NFL Fit"]].map(([key, label]) => {
+              const on = view === key;
+              return (
+                <button
+                  key={key} role="tab" aria-selected={on} onClick={() => setView(key)}
+                  style={{
+                    background: "none", border: "none", margin: "0 0 -1px", padding: "0 2px 8px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                    color: on ? BLUE : "#9aa5b4", fontSize: isMobile ? "13px" : "14px", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase",
+                    borderBottom: `3px solid ${on ? GOLD : "transparent"}`,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {hasNflFitTab && view === "nfl" && <NflFitView player={loadedPlayer} color1={BLUE} cardStyle={cardStyle} isMobile={isMobile} />}
+
+        {(!hasNflFitTab || view === "comps") && <>
         {/* ── Missing-traits prompt — traits are half of a full match (see
             findComps: 100% = same measurements + 3 shared strengths AND 3
             shared weaknesses), so a search with fewer than 3 strengths says
@@ -2322,6 +2353,7 @@ export default function Comparison() {
             </section>
           );
         })()}
+        </>}
       </div>
       </div>
       {/* Right column — Playing now (while his team is live), Videos + In

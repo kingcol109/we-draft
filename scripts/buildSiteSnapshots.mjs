@@ -21,7 +21,7 @@
 //   node --env-file=.env scripts/buildSiteSnapshots.mjs            # write
 //   node --env-file=.env scripts/buildSiteSnapshots.mjs --dry-run  # build + report only
 import { createRequire } from "module";
-import { buildSiteSnapshotDocs } from "../src/utils/snapshotBuilders.js";
+import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../src/utils/snapshotBuilders.js";
 
 const require = createRequire(import.meta.url);
 const { getFirestore } = require("./firebaseAdmin");
@@ -40,16 +40,17 @@ async function main() {
   const db = getFirestore();
   const t0 = Date.now();
 
-  const [histSnap, playerSnap, orderSnap, schoolSnap, adSnap, nflSnap] = await Promise.all([
+  const [histSnap, playerSnap, orderSnap, schoolSnap, adSnap, nflSnap, coachSnap] = await Promise.all([
     db.collection("historical").get(),
     db.collection("players").get(),
     db.collection("draftOrder").get(),
     db.collection("schools").get(),
     db.collection("ads").get(),
     db.collection("nfl").get(),
+    db.collection("coaches").where("Status", "==", "current").get(),
   ]);
   const players = playerSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  console.log(`Read historical ${histSnap.size}, players ${players.length}, draftOrder ${orderSnap.size}, schools ${schoolSnap.size}, ads ${adSnap.size}`);
+  console.log(`Read historical ${histSnap.size}, players ${players.length}, draftOrder ${orderSnap.size}, schools ${schoolSnap.size}, ads ${adSnap.size}, coaches ${coachSnap.size}`);
 
   const evalsByPlayerId = {};
   let evalDocs = 0;
@@ -68,6 +69,7 @@ async function main() {
     schools: schoolSnap.docs.map((d) => d.data()),
     ads: adSnap.docs.map((d) => d.data()),
     nflTeams: nflSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    coaches: coachSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
     latestDraftYear: LATEST_DRAFT_YEAR,
     activeYears: ACTIVE_YEARS,
   });
@@ -79,17 +81,20 @@ async function main() {
     if (bytes > MAX_DOC_BYTES) throw new Error(`${id} is ${Math.round(bytes / 1024)}KB — too large for one document`);
   }
   const meta = docs.find((d) => d.id === "_meta").data;
-  console.log(`Built ${docs.length} docs — ${meta.gradedComps} graded comps, ${meta.classLists} class lists, ${meta.searchRows} searchable prospects, ${meta.ads} ads. Largest: ${largest.id} ${Math.round(largest.bytes / 1024)}KB`);
+  console.log(`Built ${docs.length} docs — ${meta.gradedComps} graded comps, ${meta.classLists} class lists, ${meta.searchRows} searchable prospects, ${meta.ads} ads, ${meta.nflFitPlayers ?? 0} prospects with NFL fits. Largest: ${largest.id} ${Math.round(largest.bytes / 1024)}KB`);
 
   if (DRY_RUN) {
     console.log("Dry run — nothing written.");
     return;
   }
-  const batch = db.batch();
-  docs.forEach(({ id, data }) => {
-    batch.set(db.collection("compSnapshots").doc(id), { ...data, builtAt: FieldValue.serverTimestamp(), builtBy: "schedule" });
-  });
-  await batch.commit();
+  // Several MB in all — committed in chunks under Firestore's per-commit cap.
+  for (const chunk of snapshotCommitChunks(docs)) {
+    const batch = db.batch();
+    chunk.forEach(({ id, data }) => {
+      batch.set(db.collection("compSnapshots").doc(id), { ...data, builtAt: FieldValue.serverTimestamp(), builtBy: "schedule" });
+    });
+    await batch.commit();
+  }
   console.log(`Wrote ${docs.length} compSnapshots docs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }
 
