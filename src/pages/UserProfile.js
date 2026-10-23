@@ -14,6 +14,7 @@ import {
   deleteDoc,
   writeBatch,
   serverTimestamp,
+  orderBy,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import Logo from "../assets/Logo1.png";
@@ -104,6 +105,7 @@ export default function UserProfile() {
   const [showRequest, setShowRequest] = useState(false);
   const [showIssue, setShowIssue] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
+  const [showSims, setShowSims] = useState(false);
 
   // Pending incoming friend requests — fetched independently of FriendsPanel
   // (which only mounts once the section is expanded) so the "👥 Friends"
@@ -367,7 +369,10 @@ export default function UserProfile() {
               { to: "/my-draft-class", emoji: "🏈", label: "My Draft Class", sub: "Build your perfect 2026 draft class" },
               { to: "/boards", emoji: "📋", label: "My Boards", sub: "View and manage your scouting boards" },
               { to: "/whiteboard", emoji: "🗂", label: "Whiteboard", sub: "Organize your draft board" },
-              ...(simBeta || role === "admin" ? [{ to: "/sim", emoji: "🎮", label: "Football Sim", sub: "Beta — play the We-Draft football sim" }] : []),
+              ...(simBeta || role === "admin" ? [
+                { to: "/sim", emoji: "🎮", label: "Football Sim", sub: "Beta — play the We-Draft football sim" },
+                { to: "/draftsim", emoji: "🏈", label: "Draft Sim", sub: "Beta — run the NFL draft live" },
+              ] : []),
             ].map(({ to, emoji, label, sub }) => (
               <Link key={to} to={to} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", boxSizing: "border-box", backgroundColor: "#fff", border: "2px solid " + BLUE, borderRadius: "8px", padding: isMobile ? "14px 16px" : "12px 16px", textDecoration: "none" }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
@@ -398,6 +403,12 @@ export default function UserProfile() {
           <div style={{ marginBottom: "18px" }}>
             <SectionHeader label="👥 Friends" open={showFriends} onToggle={() => setShowFriends((p) => !p)} badge={pendingFriendRequests} />
             {showFriends && <FriendsPanel isMobile={isMobile} />}
+          </div>
+
+          {/* Draft Sims saved from the sim's end screen (SimResults.jsx). */}
+          <div style={{ marginBottom: "18px" }}>
+            <SectionHeader label="🏈 My Draft Sims" open={showSims} onToggle={() => setShowSims((p) => !p)} />
+            {showSims && <DraftSimsPanel />}
           </div>
 
           {/* Request a Player */}
@@ -442,6 +453,67 @@ export default function UserProfile() {
         <Suspense fallback={<LoadingSpinner label="Loading Articles" size={32} minHeight="160px" />}><ArticlesManager /></Suspense>
       </div>
     )}
+    </div>
+  );
+}
+
+// ── My Draft Sims — the user's own teams' picks from each Draft Sim they
+// saved (users/{uid}/draftSims, written by components/draftSim/
+// SimResults.jsx), newest first. ──
+function DraftSimsPanel() {
+  const { user } = useAuth();
+  const [sims, setSims] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getDocs(query(collection(db, "users", user.uid, "draftSims"), orderBy("createdAt", "desc")))
+      .then((snap) => { if (!cancelled) setSims(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); })
+      .catch((e) => { console.error("Draft sims load error:", e); if (!cancelled) setSims([]); });
+    return () => { cancelled = true; };
+  }, [user.uid]);
+  const remove = async (id) => {
+    if (!window.confirm("Delete this draft sim?")) return;
+    await deleteDoc(doc(db, "users", user.uid, "draftSims", id));
+    setSims((list) => list.filter((s) => s.id !== id));
+  };
+  if (!sims) return <LoadingSpinner size={24} minHeight="80px" />;
+  return (
+    <div style={{ marginTop: "12px" }}>
+      {sims.length === 0 && (
+        <p style={{ fontSize: "13px", fontWeight: 700, color: "#666", fontFamily: "Arial, sans-serif" }}>
+          No saved sims yet. Finish a draft and hit Save to Profile.
+        </p>
+      )}
+      {sims.map((s) => (
+        <div key={s.id} style={{ border: "2px solid " + BLUE, borderRadius: "10px", marginBottom: "12px", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: BLUE, color: "#fff" }}>
+            <span style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.06em", flex: 1 }}>
+              {s.year} DRAFT SIM{s.createdAt?.toDate ? ` · ${s.createdAt.toDate().toLocaleDateString()}` : ""}
+            </span>
+            <button onClick={() => remove(s.id)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.7, cursor: "pointer", fontSize: "11px", fontWeight: 900 }}>DELETE</button>
+          </div>
+          {(s.teams || []).map((t) => (
+            <div key={t.team} style={{ padding: "8px 12px", borderTop: "1px solid #e6ecf3" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+                <Link to={`/nfl/${t.team.toLowerCase()}`} style={{ color: BLUE, fontWeight: 900, fontSize: "14px", textDecoration: "none" }}>{t.team}</Link>
+                <span style={{ fontWeight: 900, fontSize: "16px", color: GOLD }}>{t.grade}</span>
+              </div>
+              {(t.picks || []).map((p) => (
+                <div key={p.overall} style={{ display: "flex", gap: "8px", fontSize: "12px", padding: "2px 0", fontFamily: "Arial, sans-serif" }}>
+                  <span style={{ color: "#888", fontWeight: 700, width: "62px", flexShrink: 0 }}>R{p.round} · {p.overall}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {p.slug
+                      ? <Link to={`/player/${p.slug}`} style={{ color: "#111", fontWeight: 900, textDecoration: "none" }}>{p.first} {p.last}</Link>
+                      : <span style={{ fontWeight: 900 }}>{p.first} {p.last}</span>}
+                    <span style={{ color: "#666" }}> · {p.pos} · {p.school}</span>
+                  </span>
+                  <span style={{ fontWeight: 900 }}>{p.grade}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))}
+      <Link to="/draftsim" style={{ display: "inline-block", color: BLUE, fontWeight: 900, fontSize: "13px", textDecoration: "none" }}>Run a new draft sim →</Link>
     </div>
   );
 }

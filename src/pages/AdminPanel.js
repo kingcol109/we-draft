@@ -22,6 +22,7 @@ import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
 import AdminCoachHistory from "../components/AdminCoachHistory";
+import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
@@ -286,6 +287,7 @@ const SECTIONS = [
   { key: "youtube", label: "YouTube Analytics", icon: "▶️", ready: true },
   { key: "research", label: "Research", icon: "🔬", ready: true },
   { key: "coaches", label: "Coach History", icon: "📋", ready: true },
+  { key: "mockdraft", label: "Mock Draft", icon: "📺", ready: true },
   { key: "branding", label: "Branding", icon: "🎨", ready: true },
   { key: "articles", label: "Articles", icon: "📰", ready: true },
   { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
@@ -8746,7 +8748,8 @@ function SortableTh({ label, sortKey, activeKey, dir, onSort, align = "left" }) 
 // the Dummy Content feature; verified/role were previously only ever set by
 // hand in the Firebase console). Dummy accounts (isDummy: true) are
 // filtered out — they're synthetic evaluation authors, not real people to
-// manage here. "Sim Beta" writes `simBeta` the same way — it opens /sim
+// manage here. "Sim Beta" writes `simBeta` the same way — it opens /sim and
+// (until it launches) /draftsim
 // (normally admin-only, see SimRoute.js) to that user and shows them a Sim
 // button on their own profile; same rules protection as verified. ──
 function UsersSection() {
@@ -14018,6 +14021,7 @@ export default function AdminPanel() {
             {activeSection === "youtube" && <AdminYouTubeAnalytics />}
             {activeSection === "research" && <AdminResearch />}
             {activeSection === "coaches" && <AdminCoachHistory />}
+            {activeSection === "mockdraft" && <AdminMockDraft />}
             {activeSection === "branding" && <BrandingSection />}
             {activeSection === "articles" && <ArticlesManager />}
             {activeSection === "calendar" && <ContentCalendarManager />}

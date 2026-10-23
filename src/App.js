@@ -55,6 +55,8 @@ const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
 const MyMocksPage = lazy(() => import("./pages/MyMocksPage"));
 const CreateMock = lazy(() => import("./pages/CreateMock"));
 const ViewMock = lazy(() => import("./pages/ViewMock"));
+// Draft Sim — /draftsim, and /draftsim/{team} to start as that team.
+const DraftSim = lazy(() => import("./pages/DraftSim"));
 
 // Whiteboard
 const Whiteboard = lazy(() => import("./pages/Whiteboard"));
@@ -203,6 +205,10 @@ function MainLayout() {
                 the editor at the plain /mocks/:mockId path below. */}
             <Route path="/mocks/:mockId/view" element={<ViewMock />} />
             <Route path="/mocks/:mockId" element={<CreateMock />} />
+            {/* Beta until launch: admins + Sim Beta users (SimRoute.js).
+                Signed out → sign-in prompt; signed in without access → /mocks. */}
+            <Route path="/draftsim" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
+            <Route path="/draftsim/:team" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
             <Route path="/whiteboard" element={<Whiteboard />} />
             <Route path="/draft" element={<DraftPage />} />
             <Route path="/my-draft-class" element={<MyDraftClass />} />

@@ -1,33 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+// src/pages/CreateMock.jsx
+//
+// /mocks/create and /mocks/:mockId — the mock draft editor: pick a class,
+// fill each pick from the player bank (drag, or tap a player to fill the
+// next open pick), trade picks, and write it up — an intro plus an optional
+// note on each pick, which ViewMock.js shows as the column. Only the owner
+// edits; anyone else (and the owner of a locked 2026 mock) is sent to the
+// read-only /view page.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, Link, Navigate } from "react-router-dom";
 import {
   collection, addDoc, getDocs, getDoc, updateDoc,
   doc, Timestamp, query, where,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
-import { getAuth } from "firebase/auth";
 import { useAuth } from "../context/AuthContext";
-import { useParams } from "react-router-dom";
-import { useRef } from "react";
-import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ShareMockButton from "../components/ShareMockButton";
+import { fetchNflBranding } from "../utils/draftProfileData";
 import { picksFromOrder, followsOrder, withEffectiveOrder, orderFromLegacyPicks, ORDER_YEAR } from "../utils/draftOrder";
+import { textOn } from "../utils/teamColors";
+import {
+  BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, FONT, INTRO_MAX, NOTE_MAX,
+  useIsMobile, MockPageShell, MockHero, heroText, chip, button,
+} from "../components/MockDraftKit";
 
-const SITE_BLUE = "#0055a5";
-const SITE_GOLD = "#f6a21d";
 const MOCK_LOCK_DATE = new Date("2026-04-24T19:55:00-04:00");
 
 const gradeScale = {
   "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
   "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
   "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
-};
-const gradeLabels = {
-  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
 };
 const gradeRankDesc = (label) => { const n = gradeScale[label]; return n ? 11 - n : null; };
 
@@ -38,46 +41,51 @@ function sanitizeUrl(url) {
   return u;
 }
 
-function gradeDisplay(g) {
-  const map = {
-    "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
-    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
-    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
-    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
-    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
-    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
-    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
-    "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
-  };
-  return map[g] || null;
-}
+const panel = { background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, overflow: "hidden", display: "flex", flexDirection: "column" };
+const panelHead = { background: BLUE, padding: "9px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 };
+const panelTitle = { color: GOLD, fontWeight: 900, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em" };
+const field = { width: "100%", boxSizing: "border-box", border: "2px solid #d8dee8", borderRadius: 10, outline: "none", color: INK, background: "#fff" };
 
 export default function CreateMock() {
   const { mockId } = useParams();
   const isEditMode = Boolean(mockId);
   const navigate = useNavigate();
-  const auth = getAuth();
-  const { login } = useAuth();
-  const [userId, setUserId] = useState(null);
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
+  const { user, authReady, login } = useAuth();
+  const userId = user?.uid || null;
+  const isMobile = useIsMobile();
+  const filterRef = useRef(null);
 
-  useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, []);
+  const [mockName, setMockName] = useState("New Mock Draft");
+  const [intro, setIntro] = useState("");
+  const [rounds, setRounds] = useState(7);
+  const [mockOwnerId, setMockOwnerId] = useState(null);
+  const [picks, setPicks] = useState([]);
+  const [teams, setTeams] = useState({});
+  const [activePick, setActivePick] = useState(null);
+  const [players, setPlayers] = useState([]);
+  const [assignedPlayers, setAssignedPlayers] = useState({});
+  const [orderLoaded, setOrderLoaded] = useState(false);
+  const [mockLoaded, setMockLoaded] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [bankLoading, setBankLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPositions, setSelectedPositions] = useState([]);
+  const [gradeView, setGradeView] = useState("COMM");
+  const [positionOpen, setPositionOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("idle");
+  const [userGrades, setUserGrades] = useState({});
+  const [visibility, setVisibility] = useState("public");
+  const [ownerLabel, setOwnerLabel] = useState("");
+  const [activeEditRound, setActiveEditRound] = useState(1);
+  const [showBank, setShowBank] = useState(true);
+  const [draftClass, setDraftClass] = useState(null);
+  const [pendingClass, setPendingClass] = useState(null);
 
-  useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => {
-      const uid = user?.uid || null;
-      setUserId(uid);
-      if (!mockId && uid) setMockOwnerId(uid);
-    });
-    return unsub;
-  }, [mockId]);
+  const assignedPlayerIds = useMemo(() => new Set(Object.values(assignedPlayers).map((p) => p.id)), [assignedPlayers]);
+  const isOwner = userId && mockOwnerId === userId;
+
+  useEffect(() => { if (!mockId && userId) setMockOwnerId(userId); }, [mockId, userId]);
+  useEffect(() => { fetchNflBranding().then(setTeams).catch(() => {}); }, []);
 
   useEffect(() => {
     if (!userId) return;
@@ -93,45 +101,9 @@ export default function CreateMock() {
     loadUserGrades();
   }, [userId]);
 
-  const filterRef = useRef(null);
-
-  const [mockName, setMockName] = useState("New Mock Draft");
-  const [rounds, setRounds] = useState(7);
-  const [mockOwnerId, setMockOwnerId] = useState(null);
-  const [picks, setPicks] = useState([]);
-  const [teams, setTeams] = useState({});
-  const [activePick, setActivePick] = useState(null);
-  const [players, setPlayers] = useState([]);
-  const [assignedPlayers, setAssignedPlayers] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [bankLoading, setBankLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedPositions, setSelectedPositions] = useState([]);
-  const [gradeView, setGradeView] = useState("COMM");
-  const [positionOpen, setPositionOpen] = useState(false);
-  const [gradeOpen, setGradeOpen] = useState(false);
-  const [saveStatus, setSaveStatus] = useState("idle");
-  const [userGrades, setUserGrades] = useState({});
-  const [roundsOpen, setRoundsOpen] = useState(false);
-  const [visibility, setVisibility] = useState("public");
-  const [visibilityOpen, setVisibilityOpen] = useState(false);
-  const [ownerLabel, setOwnerLabel] = useState("");
-  const [activeRound, setActiveRound] = useState(1);
-  const [activeEditRound, setActiveEditRound] = useState(1);
-  const [showBank, setShowBank] = useState(true);
-  const [communityData, setCommunityData] = useState({});
-  const [communityLoading, setCommunityLoading] = useState(false);
-  const [draftClass, setDraftClass] = useState(null);
-  const [pendingClass, setPendingClass] = useState(null);
-
-  const assignedPlayerIds = useMemo(() => new Set(Object.values(assignedPlayers).map((p) => p.id)), [assignedPlayers]);
-  const isOwner = userId && mockOwnerId === userId;
-
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (filterRef.current && !filterRef.current.contains(e.target)) {
-        setPositionOpen(false); setGradeOpen(false);
-      }
+      if (filterRef.current && !filterRef.current.contains(e.target)) setPositionOpen(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -142,82 +114,73 @@ export default function CreateMock() {
     const loadOwner = async () => {
       try {
         const snap = await getDoc(doc(db, "users", mockOwnerId));
-        if (snap.exists()) {
-          const data = snap.data();
-          setOwnerLabel(data.username || data.email || mockOwnerId);
-        } else setOwnerLabel(mockOwnerId);
-      } catch { setOwnerLabel(mockOwnerId); }
+        setOwnerLabel(snap.exists() ? (snap.data().username || snap.data().email || "") : "");
+      } catch { setOwnerLabel(""); }
     };
     loadOwner();
   }, [mockOwnerId]);
 
+  // A new mock's picks: the chosen class's draft order.
   useEffect(() => {
-    const loadDraft = async () => {
-      const teamSnap = await getDocs(collection(db, "nfl"));
-      const teamMap = {};
-      teamSnap.forEach((t) => (teamMap[t.id] = t.data()));
-      setTeams(teamMap);
-
-      if (!mockId && draftClass) {
-        // Map each draft class to its order collection
-        const orderCollectionMap = {
-          "2027": "draftOrder2027",
-          "2028": "draftOrder2028",
-          "2026": "draftOrder",
-        };
-        const orderCollection = orderCollectionMap[draftClass] || "draftOrder";
-        // Upcoming drafts live in one draftOrders/{year} doc now (all seven
-        // rounds — see utils/draftOrder.js); the old per-pick collection is
-        // the fallback for a year not saved in that format yet.
-        // A later draft follows the upcoming draft's order with its own trades.
-        let rawPicks = null;
-        if (draftClass !== "2026") {
-          const read = async (y) => { const s = await getDoc(doc(db, "draftOrders", y)); return s.exists() ? s.data() : null; };
-          let own = await read(draftClass);
-          const base = followsOrder(draftClass) ? await read(ORDER_YEAR) : own;
-          if (base?.order?.length) {
-            // A later draft not saved in the new format yet keeps its old trades.
-            if (!own && followsOrder(draftClass)) own = { trades: orderFromLegacyPicks((await getDocs(collection(db, orderCollection))).docs.map((d) => d.data())).trades };
-            rawPicks = picksFromOrder(withEffectiveOrder(draftClass, own, base));
-          }
+    if (mockId || !draftClass) return;
+    const loadOrder = async () => {
+      const orderCollectionMap = { "2027": "draftOrder2027", "2028": "draftOrder2028", "2026": "draftOrder" };
+      const orderCollection = orderCollectionMap[draftClass] || "draftOrder";
+      // Upcoming drafts live in one draftOrders/{year} doc now (all seven
+      // rounds — see utils/draftOrder.js); the old per-pick collection is
+      // the fallback for a year not saved in that format yet.
+      // A later draft follows the upcoming draft's order with its own trades.
+      let rawPicks = null;
+      if (draftClass !== "2026") {
+        const read = async (y) => { const s = await getDoc(doc(db, "draftOrders", y)); return s.exists() ? s.data() : null; };
+        let own = await read(draftClass);
+        const base = followsOrder(draftClass) ? await read(ORDER_YEAR) : own;
+        if (base?.order?.length) {
+          // A later draft not saved in the new format yet keeps its old trades.
+          if (!own && followsOrder(draftClass)) own = { trades: orderFromLegacyPicks((await getDocs(collection(db, orderCollection))).docs.map((d) => d.data())).trades };
+          rawPicks = picksFromOrder(withEffectiveOrder(draftClass, own, base));
         }
-        if (!rawPicks) rawPicks = (await getDocs(collection(db, orderCollection))).docs.map((d) => d.data());
-        const loaded = rawPicks
-          .sort((a, b) => a.Pick - b.Pick)
-          .map((d) => ({
-            pickNumber: d.Pick,
-            round: d.Round,
-            originalTeam: d.Team,
-            currentTeam: d.Traded ? d.Traded : d.Team,
-            tradedFrom: d.Traded ? d.Team : null,
-          }));
-        setPicks(loaded);
-        // 2027 and 2028 default to 1 round; 2026 defaults to 7
-        if (draftClass === "2027" || draftClass === "2028") setRounds(1);
       }
-
-      setLoading(false);
+      if (!rawPicks) rawPicks = (await getDocs(collection(db, orderCollection))).docs.map((d) => d.data());
+      setPicks(rawPicks
+        .sort((a, b) => a.Pick - b.Pick)
+        .map((d) => ({
+          pickNumber: d.Pick,
+          round: d.Round,
+          originalTeam: d.Team,
+          currentTeam: d.Traded ? d.Traded : d.Team,
+          tradedFrom: d.Traded ? d.Team : null,
+        })));
+      // 2027 and 2028 default to 1 round; 2026 defaults to 7
+      if (draftClass === "2027" || draftClass === "2028") setRounds(1);
+      setOrderLoaded(true);
     };
-    loadDraft();
+    loadOrder();
   }, [mockId, draftClass]);
 
   useEffect(() => {
     if (!mockId) return;
     const loadExistingMock = async () => {
-      const snap = await getDoc(doc(db, "mockDrafts", mockId));
-      if (!snap.exists()) return;
-      const data = snap.data();
-      setMockOwnerId(data.ownerId);
-      setMockName(data.name || "Untitled Mock Draft");
-      setRounds(data.rounds || 1);
-      setVisibility(data.visibility || "private");
-      setDraftClass(data.draftClass || "2026");
-      const picksArray = Object.values(data.picks || {}).sort((a, b) => a.pickNumber - b.pickNumber);
-      setPicks(picksArray);
-      const assigned = {};
-      picksArray.forEach((p) => { if (p.selection) assigned[p.pickNumber] = p.selection; });
-      setAssignedPlayers(assigned);
-      setLoading(false);
+      try {
+        const snap = await getDoc(doc(db, "mockDrafts", mockId));
+        if (!snap.exists()) { setNotFound(true); return; }
+        const data = snap.data();
+        setMockOwnerId(data.ownerId);
+        setMockName(data.name || "Untitled Mock Draft");
+        setIntro(data.description || "");
+        setRounds(data.rounds || 1);
+        setVisibility(data.visibility || "private");
+        setDraftClass(data.draftClass || "2026");
+        const picksArray = Object.values(data.picks || {}).sort((a, b) => a.pickNumber - b.pickNumber);
+        setPicks(picksArray);
+        const assigned = {};
+        picksArray.forEach((p) => { if (p.selection) assigned[p.pickNumber] = p.selection; });
+        setAssignedPlayers(assigned);
+      } catch (err) {
+        // A private mock that isn't ours fails the read rule.
+        console.error("Mock load error:", err);
+        setNotFound(true);
+      } finally { setMockLoaded(true); }
     };
     loadExistingMock();
   }, [mockId]);
@@ -246,13 +209,7 @@ export default function CreateMock() {
     loadPlayers();
   }, [userId, userGrades, draftClass]);
 
-  const handleDragStart = (e, player) => { if (!isOwner) return; e.dataTransfer.setData("player", JSON.stringify(player)); };
-  const handleDropOnPick = (pickNumber, e) => { if (!isOwner) return; e.preventDefault(); const player = JSON.parse(e.dataTransfer.getData("player")); setAssignedPlayers((prev) => ({ ...prev, [pickNumber]: player })); };
-  const handleRemovePlayer = (pickNumber) => { setAssignedPlayers((prev) => { const copy = { ...prev }; delete copy[pickNumber]; return copy; }); };
-  const handleTeamChange = (pickNumber, newTeam) => { setPicks((prev) => prev.map((p) => p.pickNumber === pickNumber ? { ...p, currentTeam: newTeam, tradedFrom: p.originalTeam !== newTeam ? p.originalTeam : null } : p)); setActivePick(null); };
-
   const visiblePicks = useMemo(() => picks.filter((p) => p.round <= rounds), [picks, rounds]);
-  const picksByRound = useMemo(() => visiblePicks.reduce((acc, p, i) => { if (!acc[p.round]) acc[p.round] = []; acc[p.round].push({ ...p, index: i }); return acc; }, {}), [visiblePicks]);
   const allPositions = useMemo(() => Array.from(new Set(players.map((p) => p.Position).filter(Boolean))).sort(), [players]);
   const filteredPlayers = useMemo(() => players.filter((p) => {
     if (assignedPlayerIds.has(p.id)) return false;
@@ -271,509 +228,275 @@ export default function CreateMock() {
     return arr;
   }, [filteredPlayers, gradeView]);
 
-  useEffect(() => {
-    if (isOwner || !mockId) return;
-    setCommunityData({});
-    const roundPicks = visiblePicks.filter((p) => p.round === activeRound);
-    const playerIds = roundPicks.map((p) => assignedPlayers[p.pickNumber]?.id).filter(Boolean);
-    if (!playerIds.length) return;
-    const fetchCommunity = async () => {
-      setCommunityLoading(true);
-      const results = await Promise.all(
-        playerIds.map(async (playerId) => {
-          try {
-            const evalsSnap = await getDocs(collection(db, "players", playerId, "evaluations"));
-            const grades = [], sCount = {}, wCount = {};
-            evalsSnap.forEach((d) => {
-              const ev = d.data();
-              if (ev.grade && gradeScale[ev.grade]) grades.push(gradeScale[ev.grade]);
-              if (Array.isArray(ev.strengths)) ev.strengths.forEach((s) => { sCount[s] = (sCount[s] || 0) + 1; });
-              if (Array.isArray(ev.weaknesses)) ev.weaknesses.forEach((w) => { wCount[w] = (wCount[w] || 0) + 1; });
-            });
-            const avgGrade = grades.length > 0 ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)] : null;
-            const topStrengths = Object.entries(sCount).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([s]) => s);
-            const topWeaknesses = Object.entries(wCount).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
-            return [playerId, { grade: avgGrade, strengths: topStrengths, weaknesses: topWeaknesses }];
-          } catch { return [playerId, null]; }
-        })
-      );
-      setCommunityData((prev) => ({ ...prev, ...Object.fromEntries(results.filter(([, v]) => v)) }));
-      setCommunityLoading(false);
-    };
-    fetchCommunity();
-  }, [activeRound, isOwner, mockId, assignedPlayers, visiblePicks]);
+  const assign = (pickNumber, player) => setAssignedPlayers((prev) => ({ ...prev, [pickNumber]: player }));
+  const handleDragStart = (e, player) => { if (!isOwner) return; e.dataTransfer.setData("player", JSON.stringify(player)); };
+  const handleDropOnPick = (pickNumber, e) => { if (!isOwner) return; e.preventDefault(); const raw = e.dataTransfer.getData("player"); if (raw) assign(pickNumber, JSON.parse(raw)); };
+  const handleRemovePlayer = (pickNumber) => { setAssignedPlayers((prev) => { const copy = { ...prev }; delete copy[pickNumber]; return copy; }); };
+  const handleTeamChange = (pickNumber, newTeam) => { setPicks((prev) => prev.map((p) => p.pickNumber === pickNumber ? { ...p, currentTeam: newTeam, tradedFrom: p.originalTeam !== newTeam ? p.originalTeam : null } : p)); setActivePick(null); };
+  const handleNoteChange = (pickNumber, note) => setPicks((prev) => prev.map((p) => (p.pickNumber === pickNumber ? { ...p, note } : p)));
 
   const handleSaveMock = async () => {
     if (!userId) return;
     setSaveStatus("saving");
     const obj = {};
-    visiblePicks.forEach((p) => { obj[p.pickNumber] = { ...p, selection: assignedPlayers[p.pickNumber] || null }; });
-    if (isEditMode) {
-      await updateDoc(doc(db, "mockDrafts", mockId), { name: mockName, rounds, visibility, draftClass, picks: obj, updatedAt: Timestamp.now() });
-    } else {
-      const ref = await addDoc(collection(db, "mockDrafts"), { name: mockName, ownerId: userId, rounds, visibility, draftClass, picks: obj, createdAt: Timestamp.now(), updatedAt: Timestamp.now() });
-      setMockOwnerId(userId);
-      navigate(`/mocks/${ref.id}`, { replace: true });
+    visiblePicks.forEach((p) => { obj[p.pickNumber] = { ...p, note: (p.note || "").trim(), selection: assignedPlayers[p.pickNumber] || null }; });
+    const fields = { name: mockName, description: intro.trim(), rounds, visibility, draftClass, picks: obj, updatedAt: Timestamp.now() };
+    try {
+      if (isEditMode) {
+        await updateDoc(doc(db, "mockDrafts", mockId), fields);
+      } else {
+        const ref = await addDoc(collection(db, "mockDrafts"), { ...fields, ownerId: userId, createdAt: Timestamp.now() });
+        setMockOwnerId(userId);
+        navigate(`/mocks/${ref.id}`, { replace: true });
+      }
+      setSaveStatus("saved");
+    } catch (err) {
+      console.error("Mock save error:", err);
+      setSaveStatus("error");
     }
-    setSaveStatus("saved");
-    setTimeout(() => setSaveStatus("idle"), 2000);
+    setTimeout(() => setSaveStatus("idle"), 2500);
   };
 
   // ── Draft class picker ──
   if (!mockId && !draftClass) {
     const isLocked = new Date() >= MOCK_LOCK_DATE;
-    const availableClasses = isLocked
-      ? [
-          { year: "2027", label: "2027 NFL Draft", sub: "1 round · Projected order" },
-          { year: "2028", label: "2028 NFL Draft", sub: "1 round · Projected order" },
-        ]
-      : [
-          { year: "2026", label: "2026 NFL Draft", sub: "7 rounds · Live draft order" },
-          { year: "2027", label: "2027 NFL Draft", sub: "1 round · Projected order" },
-          { year: "2028", label: "2028 NFL Draft", sub: "1 round · Projected order" },
-        ];
-
-    const handleClassSelect = (year) => {
-      if (!userId) {
-        setPendingClass(year);
-      } else {
-        setDraftClass(year);
-      }
-    };
+    const availableClasses = [
+      ...(isLocked ? [] : [{ year: "2026", sub: "7 rounds · Live draft order" }]),
+      { year: "2027", sub: "Projected order · up to 7 rounds" },
+      { year: "2028", sub: "Projected order · up to 7 rounds" },
+    ];
+    const handleClassSelect = (year) => { if (!userId) setPendingClass(year); else setDraftClass(year); };
 
     return (
-      <div style={{ maxWidth: 700, margin: "80px auto", padding: "0 20px", fontFamily: "'Arial Black', Arial, sans-serif", textAlign: "center" }}>
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ fontSize: 22, fontWeight: 900, color: SITE_BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>Create Mock Draft</div>
-          <div style={{ height: "3px", background: SITE_BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-          <div style={{ height: "3px", background: SITE_GOLD, borderRadius: "2px" }} />
-        </div>
-        {isLocked && (
-          <div style={{ background: "#fff8e1", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: "10px 16px", marginBottom: "20px", fontSize: 13, fontWeight: 700, color: "#7a5c00" }}>
-            🔒 2026 mock drafts are locked. Only 2027 and 2028 mocks can be created now.
-          </div>
-        )}
+      <MockPageShell width={900} isMobile={isMobile}>
+        <MockHero eyebrow="Mock Drafts" title="Write a Mock Draft" isMobile={isMobile}
+          actions={<button onClick={() => navigate("/mocks")} style={button("ghost", isMobile)}>Cancel</button>}>
+          <p style={heroText(isMobile)}>
+            Pick a draft class, fill the board, then make your case — an intro and a note on any pick you want to explain.
+          </p>
+        </MockHero>
 
-        {/* ── Sign-in prompt after class selected ── */}
         {pendingClass && !userId ? (
-          <div style={{
-            border: `2px solid ${SITE_GOLD}`, borderRadius: 14, overflow: "hidden",
-            boxShadow: "0 8px 40px rgba(0,85,165,0.14)", maxWidth: 420, margin: "0 auto",
-          }}>
-            <div style={{
-              background: `linear-gradient(135deg, ${SITE_BLUE} 0%, #003a7a 100%)`,
-              padding: "24px 28px 20px", textAlign: "center",
-            }}>
-              <div style={{ fontSize: 36, marginBottom: 8 }}>🏈</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1.1, marginBottom: 6 }}>
-                {pendingClass} Mock Draft
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 900, color: SITE_GOLD, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                Sign in to continue
-              </div>
+          <div style={{ ...panel, maxWidth: 440, margin: "0 auto", padding: "28px 26px", textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 900, color: BLUE, textTransform: "uppercase", marginBottom: 8 }}>{pendingClass} Mock Draft</div>
+            <div style={{ fontSize: 14, color: MUTED, fontFamily: BODY_FONT, lineHeight: 1.6, marginBottom: 20 }}>
+              Sign in to save your {pendingClass} mock draft, trade picks, and publish it to the We-Draft community.
             </div>
-            <div style={{ height: "4px", background: `linear-gradient(90deg, ${SITE_BLUE}, ${SITE_GOLD}, ${SITE_BLUE})` }} />
-            <div style={{ background: "#fff", padding: "24px 28px" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#555", lineHeight: 1.6, marginBottom: 20 }}>
-                Create and save your {pendingClass} mock draft, trade picks, and share with the We-Draft community.
-              </div>
-              <button
-                onClick={login}
-                style={{
-                  width: "100%", backgroundColor: SITE_BLUE, color: "#fff",
-                  border: `3px solid ${SITE_GOLD}`, borderRadius: 10,
-                  padding: "14px 28px", fontWeight: 900, fontSize: 16,
-                  textTransform: "uppercase", letterSpacing: "0.08em",
-                  cursor: "pointer", fontFamily: "inherit", marginBottom: 10,
-                  boxShadow: `0 4px 20px rgba(0,85,165,0.25)`,
-                }}
-              >
-                Sign In to Create →
-              </button>
-              <div style={{ fontSize: 11, color: "#aaa", fontWeight: 700, marginBottom: 16 }}>
-                Free · Google or Email · No spam
-              </div>
-              <button
-                onClick={() => setPendingClass(null)}
-                style={{ background: "none", border: "none", color: "#bbb", fontWeight: 700, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}
-              >
-                ← Back
-              </button>
-            </div>
+            <button onClick={login} style={{ ...button("blue", isMobile), width: "100%", justifyContent: "center", padding: "13px 20px", fontSize: 15 }}>Sign In to Write →</button>
+            <div style={{ fontSize: 11, color: "#98a2b3", fontWeight: 700, margin: "10px 0 14px", fontFamily: BODY_FONT }}>Free · Google or Email · No spam</div>
+            <button onClick={() => setPendingClass(null)} style={{ background: "none", border: "none", color: MUTED, fontWeight: 700, fontSize: 13, cursor: "pointer", textDecoration: "underline", fontFamily: BODY_FONT }}>← Back</button>
           </div>
         ) : (
           <>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#555", marginBottom: "24px" }}>Which draft class?</div>
-            <div style={{ display: "flex", gap: "16px", justifyContent: "center", flexWrap: "wrap" }}>
-              {availableClasses.map(({ year, label, sub }) => (
-                <div key={year} onClick={() => handleClassSelect(year)}
-                  style={{ border: `3px solid ${SITE_GOLD}`, borderRadius: 12, padding: "24px 32px", cursor: "pointer", background: "#fff", minWidth: 180, transition: "all 0.15s" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; e.currentTarget.style.borderColor = SITE_BLUE; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = SITE_GOLD; }}>
-                  <div style={{ fontSize: 32, fontWeight: 900, color: SITE_BLUE, marginBottom: 6 }}>{year}</div>
-                  <div style={{ fontSize: 13, fontWeight: 900, color: SITE_BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#999" }}>{sub}</div>
-                </div>
+            <h2 style={{ margin: "0 0 12px 2px", fontSize: isMobile ? 16 : 20, fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em" }}>Which draft?</h2>
+            <style>{`.wd-class-card { transition: transform 0.16s ease, box-shadow 0.16s ease; } .wd-class-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.14) !important; }`}</style>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : `repeat(${availableClasses.length}, 1fr)`, gap: 12 }}>
+              {availableClasses.map(({ year, sub }) => (
+                <button key={year} className="wd-class-card" onClick={() => handleClassSelect(year)}
+                  style={{ ...panel, border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontFamily: FONT }}>
+                  <span style={{ display: "block", background: `linear-gradient(120deg, #00305c 0%, ${BLUE} 100%)`, padding: "16px 18px", borderBottom: `4px solid ${GOLD}` }}>
+                    <span style={{ display: "block", fontSize: 11, fontWeight: 900, color: GOLD, letterSpacing: "0.14em" }}>NFL DRAFT</span>
+                    <span style={{ display: "block", fontSize: 38, fontWeight: 900, color: "#fff", lineHeight: 1 }}>{year}</span>
+                  </span>
+                  <span style={{ display: "block", padding: "12px 18px", fontSize: 13, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT }}>{sub}</span>
+                </button>
               ))}
             </div>
-            <button onClick={() => navigate("/mocks")} style={{ marginTop: 24, background: "none", border: "none", color: "#bbb", fontWeight: 700, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
-              Cancel
-            </button>
+            {isLocked && (
+              <div style={{ marginTop: 14, fontSize: 12, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT }}>
+                2026 mocks are closed now that the draft is done — they stay readable in the archive.
+              </div>
+            )}
           </>
         )}
-      </div>
+      </MockPageShell>
     );
   }
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
+  if (notFound) return <Navigate to={`/mocks/${mockId}/view`} replace />;
+  if (!authReady || (mockId ? !mockLoaded : !orderLoaded)) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
-  /* ===================== VIEW MODE ===================== */
+  // Only the owner edits, and 2026 mocks are frozen since the draft began.
   const mock2026Locked = draftClass === "2026" && new Date() >= MOCK_LOCK_DATE;
-  if ((!isOwner && mockId) || mock2026Locked) {
-    const picksArray = visiblePicks;
-    const availableRounds = [...new Set(picksArray.map((p) => p.round))].sort((a, b) => a - b);
-    const roundPicks = picksArray.filter((p) => p.round === activeRound);
-    const totalPicks = Object.values(assignedPlayers).length;
-    const filledRoundPicks = roundPicks.filter((p) => assignedPlayers[p.pickNumber]);
+  if (mockId && (!isOwner || mock2026Locked)) return <Navigate to={`/mocks/${mockId}/view`} replace />;
 
-    return (
-      <>
-      <div style={{ maxWidth: "1000px", margin: "0 auto", padding: "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
-            <img src={Logo1} alt="We-Draft" style={{ height: "26px", objectFit: "contain" }} />
-            <div style={{ fontSize: "24px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: SITE_BLUE, flex: 1, minWidth: 0 }}>
-              {mockName}
-            </div>
-            <button onClick={() => navigate("/mocks")} style={{ background: "#fff", color: SITE_BLUE, border: `2px solid ${SITE_BLUE}`, borderRadius: "8px", padding: "8px 18px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer", flexShrink: 0 }}>
-              ← Hub
-            </button>
-          </div>
-          <div style={{ height: "3px", background: SITE_BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-          <div style={{ height: "3px", background: SITE_GOLD, borderRadius: "2px" }} />
-        </div>
-
-        {mock2026Locked && isOwner && (
-          <div style={{ background: "#fff8e1", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: "10px 16px", marginBottom: "16px", fontSize: 13, fontWeight: 700, color: "#7a5c00", display: "flex", alignItems: "center", gap: 8 }}>
-            🔒 2026 mock drafts are locked for editing after the draft began.
-          </div>
-        )}
-
-        {/* Meta */}
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
-          {ownerLabel && (
-            <div style={{ fontSize: "13px", fontWeight: 700, color: "#666" }}>
-              By <span style={{ color: SITE_BLUE, fontWeight: 900 }}>{ownerLabel}</span>
-            </div>
-          )}
-          <div style={{ fontSize: "12px", fontWeight: 700, color: "#bbb" }}>
-            {rounds} Round{rounds !== 1 ? "s" : ""} · {totalPicks} picks made
-          </div>
-          {visibility === "public" && (
-            <span style={{ background: "#e8f5e9", color: "#2e7d32", fontSize: "8px", fontWeight: 900, padding: "2px 8px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Public</span>
-          )}
-        </div>
-
-        {/* Round tabs */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginBottom: "20px" }}>
-          {availableRounds.map((r) => (
-            <button key={r} onClick={() => setActiveRound(r)} style={{
-              padding: "8px 20px", fontWeight: 900, fontSize: "14px",
-              textTransform: "uppercase", letterSpacing: "0.05em",
-              border: `2px solid ${SITE_GOLD}`, borderRadius: "8px", cursor: "pointer",
-              background: activeRound === r ? SITE_BLUE : "#fff",
-              color: activeRound === r ? "#fff" : SITE_BLUE,
-            }}>
-              Rd {r}
-            </button>
-          ))}
-        </div>
-
-        {/* Picks list */}
-        <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-          <div style={{ background: SITE_BLUE, padding: "8px 16px" }}>
-            <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: "13px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Round {activeRound}</div>
-          </div>
-          <div style={{ height: "3px", background: SITE_GOLD }} />
-
-          {roundPicks.map((pick, i) => {
-            const team = teams[pick.currentTeam];
-            const player = assignedPlayers[pick.pickNumber];
-            const teamColor1 = team?.Color1 || SITE_BLUE;
-            const teamColor2 = team?.Color2 || SITE_GOLD;
-            const teamLogo = team?.Logo1 || null;
-            const teamName = team ? `${team.City} ${team.Team}` : pick.currentTeam;
-            const hasPick = !!player;
-
-            return (
-              <div key={pick.pickNumber} style={{
-                display: "flex", alignItems: "center",
-                padding: "14px 18px",
-                borderBottom: i < roundPicks.length - 1 ? "1px solid #f0f0f0" : "none",
-                background: "#fff", opacity: hasPick ? 1 : 0.4,
-              }}>
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "14px", minWidth: 0 }}>
-                  <div style={{ flexShrink: 0, width: "60px", height: "60px", borderRadius: "8px", background: teamColor1, border: `2px solid ${teamColor2}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                    <div style={{ fontSize: "24px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{pick.pickNumber}</div>
-                    <div style={{ fontSize: "8px", fontWeight: 800, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Pick</div>
-                  </div>
-                  <div style={{ flexShrink: 0, width: "52px", height: "52px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {teamLogo ? (
-                      <img src={sanitizeUrl(teamLogo)} alt={teamName} style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                    ) : (
-                      <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: teamColor1, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: "10px" }}>{pick.currentTeam}</div>
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {hasPick ? (
-                      <>
-                        <Link to={`/player/${player.Slug}`} style={{ color: SITE_BLUE, fontWeight: 900, fontSize: "20px", textDecoration: "none", lineHeight: 1.2, display: "block" }}
-                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
-                          {player.First} {player.Last}
-                        </Link>
-                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#555", marginTop: "2px" }}>{player.Position} · {player.School}</div>
-                      </>
-                    ) : null}
-                    <div style={{ fontSize: "12px", fontWeight: 800, color: teamColor1, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: hasPick ? "2px" : 0 }}>
-                      <Link to={`/nfl/${pick.currentTeam.toLowerCase()}`} style={{ color: teamColor1, textDecoration: "none" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
-                        {teamName}
-                      </Link>
-                      {pick.tradedFrom && <span style={{ color: "#bbb", fontWeight: 700, fontSize: "10px", marginLeft: "8px" }}>(via {pick.tradedFrom})</span>}
-                    </div>
-                  </div>
-                </div>
-
-                {hasPick && (() => {
-                  const cd = communityData[player.id];
-                  const gd = cd?.grade ? gradeDisplay(cd.grade) : null;
-                  return (
-                    <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "16px", paddingLeft: "20px", borderLeft: "1px solid #f0f0f0" }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", flexShrink: 0 }}>
-                        <div style={{ fontSize: "8px", fontWeight: 900, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.08em" }}>Comm</div>
-                        {communityLoading && !cd ? (
-                          <div style={{ width: "64px", height: "52px", borderRadius: "6px", background: "#f0f0f0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <LoadingSpinner inline size={16} />
-                          </div>
-                        ) : gd ? (
-                          <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`, borderRadius: "6px", width: "64px", height: "52px" }}>
-                            <span style={{ fontSize: "22px", fontWeight: 900, color: "#fff", lineHeight: 1 }}>{gd.short}</span>
-                            <span style={{ fontSize: "6px", fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.04em", marginTop: "2px", textAlign: "center", lineHeight: 1.1 }}>{cd.grade}</span>
-                          </div>
-                        ) : (
-                          <div style={{ width: "64px", height: "52px", borderRadius: "6px", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "9px", fontWeight: 700, color: "#ccc" }}>—</div>
-                        )}
-                      </div>
-                      {cd && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                            {cd.strengths?.slice(0, 3).map((s, si) => (
-                              <div key={`s${si}`} style={{ fontSize: "10px", fontWeight: 900, color: "#2e7d32", textTransform: "uppercase", letterSpacing: "0.04em", display: "flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap" }}>
-                                <span style={{ fontSize: "8px" }}>▲</span>{s}
-                              </div>
-                            ))}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                            {cd.weaknesses?.slice(0, 3).map((w, wi) => (
-                              <div key={`w${wi}`} style={{ fontSize: "10px", fontWeight: 900, color: "#c0392b", textTransform: "uppercase", letterSpacing: "0.04em", display: "flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap" }}>
-                                <span style={{ fontSize: "8px" }}>▼</span>{w}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      </>
-    );
-  }
-
-  /* ===================== EDIT MODE ===================== */
+  /* ===================== EDITOR ===================== */
   const filledPicks = visiblePicks.filter((p) => assignedPlayers[p.pickNumber]).length;
   const totalVisiblePicks = visiblePicks.length;
   const availableRoundsEdit = [...new Set(visiblePicks.map((p) => p.round))].sort((a, b) => a - b);
   const roundPicksEdit = visiblePicks.filter((p) => p.round === activeEditRound);
-  const filledEditRoundPicks = roundPicksEdit.filter((p) => assignedPlayers[p.pickNumber]);
+  const nextOpen = roundPicksEdit.find((p) => !assignedPlayers[p.pickNumber]);
   // ShareMockButton takes an already-normalized picks shape — here that
-  // means pulling each pick's player out of the separate assignedPlayers
-  // map (this page's own in-progress editing state keeps them apart, unlike
-  // a saved mock's picks map, which already has the player embedded).
+  // means pulling each pick's player out of the separate assignedPlayers map.
   const sharePicksEdit = roundPicksEdit.map((p) => ({ pickNumber: p.pickNumber, currentTeam: p.currentTeam, tradedFrom: p.tradedFrom, player: assignedPlayers[p.pickNumber] || null }));
+  const saveLabel = { saving: "Saving…", saved: "✓ Saved", error: "Save failed" }[saveStatus] || "Save Mock";
 
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "10px 10px 80px" : 20, fontFamily: "'Arial Black', Arial, sans-serif" }}>
-
-      {/* ── Header ── */}
-      <div style={{ marginBottom: "14px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px", flexWrap: "wrap" }}>
-          <input value={mockName} onChange={(e) => setMockName(e.target.value)} placeholder="Mock draft name…"
-            style={{ flex: 1, minWidth: "160px", fontSize: isMobile ? 16 : 20, fontWeight: 900, padding: "8px 14px", borderRadius: 8, border: `2px solid ${SITE_GOLD}`, outline: "none", color: SITE_BLUE, background: "#fff", fontFamily: "'Arial Black', Arial, sans-serif" }} />
-          <button onClick={() => navigate("/mocks/my")} style={{ background: "#fff", color: SITE_BLUE, border: `2px solid ${SITE_BLUE}`, borderRadius: 8, padding: "8px 14px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 12, whiteSpace: "nowrap" }}>My Mocks</button>
+    <MockPageShell width={1200} rails={false} isMobile={isMobile}>
+      {/* ── Header: name, intro, settings ── */}
+      <div style={{ ...panel, padding: isMobile ? 14 : 20, marginBottom: 14, gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", color: "#fff", background: BLUE, borderRadius: 999, padding: "4px 10px" }}>{draftClass} MOCK</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT }}>
+            {ownerLabel && <>By <strong style={{ color: BLUE }}>{ownerLabel}</strong> · </>}
+            <strong style={{ color: filledPicks === totalVisiblePicks && totalVisiblePicks > 0 ? "#2e7d32" : INK }}>{filledPicks}/{totalVisiblePicks}</strong> picks made
+          </span>
+          <button onClick={() => navigate("/mocks/my")} style={{ ...button("outline", true), marginLeft: "auto" }}>My Mocks</button>
         </div>
-        <div style={{ height: "3px", background: SITE_BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-        <div style={{ height: "3px", background: SITE_GOLD, borderRadius: "2px", marginBottom: "8px" }} />
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-          <div style={{ fontSize: 12, color: "#666", fontWeight: 700 }}>By <span style={{ color: SITE_BLUE }}>{ownerLabel}</span></div>
-          <div style={{ fontSize: 12, fontWeight: 900, color: filledPicks === totalVisiblePicks && totalVisiblePicks > 0 ? "#2e7d32" : SITE_BLUE }}>
-            {filledPicks} / {totalVisiblePicks} picks made
+
+        <input value={mockName} onChange={(e) => setMockName(e.target.value)} placeholder="Mock draft title…" aria-label="Mock draft title"
+          style={{ ...field, fontSize: isMobile ? 18 : 24, fontWeight: 900, padding: "10px 14px", fontFamily: FONT, textTransform: "uppercase" }} />
+
+        <div>
+          <textarea value={intro} onChange={(e) => setIntro(e.target.value.slice(0, INTRO_MAX))} rows={isMobile ? 4 : 3} aria-label="Intro"
+            placeholder="Intro (optional) — set the scene: what's driving this board, the big trades, the picks you'd defend to the end…"
+            style={{ ...field, padding: "10px 14px", fontSize: 15, lineHeight: 1.55, fontFamily: "Georgia, 'Times New Roman', serif", resize: "vertical" }} />
+          <div style={{ textAlign: "right", fontSize: 11, color: "#98a2b3", fontFamily: BODY_FONT }}>{intro.length}/{INTRO_MAX}</div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div role="group" aria-label="Visibility" style={{ display: "inline-flex", gap: 4, padding: 3, background: "#f1f4f8", borderRadius: 999 }}>
+            {["public", "private"].map((v) => (
+              <button key={v} onClick={() => setVisibility(v)} aria-pressed={visibility === v}
+                style={{ ...chip(visibility === v, true), border: "none", textTransform: "uppercase", background: visibility === v ? BLUE : "transparent" }}>
+                {v === "public" ? "Public" : "Private"}
+              </button>
+            ))}
           </div>
-          {draftClass && (
-            <div style={{ fontSize: 11, fontWeight: 900, background: SITE_BLUE, color: SITE_GOLD, padding: "2px 10px", borderRadius: 20, letterSpacing: "0.06em" }}>
-              {draftClass} CLASS
-            </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 900, color: MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Rounds
+            <select value={rounds} onChange={(e) => {
+              const n = Number(e.target.value);
+              // Saving keeps only the visible rounds, so dropping filled ones loses them.
+              const lost = picks.filter((p) => p.round > n && (assignedPlayers[p.pickNumber] || p.note?.trim())).length;
+              if (lost && !window.confirm(`Rounds ${n + 1}+ have ${lost} pick${lost !== 1 ? "s" : ""} filled in — they'll be dropped when you save. Continue?`)) return;
+              setRounds(n);
+              if (activeEditRound > n) setActiveEditRound(1);
+            }}
+              style={{ ...field, width: "auto", padding: "5px 8px", fontSize: 13, fontWeight: 900, color: BLUE, fontFamily: FONT }}>
+              {[...new Set(picks.map((p) => p.round))].sort((a, b) => a - b).map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+          <span style={{ flex: 1 }} />
+          {isEditMode && (
+            <ShareMockButton
+              variant="light"
+              mockName={mockName}
+              ownerLabel={ownerLabel}
+              roundLabel={`Round ${activeEditRound}`}
+              totalRounds={rounds}
+              visibility={visibility}
+              picks={sharePicksEdit}
+              teams={teams}
+              filenamePrefix={`WeDraft_${(mockName || "MockDraft").replace(/\s+/g, "")}_Rd${activeEditRound}`}
+            />
           )}
+          {isEditMode && <button onClick={() => navigate(`/mocks/${mockId}/view`)} style={button("outline", isMobile)}>Preview</button>}
+          <button onClick={() => { if (window.confirm("Clear all picks? This cannot be undone.")) setAssignedPlayers({}); }} style={button("danger", isMobile)}>Clear</button>
+          <button onClick={handleSaveMock} disabled={saveStatus === "saving"}
+            style={{ ...button("blue", isMobile), background: saveStatus === "saved" ? "#2e7d32" : saveStatus === "error" ? "#b42318" : BLUE, borderColor: "transparent", cursor: saveStatus === "saving" ? "default" : "pointer" }}>
+            {saveLabel}
+          </button>
         </div>
       </div>
 
-      {/* ── Controls ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ position: "relative" }}>
-          <button onClick={() => { setVisibilityOpen((o) => !o); setRoundsOpen(false); }}
-            style={{ background: visibility === "public" ? SITE_BLUE : "#fff", color: visibility === "public" ? "#fff" : SITE_BLUE, border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: "7px 14px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 12 }}>
-            {visibility === "public" ? "🌍 Public" : "🔒 Private"} ▾
-          </button>
-          {visibilityOpen && (
-            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#fff", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: 6, zIndex: 50, minWidth: 130 }}>
-              <div style={{ background: SITE_BLUE, padding: "5px 10px", borderRadius: "4px 4px 0 0", fontSize: 10, fontWeight: 900, color: SITE_GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Visibility</div>
-              {["public", "private"].map((v) => (
-                <div key={v} onClick={() => { setVisibility(v); setVisibilityOpen(false); }}
-                  style={{ padding: "6px 10px", fontWeight: v === visibility ? 900 : 700, cursor: "pointer", color: SITE_BLUE, background: v === visibility ? "#f0f5ff" : "transparent", borderRadius: 4, fontSize: 12 }}>
-                  {v === "public" ? "🌍 Public" : "🔒 Private"}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <button onClick={handleSaveMock} disabled={saveStatus === "saving"}
-          style={{ background: saveStatus === "saved" ? "#2e7d32" : SITE_BLUE, color: "#fff", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: "7px 20px", fontWeight: 900, cursor: saveStatus === "saving" ? "default" : "pointer", textTransform: "uppercase", fontSize: 12 }}>
-          {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "✓ Saved" : "Save Mock"}
-        </button>
-
-        <button onClick={() => { if (window.confirm("Clear all picks? This cannot be undone.")) setAssignedPlayers({}); }}
-          style={{ background: "#fff", color: "#c0392b", border: "2px solid #e74c3c", borderRadius: 8, padding: "7px 14px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 12 }}>
-          Clear All
-        </button>
-
-        {/* Only once the mock actually has an id (i.e. it's been saved at
-            least once) — sharing an unsaved draft with no permanent URL
-            yet doesn't make sense. Reaching this render branch at all
-            already means the current user owns this mock (see the
-            !isOwner-gated read-only branch above), so no separate
-            ownership check is needed here. */}
-        {isEditMode && (
-          <ShareMockButton
-            variant="light"
-            mockName={mockName}
-            ownerLabel={ownerLabel}
-            roundLabel={`Round ${activeEditRound}`}
-            totalRounds={rounds}
-            visibility={visibility}
-            picks={sharePicksEdit}
-            teams={teams}
-            filenamePrefix={`WeDraft_${(mockName || "MockDraft").replace(/\s+/g, "")}_Rd${activeEditRound}`}
-          />
-        )}
-
+      {/* ── Round tabs ── */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+        {availableRoundsEdit.map((r) => {
+          const filled = visiblePicks.filter((p) => p.round === r && assignedPlayers[p.pickNumber]).length;
+          const total = visiblePicks.filter((p) => p.round === r).length;
+          return (
+            <button key={r} onClick={() => setActiveEditRound(r)} aria-pressed={activeEditRound === r} style={{ ...chip(activeEditRound === r, isMobile), borderRadius: 8 }}>
+              {isMobile ? `R${r}` : `Round ${r}`} <span style={{ opacity: 0.65, fontSize: 10 }}>{filled}/{total}</span>
+            </button>
+          );
+        })}
         {isMobile && (
-          <button onClick={() => setShowBank((o) => !o)}
-            style={{ background: showBank ? SITE_BLUE : "#fff", color: showBank ? "#fff" : SITE_BLUE, border: `2px solid ${SITE_BLUE}`, borderRadius: 8, padding: "7px 14px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 12, marginLeft: "auto" }}>
+          <button onClick={() => setShowBank((o) => !o)} style={{ ...button(showBank ? "blue" : "outline", true), marginLeft: "auto" }}>
             {showBank ? "Hide Bank" : "Player Bank"}
           </button>
         )}
       </div>
 
-      {/* ── Round tabs ── */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {availableRoundsEdit.map((r) => {
-          const filled = visiblePicks.filter((p) => p.round === r && assignedPlayers[p.pickNumber]).length;
-          const total = visiblePicks.filter((p) => p.round === r).length;
-          return (
-            <button key={r} onClick={() => setActiveEditRound(r)} style={{
-              padding: isMobile ? "6px 12px" : "7px 16px", fontWeight: 900,
-              fontSize: isMobile ? 12 : 13, textTransform: "uppercase", letterSpacing: "0.05em",
-              border: `2px solid ${SITE_GOLD}`, borderRadius: 8, cursor: "pointer",
-              background: activeEditRound === r ? SITE_BLUE : "#fff",
-              color: activeEditRound === r ? "#fff" : SITE_BLUE,
-            }}>
-              Rd {r} <span style={{ opacity: 0.65, fontSize: 10 }}>({filled}/{total})</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.15fr) minmax(0, 1fr)", gap: 12, alignItems: "start" }}>
 
         {/* ── MOCK BOARD ── */}
-        <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <div style={{ background: SITE_BLUE, padding: "8px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-            <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.1em" }}>Round {activeEditRound}</div>
-            <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 700 }}>
-              {roundPicksEdit.filter((p) => assignedPlayers[p.pickNumber]).length}/{roundPicksEdit.length} picks
-            </div>
+        <div style={panel}>
+          <div style={panelHead}>
+            <span style={panelTitle}>Round {activeEditRound}</span>
+            <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 700, fontFamily: BODY_FONT }}>
+              {isMobile ? "Tap a team to trade" : "Drag players in · click a team to trade"}
+            </span>
           </div>
-          <div style={{ height: "3px", background: SITE_GOLD, flexShrink: 0 }} />
+          <div style={{ height: 3, background: GOLD, flexShrink: 0 }} />
 
-          <div style={{ overflowY: "auto", maxHeight: isMobile ? "calc(50vh / var(--pz, 1))" : "calc(65vh / var(--pz, 1))" }}>
+          <div style={{ overflowY: "auto", maxHeight: isMobile ? "calc(60vh / var(--pz, 1))" : "calc(75vh / var(--pz, 1))" }}>
             {roundPicksEdit.map((pick, i) => {
-              const team = teams[pick.currentTeam];
+              const team = teams[pick.currentTeam] || {};
               const player = assignedPlayers[pick.pickNumber];
-              const isLast = i === roundPicksEdit.length - 1;
+              const c1 = team.Color1 || BLUE;
+              const c2 = team.Color2 || GOLD;
+              const isNext = nextOpen?.pickNumber === pick.pickNumber;
               return (
                 <div key={pick.pickNumber}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => handleDropOnPick(pick.pickNumber, e)}
-                  style={{ borderBottom: isLast ? "none" : "1px solid #f0f0f0", background: player ? "#fff" : "#fafafa" }}>
+                  style={{ borderBottom: i === roundPicksEdit.length - 1 ? "none" : "1px solid #edf0f5", background: isNext ? "#f5f9ff" : "#fff", padding: "8px 12px" }}>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px" }}>
-                    <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 6, background: team?.Color1 || SITE_BLUE, border: `2px solid ${team?.Color2 || SITE_GOLD}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-                      <div style={{ fontSize: 14, fontWeight: 900, lineHeight: 1 }}>{pick.pickNumber}</div>
-                      <div style={{ fontSize: 6, fontWeight: 800, opacity: 0.7, textTransform: "uppercase" }}>Pick</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 8, background: `linear-gradient(160deg, ${c1} 0%, ${c1} 70%, ${c2} 100%)`, color: textOn(c1, c2), display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1 }}>{pick.pickNumber}</div>
+                      <div style={{ fontSize: 6, fontWeight: 900, opacity: 0.8, letterSpacing: "0.1em" }}>PICK</div>
                     </div>
 
-                    <img src={sanitizeUrl(team?.Logo1)} alt={team?.Team} style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }}
-                      onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                    <button onClick={() => setActivePick(activePick === pick.pickNumber ? null : pick.pickNumber)} title="Trade this pick"
+                      style={{ flexShrink: 0, width: 34, height: 34, padding: 0, border: activePick === pick.pickNumber ? `2px solid ${GOLD}` : "2px solid transparent", borderRadius: 8, background: "transparent", cursor: "pointer" }}>
+                      {team.Logo1
+                        ? <img src={sanitizeUrl(team.Logo1)} alt={team.Team || pick.currentTeam} style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                        : <span style={{ fontSize: 10, fontWeight: 900, color: c1 }}>{pick.currentTeam}</span>}
+                    </button>
 
-                    <div onClick={() => setActivePick(activePick === pick.pickNumber ? null : pick.pickNumber)}
-                      style={{ flex: 1, background: team?.Color1 || SITE_BLUE, color: "#fff", padding: "7px 12px", borderRadius: 8, fontWeight: 700, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2, outline: activePick === pick.pickNumber ? `3px solid ${SITE_GOLD}` : "none", minWidth: 0 }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 900, lineHeight: 1.2, flexWrap: "wrap" }}>
-                        <Link to={`/nfl/${pick.currentTeam}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "#fff", textDecoration: "none", fontWeight: 900 }}>
-                          {team?.City} {team?.Team}
-                        </Link>
-                        {player && (<><span style={{ opacity: 0.5 }}>—</span>
-                          <Link to={`/player/${player.Slug}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "#fff", textDecoration: "none", fontWeight: 900 }}>{player.First} {player.Last}</Link></>)}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 900, color: "#7a8597", letterSpacing: "0.1em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {team.City} {team.Team || pick.currentTeam}
+                        {pick.tradedFrom && <span style={{ marginLeft: 6, color: "#8a5a00" }}>· via {pick.tradedFrom}</span>}
                       </div>
-                      {player && <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 700 }}>{player.Position} · {player.School}</div>}
-                      {!player && <div style={{ fontSize: 10, opacity: 0.5, fontStyle: "italic" }}>{isMobile ? "Tap to trade" : "Drag a player here · Click to trade"}</div>}
+                      {player ? (
+                        <>
+                          <Link to={`/player/${player.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", fontSize: 15, fontWeight: 900, color: INK, textDecoration: "none", textTransform: "uppercase", lineHeight: 1.15 }}>
+                            {player.First} {player.Last}
+                          </Link>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT }}>{player.Position} · {player.School}</div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "#98a2b3", fontStyle: "italic", fontFamily: BODY_FONT }}>
+                          {isNext ? (isMobile ? "Up next — tap a player in the bank" : "Up next — drag or click a player") : "Open"}
+                        </div>
+                      )}
                     </div>
 
                     {player && (
-                      <button onClick={() => handleRemovePlayer(pick.pickNumber)}
-                        style={{ flexShrink: 0, background: "rgba(0,0,0,0.15)", border: "none", color: "#fff", fontWeight: 900, borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                      <button onClick={() => handleRemovePlayer(pick.pickNumber)} aria-label="Remove player"
+                        style={{ flexShrink: 0, background: "#f1f4f8", border: "none", color: MUTED, fontWeight: 900, borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 12 }}>✕</button>
                     )}
                   </div>
 
-                  {pick.tradedFrom && (
-                    <div style={{ fontSize: 10, color: "#999", fontWeight: 700, paddingLeft: 88, paddingBottom: 4 }}>📤 Traded from {pick.tradedFrom}</div>
-                  )}
-
                   {activePick === pick.pickNumber && (
-                    <div style={{ padding: "6px 12px 10px 88px" }}>
-                      <div style={{ fontSize: 10, fontWeight: 900, color: SITE_BLUE, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Trade pick to:</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0 2px 48px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em" }}>Trade to</span>
                       <select value={pick.currentTeam} onChange={(e) => handleTeamChange(pick.pickNumber, e.target.value)}
-                        style={{ border: `2px solid ${SITE_GOLD}`, borderRadius: 6, padding: "4px 8px", fontWeight: 700, color: SITE_BLUE, fontSize: 13 }}>
+                        style={{ ...field, width: "auto", padding: "4px 8px", fontWeight: 700, fontSize: 13, fontFamily: BODY_FONT }}>
                         {Object.keys(teams).sort().map((t) => <option key={t} value={t}>{teams[t]?.City} {teams[t]?.Team}</option>)}
                       </select>
+                    </div>
+                  )}
+
+                  {(player || pick.note) && (
+                    <div style={{ padding: "6px 0 0 48px" }}>
+                      <textarea value={pick.note || ""} onChange={(e) => handleNoteChange(pick.pickNumber, e.target.value.slice(0, NOTE_MAX))}
+                        rows={pick.note ? 3 : 1} placeholder="Why this pick? (optional)" aria-label={`Note for pick ${pick.pickNumber}`}
+                        style={{ ...field, border: "1px solid #e1e7ef", borderRadius: 8, padding: "6px 10px", fontSize: 13, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", resize: "vertical", background: "#fbfcfe" }} />
+                      {pick.note && <div style={{ textAlign: "right", fontSize: 10, color: "#98a2b3", fontFamily: BODY_FONT }}>{pick.note.length}/{NOTE_MAX}</div>}
                     </div>
                   )}
                 </div>
@@ -784,88 +507,72 @@ export default function CreateMock() {
 
         {/* ── PLAYER BANK ── */}
         {(!isMobile || showBank) && (
-          <div style={{ border: `2px solid ${SITE_BLUE}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: isMobile ? "calc(60vh / var(--pz, 1))" : "calc(75vh / var(--pz, 1))" }}>
-            <div style={{ background: SITE_BLUE, padding: "8px 14px", flexShrink: 0 }}>
-              <div style={{ color: SITE_GOLD, fontWeight: 900, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.1em" }}>Player Bank — {draftClass || "2026"}</div>
+          <div style={{ ...panel, maxHeight: isMobile ? "calc(60vh / var(--pz, 1))" : "calc(80vh / var(--pz, 1))", position: isMobile ? "static" : "sticky", top: 16 }}>
+            <div style={panelHead}>
+              <span style={panelTitle}>Player Bank — {draftClass}</span>
+              <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 700, fontFamily: BODY_FONT }}>{sortedPlayers.length} players</span>
             </div>
-            <div style={{ height: "3px", background: SITE_GOLD, flexShrink: 0 }} />
+            <div style={{ height: 3, background: GOLD, flexShrink: 0 }} />
 
-            <div ref={filterRef} style={{ background: "#fff", padding: "10px 12px", borderBottom: "1px solid #f0f0f0", flexShrink: 0 }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <div ref={filterRef} style={{ padding: "10px 12px", borderBottom: "1px solid #edf0f5", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+              <input placeholder="Search player…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ ...field, padding: "8px 12px", fontSize: 14, fontWeight: 700, fontFamily: BODY_FONT }} />
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <div style={{ position: "relative" }}>
-                  <button onClick={() => setPositionOpen((o) => !o)}
-                    style={{ background: selectedPositions.length > 0 ? SITE_BLUE : "#fff", color: selectedPositions.length > 0 ? "#fff" : SITE_BLUE, border: `2px solid ${SITE_GOLD}`, borderRadius: 6, padding: "5px 10px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 11 }}>
+                  <button onClick={() => setPositionOpen((o) => !o)} style={chip(selectedPositions.length > 0, true)}>
                     Position {selectedPositions.length > 0 ? `(${selectedPositions.length})` : "▾"}
                   </button>
                   {positionOpen && (
-                    <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#fff", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: 8, zIndex: 20, minWidth: 120 }}>
-                      <div style={{ background: SITE_BLUE, margin: "-8px -8px 8px", padding: "5px 10px", borderRadius: "6px 6px 0 0", fontSize: 10, fontWeight: 900, color: SITE_GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Position</div>
+                    <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, background: "#fff", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.16), 0 0 0 1px #e6ebf2", padding: 10, zIndex: 20, minWidth: 130, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px" }}>
                       {allPositions.map((pos) => (
-                        <label key={pos} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, fontWeight: 700, fontSize: 12, cursor: "pointer", color: SITE_BLUE }}>
+                        <label key={pos} style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 800, fontSize: 12, cursor: "pointer", color: INK }}>
                           <input type="checkbox" checked={selectedPositions.includes(pos)} onChange={() => setSelectedPositions((prev) => prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos])} />
                           {pos}
                         </label>
                       ))}
+                      {selectedPositions.length > 0 && (
+                        <button onClick={() => setSelectedPositions([])} style={{ gridColumn: "1 / -1", marginTop: 4, background: "none", border: "none", color: BLUE, fontWeight: 800, fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>Clear</button>
+                      )}
                     </div>
                   )}
                 </div>
-
-                <div style={{ position: "relative" }}>
-                  <button onClick={() => setGradeOpen((o) => !o)}
-                    style={{ background: "#fff", color: SITE_BLUE, border: `2px solid ${SITE_GOLD}`, borderRadius: 6, padding: "5px 10px", fontWeight: 900, cursor: "pointer", textTransform: "uppercase", fontSize: 11 }}>
-                    {gradeView === "COMM" ? "Comm" : "Mine"} ▾
-                  </button>
-                  {gradeOpen && (
-                    <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "#fff", border: `2px solid ${SITE_GOLD}`, borderRadius: 8, padding: 8, zIndex: 20, minWidth: 140 }}>
-                      <div style={{ background: SITE_BLUE, margin: "-8px -8px 8px", padding: "5px 10px", borderRadius: "6px 6px 0 0", fontSize: 10, fontWeight: 900, color: SITE_GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Sort by</div>
-                      {[["COMM", "Community Grades"], ["USER", "My Grades"]].map(([val, label]) => (
-                        <div key={val} onClick={() => { setGradeView(val); setGradeOpen(false); }}
-                          style={{ padding: "5px 8px", fontWeight: gradeView === val ? 900 : 700, cursor: "pointer", color: SITE_BLUE, background: gradeView === val ? "#f0f5ff" : "transparent", borderRadius: 4, fontSize: 12 }}>
-                          {label}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#bbb", marginLeft: "auto", alignSelf: "center" }}>
-                  {sortedPlayers.length} players
-                </div>
+                <span style={{ fontSize: 10, fontWeight: 900, color: "#7a8597", letterSpacing: "0.08em", marginLeft: 4 }}>SORT</span>
+                {[["COMM", "Community"], ["USER", "My Grades"]].map(([val, label]) => (
+                  <button key={val} onClick={() => setGradeView(val)} aria-pressed={gradeView === val} style={chip(gradeView === val, true)}>{label}</button>
+                ))}
               </div>
-
-              <input placeholder="Search player…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: "100%", padding: "7px 12px", borderRadius: 6, border: `2px solid ${SITE_GOLD}`, fontWeight: 700, color: SITE_BLUE, fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "'Arial Black', Arial, sans-serif" }} />
             </div>
 
-            <div style={{ overflowY: "auto", flex: 1, background: "#fafafa" }}>
+            <div style={{ overflowY: "auto", flex: 1 }}>
               {bankLoading ? (
                 <LoadingSpinner label="Loading players" size={28} minHeight="120px" />
               ) : sortedPlayers.length === 0 ? (
-                <div style={{ padding: 24, textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: 13 }}>No players match your filters</div>
+                <div style={{ padding: 24, textAlign: "center", color: "#98a2b3", fontStyle: "italic", fontSize: 13, fontFamily: BODY_FONT }}>No players match your filters</div>
               ) : sortedPlayers.map((p) => (
                 <div key={p.id} draggable onDragStart={(e) => handleDragStart(e, p)}
-                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0f0f0", background: "#fff", cursor: "grab" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+                  onClick={() => { if (nextOpen) assign(nextOpen.pickNumber, p); }}
+                  title={nextOpen ? `Click to take at pick ${nextOpen.pickNumber}` : undefined}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #edf0f5", background: "#fff", cursor: nextOpen ? "pointer" : "grab" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#f5f9ff"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}>
-                  <div style={{ color: "#ccc", fontSize: 14, flexShrink: 0 }}>⠿</div>
+                  {!isMobile && <div style={{ color: "#c3ccd8", fontSize: 14, flexShrink: 0 }}>⠿</div>}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <Link to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-                      style={{ color: SITE_BLUE, fontWeight: 900, textDecoration: "none", fontSize: 13, display: "block" }}
-                      onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
+                      style={{ color: INK, fontWeight: 900, textDecoration: "none", fontSize: 13, display: "block", textTransform: "uppercase" }}>
                       {p.First} {p.Last}
                     </Link>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#777" }}>{p.Position} · {p.School}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT }}>{p.Position} · {p.School}</div>
                   </div>
-                  <div style={{ flexShrink: 0, fontSize: 10, fontWeight: 900, color: SITE_BLUE, textAlign: "right" }}>
+                  <div style={{ flexShrink: 0, fontSize: 10, fontWeight: 900, color: BLUE, textAlign: "right", maxWidth: 90 }}>
                     {(gradeView === "COMM" ? p.CommunityGrade : p.UserGrade) || "—"}
                   </div>
+                  {nextOpen && <span style={{ flexShrink: 0, fontSize: 16, fontWeight: 900, color: BLUE }} aria-hidden="true">+</span>}
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
-    </div>
+    </MockPageShell>
   );
 }

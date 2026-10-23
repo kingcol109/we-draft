@@ -18,6 +18,7 @@ import { fetchTeamTargets } from "../utils/draftProfileData";
 import { viewportCssWidth } from "../utils/pageZoom";
 import { ROLE_BY_KEY, isOpenStint, isPlayerStint, stintYearSpan, groupStints } from "../utils/coachHistory";
 import { textOn } from "../utils/teamColors";
+import { depthNameKey, initialKey, fetchEspnRoster, fetchDepthOrder, groupRoster } from "../utils/nflRoster";
 
 const BLUE = "#0055a5";
 
@@ -53,30 +54,6 @@ const RAIL_GAP = 16;
 const SIDE = RAIL_WIDTH + RAIL_GAP;
 const railFits = () => viewportCssWidth() >= COLUMN_WIDTH + 2 * SIDE + 32;
 const GOLD = "#f6a21d";
-
-// ESPN team ID map (abbreviation → ESPN numeric ID)
-const ESPN_TEAM_IDS = {
-  ARI: 22, ATL: 1,  BAL: 33, BUF: 2,  CAR: 29, CHI: 3,  CIN: 4,  CLE: 5,
-  DAL: 6,  DEN: 7,  DET: 8,  GB: 9,   HOU: 34, IND: 11, JAX: 30, KC: 12,
-  LV: 13,  LAC: 24, LAR: 14, MIA: 15, MIN: 16, NE: 17,  NO: 18,  NYG: 19,
-  NYJ: 20, PHI: 21, PIT: 23, SF: 25,  SEA: 26, TB: 27,  TEN: 10, WAS: 28,
-};
-
-// Position groups — covers all known ESPN abbreviation variants
-const POSITION_GROUPS = {
-  "Quarterbacks":     ["QB"],
-  "Running Backs":    ["RB", "FB", "HB"],
-  "Wide Receivers":   ["WR"],
-  "Tight Ends":       ["TE"],
-  "Offensive Line":   ["OL", "OT", "OG", "C", "CTR", "OC", "LT", "RT", "LG", "RG", "G", "T"],
-  "Defensive Line":   ["DL", "DE", "DT", "NT", "DE/DT"],
-  "Edge Rushers":     ["EDGE", "OLB/DE", "DE/OLB"],
-  "Linebackers":      ["LB", "ILB", "OLB", "MLB", "SLB", "WLB"],
-  "Cornerbacks":      ["CB", "RCB", "LCB", "NCB"],
-  "Safeties":         ["S", "FS", "SS", "SAF"],
-  "Defensive Backs":  ["DB"],
-  "Specialists":      ["K", "P", "PK", "LS", "KR", "PR"],
-};
 
 // ── Season stats for the player card — ESPN's per-athlete season totals
 // (regular season), fetched on hover/tap. The season rolls over in
@@ -159,8 +136,6 @@ function statLine(pos, s) {
 // specialTeam, injuredReserveOrOut, suspended, practiceSquad), and active
 // players can carry an injury designation. statusTag turns that into the
 // chip's tag: { short, label, tone } or null for a healthy active player.
-const ROSTER_GROUP_STATUS = { injuredReserveOrOut: "reserve", suspended: "suspended", practiceSquad: "ps" };
-const STATUS_TIER = { active: 0, reserve: 1, suspended: 1, ps: 2 };
 const STATUS_TONES = {
   out: { bg: "#c0392b", fg: "#fff" },
   warn: { bg: "#e0a100", fg: "#fff" },
@@ -209,27 +184,6 @@ const HERO_STYLE = `
     .wd-nfl-chip:hover { transform: none; }
   }
 `;
-
-// Depth chart order — nflDepthOrder/{abbr} (scripts/nflTeamNeeds.js) is the
-// team's player names by season snaps, most first. Names are matched to the
-// ESPN roster loosely: punctuation and suffixes (Jr., III) dropped, then
-// first initial + last name as a fallback ("Ken Walker" / "Kenneth Walker").
-// Order only — snaps are never shown.
-const depthNameKey = (name) => String(name || "").toLowerCase()
-  .replace(/[^a-z\s-]/g, "").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, "").replace(/[\s-]+/g, " ").trim();
-const initialKey = (name) => {
-  const parts = depthNameKey(name).split(" ");
-  return parts.length > 1 ? `${parts[0][0]} ${parts.slice(1).join(" ")}` : parts[0];
-};
-function depthRanker(order) {
-  const full = new Map();
-  const initial = new Map();
-  (order || []).forEach((n, i) => {
-    if (!full.has(depthNameKey(n))) full.set(depthNameKey(n), i);
-    if (!initial.has(initialKey(n))) initial.set(initialKey(n), i);
-  });
-  return (p) => full.get(depthNameKey(p.fullName)) ?? initial.get(initialKey(p.fullName)) ?? Infinity;
-}
 
 // We-Draft profile links — roster players matched to players/{id} docs by
 // name (same loose keys as the depth order), guarded by college when both
@@ -288,7 +242,7 @@ export default function NFLTeamPage() {
   // abbreviation this page's own teamKey is) instead of by School.
   const [historicalPicks, setHistoricalPicks] = useState([]);
   const [roster, setRoster] = useState([]);
-  // nflDepthOrder/{abbr}.order — see depthRanker above.
+  // nflDepthOrder/{abbr}.order — see depthRanker in utils/nflRoster.js.
   const [depthOrder, setDepthOrder] = useState(null);
   // ESPN athlete id → We-Draft player Slug (see lastDraftYear above).
   const [profileSlugs, setProfileSlugs] = useState({});
@@ -491,49 +445,18 @@ export default function NFLTeamPage() {
   useEffect(() => {
     if (!teamKey) return;
     setDepthOrder(null);
-    getDoc(doc(db, "nflDepthOrder", teamKey))
-      .then((snap) => setDepthOrder(snap.exists() ? snap.data().order || [] : []))
+    fetchDepthOrder(teamKey)
+      .then(setDepthOrder)
       .catch((e) => { console.error("Depth order fetch error:", e); setDepthOrder([]); });
   }, [teamKey]);
 
   // Load ESPN roster
   useEffect(() => {
     if (!teamKey) return;
-    const espnId = ESPN_TEAM_IDS[teamKey];
-    if (!espnId) { setRosterLoading(false); return; }
-
-    const fetchRoster = async () => {
-      try {
-        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnId}/roster`);
-        const data = await res.json();
-        // ESPN returns athletes grouped by roster status (see statusTag)
-        const athletes = (data.athletes || []).flatMap((group) =>
-          (group.items || []).map((a) => ({
-            id: a.id,
-            firstName: a.firstName,
-            lastName: a.lastName,
-            fullName: a.fullName,
-            position: a.position?.abbreviation || "",
-            jersey: a.jersey || "",
-            age: a.age,
-            height: a.displayHeight,
-            weight: a.displayWeight,
-            experience: a.experience?.years ?? null,
-            college: a.college?.name || "",
-            headshot: a.headshot?.href || null,
-            rosterStatus: ROSTER_GROUP_STATUS[group.position] || "active",
-            injury: a.injuries?.[0]?.status || null,
-            injuryDate: a.injuries?.[0]?.date || null,
-          }))
-        );
-        setRoster(athletes);
-      } catch (err) {
-        console.error("ESPN roster fetch failed:", err);
-      } finally {
-        setRosterLoading(false);
-      }
-    };
-    fetchRoster();
+    fetchEspnRoster(teamKey)
+      .then(setRoster)
+      .catch((err) => console.error("ESPN roster fetch failed:", err))
+      .finally(() => setRosterLoading(false));
   }, [teamKey]);
 
   // ── Draft Archive: this team's actual picks across every year — 2026
@@ -619,25 +542,13 @@ export default function NFLTeamPage() {
   // Group roster by position group — active players first, then IR/
   // suspended, then the practice squad, each in depth chart (snap) order;
   // anyone not in nflDepthOrder keeps ESPN's order after everyone who is.
-  const depthRank = depthRanker(depthOrder);
-  const groupedRoster = {};
-  const allGroupedPositions = new Set(Object.values(POSITION_GROUPS).flat());
-  Object.entries(POSITION_GROUPS).forEach(([group, positions]) => {
-    const members = roster
-      .map((p, i) => ({ p, i, r: depthRank(p) }))
-      .filter(({ p }) => positions.includes(p.position))
-      .sort((a, b) => STATUS_TIER[a.p.rosterStatus] - STATUS_TIER[b.p.rosterStatus] || a.r - b.r || a.i - b.i)
-      .map(({ p }) => p);
-    if (members.length > 0) groupedRoster[group] = members;
-  });
-  const ungrouped = roster.filter((p) => !allGroupedPositions.has(p.position));
+  const groupedRoster = groupRoster(roster, depthOrder);
   const countBy = (...st) => roster.filter((p) => st.includes(p.rosterStatus)).length;
   const rosterCount = [
     `${countBy("active")} Active`,
     countBy("reserve", "suspended") ? `${countBy("reserve", "suspended")} Reserve` : null,
     countBy("ps") ? `${countBy("ps")} PS` : null,
   ].filter(Boolean).join(" · ");
-  if (ungrouped.length > 0) groupedRoster["Other"] = ungrouped;
 
   // Blocks first paint only until the team doc itself resolves (the single
   // getDoc at the top of the load effect) — not the draft-picks query and
@@ -828,7 +739,7 @@ export default function NFLTeamPage() {
 
         {/* ===== DEPTH CHART ===== */}
         {/* ESPN's roster by position group, each group in depth chart order
-            — season snaps (nflDepthOrder, see depthRanker above), never
+            — season snaps (nflDepthOrder, see depthRanker in utils/nflRoster.js), never
             shown. */}
         {tab === "depth" && <div style={{ marginBottom: 32 }}>
           <SectionTitle color1={c1} color2={c2} isMobile={isMobile} right={roster.length ? rosterCount : null}>

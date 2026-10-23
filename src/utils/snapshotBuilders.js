@@ -229,6 +229,7 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
   // their index in the position list, g, lg }. classSize on the doc is the
   // Live count; their page adds 1.
   const logoBySchool = Object.fromEntries(schools.filter((s) => s.School).map((s) => [s.School, s.Logo1 || ""]));
+  const darkLogoBySchool = Object.fromEntries(schools.filter((s) => s.School).map((s) => [s.School, s.LogoBlack || s.LogoDark || s.Logo1 || ""]));
   const avgGradeById = {};
   const byClass = {};
   const hiddenByClass = {};
@@ -250,7 +251,7 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
       if (!p.Position) return;
       group(p.Position).rows.push({
         i: p.id, F: p.First || "", L: p.Last || "", s: p.School || "", sl: p.Slug || "",
-        g: gradeOf(p), cr: idx + 1, lg: logoBySchool[p.School] || "",
+        g: gradeOf(p), cr: idx + 1, lg: logoBySchool[p.School] || "", ld: darkLogoBySchool[p.School] || "",
       });
     });
     (hiddenByClass[eligible] || []).forEach((self) => {

@@ -279,6 +279,8 @@ for (const doc of allTeams) {
     { path: "/boards", priority: 0.8, lastmod: today },
     { path: "/comparison", priority: 0.7, lastmod: today },
     { path: "/draftorder", priority: 0.8, lastmod: today },
+    // /draftsim is beta-gated (SimRoute.js) — back in the sitemap at launch.
+    { path: "/mocks", priority: 0.7, lastmod: today },
     { path: "/profile", priority: 0.6, lastmod: today },
     // We-Pick lives inside We-Draft Live now (/live/we-pick…); the old
     // /we-pick URLs just redirect there, so only the new ones are listed.
@@ -349,6 +351,8 @@ for (const doc of allTeams) {
       { path: `${base}/staff`, priority: 0.55, lastmod: today },
       { path: `${base}/depth`, priority: 0.55, lastmod: today },
       { path: `${base}/history`, priority: 0.5, lastmod: today },
+      // That team's Draft Sim (/draftsim/{abbr}) goes back here at launch —
+      // beta-gated until then (SimRoute.js).
     ];
   });
 
