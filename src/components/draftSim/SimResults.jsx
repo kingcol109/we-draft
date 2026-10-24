@@ -49,13 +49,25 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
           <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL DRAFT SIM</div>
           <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE DRAFT IS COMPLETE</div>
         </div>
-        {/* Mobile: the buttons two by two under the title. */}
-        <div style={isMobile ? { flexBasis: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 } : { display: "contents" }}>
-          <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} isMobile={isMobile} />
-          {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
-          <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#111" }}>RUN IT BACK</button>
-          <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
-        </div>
+        {/* Mobile: Share and Save side by side under the title (Share
+            alone runs full width), then New Sim across the bottom — no Run
+            It Back. */}
+        {isMobile ? (
+          <div style={{ flexBasis: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div style={{ display: "grid", gridColumn: hasMine ? "auto" : "1 / -1" }}>
+              <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} isMobile />
+            </div>
+            {hasMine && <div style={{ display: "grid" }}><SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} full /></div>}
+            <button onClick={onNew} style={{ ...btn, gridColumn: "1 / -1", padding: "12px 16px", fontSize: 13, background: GOLD, color: "#111" }}>NEW SIM</button>
+          </div>
+        ) : (
+          <>
+            <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} />
+            {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
+            <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#111" }}>RUN IT BACK</button>
+            <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
+          </>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 400px", gap: 12, alignItems: "start", marginBottom: 12 }}>
@@ -104,19 +116,6 @@ function ReportCard({ h, b, take, isMobile }) {
           {h.needs.open.length > 0 && <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Still open: {h.needs.open.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ")}</span>}
         </div>
       )}
-      {/* Every trade the team made: what it got and what it gave up. */}
-      {h.trades?.length > 0 && (
-        <div style={{ padding: "10px 16px", borderBottom: "1px solid #1f2b42", display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.16em" }}>TRADES</div>
-          {h.trades.map((t, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, fontFamily: BODY }}>
-              <span style={{ color: "#fff", fontWeight: 900, fontFamily: "inherit" }}>With {t.partner}</span>
-              <span style={{ color: "#4ade80", fontWeight: 800 }}>Got {t.got.map(pickName).join(", ")}</span>
-              <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Gave {t.gave.map(pickName).join(", ")}</span>
-            </div>
-          ))}
-        </div>
-      )}
       {h.rows.length === 0 && <div style={{ padding: 16, color: "#8b9bb4", fontFamily: BODY, fontSize: 13 }}>No picks in this sim — they traded out.</div>}
       <div style={{ display: "grid", gridTemplateColumns: isMobile || h.rows.length < 3 ? "1fr" : "1fr 1fr" }}>
         {h.rows.map(({ pick, prospect, letter, need }) => (
@@ -138,6 +137,19 @@ function ReportCard({ h, b, take, isMobile }) {
           </div>
         ))}
       </div>
+      {/* Every trade the team made, under its picks: what it got and what it gave up. */}
+      {h.trades?.length > 0 && (
+        <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.16em" }}>TRADES</div>
+          {h.trades.map((t, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, fontFamily: BODY }}>
+              <span style={{ color: "#fff", fontWeight: 900, fontFamily: "inherit" }}>With {t.partner}</span>
+              <span style={{ color: "#4ade80", fontWeight: 800 }}>Got {t.got.map(pickName).join(", ")}</span>
+              <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Gave {t.gave.map(pickName).join(", ")}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -198,7 +210,8 @@ function FullDraft({ sim, data, isMobile, cols }) {
 }
 
 // ── Save to profile: the user's teams' picks only. ──
-function SaveButton({ sim, data, hauls, speed }) {
+// full: fill its cell (the mobile button grid), any note under the button.
+function SaveButton({ sim, data, hauls, speed, full }) {
   const { user, login } = useAuth();
   const [state, setState] = useState("idle"); // idle | waiting (for sign-in) | saving | saved | error
   const save = async (uid) => {
@@ -224,12 +237,12 @@ function SaveButton({ sim, data, hauls, speed }) {
     else { setState("waiting"); login(); }
   };
   if (state === "saved") {
-    return <Link to={`/draftsim${data.year === SIM_YEAR ? "" : `/${data.year}`}?tab=saved`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none" }}>SAVED ✓ VIEW MY DRAFTS</Link>;
+    return <Link to={`/draftsim${data.year === SIM_YEAR ? "" : `/${data.year}`}?tab=saved`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none", ...(full ? { textAlign: "center", whiteSpace: "normal" } : {}) }}>{full ? "SAVED ✓ MY DRAFTS" : "SAVED ✓ VIEW MY DRAFTS"}</Link>;
   }
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      {state === "waiting" && <span style={{ color: "#9fb0c8", fontSize: 11, fontFamily: BODY, maxWidth: 200 }}>Sign in or create a free account — it saves as soon as you&apos;re in.</span>}
-      <button onClick={onClick} disabled={state === "saving"} style={{ ...btn, background: "#1a2438", color: "#fff", border: `1px solid ${GOLD}` }}>
+    <span style={{ display: full ? "flex" : "inline-flex", flexDirection: full ? "column-reverse" : "row", alignItems: full ? "stretch" : "center", gap: full ? 6 : 8 }}>
+      {state === "waiting" && <span style={{ color: "#9fb0c8", fontSize: 11, fontFamily: BODY, maxWidth: full ? "none" : 200 }}>Sign in or create a free account — it saves as soon as you&apos;re in.</span>}
+      <button onClick={onClick} disabled={state === "saving"} style={{ ...btn, background: "#1a2438", color: "#fff", border: `1px solid ${GOLD}`, ...(full ? { whiteSpace: "normal" } : {}) }}>
         {state === "saving" ? "SAVING…" : state === "error" ? "SAVE FAILED — RETRY" : "SAVE TO PROFILE"}
       </button>
     </span>
@@ -344,23 +357,51 @@ function ShareButton({ sim, data, hauls, takes, isMobile }) {
         </div>
       </div>
 
-      {open && (
+      {open && isMobile && <MobileShareSheet text={text} onClose={() => setOpen(false)} />}
+      {open && !isMobile && (
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `2px solid ${BLUE}`, borderRadius: 16, maxWidth: 460, width: "100%", maxHeight: "calc(90vh / var(--pz, 1))", overflowY: "auto", padding: 20, boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div style={{ color: BLUE, fontWeight: 900, fontSize: 14, letterSpacing: "0.06em" }}>SHARE YOUR DRAFT</div>
               <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", color: "#999", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
             </div>
-            {!isMobile && <img src={image} alt="Draft sim results" style={{ width: "100%", display: "block", borderRadius: 10, marginBottom: 16 }} />}
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 8 }}>
-              {!isMobile && <button onClick={saveImage} style={{ ...shareLink, background: BLUE, color: "#fff" }}>💾 Save</button>}
+            <img src={image} alt="Draft sim results" style={{ width: "100%", display: "block", borderRadius: 10, marginBottom: 16 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <button onClick={saveImage} style={{ ...shareLink, background: BLUE, color: "#fff" }}>💾 Save</button>
               <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={shareLink}>𝕏 Post</a>
               <a href={`sms:?&body=${encodeURIComponent(text)}`} style={shareLink}>💬 Message</a>
             </div>
-            {!isMobile && <div style={{ color: "#888", fontSize: 11, fontFamily: BODY, marginTop: 10 }}>Save the image, then attach it to your post or message.</div>}
+            <div style={{ color: "#888", fontSize: 11, fontFamily: BODY, marginTop: 10 }}>Save the image, then attach it to your post or message.</div>
           </div>
         </div>
       )}
     </>
+  );
+}
+
+// The phone's share sheet: up from the bottom in the sim's colors, the
+// message as it'll be sent, and two big buttons — X and Messages.
+function MobileShareSheet({ text, onClose }) {
+  const big = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, padding: "15px 12px", fontWeight: 900, fontSize: 15, letterSpacing: "0.04em", textDecoration: "none", fontFamily: "inherit" };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10002, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} className="wd-sim-in" style={{
+        width: "100%", background: "#0e1626", borderTop: `3px solid ${GOLD}`, borderRadius: "20px 20px 0 0",
+        padding: "10px 16px calc(18px + env(safe-area-inset-bottom))", boxSizing: "border-box", boxShadow: "0 -16px 40px rgba(0,0,0,0.5)",
+      }}>
+        <div aria-hidden="true" style={{ width: 42, height: 5, borderRadius: 999, background: "#2a3753", margin: "0 auto 12px" }} />
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ color: "#fff", fontWeight: 900, fontSize: 18, letterSpacing: "0.04em" }}>SHARE YOUR DRAFT</div>
+          <button onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "#1a2438", border: "none", color: "#9fb0c8", width: 32, height: 32, borderRadius: "50%", fontSize: 18, lineHeight: 1, cursor: "pointer" }}>×</button>
+        </div>
+        <div className="wd-sim-scroll" style={{ background: "#070d18", border: "1px solid #1f2b42", borderRadius: 12, padding: "12px 14px", maxHeight: "38vh", overflowY: "auto", color: "#dbe4f0", fontFamily: BODY, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-line", marginBottom: 14 }}>
+          {text}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={{ ...big, background: "#000", color: "#fff", border: "1px solid #2f3336" }}>𝕏 Post</a>
+          <a href={`sms:?&body=${encodeURIComponent(text)}`} style={{ ...big, background: "#2ea043", color: "#fff" }}>💬 Message</a>
+        </div>
+      </div>
+    </div>
   );
 }

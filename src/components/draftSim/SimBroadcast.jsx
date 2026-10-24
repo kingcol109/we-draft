@@ -109,7 +109,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
   if (isMobile) {
     const row = { display: "flex", alignItems: "center", gap: 8, height: 30, whiteSpace: "nowrap", minWidth: 0 };
     return (
-      <div style={{ height: 80, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center", gap: 4, padding: "6px 10px", background: "#070d18", borderRadius: 14, border: "1px solid #1f2b42", marginBottom: 8, flexShrink: 0 }}>
+      <div style={{ height: 80, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, padding: "6px 10px", background: "#070d18", borderRadius: 14, border: "1px solid #1f2b42", marginBottom: 8, flexShrink: 0 }}>
         <div style={{ ...row, overflow: "hidden" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0, background: "#c8102e", color: "#fff", borderRadius: 6, padding: "3px 9px", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>
             <span className="wd-sim-live-dot" style={{ background: "#fff" }} /> LIVE
@@ -117,7 +117,9 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
           <span style={{ color: "#fff", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", flexShrink: 0 }}>{data.year} DRAFT SIM</span>
           {showPick && <span style={{ color: GOLD, fontWeight: 900, fontSize: 11, letterSpacing: "0.08em", marginLeft: "auto", overflow: "hidden", textOverflow: "ellipsis" }}>RD {pick.round} · NO. {pick.overall}</span>}
         </div>
-        <div className="wd-sim-bar-row" style={{ ...row, gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>{controls}</div>
+        {/* Scrolls sideways only — overflow-x alone would let it scroll up
+            and down too, by the pixel or two the buttons stand taller. */}
+        <div className="wd-sim-bar-row" style={{ ...row, height: 34, gap: 6, overflowX: "auto", overflowY: "hidden", overscrollBehaviorX: "contain", scrollbarWidth: "none" }}>{controls}</div>
       </div>
     );
   }
@@ -360,6 +362,18 @@ function ClockFace({ s, team, isMobile, isUser }) {
 }
 
 function PickInFace({ pick, isMobile }) {
+  // Mobile: the envelope beside the words, sized to the card's short height.
+  if (isMobile) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, height: "100%" }}>
+        <span className="wd-sim-envelope" style={{ display: "inline-flex" }}><PickInIcon size={52} /></span>
+        <div style={{ textAlign: "left" }}>
+          <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1.05 }}>THE PICK IS IN</div>
+          <div style={{ fontSize: 13, fontWeight: 700, fontFamily: BODY, opacity: 0.85, marginTop: 4 }}>No. {pick.overall} · announcing the pick…</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: isMobile ? 4 : 8, height: "100%" }}>
       <span className="wd-sim-envelope" style={{ display: "inline-flex" }}><PickInIcon size={isMobile ? 32 : 54} /></span>
@@ -377,6 +391,25 @@ function RevealFace({ event, data, isMobile, ink }) {
   const schoolLogo = p.logo || logoOf(p);
   const valueText = event.value === 0 ? "on the board" : event.value > 0 ? `+${event.value} value` : `${event.value} reach`;
   const grade = label && label.replace(" Round", "").replace("First", "1st").replace("Second", "2nd");
+  if (isMobile) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, height: "100%", minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <span style={{ ...cardLabel, color: ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
+          <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1.1, marginTop: 4, color: "#33415a", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.First}</div>
+          <ShrinkText text={p.Last} max={34} min={18} style={{ fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: "0 0 6px" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: BODY, minWidth: 0 }}>
+            <span style={{ background: ink, color: "#fff", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: 12, flexShrink: 0 }}>{p.Position}</span>
+            <span style={{ fontWeight: 800, fontSize: 13, color: "#0f1b2d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.School}</span>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Board #{p.rank} ({valueText}){grade ? ` · ${grade}` : ""}{fit != null ? ` · Fit ${Math.round(fit)}` : ""}
+          </div>
+        </div>
+        {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0 }} />}
+      </div>
+    );
+  }
   return (
     <>
       <span style={{ ...cardLabel, color: ink }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
@@ -573,15 +606,16 @@ function SimmingContent({ s, data, isMobile }) {
 // The trade announcement — the whole stage: who moves up, who moves down,
 // and what each side gets. Labels read under the (plural) nickname:
 // "JETS / MOVE UP · GET".
+// Side by side on every screen; a phone just runs everything smaller.
 function TradeSide({ brand, team, label, picks, isMobile, align }) {
   return (
-    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: isMobile ? "row" : "column", alignItems: "center", gap: isMobile ? 10 : 8, textAlign: isMobile ? "left" : "center", justifyContent: align }}>
-      <span className="wd-sim-in" style={{ display: "inline-flex", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.4))" }}><TeamLogo brand={brand} team={team} size={isMobile ? 52 : 104} /></span>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: isMobile ? 16 : 24, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.05 }}>{brand.Team || team}</div>
-        <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", opacity: 0.75, marginTop: 4 }}>{label}</div>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "center", marginTop: 5 }}>
-          {picks.map((p) => <span key={p} style={{ background: "rgba(0,0,0,0.35)", borderRadius: 999, padding: "3px 10px", fontSize: isMobile ? 11 : 13, fontWeight: 900, whiteSpace: "nowrap" }}>{p}</span>)}
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 5 : 8, textAlign: "center", justifyContent: align }}>
+      <span className="wd-sim-in" style={{ display: "inline-flex", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.4))" }}><TeamLogo brand={brand} team={team} size={isMobile ? 64 : 104} /></span>
+      <div style={{ minWidth: 0, maxWidth: "100%" }}>
+        <div style={{ fontSize: isMobile ? 15 : 24, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.05, overflowWrap: "anywhere" }}>{brand.Team || team}</div>
+        <div style={{ fontSize: isMobile ? 9 : 10, fontWeight: 900, letterSpacing: isMobile ? "0.12em" : "0.16em", opacity: 0.75, marginTop: isMobile ? 3 : 4 }}>{label}</div>
+        <div style={{ display: "flex", gap: isMobile ? 4 : 5, flexWrap: "wrap", justifyContent: "center", marginTop: 5 }}>
+          {picks.map((p) => <span key={p} style={{ background: "rgba(0,0,0,0.35)", borderRadius: 999, padding: isMobile ? "2px 8px" : "3px 10px", fontSize: isMobile ? 10 : 13, fontWeight: 900, whiteSpace: "nowrap" }}>{p}</span>)}
         </div>
       </div>
     </div>
@@ -597,7 +631,7 @@ function TradeContent({ event, data, isMobile }) {
         <span className="wd-sim-flip" style={{ display: "inline-block", background: "#fff", color: "#a50e24", borderRadius: 8, padding: isMobile ? "3px 10px" : "4px 14px", fontSize: isMobile ? 20 : 36, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1.1 }}>TRADE</span>
         <span style={{ fontSize: isMobile ? 12 : 15, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.85 }}>{pickName(event.pick).toUpperCase()} CHANGES HANDS</span>
       </div>
-      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap: isMobile ? 10 : 18, flex: isMobile ? "0 0 auto" : 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: isMobile ? 6 : 18, flex: 1, minHeight: 0 }}>
         <TradeSide brand={to} team={event.to} label="MOVE UP · GET" picks={[pickName(event.pick)]} isMobile={isMobile} align="center" />
         <span aria-hidden="true" style={{ fontSize: isMobile ? 22 : 40, fontWeight: 900, color: GOLD, alignSelf: "center", lineHeight: 1 }}>⇄</span>
         <TradeSide brand={from} team={event.from} label="MOVE DOWN · GET" picks={event.give.map(pickName)} isMobile={isMobile} align="center" />
@@ -623,8 +657,6 @@ function Stage({ s, data, isMobile, onPickTeam }) {
 
   if (s.phase === "intro") {
     if (s.sim.userTeams.length === 1) look = teamLook(brandOf(data, s.sim.userTeams[0]));
-    // Mobile: the logo is the hero — no wordmark behind it.
-    if (isMobile) look = { ...look, wordmark: null };
     content = <IntroContent s={s} data={data} isMobile={isMobile} onPickTeam={onPickTeam} />;
   } else if (s.phase === "simming") {
     look = SIMMING_LOOK;
@@ -652,7 +684,10 @@ function Stage({ s, data, isMobile, onPickTeam }) {
   }
 
   return (
-    <StageFrame look={look} isMobile={isMobile} footer={footer} beat={beat}>
+    // Mobile: no wordmark behind the stage — before the draft the team's
+    // logo is the background (IntroContent), and during it the stage is
+    // too busy for one.
+    <StageFrame look={isMobile ? { ...look, wordmark: null } : look} isMobile={isMobile} footer={footer} beat={beat}>
       <div key={key} className="wd-sim-in" style={{ width: "100%", height: "100%", display: "flex", alignItems: "center" }}>{content}</div>
     </StageFrame>
   );

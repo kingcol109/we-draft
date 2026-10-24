@@ -339,6 +339,11 @@ export default function Navbar() {
           style={{
             backgroundColor: "#0055a5",
             padding: "0.75rem 1.25rem",
+            // The desktop height (42px logo + padding) everywhere — the
+            // phone's scaled-down logo would make it shorter, and pages
+            // like the Draft Sim sit flush against this edge.
+            minHeight: 66,
+            boxSizing: "border-box",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -347,11 +352,16 @@ export default function Navbar() {
           }}
         >
           {/* LOGO (+ LIVE button while games are on) */}
-          {/* The logo never gives up width: as a shrinking flex item, the
-              global img max-width: 100% squeezed it narrower at full height. */}
-          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px", flexShrink: 0 }}>
-            <Link to="/" style={{ display: "block", flexShrink: 0 }}>
-              <img src={Logo2} alt="We-Draft.com" style={{ height: 42, width: "auto", maxWidth: "none", objectFit: "contain", display: "block" }} />
+          {/* The logo keeps its shape: as a shrinking flex item, the global
+              img max-width: 100% used to squeeze it narrower at full height.
+              It's ~10:1, so on a phone it scales down as a whole to leave
+              room for the hamburger (which sits over it if it still runs
+              long — the LIVE button beside it). */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px", flexShrink: isMobile ? 1 : 0, minWidth: 0 }}>
+            <Link to="/" style={{ display: "block", flexShrink: isMobile ? 1 : 0, minWidth: 0 }}>
+              <img src={Logo2} alt="We-Draft.com" style={isMobile
+                ? { height: "auto", width: "auto", maxHeight: 42, maxWidth: "calc(100vw - 2.5rem - 48px)", display: "block" }
+                : { height: 42, width: "auto", maxWidth: "none", objectFit: "contain", display: "block" }} />
             </Link>
             {liveCount > 0 && (
               <Link to="/live" className="wd-live-btn" title={`${liveCount} game${liveCount === 1 ? "" : "s"} live — open We-Draft Live`}>
@@ -662,8 +672,8 @@ export default function Navbar() {
             )}
           </div>
 
-          {/* MOBILE HAMBURGER */}
-          <div className="md:hidden">
+          {/* MOBILE HAMBURGER — pinned right, over the logo if it runs long. */}
+          <div className="md:hidden" style={{ position: "absolute", right: "1.25rem", top: "50%", transform: "translateY(-50%)", zIndex: 2, background: "#0055a5", paddingLeft: 6 }}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               style={{ background: "none", border: "none", color: "#ffffff", fontSize: "2rem", cursor: "pointer", lineHeight: 1 }}
