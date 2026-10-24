@@ -7,9 +7,14 @@
 //                      pick with its We-Draft.com board rank and one more
 //                      fact — community traits, position rank, value or
 //                      reach, staff fit, position runs.
-//   Kenneth Cold       the draft analyst (@kingcoldsports): opinions —
+//   Isaac Walker       the draft analyst (@IsaacWalker): opinions —
 //                      reaches, value, fits, and the CFBD game that put a
 //                      player on his radar.
+//   Kenneth Cold       the player analyst (@kingcoldsports): what the
+//                      drafted player actually is — his own written take on
+//                      that player (PLAYER_TAKES, config/draftSimAnalysis),
+//                      by situation: a reach, a steal, a depth pick or a
+//                      normal pick. Silent on players with no take written.
 //   Dr. PP Johnson     the stat guy: reads out the player's CFBD numbers —
 //                      season lines and national ranks.
 //   Makali Pennycooke  the optimist (@timeoutwithmakalipod): loves every
@@ -20,9 +25,15 @@
 //                      to his favorite players (FSU greats, movie and TV
 //                      football players — editable in admin).
 //
+// Team needs (engine needFor → event.need: { key, label, note } from
+// nflTeamNeeds, the admin's labels) give the personalities their "why" — a
+// need met, an aging starter's heir, a pick into a crowded room. We-Draft.com
+// sticks to the board and the community; needs are the analysts' to discuss.
+//
 // We-Draft.com posts every pick; then one personality chimes in — who
 // depends on the pick (stats → Dr. Johnson, Rutgers/Eagles → Makali, FSU
-// → Davin, a reach/steal/QB/big game → Kenneth), never the same voice twice running
+// → Davin, a player with a written take → Kenneth, a reach/steal/QB/big
+// game → Isaac), never the same voice twice running
 // if it can help it. How often: the sim's desk-chatter setting (CHATTER —
 // every pick by default); the user's own picks and trades always get one.
 //
@@ -34,7 +45,7 @@
 // { text, minPick } instead of a string — only used from that overall pick
 // on (no "he'd been sitting there a few picks" at No. 1).
 import { gradeLabel } from "../communityGrades";
-import { pickName, SIM_POSITIONS, SPECIALISTS } from "./engine";
+import { pickName, SIM_POSITIONS, SPECIALISTS, needWord } from "./engine";
 
 // ── Desk chatter (personalities on CPU picks) ──
 export const CHATTER = [
@@ -47,18 +58,19 @@ export const DEFAULT_CHATTER = "all";
 export const VARIABLES = {
   player: "Full name", last: "Last name", lastPoss: "Last name, possessive (Simmons')", pos: "Position (EDGE)",
   posName: "Position in words (edge rusher)", aPosName: "With a/an (an edge rusher)", Strength: "Top strength, capitalized", Weakness: "Top concern, capitalized", posPlural: "Plural (edge rushers)", school: "College", team: "Team abbreviation",
-  teamName: "Team full name", nick: "Team nickname", n: "Overall pick number", rank: "We-Draft.com board rank",
+  teamName: "Team full name", city: "Team city (New York)", nick: "Team nickname", n: "Overall pick number", rank: "We-Draft.com board rank",
   posRank: "Position rank (5)", posRankOrd: "Position rank (5th)", spots: "Spots of value / reach", grade: "Community grade (results screen: the team's draft grade)",
   count: "Number of evaluations", strength: "Top community strength", strength2: "Second strength", weakness: "Top community concern",
   value: "Stat value", stat: "Stat name (sacks)", statTitle: "Stat title (Sacks)", rankOrd: "National rank (3rd / tied for 3rd)",
   year: "Draft year", season: "CFB season", fit: "Staff fit score", fitWord: "Fit tier (Very Strong)", staffer: "Staffer's name", stafferPoss: "Staffer's name, possessive", title: "Staffer's job (GM)",
   runCount: "Picks at the position in the last 8", leftName: "Best player left at the position", leftRank: "His board rank",
   gameLine: "Big game's stat line (4 sacks)", opp: "That game's opponent",
+  needLabel: "The team's need there (Aging Talent)", needPos: "The need in words (cornerback, slot corner)", needNote: "The admin's note on that need (Rodgers turns 42)",
   legend: "One of Davin's favorite players at the position (Chris Weinke, Uncle Rico…) — any Davin line",
   legendPos: "His favorite's position (joke pick)", legendSchool: "His favorite's school (joke pick)",
   gm: "Team's GM (full name)", gmLast: "GM's last name", hc: "Head coach (full name)", hcLast: "Head coach's last name",
   oc: "Offensive coordinator", ocLast: "OC's last name", dc: "Defensive coordinator", dcLast: "DC's last name",
-  to: "Team trading up", from: "Team trading down", toNick: "Nickname trading up", fromNick: "Nickname trading down", got: "Picks the team trading down gets", pct: "Trade-chart %",
+  to: "Team trading up", from: "Team trading down", toNick: "Nickname trading up", fromNick: "Nickname trading down", fromCity: "City trading down", got: "Picks the team trading down gets", pct: "Trade-chart %",
   fromGm: "GM trading down", fromHc: "Head coach trading down",
   best: "Best pick (results screen)", bestN: "Best pick's number (results screen)",
 };
@@ -67,14 +79,15 @@ export const VARIABLES = {
 // the staff variables are the team trading up's.
 export const VARIABLE_GROUPS = [
   ["Player", ["player", "last", "lastPoss", "pos", "posName", "aPosName", "posPlural", "school"]],
-  ["Team & pick", ["team", "teamName", "nick", "n", "year"]],
+  ["Team & pick", ["team", "teamName", "city", "nick", "n", "year"]],
   ["Coaches & GM", ["gm", "gmLast", "hc", "hcLast", "oc", "ocLast", "dc", "dcLast"]],
   ["Board & community", ["rank", "posRank", "posRankOrd", "spots", "grade", "count", "strength", "strength2", "Strength", "weakness", "Weakness"]],
   ["Staff fit", ["fit", "fitWord", "staffer", "stafferPoss", "title"]],
   ["Runs & games", ["runCount", "leftName", "leftRank", "gameLine", "opp", "season"]],
+  ["Team needs", ["needLabel", "needPos", "needNote"]],
   ["Davin", ["legend", "legendPos", "legendSchool"]],
   ["Stats", ["value", "stat", "statTitle", "rankOrd", "YDS", "TD", "INT", "PCT", "ATT", "COMPLETIONS", "YPA", "CAR", "YPC", "REC", "YPR", "TOT", "TFL", "SACKS", "QB HUR", "PD"]],
-  ["Trades", ["to", "from", "toNick", "fromNick", "got", "pct", "fromGm", "fromHc"]],
+  ["Trades", ["to", "from", "toNick", "fromNick", "fromCity", "got", "pct", "fromGm", "fromHc"]],
   ["Results screen", ["best", "bestN"]],
 ];
 
@@ -266,8 +279,8 @@ export const PP_LINES = {
   },
 };
 
-// ── Kenneth Cold: the flavor ──
-export const KENNETH_LINES = {
+// ── Isaac Walker: the flavor ──
+export const ISAAC_LINES = {
   firstOverall: {
     label: "No. 1 overall pick", when: "The first pick of the draft (the board's top guy, or close to it).",
     lines: [
@@ -330,7 +343,7 @@ export const KENNETH_LINES = {
     ],
   },
   game: {
-    label: "The game that did it", when: "The player had a standout CFBD game this season (when Kenneth chimes in on a non-headline pick).",
+    label: "The game that did it", when: "The player had a standout CFBD game this season (when Isaac chimes in on a non-headline pick).",
     lines: [
       "{player} put himself on my radar when he had {gameLine} against {opp}.",
       "I keep coming back to the {opp} game — {gameLine}. That's the {last} the {nick} are drafting.",
@@ -371,6 +384,32 @@ export const KENNETH_LINES = {
       "The {nick} are on the board with {player}. I'll have thoughts, but I like the conviction.",
       "Alright, {nick} fans — {last} is yours. Go buy the jersey.",
       "You're the GM now. {player} at {n}. Own it.",
+    ],
+  },
+  needMet: {
+    label: "Need met", when: "Fills the team's biggest kind of need (Upgrade Needed).",
+    lines: [
+      "That's the pick I'd have made. The {nick} had a hole at {needPos} you could drive a truck through, and {last} fills it.",
+      "Need, meet answer. {player} walks in as the {nick}' starting {needPos}.",
+      "{needNote} — so yeah, {last} makes all the sense in the world for the {nick}.",
+      "No overthinking it. The {nick} needed a {needPos} and they got a good one in {last}.",
+    ],
+  },
+  heir: {
+    label: "Aging starter's heir", when: "The team's starter here is Aging Talent.",
+    lines: [
+      "This is about the future. The {nick}' {needPos} isn't getting any younger, and {last} gets a year or two to learn.",
+      "Smart teams draft the replacement before they need him. {player} is the {nick}' heir apparent.",
+      "{needNote}. That's why {last} is a {nick} tonight.",
+      "Succession planning. {last} might not start right away, but this is his job in a couple of years.",
+    ],
+  },
+  crowded: {
+    label: "Pick into a crowded room", when: "The team already has more good players here than it can play.",
+    lines: [
+      "I don't get it. The {nick} were already loaded at {needPos}. Is somebody getting traded?",
+      "{player} is a fine player, but where does he play? The {nick}' {needPos} room was already full.",
+      "Best player available, I guess — because the {nick} did not need another {needPos}.",
     ],
   },
   trade: {
@@ -450,6 +489,14 @@ export const MAKALI_LINES = {
       "That's a winner right there. {nick} fans, go buy the {last} jersey.",
     ],
   },
+  needMet: {
+    label: "Need met", when: "The team needed this position (any need but Depth Needed or Crowded Room).",
+    lines: [
+      "THIS is the guy! The {nick} needed a {needPos} and {last} is going to be a STAR there.",
+      "{needPos} was the need and {player} is the answer. Perfect fit, perfect pick!",
+      "I said the {nick} needed a {needPos}. They got one. I'm thrilled!",
+    ],
+  },
   trade: {
     label: "Trade", when: "Any trade.",
     lines: [
@@ -459,9 +506,9 @@ export const MAKALI_LINES = {
   },
 };
 
-// Kenneth's take on a user team's finished draft (the results screen),
+// Isaac's take on a user team's finished draft (the results screen),
 // by its grade. {grade} is the letter, {best} the best-graded pick.
-Object.assign(KENNETH_LINES, {
+Object.assign(ISAAC_LINES, {
   gradeA: {
     label: "Draft grade: A range", when: "Results screen — the user's team graded A+, A or A-.",
     lines: [
@@ -625,6 +672,14 @@ export const DAVIN_LINES = {
       "Has anyone checked if {legend} has eligibility left? Asking for the {nick}.",
     ],
   },
+  crowded: {
+    label: "Pick into a crowded room", when: "The team already has more good players here than it can play.",
+    lines: [
+      "The {nick} already had too many at {needPos}. Now they have too many plus one. Should've taken a fullback.",
+      "Another {needPos}? The {nick} are collecting them like cheeseburgers. Except you can eat cheeseburgers.",
+      "{legend} would never sit behind three other guys. {last} is about to.",
+    ],
+  },
   trade: {
     label: "Trade", when: "Any trade.",
     lines: [
@@ -694,13 +749,21 @@ function fitLead(fit, staff) {
   return slot && name ? { slot, name, title: SLOT_TITLE[slot] } : null;
 }
 
-function pickVars(e, ctx) {
+// A team's city ("New York", "Tampa Bay") — ctx.city from teamNamer, else
+// the full name minus the nickname.
+function cityOf(ctx, team) {
+  if (ctx.city) return ctx.city(team);
+  const full = ctx.teamName(team), nick = ctx.nickname(team);
+  return full.endsWith(` ${nick}`) ? full.slice(0, -nick.length - 1) : "";
+}
+
+export function pickVars(e, ctx) {
   const p = e.prospect;
   const lead = fitLead(e.fit, ctx.staff?.[e.team]);
   return {
     player: `${p.First} ${p.Last}`, last: p.Last, lastPoss: possessive(p.Last), pos: p.Position,
     posName: POS_NAME[p.Position] || p.Position, posPlural: POS_PLURAL[p.Position] || `${POS_NAME[p.Position] || p.Position}s`,
-    school: p.School || "", team: e.team, teamName: ctx.teamName(e.team), nick: ctx.nickname(e.team), n: e.pick.overall,
+    school: p.School || "", team: e.team, teamName: ctx.teamName(e.team), city: cityOf(ctx, e.team), nick: ctx.nickname(e.team), n: e.pick.overall,
     rank: p.rank, posRank: p.positionRank, posRankOrd: ordinal(p.positionRank || 0), spots: Math.abs(e.value),
     grade: gradeLabel(p.avg) || "", count: p.count, strength: p.strengths?.[0] ? traitText(p.strengths[0]) : "",
     strength2: p.strengths?.[1] ? traitText(p.strengths[1]) : "", weakness: p.weaknesses?.[0] ? traitText(p.weaknesses[0]) : "",
@@ -710,6 +773,7 @@ function pickVars(e, ctx) {
     staffer: lead?.name || "", stafferPoss: lead ? possessive(lead.name) : "", title: lead?.title || "",
     runCount: e.positionRun, leftName: e.bestLeftAtPosition ? `${e.bestLeftAtPosition.First} ${e.bestLeftAtPosition.Last}` : "",
     leftRank: e.bestLeftAtPosition?.rank || "",
+    needLabel: e.need?.label || "", needPos: e.need ? needWord(e.need.key) : "", needNote: e.need?.note || "",
     ...staffVars(ctx.staff?.[e.team]),
   };
 }
@@ -765,7 +829,8 @@ export function weDraftFacts(e, ctx) {
   else if (base.strength && base.strength2) add("traitsStrength", 1.8);
   if (p.positionRank === 1) add("posRankTop", 2.4);
   else if (p.positionRank && p.positionRank <= 15) add("posRank", p.positionRank <= 5 ? 2 : 1.2);
-  if (base.grade && p.count >= 3) add("grade", 0.9);
+  // (Not on My Board's own grades — the line quotes the community's.)
+  if (base.grade && p.count >= 3 && !p.mine) add("grade", 0.9);
 
   // Board value, staff fit, runs.
   if (e.value >= Math.max(5, e.pick.overall * 0.2)) add("value", 2.2);
@@ -815,6 +880,7 @@ function makaliPick(e, ctx) {
   else if (rutgers) cat = "rutgers";
   else if (eagles) cat = "eagles";
   else if (e.isUser && ctx.rand() < 0.5) cat = "user";
+  else if (e.need && !["Depth Needed", "Crowded Room"].includes(e.need.label) && ctx.rand() < 0.4) cat = "needMet";
   else if (e.prospect.Position === "QB" && e.pick.round <= 2) cat = "qb";
   else if (e.value >= Math.max(6, e.pick.overall * 0.25)) cat = "steal";
   else if (-e.value >= Math.max(6, e.pick.overall * 0.25)) cat = "reach";
@@ -830,28 +896,29 @@ function davinPick(e, ctx) {
   if (isFsu(p)) {
     cat = ctx.rand() < 0.4 ? "fsuLegend" : "fsu";
     if (cat === "fsuLegend") legend = p.Position === "QB" ? "Jameis Winston" : favoriteFor(p.Position, ctx);
-  } else if (e.pick.round === 1 && ["QB", "WR", "DB"].includes(p.Position) && ctx.rand() < 0.5) cat = "fullback";
+  } else if (e.need?.label === "Crowded Room" && ctx.rand() < 0.6) cat = "crowded";
+  else if (e.pick.round === 1 && ["QB", "WR", "DB"].includes(p.Position) && ctx.rand() < 0.5) cat = "fullback";
   else if (e.value >= 0 && ctx.rand() < 0.5) { legend = favoriteFor(p.Position, ctx); cat = "legend"; }
   else cat = ctx.rand() < 0.25 ? "nonsense" : "take";
   // {legend} works in every Davin line — a favorite at the position.
   return { text: lineFrom(DAVIN_LINES, cat, { ...v, legend: legend || favoriteFor(p.Position, ctx) }, ctx, "davin") };
 }
 
-// The standout CFBD game Kenneth can bring up ({ line, opp }), when the sim
+// The standout CFBD game Isaac can bring up ({ line, opp }), when the sim
 // has loaded one for this player (ctx.games — see useDraftSim.js).
 const gameFor = (e, ctx) => ctx.games?.[e.prospect.id] || null;
 
 function tradeVars(e, ctx) {
   return {
-    to: e.to, from: e.from, toNick: ctx.nickname(e.to), fromNick: ctx.nickname(e.from), n: e.pick.overall,
+    to: e.to, from: e.from, toNick: ctx.nickname(e.to), fromNick: ctx.nickname(e.from), fromCity: cityOf(ctx, e.from), n: e.pick.overall,
     got: e.give.map(pickName).join(" + "), pct: Math.round(e.ratio * 100),
-    teamName: ctx.teamName(e.to), nick: ctx.nickname(e.to), team: e.to, year: ctx.year || "",
+    teamName: ctx.teamName(e.to), city: cityOf(ctx, e.to), nick: ctx.nickname(e.to), team: e.to, year: ctx.year || "",
     ...staffVars(ctx.staff?.[e.to]), ...staffVars(ctx.staff?.[e.from], "from"),
   };
 }
 
 function weDraftTrade(e, ctx) {
-  return { text: `TRADE · ${e.to} moves up to ${pickName(e.pick)} with ${e.from}`, lines: [lineFrom(WEDRAFT_LINES, "trade", tradeVars(e, ctx), ctx, "wedraft")] };
+  return { text: `TRADE · The ${ctx.nickname(e.to)} move up to ${pickName(e.pick)} with the ${ctx.nickname(e.from)}`, lines: [lineFrom(WEDRAFT_LINES, "trade", tradeVars(e, ctx), ctx, "wedraft")] };
 }
 
 // Should a personality speak up on this event?
@@ -866,23 +933,68 @@ function chimesIn(e, ctx) {
   return ctx.rand() < (notable ? 0.45 : e.pick.round === 1 ? 0.15 : 0.06);
 }
 
-function kennethPick(e, ctx) {
+function isaacPick(e, ctx) {
   const v = pickVars(e, ctx);
   let cat;
+  const need = e.need?.label;
   if (e.pick.overall === 1) cat = e.prospect.rank > 3 ? "firstSurprise" : "firstOverall";
+  else if (need === "Aging Talent" && ctx.rand() < 0.7) cat = "heir";
+  else if (need === "Crowded Room" && ctx.rand() < 0.7) cat = "crowded";
   else if (e.prospect.Position === "QB" && e.pick.round <= 2) cat = "qb";
   else if (e.value >= Math.max(6, e.pick.overall * 0.25)) cat = "steal";
   else if (-e.value >= Math.max(15, e.pick.overall * 0.6)) cat = "bigReach";
   else if (-e.value >= Math.max(6, e.pick.overall * 0.25)) cat = "reach";
+  else if (need === "Upgrade Needed" && ctx.rand() < 0.5) cat = "needMet";
   else if ((e.fit?.s || 0) >= 80) cat = "fit";
   else if (e.positionRun >= 3) cat = "run";
   else cat = "value";
   const game = gameFor(e, ctx);
-  if (game && e.pick.overall !== 1 && !["qb", "bigReach"].includes(cat) && ctx.rand() < 0.6) {
-    return { text: lineFrom(KENNETH_LINES, "game", { ...v, gameLine: game.line, opp: game.opp }, ctx, "kenneth") };
+  if (game && e.pick.overall !== 1 && !["qb", "bigReach", "heir", "crowded"].includes(cat) && ctx.rand() < 0.6) {
+    return { text: lineFrom(ISAAC_LINES, "game", { ...v, gameLine: game.line, opp: game.opp }, ctx, "isaac") };
   }
   if (e.isUser && e.pick.overall !== 1 && ctx.rand() < 0.5) cat = "user";
-  return { text: lineFrom(KENNETH_LINES, cat, v, ctx, "kenneth") };
+  return { text: lineFrom(ISAAC_LINES, cat, v, ctx, "isaac") };
+}
+
+// ── Kenneth Cold: the player takes ──
+// His own analysis of each player, written per player in Admin → Mock
+// Draft → Personalities (config/draftSimAnalysis.players: { [playerId]:
+// { reach: [line, …], steal, normal, depth } }). Which situation a pick is
+// uses Isaac's steal/reach thresholds; a depth pick is one the team's needs
+// call "Depth Needed". A situation with no lines of its own uses the
+// player's normal lines; a player with none at all gets no Kenneth.
+// Lines take the same {variables} as everyone else's.
+export const PLAYER_TAKES = {
+  reach: { label: "Reach", when: "Taken well before his board rank." },
+  steal: { label: "Steal", when: "Taken well after his board rank." },
+  depth: { label: "Depth pick", when: "The team's need at his position is Depth Needed (and he isn't a reach or steal)." },
+  normal: { label: "Normal", when: "Every other pick — and any situation above that has no lines of its own." },
+};
+let playerTakes = {};
+export function applyPlayerTakes(players = {}) { playerTakes = players || {}; }
+export const playerTakesFor = (id) => playerTakes[id] || {};
+
+export function takeSituation(e) {
+  if (e.value >= Math.max(6, e.pick.overall * 0.25)) return "steal";
+  if (-e.value >= Math.max(6, e.pick.overall * 0.25)) return "reach";
+  if (e.need?.label === "Depth Needed") return "depth";
+  return "normal";
+}
+
+// The situation whose lines he'd use for this pick, or null (nothing written).
+function takeFor(e) {
+  const takes = playerTakesFor(e.prospect.id);
+  const has = (cat) => (takes[cat] || []).some((l) => lineText(l).trim());
+  const cat = takeSituation(e);
+  return has(cat) ? cat : has("normal") ? "normal" : null;
+}
+
+function kennethPick(e, ctx) {
+  const cat = takeFor(e);
+  if (!cat) return null;
+  const table = { [cat]: { lines: playerTakesFor(e.prospect.id)[cat].filter((l) => lineText(l).trim()) } };
+  const text = lineFrom(table, cat, pickVars(e, ctx), ctx, `kenneth:${e.prospect.id}`);
+  return text ? { text } : null;
 }
 
 // Each personality: react(event, ctx) → its take ({ text, lines? } or
@@ -897,8 +1009,8 @@ export const ANALYSTS = [
     react: (e, ctx) => (e.type === "pick" ? weDraftPick(e, ctx) : e.type === "trade" ? weDraftTrade(e, ctx) : null),
   },
   {
-    id: "kenneth", name: "Kenneth Cold", handle: "@kingcoldsports", role: "Draft Analyst", verified: true, enabled: true,
-    color: "#f6a21d", initials: "KC", delay: 1300, lines: KENNETH_LINES,
+    id: "isaac", name: "Isaac Walker", handle: "@IsaacWalker", role: "Draft Analyst", verified: true, enabled: true,
+    color: "#14a3a3", initials: "IW", delay: 1300, lines: ISAAC_LINES,
     about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades, and your final grade.",
     cadence: "Most likely on the headline picks: No. 1, QBs, steals, reaches, big games, trades.",
     weight: (e) => {
@@ -908,10 +1020,18 @@ export const ANALYSTS = [
       return notable ? 3 : 1.3;
     },
     react: (e, ctx) => {
-      if (e.type === "pick") return kennethPick(e, ctx);
-      if (e.type === "trade") return { text: lineFrom(KENNETH_LINES, "trade", tradeVars(e, ctx), ctx, "kenneth") };
+      if (e.type === "pick") return isaacPick(e, ctx);
+      if (e.type === "trade") return { text: lineFrom(ISAAC_LINES, "trade", tradeVars(e, ctx), ctx, "isaac") };
       return null;
     },
+  },
+  {
+    id: "kenneth", name: "Kenneth Cold", handle: "@kingcoldsports", role: "Player Analyst", verified: true, enabled: true,
+    color: "#f6a21d", initials: "KC", delay: 1300, lines: {},
+    about: "The player guy — his own written analysis of the player just drafted, with different takes for a reach, a steal, a depth pick and a normal pick.",
+    cadence: "Picks of players he has a take written for (Player analysis below); never on trades.",
+    weight: (e) => (e.type === "pick" && e.pick.overall !== 1 && takeFor(e) ? 4 : 0),
+    react: (e, ctx) => (e.type === "pick" ? kennethPick(e, ctx) : null),
   },
   {
     id: "pp", name: "Dr. PP Johnson", handle: "@DrPPJohnson", role: "Stats", verified: true, enabled: true,
@@ -941,7 +1061,7 @@ export const ANALYSTS = [
     },
   },
   {
-    id: "davin", name: "Davin McGavitt", handle: "@DavinMcGavitt", role: "The Jester", verified: false, enabled: true,
+    id: "davin", name: "davin mcgavitt", handle: "@davinmcgavitt", role: "The Jester", verified: false, enabled: true,
     color: "#7a3cff", initials: "DM", delay: 1300, lines: DAVIN_LINES,
     about: "The desk's jester — a joke. Mostly negative, distracted by cheeseburgers, misses first-round fullbacks, loves Florida State players, and measures good picks against his favorite players (FSU greats, movie and TV football players).",
     cadence: "Any pick or trade; almost always on FSU players.",
@@ -998,7 +1118,7 @@ export function openingPosts({ year, userTeams, ctx }) {
   const mine = userTeams.map((t) => ctx.nickname(t)).join(", ");
   return [
     { analyst: ANALYSTS[0], text: `The ${year} NFL Draft Sim is LIVE.`, lines: ["Every CPU pick weighs the We-Draft.com board, positional value and each staff's own draft history.", ...(mine ? [`You're running the war room for: ${mine}.`] : [])], delay: 0 },
-    { analyst: byId("kenneth"), text: mine ? `Alright ${mine} fans — the clock's yours when it's your turn. Don't make me roast you on air.` : "Pull up a chair. Let's see who's got a plan and who's winging it.", delay: 900 },
+    { analyst: byId("isaac"), text: mine ? `Alright ${mine} fans — the clock's yours when it's your turn. Don't make me roast you on air.` : "Pull up a chair. Let's see who's got a plan and who's winging it.", delay: 900 },
   ];
 }
 
@@ -1011,24 +1131,24 @@ export function davinSuggestion(team, ctx) {
   if (!legend) return null;
   const pos = (legend.positions || []).find((x) => x !== "ANY") || "ATH";
   const text = lineFrom(DAVIN_LINES, "suggestion", {
-    legend: legend.name, legendPos: pos, legendSchool: legend.school || "", nick: ctx.nickname(team), teamName: ctx.teamName(team), team, year: ctx.year || "",
+    legend: legend.name, legendPos: pos, legendSchool: legend.school || "", nick: ctx.nickname(team), teamName: ctx.teamName(team), city: cityOf(ctx, team), team, year: ctx.year || "",
   }, ctx, "davin");
   return text ? { analyst: davin, legend, pos, text } : null;
 }
 
-// Kenneth's grade comment for a user team's finished draft (results
+// Isaac's grade comment for a user team's finished draft (results
 // screen) → { analyst, text }, or null when they made no picks.
 export function gradeTake(haul, ctx) {
   if (!haul.rows.length) return null;
   const best = [...haul.rows].sort((a, b) => b.score - a.score)[0];
   const cat = `grade${haul.letter[0]}`;
   const vars = {
-    grade: haul.letter, nick: ctx.nickname(haul.team), teamName: ctx.teamName(haul.team), team: haul.team,
+    grade: haul.letter, nick: ctx.nickname(haul.team), teamName: ctx.teamName(haul.team), city: cityOf(ctx, haul.team), team: haul.team,
     best: `${best.prospect.First} ${best.prospect.Last}`, bestN: best.pick.overall, year: ctx.year || "",
     ...staffVars(ctx.staff?.[haul.team]),
   };
-  const text = lineFrom(KENNETH_LINES, cat, vars, ctx, "kenneth");
-  return text ? { analyst: byId("kenneth"), text } : null;
+  const text = lineFrom(ISAAC_LINES, cat, vars, ctx, "isaac");
+  return text ? { analyst: byId("isaac"), text } : null;
 }
 
 // The desk's wrap-up for a user team's finished draft.

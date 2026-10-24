@@ -6,19 +6,27 @@
 // site's trade chart, and an analyst desk reacts to every pick
 // (utils/draftSim/analysts.js).
 //
+// /draftsim/2028 (and /draftsim/2028/:team) drafts the 2028 class instead of
+// 2027 (SIM_YEARS) — only as
+// many rounds as its board can fill (maxRounds); the setup screen switches
+// between them.
+//
 // /draftsim/tb is the marketed entry: it skips setup and starts the draft
 // right away with the default settings, the Buccaneers as the user's team
 // ("Drafting as the Buccaneers" on the stage first). /draftsim is the setup
 // screen — any number of teams (or none, and just watch), rounds, speed and
 // desk chatter; the live sim's Settings button comes back here with its
-// teams still picked. Linked from the mock drafts hub (MockDraftHub.jsx) —
+// teams still picked. "My Board" drafts off the signed-in user's own round
+// grades instead of the community's (engine applyMyGrades). Linked from the mock drafts hub (MockDraftHub.jsx) —
 // the hand-built, written mocks stay there.
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
-import { loadSimSetup, loadSimData, SIM_YEAR, teamNamer } from "../utils/draftSim/data";
+import { loadSimSetup, loadSimData, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
+import { applyMyGrades } from "../utils/draftSim/engine";
+import { useAuth } from "../context/AuthContext";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
@@ -53,28 +61,52 @@ function Column({ wide, isMobile, children }) {
 }
 
 export default function DraftSim() {
-  const { team: teamParam } = useParams();
+  // /draftsim/:team, /draftsim/:year (a SIM_YEARS year in the team slot) or
+  // /draftsim/:year/:team.
+  const params = useParams();
+  const pathYear = params.year || (SIM_YEARS.includes(params.team) ? params.team : null);
+  const teamParam = pathYear && !params.year ? null : params.team;
   const team = teamParam ? teamParam.toUpperCase() : null;
   const location = useLocation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const year = SIM_YEARS.includes(pathYear) ? pathYear : SIM_YEAR;
+  const yearPath = year === SIM_YEAR ? "" : `/${year}`;
+  const { user } = useAuth();
   const [setup, setSetup] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
-  // config: null on the setup screen; { teams, rounds, speed, chatter, seed } once started.
+  // config: null on the setup screen; { teams, rounds, speed, chatter, board, seed } once started.
   const [config, setConfig] = useState(null);
   const [pending, setPending] = useState(null);
+  // The signed-in user's own grades ({} signed out or unreadable), for My Board.
+  const [myGrades, setMyGrades] = useState(null);
 
   useEffect(() => {
-    loadSimSetup(SIM_YEAR).then(setSetup).catch((e) => { console.error("Draft sim setup error:", e); setError(true); });
+    setMyGrades(null);
+    if (!user?.uid) { setMyGrades({}); return undefined; }
+    let live = true;
+    loadMyGrades(user.uid).then((g) => live && setMyGrades(g)).catch((e) => { console.error("Draft sim my grades error:", e); if (live) setMyGrades({}); });
+    return () => { live = false; };
+  }, [user?.uid]);
+  // How many of this class's board they've graded (null while loading).
+  const myCount = data && myGrades ? data.board.filter((p) => myGrades[p.id] != null).length : null;
+
+  useEffect(() => {
+    setSetup(null);
+    setData(null);
+    setError(false);
+    let live = true;
+    loadSimSetup(year).then((s) => live && setSetup(s)).catch((e) => { console.error("Draft sim setup error:", e); if (live) setError(true); });
     // Warm the full board while the user's choosing.
-    loadSimData(SIM_YEAR).then(setData).catch((e) => { console.error("Draft sim data error:", e); setError(true); });
-  }, []);
+    loadSimData(year).then((d) => live && setData(d)).catch((e) => { console.error("Draft sim data error:", e); if (live) setError(true); });
+    return () => { live = false; };
+  }, [year]);
 
-  // A start pressed before the board finished loading.
+  // A start pressed before the board (or, for My Board, their grades) finished loading.
   useEffect(() => {
-    if (pending && data) { setConfig(pending); setPending(null); }
-  }, [pending, data]);
+    if (pending && data && (pending.board !== "mine" || myGrades)) { setConfig(pending); setPending(null); }
+  }, [pending, data, myGrades]);
 
   // /draftsim/:team starts straight away on the default settings; /draftsim
   // is the setup screen.
@@ -83,30 +115,39 @@ export default function DraftSim() {
     setPending(null);
     setConfig(validTeam && setup ? {
       teams: [validTeam], rounds: roundsFor(setup.order, [validTeam], DEFAULT_ROUNDS),
-      speed: DEFAULT_SPEED, chatter: DEFAULT_CHATTER, seed: newSeed(),
+      speed: DEFAULT_SPEED, chatter: DEFAULT_CHATTER, board: "community", seed: newSeed(),
     } : null);
   }, [validTeam, setup]);
 
-  if (team && !validTeam) return <Navigate to="/draftsim" replace />;
+  if ((team && !validTeam) || (params.year && !SIM_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
 
   const names = teamNamer(setup?.branding || {});
   const title = team
-    ? `${names.teamName(team)} Mock Draft Simulator ${SIM_YEAR} | We-Draft Draft Sim`
-    : `${SIM_YEAR} NFL Mock Draft Simulator | We-Draft Draft Sim`;
+    ? `${names.teamName(team)} Mock Draft Simulator ${year} | We-Draft Draft Sim`
+    : `${year} NFL Mock Draft Simulator | We-Draft Draft Sim`;
   const description = team
-    ? `Run the ${names.teamName(team)}' ${SIM_YEAR} draft. Every other team picks off the We-Draft community board and its own staff's draft history, trades included, with live analyst reactions to every pick.`
-    : `Simulate the ${SIM_YEAR} NFL Draft live: pick for one team or several, field trade offers, and get instant reactions from the We-Draft analyst desk. CPU teams draft by community grades and each staff's own draft tendencies.`;
-  const url = `https://we-draft.com/draftsim${team ? `/${team.toLowerCase()}` : ""}`;
+    ? `Run the ${names.teamName(team)}' ${year} draft. Every other team picks off the We-Draft community board and its own staff's draft history, trades included, with live analyst reactions to every pick.`
+    : `Simulate the ${year} NFL Draft live: pick for one team or several, field trade offers, and get instant reactions from the We-Draft analyst desk. CPU teams draft by community grades and each staff's own draft tendencies.`;
+  const url = `https://we-draft.com/draftsim${yearPath}${team ? `/${team.toLowerCase()}` : ""}`;
 
   const start = (cfg) => {
     const next = { ...cfg, seed: newSeed() };
-    if (data) setConfig(next); else setPending(next);
+    if (data && (next.board !== "mine" || myGrades)) setConfig(next); else setPending(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  // Back to the setup screen with this sim's teams picked.
-  const openSettings = (teams) => {
-    if (team) navigate("/draftsim", { state: { teams } });
-    else { setConfig(null); setPending(null); }
+  // Back to the setup screen with this sim's teams (and board) picked.
+  const openSettings = (teams, board) => {
+    if (team) navigate(`/draftsim${yearPath}`, { state: { teams, board } });
+    else { navigate(`/draftsim${yearPath}`, { replace: true, state: { ...location.state, teams, board } }); setConfig(null); setPending(null); }
+  };
+  // "Pick another team": a clean setup screen — no teams carried over (not
+  // even ones from an earlier Settings trip, which ride in the history
+  // state) and every option back to its default.
+  const pickAnother = () => {
+    setConfig(null);
+    setPending(null);
+    navigate(`/draftsim${yearPath}`, { replace: !team, state: null });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (
@@ -132,12 +173,14 @@ export default function DraftSim() {
         ) : !setup || (config && !data) ? (
           <Column isMobile={isMobile}><LoadingSpinner label="Loading the draft" size={40} minHeight="50vh" /></Column>
         ) : config ? (
-          <LiveSim key={config.seed} data={data} config={config} isMobile={isMobile}
-            onRerun={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter })}
-            onSettings={() => openSettings(config.teams)} />
+          <LiveSim key={config.seed} data={data} config={config} myGrades={myGrades} isMobile={isMobile}
+            onRerun={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
+            onSettings={() => openSettings(config.teams, config.board)}
+            onPickTeam={pickAnother} />
         ) : (
           <Column isMobile={isMobile}>
-            <Setup setup={setup} initialTeams={location.state?.teams || []} isMobile={isMobile} names={names} onStart={start} starting={!!pending} />
+            <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending}
+              onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />
           </Column>
         )}
       </div>
@@ -145,15 +188,20 @@ export default function DraftSim() {
   );
 }
 
-function LiveSim({ data, config, isMobile, onRerun, onSettings }) {
-  const s = useDraftSim(data, { userTeams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, seed: config.seed });
+function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onSettings, onPickTeam }) {
+  // My Board: their grades over the community's (fixed for this run — the
+  // sim remounts on every start).
+  const [data] = useState(() => (config.board === "mine" && myGrades ? { ...communityData, board: applyMyGrades(communityData.board, myGrades) } : communityData));
+  // No more rounds than the class's board can fill (2028 is thin).
+  const rounds = Math.min(config.rounds, maxRounds(data.board));
+  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed });
   return (
     <>
       <SimTicker s={s} data={data} />
       <Column wide isMobile={isMobile}>
         {s.phase === "done"
           ? <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} />
-          : <SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} />}
+          : <SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} onPickTeam={onPickTeam} />}
       </Column>
     </>
   );
@@ -166,11 +214,23 @@ const chipStyle = (on) => ({
   borderRadius: 999, padding: "7px 14px", cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: 12, letterSpacing: "0.05em",
 });
 
-function Setup({ setup, initialTeams, isMobile, names, onStart, starting }) {
+// year / onYear: the class being drafted and switching it; rounds: how
+// many rounds its board can fill (null while it loads).
+// initialBoard / signedIn / myCount: the board choice coming back from a
+// sim, whether there's a user to have grades, and how many of this class
+// they've graded (null while it loads).
+function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, signedIn, myCount, isMobile, names, onStart, starting }) {
   const [teams, setTeams] = useState(() => initialTeams.filter((t) => NFL_TEAMS[t]));
-  const [rounds, setRounds] = useState(DEFAULT_ROUNDS);
+  const [chosenRounds, setRounds] = useState(DEFAULT_ROUNDS);
+  const rounds = maxRoundsForYear ? Math.min(chosenRounds, maxRoundsForYear) : chosenRounds;
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [chatter, setChatter] = useState(DEFAULT_CHATTER);
+  const [board, setBoard] = useState(() => (initialBoard === "mine" && signedIn ? "mine" : "community"));
+  const boardNote = !signedIn
+    ? "Sign in to draft off your own grades."
+    : board === "community"
+      ? "Every team drafts off the We-Draft community grades."
+      : `Your round grades replace the community's and re-rank the board. Players you haven't graded use the community grade, and strengths and weaknesses are always the community's.${myCount != null ? ` You've graded ${myCount} of the ${year} class.` : ""}`;
 
   const sortedTeams = useMemo(() => [...NFL_TEAM_ABBRS].sort((a, b) => names.teamName(a).localeCompare(names.teamName(b))), [names]);
   const toggle = (t) => setTeams((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -179,12 +239,18 @@ function Setup({ setup, initialTeams, isMobile, names, onStart, starting }) {
 
   return (
     <div className="wd-sim-in">
-      <SimHero isMobile={isMobile} />
+      <SimHero isMobile={isMobile} year={year} />
 
       <div style={{ background: "#0e1626", border: "1px solid #1f2b42", borderRadius: 16, padding: isMobile ? 14 : 22, marginTop: 14 }}>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
+          <Field label="Draft" note={maxRoundsForYear && maxRoundsForYear < 7 ? `The ${year} board fills ${maxRoundsForYear} round${maxRoundsForYear === 1 ? "" : "s"} so far.` : null}>
+            {SIM_YEARS.map((y) => <button key={y} onClick={() => onYear(y)} aria-pressed={year === y} style={chipStyle(year === y)}>{y}</button>)}
+          </Field>
           <Field label="Rounds">
-            {ROUND_OPTIONS.map((r) => <button key={r} onClick={() => setRounds(r)} aria-pressed={rounds === r} style={chipStyle(rounds === r)}>{r}</button>)}
+            {ROUND_OPTIONS.map((r) => {
+              const off = maxRoundsForYear != null && r > maxRoundsForYear;
+              return <button key={r} onClick={() => !off && setRounds(r)} disabled={off} aria-pressed={rounds === r} style={{ ...chipStyle(rounds === r), opacity: off ? 0.35 : 1, cursor: off ? "not-allowed" : "pointer" }}>{r}</button>;
+            })}
           </Field>
           <Field label="Speed" note={SPEEDS[speed]?.note}>
             {Object.entries(SPEEDS).map(([k, v]) => <button key={k} onClick={() => setSpeed(k)} aria-pressed={speed === k} style={chipStyle(speed === k)}>{v.label}</button>)}
@@ -220,12 +286,19 @@ function Setup({ setup, initialTeams, isMobile, names, onStart, starting }) {
         </div>
 
         <div style={{ marginTop: 18 }}>
+          <Field label="Board" note={boardNote}>
+            <button onClick={() => setBoard("community")} aria-pressed={board === "community"} style={chipStyle(board === "community")}>Community</button>
+            <button onClick={() => signedIn && setBoard("mine")} disabled={!signedIn} aria-pressed={board === "mine"} style={{ ...chipStyle(board === "mine"), opacity: signedIn ? 1 : 0.35, cursor: signedIn ? "pointer" : "not-allowed" }}>My Board</button>
+          </Field>
+        </div>
+
+        <div style={{ marginTop: 18 }}>
           <Field label="Desk Chatter" note={CHATTER.find((c) => c.key === chatter)?.note}>
             {CHATTER.map((c) => <button key={c.key} onClick={() => setChatter(c.key)} aria-pressed={chatter === c.key} style={chipStyle(chatter === c.key)}>{c.label}</button>)}
           </Field>
         </div>
 
-        <button onClick={() => onStart({ teams, rounds: roundsFor(setup.order, teams, rounds), speed, chatter })} disabled={starting} style={{
+        <button onClick={() => onStart({ teams, rounds: roundsFor(setup.order, teams, rounds), speed, chatter, board })} disabled={starting} style={{
           marginTop: 20, width: "100%", border: "none", borderRadius: 14, padding: isMobile ? "15px 18px" : "18px 22px", cursor: starting ? "wait" : "pointer",
           background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#111", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
           textTransform: "uppercase", boxShadow: "0 10px 30px rgba(246,162,29,0.25)",
@@ -255,16 +328,16 @@ function Field({ label, note, children }) {
   );
 }
 
-function SimHero({ isMobile }) {
+function SimHero({ isMobile, year }) {
   return (
     <div style={{ position: "relative", overflow: "hidden", borderRadius: 18, border: "1px solid #1f2b42", padding: isMobile ? "22px 16px" : "36px 34px", background: `linear-gradient(120deg, #00305c 0%, ${BLUE} 55%, #0b1220 120%)` }}>
-      <div aria-hidden="true" style={{ position: "absolute", right: -20, top: "50%", transform: "translateY(-50%)", fontSize: isMobile ? 90 : 190, fontWeight: 900, color: "rgba(255,255,255,0.06)", lineHeight: 1 }}>{SIM_YEAR}</div>
+      <div aria-hidden="true" style={{ position: "absolute", right: -20, top: "50%", transform: "translateY(-50%)", fontSize: isMobile ? 90 : 190, fontWeight: 900, color: "rgba(255,255,255,0.06)", lineHeight: 1 }}>{year}</div>
       <div style={{ position: "relative" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#c8102e", color: "#fff", borderRadius: 6, padding: "3px 9px", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>
           <span className="wd-sim-live-dot" style={{ background: "#fff" }} /> DRAFT SIM
         </span>
         <h1 style={{ margin: "10px 0 10px", color: "#fff", fontSize: isMobile ? 30 : 52, fontWeight: 900, lineHeight: 1, textTransform: "uppercase" }}>
-          {SIM_YEAR} NFL Draft Simulator
+          {year} NFL Draft Simulator
         </h1>
         <p style={{ margin: 0, maxWidth: 680, color: "rgba(255,255,255,0.88)", fontSize: isMobile ? 14 : 16, lineHeight: 1.55, fontFamily: BODY, fontWeight: 600 }}>
           Take the war room for one team or several. Every other team drafts the way its front office actually drafts — community board, positional value and each staff&apos;s own pick history — and the desk reacts live to every card.

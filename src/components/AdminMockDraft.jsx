@@ -11,22 +11,25 @@
 // and his big CFBD game. Davin's panel also edits his favorite players
 // (name, positions, school) and the made-up "other schools" they can go to,
 // with their own logos and colors (config/draftSimDesk.legends /
-// .otherSchools).
+// .otherSchools). Kenneth's panel is his player takes — per player, by
+// situation (reach / steal / depth / normal), saved on their own to
+// config/draftSimAnalysis. Team Needs and Sub-positions: AdminTeamNeeds.jsx.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, doc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import {
   ANALYSTS, CHATTER, VARIABLES, VARIABLE_GROUPS, DEFAULT_CHATTER, lineText, defaultLines, applyDeskLines, defaultAvatar, applyDeskAvatars,
-  LEGEND_POSITIONS, DEFAULT_LEGENDS, davinLegends, otherSchools, applyDeskLegends,
+  LEGEND_POSITIONS, DEFAULT_LEGENDS, davinLegends, otherSchools, applyDeskLegends, PLAYER_TAKES, applyPlayerTakes,
 } from "../utils/draftSim/analysts";
-import { loadSimData, loadDeskLines, loadBestGame, SIM_YEAR, teamNamer } from "../utils/draftSim/data";
+import { loadSimData, loadDeskLines, loadBestGame, SIM_YEAR, SIM_YEARS, teamNamer } from "../utils/draftSim/data";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { initSim, makePick, rngNext } from "../utils/draftSim/engine";
+import { TeamNeeds, SubPositions } from "./AdminTeamNeeds";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-const TABS = [{ key: "personalities", label: "Personalities" }];
+const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "subpositions", label: "Sub-positions" }];
 
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
 
@@ -64,6 +67,8 @@ export default function AdminMockDraft() {
         ))}
       </div>
       {tab === "personalities" && <Personalities />}
+      {tab === "needs" && <TeamNeeds />}
+      {tab === "subpositions" && <SubPositions />}
     </div>
   );
 }
@@ -314,7 +319,8 @@ function Personalities() {
   const [others, setOthers] = useState([]);
   const changeLegends = (v) => { setLegends(v); setDirty(true); setStatus(""); };
   const changeOthers = (v) => { setOthers(v); setDirty(true); setStatus(""); };
-  // The line being edited: { id, cat, i, el } (el: its textarea).
+  // The line being edited: { id, cat, i, el } (el: its textarea), or a
+  // Kenneth take line: { el, edit(fn) } (PlayerTakesEditor).
   const focused = useRef(null);
   const [target, setTarget] = useState(null);
 
@@ -324,7 +330,8 @@ function Personalities() {
     const token = `{${k}}`;
     const start = f.el.selectionStart ?? f.el.value.length;
     const end = f.el.selectionEnd ?? start;
-    change(f.id, f.cat, (ls) => ls.map((x, idx) => (idx === f.i ? { ...x, text: x.text.slice(0, start) + token + x.text.slice(end) } : x)));
+    if (f.edit) f.edit((x) => x.slice(0, start) + token + x.slice(end));
+    else change(f.id, f.cat, (ls) => ls.map((x, idx) => (idx === f.i ? { ...x, text: x.text.slice(0, start) + token + x.text.slice(end) } : x)));
     requestAnimationFrame(() => { f.el.focus(); f.el.setSelectionRange(start + token.length, start + token.length); });
   };
 
@@ -434,6 +441,7 @@ function Personalities() {
             {open[a.id] && <AvatarEditor a={a} value={avatars[a.id] || ""} onChange={(url) => changeAvatar(a.id, url)} />}
             {open[a.id] && a.id === "davin" && <LegendsEditor legends={legends} others={others} onChange={changeLegends} />}
             {open[a.id] && a.id === "davin" && <OtherSchoolsEditor others={others} onChange={changeOthers} />}
+            {open[a.id] && a.id === "kenneth" && <PlayerTakesEditor onFocusLine={(line, label) => { focused.current = line; setTarget(line ? label : null); }} />}
             {open[a.id] && cats.map(([key, c]) => {
               const list = rows[a.id][key];
               const edited = !same(list, defaultLines(a.id, key));
@@ -505,6 +513,150 @@ function Personalities() {
   );
 }
 
+// ── Kenneth's player takes: pick a class, find a player, write his lines
+// for each situation (PLAYER_TAKES). Its own Save — config/draftSimAnalysis,
+// separate from the desk lines above. ──
+const TAKE_CATS = Object.keys(PLAYER_TAKES);
+const cleanTakes = (t = {}) => Object.fromEntries(TAKE_CATS.map((c) => [c, (t[c] || []).map((l) => l.trim()).filter(Boolean)]).filter(([, ls]) => ls.length));
+const takeCount = (t = {}) => TAKE_CATS.reduce((n, c) => n + (t[c] || []).filter((l) => l.trim()).length, 0);
+
+// onFocusLine({ el, edit }, label): hands the line being typed in to the
+// desk's Insert Variable bank (null when none is).
+function PlayerTakesEditor({ onFocusLine }) {
+  const [year, setYear] = useState(SIM_YEAR);
+  const [board, setBoard] = useState(null);
+  const [takes, setTakes] = useState(null);
+  const [query, setQuery] = useState("");
+  const [onlyWritten, setOnlyWritten] = useState(false);
+  const [openId, setOpenId] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [status, setStatus] = useState("");
+  const [shown, setShown] = useState(40);
+
+  useEffect(() => {
+    // Straight from Firestore (not the sim's page-session cache), so a save
+    // from another tab isn't overwritten with stale takes.
+    getDoc(doc(db, "config", "draftSimAnalysis"))
+      .then((snap) => setTakes(snap.exists() ? snap.data().players || {} : {}))
+      .catch((e) => { console.error("Player takes load error:", e); setStatus("loadError"); });
+  }, []);
+  useEffect(() => {
+    setBoard(null);
+    loadSimData(year).then((d) => setBoard(d.board)).catch(() => setBoard([]));
+  }, [year]);
+
+  const change = (id, cat, fn) => {
+    setTakes((t) => ({ ...t, [id]: { ...(t[id] || {}), [cat]: fn(t[id]?.[cat] || []) } }));
+    setDirty(true);
+    setStatus("");
+  };
+  const unfocus = () => onFocusLine(null);
+
+  const save = async () => {
+    const players = Object.fromEntries(Object.entries(takes).map(([id, t]) => [id, cleanTakes(t)]).filter(([, t]) => Object.keys(t).length));
+    setStatus("saving");
+    try {
+      await setDoc(doc(db, "config", "draftSimAnalysis"), { players, updatedAt: serverTimestamp() });
+      applyPlayerTakes(players);
+      setTakes(players);
+      setDirty(false);
+      setStatus("saved");
+    } catch (e) {
+      console.error("Player takes save error:", e);
+      setStatus("error");
+    }
+  };
+
+  const q = query.trim().toLowerCase();
+  const rows = (board || []).filter((p) => (!onlyWritten || takeCount(takes?.[p.id]) > 0)
+    && (!q || `${p.First} ${p.Last} ${p.School} ${p.Position}`.toLowerCase().includes(q)));
+  const written = (board || []).filter((p) => takeCount(takes?.[p.id]) > 0).length;
+  const smallBtn = (on) => ({ border: `1px solid ${on ? BLUE : "#d8dee8"}`, background: on ? BLUE : "#fff", color: on ? "#fff" : BLUE, borderRadius: "6px", padding: "4px 10px", fontSize: "12px", fontWeight: 800, cursor: "pointer" });
+
+  return (
+    <div style={{ padding: "12px 16px", borderTop: "1px solid #eef1f5" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 900, fontSize: "13px", color: "#1a1f2b" }}>Player analysis</span>
+        <span style={{ fontSize: "12px", color: "#777" }}>
+          — what he says when a player is drafted. Write as many lines per situation as you like; he rotates through them. Normal lines are all a player needs: on a reach, steal or depth pick with no lines of its own he fires off the Normal ones. A player with no lines at all gets no Kenneth. Click into a line, then use the Insert Variable bank at the top to drop in {"{nick}"}, {"{n}"}, {"{last}"} and the rest.
+        </span>
+      </div>
+      <ul style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "12px", color: "#555", lineHeight: 1.55 }}>
+        {TAKE_CATS.map((c) => <li key={c}><strong>{PLAYER_TAKES[c].label}</strong> — {PLAYER_TAKES[c].when}</li>)}
+      </ul>
+
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
+        {SIM_YEARS.map((y) => <button key={y} onClick={() => { setYear(y); setOpenId(null); setShown(40); unfocus(); }} style={smallBtn(year === y)}>{y}</button>)}
+        <input value={query} onChange={(e) => { setQuery(e.target.value); setShown(40); }} placeholder="Search name, school or position" style={{ ...inputSm, flex: "1 1 200px" }} />
+        <button onClick={() => setOnlyWritten((v) => !v)} style={smallBtn(onlyWritten)}>Written only</button>
+        <span style={{ fontSize: "12px", color: "#777" }}>{board ? `${written} of ${board.length} written` : ""}</span>
+        <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 800, color: status === "error" || status === "loadError" ? "#b42318" : dirty ? "#a06200" : "#2e7d32" }}>
+          {status === "loadError" ? "Couldn't load — don't save." : status === "saving" ? "Saving…" : status === "error" ? "Save failed — try again." : dirty ? "Unsaved analysis" : status === "saved" ? "Saved — live on the next sim load." : ""}
+        </span>
+        <button onClick={save} disabled={!dirty || status === "saving" || status === "loadError"} style={{ padding: "6px 14px", borderRadius: "8px", border: "none", background: dirty ? BLUE : "#c9d2de", color: "#fff", fontWeight: 900, fontSize: "12px", cursor: dirty ? "pointer" : "default" }}>SAVE ANALYSIS</button>
+      </div>
+
+      {!board || !takes ? <div style={{ fontSize: "12px", color: "#888", marginTop: "10px" }}>Loading the {year} board…</div> : (
+        <div style={{ display: "flex", flexDirection: "column", marginTop: "10px", border: "1px solid #eef1f5", borderRadius: "8px" }}>
+          {rows.slice(0, shown).map((p) => {
+            const t = takes[p.id] || {};
+            const n = takeCount(t);
+            const isOpen = openId === p.id;
+            return (
+              <div key={p.id} style={{ borderBottom: "1px solid #eef1f5" }}>
+                <button onClick={() => { setOpenId(isOpen ? null : p.id); unfocus(); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", border: "none", background: isOpen ? "#f7f9fc" : "#fff", cursor: "pointer", textAlign: "left" }}>
+                  <span style={{ width: "34px", textAlign: "right", color: "#999", fontSize: "12px", fontWeight: 800 }}>#{p.rank}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: "13px" }}><strong>{p.First} {p.Last}</strong> <span style={{ color: "#777" }}>{p.Position} · {p.School}</span></span>
+                  <span style={{ display: "flex", gap: "4px" }}>
+                    {TAKE_CATS.map((c) => {
+                      const k = (t[c] || []).filter((l) => l.trim()).length;
+                      return <span key={c} title={PLAYER_TAKES[c].label} style={{ fontSize: "10px", fontWeight: 900, padding: "1px 6px", borderRadius: "999px", background: k ? "#e8f5e9" : "#f1f4f8", color: k ? "#2e7d32" : "#aab4c3" }}>{PLAYER_TAKES[c].label.split(" ")[0]} {k || ""}</span>;
+                    })}
+                  </span>
+                  <span style={{ fontWeight: 900, color: n ? "#2e7d32" : "#aab4c3", fontSize: "12px", width: "16px" }}>{n ? "✓" : ""}</span>
+                </button>
+                {isOpen && (
+                  <div style={{ padding: "4px 12px 12px 54px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {TAKE_CATS.map((c) => {
+                      const list = t[c] || [];
+                      return (
+                        <div key={c}>
+                          <div style={{ fontWeight: 900, fontSize: "12px", color: "#1a1f2b" }}>{PLAYER_TAKES[c].label} <span style={{ fontWeight: 400, color: "#888" }}>— {PLAYER_TAKES[c].when}</span></div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginTop: "5px" }}>
+                            {list.map((l, i) => {
+                              const bad = unknownVars(l);
+                              return (
+                                <div key={i}>
+                                  <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
+                                    <textarea value={l} rows={Math.max(2, Math.ceil(l.length / 110))} autoFocus={!l && i === list.length - 1}
+                                      onFocus={(e) => onFocusLine({ el: e.target, edit: (fn) => change(p.id, c, (ls) => ls.map((x, k) => (k === i ? fn(x) : x))) }, `Kenneth Cold · ${p.First} ${p.Last} · ${PLAYER_TAKES[c].label} · line ${i + 1}`)}
+                                      onChange={(e) => change(p.id, c, (ls) => ls.map((x, k) => (k === i ? e.target.value : x)))}
+                                      style={{ flex: 1, minWidth: 0, border: `1px solid ${bad.length ? "#e4a11b" : "#d8dee8"}`, borderRadius: "6px", padding: "6px 8px", fontSize: "13px", fontFamily: "Arial, sans-serif", lineHeight: 1.45, resize: "vertical" }} />
+                                    <button onClick={() => { unfocus(); change(p.id, c, (ls) => ls.filter((_, k) => k !== i)); }} title="Remove line" style={{ border: "none", background: "none", color: "#b42318", fontSize: "18px", fontWeight: 900, cursor: "pointer", padding: "2px 6px" }}>×</button>
+                                  </div>
+                                  {/\{[\w ]+\}/.test(l) && <div style={{ fontSize: "12px", color: "#555", marginTop: "2px" }}><Line text={l} /></div>}
+                                  {bad.length > 0 && <div style={{ fontSize: "11px", color: "#a06200", fontWeight: 800, marginTop: "2px" }}>Unknown: {bad.map((v) => `{${v}}`).join(" ")} — shows blank</div>}
+                                </div>
+                              );
+                            })}
+                            <button onClick={() => change(p.id, c, (ls) => [...ls, ""])} style={{ alignSelf: "flex-start", border: `1px dashed ${BLUE}`, background: "#fff", color: BLUE, borderRadius: "6px", padding: "3px 9px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>+ Add {PLAYER_TAKES[c].label.toLowerCase()} line</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {rows.length > shown && <button onClick={() => setShown((x) => x + 60)} style={{ border: "none", background: "#f7f9fc", color: BLUE, fontWeight: 800, fontSize: "12px", padding: "8px", cursor: "pointer" }}>Show more ({rows.length - shown} left)</button>}
+          {!rows.length && <div style={{ fontSize: "12px", color: "#888", padding: "10px" }}>No players match.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Every analyst's post (Davin included) for a real prospect picked by a
 // random team near his board spot.
 function Preview() {
@@ -528,7 +680,7 @@ function Preview() {
     // Favor prospects with something to say about them.
     const pool = d.board.slice(0, 120).filter((p) => p.stats || p.strengths.length);
     const prospect = (pool.length ? pool : d.board)[Math.floor(rand() * (pool.length || d.board.length))];
-    let sim = initSim({ order: d.order, board: d.board, chart: d.chart, rounds: 7, seed });
+    let sim = initSim({ order: d.order, board: d.board, chart: d.chart, needs: d.needs, rounds: 7, seed });
     const slot = Math.max(0, Math.min(sim.picks.length - 1, prospect.rank - 1 + Math.round((rand() - 0.5) * 16)));
     sim = { ...sim, idx: slot };
     const { event } = makePick(sim, prospect.id);

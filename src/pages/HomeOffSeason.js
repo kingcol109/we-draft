@@ -18,6 +18,7 @@ import { Link } from "react-router-dom";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { topProspects, gradeLabel } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
+import { communityAverage } from "../utils/gradeWindow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -58,7 +59,7 @@ function GradeBadge({ grade }) {
   const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
   const bottomLabel = "ROUND";
   return (
-    <div style={{
+    <div className="wdh-grade" style={{
       display: "inline-flex", flexDirection: "column", alignItems: "center",
       justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
       borderRadius: "5px", width: "52px", height: "42px", flexShrink: 0, gap: "1px",
@@ -97,14 +98,8 @@ function TopDraftBoard({ isMobile, year }) {
             if (p.Live === false || p.Live === null || p.Live === 0 || p.Live === "false" || p.Live === "no") return null;
             try {
               const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-              const grades = [];
-              evalsSnap.forEach((d) => {
-                const g = d.data().grade;
-                if (g && gradeScale[g]) grades.push(gradeScale[g]);
-              });
-              p.commGradeScore = grades.length > 0
-                ? Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)
-                : null;
+              const avg = communityAverage(evalsSnap.docs.map((d) => d.data()), p.Eligible, gradeScale);
+              p.commGradeScore = avg != null ? Math.round(avg) : null;
               p.commGrade = p.commGradeScore ? gradeLabels[p.commGradeScore] : null;
             } catch {
               p.commGradeScore = null;
@@ -169,18 +164,18 @@ function TopDraftBoard({ isMobile, year }) {
           text-decoration: underline;
         }
       `}</style>
-      <div style={{
+      <div className="wdh-card" style={{
         borderRadius: "14px", overflow: "hidden",
         boxShadow: "0 8px 40px rgba(0,85,165,0.18)",
         border: `2px solid ${BLUE}`,
       }}>
       {/* Header */}
-      <div style={{
+      <div className="wdh-boardhead" style={{
         background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
         padding: isMobile ? "14px 14px 12px" : "16px 18px 14px",
         position: "relative", overflow: "hidden",
       }}>
-        <div style={{ position: "absolute", top: 0, right: 0, width: "150px", height: "100%", background: "repeating-linear-gradient(60deg, transparent, transparent 12px, rgba(246,162,29,0.07) 12px, rgba(246,162,29,0.07) 24px)", pointerEvents: "none" }} />
+        <div className="wdh-pattern" style={{ position: "absolute", top: 0, right: 0, width: "150px", height: "100%", background: "repeating-linear-gradient(60deg, transparent, transparent 12px, rgba(246,162,29,0.07) 12px, rgba(246,162,29,0.07) 24px)", pointerEvents: "none" }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: "9px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: "3px" }}>
@@ -193,7 +188,7 @@ function TopDraftBoard({ isMobile, year }) {
               Top Prospects
             </div>
           </div>
-          <Link to={boardLink} style={{
+          <Link to={boardLink} className="wdh-headpill" style={{
             background: GOLD, color: BLUE, fontWeight: 900,
             fontSize: "10px", padding: "6px 14px",
             borderRadius: "20px", textDecoration: "none", textTransform: "uppercase",
@@ -205,7 +200,7 @@ function TopDraftBoard({ isMobile, year }) {
           </Link>
         </div>
       </div>
-      <div style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
+      <div className="wdh-stripe" style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
 
       {/* Rows */}
       <div style={{ background: "#fff" }}>
@@ -228,7 +223,7 @@ function TopDraftBoard({ isMobile, year }) {
               }}
             >
               {/* Rank badge */}
-              <div style={{
+              <div className={rank ? "wdh-rank wdh-medal" : "wdh-rank"} style={{
                 flexShrink: 0,
                 width: isTop3 ? "38px" : "30px",
                 height: isTop3 ? "38px" : "30px",
@@ -251,7 +246,7 @@ function TopDraftBoard({ isMobile, year }) {
 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
-                  className="prospect-name"
+                  className="prospect-name wdh-pname"
                   style={{
                     color: BLUE, fontWeight: 900,
                     fontSize: isTop3 ? "19px" : "16px",
@@ -267,7 +262,7 @@ function TopDraftBoard({ isMobile, year }) {
                   display: "flex", alignItems: "center", gap: "5px",
                 }}>
                   {p.Position && (
-                    <span style={{
+                    <span className="wdh-pos" style={{
                       background: BLUE, color: "#fff", fontSize: "10px",
                       fontWeight: 900, padding: "2px 6px", borderRadius: "3px",
                       textTransform: "uppercase", letterSpacing: "0.06em",
@@ -276,7 +271,7 @@ function TopDraftBoard({ isMobile, year }) {
                       {p.Position}
                     </span>
                   )}
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "13px" }}>{p.School || "—"}</span>
+                  <span className="wdh-school" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "13px" }}>{p.School || "—"}</span>
                 </div>
               </div>
 
@@ -290,17 +285,18 @@ function TopDraftBoard({ isMobile, year }) {
       </div>
 
       {/* Footer CTA */}
-      <div style={{
+      <div className="wdh-boardfoot" style={{
         background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
         padding: isMobile ? "12px 14px" : "14px 18px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         flexWrap: "wrap", gap: "8px",
       }}>
-        <div style={{ color: "rgba(255,255,255,0.75)", fontSize: "10px", fontWeight: 700 }}>
+        <div className="wdh-foottext" style={{ color: "rgba(255,255,255,0.75)", fontSize: "10px", fontWeight: 700 }}>
           Community evaluations
         </div>
         <Link
           to={boardLink}
+          className="wdh-footbtn"
           style={{
             background: GOLD, color: BLUE, fontWeight: 900,
             fontSize: "11px", padding: "8px 16px",
@@ -389,17 +385,17 @@ export default function HomeOffSeason() {
   const SectionTitle = ({ children, linkTo, linkLabel }) => (
     <div style={{ marginBottom: "14px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "5px" }}>
-        <div style={{ fontSize: isMobile ? "16px" : "22px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
+        <div className="wdh-sectitle" style={{ fontSize: isMobile ? "16px" : "22px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
           {children}
         </div>
         {linkTo && (
-          <Link to={linkTo} style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline", flexShrink: 0, marginLeft: "10px" }}>
+          <Link to={linkTo} className="wdh-seclink" style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline", flexShrink: 0, marginLeft: "10px" }}>
             {linkLabel || "See all →"}
           </Link>
         )}
       </div>
-      <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-      <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+      <div className="wdh-secbar" style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
+      <div className="wdh-secbar" style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
     </div>
   );
 
@@ -420,27 +416,27 @@ export default function HomeOffSeason() {
           {/* -- Recent Evaluations (LEFT on desktop, 2nd on mobile) -- */}
           <div style={{ order: isMobile ? 2 : 0 }}>
             <SectionTitle linkTo="/community" linkLabel="Community →">Recent Evals</SectionTitle>
-            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <div style={{ background: BLUE, padding: "8px 14px" }}>
+            <div className="wdh-card" style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+              <div className="wdh-cardhead" style={{ background: BLUE, padding: "8px 14px" }}>
                 <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Public</div>
               </div>
-              <div style={{ height: "3px", background: GOLD }} />
+              <div className="wdh-stripe" style={{ height: "3px", background: GOLD }} />
               {loading ? (
                 <LoadingSpinner label="Loading" size={24} minHeight="100px" />
               ) : recentEvals.length > 0 ? recentEvals.map((ev, i) => (
-                <div key={i} style={{ padding: "12px 14px", background: "#fff", borderBottom: i < recentEvals.length - 1 ? "1px solid #f0f0f0" : "none" }}>
+                <div key={i} className="wdh-row wdh-eval" style={{ padding: "12px 14px", background: "#fff", borderBottom: i < recentEvals.length - 1 ? "1px solid #f0f0f0" : "none" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "6px", flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ev.username}</span>
+                    <span className="wdh-evuser" style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ev.username}</span>
                     {ev.verified && <img src={verifiedBadge} alt="Verified" style={{ width: "11px", height: "11px" }} />}
                     <span style={{ color: "#ccc", fontSize: "10px" }}>on</span>
-                    <Link to={`/player/${ev.playerSlug}`} style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textDecoration: "underline", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    <Link to={`/player/${ev.playerSlug}`} className="wdh-evplayer" style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textDecoration: "underline", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                       {ev.playerName}
                     </Link>
                   </div>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
                     {ev.grade && gradeDisplay(ev.grade) && <GradeBadge grade={ev.grade} />}
                     {ev.evaluation && (
-                      <p style={{
+                      <p className="wdh-evtext" style={{
                         fontStyle: "italic", fontSize: "11px", color: "#444", lineHeight: 1.5, margin: 0,
                         display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden",
                       }}>
@@ -452,16 +448,16 @@ export default function HomeOffSeason() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px" }}>
                       {ev.strengths?.length > 0 && (
                         <div style={{ display: "flex", alignItems: "flex-start", gap: "6px" }}>
-                          <span style={{ flexShrink: 0, background: "#2e7d32", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>S</span>
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#2e7d32", lineHeight: 1.4 }}>
+                          <span className="wdh-sw" style={{ flexShrink: 0, background: "#2e7d32", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>S</span>
+                          <span className="wdh-swtext" style={{ fontSize: "11px", fontWeight: 700, color: "#2e7d32", lineHeight: 1.4 }}>
                             {(Array.isArray(ev.strengths) ? ev.strengths : [ev.strengths]).join(", ")}
                           </span>
                         </div>
                       )}
                       {ev.weaknesses?.length > 0 && (
                         <div style={{ display: "flex", alignItems: "flex-start", gap: "6px" }}>
-                          <span style={{ flexShrink: 0, background: "#c0392b", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>W</span>
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b", lineHeight: 1.4 }}>
+                          <span className="wdh-sw" style={{ flexShrink: 0, background: "#c0392b", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>W</span>
+                          <span className="wdh-swtext" style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b", lineHeight: 1.4 }}>
                             {(Array.isArray(ev.weaknesses) ? ev.weaknesses : [ev.weaknesses]).join(", ")}
                           </span>
                         </div>
@@ -497,23 +493,23 @@ export default function HomeOffSeason() {
           {/* -- News (RIGHT on desktop, 3rd on mobile) -- */}
           <div style={{ order: isMobile ? 3 : 0 }}>
             <SectionTitle linkTo="/news" linkLabel="All News →">News</SectionTitle>
-            <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <div style={{ background: BLUE, padding: "8px 14px" }}>
+            <div className="wdh-card" style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+              <div className="wdh-cardhead" style={{ background: BLUE, padding: "8px 14px" }}>
                 <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
               </div>
-              <div style={{ height: "3px", background: GOLD }} />
+              <div className="wdh-stripe" style={{ height: "3px", background: GOLD }} />
               {combinedNews.length > 0 ? combinedNews.map((n, i) => {
                 const ts = n.publishedAt;
                 const dateStr = ts?.toDate?.().toLocaleDateString(undefined, { month: "short", day: "numeric" });
                 const [mon, day] = dateStr ? dateStr.split(" ") : [null, null];
                 return (
-                  <Link key={n.id} to={`/news/${n.slug}`}
+                  <Link key={n.id} to={`/news/${n.slug}`} className="wdh-row"
                     style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", background: "#fff", borderBottom: i < combinedNews.length - 1 ? "1px solid #f0f0f0" : "none" }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
                   >
                     {mon && day && (
-                      <div style={{ flexShrink: 0, width: "36px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                      <div className="wdh-date" style={{ flexShrink: 0, width: "36px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
                         <div style={{ background: GOLD, lineHeight: 1, padding: "2px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
                           <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{mon}</span>
                         </div>
@@ -523,7 +519,7 @@ export default function HomeOffSeason() {
                       </div>
                     )}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 900, fontSize: "11px", color: "#222", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{n.title}</div>
+                      <div className="wdh-ntitle" style={{ fontWeight: 900, fontSize: "11px", color: "#222", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{n.title}</div>
                     </div>
                     <div style={{ flexShrink: 0, fontWeight: 900, fontSize: "16px", color: BLUE }}>›</div>
                   </Link>
@@ -537,7 +533,7 @@ export default function HomeOffSeason() {
         </div>
 
         {/* ===== SOCIAL LINKS ===== */}
-        <div style={{ borderTop: `2px solid #eee`, paddingTop: "24px", textAlign: "center" }}>
+        <div className="wdh-follow" style={{ borderTop: `2px solid #eee`, paddingTop: "24px", textAlign: "center" }}>
           <div style={{ fontSize: "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: "#aaa", marginBottom: "12px" }}>Follow Us</div>
           <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? "20px" : "32px", flexWrap: "wrap" }}>
             {[

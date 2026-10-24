@@ -45,6 +45,7 @@ import {
 } from "../utils/historicalStats";
 import { cssRect } from "../utils/pageZoom";
 import NflFitView from "../components/NflFitView";
+import { communityAverage } from "../utils/gradeWindow";
 
 const BLUE = "#0055a5";
 const NAVY = "#00305c";
@@ -251,10 +252,11 @@ const gradeLabels = Object.fromEntries(Object.entries(gradeScale).map(([label, v
 // grade (same averaging as CommunityBoard.js), Early/Middle/Late First all
 // being round 1. null for UDFA or no grades. Feeds findComps' early-round
 // boost (see historicalStats.js).
-const projectedRound = (evals) => {
-  const vals = evals.map((e) => gradeScale[e.grade]).filter(Boolean);
-  if (!vals.length) return null;
-  const g = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+// Only the grades that count for his class (utils/gradeWindow.js).
+const projectedRound = (evals, eligible) => {
+  const avg = communityAverage(evals, eligible, gradeScale);
+  if (avg == null) return null;
+  const g = Math.round(avg);
   return g <= 3 ? 1 : g <= 9 ? g - 2 : null;
 };
 const gradeDisplay = (g) => {
@@ -345,9 +347,7 @@ function fetchClassListLive(eligible, position) {
       let avgGrade = null;
       try {
         const evSnap = await getDocs(collection(db, "players", p.id, "evaluations"));
-        const grades = [];
-        evSnap.forEach((ev) => { const g = ev.data().grade; if (g && gradeScale[g]) grades.push(gradeScale[g]); });
-        if (grades.length) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
+        avgGrade = communityAverage(evSnap.docs.map((ev) => ev.data()), eligible, gradeScale);
       } catch { /* ungraded */ }
       return { id: p.id, First: p.First || "", Last: p.Last || "", School: p.School || "", Slug: p.Slug || "", avgGrade };
     }));
@@ -871,7 +871,7 @@ export default function Comparison() {
       const evals = evalsSnap.docs.map((d) => d.data());
       const t = communityTraits(evals);
       const actualRound = draftSnap && !draftSnap.empty ? parseInt(draftSnap.docs[0].data().Round, 10) : NaN;
-      const round = Number.isFinite(actualRound) ? actualRound : projectedRound(evals);
+      const round = Number.isFinite(actualRound) ? actualRound : projectedRound(evals, player.Eligible);
       setSubjectRound(round);
       setStrengths(t.strengths);
       setWeaknesses(t.weaknesses);

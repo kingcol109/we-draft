@@ -55,7 +55,8 @@ const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
 const MyMocksPage = lazy(() => import("./pages/MyMocksPage"));
 const CreateMock = lazy(() => import("./pages/CreateMock"));
 const ViewMock = lazy(() => import("./pages/ViewMock"));
-// Draft Sim — /draftsim, and /draftsim/{team} to start as that team.
+// Draft Sim — /draftsim, /draftsim/{team} to start as that team, and
+// /draftsim/2028 (/draftsim/2028/{team}) for the 2028 class.
 const DraftSim = lazy(() => import("./pages/DraftSim"));
 
 // Whiteboard
@@ -209,6 +210,7 @@ function MainLayout() {
                 Signed out → sign-in prompt; signed in without access → /mocks. */}
             <Route path="/draftsim" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
             <Route path="/draftsim/:team" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
+            <Route path="/draftsim/:year/:team" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
             <Route path="/whiteboard" element={<Whiteboard />} />
             <Route path="/draft" element={<DraftPage />} />
             <Route path="/my-draft-class" element={<MyDraftClass />} />

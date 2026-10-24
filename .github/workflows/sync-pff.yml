@@ -37,10 +37,19 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           PFF_API_KEY: ${{ secrets.PFF_API_KEY }}
 
+      # OL → OT / IOL and DB → CB / S for prospects, from the PFF positions
+      # just synced (players/{id}.SubPosition — a label, no PFF numbers).
+      # The Draft Sim matches them to team needs.
+      - name: Sync prospect sub-positions
+        run: node scripts/syncSubPositions.mjs --write
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+
       # NFL depth charts with grades + ages for Admin → Research
       # (scripts/syncPffNflRosters.js, pffNflRosters/{abbr}). ~51 calls.
-      # Then derives the public snap-order depth charts (nflDepthOrder) and
-      # team needs (nflTeamNeeds) — scripts/nflTeamNeeds.js, no PFF calls.
+      # Then derives the public snap-order depth charts (nflDepthOrder) —
+      # scripts/nflDepthOrder.js, no PFF calls. Team needs are the admin's
+      # (suggested on demand in Admin → Mock Draft → Team Needs).
       - name: Sync PFF NFL rosters
         run: node scripts/syncPffNflRosters.js
         env:

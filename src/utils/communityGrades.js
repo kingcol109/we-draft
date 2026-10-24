@@ -6,9 +6,10 @@
 // scripts/buildGradeSnapshots.mjs) — one read each per page session. If a
 // snapshot is missing or from an older version, falls back to the original
 // per-player evaluations reads, so a page never breaks, it just costs more.
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import { getSiteSnapshot } from "./siteSnapshots";
+import { communityAverage } from "./gradeWindow";
 
 export const GRADE_SCALE = {
   "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3, "Second Round": 4,
@@ -19,11 +20,13 @@ export const GRADE_LABELS = Object.fromEntries(Object.entries(GRADE_SCALE).map((
 // avg (1 = Early First … 10 = UDFA) → its label, e.g. "Second Round".
 export const gradeLabel = (avg) => (avg == null ? null : GRADE_LABELS[Math.round(avg)] || null);
 
+// A player's class, for which of his grades count (utils/gradeWindow.js).
+const eligibleOf = (playerId) => getDoc(doc(db, "players", playerId)).then((s) => s.data()?.Eligible ?? null).catch(() => null);
+
 async function liveAverage(playerId) {
   try {
-    const snap = await getDocs(collection(db, "players", playerId, "evaluations"));
-    const grades = snap.docs.map((d) => GRADE_SCALE[d.data().grade]).filter(Boolean);
-    return grades.length ? grades.reduce((a, b) => a + b, 0) / grades.length : null;
+    const [snap, eligible] = await Promise.all([getDocs(collection(db, "players", playerId, "evaluations")), eligibleOf(playerId)]);
+    return communityAverage(snap.docs.map((d) => d.data()), eligible, GRADE_SCALE);
   } catch {
     return null;
   }
@@ -57,14 +60,14 @@ export async function communityFor(ids) {
   }
   const rows = await Promise.all(ids.map(async (id) => {
     try {
-      const evals = (await getDocs(collection(db, "players", id, "evaluations"))).docs.map((d) => d.data());
-      const grades = evals.map((e) => GRADE_SCALE[e.grade]).filter(Boolean);
+      const [evalSnap, eligible] = await Promise.all([getDocs(collection(db, "players", id, "evaluations")), eligibleOf(id)]);
+      const evals = evalSnap.docs.map((d) => d.data());
       const count = (key) => {
         const c = {};
         evals.forEach((e) => (Array.isArray(e[key]) ? e[key] : []).forEach((t) => { c[t] = (c[t] || 0) + 1; }));
         return Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
       };
-      return [id, { avg: grades.length ? grades.reduce((a, b) => a + b, 0) / grades.length : null, strengths: count("strengths"), weaknesses: count("weaknesses") }];
+      return [id, { avg: communityAverage(evals, eligible, GRADE_SCALE), strengths: count("strengths"), weaknesses: count("weaknesses") }];
     } catch {
       return [id, { avg: null, strengths: [], weaknesses: [] }];
     }

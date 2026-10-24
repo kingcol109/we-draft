@@ -6,20 +6,24 @@
 // prospects_{Position} / live players queries only as a fallback), community
 // grades + traits (_grades), every prospect's staff fit for all 32 teams
 // plus the staffers' names (nflFit_{Position}), CFBD season stats
-// (cfbLeaders/current + tables), the trade chart (config/draftTradeChart)
-// and team branding.
+// (cfbLeaders/current + tables), the trade chart (config/draftTradeChart),
+// team needs (nflTeamNeeds — the admin's labels) and team branding.
 import { doc, getDoc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../../firebase";
 import { fetchDraft, UPCOMING_DRAFTS } from "../../components/UpcomingPicks";
 import { fetchProspects, fetchNflBranding } from "../draftProfileData";
 import { getSiteSnapshot } from "../siteSnapshots";
-import { averageGradesFor } from "../communityGrades";
+import { averageGradesFor, GRADE_SCALE } from "../communityGrades";
 import { NFL_TEAMS } from "../coachHistory";
-import { SIM_POSITIONS, SPECIALISTS, buildBoard } from "./engine";
-import { applyDeskLines, applyDeskAvatars, applyDeskLegends } from "./analysts";
+import { SIM_POSITIONS, SPECIALISTS, buildBoard, resolveNeeds } from "./engine";
+import { applyDeskLines, applyDeskAvatars, applyDeskLegends, applyPlayerTakes } from "./analysts";
 
-// The class the sim drafts. 2028's board is too thin to fill seven rounds yet.
+// The class the sim drafts by default, and every class it can draft
+// (/draftsim/2028). A thin class's board only fills a few rounds —
+// maxRounds says how many.
 export const SIM_YEAR = "2027";
+export const SIM_YEARS = ["2027", "2028"];
+export const maxRounds = (board) => Math.max(1, Math.min(7, Math.floor(board.filter((p) => !SPECIALISTS.includes(p.Position)).length / 32)));
 
 const cache = {};
 const once = (key, load) => {
@@ -31,7 +35,8 @@ const once = (key, load) => {
 export function loadSimSetup(year = SIM_YEAR) {
   return once(`setup:${year}`, async () => {
     const next = UPCOMING_DRAFTS.find((d) => Number(d.year) === Number(year) + 1);
-    const [draft, branding, staff, future] = await Promise.all([
+    // (The fourth result, the desk lines, applies itself — nothing to keep.)
+    const [draft, branding, staff, , future] = await Promise.all([
       fetchDraft(UPCOMING_DRAFTS.find((d) => d.year === year) || UPCOMING_DRAFTS[0]),
       fetchNflBranding().catch(() => ({})),
       getSiteSnapshot("nflFit_QB").then((s) => s?.staff || {}).catch(() => ({})),
@@ -57,11 +62,20 @@ export function loadDeskLines() {
     .catch(() => {}));
 }
 
+// Kenneth Cold's written player takes (config/draftSimAnalysis.players),
+// applied to the desk. Missing or unreadable → none (he stays quiet).
+export function loadPlayerTakes() {
+  return once("playerTakes", () => getDoc(doc(db, "config", "draftSimAnalysis"))
+    .then((snap) => { applyPlayerTakes(snap.exists() ? snap.data().players || {} : {}); })
+    .catch(() => {}));
+}
+
 // The class's prospects with their official class rank (cr), plus the
 // kickers and punters (SPECIALISTS — their snapshots are optional).
 async function classProspects(year) {
   const fromSnapshot = (d, pos) => d.rows.map((r) => ({
     id: r.i, First: r.F || "", Last: r.L || "", Position: pos, School: r.s || "", Slug: r.sl, logo: r.lg || "", logoDark: r.ld, cr: r.cr ?? null,
+    subPosition: r.sp || null, height: r.ht ?? null, weight: r.wt ?? null,
   }));
   const [docs, specialists] = await Promise.all([
     Promise.all(SIM_POSITIONS.map((pos) => getSiteSnapshot(`class_${year}_${pos}`))),
@@ -71,7 +85,18 @@ async function classProspects(year) {
     return [...docs.flatMap((d, i) => fromSnapshot(d, SIM_POSITIONS[i])), ...specialists.flat()];
   }
   const lists = await Promise.all(SIM_POSITIONS.map((pos) => fetchProspects(year, pos).catch(() => [])));
-  return [...lists.flat(), ...specialists.flat()];
+  const inches = (h) => { const m = String(h || "").match(/^(\d)['-](\d{1,2})/); return m ? Number(m[1]) * 12 + Number(m[2]) : null; };
+  return [...lists.flat().map((p) => ({
+    ...p, subPosition: p.subPosition || p.SubPositionOverride || p.SubPosition || null,
+    height: p.height ?? inches(p.Height), weight: p.weight ?? (parseFloat(p.Weight) || null),
+  })), ...specialists.flat()];
+}
+
+// Every team's needs: { [team]: { [NEED_KEY]: { labels, note } } }. None
+// (an empty map — no team leans any way) if they can't be read.
+async function loadNeeds() {
+  const snap = await getDocs(collection(db, "nflTeamNeeds"));
+  return Object.fromEntries(snap.docs.map((d) => [d.id, resolveNeeds(d.data().needs)]));
 }
 
 // Every prospect's logoDark — LogoBlack, else LogoDark, else Logo1 — set
@@ -92,7 +117,7 @@ async function withDarkLogos(prospects) {
   return prospects.map((p) => ({ ...p, logoDark: p.logoDark || bySchool[p.School] || p.logo || "" }));
 }
 
-// A player's standout game this season, for Kenneth: { line: "4 sacks",
+// A player's standout game this season, for Isaac: { line: "4 sacks",
 // opp: "Tennessee" } or null. From his linked CFBD player's game logs
 // (cfbdPlayers where wedraftPlayerId, then its games — see
 // components/PlayerStatsCard.js). Cached per player for the page session.
@@ -163,14 +188,16 @@ export function loadCfbStats() {
 
 export function loadSimData(year = SIM_YEAR) {
   return once(`data:${year}`, async () => {
-    const [setup, chart, gradesSnap, prospectList, fitDocs, cfb] = await Promise.all([
+    const [setup, chart, gradesSnap, prospectList, fitDocs, cfb, needs] = await Promise.all([
       loadSimSetup(year),
       getDoc(doc(db, "config", "draftTradeChart")).then((s) => (s.exists() ? s.data().values || {} : {})).catch(() => ({})),
       getSiteSnapshot("_grades").catch(() => null),
       classProspects(year).then(withDarkLogos),
       Promise.all(SIM_POSITIONS.map((pos) => getSiteSnapshot(`nflFit_${pos}`).catch(() => null))),
       loadCfbStats().catch(() => ({ season: null, bySlug: {} })),
+      loadNeeds().catch(() => ({})),
       loadDeskLines(),
+      loadPlayerTakes(),
     ]);
     const prospects = prospectList.filter((p) => p.id && p.Slug);
     let grades = gradesSnap?.rows || null;
@@ -184,8 +211,23 @@ export function loadSimData(year = SIM_YEAR) {
       Object.assign(fits, d?.rows || {});
       Object.entries(d?.staff || {}).forEach(([team, slots]) => { staff[team] = { ...(staff[team] || {}), ...slots }; });
     });
-    return { ...setup, staff, chart, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug) };
+    return { ...setup, staff, chart, needs, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug) };
   });
+}
+
+// A signed-in user's own grades, for "My Board": { [playerId]: 1 … 10 }
+// from their mirror (users/{uid}/evaluations — one query, every class; the
+// board only uses its own players'). Watchlist and other non-round grades
+// are left out, so those players keep the community grade. Not cached:
+// a grade saved in another tab shows up on the next visit to setup.
+export async function loadMyGrades(uid) {
+  const snap = await getDocs(collection(db, "users", uid, "evaluations"));
+  const out = {};
+  snap.docs.forEach((d) => {
+    const v = GRADE_SCALE[d.data().grade];
+    if (v != null) out[d.data().playerId || d.id] = v;
+  });
+  return out;
 }
 
 // Display names, from branding when it's loaded.
@@ -195,5 +237,6 @@ export function teamNamer(branding = {}) {
     return b?.Team ? `${b.City || ""} ${b.Team}`.trim() : NFL_TEAMS[abbr] || abbr;
   };
   const nickname = (abbr) => branding[abbr]?.Team || (NFL_TEAMS[abbr] || abbr).split(" ").pop();
-  return { teamName, nickname };
+  const city = (abbr) => branding[abbr]?.City || (NFL_TEAMS[abbr] || "").split(" ").slice(0, -1).join(" ");
+  return { teamName, nickname, city };
 }

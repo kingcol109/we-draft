@@ -19,8 +19,13 @@
 //   class_{Eligible}_{Pos}  Class sidebar lists (PlayerProfile.js +
 //                           Comparison.js): Live players only, already in
 //                           ranked order, each row with avg community
-//                           grade (g), overall class rank (cr), and school
-//                           logo (lg); classSize on the doc; `hidden` holds
+//                           grade (g), overall class rank (cr), school
+//                           logo (lg), an OL/DB's sub-position (sp —
+//                           OT / IOL / CB / S: SubPositionOverride, else
+//                           SubPosition), and height in inches (ht) and
+//                           weight (wt) when known — the Draft Sim's
+//                           specific needs size players with them;
+//                           classSize on the doc; `hidden` holds
 //                           each not-Live player's own-page placement.
 //                           The latest drafted class's docs are instead
 //                           ordered by draft pick (order: "draft"), each
@@ -89,6 +94,7 @@ import {
   COMP_SNAPSHOT_VERSION, encodeCompSnapshotRows, draftedPlayersAsHistorical,
   communityTraits, isGraded, positionPercentileTables,
 } from "./historicalStats.js";
+import { communityAverage, countedGrades } from "./gradeWindow.js";
 import { NFL_TEAMS, NFL_TEAM_ABBRS, draftCredits, creditForPick } from "./coachHistory.js";
 import { historicalPickRows, currentPickRows, buildProspectTeamFits, nflFitRowsFrom, buildStaffTargets, pageScopes } from "./draftProfiles.js";
 
@@ -99,9 +105,19 @@ const GRADE_SCALE = {
 };
 const GRADE_LABELS = Object.fromEntries(Object.entries(GRADE_SCALE).map(([label, v]) => [v, label]));
 
-export function averageGrade(evaluations) {
-  const grades = evaluations.map((e) => GRADE_SCALE[e.grade]).filter(Boolean);
-  return grades.length ? grades.reduce((a, b) => a + b, 0) / grades.length : null;
+// A player's Height ("6'1\"", "6-1", or plain inches like "73.5") → inches.
+function heightInches(h) {
+  if (h == null || h === "") return null;
+  const m = String(h).match(/^\s*(\d)\s*['-]\s*(\d{1,2}(?:\.\d+)?)/);
+  if (m) return Number(m[1]) * 12 + Number(m[2]);
+  const n = parseFloat(h);
+  return n > 48 && n < 96 ? n : null;
+}
+
+// A player's community grade — only the grades that count for his class
+// (utils/gradeWindow.js: 2027 and 2028 count grades saved since Aug 2026).
+export function averageGrade(evaluations, eligible) {
+  return communityAverage(evaluations, eligible, GRADE_SCALE);
 }
 
 // PlayerProfile.js's class ranking, exactly: sort by the *rounded* grade
@@ -138,11 +154,13 @@ export function buildGradeSnapshotDocs({ players, evalsByPlayerId, activeYears }
   const avgById = {};
   players.forEach((p) => {
     const evals = evalsByPlayerId[p.id] || [];
-    const avg = averageGrade(evals);
-    if (avg == null) return;
-    avgById[p.id] = avg;
+    const avg = averageGrade(evals, p.Eligible);
+    // Traits come from every evaluation; a player whose only grades are from
+    // before the refresh keeps his traits with no grade (avg null).
     const { strengths, weaknesses } = communityTraits(evals);
-    rows[p.id] = [Math.round(avg * 1000) / 1000, evals.filter((e) => GRADE_SCALE[e.grade]).length, strengths.slice(0, 3).join("|"), weaknesses.slice(0, 3).join("|")];
+    if (avg == null && !strengths.length && !weaknesses.length) return;
+    if (avg != null) avgById[p.id] = avg;
+    rows[p.id] = [avg == null ? null : Math.round(avg * 1000) / 1000, countedGrades(evals, p.Eligible, GRADE_SCALE).length, strengths.slice(0, 3).join("|"), weaknesses.slice(0, 3).join("|")];
   });
   const years = {};
   activeYears.forEach((yr) => {
@@ -235,7 +253,7 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
   const hiddenByClass = {};
   [...players].sort(byDocId).forEach((p) => {
     if (!p.Eligible) return;
-    avgGradeById[p.id] = averageGrade(evalsOf(p.id));
+    avgGradeById[p.id] = averageGrade(evalsOf(p.id), p.Eligible);
     const bucket = p.Live === false ? hiddenByClass : byClass;
     (bucket[String(p.Eligible)] || (bucket[String(p.Eligible)] = [])).push(p);
   });
@@ -252,6 +270,9 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
       group(p.Position).rows.push({
         i: p.id, F: p.First || "", L: p.Last || "", s: p.School || "", sl: p.Slug || "",
         g: gradeOf(p), cr: idx + 1, lg: logoBySchool[p.School] || "", ld: darkLogoBySchool[p.School] || "",
+        ...((p.SubPositionOverride || p.SubPosition) ? { sp: p.SubPositionOverride || p.SubPosition } : {}),
+        ...(heightInches(p.Height) ? { ht: heightInches(p.Height) } : {}),
+        ...(parseFloat(p.Weight) > 0 ? { wt: parseFloat(p.Weight) } : {}),
       });
     });
     (hiddenByClass[eligible] || []).forEach((self) => {

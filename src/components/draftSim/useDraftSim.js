@@ -5,6 +5,7 @@
 // clock. Phases:
 //   intro    "Drafting as the Buccaneers" — waits for start()
 //   clock    a CPU team is on the clock (broadcast speed)
+//   trade    a CPU trade up, announced on the whole stage before the pick
 //   pickIn   "the pick is in" — the CPU has picked, not shown yet
 //   reveal   the pick (or trade) on screen
 //   simming  Instant / Sim to My Pick: CPU picks one after another, fast,
@@ -18,13 +19,13 @@ import {
 import { reactTo, openingPosts, wrapPost, DEFAULT_CHATTER } from "../../utils/draftSim/analysts";
 import { teamNamer, loadBestGame } from "../../utils/draftSim/data";
 
-// Timing (ms). Normal runs the clock at 3/8 of Broadcast's (Broadcast at
-// double speed, then 25% faster) and holds each pick card 8 seconds.
+// Timing (ms). Normal runs a 7-second clock, Broadcast a 15-second one;
+// Normal holds each pick card 8 seconds, a trade announcement 5.
 // Instant has none — it sims a pick every SIM_STEP_MS.
-const BROADCAST = { clock: 30000, pickIn: 5000, reveal: 10000 };
+const BROADCAST = { clock: 15000, trade: 7000, pickIn: 5000, reveal: 10000 };
 export const SPEEDS = {
-  normal: { label: "Normal", note: "About 11 seconds on the clock — skip ahead any time.", clock: 11250, pickIn: 2500, reveal: 8000 },
-  broadcast: { label: "Broadcast", note: "About 30 seconds a pick, like the real thing — skip ahead any time.", ...BROADCAST },
+  normal: { label: "Normal", note: "7 seconds on the clock — skip ahead any time.", clock: 7000, trade: 5000, pickIn: 2500, reveal: 8000 },
+  broadcast: { label: "Broadcast", note: "15 seconds on the clock, with the full pick reveal — skip ahead any time.", ...BROADCAST },
   instant: { label: "Instant", note: "Sims straight through to your next pick." },
 };
 export const DEFAULT_SPEED = "normal";
@@ -34,7 +35,7 @@ const FEED_MAX = 300;
 let postId = 0;
 
 export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed }) {
-  const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, userTeams, rounds, seed }));
+  const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams, rounds, seed }));
   const [phase, setPhase] = useState("intro");
   const [reveal, setReveal] = useState(null);
   const [feed, setFeed] = useState([]);
@@ -59,7 +60,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     memory: {},
     rand: () => { const r = rngNext(feedSeed.current); feedSeed.current = r.seed; return r.value; },
     // Drafted players' standout CFBD games ({ [id]: { line, opp } }), for
-    // Kenneth — filled by loadGames below.
+    // Isaac — filled by loadGames below.
     games: {},
   }), [data, chatter]);
 
@@ -118,6 +119,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   useEffect(() => {
     if (paused || phase === "intro" || phase === "user" || phase === "done") return undefined;
     const after = (ms, fn) => { const t = setTimeout(fn, ms); return () => clearTimeout(t); };
+    if (phase === "trade") return after(timing.trade, () => setPhase("pickIn"));
     if (phase === "pickIn") return after(timing.pickIn, applyPending);
     if (phase === "reveal") return after(timing.reveal, () => setPhase("clock"));
 
@@ -141,7 +143,8 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     return after(timing.clock, () => {
       pending.current = stepCpu(sim);
       loadGames(pending.current.events, 0);
-      setPhase("pickIn");
+      // A trade up gets its own beat on the stage before the pick is in.
+      setPhase(pending.current.events.some((e) => e.type === "trade") ? "trade" : "pickIn");
     });
   }, [sim, phase, paused, broadcast, timing, announce, applyPending, loadGames]);
 
@@ -178,7 +181,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
       pending.current = null;
       setSim(state);
       announce([event]);
-      if (phase === "pickIn") setPhase("clock");
+      if (phase === "pickIn" || phase === "trade") setPhase("clock");
     }
     return verdict;
   }, [sim, phase, announce]);
@@ -187,6 +190,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   // now; from the pick, straight to the next team.
   const skip = useCallback(() => {
     if (phase === "intro" || phase === "reveal") setPhase("clock");
+    else if (phase === "trade") setPhase("pickIn");
     else if (phase === "pickIn") applyPending();
     else if (phase === "clock" && !sim.done && !isUserOnClock(sim)) {
       const r = stepCpu(sim);

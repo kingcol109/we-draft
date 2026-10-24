@@ -7,14 +7,17 @@
 //
 // Each evaluation is stored twice (players/{id}/evaluations/{uid} and the
 // private mirror users/{uid}/evaluations/{id}); only the players copy is
-// used. Needs the collection-group index on evaluations (visibility,
+// used. Most recent activity is grade-only (no written text), so one batch
+// of the newest public docs can hold just one or two showable evals — the
+// query pages back (startAfter) until there are enough or MAX_PAGES runs out. Needs the collection-group index on evaluations (visibility,
 // updatedAt desc) in firestore.indexes.json — if the query fails (index not
 // deployed yet), falls back to the old per-player scan.
-import { collection, collectionGroup, documentId, getDocs, limit, orderBy, query, where } from "firebase/firestore";
+import { collection, collectionGroup, documentId, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore";
 import { db } from "../firebase";
 
 const HIDDEN_LIVE = [false, null, 0, "false", "no"];
-const CANDIDATES = 40; // both copies of each evaluation come back, plus non-written ones
+const PAGE_SIZE = 100; // both copies of each evaluation come back, plus non-written ones
+const MAX_PAGES = 5;
 const PER_PLAYER = 2;  // same cap the per-player scan had (limit 2 each)
 
 // Dummy evaluations (AdminPanel.js's Dummy Content tab) count toward
@@ -24,19 +27,27 @@ const PER_PLAYER = 2;  // same cap the per-player scan had (limit 2 each)
 const showable = (e) => e.visibility === "public" && e.evaluation?.trim() && !e.isDummy;
 
 async function viaCollectionGroup(count) {
-  const snap = await getDocs(query(
-    collectionGroup(db, "evaluations"),
-    where("visibility", "==", "public"),
-    orderBy("updatedAt", "desc"),
-    limit(CANDIDATES),
-  ));
   const perPlayer = {};
-  const candidates = snap.docs
-    .filter((d) => d.ref.parent.parent?.parent?.id === "players")
-    .map((d) => ({ ...d.data(), playerId: d.ref.parent.parent.id }))
-    .filter(showable)
-    .filter((e) => (perPlayer[e.playerId] = (perPlayer[e.playerId] || 0) + 1) <= PER_PLAYER)
-    .slice(0, count * 2);
+  const candidates = [];
+  let cursor = null;
+  for (let page = 0; page < MAX_PAGES && candidates.length < count * 2; page++) {
+    const snap = await getDocs(query(
+      collectionGroup(db, "evaluations"),
+      where("visibility", "==", "public"),
+      orderBy("updatedAt", "desc"),
+      ...(cursor ? [startAfter(cursor)] : []),
+      limit(PAGE_SIZE),
+    ));
+    snap.docs
+      .filter((d) => d.ref.parent.parent?.parent?.id === "players")
+      .map((d) => ({ ...d.data(), playerId: d.ref.parent.parent.id }))
+      .filter(showable)
+      .filter((e) => (perPlayer[e.playerId] = (perPlayer[e.playerId] || 0) + 1) <= PER_PLAYER)
+      .forEach((e) => candidates.push(e));
+    if (snap.docs.length < PAGE_SIZE) break;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+  candidates.splice(count * 2);
   const ids = [...new Set(candidates.map((e) => e.playerId))].slice(0, 30);
   const players = {};
   if (ids.length) {

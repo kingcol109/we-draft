@@ -1,7 +1,7 @@
 // src/components/draftSim/SimResults.jsx
 //
 // The end of a Draft Sim: the user's teams' report cards (engine teamHaul —
-// board value for the slot plus staff fit) with Kenneth's take on each
+// board value for the slot plus staff fit) with Isaac's take on each
 // grade, every team's grade, and the full draft round by round.
 //
 // No account is needed to play. From here the user can share (a branded
@@ -15,7 +15,7 @@ import * as htmlToImage from "html-to-image";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useAuth } from "../../context/AuthContext";
-import { teamHaul } from "../../utils/draftSim/engine";
+import { teamHaul, NEED_KEY_NAMES, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
@@ -35,7 +35,7 @@ const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "p
 export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew }) {
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
-  // Kenneth's line per team, picked once (it draws on the desk's rng).
+  // Isaac's line per team, picked once (it draws on the desk's rng).
   const takes = useMemo(() => Object.fromEntries(userHauls.map((h) => [h.team, gradeTake(h, ctx)])), [userHauls, ctx]);
   const league = useMemo(() => NFL_TEAM_ABBRS.map((t) => teamHaul(sim, t)).filter((h) => h.rows.length).sort((a, b) => b.score - a.score), [sim]);
   const hasMine = userHauls.some((h) => h.rows.length);
@@ -91,9 +91,30 @@ function ReportCard({ h, b, take, isMobile }) {
           </div>
         </div>
       )}
+      {/* The grade balances value and needs: which of the needs the team
+          came in with it met, and which it left open. */}
+      {(h.needs?.met.length > 0 || h.needs?.open.length > 0) && (
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid #1f2b42", fontSize: 12, fontFamily: BODY }}>
+          <span style={{ color: "#4ade80", fontWeight: 800 }}>Needs met: {h.needs.met.length ? h.needs.met.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ") : "none"}</span>
+          {h.needs.open.length > 0 && <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Still open: {h.needs.open.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ")}</span>}
+        </div>
+      )}
+      {/* Every trade the team made: what it got and what it gave up. */}
+      {h.trades?.length > 0 && (
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid #1f2b42", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.16em" }}>TRADES</div>
+          {h.trades.map((t, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, fontFamily: BODY }}>
+              <span style={{ color: "#fff", fontWeight: 900, fontFamily: "inherit" }}>With {t.partner}</span>
+              <span style={{ color: "#4ade80", fontWeight: 800 }}>Got {t.got.map(pickName).join(", ")}</span>
+              <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Gave {t.gave.map(pickName).join(", ")}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {h.rows.length === 0 && <div style={{ padding: 16, color: "#8b9bb4", fontFamily: BODY, fontSize: 13 }}>No picks in this sim — they traded out.</div>}
       <div style={{ display: "grid", gridTemplateColumns: isMobile || h.rows.length < 3 ? "1fr" : "1fr 1fr" }}>
-        {h.rows.map(({ pick, prospect, letter }) => (
+        {h.rows.map(({ pick, prospect, letter, need }) => (
           <div key={pick.overall} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderBottom: "1px solid #18233a", minWidth: 0 }}>
             <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.2 }}>R{pick.round}<br />No. {pick.overall}</span>
             {schoolLogo(prospect) ? <img src={schoolLogo(prospect)} alt="" style={{ width: 24, height: 24, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 24, flexShrink: 0 }} />}
@@ -102,6 +123,11 @@ function ReportCard({ h, b, take, isMobile }) {
               <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontFamily: BODY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {prospect.Position} · {prospect.School} · Board #{prospect.rank}{pick.via ? ` · via ${pick.via}` : ""}
               </span>
+              {need && (
+                <span style={{ display: "block", color: need.label === "Crowded Room" ? "#ff8a9a" : "#ffb3bf", fontSize: 11, fontWeight: 800, fontFamily: BODY }}>
+                  {need.label === "Crowded Room" ? "Crowded room" : "Need"}: {NEED_KEY_NAMES[need.key] || need.key} ({need.label})
+                </span>
+              )}
             </span>
             <span style={{ fontWeight: 900, fontSize: 17, color: gradeColor(letter), width: 30, textAlign: "center", flexShrink: 0 }}>{letter}</span>
           </div>

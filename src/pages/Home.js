@@ -19,6 +19,7 @@ import { db } from "../firebase";
 import HomeHero from "./HomeHero";
 import HomeOffSeason from "./HomeOffSeason";
 import HomeInSeason from "./HomeInSeason";
+import HOME_MODERN_STYLE from "./homeModernStyle";
 
 const MODE_KEY = "homeMode";
 
@@ -60,8 +61,13 @@ export default function Home() {
     return () => { alive = false; };
   }, []);
 
+  // Modern look (homeModernStyle.js) — on by default; ?modern=0 shows the
+  // old look for comparison.
+  const modern = typeof window === "undefined" || new URLSearchParams(window.location.search).get("modern") !== "0";
+
   return (
-    <div style={{ width: "100%", padding: isMobile ? "10px 10px 60px" : "20px 4% 60px", fontFamily: "'Arial Black', Arial, sans-serif", boxSizing: "border-box" }}>
+    <div className={modern ? "wdh" : undefined} style={{ width: "100%", padding: isMobile ? "10px 10px 60px" : "20px 4% 60px", fontFamily: "'Arial Black', Arial, sans-serif", boxSizing: "border-box" }}>
+      {modern && <style>{HOME_MODERN_STYLE}</style>}
       <HomeHero mode={mode || "offseason"} />
       {mode === "inseason" && <HomeInSeason />}
       {mode === "offseason" && <HomeOffSeason />}

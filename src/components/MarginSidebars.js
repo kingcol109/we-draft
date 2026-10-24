@@ -21,6 +21,7 @@ import PlayersMentionedList from "./PlayersMentionedList";
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
 import { cssRect, viewportCssWidth } from "../utils/pageZoom";
+import { communityAverage } from "../utils/gradeWindow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -210,12 +211,7 @@ export default function MarginSidebars({ contentRef, isMobile, horizontalPadding
               let avgGrade = null;
               try {
                 const evalsSnap = await getDocs(collection(db, "players", d.id, "evaluations"));
-                const grades = [];
-                evalsSnap.forEach((ev) => {
-                  const g = ev.data().grade;
-                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                });
-                if (grades.length > 0) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
+                avgGrade = communityAverage(evalsSnap.docs.map((ev) => ev.data()), "2027", gradeScale);
               } catch { }
               return { id: d.id, First: data.First || "", Last: data.Last || "", Position: data.Position || "", School: data.School || "", Slug: data.Slug || "", avgGrade };
             })

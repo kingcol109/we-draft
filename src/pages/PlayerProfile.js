@@ -65,6 +65,7 @@ import { canonicalEvalData } from "../utils/evaluationCopies";
 import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 import { classSnapshotRanks } from "../utils/classRanks";
 import { readableOn, textOn } from "../utils/teamColors";
+import { communityAverage, gradeCounts } from "../utils/gradeWindow";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -1019,17 +1020,16 @@ export function WatchFullscreenFeed({ initialClips, excludeVideoUrls, onClose, c
           // meant to surface a real profile video, not another Short.
           getDocs(query(collection(db, "videos"), where("playerIds", "array-contains", playerId))),
         ]);
-        const grades = [];
         const sCounts = {}, wCounts = {};
         evalsSnap.forEach((d) => {
           const data = d.data();
-          if (data.grade && gradeScale[data.grade]) grades.push(gradeScale[data.grade]);
           if (Array.isArray(data.strengths)) data.strengths.forEach((s) => { sCounts[s] = (sCounts[s] || 0) + 1; });
           if (Array.isArray(data.weaknesses)) data.weaknesses.forEach((w) => { wCounts[w] = (wCounts[w] || 0) + 1; });
         });
-        const gradeLabel = grades.length > 0
-          ? gradeLabels[Math.round(grades.reduce((a, b) => a + b, 0) / grades.length)]
-          : "Watchlist";
+        // Only the grades that count for his class (utils/gradeWindow.js).
+        const eligible = clip.playerEligible ?? (await getDoc(doc(db, "players", playerId)).then((s) => s.data()?.Eligible).catch(() => null));
+        const avg = communityAverage(evalsSnap.docs.map((d) => d.data()), eligible, gradeScale);
+        const gradeLabel = avg != null ? gradeLabels[Math.round(avg)] : "Watchlist";
         const topStrengths = Object.entries(sCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([s]) => s);
         const topWeaknesses = Object.entries(wCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([w]) => w);
         const schoolData = schoolSnap && !schoolSnap.empty ? schoolSnap.docs[0].data() : null;
@@ -3031,7 +3031,8 @@ useEffect(() => {
           let maxEvalMs = 0;
           evalsSnap.forEach((d) => {
             const data = d.data();
-            if (data.grade && gradeScale[data.grade]) grades.push(gradeScale[data.grade]);
+            // Only the grades that count for his class (utils/gradeWindow.js).
+            if (data.grade && gradeScale[data.grade] && gradeCounts(data, player.Eligible)) grades.push(gradeScale[data.grade]);
             if (Array.isArray(data.strengths)) data.strengths.forEach((s) => (sC[s]=(sC[s]||0)+1));
             if (Array.isArray(data.weaknesses)) data.weaknesses.forEach((w) => (wC[w]=(wC[w]||0)+1));
             if (data.nflFit) fC[data.nflFit]=(fC[data.nflFit]||0)+1;
@@ -3266,12 +3267,7 @@ useEffect(() => {
               let avgGrade = null;
               try {
                 const evalsSnap = await getDocs(collection(db, "players", d.id, "evaluations"));
-                const grades = [];
-                evalsSnap.forEach((ev) => {
-                  const g = ev.data().grade;
-                  if (g && gradeScale[g]) grades.push(gradeScale[g]);
-                });
-                if (grades.length > 0) avgGrade = grades.reduce((a, b) => a + b, 0) / grades.length;
+                avgGrade = communityAverage(evalsSnap.docs.map((ev) => ev.data()), data.Eligible, gradeScale);
               } catch { }
               return {
                 id: d.id,

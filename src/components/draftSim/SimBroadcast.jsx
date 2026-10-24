@@ -5,15 +5,18 @@
 // pick is in" → the pick card), the user's war room when they're up (best
 // available + trade offers), the board / best available / my picks tabs,
 // the analyst feed (SimFeed.jsx) and a bottom-line ticker of recent picks.
+// The console under the stage: Draft, Draft Board, Suggestions (three
+// picks, each with a word from the front office), My Picks, Roster (the
+// user's team first) and Trades.
 // State comes from useDraftSim.js.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { gradeLabel } from "../../utils/communityGrades";
-import { currentPick, available, fitFor, pickValue, pickWorth, pickName, pickByKey, FUTURE_DISCOUNT, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, CPU_ACCEPT_RATIO, suggestionsFor, rngNext } from "../../utils/draftSim/engine";
+import { currentPick, available, fitFor, pickValue, pickWorth, pickName, pickByKey, FUTURE_DISCOUNT, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, CPU_ACCEPT_RATIO, suggestionsFor, rngNext, NEED_KEY_NAMES, needWord } from "../../utils/draftSim/engine";
 import { davinSuggestion, otherSchools } from "../../utils/draftSim/analysts";
 import { useSchools } from "../DraftArchiveList";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../../utils/coachHistory";
-import { textOn } from "../../utils/teamColors";
+import { textOn, readableOn } from "../../utils/teamColors";
 import SimFeed, { Avatar } from "./SimFeed";
 import { SPEEDS } from "./useDraftSim";
 import { fetchEspnRoster, fetchDepthOrder, groupRoster } from "../../utils/nflRoster";
@@ -23,9 +26,21 @@ const GOLD = "#f6a21d";
 const PANEL = { background: "#0e1626", border: "1px solid #1f2b42", borderRadius: 16, overflow: "hidden" };
 const BODY = "Arial, sans-serif";
 
-// Motion is kept slow and soft on purpose — fades only, nothing that
-// slides, sweeps or flashes.
+// Motion: a beat lands in place rather than swapping the stage out —
+// labels and numbers flip over where they sit, the pick card turns over,
+// one soft light sweep crosses the stage per beat, and the Up Next bar
+// slides a slot as each pick comes off the board. Nothing flashes.
 export const SIM_CSS = `
+  @keyframes wdSimFlip { from { opacity: 0; transform: perspective(600px) rotateX(-70deg); } to { opacity: 1; transform: none; } }
+  @keyframes wdSimCardFlip { from { opacity: 0; transform: perspective(900px) rotateY(-75deg) scale(.97); } to { opacity: 1; transform: none; } }
+  @keyframes wdSimSweep { from { transform: translateX(-120%) skewX(-18deg); } to { transform: translateX(380%) skewX(-18deg); } }
+  @keyframes wdSimEnvelope { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  @keyframes wdSimGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); } 50% { box-shadow: 0 0 0 5px rgba(255,255,255,0.16); } }
+  .wd-sim-flip { animation: wdSimFlip .55s cubic-bezier(.2,.8,.2,1) both; transform-origin: 50% 0; }
+  .wd-sim-cardflip { animation: wdSimCardFlip .7s cubic-bezier(.2,.8,.2,1) both; }
+  .wd-sim-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent); animation: wdSimSweep 1.2s ease-out both; pointer-events: none; }
+  .wd-sim-envelope { animation: wdSimEnvelope 1.2s ease-in-out infinite; }
+  .wd-sim-cardglow { animation: wdSimGlow 1.2s ease-in-out infinite; }
   @keyframes wdSimPulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
   @keyframes wdSimClock { from { transform: scaleX(0); } to { transform: scaleX(1); } }
   @keyframes wdSimFade { from { opacity: 0; } to { opacity: 1; } }
@@ -35,13 +50,15 @@ export const SIM_CSS = `
   .wd-sim-in { animation: wdSimFade .9s ease both; }
   .wd-sim-row:hover { background: #16213a !important; }
   .wd-sim-draft:hover { filter: brightness(1.1); }
+  .wd-sim-pickteam:hover { opacity: 1 !important; }
   .wd-sim-scroll { scrollbar-width: thin; scrollbar-color: #f6a21d #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
   .wd-sim-scroll::-webkit-scrollbar-track { background: #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar-thumb { background: linear-gradient(#f6a21d, #0055a5); border-radius: 999px; border: 2px solid #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar-thumb:hover { background: #f6a21d; }
   @media (prefers-reduced-motion: reduce) {
-    .wd-sim-live-dot, .wd-sim-post, .wd-sim-in, .wd-sim-ticker-track { animation: none !important; }
+    .wd-sim-live-dot, .wd-sim-post, .wd-sim-in, .wd-sim-ticker-track, .wd-sim-flip, .wd-sim-cardflip, .wd-sim-envelope, .wd-sim-cardglow { animation: none !important; }
+    .wd-sim-sweep { display: none; }
   }
 `;
 
@@ -60,7 +77,7 @@ function TeamLogo({ brand, team, size, dark = true }) {
 }
 
 // ── Top bar ──
-const BROADCAST_SKIPPABLE = ["clock", "pickIn", "reveal"];
+const BROADCAST_SKIPPABLE = ["clock", "trade", "pickIn", "reveal"];
 function BroadcastBar({ s, data, isMobile, onSettings }) {
   const pick = currentPick(s.sim);
   const live = s.phase !== "done";
@@ -118,9 +135,9 @@ const TRADE_LOOK = { c1: "#5a0b17", c2: "#c8102e", ink: "#fff", wordmark: null }
 
 // One fixed height for every phase (clock, pick is in, the pick card,
 // trades…), so the stage never resizes and nothing below it jumps.
-const STAGE_HEIGHT = (isMobile) => (isMobile ? 200 : 260);
+const STAGE_HEIGHT = (isMobile) => (isMobile ? 290 : 260);
 
-function StageFrame({ look, isMobile, footer, children }) {
+function StageFrame({ look, isMobile, footer, beat, children }) {
   return (
     <div style={{ position: "relative", overflow: "hidden", borderRadius: 16, height: STAGE_HEIGHT(isMobile), display: "flex", flexDirection: "column", backgroundColor: look.c1, color: look.ink, transition: STAGE_FADE }}>
       {/* The team's second color sweeping in from the right. */}
@@ -137,7 +154,9 @@ function StageFrame({ look, isMobile, footer, children }) {
           }} />
         </div>
       )}
-      <div style={{ position: "relative", flex: 1, display: "flex", alignItems: "center" }}>{children}</div>
+      {/* One light sweep across the stage per beat. */}
+      {beat && <div key={beat} aria-hidden="true" className="wd-sim-sweep" />}
+      <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", alignItems: "center" }}>{children}</div>
       {footer}
     </div>
   );
@@ -155,45 +174,73 @@ const tag = (isMobile) => ({ display: "inline-block", background: "rgba(0,0,0,0.
 const bigName = (isMobile) => ({ fontSize: isMobile ? 28 : 52, fontWeight: 900, lineHeight: 1, textTransform: "uppercase", margin: "8px 0 6px", overflowWrap: "anywhere" });
 const pad = (isMobile) => ({ display: "flex", alignItems: "center", gap: isMobile ? 14 : 26, padding: isMobile ? "18px 16px" : "26px 30px", width: "100%", boxSizing: "border-box" });
 
-// The clock, filling left to right in the team's own accent color.
-function ClockBar({ s, pick, look }) {
-  const pickIn = s.phase === "pickIn";
+// The clock, filling left to right in the team's own accent color. Always
+// there under the pick stage (empty on the user's clock and the pick card)
+// so the stage's content area never changes height.
+function ClockBar({ s, pick, look, running }) {
   return (
     <div style={{ position: "relative", height: 6, background: "rgba(0,0,0,0.28)" }}>
-      <div key={`bar-${pick.overall}-${pick.owner}-${s.speed}`} style={{
-        height: "100%", background: look.ink, opacity: 0.85, transformOrigin: "left", transition: "background-color 1.2s ease",
-        ...(pickIn ? {} : { animation: `wdSimClock ${s.timing.clock}ms linear forwards`, animationPlayState: s.paused ? "paused" : "running" }),
-      }} />
+      {running && (
+        <div key={`bar-${pick.overall}-${pick.owner}-${s.speed}`} style={{
+          height: "100%", background: look.ink, opacity: 0.85, transformOrigin: "left", transition: "background-color 1.2s ease",
+          ...(s.phase === "pickIn" ? {} : { animation: `wdSimClock ${s.timing.clock}ms linear forwards`, animationPlayState: s.paused ? "paused" : "running" }),
+        }} />
+      )}
     </div>
   );
 }
 
-function ClockContent({ s, data, isMobile, pick }) {
-  const team = pick.owner;
-  const brand = brandOf(data, team);
-  const isUser = s.sim.userTeams.includes(team);
-  const { c1 } = colors(brand);
+// One line of text shrunk only as far as it takes to fit its box.
+function ShrinkText({ text, max, min, style }) {
+  const ref = useRef(null);
+  const [size, setSize] = useState(max);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const fit = () => {
+      el.style.fontSize = `${max}px`;
+      const ratio = el.clientWidth / Math.max(1, el.scrollWidth);
+      const next = ratio < 1 ? Math.max(min, Math.floor(max * ratio)) : max;
+      el.style.fontSize = `${next}px`;
+      setSize(next);
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el.parentElement || el);
+    return () => ro.disconnect();
+  }, [text, max, min]);
+  return <div ref={ref} style={{ ...style, fontSize: size, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{text}</div>;
+}
+
+// ── The pick stage: one persistent layout from "on the clock" through "the
+// pick is in" to the pick itself, and on to the next team. A beat only
+// changes what changed — the logo holds its size and spot (the next
+// team's fades in where the last one was), the label, name and numbers
+// flip over in place, and the card on the right turns over to show the
+// pick. ──
+const LOGO_SIZE = (isMobile) => (isMobile ? 76 : 132);
+
+function StageLogo({ brand, team, isMobile }) {
+  const size = LOGO_SIZE(isMobile);
   return (
-    <div style={pad(isMobile)}>
-      <TeamLogo brand={brand} team={team} size={isMobile ? 76 : 132} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        {s.phase === "pickIn" ? (
-          <div key="in" className="wd-sim-in" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.38)", color: "#fff", borderRadius: 6, padding: "4px 12px", fontWeight: 900, fontSize: isMobile ? 12 : 14, letterSpacing: "0.18em" }}>
-            <PickInIcon size={isMobile ? 18 : 22} /> THE PICK IS IN
-          </div>
-        ) : (
-          <div style={tag(isMobile)}>{isUser ? "YOU'RE ON THE CLOCK" : "ON THE CLOCK"}</div>
-        )}
-        <div style={bigName(isMobile)}>{brand.Team || team}</div>
-        {/* Round and pick, scoreboard-size — the pick itself in white with
-            the team's color, the rest on smoked glass. */}
-        <div style={{ display: "flex", alignItems: "stretch", gap: isMobile ? 6 : 8, marginTop: isMobile ? 6 : 10, flexWrap: "wrap" }}>
-          <PickBox label="ROUND" value={pick.round} isMobile={isMobile} />
-          <PickBox label="PICK" value={pick.inRound} isMobile={isMobile} solid={c1} />
-          <PickBox label="OVERALL" value={`No. ${pick.overall}`} isMobile={isMobile} />
-          {pick.via && <PickBox label="VIA" value={pick.via} isMobile={isMobile} />}
-        </div>
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <div key={team} className="wd-sim-in" style={{ position: "absolute", inset: 0, filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}>
+        <TeamLogo brand={brand} team={team} size={size} />
       </div>
+    </div>
+  );
+}
+
+function StageTag({ mode, isUser, isMobile }) {
+  const [k, body] = mode === "pickIn"
+    ? ["in", <><PickInIcon size={isMobile ? 15 : 18} /> THE PICK IS IN</>]
+    : mode === "reveal"
+      ? ["sel", "OFFICIAL PICK"]
+      : ["clock", isUser ? "YOU'RE ON THE CLOCK" : "ON THE CLOCK"];
+  return (
+    <div style={{ height: isMobile ? 24 : 28, display: "flex", alignItems: "center" }}>
+      <span key={k} className="wd-sim-flip" style={{ ...tag(isMobile), display: "inline-flex", alignItems: "center", gap: 8, background: mode === "pickIn" ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.3)" }}>{body}</span>
     </div>
   );
 }
@@ -201,18 +248,198 @@ function ClockContent({ s, data, isMobile, pick }) {
 function PickBox({ label, value, isMobile, solid }) {
   return (
     <div style={{
-      display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minWidth: isMobile ? 52 : 78,
-      padding: isMobile ? "4px 10px" : "6px 16px", borderRadius: 10,
+      display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minWidth: isMobile ? 48 : 66,
+      padding: isMobile ? "3px 8px" : "6px 12px", borderRadius: 10, overflow: "hidden",
       background: solid ? "#fff" : "rgba(0,0,0,0.32)", color: solid || "#fff", boxShadow: solid ? "0 6px 18px rgba(0,0,0,0.25)" : "none",
+      transition: "color 1.2s ease",
     }}>
-      <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 900, letterSpacing: "0.18em", opacity: solid ? 0.8 : 0.75 }}>{label}</span>
-      <span style={{ fontSize: isMobile ? 24 : 40, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{value}</span>
+      <span style={{ fontSize: isMobile ? 9 : 10, fontWeight: 900, letterSpacing: "0.18em", opacity: solid ? 0.8 : 0.75 }}>{label}</span>
+      <span key={String(value)} className="wd-sim-flip" style={{ display: "block", fontSize: isMobile ? 20 : 34, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{value}</span>
+    </div>
+  );
+}
+
+// Counts the clock down, frozen while paused; restarts when it remounts.
+function useCountdown(ms, paused) {
+  const [left, setLeft] = useState(ms);
+  const state = useRef({ left: ms, last: 0 });
+  useEffect(() => {
+    if (paused) return undefined;
+    state.current.last = Date.now();
+    const t = setInterval(() => {
+      const now = Date.now();
+      state.current.left = Math.max(0, state.current.left - (now - state.current.last));
+      state.current.last = now;
+      setLeft(state.current.left);
+    }, 100);
+    return () => clearInterval(t);
+  }, [paused]);
+  return left;
+}
+
+const cardLabel = { fontSize: 10, fontWeight: 900, letterSpacing: "0.18em", opacity: 0.75 };
+
+// The team's remaining picks this draft, current one first.
+function TeamPicks({ s, team, isMobile }) {
+  const left = s.sim.picks.slice(s.sim.idx).filter((p) => p.owner === team && !p.future).slice(0, isMobile ? 4 : 6);
+  if (!left.length) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+      <span style={cardLabel}>PICKS</span>
+      {left.map((p, i) => (
+        <span key={p.overall} style={{ fontSize: 11, fontWeight: 900, padding: "2px 7px", borderRadius: 999, fontVariantNumeric: "tabular-nums", background: i === 0 ? "#fff" : "rgba(255,255,255,0.12)", color: i === 0 ? "#0b1220" : "#fff" }}>{p.overall}</span>
+      ))}
+    </div>
+  );
+}
+
+function ClockFace({ s, team, isMobile, isUser }) {
+  const left = useCountdown(s.timing.clock, s.paused);
+  const secs = Math.ceil(left / 1000);
+  if (isUser) {
+    return (
+      <>
+        <span style={cardLabel}>NO CLOCK ON YOU</span>
+        <div style={{ fontSize: isMobile ? 26 : 40, fontWeight: 900, lineHeight: 1, margin: isMobile ? "4px 0 6px" : "6px 0 10px", color: GOLD }}>YOUR PICK</div>
+        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: BODY, opacity: 0.85, marginBottom: isMobile ? 6 : 10 }}>Draft from the board below.</div>
+        <TeamPicks s={s} team={team} isMobile={isMobile} />
+      </>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: isMobile ? "row" : "column", alignItems: isMobile ? "center" : "flex-start", gap: isMobile ? 16 : 0 }}>
+      <div>
+        <span style={cardLabel}>{s.paused ? "PAUSED" : "TIME LEFT"}</span>
+        <div style={{ fontSize: isMobile ? 44 : 72, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums", margin: isMobile ? "2px 0 0" : "4px 0 10px", color: secs <= 3 && !s.paused ? "#ffd2d2" : "#fff", transition: "color .3s ease" }}>
+          0:{String(secs).padStart(2, "0")}
+        </div>
+      </div>
+      <TeamPicks s={s} team={team} isMobile={isMobile} />
+    </div>
+  );
+}
+
+function PickInFace({ pick, isMobile }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: isMobile ? 4 : 8, height: "100%" }}>
+      <span className="wd-sim-envelope" style={{ display: "inline-flex" }}><PickInIcon size={isMobile ? 32 : 54} /></span>
+      <div style={{ fontSize: isMobile ? 15 : 20, fontWeight: 900, letterSpacing: "0.14em" }}>THE PICK IS IN</div>
+      <div style={{ fontSize: 12, fontWeight: 700, fontFamily: BODY, opacity: 0.8 }}>No. {pick.overall} · announcing the pick…</div>
+    </div>
+  );
+}
+
+function RevealFace({ event, data, isMobile, ink }) {
+  const p = event.prospect;
+  const brand = brandOf(data, event.team);
+  const label = gradeLabel(p.avg);
+  const fit = event.fit?.s;
+  const schoolLogo = p.logo || logoOf(p);
+  const valueText = event.value === 0 ? "on the board" : event.value > 0 ? `+${event.value} value` : `${event.value} reach`;
+  const grade = label && label.replace(" Round", "").replace("First", "1st").replace("Second", "2nd");
+  return (
+    <>
+      <span style={{ ...cardLabel, color: ink }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
+      {!isMobile && <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.1, marginTop: 6, color: "#33415a", textTransform: "uppercase" }}>{p.First}</div>}
+      <ShrinkText text={isMobile ? `${p.First} ${p.Last}` : p.Last} max={isMobile ? 26 : 40} min={isMobile ? 15 : 20}
+        style={{ fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: isMobile ? "3px 0 5px" : "0 0 8px" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: BODY, minWidth: 0 }}>
+        <span style={{ background: ink, color: "#fff", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: 12, flexShrink: 0 }}>{p.Position}</span>
+        {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />}
+        <span style={{ fontWeight: 800, fontSize: isMobile ? 12 : 14, color: "#0f1b2d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.School}</span>
+      </div>
+      {isMobile ? (
+        <div style={{ marginTop: 6, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84" }}>
+          Board #{p.rank} ({valueText}){grade ? ` · ${grade}` : ""}{fit != null ? ` · Fit ${Math.round(fit)}` : ""}
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+          <Stat label="Board" value={`#${p.rank}`} sub={valueText} />
+          {grade && <Stat label={p.mine ? "My Grade" : "Comm. Grade"} value={grade} />}
+          {fit != null && <Stat label="Staff Fit" value={Math.round(fit)} />}
+        </div>
+      )}
+    </>
+  );
+}
+
+function Stat({ label, value, sub }) {
+  return (
+    <span style={{ background: "#f1f4f8", color: "#0f1b2d", borderRadius: 10, padding: "5px 10px", minWidth: 64 }}>
+      <span style={{ display: "block", fontSize: 9, fontWeight: 900, letterSpacing: "0.12em", color: "#5b6b84" }}>{label.toUpperCase()}</span>
+      <span style={{ display: "block", fontSize: 16, fontWeight: 900, lineHeight: 1.1 }}>{value}</span>
+      {sub && <span style={{ display: "block", fontSize: 10, fontWeight: 800, color: "#5b6b84", fontFamily: BODY }}>{sub}</span>}
+    </span>
+  );
+}
+
+// The right-hand card: glass while the team's on the clock, turning over
+// to white for the pick.
+function StageCard({ mode, s, data, isMobile, pick, team, look, event }) {
+  const reveal = mode === "reveal";
+  const ink = readableOn(look.c1, "#ffffff");
+  const faceKey = mode === "reveal" ? `reveal-${pick.overall}` : mode === "pickIn" ? `in-${pick.overall}` : `clock-${pick.overall}-${s.speed}`;
+  let face;
+  if (reveal) face = <RevealFace event={event} data={data} isMobile={isMobile} ink={ink} />;
+  else if (mode === "pickIn") face = <PickInFace pick={pick} isMobile={isMobile} />;
+  else face = <ClockFace s={s} team={team} isMobile={isMobile} isUser={mode === "user"} />;
+  return (
+    <div className={mode === "pickIn" ? "wd-sim-cardglow" : undefined} style={{
+      position: "relative", flex: isMobile ? 1 : "0 0 40%", maxWidth: isMobile ? "none" : 400, minHeight: 0,
+      borderRadius: 14, overflow: "hidden",
+      background: reveal ? "#fff" : "rgba(0,0,0,0.3)",
+      border: `1px solid ${reveal ? "#fff" : "rgba(255,255,255,0.18)"}`,
+      boxShadow: reveal ? "0 14px 34px rgba(0,0,0,0.38)" : "none",
+      color: "#fff",
+      transition: "background-color .5s ease, border-color .5s ease, box-shadow .5s ease",
+    }}>
+      <div key={faceKey} className={reveal ? "wd-sim-cardflip" : "wd-sim-flip"} style={{
+        position: "absolute", inset: 0, display: "flex", flexDirection: "column", justifyContent: "center",
+        padding: isMobile ? "10px 14px" : "16px 20px", boxSizing: "border-box",
+      }}>
+        {face}
+      </div>
+    </div>
+  );
+}
+
+function PickStage({ s, data, isMobile, mode, pick, team, look, event, trade }) {
+  const brand = brandOf(data, team);
+  const isUser = s.sim.userTeams.includes(team);
+  const { c1 } = colors(brand);
+  const info = (
+    <div style={{ minWidth: 0, flex: 1 }}>
+      <StageTag mode={mode} isUser={isUser} isMobile={isMobile} />
+      <div style={{ margin: isMobile ? "4px 0 6px" : "8px 0 10px" }}>
+        <div key={team} className="wd-sim-flip">
+          <ShrinkText text={brand.Team || team} max={isMobile ? 30 : 48} min={isMobile ? 16 : 22} style={{ fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase" }} />
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "stretch", gap: isMobile ? 6 : 8, flexWrap: "wrap" }}>
+        <PickBox label="ROUND" value={pick.round} isMobile={isMobile} />
+        <PickBox label="PICK" value={pick.inRound} isMobile={isMobile} solid={c1} />
+        <PickBox label="OVERALL" value={pick.overall} isMobile={isMobile} />
+        {/* A trade up shows where the pick came from, beside the numbers —
+            not over the player's name. */}
+        {trade ? <PickBox label="TRADED UP" value={trade.from} isMobile={isMobile} />
+          : pick.via && <PickBox label="VIA" value={pick.via} isMobile={isMobile} />}
+      </div>
+    </div>
+  );
+  const card = <StageCard mode={mode} s={s} data={data} isMobile={isMobile} pick={pick} team={team} look={look} event={event} />;
+  return (
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: "stretch", gap: isMobile ? 12 : 26, padding: isMobile ? "14px" : "22px 26px", height: "100%", width: "100%", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 14 : 26, flex: isMobile ? "0 0 auto" : 1, minWidth: 0 }}>
+        <StageLogo brand={brand} team={team} isMobile={isMobile} />
+        {info}
+      </div>
+      {card}
     </div>
   );
 }
 
 // Before the first pick: who the user is drafting as.
-function IntroContent({ s, data, isMobile }) {
+function IntroContent({ s, data, isMobile, onPickTeam }) {
   const teams = s.sim.userTeams;
   const one = teams.length === 1 ? teams[0] : null;
   const first = s.sim.picks.find((p) => teams.includes(p.owner));
@@ -220,7 +447,7 @@ function IntroContent({ s, data, isMobile }) {
   const buttonColor = (one && brandOf(data, one).Color2) || GOLD;
   return (
     <div style={{ ...pad(isMobile), flexWrap: "wrap" }}>
-      {one ? <TeamLogo brand={brandOf(data, one)} team={one} size={isMobile ? 76 : 132} /> : teams.length > 1 && (
+      {one ? <TeamLogo brand={brandOf(data, one)} team={one} size={LOGO_SIZE(isMobile)} /> : teams.length > 1 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: isMobile ? "100%" : 220 }}>
           {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={isMobile ? 36 : 48} />)}
         </div>
@@ -234,6 +461,12 @@ function IntroContent({ s, data, isMobile }) {
         <button onClick={s.start} className="wd-sim-draft" style={{ marginTop: 14, border: "none", borderRadius: 999, padding: isMobile ? "10px 20px" : "12px 26px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: isMobile ? 14 : 16, letterSpacing: "0.1em", background: buttonColor, color: "#fff", boxShadow: "0 4px 14px rgba(0,0,0,0.25)" }}>
           START THE DRAFT ▶
         </button>
+        {/* Back to the setup screen's team picker, nothing selected. */}
+        {onPickTeam && (
+          <button onClick={onPickTeam} className="wd-sim-pickteam" style={{ display: "block", marginTop: 10, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: BODY, fontWeight: 700, fontSize: 13, color: "inherit", opacity: 0.85, textDecoration: "underline", textUnderlineOffset: 3 }}>
+            {teams.length ? "Pick another team" : "Pick a team"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -264,51 +497,21 @@ function SimmingContent({ s, data, isMobile }) {
   );
 }
 
-function PickContent({ event, data, isMobile, look, trade }) {
-  const p = event.prospect;
-  const team = event.team;
-  const brand = brandOf(data, team);
-  const label = gradeLabel(p.avg);
-  const fit = event.fit?.s;
-  const schoolLogo = logoOf(p);
-  const valueText = event.value === 0 ? "On the board" : event.value > 0 ? `+${event.value} value` : `${event.value} reach`;
+// The trade announcement — the whole stage: who moves up, who moves down,
+// and what each side gets. Labels read under the (plural) nickname:
+// "JETS / MOVE UP · GET".
+function TradeSide({ brand, team, label, picks, isMobile, align }) {
   return (
-    <div style={{ ...pad(isMobile), paddingTop: isMobile ? 14 : 22, paddingBottom: isMobile ? 14 : 22 }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0 }}>
-        <TeamLogo brand={brand} team={team} size={isMobile ? 64 : 110} />
-        <span style={{ background: "rgba(0,0,0,0.3)", color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 900, letterSpacing: "0.1em" }}>NO. {event.pick.overall}</span>
-      </div>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, letterSpacing: "0.18em", opacity: 0.85 }}>THE {(brand.Team || team).toUpperCase()} SELECT</span>
-          {trade && <span style={{ background: "rgba(0,0,0,0.38)", color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 900, letterSpacing: "0.12em" }}>TRADED UP FROM {trade.from}</span>}
-        </div>
-        <div style={{ fontSize: isMobile ? 24 : 44, fontWeight: 900, lineHeight: 0.98, textTransform: "uppercase", margin: isMobile ? "4px 0 6px" : "6px 0 8px", overflowWrap: "anywhere" }}>
-          {p.First} <br />{p.Last}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontFamily: BODY }}>
-          <span style={{ background: "#fff", color: look.c1, borderRadius: 6, padding: "3px 9px", fontWeight: 900, fontSize: 13 }}>{p.Position}</span>
-          {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 26, height: 26, objectFit: "contain" }} />}
-          <span style={{ fontWeight: 800, fontSize: isMobile ? 13 : 15 }}>{p.School}</span>
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-          <Stat label="Board" value={`#${p.rank}`} sub={valueText} />
-          {label && <Stat label="Comm. Grade" value={label.replace(" Round", "").replace("First", "1st").replace("Second", "2nd")} />}
-          {fit != null && <Stat label="Staff Fit" value={Math.round(fit)} />}
-          {event.pick.via && !trade && <Stat label="Via" value={event.pick.via} />}
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: isMobile ? "row" : "column", alignItems: "center", gap: isMobile ? 10 : 8, textAlign: isMobile ? "left" : "center", justifyContent: align }}>
+      <span className="wd-sim-in" style={{ display: "inline-flex", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.4))" }}><TeamLogo brand={brand} team={team} size={isMobile ? 52 : 104} /></span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: isMobile ? 16 : 24, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.05 }}>{brand.Team || team}</div>
+        <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", opacity: 0.75, marginTop: 4 }}>{label}</div>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "center", marginTop: 5 }}>
+          {picks.map((p) => <span key={p} style={{ background: "rgba(0,0,0,0.35)", borderRadius: 999, padding: "3px 10px", fontSize: isMobile ? 11 : 13, fontWeight: 900, whiteSpace: "nowrap" }}>{p}</span>)}
         </div>
       </div>
     </div>
-  );
-}
-
-function Stat({ label, value, sub }) {
-  return (
-    <span style={{ background: "rgba(0,0,0,0.28)", color: "#fff", borderRadius: 10, padding: "6px 10px", minWidth: 70 }}>
-      <span style={{ display: "block", fontSize: 9, fontWeight: 900, letterSpacing: "0.12em", opacity: 0.75 }}>{label.toUpperCase()}</span>
-      <span style={{ display: "block", fontSize: 16, fontWeight: 900, lineHeight: 1.1 }}>{value}</span>
-      {sub && <span style={{ display: "block", fontSize: 10, fontWeight: 800, opacity: 0.8, fontFamily: BODY }}>{sub}</span>}
-    </span>
   );
 }
 
@@ -316,63 +519,121 @@ function TradeContent({ event, data, isMobile }) {
   const to = brandOf(data, event.to);
   const from = brandOf(data, event.from);
   return (
-    <div style={{ ...pad(isMobile), flexDirection: "column", alignItems: "flex-start", gap: 0 }}>
-      <div style={{ fontSize: isMobile ? 26 : 44, fontWeight: 900, letterSpacing: "0.12em" }}>TRADE ALERT</div>
-      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 24, marginTop: 14, flexWrap: "wrap" }}>
-        <div style={{ textAlign: "center" }}>
-          <TeamLogo brand={to} team={event.to} size={isMobile ? 54 : 84} />
-          <div style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>GET {pickName(event.pick).toUpperCase()}</div>
-        </div>
-        <span style={{ fontSize: 30, fontWeight: 900, color: GOLD }}>⇄</span>
-        <div style={{ textAlign: "center" }}>
-          <TeamLogo brand={from} team={event.from} size={isMobile ? 54 : 84} />
-          <div style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>GET {event.give.map((p) => pickName(p).toUpperCase()).join(" + ")}</div>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: isMobile ? 10 : 14, width: "100%", height: "100%", padding: isMobile ? "14px" : "18px 30px", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span className="wd-sim-flip" style={{ display: "inline-block", background: "#fff", color: "#a50e24", borderRadius: 8, padding: isMobile ? "3px 10px" : "4px 14px", fontSize: isMobile ? 20 : 36, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1.1 }}>TRADE</span>
+        <span style={{ fontSize: isMobile ? 12 : 15, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.85 }}>{pickName(event.pick).toUpperCase()} CHANGES HANDS</span>
       </div>
-      {event.target && (
-        <div style={{ marginTop: 14, fontSize: 13, fontWeight: 700, fontFamily: BODY, opacity: 0.9 }}>
-          The {to.Team || event.to} are moving up — {event.target.First} {event.target.Last} ({event.target.Position}) is still on the board.
-        </div>
-      )}
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap: isMobile ? 10 : 18, flex: isMobile ? "0 0 auto" : 1, minHeight: 0 }}>
+        <TradeSide brand={to} team={event.to} label="MOVE UP · GET" picks={[pickName(event.pick)]} isMobile={isMobile} align="center" />
+        <span aria-hidden="true" style={{ fontSize: isMobile ? 22 : 40, fontWeight: 900, color: GOLD, alignSelf: "center", lineHeight: 1 }}>⇄</span>
+        <TradeSide brand={from} team={event.from} label="MOVE DOWN · GET" picks={event.give.map(pickName)} isMobile={isMobile} align="center" />
+      </div>
     </div>
   );
 }
 
-function Stage({ s, data, isMobile }) {
+function Stage({ s, data, isMobile, onPickTeam }) {
   let look = NEUTRAL_LOOK;
   let key = s.phase;
   let content = null;
   let footer = null;
+  let beat = null;
 
   const pickEvent = s.phase === "reveal" ? s.reveal?.events.filter((e) => e.type === "pick").pop() : null;
   const tradeEvent = s.phase === "reveal" ? s.reveal?.events.find((e) => e.type === "trade") : null;
+  // Before the reveal, the pick that's coming (made after any trade up —
+  // so "the pick is in" shows the team that moved up).
+  const pendingTrade = ["trade", "pickIn"].includes(s.phase) ? s.pendingEvents?.find((e) => e.type === "trade") : null;
+  const pendingPick = s.phase === "pickIn" ? s.pendingEvents?.find((e) => e.type === "pick") : null;
   const pick = currentPick(s.sim);
 
   if (s.phase === "intro") {
     if (s.sim.userTeams.length === 1) look = teamLook(brandOf(data, s.sim.userTeams[0]));
-    content = <IntroContent s={s} data={data} isMobile={isMobile} />;
+    content = <IntroContent s={s} data={data} isMobile={isMobile} onPickTeam={onPickTeam} />;
   } else if (s.phase === "simming") {
     look = SIMMING_LOOK;
     content = <SimmingContent s={s} data={data} isMobile={isMobile} />;
-  } else if (pickEvent) {
-    look = teamLook(brandOf(data, pickEvent.team));
-    key = `pick-${pickEvent.pick.overall}`;
-    content = <PickContent event={pickEvent} data={data} isMobile={isMobile} look={look} trade={tradeEvent} />;
+  } else if (s.phase === "trade" && pendingTrade) {
+    look = TRADE_LOOK;
+    key = `trade-${pendingTrade.pick.overall}`;
+    beat = key;
+    content = <TradeContent event={pendingTrade} data={data} isMobile={isMobile} />;
+  } else if (pickEvent || (pick && !tradeEvent)) {
+    // Clock, pick is in, the user's clock and the pick card all share one
+    // mounted PickStage (same key), so each beat updates it in place.
+    const mode = pickEvent ? "reveal" : s.phase === "pickIn" ? "pickIn" : s.phase === "user" ? "user" : "clock";
+    const at = pickEvent ? pickEvent.pick : pendingPick ? pendingPick.pick : pick;
+    const team = pickEvent ? pickEvent.team : pendingPick ? pendingPick.team : pick.owner;
+    look = teamLook(brandOf(data, team));
+    key = "pick-stage";
+    beat = `${mode}-${at.overall}`;
+    content = <PickStage s={s} data={data} isMobile={isMobile} mode={mode} pick={at} team={team} look={look} event={pickEvent} trade={tradeEvent || pendingTrade} />;
+    footer = <ClockBar s={s} pick={at} look={look} running={mode === "pickIn" || mode === "clock"} />;
   } else if (tradeEvent) {
     look = TRADE_LOOK;
     key = `trade-${tradeEvent.pick.overall}`;
     content = <TradeContent event={tradeEvent} data={data} isMobile={isMobile} />;
-  } else if (pick) {
-    look = teamLook(brandOf(data, pick.owner));
-    key = `clock-${pick.overall}-${pick.owner}`;
-    content = <ClockContent s={s} data={data} isMobile={isMobile} pick={pick} />;
-    if (!s.sim.userTeams.includes(pick.owner)) footer = <ClockBar s={s} pick={pick} look={look} />;
   }
 
   return (
-    <StageFrame look={look} isMobile={isMobile} footer={footer}>
-      <div key={key} className="wd-sim-in" style={{ width: "100%" }}>{content}</div>
+    <StageFrame look={look} isMobile={isMobile} footer={footer} beat={beat}>
+      <div key={key} className="wd-sim-in" style={{ width: "100%", height: "100%", display: "flex", alignItems: "center" }}>{content}</div>
     </StageFrame>
+  );
+}
+
+// ── Up Next: the draft order coming up, right under the stage. The track
+// slides one slot left as each pick comes off the board (not while
+// simming — that moves too fast to follow). The team on the clock is in
+// its own color; the user's picks are outlined in gold. ──
+function UpNextBar({ s, data, isMobile }) {
+  const trackRef = useRef(null);
+  const prevIdx = useRef(s.sim.idx);
+  const itemW = isMobile ? 62 : 78;
+  const upcoming = s.sim.picks.slice(s.sim.idx).filter((p) => !p.future).slice(0, isMobile ? 8 : 16);
+  useLayoutEffect(() => {
+    const moved = s.sim.idx - prevIdx.current;
+    prevIdx.current = s.sim.idx;
+    const el = trackRef.current;
+    if (!el?.animate || moved <= 0 || moved > 3 || s.phase === "simming") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.animate([{ transform: `translateX(${moved * (itemW + 6)}px)` }, { transform: "translateX(0)" }], { duration: 700, easing: "cubic-bezier(.2,.8,.2,1)" });
+  }, [s.sim.idx, s.phase, itemW]);
+  if (s.phase === "done" || !upcoming.length) return null;
+  const onClock = ["clock", "pickIn", "user"].includes(s.phase);
+  return (
+    <div style={{ ...PANEL, marginTop: 10, display: "flex", alignItems: "stretch" }}>
+      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", justifyContent: "center", padding: isMobile ? "0 10px" : "0 14px", background: "#070d18", borderRight: "1px solid #1f2b42", color: GOLD, fontWeight: 900, fontSize: isMobile ? 10 : 11, letterSpacing: "0.16em", lineHeight: 1.3 }}>
+        UP<br />NEXT
+      </div>
+      <div style={{ flex: 1, minWidth: 0, overflow: "hidden", padding: 8, WebkitMaskImage: "linear-gradient(90deg, #000 85%, transparent)", maskImage: "linear-gradient(90deg, #000 85%, transparent)" }}>
+        <div ref={trackRef} style={{ display: "flex", gap: 6 }}>
+          {upcoming.map((p, i) => {
+            const brand = brandOf(data, p.owner);
+            const { c1 } = colors(brand);
+            const now = i === 0 && onClock;
+            const mine = s.sim.userTeams.includes(p.owner);
+            const roundStart = p.inRound === 1 && p.round > 1;
+            return (
+              <div key={p.overall} title={`No. ${p.overall} — ${brand.Team || p.owner}${p.via ? ` (via ${p.via})` : ""}`} style={{
+                flex: `0 0 ${itemW}px`, height: isMobile ? 60 : 68, boxSizing: "border-box", borderRadius: 10,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
+                background: now ? c1 : "#121c2f",
+                border: `1px solid ${mine ? GOLD : now ? "rgba(255,255,255,0.55)" : "#1f2b42"}`,
+                transition: "background-color .6s ease, border-color .6s ease",
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", fontVariantNumeric: "tabular-nums", color: now ? textOn(c1) : roundStart ? GOLD : "#9fb0c8" }}>
+                  {roundStart ? `RD ${p.round} · ${p.overall}` : `NO. ${p.overall}`}
+                </span>
+                <TeamLogo brand={brand} team={p.owner} size={isMobile ? 24 : 30} />
+                <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.06em", color: mine ? GOLD : now ? textOn(c1) : "#dbe4f0" }}>{mine ? "YOU" : p.owner}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -431,20 +692,16 @@ function DraftTab({ s, data, isMobile }) {
   const rounds = [...new Set(s.sim.picks.map((p) => p.round))];
   const current = currentPick(s.sim);
   const [round, setRound] = useState(null);
-  const [mineOnly, setMineOnly] = useState(false);
   const shownRound = round ?? current?.round ?? rounds[0];
-  const picks = mineOnly
-    ? s.sim.picks.filter((p) => s.sim.userTeams.includes(p.owner))
-    : s.sim.picks.filter((p) => p.round === shownRound);
+  const picks = s.sim.picks.filter((p) => p.round === shownRound);
   const chipBtn = (on) => ({ ...barBtn, background: on ? GOLD : "#1a2438", color: on ? "#111" : "#9fb0c8" });
   const cols = isMobile ? 2 : 4;
   return (
     <div style={{ padding: 12 }}>
       <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
         {rounds.length > 1 && rounds.map((r) => (
-          <button key={r} onClick={() => { setRound(r); setMineOnly(false); }} aria-pressed={!mineOnly && shownRound === r} style={chipBtn(!mineOnly && shownRound === r)}>R{r}</button>
+          <button key={r} onClick={() => setRound(r)} aria-pressed={shownRound === r} style={chipBtn(shownRound === r)}>R{r}</button>
         ))}
-        {s.sim.userTeams.length > 0 && <button onClick={() => setMineOnly((v) => !v)} aria-pressed={mineOnly} style={chipBtn(mineOnly)}>My Picks</button>}
       </div>
       {/* Down the columns, not across: 1–8 in the first, 9–16 the next… */}
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(picks.length / cols) || 1}, auto)`, gridAutoFlow: "column", gap: 6 }}>
@@ -471,7 +728,71 @@ function DraftTab({ s, data, isMobile }) {
           );
         })}
       </div>
-      {mineOnly && picks.length === 0 && <div style={EMPTY}>No picks for your teams in this sim.</div>}
+    </div>
+  );
+}
+
+// My Picks tab: the user's teams' selections so far — pick, player, board
+// value or reach, the need he filled — then the picks still to come, with
+// how far off each one is.
+function MyPicksTab({ s, data, isMobile }) {
+  const teams = s.sim.userTeams;
+  return (
+    <div>
+      {teams.map((team) => {
+        const brand = brandOf(data, team);
+        const mine = s.sim.picks.filter((p) => p.owner === team);
+        const made = mine.filter((p) => p.selection);
+        const left = mine.filter((p) => !p.selection && !p.future);
+        return (
+          <div key={team}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #1f2b42", flexWrap: "wrap" }}>
+              <TeamLogo brand={brand} team={team} size={24} />
+              <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.12em" }}>{(brand.Team || team).toUpperCase()} PICKS</span>
+              <span style={{ marginLeft: "auto", color: "#6f7f99", fontSize: 11, fontFamily: BODY }}>
+                {made.length} made · {left.length} to go
+              </span>
+            </div>
+            {!made.length && <div style={{ ...EMPTY, paddingBottom: 8 }}>No selections yet.</div>}
+            {made.map((p) => {
+              const pl = s.sim.byId[p.selection];
+              const value = SPECIALISTS.includes(pl.Position) ? 0 : p.overall - pl.rank;
+              return (
+                <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: "1px solid #18233a", minWidth: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
+                  <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
+                  {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 28, flexShrink: 0 }} />}
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 14, textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</Link>
+                    <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase" }}>{pl.Position} · {pl.School} · Board #{pl.rank}</span>
+                  </span>
+                  <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 900, color: value > 0 ? "#4ade80" : value < 0 ? "#ff8a9a" : "#9fb0c8", width: 64, textAlign: "right" }}>
+                    {value > 0 ? `+${value} value` : value < 0 ? `${value} reach` : "on the board"}
+                  </span>
+                  <span style={{ flexShrink: 0, minWidth: isMobile ? 0 : 170, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: p.need ? "#ffb3bf" : "#55657e" }}>
+                    {p.need ? (p.need.label === "Crowded Room" ? `Into a crowded room: ${NEED_KEY_NAMES[p.need.key] || p.need.key}` : `Filled: ${needLine(p.need)}`) : "No need filled"}
+                  </span>
+                </div>
+              );
+            })}
+            {left.length > 0 && (
+              <div style={{ padding: "8px 14px 4px", color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.16em" }}>REMAINING PICKS</div>
+            )}
+            {left.map((p) => {
+              const away = s.sim.picks.indexOf(p) - s.sim.idx;
+              const live = away === 0 && s.phase !== "done";
+              return (
+                <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid #18233a", background: live ? "rgba(246,162,29,0.1)" : "transparent" }}>
+                  <span style={{ color: live ? GOLD : "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
+                  <span style={{ flex: 1, minWidth: 0, color: live ? "#fff" : "#9fb0c8", fontSize: 13, fontWeight: 900 }}>
+                    {live ? "On the clock" : away === 1 ? "Next pick" : `In ${away} picks`}
+                  </span>
+                  {p.via && <span style={{ flexShrink: 0, color: "#6f7f99", fontSize: 11, fontWeight: 800, fontFamily: BODY }}>via {p.via}</span>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -510,7 +831,7 @@ function DraftBoardTab({ s, data, isMobile }) {
             {logoOf(p) ? <img src={logoOf(p)} alt="" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 26, flexShrink: 0 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <Link to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", fontWeight: 900, fontSize: 14, textDecoration: "none", textTransform: "uppercase" }}>{p.First} {p.Last}</Link>
-              <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{p.Position} · {p.School}{label ? ` · ${label}` : ""}</div>
+              <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{p.Position} · {p.School}{label ? ` · ${label}${p.mine ? " (yours)" : ""}` : ""}</div>
             </div>
             {fit != null && (
               <span title="Staff fit for the team on the clock" style={{ flexShrink: 0, borderRadius: 8, padding: "3px 7px", fontSize: 11, fontWeight: 900, background: fit >= 80 ? "rgba(246,162,29,0.18)" : "#16213a", color: fit >= 80 ? GOLD : "#9fb0c8" }}>
@@ -535,10 +856,15 @@ const DAVIN_CHANCE = 0.3;
 const SLOT_TITLE = { GM: "GM", HC: "Head Coach", OC: "Off. Coordinator", DC: "Def. Coordinator" };
 const POS_WORD = { QB: "quarterback", RB: "running back", WR: "receiver", TE: "tight end", OL: "lineman", DL: "defensive lineman", EDGE: "edge rusher", LB: "linebacker", DB: "defensive back", K: "kicker", P: "punter" };
 
+// Only ever for the user's own teams: their pick when they're on the
+// clock, otherwise their next one coming up (from the board as it stands).
 function SuggestionsTab({ s, data, isMobile }) {
-  const pick = currentPick(s.sim);
+  const onPick = currentPick(s.sim);
+  const pick = onPick && s.sim.userTeams.includes(onPick.owner)
+    ? onPick
+    : s.sim.picks.slice(s.sim.idx).find((p) => !p.future && s.sim.userTeams.includes(p.owner));
   const team = pick?.owner;
-  const { value, staff } = useMemo(() => (team ? suggestionsFor(s.sim, team) : { value: null, staff: [] }), [s.sim, team]);
+  const { value, need, coach, needs, topNeed } = useMemo(() => (pick ? suggestionsFor(s.sim, team, pick.overall) : { value: null, need: null, coach: null, needs: {}, topNeed: null }), [s.sim, team, pick]);
   // Davin's in or not is settled once per pick (a seeded roll), so the card
   // doesn't flicker in and out as the board changes.
   const overall = pick?.overall;
@@ -549,41 +875,76 @@ function SuggestionsTab({ s, data, isMobile }) {
     return rand() < DAVIN_CHANCE ? davinSuggestion(team, { ...s.ctx, rand }) : null;
   }, [team, overall]); // eslint-disable-line react-hooks/exhaustive-deps
   const legendSchool = useLegendSchool(davin?.legend.school, data);
-  if (!pick) return <div style={EMPTY}>The draft&apos;s over.</div>;
+  if (!pick) return <div style={EMPTY}>{onPick ? "You're out of picks in this draft." : "The draft's over."}</div>;
   const brand = brandOf(data, team);
+  const upcoming = pick !== onPick;
   const staffNames = data.staff[team] || {};
   const onClock = s.phase === "user";
-  const shownStaff = davin ? staff.slice(0, 1) : staff;
-  const grade = value ? gradeLabel(value.avg) : null;
+  // The front office's voice: the GM on the value and need picks (else the
+  // head coach), the staffer himself on his own favorite.
+  const speaker = (slot) => {
+    const order = slot ? [slot] : ["GM", "HC"];
+    const found = order.find((k) => staffNames[k]?.n) || order[0];
+    return { name: staffNames[found]?.n || "", title: SLOT_TITLE[found] };
+  };
+  const ctx = { nick: brand.Team || team, overall: pick.overall, topNeed };
+  const cards = [];
+  if (value) {
+    cards.push(<SuggestionCard key="value" tag="VALUE PICK" accent={BLUE} p={value} onClock={onClock} s={s}
+      quote={{ text: frontOfficeLine("value", value, needs[value.id], ctx), by: speaker() }} />);
+  }
+  if (need) {
+    cards.push(<SuggestionCard key="need" tag="NEED PICK" accent={NEED_RED} p={need} onClock={onClock} s={s}
+      quote={{ text: frontOfficeLine("need", need, needs[need.id], ctx), by: speaker() }} />);
+  }
+  if (coach) {
+    const who = staffNames[coach.slot]?.n;
+    cards.push(<SuggestionCard key="coach" tag={`${coach.slot}${who ? ` ${who.toUpperCase()}` : ""}`} accent={GOLD} p={coach.p} onClock={onClock} s={s}
+      quote={{ text: frontOfficeLine("coach", coach.p, needs[coach.p.id], ctx), by: speaker(coach.slot) }} />);
+  }
+  // Davin only takes a spot that's open — three suggestions at most.
+  if (davin && cards.length < 3) cards.push(<DavinCard key="davin" davin={davin} school={legendSchool} />);
 
   return (
     <div>
       <YourPickBanner s={s} data={data} text="Your war room's picks — draft one right here." />
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #1f2b42" }}>
         <TeamLogo brand={brand} team={team} size={24} />
-        <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.12em" }}>{(brand.Team || team).toUpperCase()} SUGGESTIONS</span>
-        <span style={{ marginLeft: "auto", color: "#6f7f99", fontSize: 11, fontFamily: BODY }}>No. {pick.overall}</span>
+        <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.12em" }}>{ctx.nick.toUpperCase()} SUGGESTIONS</span>
+        <span style={{ marginLeft: "auto", color: "#6f7f99", fontSize: 11, fontFamily: BODY }}>{upcoming ? `Your next pick · No. ${pick.overall}` : `No. ${pick.overall}`}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: 10, padding: 12 }}>
-        {value && (
-          <SuggestionCard tag="VALUE PICK" accent={BLUE} p={value} onClock={onClock} s={s}
-            reason={`Best player left on the We-Draft.com board — No. ${value.rank}${grade ? `, ${grade} community grade` : ""}.`} />
-        )}
-        {shownStaff.map(({ p, slot, score }) => {
-          const who = staffNames[slot]?.n;
-          return (
-            <SuggestionCard key={`${slot}-${p.id}`} tag={`${slot}${who ? ` ${who.toUpperCase()}` : ""}`} accent={GOLD} p={p} onClock={onClock} s={s}
-              reason={`${who ? `${SLOT_TITLE[slot]} ${who}` : `The ${SLOT_TITLE[slot].toLowerCase()}`} has drafted this kind of ${POS_WORD[p.Position] || p.Position} before — ${slot} fit ${Math.round(score)}.`} />
-          );
-        })}
-        {davin && <DavinCard davin={davin} school={legendSchool} />}
-        {!value && !shownStaff.length && !davin && <div style={EMPTY}>Nothing left to suggest.</div>}
+        {cards.slice(0, 3)}
+        {!cards.length && <div style={EMPTY}>Nothing left to suggest.</div>}
       </div>
     </div>
   );
 }
 
-function SuggestionCard({ tag, accent, p, reason, onClock, s }) {
+// A team need, as the suggestion cards say it: "Cornerback (Upgrade Needed)".
+const NEED_RED = "#d6455d";
+const needLine = (n) => `${NEED_KEY_NAMES[n.key] || n.key} (${n.label})${n.note ? ` — ${n.note}` : ""}`;
+
+// What the front office says about a suggestion (kind: value / need /
+// coach). ctx: { nick, overall, topNeed }.
+function frontOfficeLine(kind, p, need, { overall, topNeed }) {
+  const name = `${p.First} ${p.Last}`;
+  const pos = POS_WORD[p.Position] || p.Position;
+  const word = need ? needWord(need.key) : pos;
+  if (kind === "need") {
+    return need?.label === "Aging Talent" ? `${name} is the guy to take over at ${word} when it's time.` : `We need a ${word}, and ${name} is the best one left.`;
+  }
+  if (kind === "value") {
+    return need ? `${name} is the best player on our board, and he fills a need. Easy call.` : `${name} is the best player on our board. You don't pass on that.`;
+  }
+  if (need) return `${name} is the kind of player I like, and he fits a need.`;
+  if (topNeed && p.rank <= overall + 5) return `Even though we have bigger needs than ${pos}, ${name} is too good to pass up.`;
+  return `${name} is the kind of ${pos} I like. He'd fit what we do.`;
+}
+
+// A suggestion: its label, the player, and the front office's word on him
+// (quote: { text, by: { name, title } }) — the label and the quote say why.
+function SuggestionCard({ tag, accent, p, onClock, s, quote }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, background: "#121c2f", border: "1px solid #1f2b42", borderTop: `3px solid ${accent}`, borderRadius: 12, padding: 12, minWidth: 0 }}>
       <span style={{ alignSelf: "flex-start", background: accent, color: accent === GOLD ? "#111" : "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 900, letterSpacing: "0.1em", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tag}</span>
@@ -594,7 +955,13 @@ function SuggestionCard({ tag, accent, p, reason, onClock, s }) {
           <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", marginTop: 2 }}>{p.Position} {p.School} · Board #{p.rank}</span>
         </span>
       </div>
-      <div style={{ color: "#c9d4e5", fontSize: 12, fontFamily: BODY, lineHeight: 1.45, flex: 1 }}>{reason}</div>
+      {quote && (
+        <blockquote style={{ margin: 0, padding: "6px 10px", borderLeft: `3px solid ${accent}`, background: "rgba(255,255,255,0.04)", borderRadius: "0 8px 8px 0" }}>
+          <span style={{ display: "block", color: "#fff", fontSize: 13, fontFamily: BODY, fontStyle: "italic", lineHeight: 1.4 }}>“{quote.text}”</span>
+          <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, marginTop: 3 }}>— {quote.by.name ? `${quote.by.name}, ${quote.by.title}` : quote.by.title}</span>
+        </blockquote>
+      )}
+      <span style={{ flex: 1 }} />
       {onClock && <button className="wd-sim-draft" onClick={() => s.draft(p.id)} style={{ ...DRAFT_BTN, alignSelf: "flex-start" }}>DRAFT</button>}
     </div>
   );
@@ -649,7 +1016,8 @@ const loadRoster = (team) => rosterCache[team] || (rosterCache[team] = Promise.a
 function RosterTab({ s, data, isMobile }) {
   const onClock = currentPick(s.sim)?.owner;
   const [chosen, setChosen] = useState(null);
-  const team = chosen || onClock || s.sim.userTeams[0] || NFL_TEAM_ABBRS[0];
+  // The user's own team by default (not whoever's on the clock).
+  const team = chosen || s.sim.userTeams[0] || onClock || NFL_TEAM_ABBRS[0];
   const brand = brandOf(data, team);
   const [loaded, setLoaded] = useState({});
   useEffect(() => {
@@ -674,8 +1042,8 @@ function RosterTab({ s, data, isMobile }) {
         <TeamLogo brand={brand} team={team} size={24} />
         <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.12em" }}>{(brand.Team || team).toUpperCase()} ROSTER</span>
         {rookies.length > 0 && <span style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.08em" }}>+{rookies.length} DRAFTED</span>}
-        <select value={team} onChange={(e) => setChosen(e.target.value === onClock ? null : e.target.value)} aria-label="Team" style={{ ...selectStyle, marginLeft: "auto", padding: "5px 10px", fontSize: 12 }}>
-          {NFL_TEAM_ABBRS.map((t) => <option key={t} value={t}>{nameOf(t)}{t === onClock ? " (on the clock)" : ""}</option>)}
+        <select value={team} onChange={(e) => setChosen(e.target.value)} aria-label="Team" style={{ ...selectStyle, marginLeft: "auto", padding: "5px 10px", fontSize: 12 }}>
+          {NFL_TEAM_ABBRS.map((t) => <option key={t} value={t}>{nameOf(t)}{s.sim.userTeams.includes(t) ? " (your team)" : t === onClock ? " (on the clock)" : ""}</option>)}
         </select>
       </div>
       {!got ? <div style={EMPTY}>Loading roster…</div>
@@ -871,7 +1239,8 @@ function Console({ s, data, isMobile }) {
     ...(isMobile ? [["desk", "The Desk"]] : []),
     ["draft", "Draft"],
     ["board", "Draft Board"],
-    ["suggestions", "Suggestions"],
+    // Suggestions are only for the user's own teams — none when watching.
+    ...(s.sim.userTeams.length ? [["suggestions", "Suggestions"], ["mypicks", "My Picks"]] : []),
     ["roster", "Roster"],
     ["trades", "Trades", s.sim.offers.length],
   ];
@@ -880,6 +1249,7 @@ function Console({ s, data, isMobile }) {
     draft: <DraftTab s={s} data={data} isMobile={isMobile} />,
     board: <DraftBoardTab s={s} data={data} isMobile={isMobile} />,
     suggestions: <SuggestionsTab s={s} data={data} isMobile={isMobile} />,
+    mypicks: <MyPicksTab s={s} data={data} isMobile={isMobile} />,
     roster: <RosterTab s={s} data={data} isMobile={isMobile} />,
     trades: <TradesTab s={s} data={data} isMobile={isMobile} />,
   }[tab];
@@ -916,13 +1286,14 @@ export function SimTicker({ s, data }) {
   );
 }
 
-export default function SimBroadcast({ s, data, isMobile, onSettings }) {
+export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam }) {
   return (
     <div>
       <BroadcastBar s={s} data={data} isMobile={isMobile} onSettings={onSettings} />
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 360px", gap: 12, alignItems: "start" }}>
         <div style={{ minWidth: 0 }}>
-          <Stage s={s} data={data} isMobile={isMobile} />
+          <Stage s={s} data={data} isMobile={isMobile} onPickTeam={onPickTeam} />
+          <UpNextBar s={s} data={data} isMobile={isMobile} />
           <Console s={s} data={data} isMobile={isMobile} />
         </div>
         {!isMobile && (

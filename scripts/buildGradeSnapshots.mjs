@@ -37,7 +37,7 @@ async function main() {
   let evalDocs = 0;
   for (let i = 0; i < playerSnap.docs.length; i += EVAL_READ_CHUNK) {
     const chunk = playerSnap.docs.slice(i, i + EVAL_READ_CHUNK);
-    const snaps = await Promise.all(chunk.map((d) => d.ref.collection("evaluations").select("grade", "strengths", "weaknesses").get()));
+    const snaps = await Promise.all(chunk.map((d) => d.ref.collection("evaluations").select("grade", "strengths", "weaknesses", "updatedAt", "uid").get()));
     snaps.forEach((snap, j) => { evalsByPlayerId[chunk[j].id] = snap.docs.map((e) => e.data()); evalDocs += snap.size; });
   }
 

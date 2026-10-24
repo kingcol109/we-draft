@@ -88,7 +88,7 @@ export default function HomeHero({ mode }) {
       `}</style>
 
         {/* ===== HERO ===== */}
-        <div style={{
+        <div className="wdh-hero" style={{
           display: "flex", alignItems: "stretch",
           marginBottom: isMobile ? "16px" : "28px",
           background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
@@ -108,7 +108,7 @@ export default function HomeHero({ mode }) {
                 { label: "Create Mock Drafts", sub: "Build and share your mock", to: "/mocks", icon: "🏈" },
                 { label: "Draft News", sub: "Latest prospect analysis", to: "/news", icon: "📰" },
               ].map(({ label, sub, to, icon }) => (
-                <Link key={label} to={to} style={{
+                <Link key={label} to={to} className="wdh-tile" style={{
                   display: "flex", flexDirection: "column", gap: "8px",
                   background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                   borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
@@ -144,7 +144,7 @@ export default function HomeHero({ mode }) {
 
             {!user ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
-                <button onClick={login} style={{
+                <button onClick={login} className="wdh-cta" style={{
                   backgroundColor: GOLD, color: "#fff",
                   border: "2px solid #fff", borderRadius: "8px",
                   padding: isMobile ? "12px 24px" : "16px 36px",
@@ -185,7 +185,7 @@ export default function HomeHero({ mode }) {
           {!isMobile && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "14px", flex: "1 1 0", minWidth: "240px", maxWidth: "420px", alignSelf: "stretch" }}>
 
-              <Link to="/nfl" style={{
+              <Link to="/nfl" className="wdh-tile" style={{
                 display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                 borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
@@ -199,7 +199,7 @@ export default function HomeHero({ mode }) {
                 <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>All 32 NFL teams</span>
               </Link>
 
-              <Link to="/cfb" style={{
+              <Link to="/cfb" className="wdh-tile" style={{
                 display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                 borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
@@ -213,7 +213,7 @@ export default function HomeHero({ mode }) {
                 <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>Prospects by school</span>
               </Link>
 
-              <div style={{
+              <div className="wdh-tile" style={{
                 display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                 borderRadius: "12px", padding: "18px 18px", height: "100%", boxSizing: "border-box",
@@ -239,7 +239,7 @@ export default function HomeHero({ mode }) {
                 </div>
               </div>
 
-              <Link to={inSeason ? wePickHref() : "/community/2026"} style={{
+              <Link to={inSeason ? wePickHref() : "/community/2026"} className="wdh-tile" style={{
                 display: "flex", flexDirection: "column", gap: "8px",
                 background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
                 borderRadius: "12px", padding: "18px 18px", textDecoration: "none",

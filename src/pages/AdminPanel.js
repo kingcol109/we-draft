@@ -31,6 +31,7 @@ import verifiedBadge from "../assets/verified.png";
 import { unzoomTransform } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { loadImageAsPngBlob } from "../utils/clipboardImage";
+import { FRESH_GRADE_CLASSES, gradeIsFresh } from "../utils/gradeWindow";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -9510,6 +9511,7 @@ function PlayerEvaluationsTable() {
             const playerId = data.playerId || d.ref.parent.parent?.id || null;
             return {
               playerId,
+              uid: data.uid || d.id,
               visibility: data.visibility || "public",
               grade: data.grade || "",
               updatedAtMs: toMs(data.updatedAt),
@@ -9592,10 +9594,13 @@ function PlayerEvaluationsTable() {
     allEvals.forEach((e) => {
       if (!e.playerId) return;
       if (e.updatedAtMs < cutoffMs) return;
-      const entry = map.get(e.playerId) || { count: 0, publicCount: 0, grades: [], lastUpdatedMs: 0 };
+      const entry = map.get(e.playerId) || { count: 0, publicCount: 0, grades: [], freshGrades: [], lastUpdatedMs: 0 };
       entry.count += 1;
       if (e.visibility === "public") entry.publicCount += 1;
-      if (e.grade && gradeScale[e.grade] != null) entry.grades.push(gradeScale[e.grade]);
+      if (e.grade && gradeScale[e.grade] != null) {
+        entry.grades.push(gradeScale[e.grade]);
+        if (gradeIsFresh(e)) entry.freshGrades.push(gradeScale[e.grade]);
+      }
       if (e.updatedAtMs > entry.lastUpdatedMs) entry.lastUpdatedMs = e.updatedAtMs;
       map.set(e.playerId, entry);
     });
@@ -9623,9 +9628,12 @@ function PlayerEvaluationsTable() {
     });
 
     const withStats = filtered.map((p) => {
-      const stats = statsByPlayer.get(p.id) || { count: 0, publicCount: 0, grades: [], lastUpdatedMs: 0 };
-      const avgGrade = stats.grades.length > 0
-        ? stats.grades.reduce((a, b) => a + b, 0) / stats.grades.length
+      const stats = statsByPlayer.get(p.id) || { count: 0, publicCount: 0, grades: [], freshGrades: [], lastUpdatedMs: 0 };
+      // The community grade refresh (utils/gradeWindow.js): 2027 / 2028
+      // average only grades saved since Aug 2026.
+      const counted = FRESH_GRADE_CLASSES.includes(String(p.Eligible)) ? stats.freshGrades : stats.grades;
+      const avgGrade = counted.length > 0
+        ? counted.reduce((a, b) => a + b, 0) / counted.length
         : null;
       const avgGradeLabel = avgGrade != null ? gradeLabels[Math.round(avgGrade)] : null;
       const pageViews = (p.Slug && pageViewsBySlug.get(p.Slug)) || null;

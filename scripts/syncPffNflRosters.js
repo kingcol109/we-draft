@@ -34,13 +34,14 @@
 //   node --env-file=.env scripts/syncPffNflRosters.js
 //   add --dry to report without writing, --season=2025 for a past season
 //
-// Then scripts/nflTeamNeeds.js derives the public depth order
-// (nflDepthOrder/{abbr}, by snaps) and team needs (nflTeamNeeds/{abbr})
-// from what was just written.
+// Then scripts/nflDepthOrder.js derives the public depth order
+// (nflDepthOrder/{abbr}, by snaps) from what was just written. Team needs
+// are the admin's (Admin → Mock Draft → Team Needs suggests them from
+// these docs on demand) — nothing here writes them.
 
 const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
-const { writeNeeds } = require("./nflTeamNeeds");
+const { writeDepthOrder } = require("./nflDepthOrder");
 
 const API = "https://api.pff.com";
 const DRY = process.argv.includes("--dry");
@@ -285,8 +286,8 @@ async function run() {
     docs.forEach((d) => batch.set(db.collection("pffNflRosters").doc(d.abbr), { ...d, updatedAt: FieldValue.serverTimestamp() }));
     await batch.commit();
   }
-  const needs = await writeNeeds(db, FieldValue, docs, { dry: DRY });
-  console.log(`${DRY ? "[dry] " : ""}PFF NFL ${season}: ${docs.length} teams written, ${players} depth-chart players, needs for ${Object.keys(needs).length}.`);
+  await writeDepthOrder(db, FieldValue, docs, { dry: DRY });
+  console.log(`${DRY ? "[dry] " : ""}PFF NFL ${season}: ${docs.length} teams written, ${players} depth-chart players.`);
   if (unmatched.length) console.log(`  unmatched teams: ${unmatched.join(", ")}`);
   console.log(`PFF calls: ${calls}`);
 }

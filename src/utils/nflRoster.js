@@ -35,7 +35,7 @@ export const POSITION_GROUPS = {
 export const ROSTER_GROUP_STATUS = { injuredReserveOrOut: "reserve", suspended: "suspended", practiceSquad: "ps" };
 export const STATUS_TIER = { active: 0, reserve: 1, suspended: 1, ps: 2 };
 
-// Depth chart order — nflDepthOrder/{abbr} (scripts/nflTeamNeeds.js) is the
+// Depth chart order — nflDepthOrder/{abbr} (scripts/nflDepthOrder.js) is the
 // team's player names by season snaps, most first. Names are matched to the
 // ESPN roster loosely: punctuation and suffixes (Jr., III) dropped, then
 // first initial + last name as a fallback ("Ken Walker" / "Kenneth Walker").
