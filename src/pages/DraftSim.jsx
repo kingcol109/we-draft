@@ -21,7 +21,7 @@
 // screen's My Drafts tab (?tab=saved) lists the user's saved sims
 // (components/draftSim/SavedSims.jsx). Linked from the mock drafts hub (MockDraftHub.jsx) —
 // the hand-built, written mocks stay there.
-import { Component, useCallback, useEffect, useMemo, useState } from "react";
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
@@ -35,6 +35,7 @@ import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDr
 import SimBroadcast, { SIM_CSS, SimTicker } from "../components/draftSim/SimBroadcast";
 import SimResults from "../components/draftSim/SimResults";
 import SavedSims from "../components/draftSim/SavedSims";
+import MarginAds from "../components/MarginAds";
 
 const BODY = "Arial, sans-serif";
 const FONT = "'Arial Black', Arial, sans-serif";
@@ -59,10 +60,11 @@ function roundsFor(order, teams, rounds) {
   return Math.max(rounds, ...firsts.filter(Number.isFinite));
 }
 
-// The centered content column.
-function Column({ wide, isMobile, children }) {
+// The centered content column. contentRef: the one the side ads center
+// in the gutters beside.
+function Column({ wide, isMobile, contentRef, children }) {
   return (
-    <div style={{ maxWidth: wide ? 1320 : 1100, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "18px 20px 60px", fontFamily: FONT }}>
+    <div ref={contentRef} style={{ maxWidth: wide ? 1320 : 1100, margin: "0 auto", padding: isMobile ? "12px 10px 60px" : "18px 20px 60px", fontFamily: FONT }}>
       {children}
     </div>
   );
@@ -87,6 +89,9 @@ export default function DraftSim() {
   // config: null on the setup screen; { teams, rounds, speed, chatter, board, seed } once started.
   const [config, setConfig] = useState(null);
   const [pending, setPending] = useState(null);
+  // The teams picked on the setup screen (the side ads default to one).
+  const [setupTeams, setSetupTeams] = useState([]);
+  const contentRef = useRef(null);
   // The signed-in user's own grades ({} signed out or unreadable), for My Board.
   const [myGrades, setMyGrades] = useState(null);
 
@@ -173,22 +178,39 @@ export default function DraftSim() {
           <SimErrorBoundary key={config.seed} isMobile={isMobile}
             onRestart={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
             onSettings={() => openSettings(config.teams, config.board)}>
-            <LiveSim data={data} config={config} myGrades={myGrades} isMobile={isMobile}
+            <LiveSim data={data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
               onRerun={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
               onSettings={() => openSettings(config.teams, config.board)}
               onPickTeam={pickAnother} />
           </SimErrorBoundary>
         ) : (
-          <Column isMobile={isMobile}>
+          <Column isMobile={isMobile} contentRef={contentRef}>
             <SetupTabs tab={tab} onTab={setTab} />
-            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending}
+            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
               onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
           </Column>
         )}
       </div>
+
+      {/* Homage NFL ads in the gutters, desktop only, in the sim's dark
+          colors: the user's team (the first, if several) by default, else
+          random. */}
+      {setup && !error && (
+        <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={20} dark
+          preferTeam={adTeam(config ? config.teams : tab === "new" ? setupTeams : [])}
+          teamLogos={adLogos(setup.branding)} watch={[!!config, tab]} />
+      )}
     </>
   );
 }
+
+// The ad's team: the one the user's drafting as (the first of several);
+// none — so random — when watching or drafting as all 32.
+const adTeam = (teams) => (teams.length && teams.length < NFL_TEAM_ABBRS.length ? teams[0] : "");
+// The picker's logos, dark-ready like the rest of the sim.
+const adLogos = (branding) => Object.fromEntries(
+  Object.entries(branding || {}).map(([t, b]) => [t, b.LogoDark || b.Logo1]).filter(([, logo]) => logo),
+);
 
 // Anything the live sim throws: a way back in instead of a blank page.
 // Keyed by the run's seed, so a restart (a new seed) clears it.
@@ -228,7 +250,7 @@ class SimErrorBoundary extends Component {
   }
 }
 
-function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onSettings, onPickTeam }) {
+function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam }) {
   // My Board: their grades over the community's (fixed for this run — the
   // sim remounts on every start).
   const [data] = useState(() => (config.board === "mine" && myGrades ? { ...communityData, board: applyMyGrades(communityData.board, myGrades) } : communityData));
@@ -243,11 +265,24 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onS
   useEffect(() => { countSim(uid, "sims"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Mobile, mid-draft: no ticker, and the sim fills the screen under the
-  // navbar edge to edge (the console scrolls inside it, not the page).
-  if (isMobile && !finished) {
+  // Mobile, mid-draft: no ticker, and the sim is pinned to the screen under
+  // the navbar, edge to edge, with the page itself locked — only the
+  // console scrolls. Sized off the page's height, the page could still be
+  // scrolled (or the browser bar collapse) and the footer slide up into it.
+  const pinned = isMobile && !finished;
+  const navBottom = useNavBottom(pinned);
+  useEffect(() => {
+    if (!pinned) return undefined;
+    const html = document.documentElement;
+    const prev = [html.style.overflow, document.body.style.overflow];
+    html.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    window.scrollTo(0, 0);
+    return () => { [html.style.overflow, document.body.style.overflow] = prev; };
+  }, [pinned]);
+  if (pinned) {
     return (
-      <div style={{ height: `calc(100dvh - ${MOBILE_NAV_HEIGHT}px)`, padding: 6, boxSizing: "border-box", fontFamily: FONT }}>
+      <div style={{ position: "fixed", top: navBottom, left: 0, right: 0, bottom: 0, zIndex: 50, background: STAGE_BG, overscrollBehavior: "contain", padding: 6, boxSizing: "border-box", fontFamily: FONT }}>
         <SimBroadcast s={s} data={data} isMobile onSettings={onSettings} onPickTeam={onPickTeam} />
       </div>
     );
@@ -255,13 +290,30 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onS
   return (
     <>
       {!isMobile && <SimTicker s={s} data={data} />}
-      <Column wide isMobile={isMobile}>
+      <Column wide isMobile={isMobile} contentRef={contentRef}>
         {s.phase === "done"
           ? <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} />
           : <SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} onPickTeam={onPickTeam} />}
       </Column>
     </>
   );
+}
+
+// The fixed navbar's bottom edge (its height can change — the LIVE button,
+// a font loading), re-read on resize while `on`.
+function useNavBottom(on) {
+  const [bottom, setBottom] = useState(MOBILE_NAV_HEIGHT);
+  useLayoutEffect(() => {
+    if (!on) return undefined;
+    const read = () => {
+      const nav = document.querySelector("nav");
+      if (nav) setBottom(Math.max(0, Math.round(nav.getBoundingClientRect().bottom)));
+    };
+    read();
+    window.addEventListener("resize", read);
+    return () => window.removeEventListener("resize", read);
+  }, [on]);
+  return bottom;
 }
 
 // ── Setup ──
@@ -289,8 +341,9 @@ const chipStyle = (on) => ({
 // initialBoard / signedIn / myCount: the board choice coming back from a
 // sim, whether there's a user to have grades, and how many of this class
 // they've graded (null while it loads).
-function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, signedIn, myCount, isMobile, names, onStart, starting }) {
+function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, signedIn, myCount, isMobile, names, onStart, starting, onTeams }) {
   const [teams, setTeams] = useState(() => initialTeams.filter((t) => NFL_TEAMS[t]));
+  useEffect(() => { onTeams?.(teams); }, [teams]); // eslint-disable-line react-hooks/exhaustive-deps
   const [chosenRounds, setRounds] = useState(DEFAULT_ROUNDS);
   const rounds = maxRoundsForYear ? Math.min(chosenRounds, maxRoundsForYear) : chosenRounds;
   const [speed, setSpeed] = useState(DEFAULT_SPEED);

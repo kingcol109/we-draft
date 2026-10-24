@@ -451,30 +451,34 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
     </button>
   );
   const firstLine = first ? `Your first pick: No. ${first.overall} (Round ${first.round}).` : "All 32 teams on the CPU.";
-  // Mobile: the logo is the hero, centered, with the start button centered
-  // along the bottom of the stage.
+  // Mobile: the team's logo oversized behind everything at 30% (contain, so
+  // a wide one like the Jets' runs the full width), the team name big over
+  // it, and the start button centered along the bottom of the stage.
   if (isMobile) {
+    const bg = one && (brandOf(data, one).LogoDark || brandOf(data, one).Logo1);
     return (
-      <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "16px 14px 16px", boxSizing: "border-box" }}>
+      <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "16px 14px 18px", boxSizing: "border-box" }}>
+        {bg && (
+          // Fills the stage, then grows from its center — dead center however
+          // wide or tall the logo is.
+          <img aria-hidden="true" alt="" src={bg} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", transform: "scale(1.25)", transformOrigin: "center", opacity: 0.3, pointerEvents: "none" }} />
+        )}
         {onPickTeam && (
-          <button onClick={onPickTeam} className="wd-sim-pickteam" style={{ position: "absolute", top: 10, right: 12, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: BODY, fontWeight: 700, fontSize: 12, color: "inherit", opacity: 0.85, textDecoration: "underline", textUnderlineOffset: 3 }}>
+          <button onClick={onPickTeam} className="wd-sim-pickteam" style={{ position: "absolute", top: 10, right: 12, zIndex: 1, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: BODY, fontWeight: 700, fontSize: 12, color: "inherit", opacity: 0.85, textDecoration: "underline", textUnderlineOffset: 3 }}>
             {teams.length ? "Pick another team" : "Pick a team"}
           </button>
         )}
-        <div style={{ flex: 1, minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          {one ? (
-            <span style={{ display: "inline-flex", filter: "drop-shadow(0 8px 18px rgba(0,0,0,0.35))" }}><TeamLogo brand={brandOf(data, one)} team={one} size={112} /></span>
-          ) : teams.length > 1 ? (
+        <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          {teams.length > 1 && (
             <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6, maxWidth: "100%" }}>
-              {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={teams.length > 4 ? 36 : 56} />)}
+              {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={teams.length > 4 ? 32 : 48} />)}
             </div>
-          ) : null}
-          <div style={{ ...tag(isMobile), marginTop: 4 }}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
-          <ShrinkText text={teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`} max={28} min={16}
-            style={{ maxWidth: "100%", fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase" }} />
-          <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.85, fontFamily: BODY }}>{firstLine}</div>
+          )}
+          <div style={tag(isMobile)}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
+          <ShrinkText text={teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`} max={teams.length > 1 ? 34 : 58} min={18}
+            style={{ maxWidth: "100%", fontWeight: 900, lineHeight: 1, textTransform: "uppercase", textShadow: "0 3px 14px rgba(0,0,0,0.35)" }} />
         </div>
-        {startButton}
+        <div style={{ position: "relative" }}>{startButton}</div>
       </div>
     );
   }
@@ -726,7 +730,8 @@ function DraftTab({ s, data, isMobile }) {
   const shownRound = round ?? current?.round ?? rounds[0];
   const picks = s.sim.picks.filter((p) => p.round === shownRound);
   const chipBtn = (on) => ({ ...barBtn, background: on ? GOLD : "#1a2438", color: on ? "#111" : "#9fb0c8" });
-  const cols = isMobile ? 2 : 4;
+  if (isMobile) return <MobileDraftList s={s} data={data} rounds={rounds} shownRound={shownRound} setRound={setRound} picks={picks} current={current} chipBtn={chipBtn} />;
+  const cols = 4;
   return (
     <div style={{ padding: 12 }}>
       <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
@@ -759,6 +764,56 @@ function DraftTab({ s, data, isMobile }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// The Draft tab on a phone: one pick per row, top to bottom, with the round
+// chips pinned over the list and the pick on the clock kept in view.
+function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current, chipBtn }) {
+  const liveRef = useRef(null);
+  const liveOverall = current && s.phase !== "done" ? current.overall : null;
+  useEffect(() => {
+    liveRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [liveOverall, shownRound]);
+  return (
+    <div>
+      {rounds.length > 1 && (
+        <div className="wd-sim-scroll" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", gap: 4, padding: "8px 10px", background: "#0e1626", borderBottom: "1px solid #1f2b42", overflowX: "auto" }}>
+          {rounds.map((r) => <button key={r} onClick={() => setRound(r)} aria-pressed={shownRound === r} style={{ ...chipBtn(shownRound === r), flexShrink: 0 }}>Round {r}</button>)}
+        </div>
+      )}
+      {picks.map((p) => {
+        const b = brandOf(data, p.owner);
+        const pl = s.sim.byId[p.selection];
+        const live = p.overall === liveOverall;
+        const mine = s.sim.userTeams.includes(p.owner);
+        return (
+          <div key={p.overall} ref={live ? liveRef : undefined} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", minWidth: 0,
+            borderBottom: "1px solid #18233a", borderLeft: `3px solid ${live ? GOLD : mine ? "#3a5a8c" : "transparent"}`,
+            background: live ? "rgba(246,162,29,0.14)" : "transparent",
+          }}>
+            <span style={{ color: live ? GOLD : "#6f7f99", fontWeight: 900, fontSize: 13, width: 26, textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{p.overall}</span>
+            <TeamLogo brand={b} team={p.owner} size={30} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              {pl ? (
+                <>
+                  <span style={{ display: "block", color: "#fff", fontSize: 14, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</span>
+                  <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {pl.Position} · {pl.School}{p.via ? ` · via ${p.via}` : ""}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{ display: "block", color: live ? "#fff" : "#9fb0c8", fontSize: 13, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.Team || p.owner}</span>
+                  <span style={{ display: "block", color: live ? GOLD : "#55657e", fontSize: 11, fontWeight: 800 }}>{live ? "On the clock" : mine ? "Your pick" : "Up later"}{p.via ? ` · via ${p.via}` : ""}</span>
+                </>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

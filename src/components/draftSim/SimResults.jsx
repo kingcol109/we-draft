@@ -45,25 +45,28 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
   return (
     <div className="wd-sim-in">
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <div style={{ marginRight: "auto" }}>
+        <div style={{ marginRight: "auto", flexBasis: isMobile ? "100%" : "auto" }}>
           <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL DRAFT SIM</div>
           <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE DRAFT IS COMPLETE</div>
         </div>
-        <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} isMobile={isMobile} />
-        {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
-        <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#111" }}>RUN IT BACK</button>
-        <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
+        {/* Mobile: the buttons two by two under the title. */}
+        <div style={isMobile ? { flexBasis: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 } : { display: "contents" }}>
+          <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} isMobile={isMobile} />
+          {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
+          <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#111" }}>RUN IT BACK</button>
+          <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 400px", gap: 12, alignItems: "start", marginBottom: 12 }}>
         <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
           {userHauls.map((h) => <ReportCard key={h.team} h={h} b={brand(h.team)} take={takes[h.team]} isMobile={isMobile} />)}
-          {userHauls.length === 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 2 : 3} />}
+          {userHauls.length === 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 3} />}
         </div>
         <LeagueGrades league={league} sim={sim} brand={brand} />
       </div>
 
-      {userHauls.length > 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 2 : 4} />}
+      {userHauls.length > 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />}
     </div>
   );
 }

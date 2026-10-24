@@ -25,6 +25,20 @@ import { cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom"
 const SITE_BLUE = "#0055a5";
 const SITE_GOLD = "#f6a21d";
 
+// Card colors: the site's white cards, or (dark) the Draft Sim's navy
+// panels — same layout either way.
+const LIGHT = {
+  label: "#aaa", card: "#fff", border: "#eee", rule: "#f3f3f3", shadow: "0 4px 18px rgba(0,0,0,0.08)", imgBg: "#fafafa",
+  title: "#111", sub: "#888", team: "#c8102e", cta: "#c8102e", ctaInk: "#fff", logoBg: "#fff",
+  btn: "#fff", btnOff: "#f6f6f6", btnBorder: "#eee", btnInk: "#333", btnInkOff: "#ccc", btnOn: "#fdecef", btnOnBorder: "#c8102e",
+};
+const DARK = {
+  label: "#6f7f99", card: "#0e1626", border: "#1f2b42", rule: "#1f2b42", shadow: "0 6px 22px rgba(0,0,0,0.45)", imgBg: "#121c2f",
+  title: "#fff", sub: "#8b9bb4", team: "#fff", cta: SITE_GOLD, ctaInk: "#111", logoBg: "#0b1322",
+  btn: "#121c2f", btnOff: "#0b1322", btnBorder: "#24324d", btnInk: "#c9d4e5", btnInkOff: "#3a4760", btnOn: "rgba(246,162,29,0.16)", btnOnBorder: SITE_GOLD,
+};
+const themeOf = (dark) => (dark ? DARK : LIGHT);
+
 export const NFL_TEAM_ABBRS = [
   "ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE",
   "DAL","DEN","DET","GB","HOU","IND","JAX","KC",
@@ -96,7 +110,8 @@ function PickerMark({ abbr, logo, dim }) {
 // shared with PlayerProfile.js's own copy of these cards. teamLogos comes
 // from the _ads snapshot (fetchAdTeamLogos); teams without an ad stay
 // disabled. Active is outlined rather than filled so the logo stays legible.
-export function NflTeamPicker({ allAds, activeTeam, teamLogos = {}, onPick }) {
+export function NflTeamPicker({ allAds, activeTeam, teamLogos = {}, onPick, dark = false }) {
+  const t = themeOf(dark);
   return (
     <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:"5px" }}>
       {NFL_TEAM_ABBRS.map((abbr) => {
@@ -117,10 +132,10 @@ export function NflTeamPicker({ allAds, activeTeam, teamLogos = {}, onPick }) {
               padding: logo ? "3px 2px" : "5px 0", borderRadius:"4px",
               display:"flex", alignItems:"center", justifyContent:"center",
               minHeight:"28px",
-              border:`1px solid ${isActive ? "#c8102e" : "#eee"}`,
-              boxShadow: isActive ? "0 0 0 1px #c8102e" : "none",
-              background: isActive ? "#fdecef" : teamAd ? "#fff" : "#f6f6f6",
-              color: teamAd ? "#333" : "#ccc",
+              border:`1px solid ${isActive ? t.btnOnBorder : t.btnBorder}`,
+              boxShadow: isActive ? `0 0 0 1px ${t.btnOnBorder}` : "none",
+              background: isActive ? t.btnOn : teamAd ? t.btn : t.btnOff,
+              color: teamAd ? t.btnInk : t.btnInkOff,
               cursor: teamAd ? "pointer" : "not-allowed",
               transition: "transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease",
             }}
@@ -373,24 +388,25 @@ export function useAdSelection({ enabled = true, preferTeam = "", preferSchool =
 
 // The plain (picker) card — the left fixed rail, and on its own the inline
 // column ad (SideRailAd below).
-function PickerAdCard({ adData, allAds, adTeamLogos, setAdData, rootRef, style }) {
+function PickerAdCard({ adData, allAds, adTeamLogos, setAdData, rootRef, style, dark = false }) {
   const teamLabel = adTeamLabel(adData);
+  const t = themeOf(dark);
   return (
     <div className="wd-margin-ad" ref={rootRef} style={style}>
-      <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
+      <div style={{ fontSize:"9px", fontWeight:800, color:t.label, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
         Sponsored
       </div>
       <div
         className="wd-margin-ad-card"
         style={{
           width:"100%", borderRadius:"14px", overflow:"hidden",
-          border:"1px solid #eee", background:"#fff",
-          boxShadow:"0 4px 18px rgba(0,0,0,0.08)",
+          border:`1px solid ${t.border}`, background:t.card,
+          boxShadow:t.shadow,
           transition:"box-shadow 0.2s ease, transform 0.2s ease",
         }}
       >
-        <div style={{ padding:"9px 10px", borderBottom:"1px solid #f3f3f3" }}>
-          <div style={{ fontSize:"9px", fontWeight:900, color:"#c8102e", textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
+        <div style={{ padding:"9px 10px", borderBottom:`1px solid ${t.rule}` }}>
+          <div style={{ fontSize:"9px", fontWeight:900, color:t.team, textTransform:"uppercase", letterSpacing:"0.06em", textAlign:"center" }}>
             {teamLabel}
           </div>
         </div>
@@ -399,29 +415,29 @@ function PickerAdCard({ adData, allAds, adTeamLogos, setAdData, rootRef, style }
           <img
             src={sanitizeUrl(adData.Image1)}
             alt={`${teamLabel} throwback gear`}
-            style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+            style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:t.imgBg }}
             loading="lazy" fetchpriority="low" referrerPolicy="no-referrer"
             onError={(e)=>{e.currentTarget.style.display="none";}}
           />
         </a>
 
-        <div style={{ padding:"10px 10px 6px", borderTop:"1px solid #f3f3f3" }}>
-          <NflTeamPicker allAds={allAds} activeTeam={adData.Team} teamLogos={adTeamLogos} onPick={setAdData} />
+        <div style={{ padding:"10px 10px 6px", borderTop:`1px solid ${t.rule}` }}>
+          <NflTeamPicker allAds={allAds} activeTeam={adData.Team} teamLogos={adTeamLogos} onPick={setAdData} dark={dark} />
         </div>
 
         <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
-          <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:"1px solid #f3f3f3" }}>
-            <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
+          <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:`1px solid ${t.rule}` }}>
+            <div style={{ fontSize:"10px", fontWeight:900, color:t.title, textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
               Officially Licensed Throwback Apparel
             </div>
-            <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
+            <div style={{ fontSize:"9px", fontWeight:700, color:t.sub, lineHeight:1.35, marginBottom:"9px" }}>
               All 32 NFL Teams + MLB, NBA, NHL &amp; More
             </div>
             <div
               className="wd-margin-ad-cta"
               style={{
                 display:"inline-flex", alignItems:"center", gap:"4px",
-                background:"#c8102e", color:"#fff",
+                background:t.cta, color:t.ctaInk,
                 fontSize:"10px", fontWeight:900,
                 padding:"7px 16px", borderRadius:"20px",
                 textTransform:"uppercase", letterSpacing:"0.05em",
@@ -433,7 +449,7 @@ function PickerAdCard({ adData, allAds, adTeamLogos, setAdData, rootRef, style }
           </div>
         </a>
 
-        <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:"1px solid #f3f3f3" }}>
+        <div style={{ padding:"8px 10px", display:"flex", alignItems:"center", justifyContent:"center", borderTop:`1px solid ${t.rule}` }}>
           <img src={HomageLogo} alt="Homage" style={{ height:"12px", objectFit:"contain" }} loading="lazy" />
         </div>
       </div>
@@ -443,7 +459,7 @@ function PickerAdCard({ adData, allAds, adTeamLogos, setAdData, rootRef, style }
 
 const AD_HOVER_CSS = `
   .wd-margin-ad:hover .wd-margin-ad-card { box-shadow: 0 8px 26px rgba(0,0,0,0.14); transform: translateY(-2px); }
-  .wd-margin-ad:hover .wd-margin-ad-cta { background: #a10d24; }
+  .wd-margin-ad:hover .wd-margin-ad-cta { filter: brightness(0.85); }
   .wd-margin-ad:hover .wd-margin-ad-cta-team { filter: brightness(0.85); }
   .wd-team-btn:hover { border-color: #c8102e !important; box-shadow: 0 2px 8px rgba(200,16,46,0.25); transform: translateY(-1px); }
   .wd-team-btn:active { transform: translateY(0) scale(0.94); }
@@ -469,9 +485,13 @@ export function SideRailAd({ isMobile, preferTeam = "", preferSchool = "", schoo
 
 // watch: values that change the content element's width without a resize
 // (re-measures the gutters when they change).
-export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "", preferSchool = "", schoolBranding = null, watch = [] }) {
-  const { allAds, adData, setAdData, adTeamLogos, adVisible, adTeamBranding } =
+// dark: the dark card colors (Draft Sim). teamLogos: picker logos by NFL
+// abbreviation that win over the ads snapshot's (e.g. dark-ready ones).
+export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60, preferTeam = "", preferSchool = "", schoolBranding = null, watch = [], dark = false, teamLogos = null }) {
+  const { allAds, adData, setAdData, adTeamLogos: snapshotLogos, adVisible, adTeamBranding } =
     useAdSelection({ enabled: !isMobile, preferTeam, preferSchool, schoolBranding });
+  const adTeamLogos = teamLogos ? { ...snapshotLogos, ...teamLogos } : snapshotLogos;
+  const t = themeOf(dark);
   const fit = useMarginAdFit({ contentRef, horizontalPadding, isMobile, watch });
   const showMarginAds = fit.show;
 
@@ -479,7 +499,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     if (!adData) return null;
     return (
       <PickerAdCard
-        adData={adData} allAds={allAds} adTeamLogos={adTeamLogos} setAdData={setAdData}
+        adData={adData} allAds={allAds} adTeamLogos={adTeamLogos} setAdData={setAdData} dark={dark}
         rootRef={fit.refFor(side)} style={fit.styleFor(side, adVisible)}
       />
     );
@@ -490,20 +510,20 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
     const teamLabel = adTeamLabel(adData);
     const tColor1 = adTeamBranding?.Color1 || SITE_BLUE;
     const tColor2 = adTeamBranding?.Color2 || SITE_GOLD;
-    const tLogo = adTeamBranding?.Logo1 || adTeamBranding?.Logo2 || "";
+    const tLogo = (dark && adTeamBranding?.LogoDark) || adTeamBranding?.Logo1 || adTeamBranding?.Logo2 || "";
     const gallery = [adData.Image2, adData.Image3].filter(Boolean);
     const displayImages = gallery.length > 0 ? gallery : (adData.Image1 ? [adData.Image1] : []);
 
     return (
       <div className="wd-margin-ad" ref={fit.refFor(side)} style={fit.styleFor(side, adVisible)}>
-        <div style={{ fontSize:"9px", fontWeight:800, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
+        <div style={{ fontSize:"9px", fontWeight:800, color:t.label, textTransform:"uppercase", letterSpacing:"0.12em", marginBottom:"6px" }}>
           Sponsored
         </div>
         <div
           className="wd-margin-ad-card"
           style={{
             width:"100%", borderRadius:"14px", overflow:"hidden",
-            border:`2px solid ${tColor1}`, background:"#fff",
+            border:`2px solid ${tColor1}`, background:t.card,
             boxShadow:`0 4px 18px ${tColor1}40`,
             transition:"box-shadow 0.2s ease, transform 0.2s ease",
           }}
@@ -535,7 +555,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
                 {displayImages.map((img, i) => (
                   <img
                     key={i} src={sanitizeUrl(img)} alt={`${teamLabel} gear ${i + 1}`}
-                    style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+                    style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:t.imgBg }}
                     loading="lazy" fetchpriority="low" referrerPolicy="no-referrer"
                     onError={(e)=>{e.currentTarget.style.display="none";}}
                   />
@@ -544,7 +564,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
             ) : displayImages[0] ? (
               <img
                 src={sanitizeUrl(displayImages[0])} alt={`${teamLabel} gear`}
-                style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:"#fafafa" }}
+                style={{ width:"100%", display:"block", aspectRatio:"1600 / 1920", objectFit:"cover", background:t.imgBg }}
                 loading="lazy" fetchpriority="low" referrerPolicy="no-referrer"
                 onError={(e)=>{e.currentTarget.style.display="none";}}
               />
@@ -553,10 +573,10 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
 
           <a href={sanitizeUrl(adData.Link)} target="_blank" rel="sponsored noopener noreferrer" style={{ display:"block", textDecoration:"none" }}>
             <div style={{ padding:"9px 12px 12px", textAlign:"center", borderTop:`1px solid ${tColor1}22` }}>
-              <div style={{ fontSize:"10px", fontWeight:900, color:"#111", textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
+              <div style={{ fontSize:"10px", fontWeight:900, color:t.title, textTransform:"uppercase", letterSpacing:"0.02em", marginBottom:"3px" }}>
                 Officially Licensed Throwback Apparel
               </div>
-              <div style={{ fontSize:"9px", fontWeight:700, color:"#888", lineHeight:1.35, marginBottom:"9px" }}>
+              <div style={{ fontSize:"9px", fontWeight:700, color:t.sub, lineHeight:1.35, marginBottom:"9px" }}>
                 All 32 NFL Teams + MLB, NBA, NHL &amp; More
               </div>
               <div
@@ -577,7 +597,7 @@ export default function MarginAds({ contentRef, isMobile, horizontalPadding = 60
           </a>
 
           {tLogo && (
-            <div style={{ padding:"16px 10px", display:"flex", alignItems:"center", justifyContent:"center", background:"#fff", borderTop:`1px solid ${tColor1}22` }}>
+            <div style={{ padding:"16px 10px", display:"flex", alignItems:"center", justifyContent:"center", background:t.logoBg, borderTop:`1px solid ${tColor1}22` }}>
               <img
                 src={sanitizeUrl(tLogo)} alt={teamLabel} style={{ height:"64px", objectFit:"contain" }}
                 loading="lazy"
