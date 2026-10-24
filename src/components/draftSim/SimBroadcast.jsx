@@ -51,6 +51,8 @@ export const SIM_CSS = `
   .wd-sim-row:hover { background: #16213a !important; }
   .wd-sim-draft:hover { filter: brightness(1.1); }
   .wd-sim-pickteam:hover { opacity: 1 !important; }
+  .wd-sim-nofooter footer { display: none; }
+  .wd-sim-bar-row::-webkit-scrollbar { display: none; }
   .wd-sim-scroll { scrollbar-width: thin; scrollbar-color: #f6a21d #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
   .wd-sim-scroll::-webkit-scrollbar-track { background: #0b1322; }
@@ -81,6 +83,44 @@ const BROADCAST_SKIPPABLE = ["clock", "trade", "pickIn", "reveal"];
 function BroadcastBar({ s, data, isMobile, onSettings }) {
   const pick = currentPick(s.sim);
   const live = s.phase !== "done";
+  const showPick = pick && live && s.phase !== "intro";
+  const controls = live && (
+    <>
+      <div role="group" aria-label="Speed" style={{ display: "inline-flex", flexShrink: 0, background: "#121c2f", borderRadius: 999, padding: 3 }}>
+        {Object.entries(SPEEDS).map(([k, v]) => (
+          <button key={k} onClick={() => s.setSpeed(k)} aria-pressed={s.speed === k} style={{
+            border: "none", borderRadius: 999, padding: isMobile ? "5px 9px" : "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap",
+            background: s.speed === k ? "#fff" : "transparent", color: s.speed === k ? "#0b1220" : "#9fb0c8",
+          }}>{v.label}</button>
+        ))}
+      </div>
+      {(s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase))) && (
+        <>
+          <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>
+          <button onClick={s.skip} style={barBtn} title="Make the pick now">{isMobile ? "Skip ⏭" : "Skip to Next Pick ⏭"}</button>
+        </>
+      )}
+      {s.userPicksLeft && !["user", "simming", "intro"].includes(s.phase) && <button onClick={s.simToMyPick} style={{ ...barBtn, background: GOLD, color: "#111" }}>Sim to My Pick ⏩</button>}
+      {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
+    </>
+  );
+  // Mobile: a fixed height — two rows that never wrap (the buttons scroll
+  // sideways if they run long), so the stage never moves as they come and go.
+  if (isMobile) {
+    const row = { display: "flex", alignItems: "center", gap: 8, height: 30, whiteSpace: "nowrap", minWidth: 0 };
+    return (
+      <div style={{ height: 80, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center", gap: 4, padding: "6px 10px", background: "#070d18", borderRadius: 14, border: "1px solid #1f2b42", marginBottom: 8, flexShrink: 0 }}>
+        <div style={{ ...row, overflow: "hidden" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0, background: "#c8102e", color: "#fff", borderRadius: 6, padding: "3px 9px", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>
+            <span className="wd-sim-live-dot" style={{ background: "#fff" }} /> LIVE
+          </span>
+          <span style={{ color: "#fff", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", flexShrink: 0 }}>{data.year} DRAFT SIM</span>
+          {showPick && <span style={{ color: GOLD, fontWeight: 900, fontSize: 11, letterSpacing: "0.08em", marginLeft: "auto", overflow: "hidden", textOverflow: "ellipsis" }}>RD {pick.round} · NO. {pick.overall}</span>}
+        </div>
+        <div className="wd-sim-bar-row" style={{ ...row, gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>{controls}</div>
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, flexWrap: "wrap", padding: isMobile ? "10px 12px" : "10px 16px", background: "#070d18", borderRadius: 14, border: "1px solid #1f2b42", marginBottom: 12 }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "#c8102e", color: "#fff", borderRadius: 6, padding: "3px 9px", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>
@@ -116,7 +156,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
     </div>
   );
 }
-const barBtn = { border: "none", borderRadius: 999, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em", background: "#1a2438", color: "#fff" };
+const barBtn = { border: "none", borderRadius: 999, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em", background: "#1a2438", color: "#fff", whiteSpace: "nowrap", flexShrink: 0 };
 
 // ── Stage ──
 // One persistent frame for every stage state. Its colors cross-fade from
@@ -474,8 +514,8 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
               {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={teams.length > 4 ? 32 : 48} />)}
             </div>
           )}
-          <div style={tag(isMobile)}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
-          <ShrinkText text={teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`} max={teams.length > 1 ? 34 : 58} min={18}
+          <div style={{ ...tag(isMobile), fontSize: 16, padding: "5px 14px", letterSpacing: "0.22em" }}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
+          <ShrinkText text={teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`} max={teams.length > 1 ? 44 : 96} min={20}
             style={{ maxWidth: "100%", fontWeight: 900, lineHeight: 1, textTransform: "uppercase", textShadow: "0 3px 14px rgba(0,0,0,0.35)" }} />
         </div>
         <div style={{ position: "relative" }}>{startButton}</div>
@@ -768,18 +808,15 @@ function DraftTab({ s, data, isMobile }) {
   );
 }
 
-// The Draft tab on a phone: one pick per row, top to bottom, with the round
-// chips pinned over the list and the pick on the clock kept in view.
+// The Draft tab on a phone: one pick per row, top to bottom, round chips
+// on top, the pick on the clock highlighted. (No scrolling to it — the list
+// is part of the page now, and that would yank the page away from the stage.)
 function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current, chipBtn }) {
-  const liveRef = useRef(null);
   const liveOverall = current && s.phase !== "done" ? current.overall : null;
-  useEffect(() => {
-    liveRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [liveOverall, shownRound]);
   return (
     <div>
       {rounds.length > 1 && (
-        <div className="wd-sim-scroll" style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", gap: 4, padding: "8px 10px", background: "#0e1626", borderBottom: "1px solid #1f2b42", overflowX: "auto" }}>
+        <div className="wd-sim-scroll" style={{ display: "flex", gap: 4, padding: "8px 10px", background: "#0e1626", borderBottom: "1px solid #1f2b42", overflowX: "auto" }}>
           {rounds.map((r) => <button key={r} onClick={() => setRound(r)} aria-pressed={shownRound === r} style={{ ...chipBtn(shownRound === r), flexShrink: 0 }}>Round {r}</button>)}
         </div>
       )}
@@ -789,7 +826,7 @@ function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current
         const live = p.overall === liveOverall;
         const mine = s.sim.userTeams.includes(p.owner);
         return (
-          <div key={p.overall} ref={live ? liveRef : undefined} style={{
+          <div key={p.overall} style={{
             display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", minWidth: 0,
             borderBottom: "1px solid #18233a", borderLeft: `3px solid ${live ? GOLD : mine ? "#3a5a8c" : "transparent"}`,
             background: live ? "rgba(246,162,29,0.14)" : "transparent",
@@ -1329,7 +1366,7 @@ function Tabs({ tabs, active, onChange }) {
   );
 }
 
-function Console({ s, data, isMobile }) {
+function Console({ s, data, isMobile, stickyTop = 0 }) {
   const [tab, setTab] = useState(isMobile ? "desk" : "draft");
   // Simming: watch the picks fill in. On the clock: the board, to draft.
   useEffect(() => {
@@ -1346,7 +1383,7 @@ function Console({ s, data, isMobile }) {
     ["trades", "Trades", s.sim.offers.length],
   ];
   const body = {
-    desk: <SimFeed feed={s.feed} height={isMobile ? "100%" : consoleHeight(isMobile)} isMobile={isMobile} />,
+    desk: <SimFeed feed={s.feed} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} />,
     draft: <DraftTab s={s} data={data} isMobile={isMobile} />,
     board: <DraftBoardTab s={s} data={data} isMobile={isMobile} />,
     suggestions: <SuggestionsTab s={s} data={data} isMobile={isMobile} />,
@@ -1354,13 +1391,16 @@ function Console({ s, data, isMobile }) {
     roster: <RosterTab s={s} data={data} isMobile={isMobile} />,
     trades: <TradesTab s={s} data={data} isMobile={isMobile} />,
   }[tab];
-  // Mobile: the console takes whatever height is left under the stage and
-  // every tab scrolls inside it.
+  // Mobile: the console runs on down the page (scrolling the page reveals
+  // more of the tab) with its tab bar stuck under the navbar. Overflow
+  // stays visible — hidden (or clip, where unsupported) stops it sticking.
   if (isMobile) {
     return (
-      <div style={{ ...PANEL, marginTop: 8, flex: 1, minHeight: 240, display: "flex", flexDirection: "column" }}>
-        <Tabs tabs={tabs} active={tab} onChange={setTab} />
-        <div className="wd-sim-scroll" style={{ flex: 1, minHeight: 0, overflowY: tab === "desk" ? "hidden" : "auto" }}>{body}</div>
+      <div style={{ ...PANEL, overflow: "visible", marginTop: 8, flex: 1, minHeight: 320 }}>
+        <div style={{ position: "sticky", top: stickyTop, zIndex: 3 }}>
+          <Tabs tabs={tabs} active={tab} onChange={setTab} />
+        </div>
+        {body}
       </div>
     );
   }
@@ -1397,18 +1437,19 @@ export function SimTicker({ s, data }) {
   );
 }
 
-export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam }) {
-  // Mobile: one screen under the navbar — bar, stage and Up Next at their
-  // own heights, the console filling the rest (DraftSim.jsx sizes this).
+// stickyTop (mobile): where the console's tab bar sticks — the navbar's
+// bottom edge.
+export default function SimBroadcast({ s, data, isMobile, stickyTop, onSettings, onPickTeam }) {
+  // Mobile: bar, stage and Up Next at fixed heights, then the console,
+  // filling at least the rest of the screen (DraftSim.jsx sets the minimum)
+  // and running on down the page.
   if (isMobile) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <BroadcastBar s={s} data={data} isMobile onSettings={onSettings} />
-        <div style={{ flexShrink: 0 }}>
-          <Stage s={s} data={data} isMobile onPickTeam={onPickTeam} />
-          <UpNextBar s={s} data={data} isMobile />
-        </div>
-        <Console s={s} data={data} isMobile />
+        <Stage s={s} data={data} isMobile onPickTeam={onPickTeam} />
+        <UpNextBar s={s} data={data} isMobile />
+        <Console s={s} data={data} isMobile stickyTop={stickyTop} />
       </div>
     );
   }

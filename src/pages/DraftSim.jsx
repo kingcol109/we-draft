@@ -168,7 +168,7 @@ export default function DraftSim() {
       <div style={{
         background: STAGE_BG,
         marginTop: isMobile ? -(APP_TOP_PADDING + BODY_TOP_PADDING - MOBILE_NAV_HEIGHT) : -APP_TOP_PADDING,
-        minHeight: isMobile ? `calc(100dvh - ${MOBILE_NAV_HEIGHT}px)` : "calc(100vh / var(--pz, 1) - 35px)",
+        minHeight: isMobile ? `calc(100svh - ${MOBILE_NAV_HEIGHT}px)` : "calc(100vh / var(--pz, 1) - 35px)",
       }}>
         {error ? (
           <Column isMobile={isMobile}><div style={{ color: "#fff", textAlign: "center", padding: 60, fontFamily: BODY }}>Couldn&apos;t load the draft — try again.</div></Column>
@@ -265,25 +265,22 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   useEffect(() => { countSim(uid, "sims"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Mobile, mid-draft: no ticker, and the sim is pinned to the screen under
-  // the navbar, edge to edge, with the page itself locked — only the
-  // console scrolls. Sized off the page's height, the page could still be
-  // scrolled (or the browser bar collapse) and the footer slide up into it.
-  const pinned = isMobile && !finished;
-  const navBottom = useNavBottom(pinned);
+  // Mobile, mid-draft: no ticker, edge to edge, and at least a screen tall.
+  // The page scrolls as usual — scrolling down just runs further into the
+  // console's tab — and the site footer is hidden meanwhile, so there's
+  // nothing under the sim to scroll into. The console's tab bar sticks
+  // under the navbar (navBottom).
+  const live = isMobile && !finished;
+  const navBottom = useNavBottom(live);
   useEffect(() => {
-    if (!pinned) return undefined;
-    const html = document.documentElement;
-    const prev = [html.style.overflow, document.body.style.overflow];
-    html.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-    window.scrollTo(0, 0);
-    return () => { [html.style.overflow, document.body.style.overflow] = prev; };
-  }, [pinned]);
-  if (pinned) {
+    if (!live) return undefined;
+    document.body.classList.add("wd-sim-nofooter");
+    return () => document.body.classList.remove("wd-sim-nofooter");
+  }, [live]);
+  if (live) {
     return (
-      <div style={{ position: "fixed", top: navBottom, left: 0, right: 0, bottom: 0, zIndex: 50, background: STAGE_BG, overscrollBehavior: "contain", padding: 6, boxSizing: "border-box", fontFamily: FONT }}>
-        <SimBroadcast s={s} data={data} isMobile onSettings={onSettings} onPickTeam={onPickTeam} />
+      <div style={{ minHeight: `calc(100svh - ${navBottom}px)`, display: "flex", flexDirection: "column", padding: "6px 6px 24px", boxSizing: "border-box", fontFamily: FONT }}>
+        <SimBroadcast s={s} data={data} isMobile stickyTop={navBottom} onSettings={onSettings} onPickTeam={onPickTeam} />
       </div>
     );
   }
