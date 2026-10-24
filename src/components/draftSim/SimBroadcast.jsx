@@ -84,15 +84,28 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
   const pick = currentPick(s.sim);
   const live = s.phase !== "done";
   const showPick = pick && live && s.phase !== "intro";
+  // Mobile, once the draft's on: just the current speed with an arrow that
+  // opens the others (the full row on the starting screen).
+  const [speedsOpen, setSpeedsOpen] = useState(false);
+  const collapsed = isMobile && s.phase !== "intro" && !speedsOpen;
+  const speeds = collapsed ? [[s.speed, SPEEDS[s.speed]]] : Object.entries(SPEEDS);
+  const chooseSpeed = (k) => {
+    if (collapsed) { setSpeedsOpen(true); return; }
+    s.setSpeed(k);
+    setSpeedsOpen(false);
+  };
   const controls = live && (
     <>
-      <div role="group" aria-label="Speed" style={{ display: "inline-flex", flexShrink: 0, background: "#121c2f", borderRadius: 999, padding: 3 }}>
-        {Object.entries(SPEEDS).map(([k, v]) => (
-          <button key={k} onClick={() => s.setSpeed(k)} aria-pressed={s.speed === k} style={{
+      <div role="group" aria-label="Speed" style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, background: "#121c2f", borderRadius: 999, padding: 3 }}>
+        {speeds.map(([k, v]) => (
+          <button key={k} onClick={() => chooseSpeed(k)} aria-pressed={s.speed === k} aria-expanded={isMobile && s.phase !== "intro" ? !collapsed : undefined} style={{
             border: "none", borderRadius: 999, padding: isMobile ? "5px 9px" : "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap",
             background: s.speed === k ? "#fff" : "transparent", color: s.speed === k ? "#0b1220" : "#9fb0c8",
-          }}>{v.label}</button>
+          }}>{v.label}{collapsed && <span aria-hidden="true" style={{ marginLeft: 5, fontSize: 9 }}>▼</span>}</button>
         ))}
+        {isMobile && s.phase !== "intro" && !collapsed && (
+          <button onClick={() => setSpeedsOpen(false)} aria-label="Close speeds" style={{ border: "none", background: "transparent", color: "#9fb0c8", padding: "5px 8px", cursor: "pointer", fontSize: 9, fontFamily: "inherit" }}>◀</button>
+        )}
       </div>
       {(s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase))) && (
         <>
@@ -339,11 +352,21 @@ function ClockFace({ s, team, isMobile, isUser }) {
   const left = useCountdown(s.timing.clock, s.paused);
   const secs = Math.ceil(left / 1000);
   if (isUser) {
+    // Mobile: no "no clock" label — "YOUR PICK" big across the card.
+    if (isMobile) {
+      return (
+        <>
+          <ShrinkText text="YOUR PICK" max={52} min={30} style={{ fontWeight: 900, lineHeight: 1, color: GOLD }} />
+          <div style={{ fontSize: 13, fontWeight: 700, fontFamily: BODY, opacity: 0.9, margin: "6px 0 8px" }}>Draft from the board below.</div>
+          <TeamPicks s={s} team={team} isMobile />
+        </>
+      );
+    }
     return (
       <>
         <span style={cardLabel}>NO CLOCK ON YOU</span>
-        <div style={{ fontSize: isMobile ? 26 : 40, fontWeight: 900, lineHeight: 1, margin: isMobile ? "4px 0 6px" : "6px 0 10px", color: GOLD }}>YOUR PICK</div>
-        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: BODY, opacity: 0.85, marginBottom: isMobile ? 6 : 10 }}>Draft from the board below.</div>
+        <div style={{ fontSize: 40, fontWeight: 900, lineHeight: 1, margin: "6px 0 10px", color: GOLD }}>YOUR PICK</div>
+        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: BODY, opacity: 0.85, marginBottom: 10 }}>Draft from the board below.</div>
         <TeamPicks s={s} team={team} isMobile={isMobile} />
       </>
     );
@@ -406,7 +429,7 @@ function RevealFace({ event, data, isMobile, ink }) {
             Board #{p.rank} ({valueText}){grade ? ` · ${grade}` : ""}{fit != null ? ` · Fit ${Math.round(fit)}` : ""}
           </div>
         </div>
-        {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0 }} />}
+        {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 92, height: 92, objectFit: "contain", flexShrink: 0, marginRight: -4 }} />}
       </div>
     );
   }
@@ -610,12 +633,12 @@ function SimmingContent({ s, data, isMobile }) {
 function TradeSide({ brand, team, label, picks, isMobile, align }) {
   return (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 5 : 8, textAlign: "center", justifyContent: align }}>
-      <span className="wd-sim-in" style={{ display: "inline-flex", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.4))" }}><TeamLogo brand={brand} team={team} size={isMobile ? 64 : 104} /></span>
+      <span className="wd-sim-in" style={{ display: "inline-flex", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.4))" }}><TeamLogo brand={brand} team={team} size={isMobile ? 92 : 104} /></span>
       <div style={{ minWidth: 0, maxWidth: "100%" }}>
-        <div style={{ fontSize: isMobile ? 15 : 24, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.05, overflowWrap: "anywhere" }}>{brand.Team || team}</div>
-        <div style={{ fontSize: isMobile ? 9 : 10, fontWeight: 900, letterSpacing: isMobile ? "0.12em" : "0.16em", opacity: 0.75, marginTop: isMobile ? 3 : 4 }}>{label}</div>
+        <div style={{ fontSize: isMobile ? 19 : 24, fontWeight: 900, textTransform: "uppercase", lineHeight: 1.05, overflowWrap: "anywhere" }}>{brand.Team || team}</div>
+        <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: isMobile ? "0.12em" : "0.16em", opacity: 0.75, marginTop: isMobile ? 3 : 4 }}>{label}</div>
         <div style={{ display: "flex", gap: isMobile ? 4 : 5, flexWrap: "wrap", justifyContent: "center", marginTop: 5 }}>
-          {picks.map((p) => <span key={p} style={{ background: "rgba(0,0,0,0.35)", borderRadius: 999, padding: isMobile ? "2px 8px" : "3px 10px", fontSize: isMobile ? 10 : 13, fontWeight: 900, whiteSpace: "nowrap" }}>{p}</span>)}
+          {picks.map((p) => <span key={p} style={{ background: "rgba(0,0,0,0.35)", borderRadius: 999, padding: isMobile ? "3px 9px" : "3px 10px", fontSize: isMobile ? 12 : 13, fontWeight: 900, whiteSpace: "nowrap" }}>{p}</span>)}
         </div>
       </div>
     </div>
@@ -626,10 +649,10 @@ function TradeContent({ event, data, isMobile }) {
   const to = brandOf(data, event.to);
   const from = brandOf(data, event.from);
   return (
-    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: isMobile ? 10 : 14, width: "100%", height: "100%", padding: isMobile ? "14px" : "18px 30px", boxSizing: "border-box" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <span className="wd-sim-flip" style={{ display: "inline-block", background: "#fff", color: "#a50e24", borderRadius: 8, padding: isMobile ? "3px 10px" : "4px 14px", fontSize: isMobile ? 20 : 36, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1.1 }}>TRADE</span>
-        <span style={{ fontSize: isMobile ? 12 : 15, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.85 }}>{pickName(event.pick).toUpperCase()} CHANGES HANDS</span>
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: isMobile ? 8 : 14, width: "100%", height: "100%", padding: isMobile ? "10px 8px 12px" : "18px 30px", boxSizing: "border-box" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: isMobile ? "center" : "flex-start", gap: isMobile ? 10 : 12, flexWrap: isMobile ? "nowrap" : "wrap", minWidth: 0 }}>
+        <span className="wd-sim-flip" style={{ display: "inline-block", flexShrink: 0, background: "#fff", color: "#a50e24", borderRadius: 8, padding: isMobile ? "3px 10px" : "4px 14px", fontSize: isMobile ? 20 : 36, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1.1 }}>TRADE</span>
+        <span style={{ fontSize: isMobile ? 12 : 15, fontWeight: 900, letterSpacing: isMobile ? "0.1em" : "0.14em", opacity: 0.85, whiteSpace: isMobile ? "nowrap" : "normal", overflow: "hidden", textOverflow: "ellipsis" }}>{pickName(event.pick).toUpperCase()} CHANGES HANDS</span>
       </div>
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: isMobile ? 6 : 18, flex: 1, minHeight: 0 }}>
         <TradeSide brand={to} team={event.to} label="MOVE UP · GET" picks={[pickName(event.pick)]} isMobile={isMobile} align="center" />
@@ -756,9 +779,10 @@ const DRAFT_BTN = { flexShrink: 0, border: "none", borderRadius: 999, padding: "
 const EMPTY = { padding: 20, color: "#6f7f99", fontSize: 13, fontFamily: BODY };
 
 // "Your pick" strip across the top of a tab while the user's on the clock.
-function YourPickBanner({ s, data, text }) {
+// Desktop only — on a phone the stage right above already says it.
+function YourPickBanner({ s, data, text, isMobile }) {
   const pick = currentPick(s.sim);
-  if (s.phase !== "user" || !pick) return null;
+  if (isMobile || s.phase !== "user" || !pick) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "linear-gradient(90deg, rgba(246,162,29,0.2), transparent)", borderBottom: "1px solid #1f2b42" }}>
       <TeamLogo brand={brandOf(data, pick.owner)} team={pick.owner} size={28} />
@@ -980,7 +1004,7 @@ function DraftBoardTab({ s, data, isMobile }) {
 
   return (
     <div>
-      <YourPickBanner s={s} data={data} text="Pick a player — no clock on you." />
+      <YourPickBanner s={s} data={data} isMobile={isMobile} text="Pick a player — no clock on you." />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 12px", borderBottom: "1px solid #1f2b42" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" aria-label="Search prospects"
           style={{ flex: "1 1 140px", minWidth: 0, background: "#121c2f", border: "1px solid #24324d", borderRadius: 999, color: "#fff", padding: "6px 12px", fontSize: 13, fontFamily: BODY, outline: "none" }} />
@@ -1078,7 +1102,7 @@ function SuggestionsTab({ s, data, isMobile }) {
 
   return (
     <div>
-      <YourPickBanner s={s} data={data} text="Your war room's picks — draft one right here." />
+      <YourPickBanner s={s} data={data} isMobile={isMobile} text="Your war room's picks — draft one right here." />
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #1f2b42" }}>
         <TeamLogo brand={brand} team={team} size={24} />
         <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.12em" }}>{ctx.nick.toUpperCase()} SUGGESTIONS</span>

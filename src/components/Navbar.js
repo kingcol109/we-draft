@@ -363,10 +363,11 @@ export default function Navbar() {
                 ? { height: "auto", width: "auto", maxHeight: 42, maxWidth: "calc(100vw - 2.5rem - 48px)", display: "block" }
                 : { height: 42, width: "auto", maxWidth: "none", objectFit: "contain", display: "block" }} />
             </Link>
-            {liveCount > 0 && (
+            {/* Desktop only — no room beside the logo on a phone. */}
+            {liveCount > 0 && !isMobile && (
               <Link to="/live" className="wd-live-btn" title={`${liveCount} game${liveCount === 1 ? "" : "s"} live — open We-Draft Live`}>
                 <span className="wd-live-dot" />LIVE
-                {!isMobile && <span className="wd-live-count">{liveCount}</span>}
+                <span className="wd-live-count">{liveCount}</span>
               </Link>
             )}
             <style>{`
