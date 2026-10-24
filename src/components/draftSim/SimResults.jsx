@@ -6,17 +6,19 @@
 //
 // No account is needed to play. From here the user can share (a branded
 // image to save, post to X or text) or save their own teams' picks — never
-// the CPU's — to their profile (users/{uid}/draftSims, listed on
-// UserProfile.js). Saving signed out opens the sign-in / sign-up modal and
+// the CPU's — to their profile (users/{uid}/draftSims, listed on the sim's
+// My Drafts tab and UserProfile.js). Saving signed out opens the sign-in / sign-up modal and
 // saves as soon as they're in.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { haulRecords, simShareText, simCallToAction } from "../../utils/draftSim/share";
 import * as htmlToImage from "html-to-image";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase";
 import { useAuth } from "../../context/AuthContext";
 import { teamHaul, NEED_KEY_NAMES, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
+import { SIM_YEAR } from "../../utils/draftSim/data";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
 import { withoutPageZoom } from "../../utils/pageZoom";
@@ -47,7 +49,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
           <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL DRAFT SIM</div>
           <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE DRAFT IS COMPLETE</div>
         </div>
-        <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} />
+        <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} isMobile={isMobile} />
         {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
         <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#111" }}>RUN IT BACK</button>
         <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
@@ -201,14 +203,7 @@ function SaveButton({ sim, data, hauls, speed }) {
     try {
       await addDoc(collection(db, "users", uid, "draftSims"), {
         year: data.year, rounds: Math.max(...sim.picks.map((p) => p.round)), speed: speed || null, createdAt: serverTimestamp(),
-        teams: hauls.filter((h) => h.rows.length).map((h) => ({
-          team: h.team, grade: h.letter,
-          picks: h.rows.map(({ pick, prospect, letter }) => ({
-            overall: pick.overall, round: pick.round, via: pick.via || null, grade: letter,
-            id: prospect.id, slug: prospect.Slug || "", first: prospect.First, last: prospect.Last,
-            pos: prospect.Position, school: prospect.School || "",
-          })),
-        })),
+        teams: haulRecords(hauls),
       });
       setState("saved");
     } catch (e) {
@@ -226,7 +221,7 @@ function SaveButton({ sim, data, hauls, speed }) {
     else { setState("waiting"); login(); }
   };
   if (state === "saved") {
-    return <Link to="/profile" style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none" }}>SAVED ✓ VIEW IN PROFILE</Link>;
+    return <Link to={`/draftsim${data.year === SIM_YEAR ? "" : `/${data.year}`}?tab=saved`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none" }}>SAVED ✓ VIEW MY DRAFTS</Link>;
   }
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -239,9 +234,10 @@ function SaveButton({ sim, data, hauls, speed }) {
 }
 
 // ── Share: a branded image (save it, or post to X / text with the
-// summary). The image is text only — an external logo can taint the
-// canvas and blank the export, same as ShareMockButton.jsx. ──
-function ShareButton({ sim, data, hauls, takes }) {
+// summary). On mobile there's no image — just X and Message. The image is
+// text only — an external logo can taint the canvas and blank the export,
+// same as ShareMockButton.jsx. ──
+function ShareButton({ sim, data, hauls, takes, isMobile }) {
   const cardRef = useRef(null);
   const [image, setImage] = useState(null);
   const [open, setOpen] = useState(false);
@@ -251,15 +247,19 @@ function ShareButton({ sim, data, hauls, takes }) {
   // No teams of their own: share the first round.
   const roundOne = sim.picks.filter((p) => p.round === 1 && p.selection);
 
-  const text = [
-    `🏈 My ${data.year} NFL Draft Sim on We-Draft.com`,
-    ...(mine.length
-      ? mine.flatMap((h) => [`${name(h.team)} — Grade: ${h.letter}`, ...h.rows.map(({ pick, prospect }) => `${pick.overall}. ${prospect.First} ${prospect.Last}, ${prospect.Position}, ${prospect.School}`)])
-      : roundOne.slice(0, 10).map((p) => { const pl = sim.byId[p.selection]; return `${p.overall}. ${name(p.owner)} — ${pl.First} ${pl.Last}`; })),
-    "Run your own: we-draft.com/draftsim",
-  ].join("\n");
+  // Each pick, the grade, then the link (utils/draftSim/share.js); a
+  // watch-only sim shares the top of round one.
+  const text = mine.length
+    ? simShareText({ year: data.year, teams: haulRecords(mine), teamName: name })
+    : [
+      `My ${data.year} NFL Draft Sim`,
+      ...roundOne.slice(0, 10).map((p) => { const pl = sim.byId[p.selection]; return `${p.overall}. ${name(p.owner)} — ${pl.First} ${pl.Last}`; }),
+      "",
+      simCallToAction(data.year),
+    ].join("\n");
 
   const build = async () => {
+    if (isMobile) { setOpen(true); return; }
     if (!cardRef.current || busy) return;
     setBusy(true);
     try {
@@ -348,13 +348,13 @@ function ShareButton({ sim, data, hauls, takes }) {
               <div style={{ color: BLUE, fontWeight: 900, fontSize: 14, letterSpacing: "0.06em" }}>SHARE YOUR DRAFT</div>
               <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", color: "#999", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
             </div>
-            <img src={image} alt="Draft sim results" style={{ width: "100%", display: "block", borderRadius: 10, marginBottom: 16 }} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-              <button onClick={saveImage} style={{ ...shareLink, background: BLUE, color: "#fff" }}>💾 Save</button>
+            {!isMobile && <img src={image} alt="Draft sim results" style={{ width: "100%", display: "block", borderRadius: 10, marginBottom: 16 }} />}
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 8 }}>
+              {!isMobile && <button onClick={saveImage} style={{ ...shareLink, background: BLUE, color: "#fff" }}>💾 Save</button>}
               <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={shareLink}>𝕏 Post</a>
               <a href={`sms:?&body=${encodeURIComponent(text)}`} style={shareLink}>💬 Message</a>
             </div>
-            <div style={{ color: "#888", fontSize: 11, fontFamily: BODY, marginTop: 10 }}>Save the image, then attach it to your post or message.</div>
+            {!isMobile && <div style={{ color: "#888", fontSize: 11, fontFamily: BODY, marginTop: 10 }}>Save the image, then attach it to your post or message.</div>}
           </div>
         </div>
       )}

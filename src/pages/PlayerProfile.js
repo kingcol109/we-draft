@@ -36,6 +36,7 @@ import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import PlayerStatsCard from "../components/PlayerStatsCard";
 // "Playing now" + Follow Live while the player's team is on the field.
 import PlayerLiveCard, { LivePill, usePlayerLiveGame } from "../components/PlayerLiveCard";
+import SimAdCard from "../components/draftSim/SimAdCard";
 import { Helmet } from "react-helmet-async";
 import * as htmlToImage from "html-to-image";
 import confetti from "canvas-confetti";
@@ -6253,9 +6254,10 @@ useEffect(() => {
         </div>
         {/* ===== END MAIN COLUMN ===== */}
 
-        {/* ===== RIGHT COLUMN: Videos + Stats + In The News ===== */}
+        {/* ===== RIGHT COLUMN: (live scoreboard) + Draft Sim ad + Videos + Stats + In The News ===== */}
         {isMobile ? (
           <div className="wdm-col" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            <SimAdCard player={player} />
             {playerVideos.length > 0 && VideosSidebar}
             <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
             {NewsSidebar}
@@ -6263,6 +6265,7 @@ useEffect(() => {
         ) : (
           <div className="wdm-col" style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
             <PlayerLiveCard player={player} />
+            <SimAdCard player={player} />
             {playerVideos.length > 0 && VideosSidebar}
             <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
             {NewsSidebar}

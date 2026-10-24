@@ -31,9 +31,11 @@ export default function SimFeed({ feed, height, isMobile }) {
   const [filter, setFilter] = useState("all");
   const shown = feed.filter((p) => filter === "all" || (filter === "mine" ? p.userInvolved : p.kind === "trade"));
 
+  // Mobile: it sits under the console's own "The Desk" tab, so just the
+  // posts — no title, lineup or filters, and no frame of its own.
   return (
-    <div style={{ display: "flex", flexDirection: "column", height, minHeight: 0, background: "#0e1626", borderRadius: 16, border: "1px solid #1f2b42", overflow: "hidden" }}>
-      <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid #1f2b42" }}>
+    <div style={{ display: "flex", flexDirection: "column", height, minHeight: 0, background: "#0e1626", ...(isMobile ? {} : { borderRadius: 16, border: "1px solid #1f2b42" }), overflow: "hidden" }}>
+      {!isMobile && <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid #1f2b42" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span className="wd-sim-live-dot" />
           <span style={{ color: "#fff", fontWeight: 900, fontSize: 13, letterSpacing: "0.12em" }}>THE DESK</span>
@@ -53,9 +55,9 @@ export default function SimFeed({ feed, height, isMobile }) {
             }}>{label}</button>
           ))}
         </div>
-      </div>
+      </div>}
 
-      <div className="wd-sim-scroll" style={{ flex: 1, overflowY: "auto", minHeight: isMobile ? 260 : 0 }}>
+      <div className="wd-sim-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
         {shown.length === 0 && (
           <div style={{ padding: 24, textAlign: "center", color: "#6f7f99", fontSize: 13, fontFamily: "Arial, sans-serif" }}>Nothing here yet.</div>
         )}

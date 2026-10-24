@@ -50,6 +50,9 @@ export default function Navbar() {
   // read the first time it opens (one cached read).
   const [nflOpen, setNflOpen] = useState(false);
   const [nflTimeout, setNflTimeout] = useState(null);
+  // Mock Drafts dropdown: the Draft Sim first, then the written mocks.
+  const [mocksOpen, setMocksOpen] = useState(false);
+  const [mocksTimeout, setMocksTimeout] = useState(null);
   const [nflTeams, setNflTeams] = useState(null);
   const [communityOpen, setCommunityOpen] = useState(false);
   const [communityTimeout, setCommunityTimeout] = useState(null);
@@ -344,9 +347,11 @@ export default function Navbar() {
           }}
         >
           {/* LOGO (+ LIVE button while games are on) */}
-          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px" }}>
-            <Link to="/">
-              <img src={Logo2} alt="We-Draft.com" style={{ height: 42 }} />
+          {/* The logo never gives up width: as a shrinking flex item, the
+              global img max-width: 100% squeezed it narrower at full height. */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "10px" : "14px", flexShrink: 0 }}>
+            <Link to="/" style={{ display: "block", flexShrink: 0 }}>
+              <img src={Logo2} alt="We-Draft.com" style={{ height: 42, width: "auto", maxWidth: "none", objectFit: "contain", display: "block" }} />
             </Link>
             {liveCount > 0 && (
               <Link to="/live" className="wd-live-btn" title={`${liveCount} game${liveCount === 1 ? "" : "s"} live — open We-Draft Live`}>
@@ -610,7 +615,32 @@ export default function Navbar() {
               )}
             </div>
 
-            <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
+            {/* ── MOCK DRAFTS DROPDOWN — the Draft Sim, then written mocks ── */}
+            <div
+              style={{ position: "relative" }}
+              onMouseEnter={() => { if (mocksTimeout) clearTimeout(mocksTimeout); setMocksOpen(true); }}
+              onMouseLeave={() => { const t = setTimeout(() => setMocksOpen(false), 150); setMocksTimeout(t); }}
+            >
+              <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
+              {mocksOpen && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", minWidth: "220px",
+                  background: "#ffffff", border: "2px solid #0055a5", borderRadius: "10px", boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                  zIndex: 10002, overflow: "hidden",
+                }}>
+                  {[
+                    { to: "/draftsim", label: "Draft Simulator", note: "Run the draft live" },
+                    { to: "/mocks", label: "Mock Drafts", note: "Write and read mocks" },
+                  ].map((m, i) => (
+                    <Link key={m.to} to={m.to} onClick={() => setMocksOpen(false)} className="cfb-team-link"
+                      style={{ display: "block", padding: "10px 14px", textDecoration: "none", borderTop: i ? "1px solid #e6ecf3" : "none" }}>
+                      <span style={{ display: "block", color: "#0055a5", fontWeight: 900, fontSize: "14px" }}>{m.label}</span>
+                      <span style={{ display: "block", color: "#667085", fontSize: "11px", fontWeight: 700 }}>{m.note}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <Link to="/watch" style={baseStyle}>▶ Watch</Link>
 
@@ -667,6 +697,7 @@ export default function Navbar() {
               { path: wePickHref(), label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
               { path: "/nfl", label: "NFL Teams" },
+              { path: "/draftsim", label: "Draft Simulator" },
               { path: "/mocks", label: "Mock Drafts" },
               { path: "/watch", label: "▶ Watch" },
             ].map((l) => (

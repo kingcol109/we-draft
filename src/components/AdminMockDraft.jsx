@@ -11,11 +11,11 @@
 // and his big CFBD game. Davin's panel also edits his favorite players
 // (name, positions, school) and the made-up "other schools" they can go to,
 // with their own logos and colors (config/draftSimDesk.legends /
-// .otherSchools). Kenneth's panel is his player takes — per player, by
+// .otherSchools). Statistics: Draft Sim usage (AdminSimStats.jsx). Kenneth's panel is his player takes — per player, by
 // situation (reach / steal / depth / normal), saved on their own to
 // config/draftSimAnalysis. Team Needs and Sub-positions: AdminTeamNeeds.jsx.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, doc, getDoc, getDocs, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteField, FieldPath, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import {
   ANALYSTS, CHATTER, VARIABLES, VARIABLE_GROUPS, DEFAULT_CHATTER, lineText, defaultLines, applyDeskLines, defaultAvatar, applyDeskAvatars,
@@ -26,10 +26,11 @@ import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { initSim, makePick, rngNext } from "../utils/draftSim/engine";
 import { TeamNeeds, SubPositions } from "./AdminTeamNeeds";
+import AdminSimStats from "./AdminSimStats";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "subpositions", label: "Sub-positions" }];
+const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "subpositions", label: "Sub-positions" }, { key: "stats", label: "Statistics" }];
 
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
 
@@ -69,6 +70,7 @@ export default function AdminMockDraft() {
       {tab === "personalities" && <Personalities />}
       {tab === "needs" && <TeamNeeds />}
       {tab === "subpositions" && <SubPositions />}
+      {tab === "stats" && <AdminSimStats />}
     </div>
   );
 }
@@ -373,9 +375,10 @@ function Personalities() {
         .filter((o) => o.name);
       // The defaults stay in code — only a changed list is stored.
       const storedLegends = JSON.stringify(cleanLegends) === JSON.stringify(DEFAULT_LEGENDS) ? [] : cleanLegends;
-      await setDoc(doc(db, "config", "draftSimDesk"), {
-        lines: overrides, avatars: pics, legends: storedLegends, otherSchools: cleanOthers, updatedAt: serverTimestamp(),
-      });
+      const desk = { lines: overrides, avatars: pics, legends: storedLegends, otherSchools: cleanOthers };
+      // Firestore caps a doc at 1 MiB (uploaded photos and logos are the big part).
+      if (new Blob([JSON.stringify(desk)]).size > TAKES_MAX_BYTES) { setStatus("tooBig"); return; }
+      await setDoc(doc(db, "config", "draftSimDesk"), { ...desk, updatedAt: serverTimestamp() });
       applyDeskLines(overrides);
       applyDeskAvatars(pics);
       applyDeskLegends(storedLegends, cleanOthers);
@@ -386,7 +389,7 @@ function Personalities() {
       setStatus("saved");
     } catch (e) {
       console.error("Desk lines save error:", e);
-      setStatus("error");
+      setStatus(e.code === "permission-denied" ? "denied" : "error");
     }
   };
 
@@ -409,7 +412,7 @@ function Personalities() {
       <div style={{ ...card, padding: "10px 16px", position: "sticky", top: 8, zIndex: 2, boxShadow: "0 6px 18px rgba(0,0,0,0.1)", overflow: "visible" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
         <span style={{ fontSize: "13px", fontWeight: 800, color: status === "error" ? "#b42318" : dirty ? "#a06200" : "#2e7d32" }}>
-          {!rows ? "Loading lines…" : status === "saving" ? "Saving…" : status === "error" ? "Save failed — try again." : dirty ? "Unsaved changes" : status === "saved" ? "Saved — live on the next sim load." : "All lines saved"}
+          {!rows ? "Loading lines…" : status === "saving" ? "Saving…" : status === "error" ? "Save failed — try again." : status === "denied" ? "Only admins can save." : status === "tooBig" ? "Too big to save — remove an uploaded photo or logo (use a URL instead)." : dirty ? "Unsaved changes" : status === "saved" ? "Saved — live on the next sim load." : "All lines saved"}
         </span>
         <button onClick={save} disabled={!dirty || status === "saving"} style={{ marginLeft: "auto", padding: "8px 18px", borderRadius: "8px", border: "none", background: dirty ? BLUE : "#c9d2de", color: "#fff", fontWeight: 900, fontSize: "12px", cursor: dirty ? "pointer" : "default", letterSpacing: "0.05em" }}>SAVE</button>
         </div>
@@ -515,9 +518,15 @@ function Personalities() {
 
 // ── Kenneth's player takes: pick a class, find a player, write his lines
 // for each situation (PLAYER_TAKES). Its own Save — config/draftSimAnalysis,
-// separate from the desk lines above. ──
+// separate from the desk lines above. A save writes only the players
+// changed here (players.{id}), so two admins — or an old tab — don't wipe
+// each other's work; then it reloads everyone's. ──
 const TAKE_CATS = Object.keys(PLAYER_TAKES);
+const TAKES_REF = () => doc(db, "config", "draftSimAnalysis");
 const cleanTakes = (t = {}) => Object.fromEntries(TAKE_CATS.map((c) => [c, (t[c] || []).map((l) => l.trim()).filter(Boolean)]).filter(([, ls]) => ls.length));
+// Firestore caps a doc at 1 MiB; leave headroom for the rest of it.
+const TAKES_MAX_BYTES = 950 * 1024;
+const TAKES_WARN_BYTES = 700 * 1024;
 const takeCount = (t = {}) => TAKE_CATS.reduce((n, c) => n + (t[c] || []).filter((l) => l.trim()).length, 0);
 
 // onFocusLine({ el, edit }, label): hands the line being typed in to the
@@ -532,11 +541,12 @@ function PlayerTakesEditor({ onFocusLine }) {
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState("");
   const [shown, setShown] = useState(40);
+  // Players edited since the last save.
+  const [changed, setChanged] = useState(() => new Set());
 
   useEffect(() => {
-    // Straight from Firestore (not the sim's page-session cache), so a save
-    // from another tab isn't overwritten with stale takes.
-    getDoc(doc(db, "config", "draftSimAnalysis"))
+    // Straight from Firestore (not the sim's page-session cache).
+    getDoc(TAKES_REF())
       .then((snap) => setTakes(snap.exists() ? snap.data().players || {} : {}))
       .catch((e) => { console.error("Player takes load error:", e); setStatus("loadError"); });
   }, []);
@@ -547,23 +557,44 @@ function PlayerTakesEditor({ onFocusLine }) {
 
   const change = (id, cat, fn) => {
     setTakes((t) => ({ ...t, [id]: { ...(t[id] || {}), [cat]: fn(t[id]?.[cat] || []) } }));
+    setChanged((c) => new Set(c).add(id));
     setDirty(true);
     setStatus("");
   };
   const unfocus = () => onFocusLine(null);
 
+  // Roughly how big the doc is (Firestore's cap is 1 MiB).
+  const docBytes = takes ? new Blob([JSON.stringify(takes)]).size : 0;
+  const tooBig = docBytes > TAKES_MAX_BYTES;
+
   const save = async () => {
-    const players = Object.fromEntries(Object.entries(takes).map(([id, t]) => [id, cleanTakes(t)]).filter(([, t]) => Object.keys(t).length));
+    if (tooBig) { setStatus("tooBig"); return; }
+    const ids = [...changed];
+    // [FieldPath, value, …] — a player with no lines left is removed.
+    const pairs = ids.flatMap((id) => {
+      const t = cleanTakes(takes[id]);
+      return [new FieldPath("players", id), Object.keys(t).length ? t : deleteField()];
+    });
     setStatus("saving");
     try {
-      await setDoc(doc(db, "config", "draftSimAnalysis"), { players, updatedAt: serverTimestamp() });
-      applyPlayerTakes(players);
-      setTakes(players);
+      try {
+        await updateDoc(TAKES_REF(), ...pairs, "updatedAt", serverTimestamp());
+      } catch (e) {
+        if (e.code !== "not-found") throw e;
+        // First save ever: no doc to update yet.
+        const players = Object.fromEntries(ids.map((id) => [id, cleanTakes(takes[id])]).filter(([, t]) => Object.keys(t).length));
+        await setDoc(TAKES_REF(), { players, updatedAt: serverTimestamp() });
+      }
+      // Everyone's takes as saved, this save's and any other admin's.
+      const fresh = (await getDoc(TAKES_REF())).data()?.players || {};
+      applyPlayerTakes(fresh);
+      setTakes(fresh);
+      setChanged(new Set());
       setDirty(false);
       setStatus("saved");
     } catch (e) {
       console.error("Player takes save error:", e);
-      setStatus("error");
+      setStatus(e.code === "permission-denied" ? "denied" : "error");
     }
   };
 
@@ -591,7 +622,8 @@ function PlayerTakesEditor({ onFocusLine }) {
         <button onClick={() => setOnlyWritten((v) => !v)} style={smallBtn(onlyWritten)}>Written only</button>
         <span style={{ fontSize: "12px", color: "#777" }}>{board ? `${written} of ${board.length} written` : ""}</span>
         <span style={{ marginLeft: "auto", fontSize: "12px", fontWeight: 800, color: status === "error" || status === "loadError" ? "#b42318" : dirty ? "#a06200" : "#2e7d32" }}>
-          {status === "loadError" ? "Couldn't load — don't save." : status === "saving" ? "Saving…" : status === "error" ? "Save failed — try again." : dirty ? "Unsaved analysis" : status === "saved" ? "Saved — live on the next sim load." : ""}
+          {status === "loadError" ? "Couldn't load — don't save." : status === "saving" ? "Saving…" : status === "error" ? "Save failed — try again." : status === "denied" ? "Only admins can save." : status === "tooBig" || tooBig ? `Too big to save (${Math.round(docBytes / 1024)} KB of ${Math.round(TAKES_MAX_BYTES / 1024)} KB) — trim some lines.` : dirty ? `Unsaved analysis (${changed.size} player${changed.size === 1 ? "" : "s"})` : status === "saved" ? "Saved — live on the next sim load." : ""}
+          {!tooBig && docBytes > TAKES_WARN_BYTES && <span style={{ color: "#a06200" }}> · {Math.round(docBytes / 1024)} KB of {Math.round(TAKES_MAX_BYTES / 1024)} KB used</span>}
         </span>
         <button onClick={save} disabled={!dirty || status === "saving" || status === "loadError"} style={{ padding: "6px 14px", borderRadius: "8px", border: "none", background: dirty ? BLUE : "#c9d2de", color: "#fff", fontWeight: 900, fontSize: "12px", cursor: dirty ? "pointer" : "default" }}>SAVE ANALYSIS</button>
       </div>

@@ -24,7 +24,7 @@ import { teamNamer, loadBestGame } from "../../utils/draftSim/data";
 // Instant has none — it sims a pick every SIM_STEP_MS.
 const BROADCAST = { clock: 15000, trade: 7000, pickIn: 5000, reveal: 10000 };
 export const SPEEDS = {
-  normal: { label: "Normal", note: "7 seconds on the clock — skip ahead any time.", clock: 7000, trade: 5000, pickIn: 2500, reveal: 8000 },
+  normal: { label: "Normal", note: "5 seconds on the clock — skip ahead any time.", clock: 5000, trade: 5000, pickIn: 2500, reveal: 8000 },
   broadcast: { label: "Broadcast", note: "15 seconds on the clock, with the full pick reveal — skip ahead any time.", ...BROADCAST },
   instant: { label: "Instant", note: "Sims straight through to your next pick." },
 };
@@ -34,7 +34,8 @@ const FEED_MAX = 300;
 
 let postId = 0;
 
-export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed }) {
+// onUserPick(event): each pick the user makes (Statistics — utils/draftSim/stats.js).
+export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed, onUserPick }) {
   const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams, rounds, seed }));
   const [phase, setPhase] = useState("intro");
   const [reveal, setReveal] = useState(null);
@@ -161,8 +162,8 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   const draft = useCallback((prospectId) => {
     if (!isUserOnClock(sim)) return;
     const { state, event } = makePick(sim, prospectId);
-    if (event) show(state, [event]);
-  }, [sim, show]);
+    if (event) { show(state, [event]); onUserPick?.(event); }
+  }, [sim, show, onUserPick]);
 
   const takeOffer = useCallback((offer) => {
     const { state, event } = acceptOffer(sim, offer);

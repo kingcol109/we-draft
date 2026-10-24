@@ -1,5 +1,5 @@
 import {
-  buildBoard, applyMyGrades, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer,
+  buildBoard, applyMyGrades, buildTeamBoards, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer,
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
@@ -345,7 +345,7 @@ test("a WR at the top of the board is still the most likely first overall pick",
     ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: POS[i % POS.length], cr: 4 + i })),
   ]);
   const firsts = {};
-  for (let seed = 1; seed <= 200; seed++) {
+  for (let seed = 1; seed <= 600; seed++) {
     const id = stepCpu(initSim({ order: [{ Pick: 1, Round: 1, Team: "T1" }], board: b, rounds: 1, seed })).state.picks[0].selection;
     firsts[id] = (firsts[id] || 0) + 1;
   }
@@ -622,4 +622,137 @@ test("Kenneth: his written take on the player, by situation; quiet without one",
   expect(kenneth.weight({ ...base, pick: { ...base.pick, overall: 1 } }, deskCtx("all"))).toBe(0);
   expect(kenneth.react({ type: "trade" }, deskCtx("all"))).toBeNull();
   applyPlayerTakes({});
+});
+
+test("team boards: each team's own read of the community board, wider down the board", () => {
+  const big = buildBoard(Array.from({ length: 300 }, (_, i) => ({ id: `n${i}`, Position: POS[i % POS.length], cr: i + 1 })));
+  const boards = buildTeamBoards(big, ["AAA", "BBB"], 7);
+  const drift = (lo, hi) => {
+    const ids = big.filter((p) => p.rank >= lo && p.rank <= hi);
+    return ids.reduce((t, p) => t + Math.abs(boards.AAA[p.id] - p.rank), 0) / ids.length;
+  };
+  expect(drift(1, 15)).toBeLessThan(1.5);
+  expect(drift(1, 15)).toBeLessThan(drift(16, 50));
+  expect(drift(16, 50)).toBeLessThan(drift(51, 100));
+  expect(drift(51, 100)).toBeLessThan(drift(151, 300));
+  // A real board: 1…N, every player once; teams differ; same seed → same boards.
+  expect(Object.values(boards.AAA).sort((a, b) => a - b)).toEqual(big.map((_, i) => i + 1));
+  expect(boards.AAA).not.toEqual(boards.BBB);
+  expect(buildTeamBoards(big, ["AAA"], 7).AAA).toEqual(boards.AAA);
+  // No chaos, no spread — and grading stays on the community rank.
+  expect(buildTeamBoards(big, ["AAA"], 7, 0)).toEqual({});
+  const s = initSim({ order: [{ Pick: 1, Round: 1, Team: "AAA" }], board: big, rounds: 1, seed: 7 });
+  const { event } = makePick(s, "n40");
+  expect(event.value).toBe(1 - 41);
+  expect(teamRank(s, "AAA", big[40])).toBe(s.teamBoards.AAA.n40);
+});
+
+test("Isaac: a trade up and the pick it bought are one take, at the pick", () => {
+  const s = sim();
+  const offer = { team: "CCC", give: [3, 7], ratio: 1.1, value: 0, target: board[0] };
+  const { state, event: trade } = acceptOffer(s, offer);
+  expect(currentPick(state).tradeUp).toMatchObject({ from: "AAA" });
+  expect(currentPick(state).tradeUp.give.map((p) => p.overall)).toEqual([3, 7]);
+  const isaac = ANALYSTS.find((a) => a.id === "isaac");
+  // Not on the trade itself…
+  expect(isaac.weight(trade, deskCtx("all"))).toBe(0);
+  // …but on the pick, with the trade folded in.
+  const { event } = makePick(state, board[0].id);
+  const later = { ...event, pick: { ...event.pick, overall: 9 }, value: 0 };
+  expect(isaac.weight(later, deskCtx("all"))).toBeGreaterThan(3);
+  const lines = ISAAC_LINES.tradeUp.lines.map(lineText);
+  for (let r = 0; r < 1; r += 0.2) {
+    const text = isaac.react(later, { ...deskCtx("all"), rand: () => r }).text;
+    expect(lines.some((l) => text.startsWith(fill0(l)))).toBe(true);
+    expect(text).not.toMatch(/[{}]/);
+  }
+  expect(isaac.react({ ...later, value: -20 }, deskCtx("all", 0.1)).text).toMatch(/board/);
+  // A pick nobody traded for gets no trade-up take.
+  const plain = makePick(s, board[0].id).event;
+  expect(plain.pick.tradeUp).toBeUndefined();
+});
+// A line's opening words, before its first {variable}.
+const fill0 = (l) => l.split("{")[0];
+
+test("Jeremiah Smith goes first unless that team has a big QB need", () => {
+  const b = buildBoard([
+    { id: "qb1", Position: "QB", cr: 1 }, { id: "row_183", First: "Jeremiah", Last: "Smith", Position: "WR", cr: 2 },
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: POS[i % POS.length], cr: 3 + i })),
+  ]);
+  const two = [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 2, Round: 1, Team: "T2" }];
+  for (let seed = 1; seed <= 50; seed++) {
+    expect(stepCpu(initSim({ order: two, board: b, rounds: 1, seed })).state.picks[0].selection).toBe("row_183");
+  }
+  // A team that needs a QB drafts its own way; he goes next.
+  const needs = { T1: resolveNeeds({ QB: { labels: ["Upgrade Needed"] } }) };
+  let s = initSim({ order: two, board: b, rounds: 1, seed: 3, needs });
+  s = stepCpu(s).state;
+  expect(s.picks[0].selection).not.toBe("row_183");
+  expect(stepCpu(s).state.picks[1].selection).toBe("row_183");
+  // Not on the user's clock — they pick for themselves.
+  const mine = initSim({ order: two, board: b, rounds: 1, seed: 3, userTeams: ["T1"] });
+  expect(stepCpu(mine).state).toBe(mine);
+});
+
+test("Isaac: a later OL protects the team's first-round QB, a WR or TE is a weapon for him", () => {
+  const b = buildBoard([
+    { id: "qb", First: "Joe", Last: "Burrow", Position: "QB", cr: 1 }, { id: "ol", First: "Penei", Last: "Sewell", Position: "OL", cr: 2 },
+    { id: "wr", First: "Ja'Marr", Last: "Chase", Position: "WR", cr: 3 }, { id: "lb", Position: "LB", cr: 4 },
+    ...Array.from({ length: 20 }, (_, i) => ({ id: `x${i}`, Position: POS[i % POS.length], cr: 5 + i })),
+  ]);
+  const ord = [{ Pick: 1, Round: 1, Team: "AAA" }, { Pick: 2, Round: 2, Team: "AAA" }, { Pick: 3, Round: 2, Team: "BBB" }];
+  let s = initSim({ order: ord, board: b, rounds: 2, seed: 1, chaos: 0 });
+  s = makePick(s, "qb").state;
+  const { state, event: ol } = makePick(s, "ol");
+  expect(ol.rookieQb.id).toBe("qb");
+  const isaac = ANALYSTS.find((a) => a.id === "isaac");
+  expect(isaac.weight(ol, deskCtx("all"))).toBeGreaterThan(3);
+  const protect = ISAAC_LINES.qbProtect.lines.map(lineText);
+  for (let r = 0; r < 0.75; r += 0.1) {
+    const text = isaac.react(ol, { ...deskCtx("all"), rand: () => r }).text;
+    expect(protect.some((l) => text.startsWith(fill0(l)) || text.includes("Burrow"))).toBe(true);
+    expect(text).not.toMatch(/[{}]/);
+  }
+  expect(isaac.react(ol, { ...deskCtx("all"), rand: () => 0 }).text).toBe("The AAA are investing in protecting Joe Burrow. Penei Sewell is the pick.");
+  const wr = makePick(s, "wr").event;
+  expect(isaac.react(wr, { ...deskCtx("all"), rand: () => 0 }).text).toBe("The AAA got Joe Burrow a weapon with Ja'Marr Chase.");
+  // Another team's pick, or a non-OL/WR/TE, doesn't count.
+  expect(makePick(state, "wr").event.rookieQb).toBeNull();
+  expect(isaac.weight(makePick(s, "lb").event, deskCtx("all"))).toBeLessThan(4);
+});
+
+test("trades: a CPU team's pick on the clock can be had; a pick made mid-deal can't", () => {
+  const s = { ...sim({ userTeams: ["DDD"] }), chart: { 1: 3000, 4: 1800, 8: 1400, 12: 1100 } };
+  expect(currentPick(s)).toMatchObject({ overall: 1, owner: "AAA" });
+  expect(tradeablePicks(s, "AAA", { includeCurrent: true }).map((p) => p.overall)).toContain(1);
+  const { state, event } = applyProposal(s, { team: "DDD", partner: "AAA", give: [4, 8, 12], get: [1] });
+  expect(event).toMatchObject({ type: "trade", to: "DDD", from: "AAA" });
+  expect(isUserOnClock(state)).toBe(true);
+  // The clock ran out while they were dealing: No. 1 is gone, nothing swaps.
+  const after = stepCpu(s).state;
+  const stale = applyProposal(after, { team: "DDD", partner: "AAA", give: [4, 8, 12], get: [1] });
+  expect(stale.event).toBeNull();
+  expect(stale.verdict.stale).toBe(true);
+  expect(stale.state).toBe(after);
+});
+
+test("desk: a personality that throws costs its post, not the draft", () => {
+  const first = stepCpu(sim({ chaos: 0 })).events.find((e) => e.type === "pick");
+  const e = { ...first, pick: { ...first.pick, overall: 3 }, value: 0 };
+  const isaac = ANALYSTS.find((a) => a.id === "isaac");
+  const { weight, react } = isaac;
+  const quiet = jest.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    isaac.weight = () => 1000;
+    isaac.react = () => { throw new Error("bad line"); };
+    const posts = reactTo(e, deskCtx("all", 0.5));
+    expect(posts[0].analyst.id).toBe("wedraft");
+    expect(posts.some((p) => p.analyst.id === "isaac")).toBe(false);
+    isaac.weight = () => { throw new Error("bad weight"); };
+    expect(() => reactTo(e, deskCtx("all", 0.5))).not.toThrow();
+  } finally {
+    isaac.weight = weight;
+    isaac.react = react;
+    quiet.mockRestore();
+  }
 });

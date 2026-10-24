@@ -1,7 +1,7 @@
 // src/pages/HomeHero.js
 //
-// The Home page's top banner (logo, tagline, sign-up button, quick-link
-// tiles) plus its <Helmet> tags — shared by both designs. Home.js renders
+// The Home page's top banner (logo, tagline, the Draft Sim front and
+// center, then sign-up, quick-link tiles) plus its <Helmet> tags — shared by both designs. Home.js renders
 // this immediately, before config/home has said which design is live, so
 // the page has its header on the first paint instead of sitting blank for
 // that read. Only the tiles below depend on the mode: in-season swaps in
@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import logo from "../assets/Logo2.png";
 import { Link } from "react-router-dom";
+import { SIM_YEAR } from "../utils/draftSim/years";
 import { wePickHref } from "../utils/wePickRoutes";
 import { useAuth } from "../context/AuthContext";
 import { Helmet } from "react-helmet-async";
@@ -34,6 +35,7 @@ export default function HomeHero({ mode }) {
 
   // Mobile quick-link chips (horizontal scroll row)
   const mobileChips = [
+    { label: "Draft Sim", to: "/draftsim", icon: "⏱️", hot: true },
     { label: "Evaluate", to: "/community", icon: "📋" },
     { label: "Mock Drafts", to: "/mocks", icon: "🏈" },
     { label: "NFL Teams", to: "/nfl", icon: "🏟️" },
@@ -85,6 +87,10 @@ export default function HomeHero({ mode }) {
           transition: background 0.15s;
         }
         .mobile-chip:active { background: rgba(255,255,255,0.22); }
+        .mobile-chip.hot { background: ${GOLD}; border-color: #fff; }
+        .wdh-sim-cta { transition: transform 0.15s, box-shadow 0.15s; }
+        .wdh-sim-cta:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,0.35); }
+        .wdh-sim-tile { position: relative; }
       `}</style>
 
         {/* ===== HERO ===== */}
@@ -105,18 +111,19 @@ export default function HomeHero({ mode }) {
                 inSeason
                   ? { label: "We-Pick", sub: "Predict this week's games", to: wePickHref(), icon: "🔮" }
                   : { label: "Watch", sub: "Player Shorts, one after another", to: "/watch", icon: "▶" },
-                { label: "Create Mock Drafts", sub: "Build and share your mock", to: "/mocks", icon: "🏈" },
+                { label: "Mock Draft Simulator", sub: "Make every pick, live", to: "/draftsim", icon: "⏱️", hot: true },
                 { label: "Draft News", sub: "Latest prospect analysis", to: "/news", icon: "📰" },
-              ].map(({ label, sub, to, icon }) => (
-                <Link key={label} to={to} className="wdh-tile" style={{
+              ].map(({ label, sub, to, icon, hot }) => (
+                <Link key={label} to={to} className={`wdh-tile${hot ? " wdh-sim-tile" : ""}`} style={{
                   display: "flex", flexDirection: "column", gap: "8px",
-                  background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+                  background: hot ? "rgba(246,162,29,0.22)" : "rgba(255,255,255,0.1)", border: hot ? `2px solid ${GOLD}` : "1px solid rgba(255,255,255,0.2)",
                   borderRadius: "12px", padding: "18px 18px", textDecoration: "none",
                   transition: "background 0.15s", height: "100%", boxSizing: "border-box",
                 }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = hot ? "rgba(246,162,29,0.34)" : "rgba(255,255,255,0.18)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = hot ? "rgba(246,162,29,0.22)" : "rgba(255,255,255,0.1)"; }}
                 >
+                  {hot && <span style={{ position: "absolute", top: "10px", right: "10px", background: "#c8102e", color: "#fff", borderRadius: "5px", padding: "2px 7px", fontSize: "10px", fontWeight: 900, letterSpacing: "0.1em" }}>NEW</span>}
                   <span style={{ fontSize: "26px", lineHeight: 1 }}>{icon}</span>
                   <span style={{ fontWeight: 900, fontSize: "13px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.25 }}>{label}</span>
                   <span style={{ fontWeight: 700, fontSize: "11px", color: "rgba(255,255,255,0.6)", lineHeight: 1.35 }}>{sub}</span>
@@ -138,17 +145,30 @@ export default function HomeHero({ mode }) {
               <span style={{ color: GOLD }}>YOUR WAY.</span>
             </div>
 
-            <div style={{ fontSize: isMobile ? "12px" : "15px", fontWeight: 700, color: "#fff", lineHeight: 1.65, marginBottom: "18px", maxWidth: "520px" }}>
-              Create your own NFL Draft board, publish player evaluations, and compare your rankings with the We-Draft community.
+            <div style={{ fontSize: isMobile ? "12px" : "15px", fontWeight: 700, color: "#fff", lineHeight: 1.65, marginBottom: "16px", maxWidth: "540px" }}>
+              Run the {SIM_YEAR} NFL Draft live in the Mock Draft Simulator, build your own board, and compare your rankings with the We-Draft community.
+            </div>
+
+            {/* The Draft Sim, front and center. */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", width: isMobile ? "100%" : "auto", marginBottom: "14px" }}>
+              <Link to="/draftsim" className="wdh-cta wdh-sim-cta" style={{
+                display: "block", boxSizing: "border-box", width: isMobile ? "100%" : "auto",
+                backgroundColor: GOLD, color: "#fff", border: "2px solid #fff", borderRadius: "10px",
+                padding: isMobile ? "13px 20px" : "16px 38px", textDecoration: "none", textAlign: "center",
+                fontWeight: 900, fontSize: isMobile ? "15px" : "19px", textTransform: "uppercase", letterSpacing: "0.06em",
+                boxShadow: "0 8px 22px rgba(0,0,0,0.28)", WebkitTapHighlightColor: "transparent",
+              }}>
+                Run the {SIM_YEAR} Mock Draft Simulator →
+              </Link>
             </div>
 
             {!user ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
                 <button onClick={login} className="wdh-cta" style={{
-                  backgroundColor: GOLD, color: "#fff",
-                  border: "2px solid #fff", borderRadius: "8px",
-                  padding: isMobile ? "12px 24px" : "16px 36px",
-                  fontWeight: 900, fontSize: isMobile ? "14px" : "18px",
+                  backgroundColor: "transparent", color: "#fff",
+                  border: `2px solid ${GOLD}`, borderRadius: "8px",
+                  padding: isMobile ? "9px 18px" : "10px 24px",
+                  fontWeight: 900, fontSize: isMobile ? "12px" : "14px",
                   textTransform: "uppercase", letterSpacing: "0.08em",
                   cursor: "pointer", fontFamily: "inherit",
                   WebkitTapHighlightColor: "transparent",
@@ -171,10 +191,10 @@ export default function HomeHero({ mode }) {
             {/* Mobile horizontal chip row */}
             {isMobile && (
               <div className="mobile-chip-scroll" style={{ marginTop: "18px", width: "100%" }}>
-                {mobileChips.map(({ label, to, icon }) => (
-                  <Link key={label} to={to} className="mobile-chip">
+                {mobileChips.map(({ label, to, icon, hot }) => (
+                  <Link key={label} to={to} className={`mobile-chip${hot ? " hot" : ""}`}>
                     <span style={{ fontSize: "20px", lineHeight: 1 }}>{icon}</span>
-                    <span style={{ fontWeight: 900, fontSize: "10px", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.2 }}>{label}</span>
+                    <span style={{ fontWeight: 900, fontSize: "10px", color: hot ? "#111" : "#fff", textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.2 }}>{label}</span>
                   </Link>
                 ))}
               </div>

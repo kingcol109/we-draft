@@ -8,8 +8,6 @@ import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, query, orderBy, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { useAuth } from "../context/AuthContext";
-import { canUseSim } from "../components/SimRoute";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { fetchNflBranding } from "../utils/draftProfileData";
@@ -27,8 +25,6 @@ const pickList = (mock) => Object.values(mock.picks || {}).sort((a, b) => a.pick
 
 export default function MockDraftHub() {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
-  const simAccess = canUseSim(user, profile);
   const isMobile = useIsMobile();
   const [mocks, setMocks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -81,25 +77,8 @@ export default function MockDraftHub() {
       <style>{MOCK_CARD_CSS}</style>
 
       <MockPageShell year={classFilter} isMobile={isMobile}>
-        <MockHero
-          eyebrow="NFL Draft"
-          title="Mock Drafts"
-          isMobile={isMobile}
-          actions={
-            <>
-              <button onClick={() => navigate("/mocks/create")} style={button("gold", isMobile)}>+ Write a Mock</button>
-              <button onClick={() => navigate("/mocks/my")} style={button("ghost", isMobile)}>My Mocks</button>
-            </>
-          }
-        >
-          <p style={heroText(isMobile)}>
-            Every pick, and the case for it. Build your board, trade picks, and explain each selection — then publish it for the community to read.
-          </p>
-        </MockHero>
-
-        {/* Draft Sim (DraftSim.jsx) — the simulator lives off this page.
-            Beta for now: only shown to who can open it (SimRoute.js). */}
-        {simAccess && <Link to="/draftsim" className="wd-mock-card" style={{
+        {/* Draft Sim (DraftSim.jsx) — first thing on the page. */}
+        <Link to="/draftsim" className="wd-mock-card" style={{
           position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 12 : 20, flexWrap: "wrap", overflow: "hidden", textDecoration: "none",
           borderRadius: 16, padding: isMobile ? "16px" : "20px 26px", marginBottom: 18,
           background: "radial-gradient(600px 200px at 20% -20%, #12305c 0%, #070d18 70%), #070d18", boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
@@ -116,7 +95,23 @@ export default function MockDraftHub() {
             </div>
           </div>
           <span style={{ ...button("gold", isMobile), flexShrink: 0 }}>Start the Draft Sim →</span>
-        </Link>}
+        </Link>
+        <MockHero
+          eyebrow="NFL Draft"
+          title="Mock Drafts"
+          isMobile={isMobile}
+          actions={
+            <>
+              <button onClick={() => navigate("/mocks/create")} style={button("gold", isMobile)}>+ Write a Mock</button>
+              <button onClick={() => navigate("/mocks/my")} style={button("ghost", isMobile)}>My Mocks</button>
+            </>
+          }
+        >
+          <p style={heroText(isMobile)}>
+            Every pick, and the case for it. Build your board, trade picks, and explain each selection — then publish it for the community to read.
+          </p>
+        </MockHero>
+
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
           {ACTIVE_YEARS.map((y) => (

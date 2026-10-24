@@ -8,8 +8,6 @@ import Logo1 from "../assets/Logo1.png";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginAds from "../components/MarginAds";
-import { useAuth } from "../context/AuthContext";
-import { canUseSim } from "../components/SimRoute";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import DraftArchiveList, { useSchoolLogos } from "../components/DraftArchiveList";
 import ProjectedPicks from "../components/ProjectedPicks";
@@ -266,10 +264,6 @@ export default function NFLTeamPage() {
   const { teamId, tab: tabParam } = useParams();
   const navigate = useNavigate();
   const teamKey = teamId?.toUpperCase();
-  // The Draft Sim is beta-gated (SimRoute.js) — the hero's DRAFT button
-  // only shows to those who can open it.
-  const { user, profile } = useAuth();
-  const simAccess = canUseSim(user, profile);
 
   const [team, setTeam] = useState(null);
   const [picks, setPicks] = useState([]);
@@ -750,28 +744,26 @@ export default function NFLTeamPage() {
             </div>
             {/* Right side, over the faded wordmark bleed — starts the
                 Draft Sim as this team (/draftsim/{team}). */}
-            {simAccess && (
-              <Link to={`/draftsim/${teamKey.toLowerCase()}`} className="wd-nfl-draft-btn"
-                aria-label={`Draft as the ${team.City} ${team.Team} in the Draft Sim`}
-                style={{
-                  "--dc": readableOn(c1, "#ffffff"), "--dg": c2,
-                  flexShrink: 0, alignSelf: "center", textDecoration: "none",
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 2 : 4,
-                  background: "linear-gradient(180deg, #ffffff 0%, #eef1f5 100%)",
-                  color: "var(--dc)", border: `2px solid ${c2}`, borderRadius: 999,
-                  padding: isMobile ? "8px 18px 9px" : "14px 44px 16px",
-                  boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
-                }}>
-                <span className="wd-draft-shine" aria-hidden="true" />
-                <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: isMobile ? 9 : 11, fontWeight: 900, letterSpacing: "0.2em", opacity: 0.85 }}>
-                  <span className="wd-draft-dot" style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: "50%", background: "#e11d2e", boxShadow: "0 0 8px rgba(225,29,46,0.7)" }} />
-                  ON THE CLOCK
-                </span>
-                <span style={{ fontSize: isMobile ? 20 : 34, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1 }}>
-                  DRAFT
-                </span>
-              </Link>
-            )}
+            <Link to={`/draftsim/${teamKey.toLowerCase()}`} className="wd-nfl-draft-btn"
+              aria-label={`Draft as the ${team.City} ${team.Team} in the Draft Sim`}
+              style={{
+                "--dc": readableOn(c1, "#ffffff"), "--dg": c2,
+                flexShrink: 0, alignSelf: "center", textDecoration: "none",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 2 : 4,
+                background: "linear-gradient(180deg, #ffffff 0%, #eef1f5 100%)",
+                color: "var(--dc)", border: `2px solid ${c2}`, borderRadius: 999,
+                padding: isMobile ? "8px 18px 9px" : "14px 44px 16px",
+                boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
+              }}>
+              <span className="wd-draft-shine" aria-hidden="true" />
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: isMobile ? 9 : 11, fontWeight: 900, letterSpacing: "0.2em", opacity: 0.85 }}>
+                <span className="wd-draft-dot" style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: "50%", background: "#e11d2e", boxShadow: "0 0 8px rgba(225,29,46,0.7)" }} />
+                ON THE CLOCK
+              </span>
+              <span style={{ fontSize: isMobile ? 20 : 34, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1 }}>
+                DRAFT
+              </span>
+            </Link>
           </div>
         </div>
 

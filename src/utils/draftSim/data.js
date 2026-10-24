@@ -18,11 +18,11 @@ import { NFL_TEAMS } from "../coachHistory";
 import { SIM_POSITIONS, SPECIALISTS, buildBoard, resolveNeeds } from "./engine";
 import { applyDeskLines, applyDeskAvatars, applyDeskLegends, applyPlayerTakes } from "./analysts";
 
-// The class the sim drafts by default, and every class it can draft
-// (/draftsim/2028). A thin class's board only fills a few rounds —
+// SIM_YEAR / SIM_YEARS (years.js): the class drafted by default, and every
+// class it can draft. A thin class's board only fills a few rounds —
 // maxRounds says how many.
-export const SIM_YEAR = "2027";
-export const SIM_YEARS = ["2027", "2028"];
+import { SIM_YEAR, SIM_YEARS } from "./years";
+export { SIM_YEAR, SIM_YEARS };
 export const maxRounds = (board) => Math.max(1, Math.min(7, Math.floor(board.filter((p) => !SPECIALISTS.includes(p.Position)).length / 32)));
 
 const cache = {};

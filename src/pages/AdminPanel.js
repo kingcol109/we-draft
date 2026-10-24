@@ -8749,8 +8749,7 @@ function SortableTh({ label, sortKey, activeKey, dir, onSort, align = "left" }) 
 // the Dummy Content feature; verified/role were previously only ever set by
 // hand in the Firebase console). Dummy accounts (isDummy: true) are
 // filtered out — they're synthetic evaluation authors, not real people to
-// manage here. "Sim Beta" writes `simBeta` the same way — it opens /sim and
-// (until it launches) /draftsim
+// manage here. "Sim Beta" writes `simBeta` the same way — it opens /sim
 // (normally admin-only, see SimRoute.js) to that user and shows them a Sim
 // button on their own profile; same rules protection as verified. ──
 function UsersSection() {

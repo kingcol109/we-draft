@@ -3,7 +3,9 @@
 // /mocks/create and /mocks/:mockId — the mock draft editor: pick a class,
 // fill each pick from the player bank (drag, or tap a player to fill the
 // next open pick), trade picks, and write it up — an intro plus an optional
-// note on each pick, which ViewMock.js shows as the column. Only the owner
+// note on each pick, which ViewMock.js shows as the column. Both start
+// hidden behind "+ Add intro" / "+ Add note" (open on their own once they
+// have text), so a plain mock is just the board. Only the owner
 // edits; anyone else (and the owner of a locked 2026 mock) is sent to the
 // read-only /view page.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -45,6 +47,9 @@ const panel = { background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, ov
 const panelHead = { background: BLUE, padding: "9px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 };
 const panelTitle = { color: GOLD, fontWeight: 900, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.1em" };
 const field = { width: "100%", boxSizing: "border-box", border: "2px solid #d8dee8", borderRadius: 10, outline: "none", color: INK, background: "#fff" };
+
+// "+ Add intro" / "+ Add note": a quiet text link.
+const addTextBtn = { border: "none", background: "none", padding: 0, color: BLUE, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: BODY_FONT };
 
 export default function CreateMock() {
   const { mockId } = useParams();
@@ -233,6 +238,9 @@ export default function CreateMock() {
   const handleDropOnPick = (pickNumber, e) => { if (!isOwner) return; e.preventDefault(); const raw = e.dataTransfer.getData("player"); if (raw) assign(pickNumber, JSON.parse(raw)); };
   const handleRemovePlayer = (pickNumber) => { setAssignedPlayers((prev) => { const copy = { ...prev }; delete copy[pickNumber]; return copy; }); };
   const handleTeamChange = (pickNumber, newTeam) => { setPicks((prev) => prev.map((p) => p.pickNumber === pickNumber ? { ...p, currentTeam: newTeam, tradedFrom: p.originalTeam !== newTeam ? p.originalTeam : null } : p)); setActivePick(null); };
+  // Text boxes opened with "+ Add…" — the intro, and picks by number.
+  const [introOpen, setIntroOpen] = useState(false);
+  const [openNotes, setOpenNotes] = useState({});
   const handleNoteChange = (pickNumber, note) => setPicks((prev) => prev.map((p) => (p.pickNumber === pickNumber ? { ...p, note } : p)));
 
   const handleSaveMock = async () => {
@@ -347,12 +355,19 @@ export default function CreateMock() {
         <input value={mockName} onChange={(e) => setMockName(e.target.value)} placeholder="Mock draft title…" aria-label="Mock draft title"
           style={{ ...field, fontSize: isMobile ? 18 : 24, fontWeight: 900, padding: "10px 14px", fontFamily: FONT, textTransform: "uppercase" }} />
 
-        <div>
-          <textarea value={intro} onChange={(e) => setIntro(e.target.value.slice(0, INTRO_MAX))} rows={isMobile ? 4 : 3} aria-label="Intro"
-            placeholder="Intro (optional) — set the scene: what's driving this board, the big trades, the picks you'd defend to the end…"
-            style={{ ...field, padding: "10px 14px", fontSize: 15, lineHeight: 1.55, fontFamily: "Georgia, 'Times New Roman', serif", resize: "vertical" }} />
-          <div style={{ textAlign: "right", fontSize: 11, color: "#98a2b3", fontFamily: BODY_FONT }}>{intro.length}/{INTRO_MAX}</div>
-        </div>
+        {introOpen || intro ? (
+          <div>
+            <textarea value={intro} onChange={(e) => setIntro(e.target.value.slice(0, INTRO_MAX))} rows={isMobile ? 4 : 3} aria-label="Intro" autoFocus={introOpen && !intro}
+              placeholder="Intro (optional) — set the scene: what's driving this board, the big trades, the picks you'd defend to the end…"
+              style={{ ...field, padding: "10px 14px", fontSize: 15, lineHeight: 1.55, fontFamily: "Georgia, 'Times New Roman', serif", resize: "vertical" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#98a2b3", fontFamily: BODY_FONT }}>
+              {!intro ? <button onClick={() => setIntroOpen(false)} style={addTextBtn}>Hide intro</button> : <span />}
+              <span>{intro.length}/{INTRO_MAX}</span>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setIntroOpen(true)} style={{ ...addTextBtn, alignSelf: "flex-start", fontSize: 13 }}>+ Add intro</button>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <div role="group" aria-label="Visibility" style={{ display: "inline-flex", gap: 4, padding: 3, background: "#f1f4f8", borderRadius: 999 }}>
@@ -491,10 +506,16 @@ export default function CreateMock() {
                     </div>
                   )}
 
-                  {(player || pick.note) && (
+                  {player && !pick.note && !openNotes[pick.pickNumber] && (
+                    <div style={{ padding: "2px 0 0 48px" }}>
+                      <button onClick={() => setOpenNotes((o) => ({ ...o, [pick.pickNumber]: true }))} style={addTextBtn}>+ Add note</button>
+                    </div>
+                  )}
+                  {(pick.note || (player && openNotes[pick.pickNumber])) && (
                     <div style={{ padding: "6px 0 0 48px" }}>
-                      <textarea value={pick.note || ""} onChange={(e) => handleNoteChange(pick.pickNumber, e.target.value.slice(0, NOTE_MAX))}
-                        rows={pick.note ? 3 : 1} placeholder="Why this pick? (optional)" aria-label={`Note for pick ${pick.pickNumber}`}
+                      <textarea value={pick.note || ""} onChange={(e) => handleNoteChange(pick.pickNumber, e.target.value.slice(0, NOTE_MAX))} autoFocus={!pick.note}
+                        onBlur={() => { if (!pick.note?.trim()) setOpenNotes((o) => ({ ...o, [pick.pickNumber]: false })); }}
+                        rows={pick.note ? 3 : 2} placeholder="Why this pick? (optional)" aria-label={`Note for pick ${pick.pickNumber}`}
                         style={{ ...field, border: "1px solid #e1e7ef", borderRadius: 8, padding: "6px 10px", fontSize: 13, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", resize: "vertical", background: "#fbfcfe" }} />
                       {pick.note && <div style={{ textAlign: "right", fontSize: 10, color: "#98a2b3", fontFamily: BODY_FONT }}>{pick.note.length}/{NOTE_MAX}</div>}
                     </div>

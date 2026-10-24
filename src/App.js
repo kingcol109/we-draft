@@ -9,6 +9,7 @@ import { HelmetProvider, Helmet } from "react-helmet-async";
 import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
 import SimRoute from "./components/SimRoute";
+import DraftSimMeta from "./components/draftSim/DraftSimMeta";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
@@ -206,11 +207,11 @@ function MainLayout() {
                 the editor at the plain /mocks/:mockId path below. */}
             <Route path="/mocks/:mockId/view" element={<ViewMock />} />
             <Route path="/mocks/:mockId" element={<CreateMock />} />
-            {/* Beta until launch: admins + Sim Beta users (SimRoute.js).
-                Signed out → sign-in prompt; signed in without access → /mocks. */}
-            <Route path="/draftsim" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
-            <Route path="/draftsim/:team" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
-            <Route path="/draftsim/:year/:team" element={<SimRoute signInPrompt deniedTo="/mocks"><DraftSim /></SimRoute>} />
+            {/* Open to everyone, no account needed (saving and My Board
+                ask for one). SEO tags: DraftSimMeta.jsx. */}
+            <Route path="/draftsim" element={<><DraftSimMeta /><DraftSim /></>} />
+            <Route path="/draftsim/:team" element={<><DraftSimMeta /><DraftSim /></>} />
+            <Route path="/draftsim/:year/:team" element={<><DraftSimMeta /><DraftSim /></>} />
             <Route path="/whiteboard" element={<Whiteboard />} />
             <Route path="/draft" element={<DraftPage />} />
             <Route path="/my-draft-class" element={<MyDraftClass />} />

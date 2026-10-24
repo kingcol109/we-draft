@@ -416,6 +416,30 @@ export function applyMyGrades(board, myGrades = {}) {
   });
 }
 
+// ── Team boards ──
+// Every team's own read of the community board, drawn once per sim: each
+// prospect's community rank plus a seeded random spread (standard
+// deviation, in board spots) that widens down the board — teams agree on
+// the top 15, disagree more and more after that. Re-ranked into the team's
+// own 1…N. CPU teams pick off their own board; everything graded (board
+// rank, value / reach, the desk, draft grades) stays on the community's.
+// Specialists keep their community spot. chaos 0 → no spread.
+export const BOARD_SPREAD = [[15, 1], [50, 6], [100, 11], [150, 17], [Infinity, 25]];
+export const boardSpread = (rank) => BOARD_SPREAD.find(([upTo]) => rank <= upTo)[1];
+const teamSeed = (seed, team) => [...team].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), seed ^ 0x811c9dc5) | 0;
+export function buildTeamBoards(board, teams, seed, chaos = 1) {
+  if (!chaos) return {};
+  const players = board.filter((p) => !isSpecialist(p));
+  return Object.fromEntries(teams.map((team) => {
+    const work = { seed: teamSeed(seed, team) };
+    const scored = players.map((p) => ({ id: p.id, s: p.rank + gaussian(work) * boardSpread(p.rank) * chaos }));
+    scored.sort((a, b) => a.s - b.s);
+    return [team, Object.fromEntries(scored.map((x, i) => [x.id, i + 1]))];
+  }));
+}
+// Where a team has a prospect on its own board (the community rank without one).
+export const teamRank = (state, team, p) => state.teamBoards?.[team]?.[p.id] ?? p.rank;
+
 // ── Sim state ──
 // order: [{ Pick, Round, Team, Traded }] (fetchDraft's picks).
 // futureOrder / futureYear: next year's draft (same shape), traded as
@@ -447,8 +471,10 @@ export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, 
       via: p.Traded ? p.Team : null,
       selection: null,
     }));
+  const teams = [...new Set([...picks, ...capital].flatMap((p) => [p.owner, p.original]))];
   return {
     picks, capital, board, chart, staff, chaos, needs,
+    teamBoards: buildTeamBoards(board, teams, seed | 0, chaos),
     byId: Object.fromEntries(board.map((p) => [p.id, p])),
     taken: {},
     teamPos: {},
@@ -486,12 +512,16 @@ function effectiveRank(state, team, p, overall, noise = 0) {
   const fitPull = fit ? Math.max(0, (fit - 60) / 40) * (4 + 0.22 * overall) : 0;
   const repeatPenalty = repeatOf(state, team, p) * (6 + 0.3 * overall) * (isSpecialist(p) ? 10 : p.Position === "QB" ? 3 : 1);
   const need = needPull(state, team, p, overall);
-  const base = isSpecialist(p) ? specialistRank(state, p.Position, overall) : p.rank * positionValue(p.Position, p.rank);
+  const rank = teamRank(state, team, p);
+  const base = isSpecialist(p) ? specialistRank(state, p.Position, overall) : rank * positionValue(p.Position, rank);
   return base + earlyNudge(p.Position, overall) - fitPull + repeatPenalty - need * (5 + 0.25 * overall) + noise;
 }
 
 function candidatesFor(state, team) {
-  const avail = cpuAvailable(state);
+  // The top of this team's own board.
+  const avail = state.teamBoards?.[team]
+    ? cpuAvailable(state).sort((a, b) => teamRank(state, team, a) - teamRank(state, team, b))
+    : cpuAvailable(state);
   const top = avail.slice(0, CANDIDATES);
   const fits = avail.slice(CANDIDATES).filter((p) => (fitFor(p, team) || 0) >= STRONG_FIT);
   // The best kicker and punter left, once one could realistically go.
@@ -503,10 +533,21 @@ function candidatesFor(state, team) {
   return [...top, ...fits, ...specialists];
 }
 
+// Prospects a CPU team takes the moment they're on the clock with him on
+// the board — unless (skip) the team has a bigger call to make. Jeremiah
+// Smith goes No. 1 unless that team has an Upgrade Needed at QB (and
+// hasn't drafted one yet); then he's the next team's.
+const bigQbNeed = (state, team) => !!state.needs?.[team]?.QB?.labels?.includes("Upgrade Needed") && (state.needFilled?.[team]?.QB || 0) < 1;
+export const MUST_PICKS = [
+  { id: "row_183", name: "Jeremiah Smith", skip: bigQbNeed },
+];
+
 // The CPU's choice for the pick on the clock → prospect or null (board empty).
 export function chooseCpuPick(state) {
   const pick = currentPick(state);
   if (!pick) return null;
+  const must = MUST_PICKS.find((m) => state.byId[m.id] && !state.taken[m.id] && !m.skip(state, pick.owner));
+  if (must) return { prospect: state.byId[must.id], seed: state.seed };
   const work = { seed: state.seed };
   let best = null;
   let bestScore = Infinity;
@@ -546,6 +587,9 @@ export function makePick(state, prospectId, seed = state.seed) {
     positionOrdinal: prior.filter((p) => p.Position === prospect.Position).length + 1,
     positionRun: recent.filter((p) => p.Position === prospect.Position).length,
     bestLeftAtPosition: state.board.find((p) => p.Position === prospect.Position && !state.taken[p.id] && p.id !== prospectId) || null,
+    // The quarterback this team took in round 1 of this sim, if any — the
+    // desk's "protecting / a weapon for {qb}" lines on its later picks.
+    rookieQb: state.byId[state.picks.slice(0, state.idx).find((p) => p.owner === pick.owner && p.round === 1 && state.byId[p.selection]?.Position === "QB")?.selection] || null,
   };
   const idx = state.idx + 1;
   const next = {
@@ -658,10 +702,10 @@ function bundleFor(state, team, target, maxValue) {
   return { picks: bundle, total };
 }
 
-// How much a team loves a prospect at a pick: value (the board has him
-// better than the pick), its needs and its staff's fit — 0 to about 1.8.
+// How much a team loves a prospect at a pick: value (its own board has
+// him better than the pick), its needs and its staff's fit — 0 to about 1.8.
 function love(state, team, p, overall) {
-  const value = Math.max(0, Math.min(1, (overall - p.rank) / (6 + overall * 0.25)));
+  const value = Math.max(0, Math.min(1, (overall - teamRank(state, team, p)) / (6 + overall * 0.25)));
   const fit = Math.max(0, ((fitFor(p, team) || 0) - 70) / 30);
   return 0.6 * value + 0.6 * needPull(state, team, p, overall) + 0.6 * fit;
 }
@@ -719,14 +763,17 @@ export function acceptOffer(state, offer) {
   if (!pick) return { state, event: null };
   const from = pick.owner;
   const swap = (p) => (offer.give.includes(p.overall) && !p.selection ? { ...p, owner: from, via: offer.team } : p);
-  const picks = state.picks.map((p, i) => (i === state.idx ? { ...p, owner: offer.team, via: from } : swap(p)));
+  const swapped = [...state.picks.map(swap), ...(state.capital || []).map(swap)];
+  const give = offer.give.map((o) => swapped.find((p) => p.overall === o));
+  // tradeUp rides on the pick into its pick event: the desk tells the
+  // trade and the selection together ("the Jets move up and get their guy").
+  const picks = state.picks.map((p, i) => (i === state.idx ? { ...p, owner: offer.team, via: from, tradeUp: { from, give } } : swap(p)));
   const capital = (state.capital || []).map(swap);
-  const all = [...picks, ...capital];
   const event = {
     type: "trade",
     from, to: offer.team,
     pick: { ...pick },
-    give: offer.give.map((o) => all.find((p) => p.overall === o)),
+    give,
     ratio: offer.ratio,
     target: offer.target,
     userInvolved: state.userTeams.includes(from),
@@ -844,6 +891,12 @@ export function evaluateProposal(state, { give = [], get = [] }) {
 
 // Swap the picks → { state, event } (event null when the CPU says no).
 export function applyProposal(state, { team, partner, give = [], get = [] }) {
+  // Every pick still there to trade — a CPU pick on the clock can be made
+  // while the user's building the deal (stale: nothing swaps).
+  const still = (n, owner) => tradeablePicks(state, owner, { includeCurrent: true }).some((p) => p.overall === n);
+  if (!give.every((n) => still(n, team)) || !get.every((n) => still(n, partner))) {
+    return { state, event: null, verdict: { ...evaluateProposal(state, { give, get }), accept: false, stale: true } };
+  }
   const verdict = evaluateProposal(state, { give, get });
   if (!verdict.accept) return { state, event: null, verdict };
   const swap = (p) => {
@@ -852,7 +905,7 @@ export function applyProposal(state, { team, partner, give = [], get = [] }) {
     if (get.includes(p.overall) && p.owner === partner) return { ...p, owner: team, via: partner };
     return p;
   };
-  const picks = state.picks.map(swap);
+  let picks = state.picks.map(swap);
   const capital = (state.capital || []).map(swap);
   const all = [...picks, ...capital];
   const find = (n) => all.find((p) => p.overall === n);
@@ -860,6 +913,8 @@ export function applyProposal(state, { team, partner, give = [], get = [] }) {
   // "moves up" to it.
   const earliest = Math.min(...give, ...get);
   const userMovesUp = get.includes(earliest);
+  // A pick in this draft carries the trade up into its pick event (see acceptOffer).
+  picks = picks.map((p) => (p.overall === earliest ? { ...p, tradeUp: { from: userMovesUp ? partner : team, give: (userMovesUp ? give : get).map(find) } } : p));
   const event = {
     type: "trade", proposed: true, userInvolved: true,
     to: userMovesUp ? team : partner, from: userMovesUp ? partner : team,

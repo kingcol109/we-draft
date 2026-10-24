@@ -17,21 +17,24 @@
 // screen — any number of teams (or none, and just watch), rounds, speed and
 // desk chatter; the live sim's Settings button comes back here with its
 // teams still picked. "My Board" drafts off the signed-in user's own round
-// grades instead of the community's (engine applyMyGrades). Linked from the mock drafts hub (MockDraftHub.jsx) —
+// grades instead of the community's (engine applyMyGrades). The setup
+// screen's My Drafts tab (?tab=saved) lists the user's saved sims
+// (components/draftSim/SavedSims.jsx). Linked from the mock drafts hub (MockDraftHub.jsx) —
 // the hand-built, written mocks stay there.
-import { useEffect, useMemo, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { loadSimSetup, loadSimData, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
 import { applyMyGrades } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
+import { countSim, countUserPick } from "../utils/draftSim/stats";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
 import SimBroadcast, { SIM_CSS, SimTicker } from "../components/draftSim/SimBroadcast";
 import SimResults from "../components/draftSim/SimResults";
+import SavedSims from "../components/draftSim/SavedSims";
 
 const BODY = "Arial, sans-serif";
 const FONT = "'Arial Black', Arial, sans-serif";
@@ -41,6 +44,11 @@ const DEFAULT_ROUNDS = 7;
 // App.js pads every page 25px below the navbar; the sim's dark stage runs
 // up under the navbar instead of leaving a white strip.
 const APP_TOP_PADDING = 25;
+// On mobile it runs right up to the navbar's bottom edge (a 42px logo plus
+// 12px padding top and bottom) — the body's 80px navbar padding
+// (index.css pt-20) leaves a strip otherwise — and fills the screen below.
+const BODY_TOP_PADDING = 80;
+const MOBILE_NAV_HEIGHT = 66;
 
 const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
@@ -121,14 +129,12 @@ export default function DraftSim() {
 
   if ((team && !validTeam) || (params.year && !SIM_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
 
+  // The setup screen's tab: "new" (set up a draft) or "saved" (My Drafts).
+  const tab = new URLSearchParams(location.search).get("tab") === "saved" ? "saved" : "new";
+  const setTab = (t) => navigate({ pathname: location.pathname, search: t === "saved" ? "?tab=saved" : "" }, { replace: true, state: location.state });
+
   const names = teamNamer(setup?.branding || {});
-  const title = team
-    ? `${names.teamName(team)} Mock Draft Simulator ${year} | We-Draft Draft Sim`
-    : `${year} NFL Mock Draft Simulator | We-Draft Draft Sim`;
-  const description = team
-    ? `Run the ${names.teamName(team)}' ${year} draft. Every other team picks off the We-Draft community board and its own staff's draft history, trades included, with live analyst reactions to every pick.`
-    : `Simulate the ${year} NFL Draft live: pick for one team or several, field trade offers, and get instant reactions from the We-Draft analyst desk. CPU teams draft by community grades and each staff's own draft tendencies.`;
-  const url = `https://we-draft.com/draftsim${yearPath}${team ? `/${team.toLowerCase()}` : ""}`;
+  // Title, description and canonical: components/draftSim/DraftSimMeta.jsx (App.js).
 
   const start = (cfg) => {
     const next = { ...cfg, seed: newSeed() };
@@ -152,40 +158,74 @@ export default function DraftSim() {
 
   return (
     <>
-      <Helmet>
-        <title>{title}</title>
-        <meta name="description" content={description} />
-        <link rel="canonical" href={url} />
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content={title} />
-        <meta property="og:description" content={description} />
-        <meta property="og:url" content={url} />
-        <meta property="og:site_name" content="We-Draft.com" />
-        <meta name="twitter:card" content="summary" />
-        <meta name="twitter:title" content={title} />
-        <meta name="twitter:description" content={description} />
-      </Helmet>
       <style>{SIM_CSS}</style>
 
-      <div style={{ background: STAGE_BG, marginTop: -APP_TOP_PADDING, minHeight: "calc(100vh / var(--pz, 1) - 35px)" }}>
+      <div style={{
+        background: STAGE_BG,
+        marginTop: isMobile ? -(APP_TOP_PADDING + BODY_TOP_PADDING - MOBILE_NAV_HEIGHT) : -APP_TOP_PADDING,
+        minHeight: isMobile ? `calc(100dvh - ${MOBILE_NAV_HEIGHT}px)` : "calc(100vh / var(--pz, 1) - 35px)",
+      }}>
         {error ? (
           <Column isMobile={isMobile}><div style={{ color: "#fff", textAlign: "center", padding: 60, fontFamily: BODY }}>Couldn&apos;t load the draft — try again.</div></Column>
         ) : !setup || (config && !data) ? (
           <Column isMobile={isMobile}><LoadingSpinner label="Loading the draft" size={40} minHeight="50vh" /></Column>
         ) : config ? (
-          <LiveSim key={config.seed} data={data} config={config} myGrades={myGrades} isMobile={isMobile}
-            onRerun={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
-            onSettings={() => openSettings(config.teams, config.board)}
-            onPickTeam={pickAnother} />
+          <SimErrorBoundary key={config.seed} isMobile={isMobile}
+            onRestart={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
+            onSettings={() => openSettings(config.teams, config.board)}>
+            <LiveSim data={data} config={config} myGrades={myGrades} isMobile={isMobile}
+              onRerun={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
+              onSettings={() => openSettings(config.teams, config.board)}
+              onPickTeam={pickAnother} />
+          </SimErrorBoundary>
         ) : (
           <Column isMobile={isMobile}>
-            <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending}
-              onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />
+            <SetupTabs tab={tab} onTab={setTab} />
+            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending}
+              onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
           </Column>
         )}
       </div>
     </>
   );
+}
+
+// Anything the live sim throws: a way back in instead of a blank page.
+// Keyed by the run's seed, so a restart (a new seed) clears it.
+class SimErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Draft sim crashed:", error, info?.componentStack);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    const { onRestart, onSettings, isMobile } = this.props;
+    const btn = (primary) => ({
+      border: primary ? "none" : `1px solid ${GOLD}`, borderRadius: 999, padding: "10px 18px", cursor: "pointer", fontFamily: FONT, fontWeight: 900,
+      fontSize: 12, letterSpacing: "0.06em", background: primary ? GOLD : "transparent", color: primary ? "#111" : "#fff",
+    });
+    return (
+      <Column isMobile={isMobile}>
+        <div style={{ background: "#0e1626", border: "1px solid #1f2b42", borderRadius: 16, padding: 28, textAlign: "center", color: "#fff", fontFamily: BODY }}>
+          <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 20, textTransform: "uppercase" }}>The draft hit a snag</div>
+          <p style={{ color: "#c9d4e5", margin: "8px 0 16px" }}>Something went wrong mid-draft. Restart it with the same settings, or head back to setup.</p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+            <button onClick={onRestart} style={btn(true)}>RESTART DRAFT</button>
+            <button onClick={onSettings} style={btn(false)}>BACK TO SETUP</button>
+          </div>
+        </div>
+      </Column>
+    );
+  }
 }
 
 function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onSettings, onPickTeam }) {
@@ -194,10 +234,27 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onS
   const [data] = useState(() => (config.board === "mine" && myGrades ? { ...communityData, board: applyMyGrades(communityData.board, myGrades) } : communityData));
   // No more rounds than the class's board can fill (2028 is thin).
   const rounds = Math.min(config.rounds, maxRounds(data.board));
-  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed });
+  // Usage counts (Admin → Mock Draft → Statistics): this run, its finish,
+  // and every pick the user makes.
+  const { user } = useAuth();
+  const uid = user?.uid || null;
+  const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
+  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, onUserPick });
+  useEffect(() => { countSim(uid, "sims"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const finished = s.phase === "done";
+  useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Mobile, mid-draft: no ticker, and the sim fills the screen under the
+  // navbar edge to edge (the console scrolls inside it, not the page).
+  if (isMobile && !finished) {
+    return (
+      <div style={{ height: `calc(100dvh - ${MOBILE_NAV_HEIGHT}px)`, padding: 6, boxSizing: "border-box", fontFamily: FONT }}>
+        <SimBroadcast s={s} data={data} isMobile onSettings={onSettings} onPickTeam={onPickTeam} />
+      </div>
+    );
+  }
   return (
     <>
-      <SimTicker s={s} data={data} />
+      {!isMobile && <SimTicker s={s} data={data} />}
       <Column wide isMobile={isMobile}>
         {s.phase === "done"
           ? <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} />
@@ -208,6 +265,19 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, onRerun, onS
 }
 
 // ── Setup ──
+
+function SetupTabs({ tab, onTab }) {
+  const tabStyle = (on) => ({
+    border: "none", borderBottom: `3px solid ${on ? GOLD : "transparent"}`, background: "none", color: on ? "#fff" : "#8b9bb4",
+    padding: "8px 4px", marginRight: 18, cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase",
+  });
+  return (
+    <div role="tablist" style={{ display: "flex", borderBottom: "1px solid #1f2b42", marginBottom: 14 }}>
+      <button role="tab" aria-selected={tab === "new"} onClick={() => onTab("new")} style={tabStyle(tab === "new")}>New Draft</button>
+      <button role="tab" aria-selected={tab === "saved"} onClick={() => onTab("saved")} style={tabStyle(tab === "saved")}>My Drafts</button>
+    </div>
+  );
+}
 
 const chipStyle = (on) => ({
   border: `2px solid ${on ? GOLD : "#24324d"}`, background: on ? GOLD : "#0e1626", color: on ? "#111" : "#c9d4e5",

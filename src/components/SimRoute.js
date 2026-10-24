@@ -8,12 +8,11 @@ const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
 // Admins, plus users granted Sim Beta (users/{uid}.simBeta, toggled from
-// AdminPanel.js's Users section). Also hides links to gated pages
-// (MockDraftHub.jsx's Draft Sim banner).
+// AdminPanel.js's Users section). (The Draft Sim launched — it's open to
+// everyone; this gates the Football Sim Lab.)
 export const canUseSim = (user, profile) => !!user && (profile?.role === "admin" || profile?.simBeta === true);
 
-// ── Gate for the sims — /sim (Football Sim Lab) and, until it launches,
-// /draftsim (Draft Sim) — see canUseSim. Same authReady wait as
+// ── Gate for /sim (Football Sim Lab) — see canUseSim. Same authReady wait as
 // AdminRoute.js, same `profile` read off AuthContext.
 //   signInPrompt  signed out → a sign-in prompt (the sign-in modal opens
 //                 on its own) instead of a redirect; once they're in, the

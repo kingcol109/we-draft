@@ -360,12 +360,12 @@ export default function HomeOffSeason() {
         userDocs.forEach((snap) => {
           if (snap.exists()) {
             const u = snap.data();
-            userMap[snap.id] = { username: u.username || u.email || "User", verified: u.verified || false };
+            userMap[snap.id] = { username: u.username || "Anonymous User", verified: u.verified || false };
           }
         });
         setRecentEvals(publicEvals.map((ev) => ({
           ...ev,
-          username: userMap[ev.uid]?.username || "User",
+          username: userMap[ev.uid]?.username || "Anonymous User",
           verified: userMap[ev.uid]?.verified || false,
         })));
       } catch (err) { console.error("Error fetching evals:", err); }

@@ -445,6 +445,39 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
   const first = s.sim.picks.find((p) => teams.includes(p.owner));
   // The team's second color (site gold when drafting as several or none).
   const buttonColor = (one && brandOf(data, one).Color2) || GOLD;
+  const startButton = (
+    <button onClick={s.start} className="wd-sim-draft" style={{ marginTop: isMobile ? 0 : 14, border: "none", borderRadius: 999, padding: isMobile ? "11px 26px" : "12px 26px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: isMobile ? 15 : 16, letterSpacing: "0.1em", background: buttonColor, color: "#fff", boxShadow: "0 4px 14px rgba(0,0,0,0.25)" }}>
+      START THE DRAFT ▶
+    </button>
+  );
+  const firstLine = first ? `Your first pick: No. ${first.overall} (Round ${first.round}).` : "All 32 teams on the CPU.";
+  // Mobile: the logo is the hero, centered, with the start button centered
+  // along the bottom of the stage.
+  if (isMobile) {
+    return (
+      <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "16px 14px 16px", boxSizing: "border-box" }}>
+        {onPickTeam && (
+          <button onClick={onPickTeam} className="wd-sim-pickteam" style={{ position: "absolute", top: 10, right: 12, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: BODY, fontWeight: 700, fontSize: 12, color: "inherit", opacity: 0.85, textDecoration: "underline", textUnderlineOffset: 3 }}>
+            {teams.length ? "Pick another team" : "Pick a team"}
+          </button>
+        )}
+        <div style={{ flex: 1, minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
+          {one ? (
+            <span style={{ display: "inline-flex", filter: "drop-shadow(0 8px 18px rgba(0,0,0,0.35))" }}><TeamLogo brand={brandOf(data, one)} team={one} size={112} /></span>
+          ) : teams.length > 1 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6, maxWidth: "100%" }}>
+              {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={teams.length > 4 ? 36 : 56} />)}
+            </div>
+          ) : null}
+          <div style={{ ...tag(isMobile), marginTop: 4 }}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
+          <ShrinkText text={teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`} max={28} min={16}
+            style={{ maxWidth: "100%", fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase" }} />
+          <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.85, fontFamily: BODY }}>{firstLine}</div>
+        </div>
+        {startButton}
+      </div>
+    );
+  }
   return (
     <div style={{ ...pad(isMobile), flexWrap: "wrap" }}>
       {one ? <TeamLogo brand={brandOf(data, one)} team={one} size={LOGO_SIZE(isMobile)} /> : teams.length > 1 && (
@@ -455,12 +488,8 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
       <div style={{ minWidth: 0 }}>
         <div style={tag(isMobile)}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
         <div style={bigName(isMobile)}>{teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`}</div>
-        <div style={{ fontSize: isMobile ? 12 : 14, fontWeight: 800, opacity: 0.85, fontFamily: BODY }}>
-          {first ? `Your first pick: No. ${first.overall} (Round ${first.round}).` : "All 32 teams on the CPU."}
-        </div>
-        <button onClick={s.start} className="wd-sim-draft" style={{ marginTop: 14, border: "none", borderRadius: 999, padding: isMobile ? "10px 20px" : "12px 26px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: isMobile ? 14 : 16, letterSpacing: "0.1em", background: buttonColor, color: "#fff", boxShadow: "0 4px 14px rgba(0,0,0,0.25)" }}>
-          START THE DRAFT ▶
-        </button>
+        <div style={{ fontSize: 14, fontWeight: 800, opacity: 0.85, fontFamily: BODY }}>{firstLine}</div>
+        {startButton}
         {/* Back to the setup screen's team picker, nothing selected. */}
         {onPickTeam && (
           <button onClick={onPickTeam} className="wd-sim-pickteam" style={{ display: "block", marginTop: 10, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: BODY, fontWeight: 700, fontSize: 13, color: "inherit", opacity: 0.85, textDecoration: "underline", textUnderlineOffset: 3 }}>
@@ -550,6 +579,8 @@ function Stage({ s, data, isMobile, onPickTeam }) {
 
   if (s.phase === "intro") {
     if (s.sim.userTeams.length === 1) look = teamLook(brandOf(data, s.sim.userTeams[0]));
+    // Mobile: the logo is the hero — no wordmark behind it.
+    if (isMobile) look = { ...look, wordmark: null };
     content = <IntroContent s={s} data={data} isMobile={isMobile} onPickTeam={onPickTeam} />;
   } else if (s.phase === "simming") {
     look = SIMMING_LOOK;
@@ -757,8 +788,21 @@ function MyPicksTab({ s, data, isMobile }) {
             {made.map((p) => {
               const pl = s.sim.byId[p.selection];
               const value = SPECIALISTS.includes(pl.Position) ? 0 : p.overall - pl.rank;
+              // Mobile: just who they took — no value or need columns.
+              if (isMobile) {
+                return (
+                  <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #18233a", minWidth: 0 }}>
+                    <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 30, flexShrink: 0, lineHeight: 1.25, textAlign: "center" }}>R{p.round}<br />{p.overall}</span>
+                    {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 30, height: 30, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 30, flexShrink: 0 }} />}
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 14, textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</Link>
+                      <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} · {pl.School}</span>
+                    </span>
+                  </div>
+                );
+              }
               return (
-                <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: "1px solid #18233a", minWidth: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
+                <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: "1px solid #18233a", minWidth: 0 }}>
                   <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
                   {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 28, flexShrink: 0 }} />}
                   <span style={{ flex: 1, minWidth: 0 }}>
@@ -768,16 +812,16 @@ function MyPicksTab({ s, data, isMobile }) {
                   <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 900, color: value > 0 ? "#4ade80" : value < 0 ? "#ff8a9a" : "#9fb0c8", width: 64, textAlign: "right" }}>
                     {value > 0 ? `+${value} value` : value < 0 ? `${value} reach` : "on the board"}
                   </span>
-                  <span style={{ flexShrink: 0, minWidth: isMobile ? 0 : 170, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: p.need ? "#ffb3bf" : "#55657e" }}>
+                  <span style={{ flexShrink: 0, minWidth: 170, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: p.need ? "#ffb3bf" : "#55657e" }}>
                     {p.need ? (p.need.label === "Crowded Room" ? `Into a crowded room: ${NEED_KEY_NAMES[p.need.key] || p.need.key}` : `Filled: ${needLine(p.need)}`) : "No need filled"}
                   </span>
                 </div>
               );
             })}
-            {left.length > 0 && (
+            {left.length > 0 && !isMobile && (
               <div style={{ padding: "8px 14px 4px", color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.16em" }}>REMAINING PICKS</div>
             )}
-            {left.map((p) => {
+            {!isMobile && left.map((p) => {
               const away = s.sim.picks.indexOf(p) - s.sim.idx;
               const live = away === 0 && s.phase !== "done";
               return (
@@ -1097,7 +1141,9 @@ function TradesTab({ s, data, isMobile }) {
   const [get, setGet] = useState([]);
   const [result, setResult] = useState(null);
   const pick = currentPick(s.sim);
-  const includeCurrent = s.phase === "user";
+  // The pick on the clock trades too — the user's, or a CPU team's until
+  // its card is turned in (instant sims move too fast to deal mid-pick).
+  const includeCurrent = !["simming", "done"].includes(s.phase);
 
   if (!userTeams.length) return <div style={EMPTY}>Trades are for your own teams — pick one in Settings.</div>;
 
@@ -1111,8 +1157,8 @@ function TradesTab({ s, data, isMobile }) {
 
   const propose = () => {
     const v = s.proposeTrade({ team, partner, give, get });
-    setResult(v.accept ? { ok: true, text: `Done — the ${brandOf(data, partner).Team || partner} accepted.` } : { ok: false, text: "They passed. Add more to your side." });
-    if (v.accept) { setGive([]); setGet([]); }
+    setResult(v.accept ? { ok: true, text: `Done — the ${brandOf(data, partner).Team || partner} accepted.` } : v.stale ? { ok: false, text: "Too late — a pick in that deal was just made." } : { ok: false, text: "They passed. Add more to your side." });
+    if (v.accept || v.stale) { setGive([]); setGet([]); }
   };
 
   const pickList = (title, picks, chosen, onToggle) => (
@@ -1245,7 +1291,7 @@ function Console({ s, data, isMobile }) {
     ["trades", "Trades", s.sim.offers.length],
   ];
   const body = {
-    desk: <SimFeed feed={s.feed} height={consoleHeight(isMobile)} isMobile={isMobile} />,
+    desk: <SimFeed feed={s.feed} height={isMobile ? "100%" : consoleHeight(isMobile)} isMobile={isMobile} />,
     draft: <DraftTab s={s} data={data} isMobile={isMobile} />,
     board: <DraftBoardTab s={s} data={data} isMobile={isMobile} />,
     suggestions: <SuggestionsTab s={s} data={data} isMobile={isMobile} />,
@@ -1253,6 +1299,16 @@ function Console({ s, data, isMobile }) {
     roster: <RosterTab s={s} data={data} isMobile={isMobile} />,
     trades: <TradesTab s={s} data={data} isMobile={isMobile} />,
   }[tab];
+  // Mobile: the console takes whatever height is left under the stage and
+  // every tab scrolls inside it.
+  if (isMobile) {
+    return (
+      <div style={{ ...PANEL, marginTop: 8, flex: 1, minHeight: 240, display: "flex", flexDirection: "column" }}>
+        <Tabs tabs={tabs} active={tab} onChange={setTab} />
+        <div className="wd-sim-scroll" style={{ flex: 1, minHeight: 0, overflowY: tab === "desk" ? "hidden" : "auto" }}>{body}</div>
+      </div>
+    );
+  }
   return (
     <div style={{ ...PANEL, marginTop: 12 }}>
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
@@ -1287,6 +1343,20 @@ export function SimTicker({ s, data }) {
 }
 
 export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam }) {
+  // Mobile: one screen under the navbar — bar, stage and Up Next at their
+  // own heights, the console filling the rest (DraftSim.jsx sizes this).
+  if (isMobile) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <BroadcastBar s={s} data={data} isMobile onSettings={onSettings} />
+        <div style={{ flexShrink: 0 }}>
+          <Stage s={s} data={data} isMobile onPickTeam={onPickTeam} />
+          <UpNextBar s={s} data={data} isMobile />
+        </div>
+        <Console s={s} data={data} isMobile />
+      </div>
+    );
+  }
   return (
     <div>
       <BroadcastBar s={s} data={data} isMobile={isMobile} onSettings={onSettings} />
