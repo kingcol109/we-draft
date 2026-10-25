@@ -1,5 +1,4 @@
 {
-  "cleanUrls": true,
   "crons": [
     { "path": "/api/live-ingest", "schedule": "* * * * *" },
     { "path": "/api/stream-orchestrator", "schedule": "* * * * *" },
