@@ -88,7 +88,7 @@ export const VARIABLES = {
   recordSchool: "Thad: the school that last had that many (Alabama)", recordTimes: "Thad: how many that school, or that draft, had (6)",
   firstYear: "Thad: the first draft in his records (2000)", times: "Thad: how many (picks, players)", timesOrd: "Thad: which one this is (5th)",
   seatName: "Thad: the GM or head coach (full name)", seatLast: "Thad: their last name", seatPoss: "Thad: their full name, possessive", schoolPoss: "Thad: the school, possessive (Texas')", mascot: "Thad: one player of the school's mascot (Longhorn)",
-  seatTitle: "Thad: their job (GM, head coach)", seatSince: "Thad: their first draft in the job", drafts: "Thad: drafts they've run, this one included",
+  seatTitle: "Thad: their job (GM, head coach)", seatSince: "Thad: their first draft in the job", drafts: "Thad: drafts they've run, this one included (from 2000 for a longer run)",
 };
 
 // The variables, grouped for the admin editor's insert palette. On a trade,
@@ -892,6 +892,20 @@ export const THAD_LINES = {
       "{player} makes it {times} {school} players drafted by the {nick} since {seatName} took over in {seatSince}.",
     ],
   },
+  staffPosLong: {
+    label: "GM / head coach since before 2000: how many at the position", when: "As above, for a staffer in the job before his records start — counted from {firstYear}.",
+    lines: [
+      "{player} makes it {times} {posPlural} drafted by the {nick} since {firstYear}, as far back as my records go — every one under {seatName}, who's run things since {seatSince}.",
+      "{seatName} loves drafting {posPlural}: {player} is the {nick}' {timesOrd} since {firstYear}, and my books don't go back to the start of his run in {seatSince}.",
+    ],
+  },
+  staffSchoolLong: {
+    label: "GM / head coach since before 2000: a school he keeps going back to", when: "As above, for a staffer in the job before his records start — counted from {firstYear}.",
+    lines: [
+      "{seatName} keeps dipping into {school}: {player} makes it {times} {mascot} picks since {firstYear}, as far back as my records go.",
+      "{player} makes it {times} {school} players drafted by the {nick} since {firstYear} — every one under {seatName}, who's been there since {seatSince}.",
+    ],
+  },
   almaMater: {
     label: "Staff alma mater", when: "The player went to the GM's, head coach's or a coordinator's school.",
     lines: [
@@ -1179,12 +1193,14 @@ export function thadFacts(e, ctx) {
   // step aside for the ones naming the school (lineFrom).
   const base = { ...pickVars(e, ctx), firstYear: H.firstYear, mascot: H.mascots[school] || "", schoolPoss: possessive(school) };
   const add = (cat, weight, group, extra = {}) => out.push({ cat, weight, group, vars: { ...base, ...extra } });
-  // Earlier first-rounders as a list, newest first and four named at most
-  // ("Bo Nix, Justin Herbert and Marcus Mariota") — two or more, else null.
+  // Earlier first-rounders as a list, newest first, four named and the rest
+  // counted ("Bo Nix, Justin Herbert and Marcus Mariota") — two or more,
+  // else null.
   const clubOf = (rows) => {
     if (rows.length < 2) return null;
     const sorted = [...rows].sort((a, b) => b.year - a.year || b.overall - a.overall);
-    const names = sorted.slice(0, 4).map((r) => r.name);
+    // Four named, the rest counted — but never "and 1 other": five, all named.
+    const names = sorted.slice(0, sorted.length === 5 ? 5 : 4).map((r) => r.name);
     const others = sorted.length - names.length;
     const club = others ? `${names.join(", ")} and ${others} other${others === 1 ? "" : "s"}` : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
     return { ...prevVars(sorted[0]), club, times: sorted.length + 1, timesOrd: ordinal(sorted.length + 1) };
@@ -1291,16 +1307,21 @@ export function thadFacts(e, ctx) {
     const who = staff[seat];
     const since = who?.id && H.staff[who.id]?.since?.[seat];
     if (!since || since.team !== e.team || since.draft > year) return;
-    const vars = { ...seatVars(who, seat), seatSince: since.draft, drafts: year - since.draft + 1 };
-    const tenure = where(H.byTeam[e.team], (r) => r.team === e.team && r.year >= since.draft);
+    // In the job before his records start (Jerry Jones, 1989): counted from
+    // {firstYear}, and the lines say so ("…Long").
+    const long = since.draft < H.firstYear;
+    const from = Math.max(since.draft, H.firstYear);
+    const vars = { ...seatVars(who, seat), seatSince: since.draft, drafts: year - from + 1 };
+    const tenure = where(H.byTeam[e.team], (r) => r.team === e.team && r.year >= from);
     if (since.draft === year && !tenure.length) add("staffFirstPick", 3, "staff", vars);
     // "First first-round edge rusher since taking over" only means something
-    // a few drafts in — not in their first or second.
-    else if (round === 1 && vars.drafts >= 3 && !tenure.some((r) => r.pos === pos && r.round === 1)) add("staffRound1Pos", 2.2, "staff", vars);
+    // a few drafts in — not in their first or second — and not for a long
+    // tenure, where it's just the team's own first-round drought.
+    else if (!long && round === 1 && vars.drafts >= 3 && !tenure.some((r) => r.pos === pos && r.round === 1)) add("staffRound1Pos", 2.2, "staff", vars);
     const atPos = tenure.filter((r) => r.pos === pos).length;
-    if (atPos >= 2) add("staffPos", 1.2, "staffPos", { ...vars, times: atPos + 1, timesOrd: ordinal(atPos + 1) });
+    if (atPos >= 2) add(long ? "staffPosLong" : "staffPos", 1.2, "staffPos", { ...vars, times: atPos + 1, timesOrd: ordinal(atPos + 1) });
     const fromSchool = school ? tenure.filter((r) => r.school === school).length : 0;
-    if (fromSchool >= 2) add("staffSchool", 1.5, "staffSchool", { ...vars, times: fromSchool + 1 });
+    if (fromSchool >= 2) add(long ? "staffSchoolLong" : "staffSchool", 1.5, "staffSchool", { ...vars, times: fromSchool + 1 });
   });
   // Any staffer's alma mater.
   const alma = school && ["GM", "HC", "OC", "DC"].find((seat) => staff[seat]?.id && H.staff[staff[seat].id]?.college === school);

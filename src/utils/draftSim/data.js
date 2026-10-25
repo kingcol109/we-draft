@@ -6,8 +6,8 @@
 // prospects_{Position} / live players queries only as a fallback), community
 // grades + traits (_grades), every prospect's staff fit for all 32 teams
 // plus the staffers' names (nflFit_{Position}), CFBD season stats
-// (cfbLeaders/current + tables), the trade chart (config/draftTradeChart),
-// team needs (nflTeamNeeds — the admin's labels), team branding and the
+// (cfbLeaders/current + tables), each prospect's best game (simGames), the trade chart (config/draftTradeChart),
+// team needs (compSnapshots/_teamNeeds — the admin's labels), team branding and the
 // draft history (draftHistory.json, Thad Murphy's).
 import { doc, getDoc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -18,12 +18,15 @@ import { averageGradesFor, GRADE_SCALE } from "../communityGrades";
 import { NFL_TEAMS } from "../coachHistory";
 import { SIM_POSITIONS, SPECIALISTS, buildBoard, resolveNeeds } from "./engine";
 import { applyDeskLines, applyDeskAvatars, applyDeskLegends, applyPlayerTakes } from "./analysts";
+import { bestGame } from "./bestGame.js";
 
 // SIM_YEAR / SIM_YEARS (years.js): the class drafted by default, and every
 // class it can draft. A thin class's board only fills a few rounds —
 // maxRounds says how many.
 import { SIM_YEAR, SIM_YEARS } from "./years";
 export { SIM_YEAR, SIM_YEARS };
+// Scored in bestGame.js (shared with the weekly snapshot build).
+export { bestGame };
 export const maxRounds = (board) => Math.max(1, Math.min(7, Math.floor(board.filter((p) => !SPECIALISTS.includes(p.Position)).length / 32)));
 
 const cache = {};
@@ -94,8 +97,13 @@ async function classProspects(year) {
 }
 
 // Every team's needs: { [team]: { [NEED_KEY]: { labels, note } } }. None
-// (an empty map — no team leans any way) if they can't be read.
+// (an empty map — no team leans any way) if they can't be read. One read:
+// compSnapshots/_teamNeeds, all 32 teams, kept in step with nflTeamNeeds by
+// the admin's save (AdminTeamNeeds.jsx) — the 32 team docs only if it's
+// missing.
 async function loadNeeds() {
+  const combined = await getSiteSnapshot("_teamNeeds");
+  if (combined?.needs) return Object.fromEntries(Object.entries(combined.needs).map(([team, needs]) => [team, resolveNeeds(needs)]));
   const snap = await getDocs(collection(db, "nflTeamNeeds"));
   return Object.fromEntries(snap.docs.map((d) => [d.id, resolveNeeds(d.data().needs)]));
 }
@@ -122,43 +130,23 @@ async function withDarkLogos(prospects) {
 // opp: "Tennessee" } or null. From his linked CFBD player's game logs
 // (cfbdPlayers where wedraftPlayerId, then its games — see
 // components/PlayerStatsCard.js). Cached per player for the page session.
+// Every class prospect's best game this season, precomputed weekly
+// (compSnapshots/simGames, scripts/buildSimGamesSnapshot.mjs): one read a
+// session instead of ~20 per pick. null when it's missing or another
+// season's.
+const simGames = (season) => getSiteSnapshot("simGames").then((d) => (d?.rows && d.season === Number(season) ? d.rows : null));
+
 export function loadBestGame(playerId, season) {
   return once(`game:${playerId}`, async () => {
+    const rows = await simGames(season);
+    if (rows) return rows[playerId] || null;
+    // No snapshot: the player's own game log (two queries).
     const snap = await getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "==", playerId), limit(1)));
     const linked = snap.docs[0];
     if (!linked || !["verified", "suggested"].includes(linked.data().mappingStatus)) return null;
     const games = await getDocs(query(collection(db, "cfbdPlayers", linked.id, "games"), orderBy("startDate", "desc"), limit(20)));
     return bestGame(games.docs.map((d) => d.data()).filter((g) => !season || g.season === Number(season)));
   });
-}
-
-// The best single-game line across a game log (box-score format:
-// { defensive: { SACKS: "4" } }), only if it's genuinely big.
-export function bestGame(games) {
-  const num = (v) => parseFloat(v) || 0;
-  const plural = (n, one, many) => `${n % 1 ? n.toFixed(1) : n} ${n === 1 ? one : many}`;
-  let best = null;
-  games.forEach((g) => {
-    const s = g.stats || {};
-    const d = s.defensive || {}, ints = s.interceptions || {}, pa = s.passing || {}, ru = s.rushing || {}, re = s.receiving || {};
-    const options = [
-      [num(d.SACKS) >= 2, num(d.SACKS) * 3, plural(num(d.SACKS), "sack", "sacks")],
-      [num(ints.INT) >= 2, num(ints.INT) * 3.5, plural(num(ints.INT), "interception", "interceptions")],
-      [num(d.TFL) >= 3, num(d.TFL) * 2, plural(num(d.TFL), "tackle for loss", "tackles for loss")],
-      [num(d.TOT) >= 12, num(d.TOT) * 0.5, plural(num(d.TOT), "tackle", "tackles")],
-      [num(pa.YDS) >= 350, num(pa.YDS) / 60, `${num(pa.YDS)} passing yards`],
-      [num(pa.TD) >= 4, num(pa.TD) * 1.8, plural(num(pa.TD), "touchdown pass", "touchdown passes")],
-      [num(ru.YDS) >= 150, num(ru.YDS) / 30, `${num(ru.YDS)} rushing yards`],
-      [num(ru.TD) >= 3, num(ru.TD) * 2, plural(num(ru.TD), "rushing touchdown", "rushing touchdowns")],
-      [num(re.YDS) >= 150, num(re.YDS) / 30, `${num(re.YDS)} receiving yards`],
-      [num(re.REC) >= 10, num(re.REC) * 0.6, plural(num(re.REC), "catch", "catches")],
-      [num(re.TD) >= 3, num(re.TD) * 2, plural(num(re.TD), "touchdown catch", "touchdown catches")],
-    ];
-    options.forEach(([ok, score, line]) => {
-      if (ok && g.opponent && (!best || score > best.score)) best = { score, line, opp: g.opponent };
-    });
-  });
-  return best && { line: best.line, opp: best.opp };
 }
 
 // CFBD season stats by player slug: { season, bySlug: { [slug]: {
@@ -214,6 +202,8 @@ export function loadSimData(year = SIM_YEAR) {
       Object.assign(fits, d?.rows || {});
       Object.entries(d?.staff || {}).forEach(([team, slots]) => { staff[team] = { ...(staff[team] || {}), ...slots }; });
     });
+    // Warm the best-games snapshot before the first pick needs it.
+    simGames(cfb.season).catch(() => null);
     return { ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug) };
   });
 }

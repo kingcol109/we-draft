@@ -35,6 +35,7 @@ import { SIM_YEAR } from "../utils/draftSim/data";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { fetchEspnRoster } from "../utils/nflRoster";
+import { COMP_SNAPSHOT_VERSION } from "../utils/historicalStats";
 import { suggestNeeds, suggestionReason, positionPlayers } from "../utils/teamNeedSuggestions";
 
 const BLUE = "#0055a5";
@@ -157,12 +158,18 @@ export function TeamNeeds() {
     return () => { alive = false; };
   }, [team]);
 
-  // Every team's needs at once → Firestore + local state.
+  // Every team's needs at once → Firestore + local state. Each team's
+  // entry in compSnapshots/_teamNeeds (all 32 in one doc — what the Draft
+  // Sim reads, utils/draftSim/data.js loadNeeds) is replaced in the same
+  // batch, so the two never drift.
   const saveTeams = async (changes) => {
     const batch = writeBatch(db);
+    const combined = { version: COMP_SNAPSHOT_VERSION, updatedAt: serverTimestamp(), needs: {} };
     Object.entries(changes).forEach(([abbr, needs]) => {
       batch.set(doc(db, "nflTeamNeeds", abbr), { abbr, needs: compact(needs), updatedAt: serverTimestamp() }, { mergeFields: ["abbr", "needs", "updatedAt"] });
+      combined.needs[abbr] = compact(needs);
     });
+    batch.set(doc(db, "compSnapshots", "_teamNeeds"), combined, { mergeFields: ["version", "updatedAt", ...Object.keys(changes).map((abbr) => `needs.${abbr}`)] });
     await batch.commit();
     setDocs((all) => ({ ...all, ...Object.fromEntries(Object.entries(changes).map(([abbr, needs]) => [abbr, { ...(all[abbr] || {}), needs: compact(needs) }])) }));
   };
