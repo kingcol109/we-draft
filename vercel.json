@@ -1,4 +1,11 @@
 {
+  "rewrites": [
+    { "source": "/draftsim", "destination": "/draftsim.html" },
+    { "source": "/draftsim/:year(2028)", "destination": "/draftsim/:year.html" },
+    { "source": "/draftsim/:team(ari|atl|bal|buf|car|chi|cin|cle|dal|den|det|gb|hou|ind|jax|kc|lac|lar|lv|mia|min|ne|no|nyg|nyj|phi|pit|sea|sf|tb|ten|was)", "destination": "/draftsim/:team.html" },
+    { "source": "/draftsim/:year(2028)/:team(ari|atl|bal|buf|car|chi|cin|cle|dal|den|det|gb|hou|ind|jax|kc|lac|lar|lv|mia|min|ne|no|nyg|nyj|phi|pit|sea|sf|tb|ten|was)", "destination": "/draftsim/:year/:team.html" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
   "crons": [
     { "path": "/api/live-ingest", "schedule": "* * * * *" },
     { "path": "/api/stream-orchestrator", "schedule": "* * * * *" },
