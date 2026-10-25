@@ -24,11 +24,12 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { loadSimSetup, loadSimData, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
 import { applyMyGrades } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
-import { countSim, countUserPick } from "../utils/draftSim/stats";
+import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
@@ -95,6 +96,13 @@ export default function DraftSim() {
   // The signed-in user's own grades ({} signed out or unreadable), for My Board.
   const [myGrades, setMyGrades] = useState(null);
 
+  // The whole page dark while it's up — the strip the body's navbar padding
+  // leaves above the stage, the footer and anything under it (SIM_CSS).
+  useEffect(() => {
+    document.documentElement.classList.add("wd-sim-dark");
+    return () => document.documentElement.classList.remove("wd-sim-dark");
+  }, []);
+
   useEffect(() => {
     setMyGrades(null);
     if (!user?.uid) { setMyGrades({}); return undefined; }
@@ -120,6 +128,12 @@ export default function DraftSim() {
   useEffect(() => {
     if (pending && data && (pending.board !== "mine" || myGrades)) { setConfig(pending); setPending(null); }
   }, [pending, data, myGrades]);
+
+  // Stuck on the spinner (a request a backgrounded tab abandoned, or one
+  // that just never comes back): one real page reload, as player pages do —
+  // on desktop too, and with longer to land, since the board is a lot more
+  // to load than one player.
+  useMobileStuckPageWatchdog(!error && (!setup || ((config || pending) && !data)), `draftsim_${year}`, { enabled: true, timeoutMs: 8000 });
 
   // /draftsim/:team starts straight away on the default settings; /draftsim
   // is the setup screen.
@@ -256,13 +270,16 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   const [data] = useState(() => (config.board === "mine" && myGrades ? { ...communityData, board: applyMyGrades(communityData.board, myGrades) } : communityData));
   // No more rounds than the class's board can fill (2028 is thin).
   const rounds = Math.min(config.rounds, maxRounds(data.board));
-  // Usage counts (Admin → Mock Draft → Statistics): this run, its finish,
-  // and every pick the user makes.
+  // Usage counts (Admin → Mock Draft → Statistics): this run once START THE
+  // DRAFT takes it past the intro (not just opening it — /draftsim/{team}
+  // lands on the intro) and the teams it's drafting as, its finish, and
+  // every pick the user makes.
   const { user } = useAuth();
   const uid = user?.uid || null;
   const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
   const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, onUserPick });
-  useEffect(() => { countSim(uid, "sims"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const started = s.phase !== "intro";
+  useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   // Mobile, mid-draft: no ticker, edge to edge, and at least a screen tall.

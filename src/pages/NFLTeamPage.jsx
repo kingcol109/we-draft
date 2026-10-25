@@ -945,15 +945,23 @@ function FitText({ children, max, min, style }) {
     const el = ref.current;
     if (!el) return undefined;
     const fit = () => {
-      // Measure at max, then scale down by how far it overflows.
+      // Measure at max, then scale down by how far it overflows. The size
+      // goes back on the element here too: a re-fit that lands on the same
+      // size as before is no state change, so React wouldn't undo the max
+      // measured with — the name sat at max, cut off ("CHARGE…").
       el.style.fontSize = `${max}px`;
       const ratio = el.scrollWidth ? el.clientWidth / el.scrollWidth : 1;
-      setSize(Math.max(min, Math.min(max, Math.floor(max * ratio))));
+      const next = Math.max(min, Math.min(max, Math.floor(max * ratio)));
+      el.style.fontSize = `${next}px`;
+      setSize(next);
     };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el.parentElement || el);
-    return () => ro.disconnect();
+    // A web font landing after the first fit changes the width too.
+    let live = true;
+    document.fonts?.ready.then(() => { if (live) fit(); });
+    return () => { live = false; ro.disconnect(); };
   }, [children, max, min]);
   return (
     <div ref={ref} style={{ ...style, fontSize: size, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>

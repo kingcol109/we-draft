@@ -25,6 +25,13 @@
 //                      love with Florida State players; compares good picks
 //                      to his favorite players (FSU greats, movie and TV
 //                      football players — editable in admin).
+//   Thad Murphy        the draft historian (@ThadMurphy): every real NFL
+//                      pick since 2000 (draftHistory.json, scripts/
+//                      buildDraftHistory.mjs) and this sim's own picks —
+//                      "the first Oregon QB in the first round since Bo
+//                      Nix", "the last FSU running back the Jets took was
+//                      …", and the GM's / head coach's own record since
+//                      they took the job.
 //
 // Team needs (engine needFor → event.need: { key, label, note } from
 // nflTeamNeeds, the admin's labels) give the personalities their "why" — a
@@ -34,7 +41,8 @@
 // We-Draft.com posts every pick; then one personality chimes in — who
 // depends on the pick (stats → Dr. Johnson, Rutgers/Eagles → Makali, FSU
 // → Davin, a player with a written take → Kenneth, a reach/steal/QB/big
-// game → Isaac), never the same voice twice running
+// game → Isaac, a drought or a first in the history books → Thad), never
+// the same voice twice running
 // if it can help it. How often: the sim's desk-chatter setting (CHATTER —
 // every pick by default); the user's own picks and trades always get one.
 //
@@ -75,6 +83,12 @@ export const VARIABLES = {
   to: "Team trading up", from: "Team trading down", toNick: "Nickname trading up", fromNick: "Nickname trading down", fromCity: "City trading down", got: "Picks the team trading down gets", pct: "Trade-chart %",
   fromGm: "GM trading down", fromHc: "Head coach trading down",
   best: "Best pick (results screen)", bestN: "Best pick's number (results screen)",
+  prev: "Thad: the earlier player he's comparing to (Bo Nix)", prevYear: "Thad: that player's draft year", prevN: "Thad: his overall pick",
+  club: "Thad: the school's (or team's) earlier first-rounders at the position (Bo Nix and Justin Herbert)", prevRound: "Thad: his round", prevNick: "Thad: the team that took him (Broncos)",
+  recordSchool: "Thad: the school that last had that many (Alabama)", recordTimes: "Thad: how many that school, or that draft, had (6)",
+  firstYear: "Thad: the first draft in his records (2000)", times: "Thad: how many (picks, players)", timesOrd: "Thad: which one this is (5th)",
+  seatName: "Thad: the GM or head coach (full name)", seatLast: "Thad: their last name", seatPoss: "Thad: their full name, possessive", schoolPoss: "Thad: the school, possessive (Texas')", mascot: "Thad: one player of the school's mascot (Longhorn)",
+  seatTitle: "Thad: their job (GM, head coach)", seatSince: "Thad: their first draft in the job", drafts: "Thad: drafts they've run, this one included",
 };
 
 // The variables, grouped for the admin editor's insert palette. On a trade,
@@ -88,6 +102,7 @@ export const VARIABLE_GROUPS = [
   ["Runs & games", ["runCount", "leftName", "leftRank", "gameLine", "opp", "season"]],
   ["Team needs", ["needLabel", "needPos", "needNote"]],
   ["Davin", ["legend", "legendPos", "legendSchool"]],
+  ["Thad (history)", ["club", "prev","prevYear", "prevN", "prevRound", "prevNick", "firstYear", "times", "timesOrd", "recordSchool", "recordTimes", "seatName", "seatLast", "seatPoss", "seatTitle", "seatSince", "drafts", "mascot", "schoolPoss"]],
   ["Stats", ["value", "stat", "statTitle", "rankOrd", "YDS", "TD", "INT", "PCT", "ATT", "COMPLETIONS", "YPA", "CAR", "YPC", "REC", "YPR", "TOT", "TFL", "SACKS", "QB HUR", "PD"]],
   ["Trades", ["to", "from", "toNick", "fromNick", "fromCity", "got", "pct", "fromGm", "fromHc"]],
   ["Results screen", ["best", "bestN"]],
@@ -568,7 +583,7 @@ Object.assign(ISAAC_LINES, {
   gradeD: {
     label: "Draft grade: D", when: "Results screen — the user's team graded D.",
     lines: [
-      "{grade}. I warned you I'd roast you on air. The {nick} reached early and often.",
+      "{grade}. Rough one. The {nick} reached early and often.",
       "Oof. A {grade} for the {nick}. {best} is fine — the rest of this I'd rather not talk about.",
       "The {nick} get a {grade} from me. Somewhere a scout is quietly updating his résumé.",
     ],
@@ -716,6 +731,172 @@ export const DAVIN_LINES = {
     lines: [
       "The {toNick} traded up for that? I would have traded up for cheeseburgers.",
       "Trades are a scam invented by people who don't believe in fullbacks.",
+    ],
+  },
+};
+
+// ── Thad Murphy: the draft history books ──
+// Every fact compares the pick with the real drafts since {firstYear} and
+// the picks already made in this sim (thadFacts). Every line names the
+// player just picked ({player}) and someone to compare him to — never a
+// bare "first since at least 2000".
+export const THAD_LINES = {
+  firstOverallPos: {
+    label: "No. 1 pick: last time at the position", when: "The No. 1 pick — the last No. 1 overall pick at his position (1970 on).",
+    lines: [
+      "{player} becomes the first {posName} to go first overall since {prev} in {prevYear}.",
+      "First {posName} off the board at No. 1 since {prev} in {prevYear}: {player}.",
+    ],
+  },
+  firstOverallSchool: {
+    label: "No. 1 pick: last time from the school", when: "The No. 1 pick — the school's last No. 1 overall pick (1970 on).",
+    lines: [
+      "{player} is {schoolPoss} first No. 1 overall pick since {prev} in {prevYear}.",
+      "Last time {school} had the first pick in the draft: {prev}, {prevYear}. Now it's {player}.",
+    ],
+  },
+  schoolPosRound1: {
+    label: "School + position: first-round drought", when: "A first-rounder; the school's last first-round player at the position was years ago.",
+    lines: [
+      "{player} is {schoolPoss} first first-round {posName} since {prev} in {prevYear}.",
+      "{player} is the first {school} {posName} taken in the first round since {prev} in {prevYear}.",
+      "Last time {school} had {aPosName} go in round one? {prev}, No. {prevN} to the {prevNick} in {prevYear}. Until {player}.",
+      "{school} hadn't had a first-round {posName} since {prev} ({prevYear}). {player} ends that.",
+    ],
+  },
+  schoolPosClub: {
+    label: "School + position: joins the club", when: "A first-rounder; the school's had a few first-rounders at the position before (most recent named first).",
+    lines: [
+      "{player} joins {club} as {school} first-round {posPlural} since {firstYear}.",
+      "Add {player} to the list of {school} first-round {posPlural} since {firstYear}: {club}.",
+    ],
+  },
+  schoolPosHighest: {
+    label: "School + position: highest ever", when: "The highest a player from the school at the position has gone in his records.",
+    lines: [
+      "{player} passes {prev} (No. {prevN}, {prevYear}) as the highest-drafted {school} {posName} since {firstYear}.",
+      "No {school} {posName} had gone higher than {prev} at No. {prevN} ({prevYear}) since {firstYear}. {player} just did.",
+    ],
+  },
+  schoolPosHighestSince: {
+    label: "School + position: highest in years", when: "The highest a player from the school at the position has gone in a long time.",
+    lines: [
+      "{player} is the highest-drafted {school} {posName} since {prev} went No. {prevN} in {prevYear}.",
+      "You have to go back to {prev} in {prevYear} to find {aPosName} from {school} drafted as high as {player}.",
+    ],
+  },
+  schoolRound1: {
+    label: "School: first-round drought", when: "A first-rounder from a school that hasn't had one in years.",
+    lines: [
+      "{player} is {schoolPoss} first first-round pick since {prev} in {prevYear}.",
+      "It's been a while for {school} in round one — {prev}, {prevYear}. {player} is the next one.",
+    ],
+  },
+  teamSchoolPos: {
+    label: "Team + school + position: the last one", when: "The team's last pick from that school at the position.",
+    lines: [
+      "The {nick} take {school} {posName} {player}. The last {school} {posName} they took? {prev}, {prevYear}.",
+      "{player} is the first {school} {posName} the {nick} have drafted since {prev} — round {prevRound}, {prevYear}.",
+      "{school} to the {nick} at {pos} again: {player}. Before him, it was {prev} back in {prevYear}.",
+    ],
+  },
+  teamSchoolPosAgain: {
+    label: "Team + school + position: twice in this draft", when: "The team already took one from that school at the position in this sim.",
+    lines: [
+      "Two {school} {posPlural} for the {nick} in one draft — {prev} at No. {prevN}, now {player}.",
+    ],
+  },
+  teamSchool: {
+    label: "Team + school: a pipeline", when: "The team's drafted several from that school.",
+    lines: [
+      "The {nick} keep going back to {school}: {player} makes it {times} since {firstYear}, the last one {prev} in {prevYear}.",
+      "{school} pipeline to {city}: {player} is the {nick}' {timesOrd} pick from there since {firstYear}.",
+    ],
+  },
+  teamPosClub: {
+    label: "Team + position: joins the club", when: "A first-rounder; the team's taken a few first-rounders at the position before (most recent named first).",
+    lines: [
+      "{player} joins {club} as the {nick}' first-round {posPlural} since {firstYear}.",
+      "Add {player} to the list of {nick} first-round {posPlural} since {firstYear}: {club}.",
+    ],
+  },
+  teamPosRound1: {
+    label: "Team + position: first-round drought", when: "A first-rounder at a position the team hasn't taken in round one in years.",
+    lines: [
+      "{player} is the {nick}' first first-round {posName} since {prev} in {prevYear}.",
+      "Last time the {nick} spent a first on {aPosName}: {prev}, No. {prevN}, {prevYear}. Now it's {player}.",
+      "{prevYear}. {prev}. That's the last first-round {posName} the {nick} took before {player}.",
+    ],
+  },
+  schoolRunRound1: {
+    label: "School: another first-rounder tonight", when: "The school's second (or more) first-rounder in this draft.",
+    lines: [
+      "{player} is {schoolPoss} {timesOrd} first-rounder of the night.",
+      "Another one for {school} — {player} makes it {times} first-rounders tonight.",
+    ],
+  },
+  schoolRunRecord: {
+    label: "School: most first-rounders in years", when: "A school's first-rounders tonight are the most from one school in years.",
+    lines: [
+      "{player} makes it {times} first-rounders for {school} — the most from one school since {recordSchool} had {recordTimes} in {prevYear}.",
+      "{times} {school} players in round one with {player}. You have to go back to {recordSchool} in {prevYear} ({recordTimes}) for a night like this.",
+    ],
+  },
+  schoolRun: {
+    label: "School: a big draft", when: "A school's 4th or later pick in this draft (after round one).",
+    lines: [
+      "{player} is {schoolPoss} {timesOrd} player off the board in this draft.",
+      "{player} makes it {times} {school} players drafted so far. What a class.",
+      "{player} is the {timesOrd} {mascot} drafted so far.",
+    ],
+  },
+  posRound1Count: {
+    label: "Position: most in a first round in years", when: "The 3rd or later first-rounder at the position, the most in a first round in years.",
+    lines: [
+      "{player} is the {timesOrd} {posName} taken in round one — the most in a first round since {prevYear}, when there were {recordTimes}.",
+      "{player} makes it {times} first-round {posPlural} tonight. Last draft with that many: {prevYear} ({recordTimes}).",
+    ],
+  },
+  posHighest: {
+    label: "Position: highest in years", when: "The highest a player at the position has gone in a while (first 64 picks).",
+    lines: [
+      "{player} is the highest-drafted {posName} since {prev} went No. {prevN} in {prevYear}.",
+      "You have to go back to {prevYear} — {prev}, No. {prevN} — for {aPosName} drafted as high as {player}.",
+    ],
+  },
+  staffFirstPick: {
+    label: "GM / head coach: first pick in the job", when: "The team's first pick in its GM's or head coach's first draft.",
+    lines: [
+      "{player} is the first pick of the {seatName} era — {seatPoss} first selection as {nick} {seatTitle}.",
+      "Day one for {seatName} as {nick} {seatTitle}, and the first name on the card is {player}.",
+    ],
+  },
+  staffRound1Pos: {
+    label: "GM / head coach: first first-rounder at the position", when: "The staffer's first first-round pick at the position since taking the job (their 3rd draft or later).",
+    lines: [
+      "{player} is {seatPoss} first first-round {posName} since taking over the {nick} in {seatSince}.",
+      "{drafts} drafts under {seatName}, and {player} is the first time the {nick} have spent a first on {aPosName}.",
+    ],
+  },
+  staffPos: {
+    label: "GM / head coach: how many at the position", when: "The staffer keeps drafting the position.",
+    lines: [
+      "{player} makes it {times} {posPlural} drafted by the {nick} since {seatName} took over in {seatSince}.",
+      "{seatName} loves drafting {posPlural}: {player} is the {timesOrd} in {drafts} drafts as {nick} {seatTitle}.",
+    ],
+  },
+  staffSchool: {
+    label: "GM / head coach: a school he keeps going back to", when: "Several picks from the same school since the staffer took the job.",
+    lines: [
+      "{seatName} keeps dipping into {school}: {player} makes it {times} {mascot} picks since {seatSince}.",
+      "{player} makes it {times} {school} players drafted by the {nick} since {seatName} took over in {seatSince}.",
+    ],
+  },
+  almaMater: {
+    label: "Staff alma mater", when: "The player went to the GM's, head coach's or a coordinator's school.",
+    lines: [
+      "{seatName} went to {school}. Funny how that works — the {nick} take {player}.",
+      "An alma mater pick: {player} out of {school}, where {nick} {seatTitle} {seatName} went to school.",
     ],
   },
 };
@@ -934,6 +1115,208 @@ function davinPick(e, ctx) {
   return { text: lineFrom(DAVIN_LINES, cat, { ...v, legend: legend || favoriteFor(p.Position, ctx) }, ctx, "davin") };
 }
 
+// Thad's history books (ctx.history: draftHistory.json, loaded with the
+// sim's data): every pick as { year, round, overall, team, pos, school,
+// name }, by school, team and position, plus each draft's first-round
+// counts by position and by school. Built once.
+const historyIndex = new WeakMap();
+function historyOf(ctx) {
+  const h = ctx.history;
+  if (!h?.picks) return null;
+  if (!historyIndex.has(h)) {
+    const rows = h.picks.map(([year, round, overall, t, pos, s, name]) => ({ year, round, overall, team: h.teams[t], pos, school: h.schools[s], name }));
+    const by = (key) => rows.reduce((m, r) => { (m[r[key]] || (m[r[key]] = [])).push(r); return m; }, {});
+    // { [year]: { [position or school]: first-rounders } }.
+    const round1 = (key) => rows.filter((r) => r.round === 1).reduce((m, r) => {
+      const y = m[r.year] || (m[r.year] = {});
+      y[r[key]] = (y[r[key]] || 0) + 1;
+      return m;
+    }, {});
+    historyIndex.set(h, {
+      bySchool: by("school"), byTeam: by("team"), byPos: by("pos"), round1ByPos: round1("pos"), round1BySchool: round1("school"),
+      firstYear: h.years[0], staff: h.staff || {}, mascots: h.mascots || {},
+      firstOverall: (h.firstOverall || []).map(([year, team, pos, school, name]) => ({ year, round: 1, overall: 1, team, pos, school, name })),
+    });
+  }
+  return historyIndex.get(h);
+}
+
+// This sim's picks so far, for Thad (reactTo records each one).
+function recordPick(e, ctx) {
+  if (e.type !== "pick" || !ctx.history) return;
+  const memory = ctx.memory || (ctx.memory = {});
+  (memory.drafted || (memory.drafted = [])).push({
+    year: Number(ctx.year), round: e.pick.round, overall: e.pick.overall, team: e.team, pos: e.prospect.Position,
+    school: e.prospect.School || "", name: `${e.prospect.First} ${e.prospect.Last}`, sim: true,
+  });
+}
+
+// The most recent of some picks (latest draft, then latest pick in it).
+const latest = (rows) => rows.reduce((a, r) => (!a || r.year > a.year || (r.year === a.year && r.overall > a.overall) ? r : a), null);
+
+// Every history fact for a pick (Thad Murphy): [{ cat, vars, weight, group }]
+// — at most one per group in a post. Cached on the event (his weight and
+// his post both need them).
+const thadCache = new WeakMap();
+export function thadFacts(e, ctx) {
+  if (e.type !== "pick") return [];
+  if (thadCache.has(e)) return thadCache.get(e);
+  const out = [];
+  thadCache.set(e, out);
+  const H = historyOf(ctx);
+  if (!H) return out;
+  const p = e.prospect;
+  const year = Number(ctx.year);
+  const { round, overall: n } = e.pick;
+  const pos = p.Position;
+  const school = p.School || "";
+  // Earlier drafts' picks matching f, then this sim's before this one.
+  const sim = (ctx.memory?.drafted || []).filter((r) => r.overall < n);
+  const where = (rows, f) => [...(rows || []).filter((r) => r.year < year && f(r)), ...sim.filter(f)];
+  const ago = (r) => year - r.year;
+  const prevVars = (r) => ({ prev: r.name, prevYear: r.year, prevN: r.overall, prevRound: r.round, prevNick: ctx.nickname ? ctx.nickname(r.team) : r.team });
+  // {mascot} is blank for a school without one on file, so lines using it
+  // step aside for the ones naming the school (lineFrom).
+  const base = { ...pickVars(e, ctx), firstYear: H.firstYear, mascot: H.mascots[school] || "", schoolPoss: possessive(school) };
+  const add = (cat, weight, group, extra = {}) => out.push({ cat, weight, group, vars: { ...base, ...extra } });
+  // Earlier first-rounders as a list, newest first and four named at most
+  // ("Bo Nix, Justin Herbert and Marcus Mariota") — two or more, else null.
+  const clubOf = (rows) => {
+    if (rows.length < 2) return null;
+    const sorted = [...rows].sort((a, b) => b.year - a.year || b.overall - a.overall);
+    const names = sorted.slice(0, 4).map((r) => r.name);
+    const others = sorted.length - names.length;
+    const club = others ? `${names.join(", ")} and ${others} other${others === 1 ? "" : "s"}` : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    return { ...prevVars(sorted[0]), club, times: sorted.length + 1, timesOrd: ordinal(sorted.length + 1) };
+  };
+
+  // The No. 1 pick: the last first overall pick at his position, and from
+  // his school (1970 on) — only when there's one to name.
+  if (n === 1) {
+    const before = H.firstOverall.filter((r) => r.year < year);
+    const lastPos = latest(before.filter((r) => r.pos === pos));
+    if (lastPos && ago(lastPos) >= 2) add("firstOverallPos", 5, "firstOverall", prevVars(lastPos));
+    const lastSchool = school && latest(before.filter((r) => r.school === school));
+    if (lastSchool) add("firstOverallSchool", 5, "firstOverall2", prevVars(lastSchool));
+  }
+
+  if (school) {
+    // The school at the position: in round one, and how high.
+    const schoolPos = where(H.bySchool[school], (r) => r.school === school && r.pos === pos);
+    if (round === 1) {
+      const last = latest(schoolPos.filter((r) => r.round === 1));
+      if (last && ago(last) >= 3) add("schoolPosRound1", 3 + Math.min(3, ago(last) / 5), "schoolPos", prevVars(last));
+      // "joins Bo Nix and Justin Herbert".
+      const club = clubOf(schoolPos.filter((r) => r.round === 1));
+      if (club) add("schoolPosClub", 3.2, "schoolPos", club);
+    }
+    const higher = schoolPos.filter((r) => r.overall <= n);
+    if (schoolPos.length >= 2 && !higher.length) {
+      add("schoolPosHighest", 3.5, "schoolPos2", prevVars(schoolPos.reduce((a, r) => (r.overall < a.overall ? r : a))));
+    } else if (higher.length && ago(latest(higher)) >= 6 && n <= 100) {
+      add("schoolPosHighestSince", 2.5, "schoolPos2", prevVars(latest(higher)));
+    }
+    // The school in round one at all.
+    if (round === 1) {
+      const last = latest(where(H.bySchool[school], (r) => r.school === school && r.round === 1));
+      if (last && ago(last) >= 8) add("schoolRound1", 2.5, "school", prevVars(last));
+    }
+    // The team and the school.
+    const teamSchool = where(H.byTeam[e.team], (r) => r.team === e.team && r.school === school);
+    const last = latest(teamSchool.filter((r) => r.pos === pos));
+    if (last?.sim) add("teamSchoolPosAgain", 3, "teamSchool", prevVars(last));
+    else if (last) add("teamSchoolPos", 2.5 + (ago(last) >= 8 ? 1 : 0), "teamSchool", prevVars(last));
+    if (teamSchool.length >= 3) {
+      add("teamSchool", 1.2, "teamSchool2", { ...prevVars(latest(teamSchool)), times: teamSchool.length + 1, timesOrd: ordinal(teamSchool.length + 1) });
+    }
+  }
+
+  // The team at the position in round one: a drought, or the club.
+  if (round === 1) {
+    const firsts = where(H.byTeam[e.team], (r) => r.team === e.team && r.pos === pos && r.round === 1);
+    const last = latest(firsts);
+    if (last && !last.sim && ago(last) >= 4) add("teamPosRound1", 3 + Math.min(2, ago(last) / 6), "teamPos", prevVars(last));
+    const club = clubOf(firsts);
+    if (club) add("teamPosClub", 3, "teamPos", club);
+  }
+
+  // The last earlier draft whose first round had at least `times` of one
+  // position (key) or from any one school (no key) → { year, count, key }.
+  const lastWith = (by, times, key) => {
+    const years = Object.keys(by).map(Number).filter((y) => y < year).sort((a, b) => b - a);
+    for (const y of years) {
+      const top = Object.entries(key ? { [key]: by[y][key] || 0 } : by[y]).sort((a, b) => b[1] - a[1])[0];
+      if (top && top[1] >= times) return { year: y, count: top[1], key: top[0] };
+    }
+    return null;
+  };
+
+  // The school's run in this draft.
+  if (school) {
+    const tonight = sim.filter((r) => r.school === school);
+    if (round === 1) {
+      const times = tonight.filter((r) => r.round === 1).length + 1;
+      if (times >= 2) add("schoolRunRound1", times >= 3 ? 3 : 1.5, "schoolRun", { times, timesOrd: ordinal(times) });
+      if (times >= 3) {
+        const record = lastWith(H.round1BySchool, times);
+        if (record && year - record.year >= 2) add("schoolRunRecord", 3.5, "schoolRun2", { times, prevYear: record.year, recordSchool: record.key, recordTimes: record.count });
+      }
+    } else if (tonight.length + 1 >= 4) {
+      const times = tonight.length + 1;
+      add("schoolRun", times >= 7 ? 2.2 : 1.2, "schoolRun", { times, timesOrd: ordinal(times) });
+    }
+  }
+
+  // The position's first-rounders in this draft, against past first rounds.
+  if (round === 1) {
+    const times = sim.filter((r) => r.round === 1 && r.pos === pos).length + 1;
+    if (times >= 3) {
+      const record = lastWith(H.round1ByPos, times, pos);
+      if (record && year - record.year >= 3) add("posRound1Count", 3, "posCount", { times, timesOrd: ordinal(times), prevYear: record.year, recordTimes: record.count });
+    }
+  }
+
+  // The position across the league, in past drafts.
+  if (n <= 64) {
+    const last = latest((H.byPos[pos] || []).filter((r) => r.year < year && r.overall <= n));
+    if (last && ago(last) >= 4) add("posHighest", 3, "pos", prevVars(last));
+  }
+
+  // The GM's and head coach's own record since taking the job (one of
+  // them per kind of fact in a post — they often started together).
+  const staff = ctx.staff?.[e.team] || {};
+  // Full names in every staff line ({seatLast} is there for admin-written ones).
+  const seatVars = (who, seat) => ({ seatName: who.n, seatLast: lastName(who.n), seatPoss: possessive(who.n), seatTitle: SLOT_TITLE[seat] });
+  ["GM", "HC"].forEach((seat) => {
+    const who = staff[seat];
+    const since = who?.id && H.staff[who.id]?.since?.[seat];
+    if (!since || since.team !== e.team || since.draft > year) return;
+    const vars = { ...seatVars(who, seat), seatSince: since.draft, drafts: year - since.draft + 1 };
+    const tenure = where(H.byTeam[e.team], (r) => r.team === e.team && r.year >= since.draft);
+    if (since.draft === year && !tenure.length) add("staffFirstPick", 3, "staff", vars);
+    // "First first-round edge rusher since taking over" only means something
+    // a few drafts in — not in their first or second.
+    else if (round === 1 && vars.drafts >= 3 && !tenure.some((r) => r.pos === pos && r.round === 1)) add("staffRound1Pos", 2.2, "staff", vars);
+    const atPos = tenure.filter((r) => r.pos === pos).length;
+    if (atPos >= 2) add("staffPos", 1.2, "staffPos", { ...vars, times: atPos + 1, timesOrd: ordinal(atPos + 1) });
+    const fromSchool = school ? tenure.filter((r) => r.school === school).length : 0;
+    if (fromSchool >= 2) add("staffSchool", 1.5, "staffSchool", { ...vars, times: fromSchool + 1 });
+  });
+  // Any staffer's alma mater.
+  const alma = school && ["GM", "HC", "OC", "DC"].find((seat) => staff[seat]?.id && H.staff[staff[seat].id]?.college === school);
+  if (alma) add("almaMater", 4, "alma", seatVars(staff[alma], alma));
+  return out;
+}
+
+// Thad's post: one fact, one short tweet — no sub-points.
+function thadPick(e, ctx) {
+  const facts = thadFacts(e, ctx);
+  if (!facts.length) return null;
+  const [fact] = chooseFacts(facts, 1, ctx.rand);
+  const text = lineFrom(THAD_LINES, fact.cat, fact.vars, ctx, "thad");
+  return text ? { text } : null;
+}
+
 // The standout CFBD game Isaac can bring up ({ line, opp }), when the sim
 // has loaded one for this player (ctx.games — see useDraftSim.js).
 const gameFor = (e, ctx) => ctx.games?.[e.prospect.id] || null;
@@ -1137,6 +1520,21 @@ export const ANALYSTS = [
       return null;
     },
   },
+  {
+    id: "thad", name: "Thad Murphy", handle: "@ThadMurphy", role: "Draft Historian", verified: true, enabled: true,
+    color: "#a0662b", initials: "TM", delay: 1300, lines: THAD_LINES,
+    about: "The history books — every NFL pick since 2000 plus this sim's: first-round droughts for a school or team at a position, the last player a team took from that school, the highest one's gone in years, a school's run of first-rounders tonight, the most at a position in a first round in years, the GM's and head coach's record since taking the job, and alma-mater picks.",
+    cadence: "Picks with real history behind them; most likely on a first or a long drought. Never on trades.",
+    weight: (e, ctx) => {
+      if (e.type !== "pick") return 0;
+      const facts = thadFacts(e, ctx);
+      // No. 1 with a first-overall fact: an even split with Isaac (100).
+      if (facts.some((f) => f.group.startsWith("firstOverall"))) return 100;
+      const top = Math.max(0, ...facts.map((f) => f.weight));
+      return top >= 3.5 ? 5 : top >= 2.5 ? 2.5 : top > 0 ? 1 : 0;
+    },
+    react: (e, ctx) => (e.type === "pick" ? thadPick(e, ctx) : null),
+  },
 ];
 
 export const LIVE_ANALYSTS = ANALYSTS.filter((a) => a.enabled);
@@ -1181,6 +1579,7 @@ export function reactTo(event, ctx) {
       (ctx.memory || (ctx.memory = {})).lastVoice = who.id;
     }
   }
+  guarded("record pick", () => recordPick(event, ctx));
   return posts;
 }
 
@@ -1189,7 +1588,7 @@ export function openingPosts({ year, userTeams, ctx }) {
   const mine = userTeams.map((t) => ctx.nickname(t)).join(", ");
   return [
     { analyst: ANALYSTS[0], text: `The ${year} NFL Draft Sim is LIVE.`, lines: ["Every CPU pick weighs the We-Draft.com board, positional value and each staff's own draft history.", ...(mine ? [`You're running the war room for: ${mine}.`] : [])], delay: 0 },
-    { analyst: byId("isaac"), text: mine ? `Alright ${mine} fans — the clock's yours when it's your turn. Don't make me roast you on air.` : "Pull up a chair. Let's see who's got a plan and who's winging it.", delay: 900 },
+    { analyst: byId("isaac"), text: mine ? `Alright ${mine} fans — the clock's yours when it's your turn. Good luck.` : "Pull up a chair. Let's see who's got a plan and who's winging it.", delay: 900 },
   ];
 }
 

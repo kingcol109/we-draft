@@ -291,13 +291,28 @@ service cloud.firestore {
     }
     match /draftSimPicks/{id} {
       allow read: if isAdmin();
-      allow create: if request.resource.data.keys().hasOnly(['year', 'team', 'p'])
+      allow create: if request.resource.data.keys().hasOnly(['year', 'team', 'day', 'p'])
+        && request.resource.data.day is string && request.resource.data.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && id.matches('.*_' + request.resource.data.day)
         && request.resource.data.p is map && request.resource.data.p.size() == 1;
-      allow update: if request.resource.data.keys().hasOnly(['year', 'team', 'p'])
+      allow update: if request.resource.data.keys().hasOnly(['year', 'team', 'day', 'p'])
         && request.resource.data.year == resource.data.year && request.resource.data.team == resource.data.team
+        && request.resource.data.day == resource.data.day
         && request.resource.data.p is map
         && request.resource.data.p.diff(resource.data.p).affectedKeys().size() == 1
         && request.resource.data.p.size() <= resource.data.p.size() + 1;
+    }
+    // The teams started sims draft as: one draft class, one day; a start
+    // bumps at most every team (32) plus WATCH.
+    match /draftSimTeams/{id} {
+      allow read: if isAdmin();
+      allow create: if request.resource.data.keys().hasOnly(['year', 'day', 't'])
+        && request.resource.data.day is string && request.resource.data.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.year is string && id == request.resource.data.year + '_' + request.resource.data.day
+        && request.resource.data.t is map && request.resource.data.t.size() <= 33;
+      allow update: if request.resource.data.keys().hasOnly(['year', 'day', 't'])
+        && request.resource.data.year == resource.data.year && request.resource.data.day == resource.data.day
+        && request.resource.data.t is map && request.resource.data.t.size() <= 33;
     }
     // A counter field that's unchanged or one more than before.
     function bumpedByOne(field) {

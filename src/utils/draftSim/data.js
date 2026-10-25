@@ -7,7 +7,8 @@
 // grades + traits (_grades), every prospect's staff fit for all 32 teams
 // plus the staffers' names (nflFit_{Position}), CFBD season stats
 // (cfbLeaders/current + tables), the trade chart (config/draftTradeChart),
-// team needs (nflTeamNeeds — the admin's labels) and team branding.
+// team needs (nflTeamNeeds — the admin's labels), team branding and the
+// draft history (draftHistory.json, Thad Murphy's).
 import { doc, getDoc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../../firebase";
 import { fetchDraft, UPCOMING_DRAFTS } from "../../components/UpcomingPicks";
@@ -188,7 +189,7 @@ export function loadCfbStats() {
 
 export function loadSimData(year = SIM_YEAR) {
   return once(`data:${year}`, async () => {
-    const [setup, chart, gradesSnap, prospectList, fitDocs, cfb, needs] = await Promise.all([
+    const [setup, chart, gradesSnap, prospectList, fitDocs, cfb, needs, history] = await Promise.all([
       loadSimSetup(year),
       getDoc(doc(db, "config", "draftTradeChart")).then((s) => (s.exists() ? s.data().values || {} : {})).catch(() => ({})),
       getSiteSnapshot("_grades").catch(() => null),
@@ -196,6 +197,8 @@ export function loadSimData(year = SIM_YEAR) {
       Promise.all(SIM_POSITIONS.map((pos) => getSiteSnapshot(`nflFit_${pos}`).catch(() => null))),
       loadCfbStats().catch(() => ({ season: null, bySlug: {} })),
       loadNeeds().catch(() => ({})),
+      // Every real draft pick since 2000, for Thad Murphy (its own chunk).
+      import("./draftHistory.json").then((m) => m.default || m).catch(() => null),
       loadDeskLines(),
       loadPlayerTakes(),
     ]);
@@ -211,7 +214,7 @@ export function loadSimData(year = SIM_YEAR) {
       Object.assign(fits, d?.rows || {});
       Object.entries(d?.staff || {}).forEach(([team, slots]) => { staff[team] = { ...(staff[team] || {}), ...slots }; });
     });
-    return { ...setup, staff, chart, needs, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug) };
+    return { ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug) };
   });
 }
 

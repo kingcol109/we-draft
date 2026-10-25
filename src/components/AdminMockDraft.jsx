@@ -717,7 +717,7 @@ function Preview() {
     sim = { ...sim, idx: slot };
     const { event } = makePick(sim, prospect.id);
     const game = await loadBestGame(prospect.id, d.season).catch(() => null);
-    const ctx = { ...names, staff: d.staff, season: d.season, year: d.year, chatter: "all", memory: {}, rand, games: game ? { [prospect.id]: game } : {} };
+    const ctx = { ...names, staff: d.staff, history: d.history, season: d.season, year: d.year, chatter: "all", memory: {}, rand, games: game ? { [prospect.id]: game } : {} };
     setPosts(event ? ANALYSTS.map((a) => ({ a, out: a.react(event, ctx), event })) : []);
     setSeed((x) => x + 1);
   };

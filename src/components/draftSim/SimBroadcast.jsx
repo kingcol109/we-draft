@@ -11,8 +11,8 @@
 // State comes from useDraftSim.js.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { gradeLabel } from "../../utils/communityGrades";
-import { currentPick, available, fitFor, pickValue, pickWorth, pickName, pickByKey, FUTURE_DISCOUNT, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, CPU_ACCEPT_RATIO, suggestionsFor, rngNext, NEED_KEY_NAMES, needWord } from "../../utils/draftSim/engine";
+import { gradeLabel, gradeLook } from "../../utils/communityGrades";
+import { currentPick, available, pickValue, pickWorth, pickName, pickByKey, FUTURE_DISCOUNT, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, CPU_ACCEPT_RATIO, suggestionsFor, rngNext, NEED_KEY_NAMES, needWord } from "../../utils/draftSim/engine";
 import { davinSuggestion, otherSchools } from "../../utils/draftSim/analysts";
 import { useSchools } from "../DraftArchiveList";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../../utils/coachHistory";
@@ -52,6 +52,10 @@ export const SIM_CSS = `
   .wd-sim-draft:hover { filter: brightness(1.1); }
   .wd-sim-pickteam:hover { opacity: 1 !important; }
   .wd-sim-nofooter footer { display: none; }
+  html.wd-sim-dark, html.wd-sim-dark body { background: #070d18; }
+  html.wd-sim-dark footer { margin-top: 0; padding-top: 40px; }
+  html.wd-sim-dark footer .text-gray-500 { color: #8b9bb4; }
+  html.wd-sim-dark footer .text-gray-400 { color: #6f7f99; }
   .wd-sim-bar-row::-webkit-scrollbar { display: none; }
   .wd-sim-scroll { scrollbar-width: thin; scrollbar-color: #f6a21d #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -410,23 +414,24 @@ function RevealFace({ event, data, isMobile, ink }) {
   const p = event.prospect;
   const brand = brandOf(data, event.team);
   const label = gradeLabel(p.avg);
-  const fit = event.fit?.s;
   const schoolLogo = p.logo || logoOf(p);
-  const valueText = event.value === 0 ? "on the board" : event.value > 0 ? `+${event.value} value` : `${event.value} reach`;
-  const grade = label && label.replace(" Round", "").replace("First", "1st").replace("Second", "2nd");
+  // Off the board's order only — a pick right on it needs no note.
+  const valueText = event.value === 0 ? null : event.value > 0 ? `+${event.value} value` : `${event.value} reach`;
+  const gradeName = p.mine ? "My Grade" : "Comm. Grade";
   if (isMobile) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, height: "100%", minWidth: 0 }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <span style={{ ...cardLabel, color: ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
           <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1.1, marginTop: 4, color: "#33415a", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.First}</div>
-          <ShrinkText text={p.Last} max={34} min={18} style={{ fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: "0 0 6px" }} />
+          <ShrinkText text={p.Last} max={34} min={18} style={{ flexShrink: 0, fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: "0 0 6px" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: BODY, minWidth: 0 }}>
             <span style={{ background: ink, color: "#fff", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: 12, flexShrink: 0 }}>{p.Position}</span>
             <span style={{ fontWeight: 800, fontSize: 13, color: "#0f1b2d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.School}</span>
           </div>
-          <div style={{ marginTop: 6, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            Board #{p.rank} ({valueText}){grade ? ` · ${grade}` : ""}{fit != null ? ` · Fit ${Math.round(fit)}` : ""}
+          <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+            {label && <GradeBadge label={label} small />}
+            <span style={{ fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Board #{p.rank}{valueText ? ` (${valueText})` : ""}</span>
           </div>
         </div>
         {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 92, height: 92, objectFit: "contain", flexShrink: 0, marginRight: -4 }} />}
@@ -435,33 +440,64 @@ function RevealFace({ event, data, isMobile, ink }) {
   }
   return (
     <>
-      <span style={{ ...cardLabel, color: ink }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
-      {!isMobile && <div style={{ fontSize: 18, fontWeight: 900, lineHeight: 1.1, marginTop: 6, color: "#33415a", textTransform: "uppercase" }}>{p.First}</div>}
-      <ShrinkText text={isMobile ? `${p.First} ${p.Last}` : p.Last} max={isMobile ? 26 : 40} min={isMobile ? 15 : 20}
-        style={{ fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: isMobile ? "3px 0 5px" : "0 0 8px" }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: BODY, minWidth: 0 }}>
+      <span style={{ ...cardLabel, color: ink, flexShrink: 0 }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
+      {!isMobile && <div style={{ flexShrink: 0, fontSize: 18, fontWeight: 900, lineHeight: 1.1, marginTop: 6, color: "#33415a", textTransform: "uppercase" }}>{p.First}</div>}
+      <ShrinkText text={isMobile ? `${p.First} ${p.Last}` : p.Last} max={isMobile ? 26 : 38} min={isMobile ? 15 : 20}
+        style={{ flexShrink: 0, fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: isMobile ? "3px 0 5px" : "0 0 8px" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: BODY, minWidth: 0, flexShrink: 0 }}>
         <span style={{ background: ink, color: "#fff", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: 12, flexShrink: 0 }}>{p.Position}</span>
         {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />}
         <span style={{ fontWeight: 800, fontSize: isMobile ? 12 : 14, color: "#0f1b2d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.School}</span>
       </div>
       {isMobile ? (
-        <div style={{ marginTop: 6, fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84" }}>
-          Board #{p.rank} ({valueText}){grade ? ` · ${grade}` : ""}{fit != null ? ` · Fit ${Math.round(fit)}` : ""}
+        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 7 }}>
+          {label && <GradeBadge label={label} small />}
+          <span style={{ fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84" }}>Board #{p.rank}{valueText ? ` (${valueText})` : ""}</span>
         </div>
       ) : (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+        // One row, always — the card's a fixed height.
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch", marginTop: 10, minWidth: 0, flexShrink: 0 }}>
           <Stat label="Board" value={`#${p.rank}`} sub={valueText} />
-          {grade && <Stat label={p.mine ? "My Grade" : "Comm. Grade"} value={grade} />}
-          {fit != null && <Stat label="Staff Fit" value={Math.round(fit)} />}
+          {label && (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, background: "#f1f4f8", borderRadius: 10, padding: "5px 10px 5px 5px", minWidth: 0 }}>
+              <GradeBadge label={label} />
+              <span style={{ minWidth: 0, fontSize: 9, fontWeight: 900, letterSpacing: "0.12em", color: "#5b6b84", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {gradeName.toUpperCase()}<br /><span style={{ fontSize: 11, color: "#0f1b2d", letterSpacing: "0.04em" }}>{label.toUpperCase()}</span>
+              </span>
+            </span>
+          )}
         </div>
       )}
     </>
   );
 }
 
+// A community (or My Board) grade as player pages brand it: the round in
+// its color, EARLY / MIDDLE / LATE over a 1st, ROUND under it.
+function GradeBadge({ label, small = false }) {
+  const { short, bg, border, qualifier } = gradeLook(label);
+  const tiny = { fontWeight: 900, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1 };
+  if (small) {
+    return (
+      <span title={label} style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0, background: bg, border: `2px solid ${border}`, borderRadius: 6, padding: "1px 6px", color: "#fff" }}>
+        {qualifier && <span style={{ ...tiny, fontSize: 8 }}>{qualifier}</span>}
+        <span style={{ fontSize: 12, fontWeight: 900, lineHeight: 1.2 }}>{short}</span>
+        <span style={{ ...tiny, fontSize: 8 }}>RD</span>
+      </span>
+    );
+  }
+  return (
+    <span title={label} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, flexShrink: 0, minWidth: 50, background: bg, border: `3px solid ${border}`, borderRadius: 6, padding: "4px 7px" }}>
+      {qualifier && <span style={{ ...tiny, fontSize: 7 }}>{qualifier}</span>}
+      <span style={{ fontSize: 20, fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.02em" }}>{short}</span>
+      <span style={{ ...tiny, fontSize: 7, color: "rgba(255,255,255,0.8)" }}>ROUND</span>
+    </span>
+  );
+}
+
 function Stat({ label, value, sub }) {
   return (
-    <span style={{ background: "#f1f4f8", color: "#0f1b2d", borderRadius: 10, padding: "5px 10px", minWidth: 64 }}>
+    <span style={{ background: "#f1f4f8", color: "#0f1b2d", borderRadius: 10, padding: "5px 10px", minWidth: 64, flexShrink: 0, whiteSpace: "nowrap" }}>
       <span style={{ display: "block", fontSize: 9, fontWeight: 900, letterSpacing: "0.12em", color: "#5b6b84" }}>{label.toUpperCase()}</span>
       <span style={{ display: "block", fontSize: 16, fontWeight: 900, lineHeight: 1.1 }}>{value}</span>
       {sub && <span style={{ display: "block", fontSize: 10, fontWeight: 800, color: "#5b6b84", fontFamily: BODY }}>{sub}</span>}
@@ -996,7 +1032,6 @@ function MyPicksTab({ s, data, isMobile }) {
 function DraftBoardTab({ s, data, isMobile }) {
   const [pos, setPos] = useState("ALL");
   const [q, setQ] = useState("");
-  const team = currentPick(s.sim)?.owner;
   const onClock = s.phase === "user";
   const rows = useMemo(() => available(s.sim)
     .filter((p) => (pos === "ALL" || p.Position === pos) && (!q || `${p.First} ${p.Last} ${p.School}`.toLowerCase().includes(q.toLowerCase())))
@@ -1018,7 +1053,6 @@ function DraftBoardTab({ s, data, isMobile }) {
         </div>
       </div>
       {rows.map((p) => {
-        const fit = team ? fitFor(p, team) : null;
         const label = gradeLabel(p.avg);
         return (
           <div key={p.id} className="wd-sim-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: isMobile ? "8px 10px" : "9px 14px", borderBottom: "1px solid #18233a" }}>
@@ -1028,11 +1062,6 @@ function DraftBoardTab({ s, data, isMobile }) {
               <Link to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", fontWeight: 900, fontSize: 14, textDecoration: "none", textTransform: "uppercase" }}>{p.First} {p.Last}</Link>
               <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{p.Position} · {p.School}{label ? ` · ${label}${p.mine ? " (yours)" : ""}` : ""}</div>
             </div>
-            {fit != null && (
-              <span title="Staff fit for the team on the clock" style={{ flexShrink: 0, borderRadius: 8, padding: "3px 7px", fontSize: 11, fontWeight: 900, background: fit >= 80 ? "rgba(246,162,29,0.18)" : "#16213a", color: fit >= 80 ? GOLD : "#9fb0c8" }}>
-                FIT {Math.round(fit)}
-              </span>
-            )}
             {onClock && <button className="wd-sim-draft" onClick={() => s.draft(p.id)} style={DRAFT_BTN}>DRAFT</button>}
           </div>
         );

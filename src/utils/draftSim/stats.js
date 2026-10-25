@@ -6,8 +6,15 @@
 //   draftSimDaily/{YYYY-MM-DD}   { sims, completed, picks } — sims started,
 //                                sims finished, picks users made, by day
 //                                (Eastern time).
-//   draftSimPicks/{year}_{team}  { year, team, p: { "{overall}_{playerId}": n } }
-//                                — who users took for that team at each pick.
+//   draftSimPicks/{year}_{team}_{YYYY-MM-DD}
+//                                { year, team, day, p: { "{overall}_{playerId}": n } }
+//                                — who users took for that team at each pick,
+//                                on that day (Eastern time).
+//   draftSimTeams/{year}_{YYYY-MM-DD}
+//                                { year, day, t: { [team]: n, WATCH: n } } —
+//                                the teams users drafted as when they pressed
+//                                START THE DRAFT (every team of a multi-team
+//                                sim; WATCH: no team, watching the CPU).
 // The site's own account (King Cold Sports) isn't counted. Fire-and-forget:
 // a failed write never touches the sim.
 import { doc, setDoc, increment } from "firebase/firestore";
@@ -34,5 +41,17 @@ export function countUserPick(uid, year, event) {
   if (!counted(uid) || !event?.prospect?.id) return;
   countSim(uid, "picks");
   const key = `${event.pick.overall}_${event.prospect.id}`;
-  quietly(setDoc(doc(db, "draftSimPicks", `${year}_${event.team}`), { year: String(year), team: event.team, p: { [key]: increment(1) } }, { merge: true }));
+  const day = statsDay();
+  quietly(setDoc(doc(db, "draftSimPicks", `${year}_${event.team}_${day}`), { year: String(year), team: event.team, day, p: { [key]: increment(1) } }, { merge: true }));
+}
+
+// The teams a started sim drafts as (none → WATCH), once per start.
+export const WATCH_KEY = "WATCH";
+export function countTeams(uid, year, teams) {
+  if (!counted(uid)) return;
+  const day = statsDay();
+  const keys = teams.length ? teams : [WATCH_KEY];
+  quietly(setDoc(doc(db, "draftSimTeams", `${year}_${day}`), {
+    year: String(year), day, t: Object.fromEntries(keys.map((k) => [k, increment(1)])),
+  }, { merge: true }));
 }

@@ -58,6 +58,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     season: data.season,
     year: data.year,
     chatter,
+    history: data.history,
     memory: {},
     rand: () => { const r = rngNext(feedSeed.current); feedSeed.current = r.seed; return r.value; },
     // Drafted players' standout CFBD games ({ [id]: { line, opp } }), for
@@ -102,9 +103,10 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
 
   // The desk posts once the game lookup's had a moment (a CPU pick's
   // started back at the end of the clock, so it's usually in already).
-  const show = useCallback((state, events) => {
+  // Events already posted (a CPU trade up, at its announcement) aren't again.
+  const show = useCallback((state, events, posted = []) => {
     setSim(state);
-    loadGames(events, 1200).then(() => announce(events));
+    loadGames(events, 1200).then(() => announce(events.filter((e) => !posted.includes(e))));
     setReveal({ events, at: Date.now() });
     setPhase("reveal");
   }, [announce, loadGames]);
@@ -112,13 +114,24 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   const applyPending = useCallback(() => {
     const r = pending.current;
     pending.current = null;
-    if (r) show(r.state, r.events);
+    if (r) show(r.state, r.events, r.posted);
     else setPhase("clock");
   }, [show]);
 
   // The clock.
   useEffect(() => {
-    if (paused || phase === "intro" || phase === "user" || phase === "done") return undefined;
+    if (phase === "intro" || phase === "user" || phase === "done") return undefined;
+    const toUser = () => {
+      setSkipToUser(false);
+      setSim((s) => withOffers(s));
+      setPhase("user");
+    };
+    // Paused, nothing runs — but a pick that's the user's (say, just traded
+    // up for) is still theirs to make.
+    if (paused) {
+      if (["clock", "reveal"].includes(phase) && isUserOnClock(sim)) toUser();
+      return undefined;
+    }
     const after = (ms, fn) => { const t = setTimeout(fn, ms); return () => clearTimeout(t); };
     if (phase === "trade") return after(timing.trade, () => setPhase("pickIn"));
     if (phase === "pickIn") return after(timing.pickIn, applyPending);
@@ -126,12 +139,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
 
     // clock / simming
     if (sim.done) { setPhase("done"); return undefined; }
-    if (isUserOnClock(sim)) {
-      setSkipToUser(false);
-      setSim((s) => withOffers(s));
-      setPhase("user");
-      return undefined;
-    }
+    if (isUserOnClock(sim)) { toUser(); return undefined; }
     if (phase === "clock" && !broadcast) { setPhase("simming"); return undefined; }
     if (phase === "simming" && broadcast) { setPhase("clock"); return undefined; }
     if (phase === "simming") {
@@ -144,8 +152,11 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     return after(timing.clock, () => {
       pending.current = stepCpu(sim);
       loadGames(pending.current.events, 0);
-      // A trade up gets its own beat on the stage before the pick is in.
-      setPhase(pending.current.events.some((e) => e.type === "trade") ? "trade" : "pickIn");
+      // A trade up gets its own beat on the stage before the pick is in,
+      // and its posts go up then — not held for the pick.
+      const trades = pending.current.events.filter((e) => e.type === "trade");
+      if (trades.length) { announce(trades); pending.current.posted = trades; }
+      setPhase(trades.length ? "trade" : "pickIn");
     });
   }, [sim, phase, paused, broadcast, timing, announce, applyPending, loadGames]);
 
