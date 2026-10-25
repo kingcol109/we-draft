@@ -8,7 +8,8 @@
 // plus the staffers' names (nflFit_{Position}), CFBD season stats
 // (cfbLeaders/current + tables), each prospect's best game (simGames), the trade chart (config/draftTradeChart),
 // team needs (compSnapshots/_teamNeeds — the admin's labels), team branding and the
-// draft history (draftHistory.json, Thad Murphy's).
+// draft history (draftHistory.json, Thad Murphy's). The Expanded Board
+// (loadExpandedBoard) adds the class's players hidden on the site.
 import { doc, getDoc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
 import { db } from "../../firebase";
 import { fetchDraft, UPCOMING_DRAFTS } from "../../components/UpcomingPicks";
@@ -74,22 +75,32 @@ export function loadPlayerTakes() {
     .catch(() => {}));
 }
 
+// A players doc's Height ("6-2", "6'2") in inches.
+const inches = (h) => { const m = String(h || "").match(/^(\d)['-](\d{1,2})/); return m ? Number(m[1]) * 12 + Number(m[2]) : null; };
+
 // The class's prospects with their official class rank (cr), plus the
-// kickers and punters (SPECIALISTS — their snapshots are optional).
+// kickers and punters (SPECIALISTS — their snapshots are optional). Each
+// carries `hiddenOf`: the snapshot's not-Live players at that position
+// ({ [id]: { cr, F, L, … } }), for the Expanded Board.
+const fromRow = (r, pos) => ({
+  id: r.i, First: r.F || "", Last: r.L || "", Position: pos, School: r.s || "", Slug: r.sl, logo: r.lg || "", logoDark: r.ld, cr: r.cr ?? null,
+  subPosition: r.sp || null, height: r.ht ?? null, weight: r.wt ?? null,
+});
 async function classProspects(year) {
-  const fromSnapshot = (d, pos) => d.rows.map((r) => ({
-    id: r.i, First: r.F || "", Last: r.L || "", Position: pos, School: r.s || "", Slug: r.sl, logo: r.lg || "", logoDark: r.ld, cr: r.cr ?? null,
-    subPosition: r.sp || null, height: r.ht ?? null, weight: r.wt ?? null,
-  }));
-  const [docs, specialists] = await Promise.all([
+  const fromSnapshot = (d, pos) => d.rows.map((r) => fromRow(r, pos));
+  const hiddenOf = (d, pos) => Object.entries(d?.hidden || {}).map(([i, h]) => ({ ...h, i, pos }));
+  const [docs, specialistDocs] = await Promise.all([
     Promise.all(SIM_POSITIONS.map((pos) => getSiteSnapshot(`class_${year}_${pos}`))),
-    Promise.all(SPECIALISTS.map((pos) => getSiteSnapshot(`class_${year}_${pos}`).then((d) => (Array.isArray(d?.rows) ? fromSnapshot(d, pos) : [])))),
+    Promise.all(SPECIALISTS.map((pos) => getSiteSnapshot(`class_${year}_${pos}`).catch(() => null))),
   ]);
+  const specialists = specialistDocs.map((d, i) => (Array.isArray(d?.rows) ? fromSnapshot(d, SPECIALISTS[i]) : []));
+  const hidden = [...docs.flatMap((d, i) => hiddenOf(d, SIM_POSITIONS[i])), ...specialistDocs.flatMap((d, i) => hiddenOf(d, SPECIALISTS[i]))];
   if (docs.every((d) => Array.isArray(d?.rows))) {
-    return [...docs.flatMap((d, i) => fromSnapshot(d, SIM_POSITIONS[i])), ...specialists.flat()];
+    const list = [...docs.flatMap((d, i) => fromSnapshot(d, SIM_POSITIONS[i])), ...specialists.flat()];
+    list.hidden = hidden;
+    return list;
   }
   const lists = await Promise.all(SIM_POSITIONS.map((pos) => fetchProspects(year, pos).catch(() => [])));
-  const inches = (h) => { const m = String(h || "").match(/^(\d)['-](\d{1,2})/); return m ? Number(m[1]) * 12 + Number(m[2]) : null; };
   return [...lists.flat().map((p) => ({
     ...p, subPosition: p.subPosition || p.SubPositionOverride || p.SubPosition || null,
     height: p.height ?? inches(p.Height), weight: p.weight ?? (parseFloat(p.Weight) || null),
@@ -181,7 +192,7 @@ export function loadSimData(year = SIM_YEAR) {
       loadSimSetup(year),
       getDoc(doc(db, "config", "draftTradeChart")).then((s) => (s.exists() ? s.data().values || {} : {})).catch(() => ({})),
       getSiteSnapshot("_grades").catch(() => null),
-      classProspects(year).then(withDarkLogos),
+      classProspects(year).then(async (list) => Object.assign(await withDarkLogos(list), { hidden: list.hidden || [] })),
       Promise.all(SIM_POSITIONS.map((pos) => getSiteSnapshot(`nflFit_${pos}`).catch(() => null))),
       loadCfbStats().catch(() => ({ season: null, bySlug: {} })),
       loadNeeds().catch(() => ({})),
@@ -204,7 +215,37 @@ export function loadSimData(year = SIM_YEAR) {
     });
     // Warm the best-games snapshot before the first pick needs it.
     simGames(cfb.season).catch(() => null);
-    return { ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug) };
+    return {
+      ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug),
+      // What loadExpandedBoard rebuilds the board from.
+      inputs: { prospects, hidden: prospectList.hidden || [], grades, fits, stats: cfb.bySlug },
+    };
+  });
+}
+
+// The Expanded Board: the class board plus its players hidden on the site
+// (players.Live === false), each at the class rank he'd hold with him added
+// (the snapshot's `hidden` placement). Free once the class snapshots carry
+// their names (snapshotBuilders.js); until a rebuild, one query for the
+// class's hidden players.
+export function loadExpandedBoard(year = SIM_YEAR) {
+  return once(`expanded:${year}`, async () => {
+    const { inputs } = await loadSimData(year);
+    let extra = inputs.hidden.filter((h) => h.F && h.sl).map((h) => ({ ...fromRow(h, h.pos), hidden: true }));
+    if (extra.length < inputs.hidden.length) {
+      const placed = Object.fromEntries(inputs.hidden.map((h) => [h.i, h]));
+      const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", String(year)), where("Live", "==", false)));
+      extra = await withDarkLogos(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        .filter((p) => p.Slug && p.Position && (SIM_POSITIONS.includes(p.Position) || SPECIALISTS.includes(p.Position)))
+        .map((p) => ({
+          id: p.id, First: p.First || "", Last: p.Last || "", Position: p.Position, School: p.School || "", Slug: p.Slug,
+          logo: placed[p.id]?.lg || "", cr: placed[p.id]?.cr ?? null, hidden: true,
+          subPosition: p.SubPositionOverride || p.SubPosition || null, height: inches(p.Height), weight: parseFloat(p.Weight) || null,
+        })));
+    }
+    const ids = new Set(inputs.prospects.map((p) => p.id));
+    const prospects = [...inputs.prospects, ...extra.filter((p) => !ids.has(p.id))];
+    return buildBoard(prospects, inputs.grades, inputs.fits, inputs.stats);
   });
 }
 

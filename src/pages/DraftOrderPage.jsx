@@ -157,7 +157,7 @@ export default function DraftOrderPage() {
         ) : (
           // One team per row, each in its own colors: the pick number big on
           // the team's color, a faded logo bleeding off the right edge, and the
-          // top of each round given extra room.
+          // top five of round one given extra room.
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <style>{`
               .wd-order-row { transition: transform 0.16s ease, box-shadow 0.16s ease; }
@@ -170,8 +170,8 @@ export default function DraftOrderPage() {
               const c1 = brand.Color1 || BLUE;
               const c2 = brand.Color2 || GOLD;
               const ink = textOn(c1, c2);
-              // The first five of the round stand out a little more.
-              const marquee = i < 5;
+              // The first five picks of the draft stand out a little more.
+              const marquee = round === 1 && i < 5;
               const numW = isMobile ? (marquee ? 64 : 54) : (marquee ? 96 : 78);
               const logoSize = isMobile ? (marquee ? 44 : 36) : (marquee ? 64 : 48);
               return (

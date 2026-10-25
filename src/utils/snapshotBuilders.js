@@ -26,7 +26,9 @@
 //                           weight (wt) when known — the Draft Sim's
 //                           specific needs size players with them;
 //                           classSize on the doc; `hidden` holds
-//                           each not-Live player's own-page placement.
+//                           each not-Live player's own-page placement
+//                           plus his name/school/size (the Draft Sim's
+//                           Expanded Board).
 //                           The latest drafted class's docs are instead
 //                           ordered by draft pick (order: "draft"), each
 //                           row adding rd/pk (round, overall pick), tm
@@ -283,6 +285,10 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
         pi: withSelf.filter((p) => p.Position === self.Position).indexOf(self),
         g: gradeOf(self),
         lg: logoBySchool[self.School] || "",
+        F: self.First || "", L: self.Last || "", s: self.School || "", sl: self.Slug || "", ld: darkLogoBySchool[self.School] || "",
+        ...((self.SubPositionOverride || self.SubPosition) ? { sp: self.SubPositionOverride || self.SubPosition } : {}),
+        ...(heightInches(self.Height) ? { ht: heightInches(self.Height) } : {}),
+        ...(parseFloat(self.Weight) > 0 ? { wt: parseFloat(self.Weight) } : {}),
       };
     });
     const isDraftedClass = eligible === String(latestDraftYear);

@@ -12,13 +12,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { gradeLabel, gradeLook } from "../../utils/communityGrades";
-import { currentPick, available, pickValue, pickWorth, pickName, pickByKey, FUTURE_DISCOUNT, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, CPU_ACCEPT_RATIO, suggestionsFor, rngNext, NEED_KEY_NAMES, needWord } from "../../utils/draftSim/engine";
+import { openNeeds, currentPick, available, pickValue, pickWorth, pickName, pickByKey, FUTURE_DISCOUNT, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, CPU_ACCEPT_RATIO, suggestionsFor, rngNext, NEED_KEY_NAMES, needWord } from "../../utils/draftSim/engine";
 import { davinSuggestion, otherSchools } from "../../utils/draftSim/analysts";
 import { useSchools } from "../DraftArchiveList";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn, readableOn } from "../../utils/teamColors";
 import SimFeed, { Avatar } from "./SimFeed";
 import { SPEEDS } from "./useDraftSim";
+import { PlayerName } from "./FitName";
 import { fetchEspnRoster, fetchDepthOrder, groupRoster } from "../../utils/nflRoster";
 
 const BLUE = "#0055a5";
@@ -98,9 +99,24 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
     s.setSpeed(k);
     setSpeedsOpen(false);
   };
+  // Mock Draft mode, the user on the clock: the CPU makes this pick, or
+  // the rest of the round.
+  // Undo steps back one of their picks, as far as the first.
+  const mockSims = s.quick && (
+    <>
+      {s.phase === "user" && (
+        <>
+          <button onClick={s.simPick} style={{ ...barBtn, background: GOLD, color: "#111" }} title="The CPU makes this pick">Sim Pick ⏭</button>
+          <button onClick={s.simRound} style={barBtn} title="The CPU makes every pick left this round">Sim Round ⏩</button>
+        </>
+      )}
+      {s.phase !== "intro" && <button onClick={s.undo} disabled={!s.canUndo} style={{ ...barBtn, opacity: s.canUndo ? 1 : 0.4, cursor: s.canUndo ? "pointer" : "default" }} title="Take back your last pick">↶ Undo</button>}
+    </>
+  );
+  // Mock Draft mode has no speeds — CPU picks are instant.
   const controls = live && (
     <>
-      <div role="group" aria-label="Speed" style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, background: "#121c2f", borderRadius: 999, padding: 3 }}>
+      {!s.quick && <div role="group" aria-label="Speed" style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, background: "#121c2f", borderRadius: 999, padding: 3 }}>
         {speeds.map(([k, v]) => (
           <button key={k} onClick={() => chooseSpeed(k)} aria-pressed={s.speed === k} aria-expanded={isMobile && s.phase !== "intro" ? !collapsed : undefined} style={{
             border: "none", borderRadius: 999, padding: isMobile ? "5px 9px" : "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap",
@@ -110,7 +126,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
         {isMobile && s.phase !== "intro" && !collapsed && (
           <button onClick={() => setSpeedsOpen(false)} aria-label="Close speeds" style={{ border: "none", background: "transparent", color: "#9fb0c8", padding: "5px 8px", cursor: "pointer", fontSize: 9, fontFamily: "inherit" }}>◀</button>
         )}
-      </div>
+      </div>}
       {(s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase))) && (
         <>
           <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>
@@ -118,6 +134,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
         </>
       )}
       {s.userPicksLeft && !["user", "simming", "intro"].includes(s.phase) && <button onClick={s.simToMyPick} style={{ ...barBtn, background: GOLD, color: "#111" }}>Sim to My Pick ⏩</button>}
+      {mockSims}
       {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
     </>
   );
@@ -154,14 +171,16 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
       <span style={{ flex: 1 }} />
       {live && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <div role="group" aria-label="Speed" style={{ display: "inline-flex", background: "#121c2f", borderRadius: 999, padding: 3 }}>
-            {Object.entries(SPEEDS).map(([k, v]) => (
-              <button key={k} onClick={() => s.setSpeed(k)} aria-pressed={s.speed === k} style={{
-                border: "none", borderRadius: 999, padding: isMobile ? "5px 9px" : "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900,
-                background: s.speed === k ? "#fff" : "transparent", color: s.speed === k ? "#0b1220" : "#9fb0c8",
-              }}>{v.label}</button>
-            ))}
-          </div>
+          {!s.quick && (
+            <div role="group" aria-label="Speed" style={{ display: "inline-flex", background: "#121c2f", borderRadius: 999, padding: 3 }}>
+              {Object.entries(SPEEDS).map(([k, v]) => (
+                <button key={k} onClick={() => s.setSpeed(k)} aria-pressed={s.speed === k} style={{
+                  border: "none", borderRadius: 999, padding: isMobile ? "5px 9px" : "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900,
+                  background: s.speed === k ? "#fff" : "transparent", color: s.speed === k ? "#0b1220" : "#9fb0c8",
+                }}>{v.label}</button>
+              ))}
+            </div>
+          )}
           {(s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase))) && (
             <>
               <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>
@@ -169,6 +188,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
             </>
           )}
           {s.userPicksLeft && !["user", "simming", "intro"].includes(s.phase) && <button onClick={s.simToMyPick} style={{ ...barBtn, background: GOLD, color: "#111" }}>Sim to My Pick ⏩</button>}
+          {mockSims}
           {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
         </div>
       )}
@@ -352,25 +372,41 @@ function TeamPicks({ s, team, isMobile }) {
   );
 }
 
+// Mock Draft mode: the team's top three open needs, for the Your Pick card.
+function TopNeeds({ s, team, isMobile }) {
+  const needs = openNeeds(s.sim, team).slice(0, 3);
+  if (!needs.length) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", margin: isMobile ? "0 0 8px" : "0 0 10px" }}>
+      <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.8 }}>TOP NEEDS</span>
+      {needs.map((n) => (
+        <span key={n.key} title={n.label} style={{ background: "rgba(0,0,0,0.3)", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 900 }}>{NEED_KEY_NAMES[n.key] || n.key}</span>
+      ))}
+    </div>
+  );
+}
+
 function ClockFace({ s, team, isMobile, isUser }) {
   const left = useCountdown(s.timing.clock, s.paused);
   const secs = Math.ceil(left / 1000);
   if (isUser) {
-    // Mobile: no "no clock" label — "YOUR PICK" big across the card.
+    // Mobile: "YOUR PICK" big across the card.
     if (isMobile) {
       return (
         <>
           <ShrinkText text="YOUR PICK" max={52} min={30} style={{ fontWeight: 900, lineHeight: 1, color: GOLD }} />
           <div style={{ fontSize: 13, fontWeight: 700, fontFamily: BODY, opacity: 0.9, margin: "6px 0 8px" }}>Draft from the board below.</div>
+          {s.quick && <TopNeeds s={s} team={team} isMobile />}
           <TeamPicks s={s} team={team} isMobile />
         </>
       );
     }
     return (
       <>
-        <span style={cardLabel}>NO CLOCK ON YOU</span>
+        <span style={cardLabel}>ON THE CLOCK</span>
         <div style={{ fontSize: 40, fontWeight: 900, lineHeight: 1, margin: "6px 0 10px", color: GOLD }}>YOUR PICK</div>
         <div style={{ fontSize: 12, fontWeight: 700, fontFamily: BODY, opacity: 0.85, marginBottom: 10 }}>Draft from the board below.</div>
+        {s.quick && <TopNeeds s={s} team={team} />}
         <TeamPicks s={s} team={team} isMobile={isMobile} />
       </>
     );
@@ -570,10 +606,50 @@ function PickStage({ s, data, isMobile, mode, pick, team, look, event, trade }) 
   );
 }
 
+// The NFL's divisions, for naming a group the user drafts as.
+const DIVISIONS = {
+  "AFC East": ["BUF", "MIA", "NE", "NYJ"], "AFC North": ["BAL", "CIN", "CLE", "PIT"],
+  "AFC South": ["HOU", "IND", "JAX", "TEN"], "AFC West": ["DEN", "KC", "LV", "LAC"],
+  "NFC East": ["DAL", "NYG", "PHI", "WAS"], "NFC North": ["CHI", "DET", "GB", "MIN"],
+  "NFC South": ["ATL", "CAR", "NO", "TB"], "NFC West": ["ARI", "LAR", "SF", "SEA"],
+};
+const andList = (xs) => (xs.length < 3 ? xs.join(" & ") : `${xs.slice(0, -1).join(", ")} & ${xs[xs.length - 1]}`);
+
+// The intro's headline for the teams the user drafts as → { tag, title }:
+// one team or two or three by name, a conference or whole divisions by
+// name, all 32 as the league, anything else as a count.
+export function introHeadline(teams, nickname, year) {
+  if (!teams.length) return { tag: "THE DRAFT IS ABOUT TO BEGIN", title: `${year} NFL Draft` };
+  if (teams.length >= 32) return { tag: "YOU'RE RUNNING THE WHOLE LEAGUE", title: "All 32 Teams" };
+  const has = (list) => list.every((t) => teams.includes(t));
+  const divs = Object.entries(DIVISIONS).filter(([, list]) => has(list));
+  const covered = divs.flatMap(([, list]) => list);
+  if (teams.length > 3 && covered.length === teams.length) {
+    const confs = ["AFC", "NFC"].filter((c) => divs.filter(([d]) => d.startsWith(c)).length === 4);
+    if (confs.length === 1 && teams.length === 16) return { tag: "DRAFTING FOR THE", title: confs[0] };
+    if (divs.length <= 2) return { tag: "DRAFTING FOR THE", title: andList(divs.map(([d]) => d)) };
+  }
+  if (teams.length <= 3) return { tag: "DRAFTING AS THE", title: andList(teams.map(nickname)) };
+  return { tag: "DRAFTING FOR", title: `${teams.length} Teams` };
+}
+// Logo size for a group of n on the intro, smaller the more there are.
+const groupLogo = (n, isMobile) => (n <= 3 ? (isMobile ? 44 : 56) : n <= 8 ? (isMobile ? 34 : 44) : n <= 16 ? (isMobile ? 28 : 34) : (isMobile ? 24 : 28));
+
 // Before the first pick: who the user is drafting as.
 function IntroContent({ s, data, isMobile, onPickTeam }) {
   const teams = s.sim.userTeams;
   const one = teams.length === 1 ? teams[0] : null;
+  const all = teams.length >= 32;
+  const head = introHeadline(teams, (t) => brandOf(data, t).Team || t, data.year);
+  // Several teams: all their logos, in pick order of their first pick.
+  const firstOf = (t) => s.sim.picks.find((p) => p.owner === t)?.overall ?? Infinity;
+  const ordered = [...teams].sort((a, b) => firstOf(a) - firstOf(b));
+  const logoSize = groupLogo(teams.length, isMobile);
+  const logoGrid = (maxWidth) => (
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(teams.length, all ? 8 : teams.length <= 3 ? 3 : teams.length <= 8 ? 4 : 6)}, ${logoSize}px)`, gap: all ? 4 : 6, justifyContent: "center", maxWidth }}>
+      {ordered.map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={logoSize} />)}
+    </div>
+  );
   const first = s.sim.picks.find((p) => teams.includes(p.owner));
   // The team's second color (site gold when drafting as several or none).
   const buttonColor = (one && brandOf(data, one).Color2) || GOLD;
@@ -582,7 +658,10 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
       START THE DRAFT ▶
     </button>
   );
-  const firstLine = first ? `Your first pick: No. ${first.overall} (Round ${first.round}).` : "All 32 teams on the CPU.";
+  const firstLine = !first ? "All 32 teams on the CPU."
+    : all ? "Every pick is yours — you're on the clock from No. 1."
+      : teams.length > 1 ? `First up: No. ${first.overall} (Round ${first.round}), the ${brandOf(data, first.owner).Team || first.owner}.`
+        : `Your first pick: No. ${first.overall} (Round ${first.round}).`;
   // Mobile: the team's logo oversized behind everything at 30% (contain, so
   // a wide one like the Jets' runs the full width), the team name big over
   // it, and the start button centered along the bottom of the stage.
@@ -601,14 +680,11 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
           </button>
         )}
         <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          {teams.length > 1 && (
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6, maxWidth: "100%" }}>
-              {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={teams.length > 4 ? 32 : 48} />)}
-            </div>
-          )}
-          <div style={{ ...tag(isMobile), fontSize: 16, padding: "5px 14px", letterSpacing: "0.22em" }}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
-          <ShrinkText text={teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`} max={teams.length > 1 ? 44 : 96} min={20}
+          {teams.length > 1 && logoGrid("100%")}
+          <div style={{ ...tag(isMobile), fontSize: all ? 12 : 16, padding: "5px 14px", letterSpacing: "0.22em" }}>{head.tag}</div>
+          <ShrinkText text={head.title} max={teams.length > 1 ? 52 : 96} min={20}
             style={{ maxWidth: "100%", fontWeight: 900, lineHeight: 1, textTransform: "uppercase", textShadow: "0 3px 14px rgba(0,0,0,0.35)" }} />
+          {teams.length > 1 && <div style={{ fontSize: 13, fontWeight: 800, opacity: 0.85, fontFamily: BODY }}>{firstLine}</div>}
         </div>
         <div style={{ position: "relative" }}>{startButton}</div>
       </div>
@@ -616,14 +692,10 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
   }
   return (
     <div style={{ ...pad(isMobile), flexWrap: "wrap" }}>
-      {one ? <TeamLogo brand={brandOf(data, one)} team={one} size={LOGO_SIZE(isMobile)} /> : teams.length > 1 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxWidth: isMobile ? "100%" : 220 }}>
-          {teams.slice(0, 8).map((t) => <TeamLogo key={t} brand={brandOf(data, t)} team={t} size={isMobile ? 36 : 48} />)}
-        </div>
-      )}
-      <div style={{ minWidth: 0 }}>
-        <div style={tag(isMobile)}>{teams.length ? "DRAFTING AS THE" : "THE DRAFT IS ABOUT TO BEGIN"}</div>
-        <div style={bigName(isMobile)}>{teams.length ? teams.map((t) => brandOf(data, t).Team || t).join(", ") : `${data.year} NFL Draft`}</div>
+      {one ? <TeamLogo brand={brandOf(data, one)} team={one} size={LOGO_SIZE(isMobile)} /> : teams.length > 1 && <div style={{ flexShrink: 0 }}>{logoGrid(all ? 300 : 280)}</div>}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={tag(isMobile)}>{head.tag}</div>
+        <ShrinkText text={head.title} max={52} min={24} style={{ ...bigName(isMobile), overflowWrap: "normal" }} />
         <div style={{ fontSize: 14, fontWeight: 800, opacity: 0.85, fontFamily: BODY }}>{firstLine}</div>
         {startButton}
         {/* Back to the setup screen's team picker, nothing selected. */}
@@ -828,35 +900,6 @@ function YourPickBanner({ s, data, text, isMobile }) {
   );
 }
 
-// A name that's the full one when it fits its box, else the short one
-// (ellipsized if even that doesn't). Re-checked as the box resizes.
-function FitName({ full, short, style }) {
-  const ref = useRef(null);
-  const [fits, setFits] = useState(true);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const check = () => {
-      const probe = document.createElement("span");
-      probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;";
-      probe.style.font = getComputedStyle(el).font;
-      probe.textContent = full;
-      el.appendChild(probe);
-      setFits(probe.offsetWidth <= el.clientWidth);
-      probe.remove();
-    };
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [full]);
-  return (
-    <span ref={ref} title={full} style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textTransform: "uppercase", ...style }}>
-      {fits ? full : short}
-    </span>
-  );
-}
-
 // Draft tab: the picks so far, round by round (or just the user's).
 function DraftTab({ s, data, isMobile }) {
   const rounds = [...new Set(s.sim.picks.map((p) => p.round))];
@@ -891,7 +934,7 @@ function DraftTab({ s, data, isMobile }) {
               <TeamLogo brand={b} team={p.owner} size={22} />
               <span style={{ minWidth: 0, flex: 1 }}>
                 {pl
-                  ? <FitName full={`${pl.First} ${pl.Last}`} short={`${pl.First[0]}. ${pl.Last}`} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} />
+                  ? <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></Link>
                   : <span style={{ display: "block", color: "#55657e", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{live ? "On the clock" : "—"}</span>}
                 {pl && <span style={{ display: "block", color: "#8b9bb4", fontSize: 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} {pl.School}</span>}
               </span>
@@ -931,7 +974,7 @@ function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current
             <span style={{ flex: 1, minWidth: 0 }}>
               {pl ? (
                 <>
-                  <span style={{ display: "block", color: "#fff", fontSize: 14, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</span>
+                  <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 14, fontWeight: 900 }} /></Link>
                   <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {pl.Position} · {pl.School}{p.via ? ` · via ${p.via}` : ""}
                   </span>
@@ -982,7 +1025,7 @@ function MyPicksTab({ s, data, isMobile }) {
                     <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 30, flexShrink: 0, lineHeight: 1.25, textAlign: "center" }}>R{p.round}<br />{p.overall}</span>
                     {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 30, height: 30, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 30, flexShrink: 0 }} />}
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 14, textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</Link>
+                      <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
                       <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} · {pl.School}</span>
                     </span>
                   </div>
@@ -993,7 +1036,7 @@ function MyPicksTab({ s, data, isMobile }) {
                   <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
                   {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 28, flexShrink: 0 }} />}
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 14, textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</Link>
+                    <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
                     <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase" }}>{pl.Position} · {pl.School} · Board #{pl.rank}</span>
                   </span>
                   <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 900, color: value > 0 ? "#4ade80" : value < 0 ? "#ff8a9a" : "#9fb0c8", width: 64, textAlign: "right" }}>
@@ -1039,7 +1082,7 @@ function DraftBoardTab({ s, data, isMobile }) {
 
   return (
     <div>
-      <YourPickBanner s={s} data={data} isMobile={isMobile} text="Pick a player — no clock on you." />
+      <YourPickBanner s={s} data={data} isMobile={isMobile} text="Pick a player." />
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 12px", borderBottom: "1px solid #1f2b42" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" aria-label="Search prospects"
           style={{ flex: "1 1 140px", minWidth: 0, background: "#121c2f", border: "1px solid #24324d", borderRadius: 999, color: "#fff", padding: "6px 12px", fontSize: 13, fontFamily: BODY, outline: "none" }} />
@@ -1240,8 +1283,11 @@ const loadRoster = (team) => rosterCache[team] || (rosterCache[team] = Promise.a
 function RosterTab({ s, data, isMobile }) {
   const onClock = currentPick(s.sim)?.owner;
   const [chosen, setChosen] = useState(null);
-  // The user's own team by default (not whoever's on the clock).
-  const team = chosen || s.sim.userTeams[0] || onClock || NFL_TEAM_ABBRS[0];
+  // The user's own team by default (not whoever's on the clock) — in Mock
+  // Draft mode, the team on the clock, a pick from the list holding only
+  // until the next pick's up.
+  useEffect(() => { if (s.quick) setChosen(null); }, [s.quick, onClock]);
+  const team = chosen || (s.quick ? onClock : s.sim.userTeams[0]) || onClock || NFL_TEAM_ABBRS[0];
   const brand = brandOf(data, team);
   const [loaded, setLoaded] = useState({});
   useEffect(() => {
@@ -1313,9 +1359,12 @@ function RosterChip({ pl, c1, year }) {
 const pickLabel = (p) => (p.future ? pickName(p) : `R${p.round} · No. ${p.overall}`);
 
 // Trades tab: offers for the user's pick, and proposing their own deals.
+// Mock Draft mode (s.quick): the user deals for both sides — any two teams,
+// done the moment they say so, no offers coming in.
 function TradesTab({ s, data, isMobile }) {
-  const userTeams = s.sim.userTeams;
-  const [team, setTeam] = useState(userTeams[0] || null);
+  const god = s.quick;
+  const userTeams = god ? NFL_TEAM_ABBRS : s.sim.userTeams;
+  const [team, setTeam] = useState(god ? "" : userTeams[0] || null);
   const [partner, setPartner] = useState("");
   const [give, setGive] = useState([]);
   const [get, setGet] = useState([]);
@@ -1327,9 +1376,10 @@ function TradesTab({ s, data, isMobile }) {
 
   if (!userTeams.length) return <div style={EMPTY}>Trades are for your own teams — pick one in Settings.</div>;
 
-  const mine = tradeablePicks(s.sim, team, { includeCurrent });
-  const partners = NFL_TEAM_ABBRS.filter((t) => !userTeams.includes(t) && tradeablePicks(s.sim, t, { includeCurrent }).length)
-    .sort((a, b) => (brandOf(data, a).Team || a).localeCompare(brandOf(data, b).Team || b));
+  const byName = (a, b) => (brandOf(data, a).Team || a).localeCompare(brandOf(data, b).Team || b);
+  const mine = team ? tradeablePicks(s.sim, team, { includeCurrent }) : [];
+  const partners = NFL_TEAM_ABBRS.filter((t) => t !== team && (god || !userTeams.includes(t)) && tradeablePicks(s.sim, t, { includeCurrent }).length).sort(byName);
+  const sides = god ? NFL_TEAM_ABBRS.filter((t) => tradeablePicks(s.sim, t, { includeCurrent }).length).sort(byName) : userTeams;
   const theirs = partner ? tradeablePicks(s.sim, partner, { includeCurrent }) : [];
   const verdict = evaluateProposal(s.sim, { give, get });
   const toggle = (list, setList, n) => { setResult(null); setList(list.includes(n) ? list.filter((x) => x !== n) : [...list, n]); };
@@ -1337,7 +1387,7 @@ function TradesTab({ s, data, isMobile }) {
 
   const propose = () => {
     const v = s.proposeTrade({ team, partner, give, get });
-    setResult(v.accept ? { ok: true, text: `Done — the ${brandOf(data, partner).Team || partner} accepted.` } : v.stale ? { ok: false, text: "Too late — a pick in that deal was just made." } : { ok: false, text: "They passed. Add more to your side." });
+    setResult(v.accept ? { ok: true, text: god ? "Done — the picks have moved." : `Done — the ${brandOf(data, partner).Team || partner} accepted.` } : v.stale ? { ok: false, text: "Too late — a pick in that deal was just made." } : { ok: false, text: "They passed. Add more to your side." });
     if (v.accept || v.stale) { setGive([]); setGet([]); }
   };
 
@@ -1360,8 +1410,8 @@ function TradesTab({ s, data, isMobile }) {
 
   return (
     <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Offers for the pick on the clock. */}
-      <div>
+      {/* Offers for the pick on the clock (none in Mock Draft mode). */}
+      {!god && <div>
         <div style={{ ...labelSm, marginBottom: 8 }}>Offers{s.sim.offers.length ? ` (${s.sim.offers.length})` : ""}</div>
         {s.sim.offers.length === 0 ? (
           <div style={{ color: "#6f7f99", fontSize: 13, fontFamily: BODY }}>Teams call when you&apos;re on the clock — offers show up here.</div>
@@ -1388,15 +1438,17 @@ function TradesTab({ s, data, isMobile }) {
             })}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Propose a trade. */}
       <div>
-        <div style={{ ...labelSm, marginBottom: 8 }}>Propose a Trade</div>
+        <div style={{ ...labelSm, marginBottom: 8 }}>{god ? "Make a Trade" : "Propose a Trade"}</div>
+        {god && <div style={{ color: "#8b9bb4", fontSize: 13, fontFamily: BODY, marginBottom: 8 }}>Pick any two teams and the picks each one sends — it goes through as you build it.</div>}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-          {userTeams.length > 1 && (
-            <select value={team} onChange={(e) => { setTeam(e.target.value); setGive([]); setResult(null); }} aria-label="Your team" style={selectStyle}>
-              {userTeams.map((t) => <option key={t} value={t}>{brandOf(data, t).Team || t}</option>)}
+          {(god || userTeams.length > 1) && (
+            <select value={team || ""} onChange={(e) => { setTeam(e.target.value); setGive([]); if (e.target.value === partner) { setPartner(""); setGet([]); } setResult(null); }} aria-label={god ? "First team" : "Your team"} style={selectStyle}>
+              {god && <option value="">Team…</option>}
+              {sides.map((t) => <option key={t} value={t}>{god ? `${brandOf(data, t).City || ""} ${brandOf(data, t).Team || t}`.trim() : brandOf(data, t).Team || t}</option>)}
             </select>
           )}
           <select value={partner} onChange={(e) => { setPartner(e.target.value); setGet([]); setResult(null); }} aria-label="Trade partner" style={selectStyle}>
@@ -1404,24 +1456,31 @@ function TradesTab({ s, data, isMobile }) {
             {partners.map((t) => <option key={t} value={t}>{brandOf(data, t).City} {brandOf(data, t).Team || t}</option>)}
           </select>
         </div>
-        {partner && (
+        {team && partner && (
           <>
             <div style={{ display: "flex", gap: 8, flexDirection: isMobile ? "column" : "row" }}>
-              {pickList(`YOU GIVE · ${(brandOf(data, team).Team || team).toUpperCase()}`, mine, give, (n) => toggle(give, setGive, n))}
-              {pickList(`YOU GET · ${(brandOf(data, partner).Team || partner).toUpperCase()}`, theirs, get, (n) => toggle(get, setGet, n))}
+              {pickList(`${god ? "SENDS" : "YOU GIVE"} · ${(brandOf(data, team).Team || team).toUpperCase()}`, mine, give, (n) => toggle(give, setGive, n))}
+              {pickList(`${god ? "SENDS" : "YOU GET"} · ${(brandOf(data, partner).Team || partner).toUpperCase()}`, theirs, get, (n) => toggle(get, setGet, n))}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
               <span style={{ color: "#c9d4e5", fontSize: 13, fontFamily: BODY }}>
-                You give <strong>{verdict.give.toLocaleString()}</strong> pts · you get <strong>{verdict.get.toLocaleString()}</strong> pts
-                {give.length > 0 && get.length > 0 && (
+                {god
+                  ? <>The {brandOf(data, team).Team || team} send <strong>{verdict.give.toLocaleString()}</strong> pts · the {brandOf(data, partner).Team || partner} send <strong>{verdict.get.toLocaleString()}</strong> pts</>
+                  : <>You give <strong>{verdict.give.toLocaleString()}</strong> pts · you get <strong>{verdict.get.toLocaleString()}</strong> pts</>}
+                {!god && give.length > 0 && get.length > 0 && (
                   <span style={{ color: verdict.accept ? "#3fb950" : GOLD, fontWeight: 800 }}>
                     {verdict.accept ? " · they'd take it" : ` · they want ${Math.ceil(verdict.get * CPU_ACCEPT_RATIO - verdict.give).toLocaleString()} more pts`}
                   </span>
                 )}
               </span>
-              <button onClick={propose} disabled={!give.length || !get.length} style={{ ...DRAFT_BTN, marginLeft: "auto", opacity: give.length && get.length ? 1 : 0.5, cursor: give.length && get.length ? "pointer" : "default" }}>
-                PROPOSE TRADE
-              </button>
+              {(() => {
+                const ready = god ? give.length + get.length > 0 : give.length > 0 && get.length > 0;
+                return (
+                  <button onClick={propose} disabled={!ready} style={{ ...DRAFT_BTN, marginLeft: "auto", opacity: ready ? 1 : 0.5, cursor: ready ? "pointer" : "default" }}>
+                    {god ? "MAKE TRADE" : "PROPOSE TRADE"}
+                  </button>
+                );
+              })()}
             </div>
             {result && <div style={{ marginTop: 8, color: result.ok ? "#3fb950" : GOLD, fontSize: 13, fontWeight: 800, fontFamily: BODY }}>{result.text}</div>}
           </>

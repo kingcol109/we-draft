@@ -15,6 +15,8 @@ import { PROFILE_SKIP, buildProfile, scoreProspects, fitScore, pageScopes } from
 import { fetchStaffPickRows, fetchProspects, fetchPctTables, fetchNflBranding, fetchCurrentStaff } from "../utils/draftProfileData";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
+import DraftOrderRail from "../components/DraftOrderRail";
+import DraftNowButton from "../components/DraftNowButton";
 
 // ── /staff/{slug} — a current head coach's or GM's draft history ──
 // Every pick their team made while they held a creditable job there (see
@@ -256,6 +258,13 @@ export default function StaffPage() {
       }}>
         {/* In the margin: a full-height strip off the column's left edge, so
             the rail's sticky positioning has the whole page to travel. */}
+        {/* The right margin: the draft order, as much as fits, the
+            person's team highlighted. */}
+        {!isMobile && railInMargin && (
+          <div style={{ position: "absolute", top: 24, bottom: 60, left: `calc(100% + ${RAIL_GAP}px)`, width: RAIL_WIDTH }}>
+            <DraftOrderRail currentTeam={homeAbbr} color1={c1} />
+          </div>
+        )}
         {!isMobile && (railInMargin ? (
           <div style={{ position: "absolute", top: 24, bottom: 60, right: `calc(100% + ${RAIL_GAP}px)`, width: RAIL_WIDTH }}>
             <StaffRail staff={allStaff} teams={teams} currentId={person.id} defaultRole={railRole} tab={tab} color1={c1} />
@@ -290,6 +299,8 @@ export default function StaffPage() {
                 ← {homeName} staff
               </Link>
             </div>
+            {/* Draft as their team in the Draft Sim, as on the team page. */}
+            <DraftNowButton team={homeAbbr} teamName={homeName} c1={c1} c2={c2} isMobile={isMobile} />
           </div>
         </div>
 

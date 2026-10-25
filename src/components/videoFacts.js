@@ -27,7 +27,7 @@ const heightOf = (ht) => `${Math.floor(ht / 12)}'${ht % 12}"`;
 
 const WD_PLURAL = { QB: "QBs", RB: "RBs", WR: "WRs", TE: "TEs", OL: "OL", DL: "DL", EDGE: "edge rushers", LB: "LBs", DB: "DBs", K: "kickers", P: "punters" };
 const PFF_PLURAL = { QB: "QBs", HB: "RBs", FB: "fullbacks", WR: "WRs", TE: "TEs", T: "tackles", G: "guards", C: "centers", DI: "interior DL", ED: "edge rushers", LB: "LBs", CB: "CBs", S: "safeties", K: "kickers" };
-const CAT_PLURAL = { passing: "passers", rushing: "ball carriers", receiving: "receivers", blocking: "blockers", defense: "defenders", kicking: "kickers" };
+const CAT_PLURAL = { passing: "passers", rushing: "ball carriers", receiving: "receivers", blocking: "blockers", defense: "defenders", kicking: "kickers", punting: "punters" };
 const SUB_LABEL = { pass: "passing", run: "rushing", route: "route-running", hands: "hands", pblk: "pass-blocking", rblk: "run-blocking", prush: "pass-rush", rdef: "run-defense", cov: "coverage", tkl: "tackling" };
 
 // CFBD season stats: [category, stat, label, qualify?, format?, dir?].
@@ -271,7 +271,7 @@ export function factsFor(universe, r) {
     });
 
     // Recent form (newest first in rg).
-    const games = (p.rg || []).filter((x) => p.cat === "kicking" || x.sn >= 10);
+    const games = (p.rg || []).filter((x) => p.cat === "kicking" || p.cat === "punting" || x.sn >= 10);
     if (games.length >= 3 && games[0].g > games[1].g && games[1].g > games[2].g) {
       facts.push({ text: `PFF grade has risen in each of his last 3 games (${games[2].g} → ${games[1].g} → ${games[0].g})`, kind: "trend", src: "PFF", score: 0.9 });
     } else if (games.length >= 3 && games[0].g < games[1].g && games[1].g < games[2].g) {

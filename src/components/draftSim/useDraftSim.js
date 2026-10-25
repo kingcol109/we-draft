@@ -12,9 +12,17 @@
 //            the stage just reads "Simming"
 //   user     one of the user's teams is up — waits for draft() / trades
 //   done     the board's filled (or ran out of prospects)
+//
+// quick (Mock Draft mode): the same sim with no pause between picks — CPU
+// teams sim straight through (Instant) and the user's own picks and trades
+// skip the reveal hold, straight on to the next pick. The desk still posts.
+// simPick() / simRound(): the CPU makes the user's pick on the clock, or
+// every pick left in the round (theirs too). undo(): back one of the
+// user's picks (or trades) — and the CPU picks after it — as far back as
+// the first; the desk's posts for those picks come down too.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  initSim, stepCpu, makePick, acceptOffer, withOffers, isUserOnClock, rngNext, teamHaul, applyProposal,
+  initSim, stepCpu, makePick, acceptOffer, withOffers, isUserOnClock, rngNext, teamHaul, applyProposal, chooseCpuPick, currentPick,
 } from "../../utils/draftSim/engine";
 import { reactTo, openingPosts, wrapPost, DEFAULT_CHATTER } from "../../utils/draftSim/analysts";
 import { teamNamer, loadBestGame } from "../../utils/draftSim/data";
@@ -35,13 +43,15 @@ const FEED_MAX = 300;
 let postId = 0;
 
 // onUserPick(event): each pick the user makes (Statistics — utils/draftSim/stats.js).
-export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed, onUserPick }) {
-  const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams, rounds, seed }));
+export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed, cpuTrades, quick = false, onUserPick }) {
+  const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams, rounds, seed, cpuTrades }));
   const [phase, setPhase] = useState("intro");
   const [reveal, setReveal] = useState(null);
   const [feed, setFeed] = useState([]);
   const [paused, setPaused] = useState(false);
-  const [speed, setSpeed] = useState(SPEEDS[initialSpeed] ? initialSpeed : DEFAULT_SPEED);
+  const [speed, setSpeed] = useState(quick ? "instant" : SPEEDS[initialSpeed] ? initialSpeed : DEFAULT_SPEED);
+  // The sim before each of the user's picks and trades, for undo().
+  const history = useRef([]);
   const [skipToUser, setSkipToUser] = useState(false);
   // The CPU pick made at the end of the clock, held through "the pick is in".
   const pending = useRef(null);
@@ -104,9 +114,11 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   // The desk posts once the game lookup's had a moment (a CPU pick's
   // started back at the end of the clock, so it's usually in already).
   // Events already posted (a CPU trade up, at its announcement) aren't again.
-  const show = useCallback((state, events, posted = []) => {
+  // Quick, for the user's own pick or trade: no card to sit through.
+  const show = useCallback((state, events, posted = [], hold = true) => {
     setSim(state);
     loadGames(events, 1200).then(() => announce(events.filter((e) => !posted.includes(e))));
+    if (!hold) { setPhase("clock"); return; }
     setReveal({ events, at: Date.now() });
     setPhase("reveal");
   }, [announce, loadGames]);
@@ -123,7 +135,8 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     if (phase === "intro" || phase === "user" || phase === "done") return undefined;
     const toUser = () => {
       setSkipToUser(false);
-      setSim((s) => withOffers(s));
+      // Mock Draft mode: no CPU teams calling.
+      if (!quick) setSim((s) => withOffers(s));
       setPhase("user");
     };
     // Paused, nothing runs — but a pick that's the user's (say, just traded
@@ -158,28 +171,71 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
       if (trades.length) { announce(trades); pending.current.posted = trades; }
       setPhase(trades.length ? "trade" : "pickIn");
     });
-  }, [sim, phase, paused, broadcast, timing, announce, applyPending, loadGames]);
+  }, [sim, phase, paused, broadcast, timing, announce, applyPending, loadGames, quick]);
 
   // Wrap-up posts for the user's teams.
   const wrapped = useRef(false);
   useEffect(() => {
-    if (phase !== "done" || wrapped.current) return;
+    // Mock Draft mode: no grades, so no grade wrap-up.
+    if (phase !== "done" || wrapped.current || quick) return;
     wrapped.current = true;
     sim.userTeams.forEach((t) => publish([wrapPost(teamHaul(sim, t), ctx)]));
-  }, [phase, sim, ctx, publish]);
+  }, [phase, sim, ctx, publish, quick]);
 
   // The user's own picks and trades always get the pick card for its full
   // reveal, even on Instant — the sim picks back up after.
   const draft = useCallback((prospectId) => {
     if (!isUserOnClock(sim)) return;
     const { state, event } = makePick(sim, prospectId);
-    if (event) { show(state, [event]); onUserPick?.(event); }
-  }, [sim, show, onUserPick]);
+    if (event) { history.current.push(sim); show(state, [event], [], !quick); onUserPick?.(event); }
+  }, [sim, show, onUserPick, quick]);
+
+  const undo = useCallback(() => {
+    const prev = history.current.pop();
+    if (!prev) return;
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    pending.current = null;
+    const cut = currentPick(prev)?.overall ?? Infinity;
+    setFeed((f) => f.filter((p) => p.overall == null || p.overall < cut));
+    setReveal(null);
+    setSkipToUser(false);
+    setSim(prev);
+    setPhase(isUserOnClock(prev) ? "user" : "clock");
+  }, []);
+
+  // The CPU's pick for one of the user's teams → { state, event } or null.
+  const cpuForUser = (s) => {
+    const choice = chooseCpuPick(s);
+    return choice?.prospect ? makePick(s, choice.prospect.id, choice.seed) : null;
+  };
+  const simPick = useCallback(() => {
+    if (!isUserOnClock(sim)) return;
+    const r = cpuForUser(sim);
+    if (r?.event) { history.current.push(sim); show(r.state, [r.event], [], !quick); }
+  }, [sim, show, quick]);
+  const simRound = useCallback(() => {
+    const round = currentPick(sim)?.round;
+    if (round == null) return;
+    let s = sim;
+    const events = [];
+    while (!s.done && currentPick(s)?.round === round) {
+      // Each of the user's picks undoes on its own.
+      if (isUserOnClock(s)) history.current.push(s);
+      const r = isUserOnClock(s) ? cpuForUser(s) : stepCpu(s);
+      if (!r) break;
+      s = r.state;
+      events.push(...(r.events || (r.event ? [r.event] : [])));
+    }
+    setSim(s);
+    announce(events, true);
+    setPhase("clock");
+  }, [sim, announce]);
 
   const takeOffer = useCallback((offer) => {
     const { state, event } = acceptOffer(sim, offer);
-    if (event) show(state, [event]);
-  }, [sim, show]);
+    if (event) { history.current.push(sim); show(state, [event], [], !quick); }
+  }, [sim, show, quick]);
 
   const declineOffer = useCallback((offer) => {
     setSim((s) => ({ ...s, offers: s.offers.filter((o) => o !== offer) }));
@@ -188,15 +244,16 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   // A user-proposed trade (Trades tab). A CPU pick already "in" was made on
   // the old order, so it's redone after the swap. → the verdict.
   const proposeTrade = useCallback((proposal) => {
-    const { state, event, verdict } = applyProposal(sim, proposal);
+    const { state, event, verdict } = applyProposal(sim, proposal, { force: quick });
     if (event) {
+      history.current.push(sim);
       pending.current = null;
       setSim(state);
       announce([event]);
       if (phase === "pickIn" || phase === "trade") setPhase("clock");
     }
     return verdict;
-  }, [sim, phase, announce]);
+  }, [sim, phase, announce, quick]);
 
   // Broadcast "Skip": cut the wait — the pick on the clock is made and shown
   // now; from the pick, straight to the next team.
@@ -214,7 +271,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
 
   return {
     sim, phase, reveal, feed, paused, speed, timing, ctx, userPicksLeft, skipToUser, pendingEvents: pending.current?.events || null,
-    setPaused, setSpeed, draft, takeOffer, declineOffer, skip, proposeTrade,
+    setPaused, setSpeed, draft, takeOffer, declineOffer, skip, proposeTrade, simPick, simRound, undo, canUndo: history.current.length > 0, quick,
     start: () => { if (phase === "intro") setPhase("clock"); },
     simToMyPick: () => { if (userPicksLeft && phase !== "intro") { pending.current = null; setSkipToUser(true); setPhase("simming"); } },
   };

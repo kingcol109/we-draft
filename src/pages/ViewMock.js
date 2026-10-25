@@ -2,8 +2,8 @@
 //
 // /mocks/:mockId/view — a published mock draft, read like a column: the
 // author's intro, then one row per pick in the picking team's colors with
-// the author's note on that pick and the player's community grade. The
-// owner gets Share and Edit (CreateMock.jsx) from here.
+// the author's note on that pick — no player grades, it's the author's
+// board. The owner gets Share and Edit (CreateMock.jsx) from here.
 import { Fragment, useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
@@ -13,7 +13,6 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import ShareMockButton from "../components/ShareMockButton";
 import { useAuth } from "../context/AuthContext";
 import { fetchNflBranding } from "../utils/draftProfileData";
-import { communityFor, gradeLabel } from "../utils/communityGrades";
 import { textOn } from "../utils/teamColors";
 import {
   BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS,
@@ -23,11 +22,6 @@ import {
 // Phones: the Homage card goes after this pick of the round.
 const PHONE_AD_AFTER = 5;
 
-const GRADE_SHORT = {
-  "Early First Round": "Early 1st", "Middle First Round": "Mid 1st", "Late First Round": "Late 1st",
-  "Second Round": "2nd", "Third Round": "3rd", "Fourth Round": "4th", "Fifth Round": "5th",
-  "Sixth Round": "6th", "Seventh Round": "7th", UDFA: "UDFA",
-};
 
 export default function ViewMock() {
   const { mockId } = useParams();
@@ -39,7 +33,6 @@ export default function ViewMock() {
   const [loading, setLoading] = useState(true);
   const [activeRound, setActiveRound] = useState(1);
   const [ownerLabel, setOwnerLabel] = useState("");
-  const [community, setCommunity] = useState({});
 
   useEffect(() => { fetchNflBranding().then(setTeams).catch(() => {}); }, []);
 
@@ -62,15 +55,6 @@ export default function ViewMock() {
     };
     load();
   }, [mockId]);
-
-  // Community grades for every selected player — one snapshot read.
-  useEffect(() => {
-    const ids = Object.values(mock?.picks || {}).map((p) => p.selection?.id).filter(Boolean);
-    if (!ids.length) return;
-    let cancelled = false;
-    communityFor(ids).then((c) => { if (!cancelled) setCommunity(c); }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [mock]);
 
   if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
@@ -135,6 +119,8 @@ export default function ViewMock() {
                   picks={sharePicks}
                   teams={teams}
                   filenamePrefix={`WeDraft_${(mock.name || "MockDraft").replace(/\s+/g, "")}_Rd${activeRound}`}
+                  draftClass={mock.draftClass}
+                  mockUrl={url}
                 />
               )}
               {isOwner && <button onClick={() => navigate(`/mocks/${mockId}`)} style={button("gold", isMobile)}>Edit</button>}
@@ -179,7 +165,7 @@ export default function ViewMock() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {roundPicks.map((pick, i) => (
             <Fragment key={pick.pickNumber}>
-              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} community={community[pick.selection?.id]} isMobile={isMobile} />
+              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} />
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
           ))}
@@ -191,13 +177,12 @@ export default function ViewMock() {
 
 // One pick, DraftOrderPage's row: the number on the team's color, then the
 // player, the team and the author's note underneath.
-function PickRow({ pick, brand, community, isMobile }) {
+function PickRow({ pick, brand, isMobile }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || GOLD;
   const ink = textOn(c1, c2);
   const teamName = brand.Team ? `${brand.City || ""} ${brand.Team}`.trim() : pick.currentTeam;
-  const grade = gradeLabel(community?.avg);
   const note = pick.note?.trim();
   const logoSize = isMobile ? 36 : 52;
 
@@ -250,12 +235,6 @@ function PickRow({ pick, brand, community, isMobile }) {
               <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: "#b0b8c4", fontStyle: "italic" }}>No selection</div>
             )}
           </div>
-          {grade && (
-            <div title={`Community grade: ${grade}`} style={{ flexShrink: 0, textAlign: "center", background: "#f3f6fa", border: "1px solid #e1e7ef", borderRadius: 10, padding: isMobile ? "4px 7px" : "6px 10px" }}>
-              <div style={{ fontSize: 8, fontWeight: 900, color: "#7a8597", letterSpacing: "0.1em" }}>COMM</div>
-              <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, color: BLUE, whiteSpace: "nowrap" }}>{GRADE_SHORT[grade] || grade}</div>
-            </div>
-          )}
         </div>
 
         {note && (

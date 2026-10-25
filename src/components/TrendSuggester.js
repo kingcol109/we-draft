@@ -82,7 +82,7 @@ export default function TrendSuggester({ players, trendsMap, onPick, onClose }) 
       players.forEach((p) => {
         const rec = pff.get(cfbdByWd.get(p.id));
         if (!p.Slug || rec?.rk == null) return;
-        const games = (rec.rg || (rec.w ? [rec.w] : [])).filter((x) => rec.cat === "kicking" || x.sn >= MIN_GAME_SNAPS);
+        const games = (rec.rg || (rec.w ? [rec.w] : [])).filter((x) => rec.cat === "kicking" || rec.cat === "punting" || x.sn >= MIN_GAME_SNAPS);
         if (!games.length) return;
         const recentAvg = avg(games.slice(0, 2).map((x) => x.g));
         const pv = views.get(p.Slug) || {};

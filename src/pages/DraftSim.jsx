@@ -26,14 +26,14 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from "react-route
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
-import { loadSimSetup, loadSimData, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
-import { applyMyGrades } from "../utils/draftSim/engine";
+import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
+import { applyMyGrades, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
 import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
-import SimBroadcast, { SIM_CSS, SimTicker } from "../components/draftSim/SimBroadcast";
+import SimBroadcast, { SIM_CSS, SimTicker, introHeadline } from "../components/draftSim/SimBroadcast";
 import SimResults from "../components/draftSim/SimResults";
 import SavedSims from "../components/draftSim/SavedSims";
 import MarginAds from "../components/MarginAds";
@@ -43,6 +43,10 @@ const FONT = "'Arial Black', Arial, sans-serif";
 const STAGE_BG = "radial-gradient(1200px 500px at 50% -10%, #12305c 0%, #070d18 60%), #070d18";
 const ROUND_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 const DEFAULT_ROUNDS = 7;
+// Classes whose sims and mocks start on the Expanded Board (a thin site board).
+const EXPANDED_YEARS = ["2028"];
+// Mock Draft mode's default.
+const MOCK_ROUNDS = 1;
 // App.js pads every page 25px below the navbar; the sim's dark stage runs
 // up under the navbar instead of leaving a white strip.
 const APP_TOP_PADDING = 25;
@@ -54,11 +58,13 @@ const MOBILE_NAV_HEIGHT = 66;
 
 const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
-// Enough rounds to reach a team's first pick (a team without a 1st-rounder
-// still gets to draft on default settings).
+// Enough rounds that the user gets a pick: stretched only when none of
+// their teams picks in the rounds chosen (a lone team without a
+// 1st-rounder still drafts) — not to reach every team's first pick, or one
+// team that traded its 1st turns a one-round draft into two.
 function roundsFor(order, teams, rounds) {
-  const firsts = teams.map((t) => Math.min(...order.filter((p) => (p.Traded || p.Team) === t).map((p) => p.Round)));
-  return Math.max(rounds, ...firsts.filter(Number.isFinite));
+  const firsts = teams.map((t) => Math.min(...order.filter((p) => (p.Traded || p.Team) === t).map((p) => p.Round))).filter(Number.isFinite);
+  return firsts.length ? Math.max(rounds, Math.min(...firsts)) : rounds;
 }
 
 // The centered content column. contentRef: the one the side ads center
@@ -90,6 +96,8 @@ export default function DraftSim() {
   // config: null on the setup screen; { teams, rounds, speed, chatter, board, seed } once started.
   const [config, setConfig] = useState(null);
   const [pending, setPending] = useState(null);
+  // The Expanded Board (hidden players in), loaded the first time a run asks.
+  const [expandedBoard, setExpandedBoard] = useState(null);
   // The teams picked on the setup screen (the side ads default to one).
   const [setupTeams, setSetupTeams] = useState([]);
   const contentRef = useRef(null);
@@ -116,6 +124,7 @@ export default function DraftSim() {
   useEffect(() => {
     setSetup(null);
     setData(null);
+    setExpandedBoard(null);
     setError(false);
     let live = true;
     loadSimSetup(year).then((s) => live && setSetup(s)).catch((e) => { console.error("Draft sim setup error:", e); if (live) setError(true); });
@@ -124,16 +133,25 @@ export default function DraftSim() {
     return () => { live = false; };
   }, [year]);
 
+  // The Expanded Board, once a run (started or waiting to) wants it.
+  const wantsExpanded = !!(config?.expanded || pending?.expanded);
+  useEffect(() => {
+    if (!wantsExpanded || expandedBoard) return;
+    loadExpandedBoard(year).then(setExpandedBoard).catch((e) => { console.error("Draft sim expanded board error:", e); setError(true); });
+  }, [wantsExpanded, expandedBoard, year]);
+
   // A start pressed before the board (or, for My Board, their grades) finished loading.
   useEffect(() => {
-    if (pending && data && (pending.board !== "mine" || myGrades)) { setConfig(pending); setPending(null); }
-  }, [pending, data, myGrades]);
+    if (pending && data && (pending.board !== "mine" || myGrades) && (!pending.expanded || expandedBoard)) { setConfig(pending); setPending(null); }
+  }, [pending, data, myGrades, expandedBoard]);
 
   // Stuck on the spinner (a request a backgrounded tab abandoned, or one
   // that just never comes back): one real page reload, as player pages do —
   // on desktop too, and with longer to land, since the board is a lot more
   // to load than one player.
-  useMobileStuckPageWatchdog(!error && (!setup || ((config || pending) && !data)), `draftsim_${year}`, { enabled: true, timeoutMs: 8000 });
+  // A run on the Expanded Board waits for it too.
+  const boardReady = !!data && (!config?.expanded || !!expandedBoard);
+  useMobileStuckPageWatchdog(!error && (!setup || ((config || pending) && !boardReady)), `draftsim_${year}`, { enabled: true, timeoutMs: 8000 });
 
   // /draftsim/:team starts straight away on the default settings; /draftsim
   // is the setup screen.
@@ -141,10 +159,10 @@ export default function DraftSim() {
   useEffect(() => {
     setPending(null);
     setConfig(validTeam && setup ? {
-      teams: [validTeam], rounds: roundsFor(setup.order, [validTeam], DEFAULT_ROUNDS),
-      speed: DEFAULT_SPEED, chatter: DEFAULT_CHATTER, board: "community", seed: newSeed(),
+      teams: [validTeam], baseRounds: DEFAULT_ROUNDS, rounds: roundsFor(setup.order, [validTeam], DEFAULT_ROUNDS),
+      speed: DEFAULT_SPEED, chatter: DEFAULT_CHATTER, board: "community", seed: newSeed(), expanded: EXPANDED_YEARS.includes(year),
     } : null);
-  }, [validTeam, setup]);
+  }, [validTeam, setup, year]);
 
   if ((team && !validTeam) || (params.year && !SIM_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
 
@@ -155,15 +173,22 @@ export default function DraftSim() {
   const names = teamNamer(setup?.branding || {});
   // Title, description and canonical: components/draftSim/DraftSimMeta.jsx (App.js).
 
+  // cfg.baseRounds: the rounds picked; rounds stretches them to reach each
+  // team's first pick in this run's order (a random one is new every start).
   const start = (cfg) => {
-    const next = { ...cfg, seed: newSeed() };
-    if (data && (next.board !== "mine" || myGrades)) setConfig(next); else setPending(next);
+    const seed = newSeed();
+    const order = cfg.orderMode === "random" ? shuffleOrder(setup.order, seed) : cfg.orderMode === "custom" && cfg.orderMap ? relabelOrder(setup.order, cfg.orderMap) : null;
+    const next = { ...cfg, seed, order, rounds: roundsFor(order || setup.order, cfg.teams, cfg.baseRounds ?? cfg.rounds) };
+    if (data && (next.board !== "mine" || myGrades) && (!next.expanded || expandedBoard)) setConfig(next); else setPending(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   // Back to the setup screen with this sim's teams (and board) picked.
-  const openSettings = (teams, board) => {
-    if (team) navigate(`/draftsim${yearPath}`, { state: { teams, board } });
-    else { navigate(`/draftsim${yearPath}`, { replace: true, state: { ...location.state, teams, board } }); setConfig(null); setPending(null); }
+  // opts: the run's other setup choices ({ mode, orderMode, orderMap, cpuTrades, expanded }),
+  // with the year they were made for.
+  const openSettings = (teams, board, runOpts) => {
+    const opts = { ...runOpts, year };
+    if (team) navigate(`/draftsim${yearPath}`, { state: { teams, board, opts } });
+    else { navigate(`/draftsim${yearPath}`, { replace: true, state: { ...location.state, teams, board, opts } }); setConfig(null); setPending(null); }
   };
   // "Pick another team": a clean setup screen — no teams carried over (not
   // even ones from an earlier Settings trip, which ride in the history
@@ -186,21 +211,21 @@ export default function DraftSim() {
       }}>
         {error ? (
           <Column isMobile={isMobile}><div style={{ color: "#fff", textAlign: "center", padding: 60, fontFamily: BODY }}>Couldn&apos;t load the draft — try again.</div></Column>
-        ) : !setup || (config && !data) ? (
+        ) : !setup || (config && !boardReady) ? (
           <Column isMobile={isMobile}><LoadingSpinner label="Loading the draft" size={40} minHeight="50vh" /></Column>
         ) : config ? (
           <SimErrorBoundary key={config.seed} isMobile={isMobile}
-            onRestart={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
-            onSettings={() => openSettings(config.teams, config.board)}>
-            <LiveSim data={data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
-              onRerun={() => start({ teams: config.teams, rounds: config.rounds, speed: config.speed, chatter: config.chatter, board: config.board })}
-              onSettings={() => openSettings(config.teams, config.board)}
+            onRestart={() => start(rerunOf(config))}
+            onSettings={() => openSettings(config.teams, config.board, optsOf(config))}>
+            <LiveSim data={config.expanded && expandedBoard ? { ...data, board: expandedBoard } : data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
+              onRerun={() => start(rerunOf(config))}
+              onSettings={() => openSettings(config.teams, config.board, optsOf(config))}
               onPickTeam={pickAnother} />
           </SimErrorBoundary>
         ) : (
           <Column isMobile={isMobile} contentRef={contentRef}>
             <SetupTabs tab={tab} onTab={setTab} />
-            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
+            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
               onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
           </Column>
         )}
@@ -217,6 +242,10 @@ export default function DraftSim() {
     </>
   );
 }
+
+// A run's setup choices, to run it again or take back to Settings.
+const optsOf = (c) => ({ mode: c.mode, orderMode: c.orderMode, orderMap: c.orderMap, cpuTrades: c.cpuTrades, expanded: !!c.expanded });
+const rerunOf = (c) => ({ mode: c.mode, teams: c.teams, baseRounds: c.baseRounds, rounds: c.rounds, speed: c.speed, chatter: c.chatter, board: c.board, ...optsOf(c) });
 
 // The ad's team: the one the user's drafting as (the first of several);
 // none — so random — when watching or drafting as all 32.
@@ -267,9 +296,16 @@ class SimErrorBoundary extends Component {
 function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam }) {
   // My Board: their grades over the community's (fixed for this run — the
   // sim remounts on every start).
-  const [data] = useState(() => (config.board === "mine" && myGrades ? { ...communityData, board: applyMyGrades(communityData.board, myGrades) } : communityData));
+  // A random order (config.order) over the real one.
+  const [data] = useState(() => ({
+    ...communityData,
+    ...(config.board === "mine" && myGrades ? { board: applyMyGrades(communityData.board, myGrades) } : {}),
+    ...(config.order ? { order: config.order } : {}),
+  }));
   // No more rounds than the class's board can fill (2028 is thin).
   const rounds = Math.min(config.rounds, maxRounds(data.board));
+  // Mock Draft mode: the same sim, no pause between picks (useDraftSim quick).
+  const mock = config.mode === "mock";
   // Usage counts (Admin → Mock Draft → Statistics): this run once START THE
   // DRAFT takes it past the intro (not just opening it — /draftsim/{team}
   // lands on the intro) and the teams it's drafting as, its finish, and
@@ -277,7 +313,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   const { user } = useAuth();
   const uid = user?.uid || null;
   const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
-  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, onUserPick });
+  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, cpuTrades: config.cpuTrades, quick: mock, onUserPick });
   const started = s.phase !== "intro";
   useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
@@ -306,7 +342,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
       {!isMobile && <SimTicker s={s} data={data} />}
       <Column wide isMobile={isMobile} contentRef={contentRef}>
         {s.phase === "done"
-          ? <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} />
+          ? <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} onUndo={mock && s.canUndo ? s.undo : undefined} />
           : <SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} onPickTeam={onPickTeam} />}
       </Column>
     </>
@@ -355,14 +391,54 @@ const chipStyle = (on) => ({
 // initialBoard / signedIn / myCount: the board choice coming back from a
 // sim, whether there's a user to have grades, and how many of this class
 // they've graded (null while it loads).
-function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, signedIn, myCount, isMobile, names, onStart, starting, onTeams }) {
+function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, initialBoard, initialOpts, signedIn, myCount, isMobile, names, onStart, starting, onTeams }) {
   const [teams, setTeams] = useState(() => initialTeams.filter((t) => NFL_TEAMS[t]));
+  // "sim" or "mock" (Mock Draft: the same sim with no pause between picks,
+  // all 32 by default, exports as a mock draft post). Switching to Mock
+  // Draft picks all 32 and back restores the teams from before.
+  const [mode, setMode] = useState(() => (initialOpts?.mode === "mock" ? "mock" : "sim"));
+  const simTeams = useRef(null);
+  const simRounds = useRef(null);
+  const switchMode = (m) => {
+    if (m === mode) return;
+    if (m === "mock") {
+      simTeams.current = teams;
+      simRounds.current = chosenRounds;
+      setTeams([...NFL_TEAM_ABBRS]);
+      setRounds(MOCK_ROUNDS);
+    } else {
+      setTeams(simTeams.current || []);
+      setRounds(simRounds.current || DEFAULT_ROUNDS);
+    }
+    setMode(m);
+  };
   useEffect(() => { onTeams?.(teams); }, [teams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [chosenRounds, setRounds] = useState(DEFAULT_ROUNDS);
+  const [chosenRounds, setRounds] = useState(() => (initialOpts?.mode === "mock" ? MOCK_ROUNDS : DEFAULT_ROUNDS));
   const rounds = maxRoundsForYear ? Math.min(chosenRounds, maxRoundsForYear) : chosenRounds;
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [chatter, setChatter] = useState(DEFAULT_CHATTER);
   const [board, setBoard] = useState(() => (initialBoard === "mine" && signedIn ? "mine" : "community"));
+  const [orderMode, setOrderMode] = useState(() => (ORDER_MODES.some((m) => m.key === initialOpts?.orderMode) ? initialOpts.orderMode : "real"));
+  // Custom: who holds each team's picks, every team listed so a swap stays
+  // a one-for-one trade of places (Settings' map only if it's this year's teams).
+  const [orderMap, setOrderMap] = useState(() => {
+    const all = orderTeams(setup.order);
+    const kept = initialOpts?.orderMap;
+    return kept && all.every((t) => kept[t]) ? kept : Object.fromEntries(all.map((t) => [t, t]));
+  });
+  const [cpuTrades, setCpuTrades] = useState(() => (CPU_TRADES[initialOpts?.cpuTrades] ? initialOpts.cpuTrades : "normal"));
+  // Their own choice for this class (back from Settings), else the class's default.
+  const [expanded, setExpanded] = useState(() => (initialOpts?.year === year ? !!initialOpts.expanded : EXPANDED_YEARS.includes(year)));
+  // More Options: the choices off their defaults, shown on the closed
+  // section — open from the start when there are any (back from Settings).
+  const changed = [
+    orderMode !== "real" && (orderMode === "custom" ? "Custom order" : "Random order"),
+    mode === "sim" && cpuTrades !== "normal" && `CPU trades ${CPU_TRADES[cpuTrades].label.toLowerCase()}`,
+    expanded !== EXPANDED_YEARS.includes(year) && (expanded ? "Expanded Board" : "Site Board"),
+    board === "mine" && "My Board",
+    chatter !== DEFAULT_CHATTER && `Chatter: ${CHATTER.find((c) => c.key === chatter)?.label}`,
+  ].filter(Boolean);
+  const [moreOpen, setMoreOpen] = useState(() => changed.length > 0);
   const boardNote = !signedIn
     ? "Sign in to draft off your own grades."
     : board === "community"
@@ -372,13 +448,24 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
   const sortedTeams = useMemo(() => [...NFL_TEAM_ABBRS].sort((a, b) => names.teamName(a).localeCompare(names.teamName(b))), [names]);
   const toggle = (t) => setTeams((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
 
-  const startLabel = starting ? "Loading the board…" : teams.length === 0 ? "Watch the CPU Draft" : teams.length === 1 ? `Start the ${names.nickname(teams[0])}' Draft` : `Start Draft · ${teams.length} Teams`;
+  const startLabel = starting ? "Loading the board…" : mode === "mock" ? (teams.length ? "Start the Mock Draft" : "Watch the CPU Mock") : teams.length === 0 ? "Watch the CPU Draft" : teams.length === 1 ? `Start the ${names.nickname(teams[0])}' Draft` : `Start Draft · ${teams.length} Teams`;
 
   return (
     <div className="wd-sim-in">
       <SimHero isMobile={isMobile} year={year} />
 
       <div style={{ background: "#0e1626", border: "1px solid #1f2b42", borderRadius: 16, padding: isMobile ? 14 : 22, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 18 }}>
+          {MODES.map((m) => (
+            <button key={m.key} onClick={() => switchMode(m.key)} aria-pressed={mode === m.key} style={{
+              textAlign: "left", borderRadius: 12, padding: isMobile ? "10px 12px" : "12px 16px", cursor: "pointer", fontFamily: FONT,
+              border: `2px solid ${mode === m.key ? GOLD : "#1f2b42"}`, background: mode === m.key ? "rgba(246,162,29,0.12)" : "#0b1322",
+            }}>
+              <span style={{ display: "block", color: mode === m.key ? GOLD : "#fff", fontWeight: 900, fontSize: isMobile ? 14 : 16, letterSpacing: "0.08em", textTransform: "uppercase" }}>{m.label}</span>
+              <span style={{ display: "block", color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginTop: 2 }}>{m.note}</span>
+            </button>
+          ))}
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
           <Field label="Draft" note={maxRoundsForYear && maxRoundsForYear < 7 ? `The ${year} board fills ${maxRoundsForYear} round${maxRoundsForYear === 1 ? "" : "s"} so far.` : null}>
             {SIM_YEARS.map((y) => <button key={y} onClick={() => onYear(y)} aria-pressed={year === y} style={chipStyle(year === y)}>{y}</button>)}
@@ -389,16 +476,18 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
               return <button key={r} onClick={() => !off && setRounds(r)} disabled={off} aria-pressed={rounds === r} style={{ ...chipStyle(rounds === r), opacity: off ? 0.35 : 1, cursor: off ? "not-allowed" : "pointer" }}>{r}</button>;
             })}
           </Field>
-          <Field label="Speed" note={SPEEDS[speed]?.note}>
-            {Object.entries(SPEEDS).map(([k, v]) => <button key={k} onClick={() => setSpeed(k)} aria-pressed={speed === k} style={chipStyle(speed === k)}>{v.label}</button>)}
-          </Field>
+          {mode === "sim" && (
+            <Field label="Speed" note={SPEEDS[speed]?.note}>
+              {Object.entries(SPEEDS).map(([k, v]) => <button key={k} onClick={() => setSpeed(k)} aria-pressed={speed === k} style={chipStyle(speed === k)}>{v.label}</button>)}
+            </Field>
+          )}
         </div>
 
         <div style={{ marginTop: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <span style={labelStyle}>Pick Your Teams</span>
             <span style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>
-              {teams.length ? teams.map((t) => names.nickname(t)).join(", ") : "None — the CPU drafts for everyone"}
+              {teams.length > 3 ? introHeadline(teams, names.nickname, year).title : teams.length ? teams.map((t) => names.nickname(t)).join(", ") : "None — the CPU drafts for everyone"}
             </span>
             <span style={{ flex: 1 }} />
             <button onClick={() => setTeams([...NFL_TEAM_ABBRS])} style={{ ...chipStyle(false), padding: "5px 12px", fontSize: 11 }}>All 32</button>
@@ -422,20 +511,55 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
           </div>
         </div>
 
-        <div style={{ marginTop: 18 }}>
-          <Field label="Board" note={boardNote}>
-            <button onClick={() => setBoard("community")} aria-pressed={board === "community"} style={chipStyle(board === "community")}>Community</button>
-            <button onClick={() => signedIn && setBoard("mine")} disabled={!signedIn} aria-pressed={board === "mine"} style={{ ...chipStyle(board === "mine"), opacity: signedIn ? 1 : 0.35, cursor: signedIn ? "pointer" : "not-allowed" }}>My Board</button>
-          </Field>
-        </div>
+        <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} style={{
+          display: "flex", alignItems: "center", gap: 10, width: "100%", marginTop: 18, padding: "10px 0 0", border: "none", borderTop: "1px solid #1f2b42",
+          background: "none", cursor: "pointer", fontFamily: FONT, textAlign: "left",
+        }}>
+          <span style={labelStyle}>More Options</span>
+          {!moreOpen && changed.length > 0 && <span style={{ color: GOLD, fontSize: 12, fontWeight: 800, fontFamily: BODY }}>{changed.join(" · ")}</span>}
+          <span style={{ marginLeft: "auto", color: "#8b9bb4", fontSize: 14, transform: moreOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+        </button>
+        {moreOpen && (
+          <div>
+            <div style={{ marginTop: 14 }}>
+              <Field label="Draft Order" note={ORDER_MODES.find((m) => m.key === orderMode).note(year)}>
+                {ORDER_MODES.map((m) => <button key={m.key} onClick={() => setOrderMode(m.key)} aria-pressed={orderMode === m.key} style={chipStyle(orderMode === m.key)}>{m.label}</button>)}
+              </Field>
+              {orderMode === "custom" && <OrderEditor order={setup.order} map={orderMap} onMap={setOrderMap} branding={setup.branding} names={names} isMobile={isMobile} />}
+            </div>
 
-        <div style={{ marginTop: 18 }}>
-          <Field label="Desk Chatter" note={CHATTER.find((c) => c.key === chatter)?.note}>
-            {CHATTER.map((c) => <button key={c.key} onClick={() => setChatter(c.key)} aria-pressed={chatter === c.key} style={chipStyle(chatter === c.key)}>{c.label}</button>)}
-          </Field>
-        </div>
+            {/* Mock Draft mode: no CPU trades — the user makes every deal. */}
+            {mode === "sim" && (
+              <div style={{ marginTop: 18 }}>
+                <Field label="CPU Trades" note={CPU_TRADES[cpuTrades].note}>
+                  {Object.entries(CPU_TRADES).map(([k, v]) => <button key={k} onClick={() => setCpuTrades(k)} aria-pressed={cpuTrades === k} style={chipStyle(cpuTrades === k)}>{v.label}</button>)}
+                </Field>
+              </div>
+            )}
 
-        <button onClick={() => onStart({ teams, rounds: roundsFor(setup.order, teams, rounds), speed, chatter, board })} disabled={starting} style={{
+            <div style={{ marginTop: 18 }}>
+              <Field label="Player Pool" note={expanded ? "We-Draft.com's expanded board — more of the class than the main board." : "We-Draft.com's class board."}>
+                <button onClick={() => setExpanded(false)} aria-pressed={!expanded} style={chipStyle(!expanded)}>Site Board</button>
+                <button onClick={() => setExpanded(true)} aria-pressed={expanded} style={chipStyle(expanded)}>Expanded Board</button>
+              </Field>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <Field label="Board" note={boardNote}>
+                <button onClick={() => setBoard("community")} aria-pressed={board === "community"} style={chipStyle(board === "community")}>Community</button>
+                <button onClick={() => signedIn && setBoard("mine")} disabled={!signedIn} aria-pressed={board === "mine"} style={{ ...chipStyle(board === "mine"), opacity: signedIn ? 1 : 0.35, cursor: signedIn ? "pointer" : "not-allowed" }}>My Board</button>
+              </Field>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <Field label="Desk Chatter" note={CHATTER.find((c) => c.key === chatter)?.note}>
+                {CHATTER.map((c) => <button key={c.key} onClick={() => setChatter(c.key)} aria-pressed={chatter === c.key} style={chipStyle(chatter === c.key)}>{c.label}</button>)}
+              </Field>
+            </div>
+          </div>
+        )}
+
+        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades })} disabled={starting} style={{
           marginTop: 20, width: "100%", border: "none", borderRadius: 14, padding: isMobile ? "15px 18px" : "18px 22px", cursor: starting ? "wait" : "pointer",
           background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#111", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
           textTransform: "uppercase", boxShadow: "0 10px 30px rgba(246,162,29,0.25)",
@@ -449,6 +573,69 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
         <Link to="/mocks" style={{ color: GOLD, fontWeight: 800 }}>Write a mock draft →</Link>
         <Link to="/draftorder" style={{ color: GOLD, fontWeight: 800 }}>See the full draft order →</Link>
       </div>
+    </div>
+  );
+}
+
+const MODES = [
+  { key: "sim", label: "Draft Sim", note: "The broadcast: on the clock, the desk, trades." },
+  { key: "mock", label: "Mock Draft", note: "The sim with no pauses between picks — then post it as a mock." },
+];
+
+const ORDER_MODES = [
+  { key: "real", label: "Real", note: (year) => `The real ${year} draft order, trades included.` },
+  { key: "custom", label: "Custom", note: () => "Tap two teams to swap them — each takes the other's picks in every round, trades included." },
+  { key: "random", label: "Randomize", note: () => "Every team takes over a random team's picks — a new order each run." },
+];
+
+// Custom order: round 1 as it stands under the map, plus the teams without
+// a first-rounder. Tap one team, then another, to swap them.
+function OrderEditor({ order, map, onMap, branding, names, isMobile }) {
+  const [picked, setPicked] = useState(null);
+  const relabeled = useMemo(() => relabelOrder(order, map), [order, map]);
+  const firsts = relabeled.filter((p) => p.Round === 1).sort((a, b) => a.Pick - b.Pick);
+  const holders = new Set(firsts.map((p) => p.Traded || p.Team));
+  const without = orderTeams(order).filter((t) => !holders.has(t));
+  const tap = (t) => {
+    if (!picked) { setPicked(t); return; }
+    if (picked !== t) onMap(swapTeams(map, picked, t));
+    setPicked(null);
+  };
+  const isReal = Object.entries(map).every(([k, v]) => k === v);
+  const cols = `repeat(${isMobile ? 3 : 8}, minmax(0, 1fr))`;
+  const slot = (t, label, key) => {
+    const b = branding[t] || {};
+    const on = picked === t;
+    return (
+      <button key={key} onClick={() => tap(t)} aria-pressed={on} title={names.teamName(t)} style={{
+        display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 10, cursor: "pointer", minWidth: 0,
+        border: `2px solid ${on ? GOLD : "#1f2b42"}`, background: on ? `linear-gradient(160deg, ${b.Color1 || BLUE}, #0e1626 130%)` : "#0e1626", fontFamily: FONT,
+      }}>
+        {label != null && <span style={{ color: "#6f7f99", fontSize: 10, fontWeight: 900, width: 16, textAlign: "right", flexShrink: 0 }}>{label}</span>}
+        {b.LogoDark || b.Logo1 ? <img src={b.LogoDark || b.Logo1} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 22, flexShrink: 0 }} />}
+        <span style={{ color: on ? "#fff" : "#c9d4e5", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em" }}>{t}</span>
+      </button>
+    );
+  };
+  return (
+    <div style={{ marginTop: 10, background: "#0b1322", border: "1px solid #1f2b42", borderRadius: 12, padding: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{picked ? `Now tap the team to swap with the ${names.nickname(picked)}.` : "Round 1"}</span>
+        <span style={{ flex: 1 }} />
+        <button onClick={() => { onMap(randomTeamMap(order, Math.floor(Math.random() * 2 ** 31))); setPicked(null); }} style={{ ...chipStyle(false), padding: "5px 12px", fontSize: 11 }}>Shuffle</button>
+        <button onClick={() => { onMap(Object.fromEntries(Object.keys(map).map((t) => [t, t]))); setPicked(null); }} disabled={isReal} style={{ ...chipStyle(false), padding: "5px 12px", fontSize: 11, opacity: isReal ? 0.35 : 1 }}>Reset</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 5 }}>
+        {firsts.map((p) => slot(p.Traded || p.Team, p.Pick, p.Pick))}
+      </div>
+      {without.length > 0 && (
+        <>
+          <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, margin: "10px 0 6px" }}>No first-round pick</div>
+          <div style={{ display: "grid", gridTemplateColumns: cols, gap: 5 }}>
+            {without.map((t) => slot(t, null, t))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

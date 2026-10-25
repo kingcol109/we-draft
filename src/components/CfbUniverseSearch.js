@@ -30,7 +30,8 @@
 // seasonStats.js, a percentile within his stat group; OL — no stats — on
 // PFF alone). Only players with a ranked PFF grade (enough snaps) qualify.
 // PFF grades (pffData.js) also set the default We-Draft position (ED →
-// EDGE, DI → DL) and show in the PFF column — admin only; PFF data is never
+// EDGE, DI → DL) and show in the PFF column, with season snaps for
+// linemen — admin only; PFF data is never
 // displayed on the public site.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -46,6 +47,9 @@ const MAX_RESULTS = 60;
 const SUGGEST_COUNT = 50; // per page — "Show more" adds another page
 
 const WD_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB", "K", "P", "LS"];
+// Suggested Adds shows these positions' PFF season snaps under the grade —
+// the box score says little (OL: nothing) about a lineman.
+const LINEMEN = ["OL", "DL"];
 // CFBD roster position → We-Draft position. CFBD lumps ends and tackles
 // into DL, so those come in as DL (switch to EDGE per row when needed).
 export const POS_MAP = {
@@ -320,6 +324,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                           {!suggestMode && p.pff.w && <div style={{ fontSize: "11px", fontWeight: 700, color: "#7a8597" }}>latest {p.pff.w.g} (wk {p.pff.w.wk})</div>}
                         </>
                       ) : "—"}
+                      {suggestMode && LINEMEN.includes(p.wdPos) && p.pff?.sn != null ? <div style={{ fontSize: "11px", fontWeight: 700, color: "#3b4756" }}>{Number(p.pff.sn).toLocaleString()} snaps</div> : null}
                       {suggestMode && statLine(p.group, p.s) ? <div style={{ fontSize: "11px", fontWeight: 700, color: "#3b4756", whiteSpace: "normal", maxWidth: "260px" }}>{statLine(p.group, p.s)}</div> : null}
                     </td>
                     <td style={td}>{CLASS(p.yr)}</td>

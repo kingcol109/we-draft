@@ -11,7 +11,8 @@
 // saves as soon as they're in.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { haulRecords, simShareText, simCallToAction } from "../../utils/draftSim/share";
+import { haulRecords, simShareText, simCallToAction, mockShareText, simUrl } from "../../utils/draftSim/share";
+import MockShareCard, { shareRow } from "../MockShareCard";
 import * as htmlToImage from "html-to-image";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -23,6 +24,8 @@ import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
 import { withoutPageZoom } from "../../utils/pageZoom";
 import { Avatar } from "./SimFeed";
+import MockExport from "./MockExport";
+import { PlayerName } from "./FitName";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -34,13 +37,34 @@ const teamLogo = (b) => b.LogoDark || b.Logo1;
 const schoolLogo = (p) => p.logoDark || p.logo;
 const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: 12, letterSpacing: "0.06em", whiteSpace: "nowrap" };
 
-export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew }) {
+// mock: a Mock Draft mode run — the export-as-mock-draft panel up top.
+// onUndo (Mock Draft mode): take back the last pick, back into the draft.
+export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, onUndo }) {
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
   // Isaac's line per team, picked once (it draws on the desk's rng).
   const takes = useMemo(() => Object.fromEntries(userHauls.map((h) => [h.team, gradeTake(h, ctx)])), [userHauls, ctx]);
   const league = useMemo(() => NFL_TEAM_ABBRS.map((t) => teamHaul(sim, t)).filter((h) => h.rows.length).sort((a, b) => b.score - a.score), [sim]);
   const hasMine = userHauls.some((h) => h.rows.length);
+
+  // Mock Draft mode: no grades — the export and the draft itself.
+  if (mock) {
+    return (
+      <div className="wd-sim-in">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ marginRight: "auto" }}>
+            <div style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em" }}>FINAL · {data.year} NFL MOCK DRAFT</div>
+            <div style={{ color: "#fff", fontSize: isMobile ? 24 : 34, fontWeight: 900, lineHeight: 1 }}>THE MOCK IS COMPLETE</div>
+          </div>
+          <MockShare sim={sim} data={data} isMobile={isMobile} />
+          <button onClick={onRerun} style={{ ...btn, background: "#1a2438", color: "#fff" }}>START OVER</button>
+          <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>SETTINGS</button>
+        </div>
+        <MockExport sim={sim} year={data.year} isMobile={isMobile} onUndo={onUndo} />
+        <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />
+      </div>
+    );
+  }
 
   return (
     <div className="wd-sim-in">
@@ -123,7 +147,7 @@ function ReportCard({ h, b, take, isMobile }) {
             <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.2 }}>R{pick.round}<br />No. {pick.overall}</span>
             {schoolLogo(prospect) ? <img src={schoolLogo(prospect)} alt="" style={{ width: 24, height: 24, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 24, flexShrink: 0 }} />}
             <span style={{ flex: 1, minWidth: 0 }}>
-              <Link to={`/player/${prospect.Slug}`} style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 13, textDecoration: "none", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{prospect.First} {prospect.Last}</Link>
+              <Link to={`/player/${prospect.Slug}`} style={{ display: "block", textDecoration: "none" }}><PlayerName p={prospect} style={{ color: "#fff", fontWeight: 900, fontSize: 13 }} /></Link>
               <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontFamily: BODY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {prospect.Position} · {prospect.School} · Board #{prospect.rank}{pick.via ? ` · via ${pick.via}` : ""}
               </span>
@@ -198,7 +222,7 @@ function FullDraft({ sim, data, isMobile, cols }) {
               <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 22, textAlign: "right", flexShrink: 0 }}>{p.overall}</span>
               {teamLogo(b) && <img src={teamLogo(b)} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />}
               <span style={{ minWidth: 0, flex: 1 }}>
-                <span style={{ display: "block", color: "#fff", fontSize: 12, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</span>
+                <Link to={`/player/${pl.Slug}`} style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></Link>
                 <span style={{ display: "block", color: "#8b9bb4", fontSize: 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} {pl.School}{p.via ? ` · VIA ${p.via}` : ""}</span>
               </span>
             </div>
@@ -253,6 +277,74 @@ function SaveButton({ sim, data, hauls, speed, full }) {
 // summary). On mobile there's no image — just X and Message. The image is
 // text only — an external logo can taint the canvas and blank the export,
 // same as ShareMockButton.jsx. ──
+// Mock Draft mode's two shares: SAVE IMAGE downloads round one as a board
+// (every pick, team colors), SHARE TEXT sends every pick as a post or a
+// text (utils/draftSim/share.js mockShareText).
+function MockShare({ sim, data, isMobile }) {
+  const cardRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const name = (t) => { const b = data.branding[t] || {}; return b.Team ? `${b.City || ""} ${b.Team}`.trim() : t; };
+  const text = mockShareText({ year: data.year, sim, teamName: name });
+  const roundOne = sim.picks.filter((p) => p.round === 1 && p.selection);
+  const multi = sim.picks.some((p) => p.round > 1);
+
+  const saveImage = async () => {
+    if (!cardRef.current || busy) return;
+    setBusy(true);
+    try {
+      const url = await withoutPageZoom(() => htmlToImage.toPng(cardRef.current, {
+        pixelRatio: 2, backgroundColor: "#06162c", skipFonts: true, filter: (node) => node.tagName !== "IMG",
+      }));
+      const a = document.createElement("a");
+      a.download = `WeDraft_MockDraft_${data.year}.png`;
+      a.href = url;
+      a.click();
+    } catch (e) {
+      alert("Couldn't build the image. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = () => {
+    navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => {});
+  };
+  const shareLink = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#fff", border: `2px solid ${BLUE}`, borderRadius: 8, padding: 10, color: BLUE, fontWeight: 800, fontSize: 13, textDecoration: "none", cursor: "pointer", fontFamily: "inherit" };
+
+  return (
+    <>
+      <button onClick={saveImage} style={{ ...btn, background: BLUE, color: "#fff" }}>{busy ? "BUILDING…" : "SAVE IMAGE"}</button>
+      <button onClick={() => setOpen(true)} style={{ ...btn, background: BLUE, color: "#fff" }}>SHARE TEXT</button>
+
+      {/* The image (MockShareCard), drawn off screen: round one. */}
+      <div style={{ position: "absolute", left: -9999, top: 0 }} aria-hidden="true">
+        <MockShareCard ref={cardRef} eyebrow={`${data.year} NFL MOCK DRAFT${multi ? " · ROUND 1" : ""}`} title={`My ${data.year} Mock Draft`}
+          rows={roundOne.map((p) => shareRow(data.branding, { pickNumber: p.overall, team: p.owner, player: sim.byId[p.selection], via: p.via }))}
+          footer={`Make yours at ${simUrl(data.year)}`} />
+      </div>
+
+      {open && isMobile && <MobileShareSheet text={text} onClose={() => setOpen(false)} />}
+      {open && !isMobile && (
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `2px solid ${BLUE}`, borderRadius: 16, maxWidth: 480, width: "100%", maxHeight: "calc(90vh / var(--pz, 1))", overflowY: "auto", padding: 20, boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ color: BLUE, fontWeight: 900, fontSize: 14, letterSpacing: "0.06em" }}>SHARE YOUR MOCK</div>
+              <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", color: "#999", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
+            </div>
+            <div style={{ background: "#f4f6fa", border: "1px solid #d8dee8", borderRadius: 10, padding: "10px 12px", maxHeight: 320, overflowY: "auto", color: "#1d2733", fontFamily: BODY, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-line", marginBottom: 14 }}>{text}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={shareLink}>𝕏 Post</a>
+              <a href={`sms:?&body=${encodeURIComponent(text)}`} style={shareLink}>💬 Message</a>
+              <button onClick={copy} style={{ ...shareLink, background: BLUE, color: "#fff" }}>{copied ? "✓ Copied" : "📋 Copy"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ShareButton({ sim, data, hauls, takes, isMobile }) {
   const cardRef = useRef(null);
   const [image, setImage] = useState(null);
@@ -344,7 +436,7 @@ function ShareButton({ sim, data, hauls, takes, isMobile }) {
                   return (
                     <div key={p.overall} style={{ display: "flex", gap: 8, alignItems: "center", background: b.Color1 || BLUE, borderRadius: 6, padding: "5px 8px", fontSize: 11 }}>
                       <span style={{ width: 18, opacity: 0.75 }}>{p.overall}</span>
-                      <span style={{ flex: 1, fontWeight: 900, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.First} {pl.Last}</span>
+                      <PlayerName p={pl} style={{ flex: 1, minWidth: 0, fontWeight: 900 }} />
                       <span style={{ opacity: 0.8 }}>{pl.Position}</span>
                     </div>
                   );

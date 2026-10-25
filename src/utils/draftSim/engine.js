@@ -255,6 +255,39 @@ export function needPull(state, team, p, overall) {
   return specific > 0 && specific > position ? specific : position;
 }
 
+// Premium capital: picks in rounds 1–PREMIUM_ROUNDS (1–QB_PREMIUM_ROUNDS
+// for a quarterback). A team never spends one on a position it's only
+// looking for depth at — Depth Needed and nothing more urgent there (an
+// OL / DB with no sub-position only when both halves are), and no more
+// urgent specific need he fits.
+export const PREMIUM_ROUNDS = 2;
+export const QB_PREMIUM_ROUNDS = 4;
+const depthOnlyAt = (n) => !!n?.labels.includes("Depth Needed") && !n.labels.some((l) => URGENT.includes(l));
+export function depthOnly(state, team, p) {
+  const needs = state.needs?.[team];
+  if (!needs) return false;
+  const keys = needKeysFor(p);
+  if (!keys.length || !keys.every(({ key }) => depthOnlyAt(needs[key]))) return false;
+  return !specificsFor(p).some((s) => needs[s.key]?.labels.some((l) => URGENT.includes(l)) && specificFit(s, p, state.board));
+}
+const isPremium = (round, p) => round != null && round <= (p?.Position === "QB" ? QB_PREMIUM_ROUNDS : PREMIUM_ROUNDS);
+
+// A team with its QB room filled in (Set, Crowded Room — or no QB label
+// when it has needs entered at all) takes a quarterback with premium
+// capital only when he's too good to pass up: this many spots on top,
+// more the later the pick, half again for a crowded room.
+const qbRoomFull = (state, team) => {
+  const needs = state.needs?.[team];
+  if (!needs || !Object.keys(needs).length) return false;
+  const labels = needs.QB?.labels || [];
+  return !labels.some((l) => URGENT.includes(l) || l === "Depth Needed");
+};
+function qbRoomPenalty(state, team, p, overall, round) {
+  if (p.Position !== "QB" || !isPremium(round, p) || !qbRoomFull(state, team)) return 0;
+  const spots = 18 + 0.6 * overall;
+  return state.needs[team].QB?.labels.includes("Crowded Room") ? spots * 1.5 : spots;
+}
+
 // The specific needs a prospect fills: [{ key, fit }].
 export const specificFits = (p, board) => specificsFor(p).map((s) => ({ key: s.key, fit: specificFit(s, p, board) })).filter((x) => x.fit > 0);
 
@@ -440,11 +473,46 @@ export function buildTeamBoards(board, teams, seed, chaos = 1) {
 // Where a team has a prospect on its own board (the community rank without one).
 export const teamRank = (state, team, p) => state.teamBoards?.[team]?.[p.id] ?? p.rank;
 
+// ── Draft order ──
+// A team map ({ [team]: team }) relabels the order: every team takes over
+// another team's whole set of picks — round 1 slot, the rounds after it
+// and any picks traded in or out — so the order's shape (comp picks,
+// trades) stays real while who sits where changes. Needs and staff stay
+// with the team. The setup screen's Randomize (a new map each run) and
+// Custom (one the user builds by swapping teams) both come through here.
+export const orderTeams = (order) => [...new Set(order.flatMap((p) => [p.Team, p.Traded]).filter(Boolean))].sort();
+export function relabelOrder(order, to = {}) {
+  return order.map((p) => ({ ...p, Team: to[p.Team] || p.Team, ...(p.Traded ? { Traded: to[p.Traded] || p.Traded } : {}) }));
+}
+// A random team map (seeded).
+export function randomTeamMap(order, seed) {
+  const teams = orderTeams(order);
+  const work = { seed };
+  const shuffled = [...teams];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(random(work) * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return Object.fromEntries(teams.map((t, i) => [t, shuffled[i]]));
+}
+export const shuffleOrder = (order, seed) => relabelOrder(order, randomTeamMap(order, seed));
+// Teams a and b trade places in a map: each takes the other's picks.
+export function swapTeams(to, a, b) {
+  const next = { ...to };
+  const keyOf = (t) => Object.keys(next).find((k) => (next[k] || k) === t) || t;
+  const ka = keyOf(a);
+  const kb = keyOf(b);
+  next[ka] = b;
+  next[kb] = a;
+  return next;
+}
+
 // ── Sim state ──
 // order: [{ Pick, Round, Team, Traded }] (fetchDraft's picks).
 // futureOrder / futureYear: next year's draft (same shape), traded as
 // capital at FUTURE_DISCOUNT.
-export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null }) {
+// cpuTrades: how often CPU teams trade with each other (CPU_TRADES key).
+export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal" }) {
   // Picks in rounds the sim doesn't draft still change hands in trades —
   // a one-round sim's teams can trade up with their 2nd-rounders — and so
   // do next year's.
@@ -473,7 +541,7 @@ export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, 
     }));
   const teams = [...new Set([...picks, ...capital].flatMap((p) => [p.owner, p.original]))];
   return {
-    picks, capital, board, chart, staff, chaos, needs,
+    picks, capital, board, chart, staff, chaos, needs, cpuTrades,
     teamBoards: buildTeamBoards(board, teams, seed | 0, chaos),
     byId: Object.fromEntries(board.map((p) => [p.id, p])),
     taken: {},
@@ -507,14 +575,14 @@ function repeatOf(state, team, p) {
 }
 
 // A team's effective rank for a prospect at this pick (lower = wanted more).
-function effectiveRank(state, team, p, overall, noise = 0) {
+function effectiveRank(state, team, p, overall, round, noise = 0) {
   const fit = fitFor(p, team);
   const fitPull = fit ? Math.max(0, (fit - 60) / 40) * (4 + 0.22 * overall) : 0;
   const repeatPenalty = repeatOf(state, team, p) * (6 + 0.3 * overall) * (isSpecialist(p) ? 10 : p.Position === "QB" ? 3 : 1);
   const need = needPull(state, team, p, overall);
   const rank = teamRank(state, team, p);
   const base = isSpecialist(p) ? specialistRank(state, p.Position, overall) : rank * positionValue(p.Position, rank);
-  return base + earlyNudge(p.Position, overall) - fitPull + repeatPenalty - need * (5 + 0.25 * overall) + noise;
+  return base + earlyNudge(p.Position, overall) - fitPull + repeatPenalty - need * (5 + 0.25 * overall) + qbRoomPenalty(state, team, p, overall, round) + noise;
 }
 
 function candidatesFor(state, team) {
@@ -530,7 +598,11 @@ function candidatesFor(state, team) {
     .filter((pos) => specialistRank(state, pos, overall) < Infinity)
     .map((pos) => available(state).find((p) => p.Position === pos))
     .filter(Boolean);
-  return [...top, ...fits, ...specialists];
+  const all = [...top, ...fits, ...specialists];
+  // No premium pick on a depth-only position (unless that's all that's left).
+  const round = currentPick(state)?.round;
+  const allowed = all.filter((p) => !isPremium(round, p) || !depthOnly(state, team, p));
+  return allowed.length ? allowed : all;
 }
 
 // Prospects a CPU team takes the moment they're on the clock with him on
@@ -553,7 +625,7 @@ export function chooseCpuPick(state) {
   let bestScore = Infinity;
   candidatesFor(state, pick.owner).forEach((p) => {
     const noise = gaussian(work) * (2.5 + 0.1 * pick.overall) * state.chaos;
-    const score = effectiveRank(state, pick.owner, p, pick.overall, noise);
+    const score = effectiveRank(state, pick.owner, p, pick.overall, pick.round, noise);
     if (score < bestScore) { bestScore = score; best = p; }
   });
   return { prospect: best, seed: work.seed };
@@ -648,11 +720,16 @@ export function suggestionsFor(state, team, overall = currentPick(state)?.overal
     const n = needFor(state, team, p);
     if (n) needs[p.id] = n;
   });
-  const open = Object.entries(state.needs?.[team] || {})
+  return { value, need, coach, needs, topNeed: openNeeds(state, team)[0] || null };
+}
+
+// A team's urgent needs it hasn't drafted for yet, most urgent first
+// (positions before specific roles at the same label): [{ key, label }].
+export function openNeeds(state, team) {
+  return Object.entries(state.needs?.[team] || {})
     .map(([key, n]) => ({ key, label: NEED_LABELS.find((l) => URGENT.includes(l) && n.labels.includes(l)) }))
     .filter((n) => n.label && (state.needFilled?.[team]?.[n.key] || 0) < 1)
     .sort((a, c) => NEED_LABELS.indexOf(a.label) - NEED_LABELS.indexOf(c.label) || (SPECIFIC_BY_KEY[a.key] ? 1 : 0) - (SPECIFIC_BY_KEY[c.key] ? 1 : 0));
-  return { value, need, coach, needs, topNeed: open[0] || null };
 }
 
 // One CPU pick (with the chance of a CPU–CPU trade first) → { state, events }.
@@ -745,7 +822,13 @@ export function findTradeUpOffers(state, { max = MAX_OFFERS, threshold = 0.75 } 
     if (!theirs || theirs.future) return;
     let want = null;
     let wantScore = 0;
-    top.forEach((p) => { const d = desire(state, team, p, theirs.overall); if (d > wantScore) { wantScore = d; want = p; } });
+    // Moving up costs premium capital — not for a depth-only position, or
+    // a quarterback when the room's full.
+    top.forEach((p) => {
+      if ((isPremium(pick.round, p) || isPremium(theirs.round, p)) && (depthOnly(state, team, p) || (p.Position === "QB" && qbRoomFull(state, team)))) return;
+      const d = desire(state, team, p, theirs.overall);
+      if (d > wantScore) { wantScore = d; want = p; }
+    });
     if (!want || wantScore < threshold) return;
     // A team that really wants him will overpay a little more.
     const maxRatio = TRADE_MAX_RATIO + 0.2 * Math.max(0, wantScore - 1);
@@ -783,17 +866,28 @@ export function acceptOffer(state, offer) {
 }
 
 // Before a CPU pick: sometimes a team behind it trades up for its guy.
+// The setup screen's CPU Trades: a multiple of the usual chance (Frequent
+// also lets a team that only fairly wants its guy call), capped at
+// CPU_TRADE_CAP. Off: no CPU–CPU deals — the user's own offers still come.
+export const CPU_TRADES = {
+  off: { label: "Off", rate: 0, note: "No trades between CPU teams — offers to you still come in." },
+  normal: { label: "Normal", rate: 1, threshold: 0.9, note: "Trades about as often as a real draft." },
+  frequent: { label: "Frequent", rate: 2.5, threshold: 0.75, note: "Teams are on the phones — expect a lot more movement." },
+};
+const CPU_TRADE_CAP = 0.85;
 function maybeCpuTrade(state) {
   const pick = currentPick(state);
-  if (!pick) return null;
+  const level = CPU_TRADES[state.cpuTrades] || CPU_TRADES.normal;
+  if (!pick || !level.rate) return null;
   const work = { seed: state.seed };
   const roll = random(work);
-  const offer = findTradeUpOffers({ ...state, seed: work.seed }, { max: 1, threshold: 0.9 })[0];
+  const offer = findTradeUpOffers({ ...state, seed: work.seed }, { max: 1, threshold: level.threshold })[0];
   if (!offer) return null;
   // The bigger the gap between how much the caller wants his player and how
   // much the team on the clock loves its options, the likelier the deal.
   const gap = offer.desire - offer.attachment;
-  const chance = Math.min(TRADE_GAP_MAX, (CPU_TRADE_CHANCE[pick.round - 1] ?? 0.01) + TRADE_GAP_RATE * Math.max(0, gap - TRADE_GAP_START)) * state.chaos;
+  const base = Math.min(TRADE_GAP_MAX, (CPU_TRADE_CHANCE[pick.round - 1] ?? 0.01) + TRADE_GAP_RATE * Math.max(0, gap - TRADE_GAP_START)) * state.chaos;
+  const chance = Math.min(CPU_TRADE_CAP, base * level.rate);
   if (roll >= chance) return null;
   return acceptOffer({ ...state, seed: work.seed }, offer);
 }
@@ -890,14 +984,18 @@ export function evaluateProposal(state, { give = [], get = [] }) {
 }
 
 // Swap the picks → { state, event } (event null when the CPU says no).
-export function applyProposal(state, { team, partner, give = [], get = [] }) {
+// force (Mock Draft mode): no CPU to ask — any two teams, any picks, even
+// one side's picks for nothing.
+export function applyProposal(state, { team, partner, give = [], get = [] }, { force = false } = {}) {
   // Every pick still there to trade — a CPU pick on the clock can be made
   // while the user's building the deal (stale: nothing swaps).
   const still = (n, owner) => tradeablePicks(state, owner, { includeCurrent: true }).some((p) => p.overall === n);
   if (!give.every((n) => still(n, team)) || !get.every((n) => still(n, partner))) {
     return { state, event: null, verdict: { ...evaluateProposal(state, { give, get }), accept: false, stale: true } };
   }
-  const verdict = evaluateProposal(state, { give, get });
+  const verdict = force
+    ? { ...evaluateProposal(state, { give, get }), accept: give.length + get.length > 0 && team !== partner }
+    : evaluateProposal(state, { give, get });
   if (!verdict.accept) return { state, event: null, verdict };
   const swap = (p) => {
     if (p.selection) return p;
@@ -920,7 +1018,7 @@ export function applyProposal(state, { team, partner, give = [], get = [] }) {
     to: userMovesUp ? team : partner, from: userMovesUp ? partner : team,
     pick: find(earliest),
     give: (userMovesUp ? give : get).map(find),
-    ratio: userMovesUp ? verdict.ratio : 1 / verdict.ratio,
+    ratio: userMovesUp ? verdict.ratio : verdict.ratio ? 1 / verdict.ratio : 0,
     target: null,
   };
   const trades = [...(state.trades || []), { a: team, b: partner, aGot: get.map(find), bGot: give.map(find) }];

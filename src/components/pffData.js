@@ -16,7 +16,7 @@ import { db } from "../firebase";
 // PFF position → We-Draft position.
 export const PFF_TO_WD = {
   QB: "QB", HB: "RB", FB: "RB", WR: "WR", TE: "TE", T: "OL", G: "OL", C: "OL",
-  DI: "DL", ED: "EDGE", LB: "LB", CB: "DB", S: "DB", K: "K",
+  DI: "DL", ED: "EDGE", LB: "LB", CB: "DB", S: "DB", K: "K", P: "P",
 };
 
 let cached = null;

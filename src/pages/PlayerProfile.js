@@ -4475,7 +4475,8 @@ useEffect(() => {
                 className="font-black uppercase"
                 style={{
                   background: "none", border: "none", margin: 0, padding: "0 0 5px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-                  color: on ? siteC1 : "#9aa5b4", fontSize: isMobile ? "12px" : modern ? "14px" : "22px", letterSpacing: isMobile ? "0.06em" : modern ? "0.1em" : "0.08em",
+                  // My Evaluation stays blue either way — only the underline marks it selected.
+                  color: on || key === "mine" ? siteC1 : "#9aa5b4", fontSize: isMobile ? "12px" : modern ? "14px" : "22px", letterSpacing: isMobile ? "0.06em" : modern ? "0.1em" : "0.08em",
                   borderBottom: `3px solid ${on ? siteC2 : "transparent"}`, transition: "color 0.15s ease",
                 }}
               >
@@ -6039,6 +6040,17 @@ useEffect(() => {
         ) : !adsResolved && (
           // Holds the ad's height (+ its "Sponsored" label) until it loads.
           <div className="mb-8" aria-hidden="true" style={{ height: isMobile ? `${MOBILE_AD_HEIGHT + 17}px` : "131px" }} />
+        )}
+
+        {/* PC only, where My Evaluation used to be: opens its tab up top. */}
+        {!isMobile && (
+          <div className="mb-8" style={{ display: "flex", justifyContent: "center" }}>
+            <button onClick={()=>{ setScoutTab("mine"); evaluationFormRef.current?.scrollIntoView({behavior:"smooth",block:"start"}); }}
+              className="font-black uppercase rounded-full transition hover:opacity-90"
+              style={{ backgroundColor:siteC1, border:`3px solid ${siteC2}`, color:"#fff", fontSize:"16px", padding:"10px 28px", letterSpacing:"0.08em", cursor:"pointer" }}>
+              My Evaluation
+            </button>
+          </div>
         )}
 
         {/* ===== Archived Evaluation ===== */}

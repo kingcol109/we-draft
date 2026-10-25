@@ -16,7 +16,7 @@
 //                   last week's)
 // Each player is graded in the category that matches his PFF position (QB →
 // passing, HB → rushing, WR/TE → receiving, OL → blocking, defense →
-// defense, K → field goals), ranked among FBS players at that position with
+// defense, K → field goals, P → punting), ranked among FBS players at that position with
 // enough snaps (MIN_SNAPS). He also carries his specific grades (SUBS —
 // pass rush, coverage, pass block…), each ranked among every FBS player with
 // enough snaps in that phase, for the suggester's PFF focus.
@@ -48,14 +48,15 @@ const CATS = {
   blocking: { path: "offense/blocking", grade: "grades_offense", snaps: (r) => r.snap_counts_offense },
   defense: { path: "defense/summary", grade: "grades_defense", snaps: (r) => r.snap_counts_defense },
   kicking: { path: "field_goal/summary", grade: "grades_fgep_kicker", snaps: (r) => r.total_attempts },
+  punting: { path: "punting/summary", grade: "grades_punter", snaps: (r) => r.attempts },
 };
 const CAT_OF_POS = {
   QB: "passing", HB: "rushing", FB: "rushing", WR: "receiving", TE: "receiving",
-  T: "blocking", G: "blocking", C: "blocking", DI: "defense", ED: "defense", LB: "defense", CB: "defense", S: "defense", K: "kicking",
+  T: "blocking", G: "blocking", C: "blocking", DI: "defense", ED: "defense", LB: "defense", CB: "defense", S: "defense", K: "kicking", P: "punting",
 };
 // Season snaps before a grade is ranked — an early-season grade on 30 snaps
 // isn't a signal. VideoSuggester.js only scores grades with a rank (rk).
-const MIN_SNAPS = { passing: 50, rushing: 30, receiving: 60, blocking: 100, defense: 100, kicking: 3 };
+const MIN_SNAPS = { passing: 50, rushing: 30, receiving: 60, blocking: 100, defense: 100, kicking: 3, punting: 10 };
 // Specific grades — key (VideoSuggester.js PFF_FOCUS uses the same keys),
 // the category row it comes from, its grade, the snaps in that phase, and
 // how many before it's ranked.
@@ -82,6 +83,7 @@ const STATS = {
   blocking: ["pressures_allowed", "sacks_allowed", "pbe"],
   defense: ["total_pressures", "sacks", "hits", "hurries", "stops", "tackles_for_loss", "missed_tackle_rate", "pass_break_ups", "interceptions", "forced_fumbles", "qb_rating_against", "batted_passes"],
   kicking: ["total_percent", "fifty_made", "forty_made"],
+  punting: ["average_net_yards", "average_hangtime", "inside_twenties", "touchbacks"],
 };
 
 // PFF's upstream sometimes 502s on the big leaderboards — retry 5xx a few
@@ -172,6 +174,8 @@ async function run() {
 
   const ops = [];
   let matched = 0, unmatched = 0, noRoster = 0;
+  // Ranked (matched) players per category, for the summary.
+  const rankedByCat = {};
   const unmatchedSample = [];
   for (const [teamId, team] of byTeam) {
     const roster = (await db.collection("cfbRosters").doc(teamId).get()).data();
@@ -230,6 +234,7 @@ async function run() {
         st: Object.keys(st).length ? st : undefined,
       }));
       matched++;
+      if (qualifies && list) rankedByCat[cat] = (rankedByCat[cat] || 0) + 1;
     });
     ops.push((b) => b.set(db.collection("pffGrades").doc(teamId), {
       teamId, school: team.school, pffTeamId: team.pffTeamId, season, weeks, players, updatedAt: FieldValue.serverTimestamp(),
@@ -244,6 +249,7 @@ async function run() {
     }
   }
   console.log(`${DRY ? "[dry] " : ""}PFF ${season} through week ${week}: ${ops.length} teams written, ${matched} players matched, ${unmatched} unmatched${noRoster ? `, ${noRoster} teams with no roster doc` : ""}.`);
+  console.log(`  ranked: ${Object.keys(CATS).map((c) => `${c} ${rankedByCat[c] || 0}`).join(", ")}`);
   if (unmatchedSample.length) console.log(`  unmatched e.g.: ${unmatchedSample.join("; ")}`);
   console.log(`PFF calls: ${calls}`);
 }

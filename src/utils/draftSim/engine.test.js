@@ -1,7 +1,7 @@
 import {
   buildBoard, applyMyGrades, buildTeamBoards, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer,
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
-  positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
+  positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
 import { reactTo, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, takeSituation } from "./analysts";
 import { bestGame } from "./data";
@@ -435,6 +435,135 @@ test("needs: a team that needs a corner takes the corner, not the safety ahead o
     if (stepCpu(s).state.picks[0].selection === "cb") cb++;
   }
   expect(cb).toBeGreaterThanOrEqual(35);
+});
+
+test("needs: no premium pick (rounds 1–2) on a depth-only position", () => {
+  const NO_RB = POS.filter((p) => p !== "RB");
+  const b = buildBoard([
+    { id: "rb", Position: "RB", cr: 1 },
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: NO_RB[i % NO_RB.length], cr: 2 + i })),
+  ]);
+  const needs = needsOf("T1", { RB: "Depth Needed" });
+  const at = (round) => {
+    let rb = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = initSim({ order: [{ Pick: 1, Round: round, Team: "T1" }], board: b, needs, rounds: round, seed });
+      if (stepCpu(s).state.picks[0].selection === "rb") rb++;
+    }
+    return rb;
+  };
+  expect(at(1)).toBe(0);
+  expect(at(2)).toBe(0);
+  expect(at(3)).toBeGreaterThan(0);
+  // A more urgent label alongside it, or no label at all, lifts the rule.
+  const s = initSim({ order, board, needs: needsOf("AAA", { RB: "Depth Needed", CB: "Depth Needed" }) });
+  expect(depthOnly(s, "AAA", { Position: "RB" })).toBe(true);
+  expect(depthOnly(s, "AAA", { Position: "DB" })).toBe(false);
+  expect(depthOnly(s, "AAA", { Position: "DB", subPosition: "CB" })).toBe(true);
+  const both = initSim({ order, board, needs: { AAA: resolveNeeds({ RB: { labels: ["Depth Needed", "Expiring Contract"] } }) } });
+  expect(depthOnly(both, "AAA", { Position: "RB" })).toBe(false);
+});
+
+test("needs: a depth-only QB waits until round 5", () => {
+  const NO_QB = POS.filter((p) => p !== "QB");
+  const b = buildBoard([
+    { id: "qb", Position: "QB", cr: 1 },
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: NO_QB[i % NO_QB.length], cr: 2 + i })),
+  ]);
+  const qbs = (round) => {
+    let n = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = initSim({ order: [{ Pick: 1, Round: round, Team: "T1" }], board: b, needs: needsOf("T1", { QB: "Depth Needed" }), rounds: round, seed });
+      if (stepCpu(s).state.picks[0].selection === "qb") n++;
+    }
+    return n;
+  };
+  [1, 2, 3, 4].forEach((round) => expect(qbs(round)).toBe(0));
+  expect(qbs(5)).toBeGreaterThan(0);
+});
+
+test("needs: a team with a full QB room passes on a first-round QB unless he's too good", () => {
+  const NO_QB = POS.filter((p) => p !== "QB");
+  // A QB the board has at `qbRank`, on the clock at `overall`.
+  const qbs = (label, qbRank, overall, fit = null) => {
+    const b = buildBoard([
+      ...Array.from({ length: 60 }, (_, i) => ({ id: `x${i}`, Position: NO_QB[i % NO_QB.length], cr: i + 1 + (i + 1 >= qbRank ? 1 : 0) })),
+      { id: "qb", Position: "QB", cr: qbRank },
+    ], {}, fit ? { qb: [{ a: "T1", s: fit, GM: fit }] } : {});
+    const order = Array.from({ length: overall }, (_, i) => ({ Pick: i + 1, Round: 1, Team: i + 1 === overall ? "T1" : `O${i}` }));
+    let n = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      let s = initSim({ order, board: b, needs: needsOf("T1", { QB: label, WR: "Upgrade Wanted" }), rounds: 1, seed });
+      // Everyone ahead takes the next non-QB off the board.
+      for (let i = 0; i < overall - 1; i++) { const { taken } = s; s = makePick(s, b.find((p) => p.Position !== "QB" && !taken[p.id]).id).state; }
+      if (stepCpu(s).state.picks[overall - 1].selection === "qb") n++;
+    }
+    return n;
+  };
+  // The No. 5 QB at No. 10: a team that needs one takes him; a set room doesn't.
+  expect(qbs("Upgrade Needed", 5, 10)).toBeGreaterThan(45);
+  expect(qbs("Set", 5, 10)).toBeLessThanOrEqual(2);
+  expect(qbs("Crowded Room", 5, 10)).toBe(0);
+  // The board's No. 1 player still there at No. 20, a strong fit for the
+  // staff, can be too good to pass up — sometimes.
+  expect(qbs("Set", 1, 20)).toBe(0);
+  const tooGood = qbs("Set", 1, 20, 95);
+  expect(tooGood).toBeGreaterThan(0);
+  expect(tooGood).toBeLessThan(30);
+});
+
+test("random order: each team takes over another's picks, trades and all, and the seed replays it", () => {
+  const real = [...order.slice(0, 5), { ...order[5], Traded: "AAA" }, ...order.slice(6)];
+  const a = shuffleOrder(real, 7);
+  expect(shuffleOrder(real, 7)).toEqual(a);
+  expect(a.map((p) => p.Pick)).toEqual(real.map((p) => p.Pick));
+  // One team for one team: AAA's two-pick haul (its own + the one traded in) lands with a single team.
+  const to = Object.fromEntries(real.map((p, i) => [p.Team, a[i].Team]));
+  expect(new Set(Object.values(to)).size).toBe(TEAMS.length);
+  expect(a[5].Traded).toBe(to.AAA);
+  expect([1, 2, 3, 4, 5, 6, 8].some((seed) => shuffleOrder(real, seed)[0].Team !== "AAA")).toBe(true);
+});
+
+test("custom order: swapping two teams trades their whole sets of picks", () => {
+  const real = [...order.slice(0, 5), { ...order[5], Traded: "AAA" }, ...order.slice(6)];
+  const identity = Object.fromEntries(orderTeams(real).map((t) => [t, t]));
+  const once = swapTeams(identity, "AAA", "CCC");
+  const a = relabelOrder(real, once);
+  expect(a[0].Team).toBe("CCC");
+  expect(a[2].Team).toBe("AAA");
+  expect(a[5].Traded).toBe("CCC");
+  // Swapping by who holds the slot now, not who started there.
+  const twice = relabelOrder(real, swapTeams(once, "CCC", "BBB"));
+  expect(twice[0].Team).toBe("BBB");
+  expect(twice[1].Team).toBe("CCC");
+  expect(twice[2].Team).toBe("AAA");
+});
+
+test("CPU trades: Off means none between CPU teams, Frequent more than Normal", () => {
+  const big = buildBoard(Array.from({ length: 120 }, (_, i) => ({ id: `b${i}`, Position: POS[i % POS.length], cr: i + 1 })));
+  const teams = Array.from({ length: 16 }, (_, i) => `T${i}`);
+  const ord = [1, 2].flatMap((round) => teams.map((t, i) => ({ Pick: (round - 1) * 16 + i + 1, Round: round, Team: t })));
+  // Every team needs something badly, so someone always wants to move up.
+  const keys = ["QB", "WR", "EDGE", "OT", "CB", "RB", "LB", "IDL", "TE"];
+  const tradeNeeds = Object.fromEntries(teams.map((t, i) => [t, resolveNeeds({ [keys[i % keys.length]]: { labels: ["Upgrade Needed"] } })]));
+  const count = (cpuTrades) => {
+    let n = 0;
+    for (let seed = 1; seed <= 25; seed++) {
+      let s = initSim({ order: ord, board: big, rounds: 2, seed, cpuTrades, needs: tradeNeeds });
+      while (!s.done) {
+        const r = stepCpu(s);
+        n += r.events.filter((e) => e.type === "trade").length;
+        s = r.state;
+      }
+    }
+    return n;
+  };
+  const off = count("off");
+  const normal = count("normal");
+  const frequent = count("frequent");
+  expect(off).toBe(0);
+  expect(normal).toBeGreaterThan(0);
+  expect(frequent).toBeGreaterThan(normal);
 });
 
 test("needs reach the desk: the pick event carries the need, and the lines fill in", () => {

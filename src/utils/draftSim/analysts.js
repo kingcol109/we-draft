@@ -84,7 +84,7 @@ export const VARIABLES = {
   fromGm: "GM trading down", fromHc: "Head coach trading down",
   best: "Best pick (results screen)", bestN: "Best pick's number (results screen)",
   prev: "Thad: the earlier player he's comparing to (Bo Nix)", prevYear: "Thad: that player's draft year", prevN: "Thad: his overall pick",
-  club: "Thad: the school's (or team's) earlier first-rounders at the position (Bo Nix and Justin Herbert)", prevRound: "Thad: his round", prevNick: "Thad: the team that took him (Broncos)",
+  club: "Thad: the school's (or team's) earlier first-rounders — or Day 2 picks — at the position (Bo Nix and Justin Herbert)", prevRound: "Thad: his round", prevNick: "Thad: the team that took him (Broncos)",
   recordSchool: "Thad: the school that last had that many (Alabama)", recordTimes: "Thad: how many that school, or that draft, had (6)",
   firstYear: "Thad: the first draft in his records (2000)", times: "Thad: how many (picks, players)", timesOrd: "Thad: which one this is (5th)",
   seatName: "Thad: the GM or head coach (full name)", seatLast: "Thad: their last name", seatPoss: "Thad: their full name, possessive", schoolPoss: "Thad: the school, possessive (Texas')", mascot: "Thad: one player of the school's mascot (Longhorn)",
@@ -864,6 +864,73 @@ export const THAD_LINES = {
       "You have to go back to {prevYear} — {prev}, No. {prevN} — for {aPosName} drafted as high as {player}.",
     ],
   },
+  // Day 2 (rounds two and three) — the first-round facts again.
+  schoolPosDay2: {
+    label: "Day 2 · School + position: drought", when: "A round 2–3 pick; the school's last Day 2 player at the position was years ago.",
+    lines: [
+      "{player} is {schoolPoss} first Day 2 {posName} since {prev} in {prevYear}.",
+      "{player} is the first {school} {posName} taken in rounds two or three since {prev} in {prevYear}.",
+      "Last time {school} had {aPosName} go on Day 2? {prev}, No. {prevN} to the {prevNick} in {prevYear}. Until {player}.",
+      "{school} hadn't had a Day 2 {posName} since {prev} ({prevYear}). {player} ends that.",
+    ],
+  },
+  schoolPosDay2Club: {
+    label: "Day 2 · School + position: joins the club", when: "A round 2–3 pick; the school's had a few Day 2 picks at the position before (most recent named first).",
+    lines: [
+      "{player} joins {club} as {school} Day 2 {posPlural} since {firstYear}.",
+      "Add {player} to the list of {school} {posPlural} taken in rounds two and three since {firstYear}: {club}.",
+    ],
+  },
+  schoolDay2: {
+    label: "Day 2 · School: drought", when: "A round 2–3 pick from a school that hasn't had a Day 2 pick in years.",
+    lines: [
+      "{player} is {schoolPoss} first Day 2 pick since {prev} in {prevYear}.",
+      "It's been a while for {school} on Day 2 — {prev}, {prevYear}. {player} is the next one.",
+    ],
+  },
+  teamPosDay2Club: {
+    label: "Day 2 · Team + position: joins the club", when: "A round 2–3 pick; the team's taken a few Day 2 picks at the position before (most recent named first).",
+    lines: [
+      "{player} joins {club} as the {nick}' Day 2 {posPlural} since {firstYear}.",
+      "Add {player} to the list of {nick} {posPlural} taken in rounds two and three since {firstYear}: {club}.",
+    ],
+  },
+  teamPosDay2: {
+    label: "Day 2 · Team + position: drought", when: "A round 2–3 pick at a position the team hasn't taken on Day 2 in years.",
+    lines: [
+      "{player} is the {nick}' first Day 2 {posName} since {prev} in {prevYear}.",
+      "Last time the {nick} spent a second- or third-rounder on {aPosName}: {prev}, No. {prevN}, {prevYear}. Now it's {player}.",
+      "{prevYear}. {prev}. That's the last Day 2 {posName} the {nick} took before {player}.",
+    ],
+  },
+  schoolRunDay2: {
+    label: "Day 2 · School: another one tonight", when: "The school's third (or more) round 2–3 pick in this draft.",
+    lines: [
+      "{player} is {schoolPoss} {timesOrd} Day 2 pick of the night.",
+      "Another one for {school} — {player} makes it {times} picks in rounds two and three.",
+    ],
+  },
+  schoolRunDay2Record: {
+    label: "Day 2 · School: most in years", when: "A school's round 2–3 picks in this draft are the most from one school on a Day 2 in years.",
+    lines: [
+      "{player} makes it {times} Day 2 picks for {school} — the most from one school since {recordSchool} had {recordTimes} in {prevYear}.",
+      "{times} {school} players in rounds two and three with {player}. You have to go back to {recordSchool} in {prevYear} ({recordTimes}) for a Day 2 like this.",
+    ],
+  },
+  posDay2Count: {
+    label: "Day 2 · Position: most in years", when: "The 5th or later round 2–3 pick at the position, the most on a Day 2 in years.",
+    lines: [
+      "{player} is the {timesOrd} {posName} taken on Day 2 — the most in rounds two and three since {prevYear}, when there were {recordTimes}.",
+      "{player} makes it {times} Day 2 {posPlural}. Last draft with that many: {prevYear} ({recordTimes}).",
+    ],
+  },
+  staffDay2Pos: {
+    label: "Day 2 · GM / head coach: first at the position", when: "The staffer's first round 2–3 pick at the position since taking the job (their 3rd draft or later).",
+    lines: [
+      "{player} is {seatPoss} first Day 2 {posName} since taking over the {nick} in {seatSince}.",
+      "{drafts} drafts under {seatName}, and {player} is the first time the {nick} have spent a second- or third-rounder on {aPosName}.",
+    ],
+  },
   staffFirstPick: {
     label: "GM / head coach: first pick in the job", when: "The team's first pick in its GM's or head coach's first draft.",
     lines: [
@@ -1140,14 +1207,15 @@ function historyOf(ctx) {
   if (!historyIndex.has(h)) {
     const rows = h.picks.map(([year, round, overall, t, pos, s, name]) => ({ year, round, overall, team: h.teams[t], pos, school: h.schools[s], name }));
     const by = (key) => rows.reduce((m, r) => { (m[r[key]] || (m[r[key]] = [])).push(r); return m; }, {});
-    // { [year]: { [position or school]: first-rounders } }.
-    const round1 = (key) => rows.filter((r) => r.round === 1).reduce((m, r) => {
+    // { [year]: { [position or school]: picks in those rounds } }.
+    const countIn = (key, rounds) => rows.filter((r) => rounds.includes(r.round)).reduce((m, r) => {
       const y = m[r.year] || (m[r.year] = {});
       y[r[key]] = (y[r[key]] || 0) + 1;
       return m;
     }, {});
     historyIndex.set(h, {
-      bySchool: by("school"), byTeam: by("team"), byPos: by("pos"), round1ByPos: round1("pos"), round1BySchool: round1("school"),
+      bySchool: by("school"), byTeam: by("team"), byPos: by("pos"), round1ByPos: countIn("pos", [1]), round1BySchool: countIn("school", [1]),
+      day2ByPos: countIn("pos", [2, 3]), day2BySchool: countIn("school", [2, 3]),
       firstYear: h.years[0], staff: h.staff || {}, mascots: h.mascots || {},
       firstOverall: (h.firstOverall || []).map(([year, team, pos, school, name]) => ({ year, round: 1, overall: 1, team, pos, school, name })),
     });
@@ -1184,6 +1252,9 @@ export function thadFacts(e, ctx) {
   const { round, overall: n } = e.pick;
   const pos = p.Position;
   const school = p.School || "";
+  // Day 2: rounds two and three, which get the first-round facts too.
+  const isDay2 = (r) => r.round === 2 || r.round === 3;
+  const day2 = isDay2(e.pick);
   // Earlier drafts' picks matching f, then this sim's before this one.
   const sim = (ctx.memory?.drafted || []).filter((r) => r.overall < n);
   const where = (rows, f) => [...(rows || []).filter((r) => r.year < year && f(r)), ...sim.filter(f)];
@@ -1225,6 +1296,11 @@ export function thadFacts(e, ctx) {
       // "joins Bo Nix and Justin Herbert".
       const club = clubOf(schoolPos.filter((r) => r.round === 1));
       if (club) add("schoolPosClub", 3.2, "schoolPos", club);
+    } else if (day2) {
+      const last = latest(schoolPos.filter(isDay2));
+      if (last && ago(last) >= 4) add("schoolPosDay2", 2.5 + Math.min(3, ago(last) / 5), "schoolPos", prevVars(last));
+      const club = clubOf(schoolPos.filter(isDay2));
+      if (club) add("schoolPosDay2Club", 2.6, "schoolPos", club);
     }
     const higher = schoolPos.filter((r) => r.overall <= n);
     if (schoolPos.length >= 2 && !higher.length) {
@@ -1236,6 +1312,9 @@ export function thadFacts(e, ctx) {
     if (round === 1) {
       const last = latest(where(H.bySchool[school], (r) => r.school === school && r.round === 1));
       if (last && ago(last) >= 8) add("schoolRound1", 2.5, "school", prevVars(last));
+    } else if (day2) {
+      const last = latest(where(H.bySchool[school], (r) => r.school === school && isDay2(r)));
+      if (last && ago(last) >= 8) add("schoolDay2", 2.5, "school", prevVars(last));
     }
     // The team and the school.
     const teamSchool = where(H.byTeam[e.team], (r) => r.team === e.team && r.school === school);
@@ -1254,6 +1333,12 @@ export function thadFacts(e, ctx) {
     if (last && !last.sim && ago(last) >= 4) add("teamPosRound1", 3 + Math.min(2, ago(last) / 6), "teamPos", prevVars(last));
     const club = clubOf(firsts);
     if (club) add("teamPosClub", 3, "teamPos", club);
+  } else if (day2) {
+    const picks = where(H.byTeam[e.team], (r) => r.team === e.team && r.pos === pos && isDay2(r));
+    const last = latest(picks);
+    if (last && !last.sim && ago(last) >= 5) add("teamPosDay2", 2.5 + Math.min(2, ago(last) / 6), "teamPos", prevVars(last));
+    const club = clubOf(picks);
+    if (club) add("teamPosDay2Club", 2.4, "teamPos", club);
   }
 
   // The last earlier draft whose first round had at least `times` of one
@@ -1277,6 +1362,11 @@ export function thadFacts(e, ctx) {
         const record = lastWith(H.round1BySchool, times);
         if (record && year - record.year >= 2) add("schoolRunRecord", 3.5, "schoolRun2", { times, prevYear: record.year, recordSchool: record.key, recordTimes: record.count });
       }
+    } else if (day2 && tonight.filter(isDay2).length + 1 >= 3) {
+      const times = tonight.filter(isDay2).length + 1;
+      add("schoolRunDay2", times >= 4 ? 2.5 : 1.5, "schoolRun", { times, timesOrd: ordinal(times) });
+      const record = lastWith(H.day2BySchool, times);
+      if (record && year - record.year >= 2) add("schoolRunDay2Record", 3, "schoolRun2", { times, prevYear: record.year, recordSchool: record.key, recordTimes: record.count });
     } else if (tonight.length + 1 >= 4) {
       const times = tonight.length + 1;
       add("schoolRun", times >= 7 ? 2.2 : 1.2, "schoolRun", { times, timesOrd: ordinal(times) });
@@ -1289,6 +1379,12 @@ export function thadFacts(e, ctx) {
     if (times >= 3) {
       const record = lastWith(H.round1ByPos, times, pos);
       if (record && year - record.year >= 3) add("posRound1Count", 3, "posCount", { times, timesOrd: ordinal(times), prevYear: record.year, recordTimes: record.count });
+    }
+  } else if (day2) {
+    const times = sim.filter((r) => isDay2(r) && r.pos === pos).length + 1;
+    if (times >= 5) {
+      const record = lastWith(H.day2ByPos, times, pos);
+      if (record && year - record.year >= 3) add("posDay2Count", 2.6, "posCount", { times, timesOrd: ordinal(times), prevYear: record.year, recordTimes: record.count });
     }
   }
 
@@ -1318,6 +1414,7 @@ export function thadFacts(e, ctx) {
     // a few drafts in — not in their first or second — and not for a long
     // tenure, where it's just the team's own first-round drought.
     else if (!long && round === 1 && vars.drafts >= 3 && !tenure.some((r) => r.pos === pos && r.round === 1)) add("staffRound1Pos", 2.2, "staff", vars);
+    else if (!long && day2 && vars.drafts >= 3 && !tenure.some((r) => r.pos === pos && isDay2(r))) add("staffDay2Pos", 2, "staff", vars);
     const atPos = tenure.filter((r) => r.pos === pos).length;
     if (atPos >= 2) add(long ? "staffPosLong" : "staffPos", 1.2, "staffPos", { ...vars, times: atPos + 1, timesOrd: ordinal(atPos + 1) });
     const fromSchool = school ? tenure.filter((r) => r.school === school).length : 0;
@@ -1544,7 +1641,7 @@ export const ANALYSTS = [
   {
     id: "thad", name: "Thad Murphy", handle: "@ThadMurphy", role: "Draft Historian", verified: true, enabled: true,
     color: "#a0662b", initials: "TM", delay: 1300, lines: THAD_LINES,
-    about: "The history books — every NFL pick since 2000 plus this sim's: first-round droughts for a school or team at a position, the last player a team took from that school, the highest one's gone in years, a school's run of first-rounders tonight, the most at a position in a first round in years, the GM's and head coach's record since taking the job, and alma-mater picks.",
+    about: "The history books — every NFL pick since 2000 plus this sim's: first-round droughts for a school or team at a position, the last player a team took from that school, the highest one's gone in years, a school's run of first-rounders tonight, the most at a position in a first round in years, the GM's and head coach's record since taking the job, and alma-mater picks. Day 2 (rounds two and three) gets its own version of the first-round facts.",
     cadence: "Picks with real history behind them; most likely on a first or a long drought. Never on trades.",
     weight: (e, ctx) => {
       if (e.type !== "pick") return 0;
