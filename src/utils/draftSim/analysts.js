@@ -76,6 +76,7 @@ export const VARIABLES = {
   runCount: "Picks at the position in the last 8", leftName: "Best player left at the position", leftRank: "His board rank",
   gameLine: "Big game's stat line (4 sacks)", opp: "That game's opponent",
   needLabel: "The team's need there (Aging Talent)", needPos: "The need in words (cornerback, slot corner)", needNote: "The admin's note on that need (Rodgers turns 42)",
+  passed: "The big need the team passed on (quarterback)", aPassed: "With a/an (a quarterback)", passes: "The team's picks so far without it, this one included (3)",
   legend: "One of Davin's favorite players at the position (Chris Weinke, Uncle Rico…) — any Davin line",
   legendPos: "His favorite's position (joke pick)", legendSchool: "His favorite's school (joke pick)",
   gm: "Team's GM (full name)", gmLast: "GM's last name", hc: "Head coach (full name)", hcLast: "Head coach's last name",
@@ -100,7 +101,7 @@ export const VARIABLE_GROUPS = [
   ["Board & community", ["rank", "posRank", "posRankOrd", "spots", "grade", "count", "strength", "strength2", "Strength", "weakness", "Weakness"]],
   ["Staff fit", ["fit", "fitWord", "staffer", "stafferPoss", "title"]],
   ["Runs & games", ["runCount", "leftName", "leftRank", "gameLine", "opp", "season"]],
-  ["Team needs", ["needLabel", "needPos", "needNote"]],
+  ["Team needs", ["needLabel", "needPos", "needNote", "passed", "aPassed", "passes"]],
   ["Davin", ["legend", "legendPos", "legendSchool"]],
   ["Thad (history)", ["club", "prev","prevYear", "prevN", "prevRound", "prevNick", "firstYear", "times", "timesOrd", "recordSchool", "recordTimes", "seatName", "seatLast", "seatPoss", "seatTitle", "seatSince", "drafts", "mascot", "schoolPoss"]],
   ["Stats", ["value", "stat", "statTitle", "rankOrd", "YDS", "TD", "INT", "PCT", "ATT", "COMPLETIONS", "YPA", "CAR", "YPC", "REC", "YPR", "TOT", "TFL", "SACKS", "QB HUR", "PD"]],
@@ -395,6 +396,22 @@ export const ISAAC_LINES = {
       "{player} at {n}? I had him going later. The {nick} clearly didn't want to wait.",
     ],
   },
+  shockSteal: {
+    label: "Shock: big slide", when: "He went 10 or more spots after his board rank in round 1, or 25 or more on Day 2 (rounds 2–3). The desk always reacts.",
+    lines: [
+      "WHAT? {player} at {n}?! He was No. {rank} on the board. How did {spots} picks go by without him?",
+      "Stop everything. {last} just slid {spots} spots and the {nick} pounce at {n}. That's a franchise-changing fall.",
+      "I can't believe what I'm seeing. {player} — No. {rank} on the board — is still there at {n}. The {nick} just stole one.",
+    ],
+  },
+  shockReach: {
+    label: "Shock: big reach", when: "He went 10 or more spots before his board rank in round 1, or 25 or more on Day 2 (rounds 2–3). The desk always reacts.",
+    lines: [
+      "WHAT? {player} at {n}?! The board had him at {rank}. That's {spots} spots early.",
+      "Nobody saw that coming. The {nick} take {last} at {n} — {spots} spots ahead of the board. Shock in the room.",
+      "I had to read the card twice. {player}, No. {rank} on the board, goes {n}. The {nick} are going to hear about this one.",
+    ],
+  },
   bigReach: {
     label: "Big reach", when: "Taken far before his board rank.",
     lines: [
@@ -466,6 +483,22 @@ export const ISAAC_LINES = {
       "Best player available, I guess — because the {nick} did not need another {needPos}.",
     ],
   },
+  passedNeed: {
+    label: "Passed on a big need", when: "Rounds 1–3: the team has an Upgrade Needed position it hasn't drafted for, and this pick isn't one of its Upgrade Needed positions — the team's first pick of the sim. {passed} / {aPassed} is that need.",
+    lines: [
+      "So the {nick} don't go for {aPassed} after all. {player} is the selection.",
+      "Everyone had the {nick} taking {aPassed} here. Instead: {player}.",
+      "The {nick} needed {aPassed}. They take {player} instead — they must like what's left at {passed} later.",
+    ],
+  },
+  stillNoNeed: {
+    label: "Still passing on a big need", when: "Like the one above, on a later pick — they've already passed on it. {passes} is how many of their picks have gone by without it, this one included.",
+    lines: [
+      "Still no {passed} for the {nick}. They take {player} at {n}.",
+      "That's {passes} picks and still no {passed} for the {nick}. {player} is the pick.",
+      "The {nick} keep passing on {passed}. {last} at {n} — they'd better have a plan.",
+    ],
+  },
 };
 
 // ── Makali Pennycooke: the optimist ──
@@ -486,6 +519,20 @@ export const MAKALI_LINES = {
     lines: [
       "{player} at {n}?! Highway robbery! The {nick} are going to look like geniuses.",
       "How is {last} still on the board at {n}? The {nick} just won the draft!",
+    ],
+  },
+  shockSteal: {
+    label: "Shock: big slide", when: "He went 10 or more spots after his board rank in round 1, or 25 or more on Day 2 (rounds 2–3).",
+    lines: [
+      "I'm SCREAMING. {player} at {n}?! {spots} spots of value! The {nick} just won the whole draft!",
+      "{last} fell {spots} spots and landed with the {nick}. This is the best thing that's ever happened to them!",
+    ],
+  },
+  shockReach: {
+    label: "Shock: big reach", when: "He went 10 or more spots before his board rank in round 1, or 25 or more on Day 2 (rounds 2–3).",
+    lines: [
+      "Everyone's shocked, and I'm thrilled! {player} at {n} — the {nick} saw something the board didn't!",
+      "{spots} spots early? Doesn't matter! {last} is going to make every team that passed on him sorry.",
     ],
   },
   reach: {
@@ -532,6 +579,20 @@ export const MAKALI_LINES = {
       "THIS is the guy! The {nick} needed a {needPos} and {last} is going to be a STAR there.",
       "{needPos} was the need and {player} is the answer. Perfect fit, perfect pick!",
       "I said the {nick} needed a {needPos}. They got one. I'm thrilled!",
+    ],
+  },
+  passedNeed: {
+    label: "Passed on a big need", when: "Rounds 1–3: the team skips an Upgrade Needed position it hasn't drafted for — its first pick of the sim. {passed} / {aPassed} is that need.",
+    lines: [
+      "Who needs {aPassed} when you can get {player}? Great pick by the {nick}!",
+      "The {nick} skip {passed} and take {player} — and honestly? Even better. I love it!",
+    ],
+  },
+  stillNoNeed: {
+    label: "Still passing on a big need", when: "Like the one above, on a later pick. {passes} is how many of their picks have gone by without it.",
+    lines: [
+      "Still no {passed}, but the {nick} keep getting great players. {player} is a star!",
+      "{passes} picks, no {passed}, and I don't care! {player} is going to be special for the {nick}.",
     ],
   },
   tradeUp: {
@@ -716,6 +777,34 @@ export const DAVIN_LINES = {
       "The {nick} already had too many at {needPos}. Now they have too many plus one. Should've taken a fullback.",
       "Another {needPos}? The {nick} are collecting them like cheeseburgers. Except you can eat cheeseburgers.",
       "{legend} would never sit behind three other guys. {last} is about to.",
+    ],
+  },
+  shockSteal: {
+    label: "Shock: big slide", when: "He went 10 or more spots after his board rank in round 1, or 25 or more on Day 2 (rounds 2–3).",
+    lines: [
+      "{player} fell {spots} spots. Even I'd have taken him by now, and I'd have taken a cheeseburger first.",
+      "{last} at {n}? The other teams must have been on a burger run.",
+    ],
+  },
+  shockReach: {
+    label: "Shock: big reach", when: "He went 10 or more spots before his board rank in round 1, or 25 or more on Day 2 (rounds 2–3).",
+    lines: [
+      "{player} at {n}?! {spots} spots early. I've made better decisions at a drive-thru at 2 a.m.",
+      "The {nick} took {last} at {n}. {legend} is laughing somewhere. So am I.",
+    ],
+  },
+  passedNeed: {
+    label: "Passed on a big need", when: "Rounds 1–3: the team skips an Upgrade Needed position it hasn't drafted for — its first pick of the sim. {passed} / {aPassed} is that need.",
+    lines: [
+      "The {nick} needed {aPassed} and took {player}. That's like ordering a cheeseburger and getting a salad.",
+      "No {passed}? The {nick} could have just taken {legend}. Classic.",
+    ],
+  },
+  stillNoNeed: {
+    label: "Still passing on a big need", when: "Like the one above, on a later pick. {passes} is how many of their picks have gone by without it.",
+    lines: [
+      "Still no {passed} for the {nick}. At this point just sign {legend}.",
+      "{passes} picks and no {passed}. The {nick} are building a team the way I build a diet: badly.",
     ],
   },
   tradeUp: {
@@ -1007,7 +1096,10 @@ const blankVars = (text, vars) => (text.match(/\{([\w ]+)\}/g) || []).filter((v)
   return x == null || x === "";
 });
 
-// Pick a variant the analyst hasn't used lately.
+// Pick a variant the analyst hasn't used lately. In a personality's post
+// (memory.roundRule, set by reactTo) never one they've already posted this
+// round (memory.roundLines, by line text) — null when every line's been
+// used, and reactTo hands the post to someone else.
 function lineFrom(table, cat, vars, ctx, who) {
   const pool = table[cat]?.lines || [];
   // Lines usable at this pick (a { text, minPick } line waits for its pick),
@@ -1015,15 +1107,18 @@ function lineFrom(table, cat, vars, ctx, who) {
   // read with a hole in it only runs if nothing else can.
   const timely = pool.map((_, i) => i).filter((i) => !(pool[i].minPick > (vars.n || 0)));
   const filled = timely.filter((i) => !blankVars(lineText(pool[i]), vars).length);
-  const usable = filled.length ? filled : timely;
-  if (!usable.length) return null;
   const memory = ctx.memory || (ctx.memory = {});
+  const usedKey = (i) => `${who.split(":")[0]}|${lineText(pool[i])}`;
+  const used = memory.roundRule ? (memory.roundLines || (memory.roundLines = {})) : null;
+  const usable = (filled.length ? filled : timely).filter((i) => !used?.[usedKey(i)]);
+  if (!usable.length) return null;
   const key = `${who}:${cat}`;
   const recent = memory[key] || [];
   let options = usable.filter((i) => !recent.includes(i));
   if (!options.length) options = usable;
   const i = options[Math.floor(ctx.rand() * options.length)];
   memory[key] = [...recent, i].slice(-Math.max(1, pool.length - 1));
+  if (used) used[usedKey(i)] = true;
   return capitalize(fill(lineText(pool[i]), vars));
 }
 
@@ -1060,9 +1155,20 @@ export function pickVars(e, ctx) {
     runCount: e.positionRun, leftName: e.bestLeftAtPosition ? `${e.bestLeftAtPosition.First} ${e.bestLeftAtPosition.Last}` : "",
     leftRank: e.bestLeftAtPosition?.rank || "",
     needLabel: e.need?.label || "", needPos: e.need ? needWord(e.need.key) : "", needNote: e.need?.note || "",
+    ...passedVars(e.passedNeed),
     ...staffVars(ctx.staff?.[e.team]),
   };
 }
+
+// The big need a pick passed on (engine passedNeedFor) → its variables.
+function passedVars(passed) {
+  if (!passed) return { passed: "", aPassed: "", passes: "" };
+  const word = needWord(passed.key);
+  return { passed: word, aPassed: `${/^[aeiou]/i.test(word) ? "an" : "a"} ${word}`, passes: passed.times + 1 };
+}
+
+// Passing on a big need: "passedNeed" the first time, "stillNoNeed" after.
+const passedCat = (e) => (e.passedNeed.times ? "stillNoNeed" : "passedNeed");
 
 // Every CFBD stat fact for a pick (Dr. PP Johnson): [{ cat, vars, weight, group }].
 export function statFacts(e, ctx) {
@@ -1168,6 +1274,8 @@ function makaliPick(e, ctx) {
   if (rutgers && eagles) cat = "rutgersEagles";
   else if (rutgers) cat = "rutgers";
   else if (eagles) cat = "eagles";
+  else if (shockOf(e)) cat = shockOf(e);
+  else if (e.passedNeed && ctx.rand() < 0.5) cat = passedCat(e);
   else if (e.need && !["Depth Needed", "Crowded Room"].includes(e.need.label) && ctx.rand() < 0.4) cat = "needMet";
   else if (e.prospect.Position === "QB" && e.pick.round <= 2) cat = "qb";
   else if (e.value >= Math.max(6, e.pick.overall * 0.25)) cat = "steal";
@@ -1187,7 +1295,9 @@ function davinPick(e, ctx) {
   if (isFsu(p)) {
     cat = ctx.rand() < 0.4 ? "fsuLegend" : "fsu";
     if (cat === "fsuLegend") legend = p.Position === "QB" ? "Jameis Winston" : favoriteFor(p.Position, ctx);
-  } else if (e.need?.label === "Crowded Room" && ctx.rand() < 0.6) cat = "crowded";
+  } else if (shockOf(e)) cat = shockOf(e);
+  else if (e.passedNeed && ctx.rand() < 0.5) cat = passedCat(e);
+  else if (e.need?.label === "Crowded Room" && ctx.rand() < 0.6) cat = "crowded";
   else if (e.pick.round === 1 && ["QB", "WR", "DB"].includes(p.Position) && ctx.rand() < 0.5) cat = "fullback";
   else if (e.value >= 0 && ctx.rand() < 0.5) { legend = favoriteFor(p.Position, ctx); cat = "legend"; }
   else cat = ctx.rand() < 0.25 ? "nonsense" : "take";
@@ -1451,14 +1561,29 @@ function weDraftTrade(e, ctx) {
   return { text: `TRADE · The ${ctx.nickname(e.to)} move up to ${pickName(e.pick)} with the ${ctx.nickname(e.from)}`, lines: [lineFrom(WEDRAFT_LINES, "trade", tradeVars(e, ctx), ctx, "wedraft")] };
 }
 
+// A shock: a pick SHOCK_SPOTS[round] or more off his board rank — 10 in
+// round 1, 25 on Day 2 (rounds 2–3) → "shockSteal" (he slid) /
+// "shockReach" (he went early), else null. It overrules the smaller steal
+// and reach takes; the desk always reacts, with Isaac, Makali or Davin (or
+// Kenneth's take).
+export const SHOCK_SPOTS = { 1: 10, 2: 25, 3: 25 };
+export function shockOf(e) {
+  const spots = e?.type === "pick" && SHOCK_SPOTS[e.pick.round];
+  if (!spots) return null;
+  if (e.value >= spots) return "shockSteal";
+  if (-e.value >= spots) return "shockReach";
+  return null;
+}
+
 // Should a personality speak up on this event? Never on a trade by itself —
 // a trade up is told with the pick it bought (tradeUp lines), one post.
+// Always on a shock (unless it's "My picks only" and not theirs).
 function chimesIn(e, ctx) {
   if (e.type === "trade") return false;
   if (e.isUser || e.userInvolved) return true;
   const mode = ctx.chatter || DEFAULT_CHATTER;
   if (mode === "mine") return false;
-  if (mode === "all") return true;
+  if (mode === "all" || shockOf(e)) return true;
   if (e.pick.overall === 1) return true;
   const notable = (e.prospect.Position === "QB" && e.pick.round <= 2) || Math.abs(e.value) >= Math.max(8, e.pick.overall * 0.3);
   return ctx.rand() < (notable ? 0.45 : e.pick.round === 1 ? 0.15 : 0.06);
@@ -1489,6 +1614,11 @@ function isaacPick(e, ctx) {
     const cat = e.value >= Math.max(6, e.pick.overall * 0.25) ? "tradeUpValue" : -e.value >= Math.max(6, e.pick.overall * 0.25) ? "tradeUpReach" : "tradeUp";
     return { text: lineFrom(ISAAC_LINES, cat, { ...v, ...up }, ctx, "isaac") };
   }
+  // A shock — over the smaller steal / reach takes (No. 1's surprise has its own lines below).
+  const shock = shockOf(e);
+  if (shock && e.pick.overall !== 1) return { text: lineFrom(ISAAC_LINES, shock, v, ctx, "isaac") };
+  // Passed on a big need for a lesser one.
+  if (e.passedNeed && e.pick.overall !== 1 && ctx.rand() < 0.8) return { text: lineFrom(ISAAC_LINES, passedCat(e), v, ctx, "isaac") };
   // A blocker or a target for the QB they took in round 1.
   const qbCat = qbSupport(e);
   if (qbCat && ctx.rand() < 0.75) {
@@ -1570,11 +1700,14 @@ export const ANALYSTS = [
     id: "isaac", name: "Isaac Walker", handle: "@IsaacWalker", role: "Draft Analyst", verified: true, enabled: true,
     color: "#14a3a3", initials: "IW", delay: 1300, lines: ISAAC_LINES,
     about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades up, and your final grade.",
-    cadence: "Most likely on the headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, and a team trading up — told with the pick.",
+    cadence: "Most likely on a shock (10+ spots off the board in round 1, 25+ on Day 2) and the other headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, a team passing on a big need (more so the second time), and a team trading up — told with the pick.",
     weight: (e) => {
       if (e.type !== "pick") return 0;
       if (e.pick.overall === 1) return 100;
       if (e.pick.tradeUp) return 8;
+      if (shockOf(e)) return 10;
+      // Passing on a big need — louder each time they do.
+      if (e.passedNeed) return e.passedNeed.times ? 6 : 4;
       if (qbSupport(e)) return 4;
       const notable = (e.prospect.Position === "QB" && e.pick.round <= 2) || Math.abs(e.value) >= Math.max(6, e.pick.overall * 0.25);
       return notable ? 3 : 1.3;
@@ -1593,9 +1726,10 @@ export const ANALYSTS = [
     id: "pp", name: "Dr. PP Johnson", handle: "@DrPPJohnson", role: "Stats", verified: true, enabled: true,
     color: "#2e9e5b", initials: "PJ", delay: 1300, lines: PP_LINES,
     about: "The stat guy. Reads out the drafted player's CFBD numbers — his season line and where he ranks nationally.",
-    cadence: "Picks with a real stat line this season; most likely when the player ranks nationally. Not a pick a team traded up for (his stat lines don't tell the trade).",
+    cadence: "Picks with a real stat line this season; most likely when the player ranks nationally. Not a pick a team traded up for, or a shock (his stat lines don't tell either).",
     weight: (e, ctx) => {
-      if (e.type !== "pick" || e.pick.tradeUp) return 0;
+      // Not on a traded-up pick or a shock — his numbers don't tell either.
+      if (e.type !== "pick" || e.pick.tradeUp || shockOf(e)) return 0;
       const facts = statFacts(e, ctx);
       return facts.some((f) => f.group === "leader") ? 2.5 : facts.length ? 1.3 : 0;
     },
@@ -1603,23 +1737,24 @@ export const ANALYSTS = [
   },
   {
     id: "makali", name: "Makali Pennycooke", handle: "@timeoutwithmakalipod", role: "Optimist", verified: true, enabled: true,
-    color: "#cc0033", initials: "MP", delay: 1300, lines: MAKALI_LINES,
+    color: "#cc0033", initials: "MP", delay: 1300, lines: MAKALI_LINES, noRepeat: true,
     about: "Loves every pick and thinks every player is going to be great — Rutgers players and Eagles picks most of all.",
     cadence: "Any pick, a team trading up told with the pick; almost always on Rutgers players and Eagles picks.",
     weight: (e) => {
       if (e.type !== "pick") return 0;
-      return isRutgers(e.prospect) || e.team === "PHI" ? 14 : 1;
+      return isRutgers(e.prospect) || e.team === "PHI" ? 14 : shockOf(e) ? 2 : 1;
     },
     react: (e, ctx) => (e.type === "pick" ? makaliPick(e, ctx) : null),
   },
   {
     id: "davin", name: "davin mcgavitt", handle: "@davinmcgavitt", role: "The Jester", verified: false, enabled: true,
-    color: "#7a3cff", initials: "DM", delay: 1300, lines: DAVIN_LINES,
+    color: "#7a3cff", initials: "DM", delay: 1300, lines: DAVIN_LINES, noRepeat: true,
     about: "The desk's jester — a joke. Mostly negative, distracted by cheeseburgers, misses first-round fullbacks, loves Florida State players, and measures good picks against his favorite players (FSU greats, movie and TV football players).",
     cadence: "Any pick, a team trading up told with the pick; almost always on FSU players.",
     weight: (e) => {
       if (e.type !== "pick") return 0;
       if (isFsu(e.prospect)) return 14;
+      if (shockOf(e)) return 2;
       if (e.pick.round === 1 && ["QB", "WR", "DB"].includes(e.prospect.Position)) return 1.6;
       return 0.9;
     },
@@ -1627,11 +1762,12 @@ export const ANALYSTS = [
   },
   {
     id: "thad", name: "Thad Murphy", handle: "@ThadMurphy", role: "Draft Historian", verified: true, enabled: true,
-    color: "#a0662b", initials: "TM", delay: 1300, lines: THAD_LINES,
+    color: "#a0662b", initials: "TM", delay: 1300, lines: THAD_LINES, noRepeat: true,
     about: "The history books — every NFL pick since 2000 plus this sim's: first-round droughts for a school or team at a position, the last player a team took from that school, the highest one's gone in years, a school's run of first-rounders tonight, the most at a position in a first round in years, the GM's and head coach's record since taking the job, and alma-mater picks. Day 2 (rounds two and three) gets its own version of the first-round facts.",
-    cadence: "Picks with real history behind them; most likely on a first or a long drought. Never on trades.",
+    cadence: "Picks with real history behind them; most likely on a first or a long drought. Never on trades or a shock (10+ spots off the board in round 1 after No. 1, 25+ on Day 2).",
     weight: (e, ctx) => {
-      if (e.type !== "pick") return 0;
+      // Not on a shock (after No. 1) — the desk reacts to the shock.
+      if (e.type !== "pick" || (shockOf(e) && e.pick.overall !== 1)) return 0;
       const facts = thadFacts(e, ctx);
       // No. 1 with a first-overall fact: an even split with Isaac (100).
       if (facts.some((f) => f.group.startsWith("firstOverall"))) return 100;
@@ -1646,7 +1782,8 @@ export const LIVE_ANALYSTS = ANALYSTS.filter((a) => a.enabled);
 const byId = (id) => ANALYSTS.find((a) => a.id === id);
 
 // The one personality after We-Draft.com: weighted by the pick, and
-// whoever spoke last is much less likely to go again.
+// whoever spoke last is much less likely to go again — never, for one
+// marked noRepeat (Makali, Davin, Thad).
 // A personality's code (or an admin-edited line, or missing data) failing
 // costs that one post, never the draft: logged, and null.
 function guarded(label, fn, fallback = null) {
@@ -1658,10 +1795,10 @@ function guarded(label, fn, fallback = null) {
   }
 }
 
-function choosePersonality(e, ctx) {
+function choosePersonality(e, ctx, skip = new Set()) {
   const memory = ctx.memory || (ctx.memory = {});
-  const pool = LIVE_ANALYSTS.filter((a) => a.weight)
-    .map((a) => ({ a, w: (Number(guarded(`${a.id} weight`, () => a.weight(e, ctx), 0)) || 0) * (memory.lastVoice === a.id ? 0.35 : 1) }))
+  const pool = LIVE_ANALYSTS.filter((a) => a.weight && !skip.has(a.id))
+    .map((a) => ({ a, w: (Number(guarded(`${a.id} weight`, () => a.weight(e, ctx), 0)) || 0) * (memory.lastVoice === a.id ? (a.noRepeat ? 0 : 0.35) : 1) }))
     .filter((x) => x.w > 0);
   const total = pool.reduce((t, x) => t + x.w, 0);
   let r = ctx.rand() * total;
@@ -1670,18 +1807,31 @@ function choosePersonality(e, ctx) {
 }
 
 // Every post for one event: We-Draft.com's, then (when the desk chatter
-// says so) one personality's — [{ analyst, text, lines?, delay }].
+// says so) one personality's — [{ analyst, text, lines?, delay }]. One
+// with nothing left to say (every fitting line already used this round)
+// passes to the next.
 export function reactTo(event, ctx) {
   const posts = [];
+  const memory = ctx.memory || (ctx.memory = {});
+  const round = event.pick?.round ?? null;
+  if (round !== memory.round) { memory.round = round; memory.roundLines = {}; }
   const house = ANALYSTS[0];
   const hr = guarded(`${house.id} ${event.type}`, () => house.react(event, ctx));
   if (hr?.text) posts.push({ analyst: house, ...hr, delay: house.delay });
   if (guarded("chimesIn", () => chimesIn(event, ctx), false)) {
-    const who = choosePersonality(event, ctx);
-    const r = who && guarded(`${who.id} ${event.type}`, () => who.react(event, ctx));
-    if (r?.text) {
-      posts.push({ analyst: who, ...r, delay: who.delay });
-      (ctx.memory || (ctx.memory = {})).lastVoice = who.id;
+    const tried = new Set();
+    for (let k = 0; k < LIVE_ANALYSTS.length; k++) {
+      const who = choosePersonality(event, ctx, tried);
+      if (!who) break;
+      tried.add(who.id);
+      memory.roundRule = true;
+      const r = guarded(`${who.id} ${event.type}`, () => who.react(event, ctx));
+      memory.roundRule = false;
+      if (r?.text) {
+        posts.push({ analyst: who, ...r, delay: who.delay });
+        memory.lastVoice = who.id;
+        break;
+      }
     }
   }
   guarded("record pick", () => recordPick(event, ctx));

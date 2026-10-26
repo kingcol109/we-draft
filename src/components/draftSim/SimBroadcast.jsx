@@ -1410,7 +1410,7 @@ function TradesTab({ s, data, isMobile }) {
 
   const propose = () => {
     const v = s.proposeTrade({ team, partner, give, get });
-    setResult(v.accept ? { ok: true, text: god ? "Done — the picks have moved." : `Done — the ${brandOf(data, partner).Team || partner} accepted.` } : v.stale ? { ok: false, text: "Too late — a pick in that deal was just made." } : { ok: false, text: "They passed. Add more to your side." });
+    setResult(v.accept ? { ok: true, text: god ? "Done — the picks have moved." : `Done — the ${brandOf(data, partner).Team || partner} accepted.` } : v.stale ? { ok: false, text: "Too late — a pick in that deal was just made." } : v.movedUp ? { ok: false, text: "They passed — they traded up already and aren't moving back down." } : { ok: false, text: "They passed. Add more to your side." });
     if (v.accept || v.stale) { setGive([]); setGet([]); }
   };
 
@@ -1492,7 +1492,7 @@ function TradesTab({ s, data, isMobile }) {
                   : <>You give <strong>{verdict.give.toLocaleString()}</strong> pts · you get <strong>{verdict.get.toLocaleString()}</strong> pts</>}
                 {!god && give.length > 0 && get.length > 0 && (
                   <span style={{ color: verdict.accept ? "#3fb950" : GOLD, fontWeight: 800 }}>
-                    {verdict.accept ? " · they'd take it" : ` · they want ${Math.ceil(verdict.get * CPU_ACCEPT_RATIO - verdict.give).toLocaleString()} more pts`}
+                    {verdict.accept ? " · they'd take it" : verdict.movedUp ? " · they traded up already — not moving back down" : ` · they want ${Math.ceil(verdict.get * CPU_ACCEPT_RATIO - verdict.give).toLocaleString()} more pts`}
                   </span>
                 )}
               </span>

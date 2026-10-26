@@ -411,7 +411,9 @@ export const pickByKey = (state, key) => [...state.picks, ...(state.capital || [
 // stats: { [slug]: { leaders, lines } } (data.js loadCfbStats).
 // Order: class rank, then community grade (more evaluations breaking ties),
 // then ungraded by best team fit. positionRank counts within the position.
-export function buildBoard(prospects, grades = {}, fits = {}, stats = {}) {
+// gradeSpread: carry each prospect's grade spread (gradeSd) for his team
+// boards (classes in GRADE_SPREAD_CLASSES — see buildTeamBoards).
+export function buildBoard(prospects, grades = {}, fits = {}, stats = {}, { gradeSpread = false } = {}) {
   const split = (v) => (v ? String(v).split("|").filter(Boolean) : []);
   const rows = prospects.map((p) => {
     const g = grades[p.id];
@@ -420,6 +422,7 @@ export function buildBoard(prospects, grades = {}, fits = {}, stats = {}) {
     const bestFit = Math.max(0, ...(fits[p.id] || []).map((f) => f.s || 0));
     return {
       ...p, cr: p.cr ?? null, avg: g ? g[0] : null, count: g ? g[1] || 0 : 0,
+      ...(gradeSpread && g?.[4] != null ? { gradeSd: g[4] } : {}),
       strengths: split(g?.[2]), weaknesses: split(g?.[3]),
       fits: teamFits, bestFit, stats: stats[p.Slug] || null,
     };
@@ -478,15 +481,25 @@ export function applyMyGrades(board, myGrades = {}) {
 // own 1…N. CPU teams pick off their own board; everything graded (board
 // rank, value / reach, the desk, draft grades) stays on the community's.
 // Specialists keep their community spot. chaos 0 → no spread.
+// For a class in GRADE_SPREAD_CLASSES, a prospect with GRADE_SPREAD_MIN or
+// more counted grades (round grades — no Watchlist — that count for his
+// class) has his spread scaled by how much they disagree (gradeSd, the
+// _grades snapshot): gradeSd / TYPICAL_GRADE_SD, held to ½ … 2× — a
+// consensus guy moves less, a polarizing one more.
 export const BOARD_SPREAD = [[15, 1], [50, 6], [60, 11], [100, 16], [150, 25], [Infinity, 36]];
 export const boardSpread = (rank) => BOARD_SPREAD.find(([upTo]) => rank <= upTo)[1];
+export const GRADE_SPREAD_CLASSES = ["2027"];
+export const GRADE_SPREAD_MIN = 5;
+const TYPICAL_GRADE_SD = 0.8;
+export const gradeSpreadFactor = (p) => (p.gradeSd != null && (p.count || 0) >= GRADE_SPREAD_MIN
+  ? Math.min(2, Math.max(0.5, p.gradeSd / TYPICAL_GRADE_SD)) : 1);
 const teamSeed = (seed, team) => [...team].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), seed ^ 0x811c9dc5) | 0;
 export function buildTeamBoards(board, teams, seed, chaos = 1) {
   if (!chaos) return {};
   const players = board.filter((p) => !isSpecialist(p));
   return Object.fromEntries(teams.map((team) => {
     const work = { seed: teamSeed(seed, team) };
-    const scored = players.map((p) => ({ id: p.id, s: p.rank + gaussian(work) * boardSpread(p.rank) * chaos }));
+    const scored = players.map((p) => ({ id: p.id, s: p.rank + gaussian(work) * boardSpread(p.rank) * gradeSpreadFactor(p) * chaos }));
     scored.sort((a, b) => a.s - b.s);
     return [team, Object.fromEntries(scored.map((x, i) => [x.id, i + 1]))];
   }));
@@ -652,6 +665,23 @@ export function chooseCpuPick(state) {
   return { prospect: best, seed: work.seed };
 }
 
+// The big need a pick passes on → { key, times } or null: in rounds 1–3, a
+// position the team has at Upgrade Needed and hasn't drafted for yet, when
+// the pick meets none of its Upgrade Needed needs (taking one big need over
+// another isn't passing). The first such position in NEED_KEYS order (QB
+// first). times: the team's picks before this one in the sim — every one
+// of them passed on it too.
+const PASSED_NEED_ROUNDS = 3;
+function passedNeedFor(state, pick, prospect, need) {
+  const needs = state.needs?.[pick.owner];
+  if (!needs || pick.round > PASSED_NEED_ROUNDS || need?.label === "Upgrade Needed") return null;
+  const filled = state.needFilled?.[pick.owner] || {};
+  const open = NEED_KEYS.filter((k) => needs[k]?.labels.includes("Upgrade Needed") && (filled[k] || 0) < 1);
+  const mine = needKeysFor(prospect).map(({ key }) => key);
+  if (!open.length || open.some((k) => mine.includes(k))) return null;
+  return { key: open[0], times: state.picks.slice(0, state.idx).filter((p) => p.owner === pick.owner && p.selection).length };
+}
+
 // Make the pick on the clock → { state, event }.
 export function makePick(state, prospectId, seed = state.seed) {
   const pick = currentPick(state);
@@ -677,6 +707,8 @@ export function makePick(state, prospectId, seed = state.seed) {
     value: isSpecialist(prospect) ? 0 : pick.overall - prospect.rank,
     fit: prospect.fits?.[pick.owner] || null,
     need,
+    // A big need he passed on (the desk's "still no quarterback" lines).
+    passedNeed: passedNeedFor(state, pick, prospect, need),
     positionOrdinal: prior.filter((p) => p.Position === prospect.Position).length + 1,
     positionRun: recent.filter((p) => p.Position === prospect.Position).length,
     bestLeftAtPosition: state.board.find((p) => p.Position === prospect.Position && !state.taken[p.id] && p.id !== prospectId) || null,
@@ -824,11 +856,23 @@ function desire(state, team, p, theirPick) {
   return fitDesire * 0.8 + wontLast * 0.6 + need;
 }
 
+// Has `team` moved up in a trade this draft — landed the earliest pick in
+// the deal? A CPU team that has never turns around and trades down.
+export function movedUp(state, team) {
+  return (state.trades || []).some((t) => {
+    const all = [...t.aGot, ...t.bGot].filter(Boolean);
+    if (!all.length) return false;
+    const earliest = Math.min(...all.map((p) => p.overall));
+    return (t.aGot.some((p) => p?.overall === earliest) ? t.a : t.b) === team;
+  });
+}
+
 // Teams that would trade up into the pick on the clock, best offer first:
-// [{ team, give: [pick], value, ratio, target: prospect }].
+// [{ team, give: [pick], value, ratio, target: prospect }]. None for a CPU
+// team that's moved up this draft — it doesn't trade back down.
 export function findTradeUpOffers(state, { max = MAX_OFFERS, threshold = 0.75 } = {}) {
   const pick = currentPick(state);
-  if (!pick) return [];
+  if (!pick || (!state.userTeams.includes(pick.owner) && movedUp(state, pick.owner))) return [];
   const target = pickValue(state.chart, pick.overall);
   const top = cpuAvailable(state).slice(0, 8);
   // A CPU team on the clock asks more the more it loves its options; the
@@ -992,10 +1036,16 @@ export function tradeablePicks(state, team, { includeCurrent = false } = {}) {
 const chartTotal = (state, keys) => keys.reduce((a, k) => a + pickWorth(state, pickByKey(state, k)), 0);
 
 // give: the user's pick numbers going to the partner; get: the partner's
-// coming back. → { give, get (chart points), ratio (give / get), accept }.
+// coming back. → { give, get (chart points), ratio (give / get), accept,
+// movedUp? }. A CPU partner that's moved up this draft won't trade back
+// down (give up the earliest pick in the deal) — movedUp: true says why.
 export function evaluateProposal(state, { give = [], get = [] }) {
   const giveValue = chartTotal(state, give);
   const getValue = chartTotal(state, get);
+  const partner = get.length ? pickByKey(state, get[0])?.owner : null;
+  if (partner && !state.userTeams.includes(partner) && movedUp(state, partner) && Math.min(...get) < Math.min(Infinity, ...give)) {
+    return { give: giveValue, get: getValue, ratio: getValue ? giveValue / getValue : 0, accept: false, movedUp: true };
+  }
   // Asking a CPU team for the pick it's on the clock with: it wants more the
   // more it loves who's there.
   const onClock = currentPick(state);

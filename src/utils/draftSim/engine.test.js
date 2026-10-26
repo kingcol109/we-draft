@@ -1,9 +1,9 @@
 import {
-  buildBoard, applyMyGrades, buildTeamBoards, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer,
+  buildBoard, applyMyGrades, buildTeamBoards, gradeSpreadFactor, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer, movedUp,
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
-import { reactTo, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, takeSituation } from "./analysts";
+import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, takeSituation } from "./analysts";
 import { bestGame } from "./data";
 
 const TEAMS = ["AAA", "BBB", "CCC", "DDD"];
@@ -219,6 +219,23 @@ test("proposed trades: the CPU wants more than it gives, then the picks swap", (
   expect(evaluateProposal(s, { give: [4, 8], get: [1] }).accept).toBe(false);
 });
 
+test("trades: a CPU team that's moved up doesn't trade back down", () => {
+  // CCC trades up into No. 1 — nobody can then trade up into it from CCC.
+  const s = sim();
+  const { state } = acceptOffer(s, { team: "CCC", give: [3, 7], ratio: 1.1, value: 0, target: board[0] });
+  expect(movedUp(state, "CCC")).toBe(true);
+  expect(movedUp(state, "AAA")).toBe(false);
+  expect(findTradeUpOffers(state, { threshold: 0 })).toEqual([]);
+  // The user moves AAA up to No. 4 in a proposal; AAA then won't give it back, at any price.
+  const u = { ...sim({ userTeams: ["DDD"] }), chart: { 4: 1800, 5: 1700, 8: 1400, 9: 1000, 12: 1100, 1: 3000 } };
+  const up = applyProposal(u, { team: "DDD", partner: "AAA", give: [4], get: [5] }).state;
+  expect(movedUp(up, "AAA")).toBe(true);
+  const back = evaluateProposal(up, { give: [5, 8, 12], get: [4] });
+  expect(back).toMatchObject({ accept: false, movedUp: true });
+  // Moving AAA up again is fine.
+  expect(evaluateProposal(up, { give: [8], get: [9] }).movedUp).toBeUndefined();
+});
+
 test("admin-edited desk lines replace a situation's built-ins, and reset back", () => {
   const before = MAKALI_LINES.any.lines;
   applyDeskLines({ makali: { any: ["{last} is my guy."] } });
@@ -253,7 +270,8 @@ test("Davin: loves FSU, compares good picks to FSU legends", () => {
 
 test("a line with a blank variable is skipped; {legend} fills in any Davin line", () => {
   const first = stepCpu(sim({ chaos: 0 })).events.find((e) => e.type === "pick");
-  const e = { ...first, pick: { ...first.pick, overall: 40, round: 2 }, value: -30, prospect: { ...first.prospect, School: "Oregon", Position: "LB" } };
+  // A reach, but short of a Day 2 shock (25).
+  const e = { ...first, pick: { ...first.pick, overall: 40, round: 2 }, value: -20, prospect: { ...first.prospect, School: "Oregon", Position: "LB" } };
   const davin = ANALYSTS.find((a) => a.id === "davin");
   applyDeskLines({ davin: { nonsense: ["Has {legend} been picked yet?"], take: ["Has {legend} been picked yet?"] } });
   for (let r = 0; r < 1; r += 0.1) expect(davin.react(e, deskCtx("all", r)).text).toMatch(/^Has \S.* been picked yet\?$/);
@@ -786,6 +804,31 @@ test("team boards: each team's own read of the community board, wider down the b
   expect(teamRank(s, "AAA", big[40])).toBe(s.teamBoards.AAA.n40);
 });
 
+test("team boards: grade spread scales a prospect's spread — only with 5+ counted grades, and only when the board carries it", () => {
+  expect(gradeSpreadFactor({ gradeSd: 0, count: 6 })).toBe(0.5);
+  expect(gradeSpreadFactor({ gradeSd: 0.8, count: 5 })).toBe(1);
+  expect(gradeSpreadFactor({ gradeSd: 1.2, count: 9 })).toBeCloseTo(1.5);
+  expect(gradeSpreadFactor({ gradeSd: 3, count: 9 })).toBe(2);
+  expect(gradeSpreadFactor({ gradeSd: 2, count: 4 })).toBe(1);
+  expect(gradeSpreadFactor({ count: 12 })).toBe(1);
+  // buildBoard carries the _grades spread (row [4]) only when asked (a GRADE_SPREAD_CLASSES class).
+  const rows = { a: [3, 6, "", "", 1.6] };
+  expect(buildBoard([{ id: "a", Position: "QB", cr: 1 }], rows)[0].gradeSd).toBeUndefined();
+  expect(buildBoard([{ id: "a", Position: "QB", cr: 1 }], rows, {}, {}, { gradeSpread: true })[0].gradeSd).toBe(1.6);
+  // My Board swaps in the user's grade but keeps the community's spread and count.
+  const mine = applyMyGrades(buildBoard([{ id: "a", Position: "QB", cr: 1 }], rows, {}, {}, { gradeSpread: true }), { a: 7 })[0];
+  expect(mine).toMatchObject({ avg: 7, mine: true, gradeSd: 1.6, count: 6 });
+  expect(gradeSpreadFactor(mine)).toBe(2);
+  // A polarizing prospect drifts further across teams than a consensus one at the same spot.
+  const big = buildBoard(Array.from({ length: 300 }, (_, i) => ({ id: `n${i}`, Position: POS[i % POS.length], cr: i + 1 })),
+    Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`n${i}`, [5, 8, "", "", i % 2 ? 1.6 : 0]])), {}, {}, { gradeSpread: true });
+  const teams = Array.from({ length: 32 }, (_, i) => `T${i}`);
+  const boards = buildTeamBoards(big, teams, 3);
+  const drift = (odd) => big.filter((p, i) => p.rank > 100 && i % 2 === odd)
+    .reduce((t, p) => t + teams.reduce((u, tm) => u + Math.abs(boards[tm][p.id] - p.rank), 0), 0);
+  expect(drift(1)).toBeGreaterThan(drift(0) * 2);
+});
+
 test("Isaac: a trade up and the pick it bought are one take, at the pick", () => {
   const s = sim();
   const offer = { team: "CCC", give: [3, 7], ratio: 1.1, value: 0, target: board[0] };
@@ -809,6 +852,94 @@ test("Isaac: a trade up and the pick it bought are one take, at the pick", () =>
   // A pick nobody traded for gets no trade-up take.
   const plain = makePick(s, board[0].id).event;
   expect(plain.pick.tradeUp).toBeUndefined();
+});
+
+test("passed need: a pick that skips an open Upgrade Needed position for a lesser one — not one big need over another", () => {
+  const s = sim({ needs: needsOf("AAA", { QB: "Upgrade Needed", WR: "Upgrade Needed", CB: "Upgrade Wanted" }) });
+  // Taking the other big need isn't passing.
+  expect(makePick(s, "p01").event.passedNeed).toBeNull();
+  expect(makePick(s, "p00").event.passedNeed).toBeNull();
+  // A corner (a lesser need) passes on the quarterback — QB first in need order.
+  const first = makePick(s, "p04");
+  expect(first.event.passedNeed).toEqual({ key: "QB", times: 0 });
+  // Again at AAA's next pick: "still no quarterback".
+  let t = first.state;
+  ["p02", "p03", "p05"].forEach((id) => { t = makePick(t, id).state; });
+  const again = makePick(t, "p13").event;
+  expect(again.passedNeed).toEqual({ key: "QB", times: 1 });
+  const isaac = ANALYSTS.find((a) => a.id === "isaac");
+  expect(isaac.weight(again, deskCtx("all"))).toBe(6);
+  const text = isaac.react(again, deskCtx("all", 0.1)).text;
+  expect(ISAAC_LINES.stillNoNeed.lines.map(lineText).some((l) => text.startsWith(fill0(l)))).toBe(true);
+  expect(text).toMatch(/quarterback/);
+  expect(text).not.toMatch(/[{}]/);
+  ["makali", "davin"].forEach((id) => {
+    const out = ANALYSTS.find((a) => a.id === id).react(again, deskCtx("all", 0.1)).text;
+    expect(out).toMatch(/quarterback/);
+    expect(out).not.toMatch(/[{}]/);
+  });
+  // No big need, nothing passed.
+  expect(makePick(sim({ needs: needsOf("AAA", { QB: "Upgrade Wanted" }) }), "p04").event.passedNeed).toBeNull();
+});
+
+test("desk: a pick 10+ spots off the board in round 1 (25+ on Day 2) is a shock — the desk always reacts, Thad and PP sit it out", () => {
+  const first = stepCpu(sim({ chaos: 0 })).events.find((e) => e.type === "pick");
+  const at = (n, value, round = 1) => ({ ...first, isUser: false, pick: { ...first.pick, overall: n, round }, value });
+  expect(shockOf(at(20, 10))).toBe("shockSteal");
+  expect(shockOf(at(20, -12))).toBe("shockReach");
+  expect(shockOf(at(20, 9))).toBeNull();
+  // Day 2 (rounds 2–3) takes 25; nothing after.
+  expect(shockOf(at(40, -15, 2))).toBeNull();
+  expect(shockOf(at(40, -25, 2))).toBe("shockReach");
+  expect(shockOf(at(80, 30, 3))).toBe("shockSteal");
+  expect(shockOf(at(110, 40, 4))).toBeNull();
+  const quiet = { ...deskCtx("some"), rand: () => 0.99 };
+  // Even with chatter at "now and then" and a roll that would stay quiet.
+  expect(reactTo(at(20, -12), quiet)[1]).toBeTruthy();
+  expect(reactTo(at(20, -2), quiet)[1]).toBeUndefined();
+  const byId = (id) => ANALYSTS.find((a) => a.id === id);
+  expect(byId("thad").weight(at(20, -12), deskCtx("all"))).toBe(0);
+  expect(byId("pp").weight(at(20, -12), deskCtx("all"))).toBe(0);
+  expect(byId("isaac").weight(at(20, -12), deskCtx("all"))).toBe(10);
+  [["isaac", ISAAC_LINES], ["makali", MAKALI_LINES], ["davin", DAVIN_LINES]].forEach(([id, table]) => {
+    ["shockReach", "shockSteal"].forEach((cat) => {
+      const text = byId(id).react(at(20, cat === "shockReach" ? -12 : 12), deskCtx("all", 0.1)).text;
+      expect(table[cat].lines.map(lineText).some((l) => text.startsWith(fill0(l)))).toBe(true);
+      expect(text).not.toMatch(/[{}]/);
+    });
+  });
+});
+
+test("desk: a personality never posts the same line twice in a round; a new round starts fresh", () => {
+  const first = stepCpu(sim({ chaos: 0 })).events.find((e) => e.type === "pick");
+  const e = { ...first, isUser: false, pick: { ...first.pick, overall: 20, round: 1 }, value: 0 };
+  let seed = 7;
+  const ctx = { ...deskCtx("all"), memory: {}, rand: () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; } };
+  // The same pick over and over: identical variables, so a repeated line is a repeated text.
+  const posted = () => reactTo(e, ctx).slice(1).map((p) => `${p.analyst.id}|${p.text}`);
+  const round1 = Array.from({ length: 40 }, posted).flat();
+  expect(round1.length).toBeGreaterThan(10);
+  expect(new Set(round1).size).toBe(round1.length);
+  // Round 2: lines from round 1 are allowed again.
+  const e2 = { ...e, pick: { ...e.pick, overall: 40, round: 2 } };
+  const again = Array.from({ length: 40 }, () => reactTo({ ...e2, pick: { ...e2.pick, overall: 20 }, value: 0 }, ctx).slice(1)).flat();
+  expect(again.length).toBeGreaterThan(0);
+});
+
+test("desk: Makali, Davin and Thad never post twice in a row; Isaac can", () => {
+  const first = stepCpu(sim({ chaos: 0 })).events.find((e) => e.type === "pick");
+  const fsu = { ...first, pick: { ...first.pick, overall: 20, round: 2 }, prospect: { ...first.prospect, School: "Florida State" } };
+  const voices = (last) => {
+    const seen = new Set();
+    for (let r = 0.01; r < 1; r += 0.02) {
+      const posts = reactTo(fsu, { ...deskCtx("all"), memory: { lastVoice: last }, rand: () => r });
+      if (posts[1]) seen.add(posts[1].analyst.id);
+    }
+    return seen;
+  };
+  expect(voices("isaac").has("davin")).toBe(true);
+  ["davin", "makali", "thad"].forEach((id) => expect(voices(id).has(id)).toBe(false));
+  expect(ANALYSTS.filter((a) => a.noRepeat).map((a) => a.id).sort()).toEqual(["davin", "makali", "thad"]);
 });
 
 test("desk: no personality posts on a trade by itself; Makali and Davin tell it with the pick, Kenneth and PP sit it out", () => {

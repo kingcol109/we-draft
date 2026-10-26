@@ -47,9 +47,11 @@
 //   _draftTicker            Navbar ticker's draft-pick lines.
 //   _grades                 Every player's community grade + traits: rows
 //                           { [playerId]: [avg, count, "s1|s2|s3",
-//                           "w1|w2|w3"] } (graded players only; top 3
+//                           "w1|w2|w3", spread] } (graded players only; top 3
 //                           traits each, "|"-joined since Firestore has no
-//                           arrays inside arrays) — read through
+//                           arrays inside arrays; count and spread — the
+//                           grades' standard deviation, gradeSpread — are of
+//                           the round grades that count) — read through
 //                           utils/communityGrades.js instead of one
 //                           evaluations query per player.
 //   _top                    Top TOP_PER_CLASS graded Live prospects per
@@ -139,6 +141,15 @@ export function rankByGrade(list, gradeOf = (x) => x.avgGrade) {
 }
 
 const TOP_PER_CLASS = 25;
+
+// How much a player's counted grades disagree: their standard deviation on
+// the 1 … 10 round scale (0 = everyone agrees; ~1 = a round either way),
+// to two places. Null with fewer than two grades.
+export function gradeSpread(values) {
+  if (values.length < 2) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  return Math.round(Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length) * 100) / 100;
+}
 // Live values the home page boards have always treated as hidden.
 const HIDDEN_LIVE = [false, null, 0, "false", "no"];
 
@@ -162,7 +173,8 @@ export function buildGradeSnapshotDocs({ players, evalsByPlayerId, activeYears }
     const { strengths, weaknesses } = communityTraits(evals);
     if (avg == null && !strengths.length && !weaknesses.length) return;
     if (avg != null) avgById[p.id] = avg;
-    rows[p.id] = [avg == null ? null : Math.round(avg * 1000) / 1000, countedGrades(evals, p.Eligible, GRADE_SCALE).length, strengths.slice(0, 3).join("|"), weaknesses.slice(0, 3).join("|")];
+    const counted = countedGrades(evals, p.Eligible, GRADE_SCALE);
+    rows[p.id] = [avg == null ? null : Math.round(avg * 1000) / 1000, counted.length, strengths.slice(0, 3).join("|"), weaknesses.slice(0, 3).join("|"), gradeSpread(counted)];
   });
   const years = {};
   activeYears.forEach((yr) => {

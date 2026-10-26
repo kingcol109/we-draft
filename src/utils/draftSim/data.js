@@ -17,7 +17,7 @@ import { fetchProspects, fetchNflBranding } from "../draftProfileData";
 import { getSiteSnapshot } from "../siteSnapshots";
 import { averageGradesFor, GRADE_SCALE } from "../communityGrades";
 import { NFL_TEAMS } from "../coachHistory";
-import { SIM_POSITIONS, SPECIALISTS, buildBoard, resolveNeeds } from "./engine";
+import { SIM_POSITIONS, SPECIALISTS, buildBoard, resolveNeeds, GRADE_SPREAD_CLASSES } from "./engine";
 import { applyDeskLines, applyDeskAvatars, applyDeskLegends, applyPlayerTakes } from "./analysts";
 import { bestGame } from "./bestGame.js";
 
@@ -202,6 +202,8 @@ export function loadSimData(year = SIM_YEAR) {
       loadPlayerTakes(),
     ]);
     const prospects = prospectList.filter((p) => p.id && p.Slug);
+    // Team boards scale by grade spread for these classes only (engine buildTeamBoards).
+    const gradeSpread = GRADE_SPREAD_CLASSES.includes(String(year));
     let grades = gradesSnap?.rows || null;
     if (!grades) {
       const avgs = await averageGradesFor(prospects.map((p) => p.id));
@@ -216,9 +218,9 @@ export function loadSimData(year = SIM_YEAR) {
     // Warm the best-games snapshot before the first pick needs it.
     simGames(cfb.season).catch(() => null);
     return {
-      ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug),
+      ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug, { gradeSpread }),
       // What loadExpandedBoard rebuilds the board from.
-      inputs: { prospects, hidden: prospectList.hidden || [], grades, fits, stats: cfb.bySlug },
+      inputs: { prospects, hidden: prospectList.hidden || [], grades, fits, stats: cfb.bySlug, gradeSpread },
     };
   });
 }
@@ -245,7 +247,7 @@ export function loadExpandedBoard(year = SIM_YEAR) {
     }
     const ids = new Set(inputs.prospects.map((p) => p.id));
     const prospects = [...inputs.prospects, ...extra.filter((p) => !ids.has(p.id))];
-    return buildBoard(prospects, inputs.grades, inputs.fits, inputs.stats);
+    return buildBoard(prospects, inputs.grades, inputs.fits, inputs.stats, { gradeSpread: inputs.gradeSpread });
   });
 }
 
