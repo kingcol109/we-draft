@@ -164,13 +164,27 @@ export function resolveNeeds(needs = {}) {
   return out;
 }
 
-// The need(s) a prospect fills: [{ key, share }]. An OL or DB with no
-// sub-position (subPosition — OT / IOL, CB / S) counts half toward each.
+// A prospect's sub-positions (subPosition — OT / IOL, CB / S): one, or
+// several for a player who plays more than one ("OT" or ["OT", "IOL"]).
+const SUB_POSITIONS = { OL: ["OT", "IOL"], DB: ["CB", "S"] };
+export function subsOf(p) {
+  const all = SUB_POSITIONS[p?.Position];
+  if (!all) return [];
+  const sp = p.subPosition;
+  return all.filter((s) => (Array.isArray(sp) ? sp.includes(s) : sp === s));
+}
+
+// The need(s) a prospect fills: [{ key, share }]. An OL or DB with one
+// sub-position fills it; with none, or both (`flex` — he plays either),
+// he counts half toward each.
 export function needKeysFor(p) {
   if (!p || isSpecialist(p)) return [];
-  const sub = p.subPosition;
-  if (p.Position === "OL") return ["OT", "IOL"].includes(sub) ? [{ key: sub, share: 1 }] : [{ key: "OT", share: 0.5 }, { key: "IOL", share: 0.5 }];
-  if (p.Position === "DB") return ["CB", "S"].includes(sub) ? [{ key: sub, share: 1 }] : [{ key: "CB", share: 0.5 }, { key: "S", share: 0.5 }];
+  const all = SUB_POSITIONS[p.Position];
+  if (all) {
+    const subs = subsOf(p);
+    if (subs.length === 1) return [{ key: subs[0], share: 1 }];
+    return all.map((key) => ({ key, share: 0.5, ...(subs.length > 1 ? { flex: true } : {}) }));
+  }
   if (p.Position === "DL") return [{ key: "IDL", share: 1 }];
   return [{ key: p.Position, share: 1 }];
 }
@@ -218,7 +232,8 @@ function bigForPosition(board, p) {
 // need, the same share he counts toward CB or S as a position.
 export function specificFit(spec, p, board) {
   if (!spec || p?.Position !== spec.pos) return 0;
-  if (spec.sub && p.subPosition && p.subPosition !== spec.sub) return 0;
+  const subs = subsOf(p);
+  if (spec.sub && subs.length && !subs.includes(spec.sub)) return 0;
   const weak = p.weaknesses || [];
   if (spec.avoid.some((t) => weak.includes(t))) return 0;
   const s = spec.size || {};
@@ -226,25 +241,30 @@ export function specificFit(spec, p, board) {
   if (p.weight != null && ((s.wMin && p.weight < s.wMin) || (s.wMax && p.weight > s.wMax))) return 0;
   const strong = p.strengths || [];
   const fits = spec.want.some((t) => strong.includes(t) || (t === "Frame" && bigForPosition(board, p)));
-  return fits ? (spec.sub && !p.subPosition ? 0.5 : 1) : 0;
+  return fits ? (spec.sub && !subs.length ? 0.5 : 1) : 0;
 }
 const specificsFor = (p) => SPECIFIC_NEEDS.filter((s) => s.pos === p?.Position);
 
 // A team's pull toward a prospect from its needs: the strongest label that
 // wants him — at his position, or (at SPECIFIC_WEIGHT) a specific need he
 // fits — fading once the team's drafted for it (state.needFilled). A
-// Crowded Room only counts when nothing wants him.
+// Crowded Room only counts when nothing wants him. One who plays both
+// sub-positions (flex) pulls in full toward whichever the team wants more.
 export function needPull(state, team, p, overall) {
   const needs = state.needs?.[team];
   if (!needs) return 0;
   const filledOf = (key) => state.needFilled?.[team]?.[key] || 0;
-  const position = needKeysFor(p).reduce((total, { key, share }) => {
+  const keys = needKeysFor(p);
+  const pullAt = (key) => {
     const n = needs[key];
-    if (!n) return total;
+    if (!n) return 0;
     const pulls = n.labels.map((l) => labelPull(l, key, p, overall));
     const want = Math.max(0, ...pulls);
-    return total + share * (want > 0 ? want * Math.max(0, 1 - filledOf(key)) : Math.min(0, ...pulls));
-  }, 0);
+    return want > 0 ? want * Math.max(0, 1 - filledOf(key)) : Math.min(0, ...pulls);
+  };
+  const halves = keys.reduce((total, { key, share }) => total + share * pullAt(key), 0);
+  const best = keys[0]?.flex ? Math.max(...keys.map(({ key }) => pullAt(key))) : 0;
+  const position = best > 0 ? best : halves;
   const specific = Math.max(0, ...specificsFor(p).map((s) => {
     const n = needs[s.key];
     const fit = n ? specificFit(s, p, state.board) : 0;
@@ -453,11 +473,12 @@ export function applyMyGrades(board, myGrades = {}) {
 // Every team's own read of the community board, drawn once per sim: each
 // prospect's community rank plus a seeded random spread (standard
 // deviation, in board spots) that widens down the board — teams agree on
-// the top 15, disagree more and more after that. Re-ranked into the team's
+// the top 15, disagree more and more after that — most of all past the
+// top 60, where real boards split the widest. Re-ranked into the team's
 // own 1…N. CPU teams pick off their own board; everything graded (board
 // rank, value / reach, the desk, draft grades) stays on the community's.
 // Specialists keep their community spot. chaos 0 → no spread.
-export const BOARD_SPREAD = [[15, 1], [50, 6], [100, 11], [150, 17], [Infinity, 25]];
+export const BOARD_SPREAD = [[15, 1], [50, 6], [60, 11], [100, 16], [150, 25], [Infinity, 36]];
 export const boardSpread = (rank) => BOARD_SPREAD.find(([upTo]) => rank <= upTo)[1];
 const teamSeed = (seed, team) => [...team].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), seed ^ 0x811c9dc5) | 0;
 export function buildTeamBoards(board, teams, seed, chaos = 1) {

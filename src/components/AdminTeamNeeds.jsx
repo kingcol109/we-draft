@@ -1,6 +1,6 @@
 // src/components/AdminTeamNeeds.jsx
 //
-// Admin → Mock Draft's two needs tabs:
+// Admin → Mock Draft's Team Needs tab:
 //
 //   Team Needs     every team's need labels per position — nflTeamNeeds/
 //                  {abbr}.needs: { [key]: { labels, note } }, the admin's
@@ -21,17 +21,12 @@
 //                  SPECIFIC_NEEDS) are labeled the same way and listed under
 //                  their position; the grid marks a position with a
 //                  specific need (•).
-//   Sub-positions  OL → OT / IOL and DB → CB / S for the sim's class
-//                  (players/{id}.SubPositionOverride over the synced
-//                  SubPosition — scripts/syncSubPositions.mjs). Mostly for
-//                  the prospects PFF couldn't place. The sim picks these up
-//                  from the class snapshots, so they apply after the next
-//                  Rebuild Site Snapshots.
+// Sub-positions (OT / IOL, CB / S) are kept under Data Management —
+// AdminSubPositions.jsx.
 import { useEffect, useMemo, useState } from "react";
-import { collection, deleteField, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "../firebase";
 import { NEED_LABELS, NEED_KEYS, NEED_KEY_NAMES, MANUAL_LABELS, SPECIFIC_NEEDS, resolveNeeds } from "../utils/draftSim/engine";
-import { SIM_YEAR } from "../utils/draftSim/data";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { fetchEspnRoster } from "../utils/nflRoster";
@@ -408,74 +403,6 @@ export function TeamNeeds() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-const SUBS = { OL: ["OT", "IOL"], DB: ["CB", "S"] };
-
-export function SubPositions() {
-  const [players, setPlayers] = useState(null);
-  const [missingOnly, setMissingOnly] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    getDocs(query(collection(db, "players"), where("Eligible", "==", SIM_YEAR), where("Position", "in", Object.keys(SUBS))))
-      .then((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-        .filter((p) => !(p.Live === false || p.Live === "false" || p.Live === "no"))
-        .sort((a, b) => (a.Position + a.Last).localeCompare(b.Position + b.Last))))
-      .catch((e) => setError(e.message));
-  }, []);
-
-  const set = async (p, sub) => {
-    try {
-      await updateDoc(doc(db, "players", p.id), { SubPositionOverride: sub || deleteField() });
-      setPlayers((all) => all.map((x) => (x.id === p.id ? { ...x, SubPositionOverride: sub || undefined } : x)));
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  if (error) return <div style={{ padding: 20, color: "#c8102e" }}>{error}</div>;
-  if (!players) return <div style={{ padding: 20, color: "#777" }}>Loading {SIM_YEAR} OL and DBs…</div>;
-  const missing = players.filter((p) => !p.SubPositionOverride && !p.SubPosition);
-  const shown = missingOnly ? missing : players;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-      <div style={{ ...card, padding: "14px 16px", fontSize: "13px", color: "#33415a", lineHeight: 1.5 }}>
-        Team needs split OL into tackles and interior, and DBs into corners and safeties. Most {SIM_YEAR} prospects get theirs from PFF
-        (scripts/syncSubPositions.mjs); set the rest here, or correct one. An OL or DB with none counts half toward each in the sim.
-        Changes reach the sim after the next <b>Rebuild Site Snapshots</b>.
-      </div>
-      <div style={card}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 16px", background: "#f7f9fc", borderBottom: "1px solid #eef1f5", fontSize: "12px", fontWeight: 800 }}>
-          <span>{missing.length} of {players.length} without a sub-position</span>
-          <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-            <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} /> Missing only
-          </label>
-        </div>
-        {shown.map((p) => {
-          const current = p.SubPositionOverride || p.SubPosition || null;
-          return (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 16px", borderTop: "1px solid #eef1f5", fontSize: "13px" }}>
-              <span style={{ fontWeight: 900, color: BLUE, width: "34px" }}>{p.Position}</span>
-              <span style={{ fontWeight: 800, color: "#0f1b2d", minWidth: 0, flex: 1 }}>{p.First} {p.Last} <span style={{ color: "#8a97ab", fontWeight: 600 }}>· {p.School}</span></span>
-              {p.SubPosition && <span style={{ fontSize: "11px", color: "#8a97ab" }}>PFF: {p.SubPosition}</span>}
-              {SUBS[p.Position].map((s) => (
-                <button key={s} onClick={() => set(p, s)} style={{
-                  border: `1px solid ${current === s ? BLUE : "#d5dce6"}`, background: current === s ? BLUE : "#fff", color: current === s ? "#fff" : "#33415a",
-                  borderRadius: "999px", padding: "4px 12px", fontWeight: 800, fontSize: "11px", cursor: "pointer",
-                }}>{s}</button>
-              ))}
-              <button onClick={() => set(p, null)} disabled={!p.SubPositionOverride} title="Back to PFF's" style={{ border: "none", background: "none", color: p.SubPositionOverride ? BLUE : "#c9d2de", fontSize: "11px", fontWeight: 800, cursor: p.SubPositionOverride ? "pointer" : "default", textDecoration: "underline" }}>
-                Reset
-              </button>
-            </div>
-          );
-        })}
-        {!shown.length && <div style={{ padding: "16px", color: "#5b6b84", fontSize: "13px" }}>Every {SIM_YEAR} OL and DB has a sub-position.</div>}
-      </div>
     </div>
   );
 }

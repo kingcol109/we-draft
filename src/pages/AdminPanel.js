@@ -18,6 +18,7 @@ import VideoConcepts from "../components/VideoConcepts";
 import DraftOrderEditor from "../components/DraftOrderEditor";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
+import AdminSubPositions from "../components/AdminSubPositions";
 import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
@@ -267,6 +268,7 @@ const PLAYER_GROUPS = [
       { key: "suggestAdds", label: "Suggested Adds" },
       { key: "portal", label: "Transfer Portal" },
       { key: "recruits", label: "Recruits" },
+      { key: "subpositions", label: "Sub-positions" },
     ],
   },
   {
@@ -1362,6 +1364,8 @@ function PlayerDataSection() {
         <AdminTransferPortal allPlayers={allPlayers} setAllPlayers={setAllPlayers} nextFebFirstUTC={nextFebFirstUTC} />
       ) : playerDataTab === "recruits" ? (
         <RecruitsSection />
+      ) : playerDataTab === "subpositions" ? (
+        <AdminSubPositions />
       ) : playerDataTab === "historical" ? (
         <HistoricalSection />
       ) : playerDataTab === "comps" ? (

@@ -8,8 +8,8 @@
 // groups (a DB PFF lists as DI) is left alone.
 //
 // Writes players/{id}.SubPosition — the label only, no PFF numbers, so it's
-// public like Position. The admin's SubPositionOverride (Admin → Mock Draft
-// → Sub-positions) wins over it wherever it's set; this never touches it.
+// public like Position. The admin's SubPositionOverride (Admin → Players →
+// Data Management → Sub-positions) wins over it wherever it's set; this never touches it.
 // The class snapshots (utils/snapshotBuilders.js) carry it to the sim on
 // their next rebuild.
 //

@@ -466,15 +466,6 @@ export const ISAAC_LINES = {
       "Best player available, I guess — because the {nick} did not need another {needPos}.",
     ],
   },
-  trade: {
-    label: "Trade", when: "Any trade.",
-    lines: [
-      "We've got a TRADE! The {toNick} are jumping up to {n}. You don't make that call unless your guy is sitting right there.",
-      "Phones are ringing. The {toNick} move up to {n}, and the {fromNick} pick up extra picks to slide back.",
-      "Aggressive move by the {toNick}. Somebody they love is on the board and they weren't going to risk waiting.",
-      "Draft night is officially fun. The {toNick} trade up to {n}.",
-    ],
-  },
 };
 
 // ── Makali Pennycooke: the optimist ──
@@ -543,11 +534,12 @@ export const MAKALI_LINES = {
       "I said the {nick} needed a {needPos}. They got one. I'm thrilled!",
     ],
   },
-  trade: {
-    label: "Trade", when: "Any trade.",
+  tradeUp: {
+    label: "Traded up for him", when: "The team just traded up into this pick — the trade and the pick, one take. Trade variables work here: {fromNick}, {fromCity}, {got}.",
     lines: [
-      "LOVE the aggression from the {toNick}! And the {fromNick} pick up more picks — everybody wins!",
-      "Trade! Great move for the {toNick}, great move for the {fromNick}. I love trades.",
+      "LOVE the aggression from the {nick}! They trade up with the {fromNick} and get {player}. Everybody wins!",
+      "Trade up AND a great pick? The {nick} jump to No. {n} for {last} and I'm fired up!",
+      "{got} to the {fromNick} to go get {player}? Worth every pick. {last} is going to be a star.",
     ],
   },
 };
@@ -726,11 +718,12 @@ export const DAVIN_LINES = {
       "{legend} would never sit behind three other guys. {last} is about to.",
     ],
   },
-  trade: {
-    label: "Trade", when: "Any trade.",
+  tradeUp: {
+    label: "Traded up for him", when: "The team just traded up into this pick — the trade and the pick, one take. Trade variables work here: {fromNick}, {fromCity}, {got}.",
     lines: [
-      "The {toNick} traded up for that? I would have traded up for cheeseburgers.",
-      "Trades are a scam invented by people who don't believe in fullbacks.",
+      "The {nick} traded up for {player}? I would have traded up for cheeseburgers.",
+      "Trades are a scam invented by people who don't believe in fullbacks. The {nick} moved up for {last} anyway.",
+      "{got} to the {fromNick} for {player}. {legend} would never have cost that much.",
     ],
   },
 };
@@ -1166,6 +1159,9 @@ function ppPick(e, ctx) {
 const isRutgers = (p) => /rutgers/i.test(p?.School || "");
 
 function makaliPick(e, ctx) {
+  // Traded up for him: the trade and the pick, one take.
+  const up = tradeUpVars(e, ctx);
+  if (up) return { text: lineFrom(MAKALI_LINES, "tradeUp", { ...pickVars(e, ctx), ...up }, ctx, "makali") };
   const rutgers = isRutgers(e.prospect);
   const eagles = e.team === "PHI";
   let cat;
@@ -1185,6 +1181,9 @@ function davinPick(e, ctx) {
   const v = pickVars(e, ctx);
   let cat;
   let legend = "";
+  // Traded up for him: the trade and the pick, one take.
+  const up = tradeUpVars(e, ctx);
+  if (up) return { text: lineFrom(DAVIN_LINES, "tradeUp", { ...v, ...up, legend: favoriteFor(p.Position, ctx) }, ctx, "davin") };
   if (isFsu(p)) {
     cat = ctx.rand() < 0.4 ? "fsuLegend" : "fsu";
     if (cat === "fsuLegend") legend = p.Position === "QB" ? "Jameis Winston" : favoriteFor(p.Position, ctx);
@@ -1452,13 +1451,14 @@ function weDraftTrade(e, ctx) {
   return { text: `TRADE · The ${ctx.nickname(e.to)} move up to ${pickName(e.pick)} with the ${ctx.nickname(e.from)}`, lines: [lineFrom(WEDRAFT_LINES, "trade", tradeVars(e, ctx), ctx, "wedraft")] };
 }
 
-// Should a personality speak up on this event?
+// Should a personality speak up on this event? Never on a trade by itself —
+// a trade up is told with the pick it bought (tradeUp lines), one post.
 function chimesIn(e, ctx) {
+  if (e.type === "trade") return false;
   if (e.isUser || e.userInvolved) return true;
   const mode = ctx.chatter || DEFAULT_CHATTER;
   if (mode === "mine") return false;
   if (mode === "all") return true;
-  if (e.type === "trade") return ctx.rand() < 0.7;
   if (e.pick.overall === 1) return true;
   const notable = (e.prospect.Position === "QB" && e.pick.round <= 2) || Math.abs(e.value) >= Math.max(8, e.pick.overall * 0.3);
   return ctx.rand() < (notable ? 0.45 : e.pick.round === 1 ? 0.15 : 0.06);
@@ -1569,38 +1569,33 @@ export const ANALYSTS = [
   {
     id: "isaac", name: "Isaac Walker", handle: "@IsaacWalker", role: "Draft Analyst", verified: true, enabled: true,
     color: "#14a3a3", initials: "IW", delay: 1300, lines: ISAAC_LINES,
-    about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades, and your final grade.",
-    cadence: "Most likely on the headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, and a team trading up — told with the pick. On its own only when a trade moves just later-round or future picks.",
+    about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades up, and your final grade.",
+    cadence: "Most likely on the headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, and a team trading up — told with the pick.",
     weight: (e) => {
-      // A trade into a pick in this draft is his at the pick (tradeUp lines).
-      if (e.type === "trade") return e.pick?.capital || e.pick?.future ? 3 : 0;
+      if (e.type !== "pick") return 0;
       if (e.pick.overall === 1) return 100;
       if (e.pick.tradeUp) return 8;
       if (qbSupport(e)) return 4;
       const notable = (e.prospect.Position === "QB" && e.pick.round <= 2) || Math.abs(e.value) >= Math.max(6, e.pick.overall * 0.25);
       return notable ? 3 : 1.3;
     },
-    react: (e, ctx) => {
-      if (e.type === "pick") return isaacPick(e, ctx);
-      if (e.type === "trade") return { text: lineFrom(ISAAC_LINES, "trade", tradeVars(e, ctx), ctx, "isaac") };
-      return null;
-    },
+    react: (e, ctx) => (e.type === "pick" ? isaacPick(e, ctx) : null),
   },
   {
     id: "kenneth", name: "Kenneth Cold", handle: "@kingcoldsports", role: "Player Analyst", verified: true, enabled: true,
     color: "#f6a21d", initials: "KC", delay: 1300, lines: {},
     about: "The player guy — his own written analysis of the player just drafted, with different takes for a reach, a steal, a depth pick and a normal pick.",
-    cadence: "Picks of players he has a take written for (Player analysis below); never on trades.",
-    weight: (e) => (e.type === "pick" && e.pick.overall !== 1 && takeFor(e) ? 4 : 0),
+    cadence: "Picks of players he has a take written for (Player analysis below); never on trades, or a pick a team traded up for (his takes don't tell the trade).",
+    weight: (e) => (e.type === "pick" && e.pick.overall !== 1 && !e.pick.tradeUp && takeFor(e) ? 4 : 0),
     react: (e, ctx) => (e.type === "pick" ? kennethPick(e, ctx) : null),
   },
   {
     id: "pp", name: "Dr. PP Johnson", handle: "@DrPPJohnson", role: "Stats", verified: true, enabled: true,
     color: "#2e9e5b", initials: "PJ", delay: 1300, lines: PP_LINES,
     about: "The stat guy. Reads out the drafted player's CFBD numbers — his season line and where he ranks nationally.",
-    cadence: "Picks with a real stat line this season; most likely when the player ranks nationally.",
+    cadence: "Picks with a real stat line this season; most likely when the player ranks nationally. Not a pick a team traded up for (his stat lines don't tell the trade).",
     weight: (e, ctx) => {
-      if (e.type !== "pick") return 0;
+      if (e.type !== "pick" || e.pick.tradeUp) return 0;
       const facts = statFacts(e, ctx);
       return facts.some((f) => f.group === "leader") ? 2.5 : facts.length ? 1.3 : 0;
     },
@@ -1610,33 +1605,25 @@ export const ANALYSTS = [
     id: "makali", name: "Makali Pennycooke", handle: "@timeoutwithmakalipod", role: "Optimist", verified: true, enabled: true,
     color: "#cc0033", initials: "MP", delay: 1300, lines: MAKALI_LINES,
     about: "Loves every pick and thinks every player is going to be great — Rutgers players and Eagles picks most of all.",
-    cadence: "Any pick or trade; almost always on Rutgers players and Eagles picks.",
+    cadence: "Any pick, a team trading up told with the pick; almost always on Rutgers players and Eagles picks.",
     weight: (e) => {
-      if (e.type === "trade") return e.to === "PHI" || e.from === "PHI" ? 6 : 1;
+      if (e.type !== "pick") return 0;
       return isRutgers(e.prospect) || e.team === "PHI" ? 14 : 1;
     },
-    react: (e, ctx) => {
-      if (e.type === "pick") return makaliPick(e, ctx);
-      if (e.type === "trade") return { text: lineFrom(MAKALI_LINES, "trade", tradeVars(e, ctx), ctx, "makali") };
-      return null;
-    },
+    react: (e, ctx) => (e.type === "pick" ? makaliPick(e, ctx) : null),
   },
   {
     id: "davin", name: "davin mcgavitt", handle: "@davinmcgavitt", role: "The Jester", verified: false, enabled: true,
     color: "#7a3cff", initials: "DM", delay: 1300, lines: DAVIN_LINES,
     about: "The desk's jester — a joke. Mostly negative, distracted by cheeseburgers, misses first-round fullbacks, loves Florida State players, and measures good picks against his favorite players (FSU greats, movie and TV football players).",
-    cadence: "Any pick or trade; almost always on FSU players.",
+    cadence: "Any pick, a team trading up told with the pick; almost always on FSU players.",
     weight: (e) => {
-      if (e.type === "trade") return 0.8;
+      if (e.type !== "pick") return 0;
       if (isFsu(e.prospect)) return 14;
       if (e.pick.round === 1 && ["QB", "WR", "DB"].includes(e.prospect.Position)) return 1.6;
       return 0.9;
     },
-    react: (e, ctx) => {
-      if (e.type === "trade") return { text: lineFrom(DAVIN_LINES, "trade", { ...tradeVars(e, ctx), legend: favoriteFor(null, ctx) }, ctx, "davin") };
-      if (e.type === "pick") return davinPick(e, ctx);
-      return null;
-    },
+    react: (e, ctx) => (e.type === "pick" ? davinPick(e, ctx) : null),
   },
   {
     id: "thad", name: "Thad Murphy", handle: "@ThadMurphy", role: "Draft Historian", verified: true, enabled: true,

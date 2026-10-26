@@ -25,12 +25,12 @@ import { loadSimData, loadDeskLines, loadBestGame, SIM_YEAR, SIM_YEARS, teamName
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { initSim, makePick, rngNext } from "../utils/draftSim/engine";
-import { TeamNeeds, SubPositions } from "./AdminTeamNeeds";
+import { TeamNeeds } from "./AdminTeamNeeds";
 import AdminSimStats from "./AdminSimStats";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "subpositions", label: "Sub-positions" }, { key: "stats", label: "Statistics" }];
+const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" },{ key: "stats", label: "Statistics" }];
 
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
 
@@ -69,7 +69,6 @@ export default function AdminMockDraft() {
       </div>
       {tab === "personalities" && <Personalities />}
       {tab === "needs" && <TeamNeeds />}
-      {tab === "subpositions" && <SubPositions />}
       {tab === "stats" && <AdminSimStats />}
     </div>
   );

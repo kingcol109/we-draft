@@ -3,7 +3,7 @@ import {
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
-import { reactTo, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, takeSituation } from "./analysts";
+import { reactTo, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, takeSituation } from "./analysts";
 import { bestGame } from "./data";
 
 const TEAMS = ["AAA", "BBB", "CCC", "DDD"];
@@ -391,6 +391,15 @@ test("needs: OL and DB fill their sub-position, or half of each without one", ()
   expect(needKeysFor({ Position: "K" })).toEqual([]);
 });
 
+test("needs: an OL or DB with both sub-positions counts half toward each, but pulls in full toward either", () => {
+  expect(needKeysFor({ Position: "OL", subPosition: ["IOL"] })).toEqual([{ key: "IOL", share: 1 }]);
+  expect(needKeysFor({ Position: "OL", subPosition: ["OT", "IOL"] })).toEqual([{ key: "OT", share: 0.5, flex: true }, { key: "IOL", share: 0.5, flex: true }]);
+  const s = initSim({ order, board, needs: needsOf("AAA", { OT: "Upgrade Needed" }) });
+  const swing = needPull(s, "AAA", { Position: "OL", subPosition: ["OT", "IOL"], rank: 10 }, 10);
+  expect(swing).toBe(needPull(s, "AAA", { Position: "OL", subPosition: "OT", rank: 10 }, 10));
+  expect(swing).toBeGreaterThan(needPull(s, "AAA", { Position: "OL", rank: 10 }, 10));
+});
+
 test("needs: Upgrade Needed pulls hardest, depth waits for later rounds, a crowded room pushes away", () => {
   const s = initSim({ order, board, needs: needsOf("AAA", { QB: "Upgrade Needed", WR: "Upgrade Wanted", RB: "Depth Needed", TE: "Crowded Room", LB: "Set" }) });
   const qb = { Position: "QB", rank: 5 };
@@ -609,6 +618,7 @@ test("specific fit: Frame counts for a prospect who's big for his position; DBs 
   const db = { Position: "DB", strengths: ["Man Technique", "Hip Fluidity"], weaknesses: [] };
   expect(specificFit(spec("SLOTCB"), { ...db, subPosition: "CB" })).toBe(1);
   expect(specificFit(spec("SLOTCB"), { ...db, subPosition: "S" })).toBe(0);
+  expect(specificFit(spec("SLOTCB"), { ...db, subPosition: ["CB", "S"] })).toBe(1);
   expect(specificFit(spec("SLOTCB"), db)).toBe(0.5);
 });
 
@@ -799,6 +809,24 @@ test("Isaac: a trade up and the pick it bought are one take, at the pick", () =>
   // A pick nobody traded for gets no trade-up take.
   const plain = makePick(s, board[0].id).event;
   expect(plain.pick.tradeUp).toBeUndefined();
+});
+
+test("desk: no personality posts on a trade by itself; Makali and Davin tell it with the pick, Kenneth and PP sit it out", () => {
+  const s = sim();
+  const offer = { team: "CCC", give: [3, 7], ratio: 1.1, value: 0, target: board[0] };
+  const { state, event: trade } = acceptOffer(s, offer);
+  // Only We-Draft.com's trade announcement, even with every post on.
+  expect(reactTo(trade, deskCtx("all")).map((p) => p.analyst.id)).toEqual(["wedraft"]);
+  ANALYSTS.filter((a) => a.weight).forEach((a) => expect(a.weight(trade, deskCtx("all")) || 0).toBe(0));
+  const { event } = makePick(state, board[0].id);
+  const later = { ...event, pick: { ...event.pick, overall: 9 }, value: 0 };
+  [["makali", MAKALI_LINES], ["davin", DAVIN_LINES]].forEach(([id, table]) => {
+    const text = ANALYSTS.find((a) => a.id === id).react(later, deskCtx("all")).text;
+    expect(table.tradeUp.lines.map(lineText).some((l) => text.startsWith(fill0(l)))).toBe(true);
+    expect(text).not.toMatch(/[{}]/);
+  });
+  expect(ANALYSTS.find((a) => a.id === "pp").weight(later, deskCtx("all"))).toBe(0);
+  expect(ANALYSTS.find((a) => a.id === "kenneth").weight(later, deskCtx("all"))).toBe(0);
 });
 // A line's opening words, before its first {variable}.
 const fill0 = (l) => l.split("{")[0];
