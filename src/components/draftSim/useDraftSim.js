@@ -44,8 +44,8 @@ const FEED_MAX = 300;
 let postId = 0;
 
 // onUserPick(event): each pick the user makes (Statistics — utils/draftSim/stats.js).
-export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed, cpuTrades, quick = false, onUserPick }) {
-  const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams, rounds, seed, cpuTrades }));
+export default function useDraftSim(data, { userTeams, rounds, speed: initialSpeed = DEFAULT_SPEED, chatter = DEFAULT_CHATTER, seed, cpuTrades, variance, quick = false, onUserPick }) {
+  const [sim, setSim] = useState(() => initSim({ order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams, rounds, seed, cpuTrades, variance }));
   const [phase, setPhase] = useState("intro");
   const [reveal, setReveal] = useState(null);
   const [feed, setFeed] = useState([]);

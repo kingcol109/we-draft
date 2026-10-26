@@ -10,6 +10,8 @@ import {
   limit,
   startAfter,
   getDocs,
+  doc,
+  getDoc,
 } from "firebase/firestore";
 
 // --- Firebase config ---
@@ -105,6 +107,18 @@ async function getCurrentStaff() {
   const snapshot = await getDocs(q);
   return snapshot.docs;
 }
+// A class's published Weekly Mock summary (written on Publish in
+// AdminWeeklyMock.jsx; null before the first). Ids and URLs as in
+// src/utils/weeklyMockNews.js: the main class at /mocks/{abbr}, the next at
+// /mocks/{abbr}/{year}.
+const WEEKLY_CLASSES = [
+  { year: "2027", doc: "weeklyMock", suffix: "" },
+  { year: "2028", doc: "weeklyMock2028", suffix: "/2028" },
+];
+async function getWeeklyMockSummary(docId) {
+  const snap = await getDoc(doc(db, "config", docId));
+  return snap.exists() ? snap.data() : null;
+}
 async function getAllGames() {
   const colRef = collection(db, "schedule26");
   const snapshot = await getDocs(colRef);
@@ -121,6 +135,9 @@ async function generateSitemap() {
   console.log("🔄 Fetching player data from Firestore...");
   const allPlayers = await getAllDocs("players");
   console.log(`✅ Found ${allPlayers.length} players.`);
+  // An empty read means something went wrong, not that the site has no
+  // players — keep the sitemap that's there rather than shrink it.
+  if (!allPlayers.length) throw new Error("No players read; keeping the existing sitemap.");
 
   const playerPages = [];
   // Every player also has a Find Comparison page (/comparison/<Slug>, see
@@ -359,6 +376,29 @@ for (const doc of allTeams) {
     ];
   });
 
+  /* =========================
+     WEEKLY MOCK
+     Each team's page (/mocks/{abbr}, WeeklyTeamMock.jsx — the permanent
+     URLs) and the current week's full mock, dated by when that week was
+     published (Eastern time, the date the pages show) — not by this run.
+     None before the first Weekly Mock is published. Past weeks' full mocks
+     are noindexed (ViewMock.js), so they're left out.
+  ========================= */
+  console.log("🔄 Fetching the Weekly Mock summaries from Firestore...");
+  const weeklyMockPages = [];
+  for (const cls of WEEKLY_CLASSES) {
+    const weekly = await getWeeklyMockSummary(cls.doc);
+    const weeklyDate = weekly?.publishedAt?.toDate?.()?.toLocaleDateString("en-CA", { timeZone: "America/New_York" }) || null;
+    if (!weekly || !weeklyDate) continue;
+    const priority = cls.suffix ? 0.6 : 0.7;
+    weeklyMockPages.push(
+      ...NFL_TEAM_ABBRS.map((abbr) => ({ path: `/mocks/${abbr.toLowerCase()}${cls.suffix}`, priority, lastmod: weeklyDate })),
+      ...(weekly.mockId && isValidSlug(weekly.mockId.toLowerCase()) ? [{ path: `/mocks/${weekly.mockId}/view`, priority: priority - 0.05, lastmod: weeklyDate }] : []),
+    );
+    console.log(`✅ ${cls.year} Weekly Mock published ${weeklyDate}.`);
+  }
+  console.log(`✅ ${weeklyMockPages.length} Weekly Mock pages.`);
+
   console.log("🔄 Fetching current staff from Firestore...");
   const staffDocs = await getCurrentStaff();
   const staffPages = [];
@@ -382,30 +422,13 @@ for (const doc of allTeams) {
   console.log(`✅ Found ${staffPages.length / 4} staff pages.`);
 
   /* =========================
-     BUILD XML
-  ========================= */
-const urls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages]
-    .map(
-      (u) => `
-  <url>
-    <loc>${baseUrl}${u.path}</loc>
-    <lastmod>${u.lastmod}</lastmod>
-    <priority>${u.priority}</priority>
-  </url>`
-    )
-    .join("");
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls}
-</urlset>`;
-
-  /* =========================
      WRITE FILE
   ========================= */
 // Split into chunks of 1000
   const chunkSize = 1000;
-  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
+  // Everything — the NFL team, staff and Weekly Mock pages too (they were
+  // built but left out of this list until 2026-10-26).
+  const allUrls = [...staticPages, ...communityBoardPages, ...teamPages, ...nflPages, ...weeklyMockPages, ...staffPages, ...playerPages, ...comparisonPages, ...newsPages, ...gamePages];
   const chunks = [];
   
   for (let i = 0; i < allUrls.length; i += chunkSize) {
@@ -442,6 +465,9 @@ console.log(
   - ${staticPages.length} static pages
   - ${communityBoardPages.length} community board pages
   - ${teamPages.length} team pages
+  - ${nflPages.length} NFL team pages
+  - ${weeklyMockPages.length} Weekly Mock pages
+  - ${staffPages.length} staff pages
   - ${playerPages.length} player pages
   - ${comparisonPages.length} comparison pages
   - ${newsPages.length} news articles

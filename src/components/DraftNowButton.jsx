@@ -42,27 +42,32 @@ const CSS = `
 `;
 
 // team: the abbreviation; teamName: "Cleveland Browns" (for screen readers).
-export default function DraftNowButton({ team, teamName, c1, c2, isMobile }) {
+// No team: the sim's own start (/draftsim — the full weekly mock's banner).
+// year: another class than the sim's default (/draftsim/2028/{team}).
+// compact: the phone size everywhere (the weekly mock's pages, where it
+// sits in a banner rather than a hero).
+export default function DraftNowButton({ team, teamName, c1, c2, isMobile, compact = false, year = "" }) {
+  const small = isMobile || compact;
   return (
     <>
       <style>{CSS}</style>
-      <Link to={`/draftsim/${team.toLowerCase()}`} className="wd-nfl-draft-btn"
-        aria-label={`Draft as the ${teamName} in the Draft Sim`}
+      <Link to={`/draftsim${year ? `/${year}` : ""}${team ? `/${team.toLowerCase()}` : ""}`} className="wd-nfl-draft-btn"
+        aria-label={team ? `Draft as the ${teamName} in the Draft Sim` : "Start the Draft Sim"}
         style={{
           "--dc": readableOn(c1, "#ffffff"), "--dg": c2,
           flexShrink: 0, alignSelf: "center", textDecoration: "none",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 2 : 4,
+          display: "flex", flexDirection: "column", alignItems: "center", gap: small ? 2 : 4,
           background: "linear-gradient(180deg, #ffffff 0%, #eef1f5 100%)",
           color: "var(--dc)", border: `2px solid ${c2}`, borderRadius: 999,
-          padding: isMobile ? "8px 18px 9px" : "14px 44px 16px",
+          padding: small ? "8px 18px 9px" : "14px 44px 16px",
           boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
         }}>
         <span className="wd-draft-shine" aria-hidden="true" />
-        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: isMobile ? 9 : 11, fontWeight: 900, letterSpacing: "0.2em", opacity: 0.85 }}>
-          <span className="wd-draft-dot" style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: "50%", background: "#e11d2e", boxShadow: "0 0 8px rgba(225,29,46,0.7)" }} />
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: small ? 9 : 11, fontWeight: 900, letterSpacing: "0.2em", opacity: 0.85 }}>
+          <span className="wd-draft-dot" style={{ width: small ? 6 : 8, height: small ? 6 : 8, borderRadius: "50%", background: "#e11d2e", boxShadow: "0 0 8px rgba(225,29,46,0.7)" }} />
           ON THE CLOCK
         </span>
-        <span style={{ fontSize: isMobile ? 20 : 34, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1 }}>
+        <span style={{ fontSize: small ? 20 : 34, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1 }}>
           DRAFT
         </span>
       </Link>

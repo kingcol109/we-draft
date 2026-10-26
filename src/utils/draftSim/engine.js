@@ -303,7 +303,7 @@ const qbRoomFull = (state, team) => {
   return !labels.some((l) => URGENT.includes(l) || l === "Depth Needed");
 };
 function qbRoomPenalty(state, team, p, overall, round) {
-  if (p.Position !== "QB" || !isPremium(round, p) || !qbRoomFull(state, team)) return 0;
+  if (p.Position !== "QB" || !isPremium(round, p) || !qbRoomFull(state, team) || state.qbTeams?.includes(team)) return 0;
   const spots = 18 + 0.6 * overall;
   return state.needs[team].QB?.labels.includes("Crowded Room") ? spots * 1.5 : spots;
 }
@@ -488,6 +488,18 @@ export function applyMyGrades(board, myGrades = {}) {
 // consensus guy moves less, a polarizing one more.
 export const BOARD_SPREAD = [[15, 1], [50, 6], [60, 11], [100, 16], [150, 25], [Infinity, 36]];
 export const boardSpread = (rank) => BOARD_SPREAD.find(([upTo]) => rank <= upTo)[1];
+// The setup screen's Board Variance, in the order it shows them: how far
+// CPU teams' boards (and each pick's own noise) stray from the community's.
+// Normal is the spread above; None, every team drafts straight off it.
+// Separate from CPU Trades.
+export const VARIANCE = {
+  none: { label: "None", scale: 0, note: "Every CPU team drafts straight off the board, by its needs and staff — no randomness in its picks." },
+  less: { label: "Less", scale: 0.5, note: "Teams mostly agree with the board — fewer surprises." },
+  normal: { label: "Normal", scale: 1, note: "Teams agree at the top and disagree more further down, like a real draft." },
+  more: { label: "More", scale: 1.6, note: "Every war room has its own board — expect plenty of surprises." },
+};
+export const DEFAULT_VARIANCE = "normal";
+const varianceScale = (key) => VARIANCE[key]?.scale ?? 1;
 export const GRADE_SPREAD_CLASSES = ["2027"];
 export const GRADE_SPREAD_MIN = 5;
 const TYPICAL_GRADE_SD = 0.8;
@@ -546,7 +558,11 @@ export function swapTeams(to, a, b) {
 // futureOrder / futureYear: next year's draft (same shape), traded as
 // capital at FUTURE_DISCOUNT.
 // cpuTrades: how often CPU teams trade with each other (CPU_TRADES key).
-export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal" }) {
+// qbTeams: the only CPU teams that take a quarterback — one each, with no
+// "room is full" penalty for it (qbRoomPenalty) — the Weekly Mock's next
+// class (weeklyMock.js qbEligibleTeams). null: every team, as usual.
+// variance: how far their boards and picks stray (VARIANCE key).
+export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal", variance = DEFAULT_VARIANCE, qbTeams = null }) {
   // Picks in rounds the sim doesn't draft still change hands in trades —
   // a one-round sim's teams can trade up with their 2nd-rounders — and so
   // do next year's.
@@ -575,8 +591,8 @@ export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, 
     }));
   const teams = [...new Set([...picks, ...capital].flatMap((p) => [p.owner, p.original]))];
   return {
-    picks, capital, board, chart, staff, chaos, needs, cpuTrades,
-    teamBoards: buildTeamBoards(board, teams, seed | 0, chaos),
+    picks, capital, board, chart, staff, chaos, needs, cpuTrades, variance, qbTeams: qbTeams ? [...qbTeams] : null,
+    teamBoards: buildTeamBoards(board, teams, seed | 0, chaos * varianceScale(variance)),
     byId: Object.fromEntries(board.map((p) => [p.id, p])),
     taken: {},
     teamPos: {},
@@ -619,6 +635,24 @@ function effectiveRank(state, team, p, overall, round, noise = 0) {
   return base + earlyNudge(p.Position, overall) - fitPull + repeatPenalty - need * (5 + 0.25 * overall) + qbRoomPenalty(state, team, p, overall, round) + noise;
 }
 
+// Value: a CPU team doesn't take a player graded more than VALUE_ROUNDS
+// rounds later than the round it's in (his community grade, avg, is about
+// the round he's graded for — 1 … 7) while one inside that is among its
+// candidates, nor an ungraded one while any graded player is. Needs and
+// staff fit still choose among them. Mostly matters on a thin board (the
+// 2028 class, where a back graded for round 7 was going in round 2).
+// Kickers and punters keep their own timing (specialistRank).
+export const VALUE_ROUNDS = 3;
+export function withinValue(list, round) {
+  if (!round) return list;
+  const specialists = list.filter(isSpecialist);
+  const players = list.filter((p) => !isSpecialist(p));
+  const inRange = players.filter((p) => p.avg != null && Math.round(p.avg) <= round + VALUE_ROUNDS);
+  if (inRange.length) return [...inRange, ...specialists];
+  const graded = players.filter((p) => p.avg != null);
+  return graded.length ? [...graded, ...specialists] : list;
+}
+
 function candidatesFor(state, team) {
   // The top of this team's own board.
   const avail = state.teamBoards?.[team]
@@ -635,8 +669,14 @@ function candidatesFor(state, team) {
   const all = [...top, ...fits, ...specialists];
   // No premium pick on a depth-only position (unless that's all that's left).
   const round = currentPick(state)?.round;
-  const allowed = all.filter((p) => !isPremium(round, p) || !depthOnly(state, team, p));
-  return allowed.length ? allowed : all;
+  let allowed = all.filter((p) => !isPremium(round, p) || !depthOnly(state, team, p));
+  if (!allowed.length) allowed = all;
+  // (Before the value cut, so it falls to the next-best non-QB.)
+  if (state.qbTeams && (!state.qbTeams.includes(team) || (state.needFilled?.[team]?.QB || 0) >= 1)) {
+    const noQb = allowed.filter((p) => p.Position !== "QB");
+    if (noQb.length) allowed = noQb;
+  }
+  return withinValue(allowed, round);
 }
 
 // Prospects a CPU team takes the moment they're on the clock with him on
@@ -658,7 +698,7 @@ export function chooseCpuPick(state) {
   let best = null;
   let bestScore = Infinity;
   candidatesFor(state, pick.owner).forEach((p) => {
-    const noise = gaussian(work) * (2.5 + 0.1 * pick.overall) * state.chaos;
+    const noise = gaussian(work) * (2.5 + 0.1 * pick.overall) * state.chaos * varianceScale(state.variance);
     const score = effectiveRank(state, pick.owner, p, pick.overall, pick.round, noise);
     if (score < bestScore) { bestScore = score; best = p; }
   });

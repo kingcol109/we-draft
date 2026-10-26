@@ -6,11 +6,15 @@
 // layout as DraftOrderPage.jsx: a centered column, top prospects / recent
 // videos side columns when the window has room, and the NFL margin ads in
 // the gutters outside both; phones get MobileAdCard in the content instead.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import MarginAds, { useAdSelection, teamNameFromAbbr } from "./MarginAds";
 import { MobileAdCard, MOBILE_AD_HEIGHT } from "./AdBanner";
 import { TopProspectsRail, RecentVideosRail } from "./DraftSideRails";
+import DraftNowButton from "./DraftNowButton";
+import { SIM_YEAR } from "../utils/draftSim/years";
 import { viewportCssWidth } from "../utils/pageZoom";
+import verifiedBadge from "../assets/verified.png";
 
 export const BLUE = "#0055a5";
 export const GOLD = "#f6a21d";
@@ -40,8 +44,9 @@ export function useIsMobile() {
 
 // The page frame. width: the content column; year: the class for the top
 // prospects rail. rails={false} drops the side columns (the editor needs the
-// room) but keeps the margin ads.
-export function MockPageShell({ width = 1000, year = "2027", rails: allowRails = true, isMobile, children }) {
+// room) but keeps the margin ads. leftRail: a column of the page's own in
+// place of the top prospects (the weekly mock's team pages: every team).
+export function MockPageShell({ width = 1000, year = "2027", rails: allowRails = true, leftRail = null, isMobile, children }) {
   const fits = () => typeof window !== "undefined" && viewportCssWidth() >= width + 2 * SIDE + 32;
   const [showRails, setShowRails] = useState(fits);
   const contentRef = useRef(null);
@@ -64,7 +69,7 @@ export function MockPageShell({ width = 1000, year = "2027", rails: allowRails =
         {rails && (
           <>
             <div style={{ position: "absolute", top: 24, bottom: 60, left: 0, width: RAIL_WIDTH }}>
-              <div style={{ position: "sticky", top: 16 }}><TopProspectsRail year={year} /></div>
+              <div style={{ position: "sticky", top: 16 }}>{leftRail || <TopProspectsRail year={year} />}</div>
             </div>
             <div style={{ position: "absolute", top: 24, bottom: 60, right: 0, width: RAIL_WIDTH }}>
               <div style={{ position: "sticky", top: 16 }}><RecentVideosRail /></div>
@@ -103,6 +108,142 @@ export function MockHero({ eyebrow, title, actions, isMobile, watermark, childre
         </div>
         {actions && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0 }}>{actions}</div>}
       </div>
+    </div>
+  );
+}
+
+// The Weekly Mock's header (its team pages, WeeklyTeamMock.jsx, and the
+// full mock, ViewMock.js), read like an article's: a logo (to its page,
+// when there's one) beside the date, a kicker and the title — one line,
+// shrunk to fit (FitLine) — then a summary and the byline, in the hero's
+// colors with its wordmark faded behind. hero: { c1, c2 (the background),
+// ink (text), accent (date badge, kicker, bottom edge), logo, logoTitle,
+// href, wordmark }. actions sit top-right, like MockHero's — on phones, a
+// row of their own under the title, which wraps there instead of shrinking.
+export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, byline, actions }) {
+  const logoSize = isMobile ? 56 : 88;
+  return (
+    <header style={{
+      position: "relative", overflow: "hidden", borderRadius: 16, marginBottom: 14, padding: isMobile ? "18px 16px" : "26px 30px",
+      background: `linear-gradient(120deg, ${hero.c1} 0%, ${hero.c1} 62%, ${hero.c2} 140%)`, color: hero.ink, boxShadow: "0 10px 28px rgba(0,0,0,0.2)",
+      ...(hero.accent ? { borderBottom: `5px solid ${hero.accent}` } : {}),
+    }}>
+      {hero.wordmark && (
+        <img src={hero.wordmark} alt="" aria-hidden="true" style={{
+          position: "absolute", right: isMobile ? -24 : 8, top: "50%", transform: "translateY(-50%)", height: isMobile ? 90 : 150,
+          maxWidth: "62%", objectFit: "contain", opacity: 0.12, pointerEvents: "none",
+        }} />
+      )}
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 14 : 22 }}>
+        {hero.logo && (
+          <Link to={hero.href} title={hero.logoTitle} style={{ flexShrink: 0, lineHeight: 0 }}>
+            <img src={hero.logo} alt={hero.logoTitle} style={{ width: logoSize, height: logoSize, objectFit: "contain", filter: "drop-shadow(0 3px 8px rgba(0,0,0,0.3))" }} />
+          </Link>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {date && (
+              <span style={{
+                display: "inline-block", borderRadius: 6, padding: isMobile ? "3px 8px" : "4px 10px", background: hero.accent || hero.ink, color: hero.c1,
+                fontSize: isMobile ? 12 : 14, fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: BODY_FONT,
+              }}>{date}</span>
+            )}
+            <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", ...(hero.accent ? { color: hero.accent } : { opacity: 0.8 }) }}>{kicker}</span>
+          </div>
+          <h1 style={{ margin: "6px 0 0", fontWeight: 900, lineHeight: 1.15, letterSpacing: "-0.01em", ...(isMobile ? { fontSize: 22, overflowWrap: "anywhere" } : {}) }}>
+            {isMobile ? headline : <FitLine max={34} min={14}>{headline}</FitLine>}
+          </h1>
+        </div>
+        {actions && !isMobile && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, flexShrink: 0, alignSelf: "flex-start" }}>{actions}</div>}
+      </div>
+      {actions && isMobile && <div style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>{actions}</div>}
+      {dek && <p style={{ position: "relative", margin: isMobile ? "12px 0 0" : "14px 0 0", maxWidth: 640, fontSize: isMobile ? 15 : 17, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", opacity: 0.95 }}>{dek}</p>}
+      {byline && <div style={{ position: "relative", marginTop: 10, fontSize: 12, fontWeight: 700, fontFamily: BODY_FONT, opacity: 0.9 }}>{byline}</div>}
+    </header>
+  );
+}
+
+// Text kept to one line: the biggest font size from max down to min that
+// fits its box, measured again whenever the box resizes.
+function FitLine({ max, min, children }) {
+  const ref = useRef(null);
+  const [size, setSize] = useState(max);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const fit = () => {
+      let s = max;
+      el.style.fontSize = `${s}px`;
+      while (s > min && el.scrollWidth > el.clientWidth) { s -= 1; el.style.fontSize = `${s}px`; }
+      setSize(s);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [max, min, children]);
+  return <span ref={ref} style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: size }}>{children}</span>;
+}
+
+// Breadcrumbs over a page's header — items: [{ name, href }], the last
+// one this page (not a link). Its BreadcrumbList JSON-LD (breadcrumbLd)
+// lists the same items, so the markup matches what's on the page.
+export function Breadcrumbs({ items }) {
+  return (
+    <nav aria-label="Breadcrumb" style={{ marginBottom: 10, fontSize: 12, fontWeight: 700, fontFamily: BODY_FONT, color: MUTED }}>
+      <ol style={{ display: "flex", flexWrap: "wrap", gap: 6, listStyle: "none", margin: 0, padding: 0 }}>
+        {items.map((it, i) => {
+          const last = i === items.length - 1;
+          return (
+            <li key={it.href} style={{ display: "flex", gap: 6 }}>
+              {last
+                ? <span aria-current="page" style={{ color: INK }}>{it.name}</span>
+                : <Link to={it.href} style={{ color: BLUE, textDecoration: "none" }}>{it.name}</Link>}
+              {!last && <span aria-hidden="true">›</span>}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+export const breadcrumbLd = (items, site = "https://we-draft.com") => ({
+  "@context": "https://schema.org", "@type": "BreadcrumbList",
+  itemListElement: items.map((it, i) => ({ "@type": "ListItem", position: i + 1, name: it.name, item: `${site}${it.href}` })),
+});
+// The site as a publisher, for a page's JSON-LD (NewsArticle.jsx's).
+export const SITE_PUBLISHER = { "@type": "Organization", name: "We-Draft", url: "https://we-draft.com", logo: { "@type": "ImageObject", url: "https://we-draft.com/logo512.png" } };
+
+// The Weekly Mock's byline: posted as We-Draft.com, with the site's
+// verified badge, made by the Draft Sim.
+export function WeeklyByline() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+      {/* The dot stays with the name, so a phone's wrap doesn't start a line with it. */}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+        By <strong style={{ fontWeight: 900 }}>We-Draft.com</strong>
+        <img src={verifiedBadge} alt="Verified" title="Verified" style={{ width: 15, height: 15, objectFit: "contain" }} /> ·
+      </span>
+      <span>Generated by the <Link to="/draftsim" style={{ color: "inherit", fontWeight: 900 }}>We-Draft.com Draft Sim</Link></span>
+    </span>
+  );
+}
+
+// The sim, for anyone who'd draft it differently: "Don't like the picks?"
+// with the Draft button, on the page's colors. team/nick: draft as that
+// team (its weekly mock page); none: the sim's own start (the full mock).
+// year: a class other than the sim's default (2028's pages).
+export function MakeYourOwnBanner({ team = "", teamName = "", nick = "", year = "", c1, c2, ink, isMobile }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", marginBottom: 18,
+      background: `linear-gradient(120deg, ${c1} 0%, ${c1} 55%, ${c2} 130%)`, color: ink, borderRadius: 14,
+      boxShadow: "0 6px 18px rgba(0,0,0,0.16)", padding: isMobile ? "14px 16px" : "16px 24px",
+    }}>
+      <span style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900 }}>
+        Don&apos;t like the picks? {nick ? `Draft as the ${nick} and make your own!` : "Make your own!"}
+      </span>
+      <DraftNowButton team={team} teamName={teamName} year={year && year !== SIM_YEAR ? year : ""} c1={c1} c2={c2} isMobile={isMobile} compact />
     </div>
   );
 }

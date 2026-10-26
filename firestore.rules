@@ -831,6 +831,12 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+    // The site's official Weekly Mock (Admin → Mock Draft → Weekly Mock),
+    // read by every team's /mocks/{team} page; only admins publish one.
+    match /weeklyMocks/{weekId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /mockDrafts/{draftId} {
       allow read: if resource.data.visibility == 'public'
                   || (request.auth != null && request.auth.uid == resource.data.ownerId);

@@ -27,7 +27,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
-import { applyMyGrades, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES } from "../utils/draftSim/engine";
+import { applyMyGrades, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES, VARIANCE, DEFAULT_VARIANCE } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
 import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
@@ -183,7 +183,7 @@ export default function DraftSim() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   // Back to the setup screen with this sim's teams (and board) picked.
-  // opts: the run's other setup choices ({ mode, orderMode, orderMap, cpuTrades, expanded }),
+  // opts: the run's other setup choices ({ mode, orderMode, orderMap, cpuTrades, variance, expanded }),
   // with the year they were made for.
   const openSettings = (teams, board, runOpts) => {
     const opts = { ...runOpts, year };
@@ -244,7 +244,7 @@ export default function DraftSim() {
 }
 
 // A run's setup choices, to run it again or take back to Settings.
-const optsOf = (c) => ({ mode: c.mode, orderMode: c.orderMode, orderMap: c.orderMap, cpuTrades: c.cpuTrades, expanded: !!c.expanded });
+const optsOf = (c) => ({ mode: c.mode, orderMode: c.orderMode, orderMap: c.orderMap, cpuTrades: c.cpuTrades, variance: c.variance, expanded: !!c.expanded });
 const rerunOf = (c) => ({ mode: c.mode, teams: c.teams, baseRounds: c.baseRounds, rounds: c.rounds, speed: c.speed, chatter: c.chatter, board: c.board, ...optsOf(c) });
 
 // The ad's team: the one the user's drafting as (the first of several);
@@ -313,7 +313,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   const { user } = useAuth();
   const uid = user?.uid || null;
   const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
-  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, cpuTrades: config.cpuTrades, quick: mock, onUserPick });
+  const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, cpuTrades: config.cpuTrades, variance: config.variance, quick: mock, onUserPick });
   const started = s.phase !== "intro";
   useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
@@ -427,6 +427,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
     return kept && all.every((t) => kept[t]) ? kept : Object.fromEntries(all.map((t) => [t, t]));
   });
   const [cpuTrades, setCpuTrades] = useState(() => (CPU_TRADES[initialOpts?.cpuTrades] ? initialOpts.cpuTrades : "normal"));
+  const [variance, setVariance] = useState(() => (VARIANCE[initialOpts?.variance] ? initialOpts.variance : DEFAULT_VARIANCE));
   // Their own choice for this class (back from Settings), else the class's default.
   const [expanded, setExpanded] = useState(() => (initialOpts?.year === year ? !!initialOpts.expanded : EXPANDED_YEARS.includes(year)));
   // More Options: the choices off their defaults, shown on the closed
@@ -434,6 +435,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
   const changed = [
     orderMode !== "real" && (orderMode === "custom" ? "Custom order" : "Random order"),
     mode === "sim" && cpuTrades !== "normal" && `CPU trades ${CPU_TRADES[cpuTrades].label.toLowerCase()}`,
+    variance !== DEFAULT_VARIANCE && `Variance: ${VARIANCE[variance].label}`,
     expanded !== EXPANDED_YEARS.includes(year) && (expanded ? "Expanded Board" : "Site Board"),
     board === "mine" && "My Board",
     chatter !== DEFAULT_CHATTER && `Chatter: ${CHATTER.find((c) => c.key === chatter)?.label}`,
@@ -551,6 +553,13 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
               </Field>
             </div>
 
+            {/* Both modes: CPU teams draft off their own boards in each. */}
+            <div style={{ marginTop: 18 }}>
+              <Field label="Board Variance" note={VARIANCE[variance].note}>
+                {Object.entries(VARIANCE).map(([k, v]) => <button key={k} onClick={() => setVariance(k)} aria-pressed={variance === k} style={chipStyle(variance === k)}>{v.label}</button>)}
+              </Field>
+            </div>
+
             <div style={{ marginTop: 18 }}>
               <Field label="Desk Chatter" note={CHATTER.find((c) => c.key === chatter)?.note}>
                 {CHATTER.map((c) => <button key={c.key} onClick={() => setChatter(c.key)} aria-pressed={chatter === c.key} style={chipStyle(chatter === c.key)}>{c.label}</button>)}
@@ -559,7 +568,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
           </div>
         )}
 
-        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades })} disabled={starting} style={{
+        <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades, variance })} disabled={starting} style={{
           marginTop: 20, width: "100%", border: "none", borderRadius: 14, padding: isMobile ? "15px 18px" : "18px 22px", cursor: starting ? "wait" : "pointer",
           background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#fff", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
           textTransform: "uppercase", boxShadow: "0 10px 30px rgba(246,162,29,0.25)",

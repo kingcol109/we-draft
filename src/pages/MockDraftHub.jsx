@@ -3,7 +3,10 @@
 // /mocks — the public mock drafts: hand-built and written up by their
 // authors (an intro plus a note on each pick), read like a column rather
 // than run like a simulator. Anyone signed in can write one (CreateMock.jsx);
-// each opens in ViewMock.js.
+// each opens in ViewMock.js. Above them, the site's Weekly Mock: a link to
+// every team's page (/mocks/{team}, WeeklyTeamMock.jsx) — the hub that
+// reaches all 32 — and to the full draft; the next class's (/mocks/{team}/
+// 2028) underneath once it's been published.
 import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, query, orderBy, where } from "firebase/firestore";
@@ -11,6 +14,8 @@ import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { fetchNflBranding } from "../utils/draftProfileData";
+import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
+import { loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, WEEKLY_YEARS, MAIN_WEEKLY_YEAR } from "../utils/weeklyMockNews";
 import {
   BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS,
   useIsMobile, MockPageShell, MockHero, heroText, chip, button, SectionTitle, PhoneAd,
@@ -31,8 +36,25 @@ export default function MockDraftHub() {
   const [userMap, setUserMap] = useState({});
   const [teams, setTeams] = useState({});
   const [classFilter, setClassFilter] = useState("2027");
+  const [weekly, setWeekly] = useState(undefined);
 
   useEffect(() => { fetchNflBranding().then(setTeams).catch(() => {}); }, []);
+  // Each class's summary, in WEEKLY_YEARS order.
+  useEffect(() => { Promise.all(WEEKLY_YEARS.map((y) => loadWeeklyMockSummary(y))).then(setWeekly); }, []);
+
+  // Prerender.io's cue (public/index.html): the mocks list and the Weekly
+  // Mock summary in. 8s cap, then a frame for Helmet.
+  const settled = !loading && weekly !== undefined;
+  useEffect(() => {
+    window.prerenderReady = false;
+    const t = setTimeout(() => { window.prerenderReady = true; }, 8000);
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (!settled) return undefined;
+    const frame = requestAnimationFrame(() => { window.prerenderReady = true; });
+    return () => cancelAnimationFrame(frame);
+  }, [settled]);
 
   useEffect(() => {
     const load = async () => {
@@ -58,7 +80,7 @@ export default function MockDraftHub() {
 
   const filtered = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
   const isArchive = ARCHIVE_YEARS.includes(classFilter);
-  const description = "Mock drafts written by the We-Draft community — every pick for the 2027 and 2028 NFL Drafts, with the reasoning behind it.";
+  const description = "NFL mock drafts: We-Draft's weekly 7-round mock for all 32 teams, plus mock drafts written by the community for the 2027 and 2028 NFL Drafts.";
 
   return (
     <>
@@ -112,6 +134,9 @@ export default function MockDraftHub() {
           </p>
         </MockHero>
 
+        {WEEKLY_YEARS.map((y, i) => (y === MAIN_WEEKLY_YEAR || weekly?.[i]) && (
+          <WeeklyTeams key={y} year={y} summary={weekly?.[i] || null} teams={teams} isMobile={isMobile} />
+        ))}
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
           {ACTIVE_YEARS.map((y) => (
@@ -156,6 +181,43 @@ export default function MockDraftHub() {
         )}
       </MockPageShell>
     </>
+  );
+}
+
+// The Weekly Mock, team by team: every team's page by name (plain links,
+// there on the first render — no data needed), then the full draft and its
+// date once the summary (config/weeklyMock) is in.
+function WeeklyTeams({ year, summary, teams, isMobile }) {
+  const all = [...NFL_TEAM_ABBRS].sort((a, b) => (NFL_TEAMS[a] || a).localeCompare(NFL_TEAMS[b] || b));
+  const rounds = summary?.rounds || 7;
+  const updated = weeklyMockDate(summary?.publishedAt);
+  return (
+    <section style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: isMobile ? "14px" : "18px 22px", marginBottom: 18 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? 16 : 19, fontWeight: 900, color: INK, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+          {year} {rounds}-Round Weekly Mock Draft · By Team
+        </h2>
+        {updated && <span style={{ fontSize: 12, fontWeight: 700, color: MUTED, fontFamily: BODY_FONT }}>Updated {updated}</span>}
+      </div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 4 }}>
+        {all.map((t) => {
+          const b = teams[t] || {};
+          return (
+            <li key={t}>
+              <Link to={weeklyMockHref(t, year)} className="wd-mock-card" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, textDecoration: "none", color: INK }}>
+                {b.Logo1 ? <img src={b.Logo1} alt="" width={22} height={22} style={{ objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 22, flexShrink: 0 }} />}
+                <span style={{ fontSize: 12, fontWeight: 800, fontFamily: BODY_FONT, minWidth: 0 }}>{NFL_TEAMS[t] || t}{year === MAIN_WEEKLY_YEAR ? "" : ` ${year}`} mock draft</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      {summary?.mockId && (
+        <Link to={`/mocks/${summary.mockId}/view`} style={{ ...button("blue", isMobile), marginTop: 12 }}>
+          Full {rounds}-round {year} mock draft →
+        </Link>
+      )}
+    </section>
   );
 }
 

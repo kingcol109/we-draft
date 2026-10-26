@@ -1,5 +1,5 @@
 import {
-  buildBoard, applyMyGrades, buildTeamBoards, gradeSpreadFactor, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer, movedUp,
+  withinValue, buildBoard, applyMyGrades, buildTeamBoards, gradeSpreadFactor, VARIANCE, DEFAULT_VARIANCE, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer, movedUp,
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
@@ -804,6 +804,22 @@ test("team boards: each team's own read of the community board, wider down the b
   expect(teamRank(s, "AAA", big[40])).toBe(s.teamBoards.AAA.n40);
 });
 
+test("board variance: None, Less, Normal, More — in that order; None drafts straight off the board, More strays furthest", () => {
+  expect(Object.keys(VARIANCE)).toEqual(["none", "less", "normal", "more"]);
+  expect(DEFAULT_VARIANCE).toBe("normal");
+  const big = buildBoard(Array.from({ length: 300 }, (_, i) => ({ id: `n${i}`, Position: POS[i % POS.length], cr: i + 1 })));
+  const ord = Array.from({ length: 32 }, (_, i) => ({ Pick: i + 1, Round: 1, Team: `T${i}` }));
+  const drift = (variance) => {
+    const s = initSim({ order: ord, board: big, rounds: 1, seed: 5, variance });
+    return Object.values(s.teamBoards).reduce((t, b) => t + big.reduce((u, p) => u + Math.abs((b[p.id] ?? p.rank) - p.rank), 0), 0);
+  };
+  expect(initSim({ order: ord, board: big, rounds: 1, seed: 5, variance: "none" }).teamBoards).toEqual({});
+  expect(drift("less")).toBeLessThan(drift("normal"));
+  expect(drift("normal")).toBeLessThan(drift("more"));
+  // No setting (an old saved run) is Normal.
+  expect(drift(undefined)).toBe(drift("normal"));
+});
+
 test("team boards: grade spread scales a prospect's spread — only with 5+ counted grades, and only when the board carries it", () => {
   expect(gradeSpreadFactor({ gradeSd: 0, count: 6 })).toBe(0.5);
   expect(gradeSpreadFactor({ gradeSd: 0.8, count: 5 })).toBe(1);
@@ -1043,4 +1059,13 @@ test("desk: a personality that throws costs its post, not the draft", () => {
     isaac.react = react;
     quiet.mockRestore();
   }
+});
+
+test("value: no one graded more than three rounds past the pick while someone inside it is there; ungraded only after graded", () => {
+  const p = (id, avg, Position = "RB") => ({ id, avg, Position });
+  const list = [p("a", 7), p("b", 4.4), p("c", null), p("k", null, "K")];
+  expect(withinValue(list, 1).map((x) => x.id)).toEqual(["b", "k"]);
+  expect(withinValue([p("a", 7), p("c", null)], 2).map((x) => x.id)).toEqual(["a"]);
+  expect(withinValue([p("c", null), p("d", null)], 2).map((x) => x.id)).toEqual(["c", "d"]);
+  expect(withinValue(list, 4).map((x) => x.id)).toEqual(["a", "b", "k"]);
 });

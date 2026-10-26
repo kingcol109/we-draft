@@ -21,6 +21,7 @@ import { viewportCssWidth } from "../utils/pageZoom";
 import { ROLE_BY_KEY, isOpenStint, isPlayerStint, stintYearSpan, groupStints } from "../utils/coachHistory";
 import { textOn } from "../utils/teamColors";
 import { depthNameKey, initialKey, fetchEspnRoster, fetchDepthOrder, groupRoster } from "../utils/nflRoster";
+import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, weeklyMockDate, WEEKLY_YEARS } from "../utils/weeklyMockNews";
 
 const BLUE = "#0055a5";
 
@@ -202,6 +203,59 @@ const stripSuffix = (last) => String(last || "").replace(/\s+(jr\.?|sr\.?|ii|iii
 
 // Team colors are admin-entered hex — tint only when it's actually #rrggbb.
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
+
+// In The News: the team's pages in the current Weekly Mocks
+// (utils/weeklyMockNews.js) — 2027's, then the next class's underneath;
+// each is updated in place, so only the latest shows, with its date. In the
+// right rail above the draft order (compact); under the hero when there's
+// no rail. Nothing at all when the team has no picks in either.
+function TeamNews({ teamKey, c1, c2, isMobile, compact = false }) {
+  const [summaries, setSummaries] = useState([]);
+  useEffect(() => { Promise.all(WEEKLY_YEARS.map((y) => loadWeeklyMockSummary(y))).then(setSummaries); }, []);
+  const items = summaries.filter((s) => s?.teams?.[teamKey]);
+  if (!items.length) return null;
+  const ink = textOn(c1, c2);
+  return (
+    <div style={{ marginBottom: compact ? 12 : isMobile ? 18 : 24, background: "#fff", borderRadius: compact ? 14 : 12, boxShadow: "0 2px 6px rgba(0,0,0,0.07), 0 0 0 1px #e6ebf2", overflow: "hidden" }}>
+      <div style={{ padding: compact ? "7px 12px" : "8px 14px", background: c1, color: ink, fontSize: compact ? 10 : 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase" }}>In The News</div>
+      {items.map((summary, i) => {
+        const first = summary.teams[teamKey].first;
+        const updated = weeklyMockDate(summary.publishedAt, { month: "short", day: "numeric", year: "numeric" });
+        return (
+          <Link key={summary.year} to={weeklyMockHref(teamKey, summary.year)}
+            style={{ display: "flex", alignItems: compact ? "flex-start" : "center", gap: compact ? 10 : 12, padding: compact ? "10px 12px" : "12px 14px", textDecoration: "none", borderTop: i ? "1px solid #edf0f5" : "none" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+            {updated && (
+              <span style={{ flexShrink: 0, width: compact ? 34 : 40, borderRadius: 6, overflow: "hidden", border: `2px solid ${c1}`, textAlign: "center", lineHeight: 1 }}>
+                <span style={{ display: "block", background: c1, color: ink, fontSize: 8, fontWeight: 900, padding: "2px 0", textTransform: "uppercase" }}>
+                  {weeklyMockDate(summary.publishedAt, { month: "short" })}
+                </span>
+                <span style={{ display: "block", color: c1, fontSize: compact ? 14 : 16, fontWeight: 900, padding: "3px 0" }}>{weeklyMockDate(summary.publishedAt, { day: "numeric" })}</span>
+              </span>
+            )}
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: compact ? 12 : isMobile ? 13 : 15, lineHeight: compact ? 1.2 : undefined, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                {weeklyMockTitle(summary, teamKey)}
+              </span>
+              {first && !compact && (
+                <span style={{ display: "block", marginTop: 2, fontSize: 12, fontWeight: 700, color: "#5f6b7a", fontFamily: "Arial, sans-serif" }}>
+                  First pick: No. {first.overall}, {first.name}, {first.pos}{first.school ? `, ${first.school}` : ""}
+                </span>
+              )}
+              {updated && (
+                <span style={{ display: "block", marginTop: 3, fontSize: 10, fontWeight: 900, color: "#9aa5b4", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                  Updated {updated}
+                </span>
+              )}
+            </span>
+            {!compact && <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 900, color: c1 }}>→</span>}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
 
 // Section heading — title with a team-color rule fading out beside it
 // (CFBPage.js's conference header look), optional count on the right.
@@ -635,9 +689,11 @@ export default function NFLTeamPage() {
           <NFLTeamRail currentTeam={teamKey} tabSuffix={TAB_PATH[tab]} color1={c1} />
         </div>
       )}
-      {/* The right side column: the draft order, as much as fits. */}
+      {/* The right side column: the team's Weekly Mock (In The News), then
+          the draft order, as much as fits. */}
       {rail && (
         <div style={{ position: "absolute", top: 24, bottom: 60, right: 0, width: RAIL_WIDTH }}>
+          <TeamNews teamKey={teamKey} c1={c1} c2={c2} isMobile={isMobile} compact />
           <DraftOrderRail currentTeam={teamKey} color1={c1} />
         </div>
       )}
@@ -722,6 +778,10 @@ export default function NFLTeamPage() {
             <DraftNowButton team={teamKey} teamName={`${team.City} ${team.Team}`} c1={c1} c2={c2} isMobile={isMobile} />
           </div>
         </div>
+
+        {/* ===== IN THE NEWS ===== */}
+        {/* In the right rail when there is one. */}
+        {!rail && <TeamNews teamKey={teamKey} c1={c1} c2={c2} isMobile={isMobile} />}
 
         {/* ===== TABS ===== */}
         <div ref={tabsRef} role="tablist" style={{ scrollMarginTop: 80, display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 18 : 24, borderBottom: `3px solid ${tint(c1, "1f")}` }}>

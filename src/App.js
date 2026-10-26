@@ -15,6 +15,7 @@ import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
 import PlayerHeaderShell from "./components/PlayerHeaderShell";
 import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
+import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref } from "./utils/weeklyMockNews";
 
 // A cold landing on /player/:slug starts its player query now, alongside
 // the PlayerProfile chunk download rather than after it.
@@ -56,6 +57,8 @@ const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
 const MyMocksPage = lazy(() => import("./pages/MyMocksPage"));
 const CreateMock = lazy(() => import("./pages/CreateMock"));
 const ViewMock = lazy(() => import("./pages/ViewMock"));
+// /mocks/{team} — a team's picks in the weekly mock.
+const WeeklyTeamMock = lazy(() => import("./pages/WeeklyTeamMock"));
 // Draft Sim — /draftsim, /draftsim/{team} to start as that team, and
 // /draftsim/2028 (/draftsim/2028/{team}) for the 2028 class.
 const DraftSim = lazy(() => import("./pages/DraftSim"));
@@ -206,7 +209,8 @@ function MainLayout() {
                 own owner had no way to see it without landing straight in
                 the editor at the plain /mocks/:mockId path below. */}
             <Route path="/mocks/:mockId/view" element={<ViewMock />} />
-            <Route path="/mocks/:mockId" element={<CreateMock />} />
+            <Route path="/mocks/:mockId" element={<MockOrTeam />} />
+            <Route path="/mocks/:mockId/:year" element={<TeamMockYear />} />
             {/* Open to everyone, no account needed (saving and My Board
                 ask for one). SEO tags: DraftSimMeta.jsx. */}
             <Route path="/draftsim" element={<><DraftSimMeta /><DraftSim /></>} />
@@ -244,6 +248,28 @@ function MainLayout() {
       <Analytics />
     </>
   );
+}
+
+// /mocks/:mockId is the mock editor — unless it's a team code ("nyj"),
+// that team's weekly mock page (WeeklyTeamMock checks it's a real team).
+// Mock IDs are 20-character Firestore IDs, so the two never collide. A
+// team code in capitals (/mocks/MIA) goes to the lowercase URL, the one
+// canonical and in the sitemap.
+function MockOrTeam() {
+  const { mockId } = useParams();
+  if (!/^[a-z]{2,3}$/i.test(mockId || "")) return <CreateMock />;
+  if (mockId !== mockId.toLowerCase()) return <Navigate to={`/mocks/${mockId.toLowerCase()}`} replace />;
+  return <WeeklyTeamMock key={mockId} team={mockId.toUpperCase()} />;
+}
+
+// /mocks/{team}/2028 — a team's page in the next class's Weekly Mock. The
+// main class has no year in its URL (/mocks/nyj/2027 goes there); any other
+// year, or a non-team, is WeeklyTeamMock's not found.
+function TeamMockYear() {
+  const { mockId, year } = useParams();
+  const team = String(mockId || "").toLowerCase();
+  if (year === MAIN_WEEKLY_YEAR || (mockId !== team && WEEKLY_YEARS.includes(year))) return <Navigate to={weeklyMockHref(team, year)} replace />;
+  return <WeeklyTeamMock key={`${team}-${year}`} team={WEEKLY_YEARS.includes(year) && /^[a-z]{2,3}$/.test(team) ? team.toUpperCase() : ""} year={year} />;
 }
 
 // Redirect /player2/:slug → /player/:slug

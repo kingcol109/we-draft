@@ -13,7 +13,8 @@
 // with their own logos and colors (config/draftSimDesk.legends /
 // .otherSchools). Statistics: Draft Sim usage (AdminSimStats.jsx). Kenneth's panel is his player takes — per player, by
 // situation (reach / steal / depth / normal), saved on their own to
-// config/draftSimAnalysis. Team Needs and Sub-positions: AdminTeamNeeds.jsx.
+// config/draftSimAnalysis. Team Needs: AdminTeamNeeds.jsx. Weekly Mock: the
+// site's official weekly mock draft (AdminWeeklyMock.jsx).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteField, FieldPath, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
@@ -27,10 +28,11 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import { initSim, makePick, rngNext } from "../utils/draftSim/engine";
 import { TeamNeeds } from "./AdminTeamNeeds";
 import AdminSimStats from "./AdminSimStats";
+import AdminWeeklyMock from "./AdminWeeklyMock";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" },{ key: "stats", label: "Statistics" }];
+const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "weekly", label: "Weekly Mock" }, { key: "stats", label: "Statistics" }];
 
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
 
@@ -69,6 +71,7 @@ export default function AdminMockDraft() {
       </div>
       {tab === "personalities" && <Personalities />}
       {tab === "needs" && <TeamNeeds />}
+      {tab === "weekly" && <AdminWeeklyMock />}
       {tab === "stats" && <AdminSimStats />}
     </div>
   );

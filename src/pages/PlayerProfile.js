@@ -22,6 +22,7 @@ import {
 import { db } from "../firebase";
 import { cfbdPlayerFor, setLivePlayerFollow } from "../utils/liveFollowSync";
 import { getSiteSnapshot, fetchAds, fetchCfbAds, fetchAdTeamLogos } from "../utils/siteSnapshots";
+import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, WEEKLY_YEARS } from "../utils/weeklyMockNews";
 import { NflTeamPicker, useMarginAdFit } from "../components/MarginAds";
 import AdBanner, { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
@@ -2221,6 +2222,9 @@ export default function PlayerProfile() {
   const [draftInfo, setDraftInfo] = useState(null);
   const [playerNews, setPlayerNews] = useState([]);
   const [playerVideos, setPlayerVideos] = useState([]);
+  // Whether playerVideos are his own (tagged to him) — not teammates' or
+  // the site's newest — which decides where In The News sits beside them.
+  const [ownVideos, setOwnVideos] = useState(false);
   // Videos sidebar shows one video until "Show More Videos" (then +3 a click).
   const [visibleVideoCount, setVisibleVideoCount] = useState(1);
   // ── Measurement pill percentiles — same hover treatment as the
@@ -2672,7 +2676,31 @@ export default function PlayerProfile() {
       } catch(e) { setPlayerNews([]); }
     };
     fetch();
-  }, [slug, player?.id, player?.School]);
+  }, [slug, player?.id, player?.School, player?.Last]);
+
+  // The current Weekly Mocks as the top In The News items (utils/
+  // weeklyMockNews.js — one cached config read a class; only the latest,
+  // they're updated in place). A drafted player gets the mocks of the team
+  // that drafted him — 2027's, then the next class's; a prospect gets the
+  // team that takes him in his class's mock, if any.
+  const [weeklyMockItems, setWeeklyMockItems] = useState([]);
+  useEffect(() => {
+    let live = true;
+    setWeeklyMockItems([]);
+    Promise.all(WEEKLY_YEARS.map((y) => loadWeeklyMockSummary(y))).then((all) => {
+      if (!live) return;
+      const items = all.filter(Boolean).map((s) => {
+        if (draftedBy) {
+          return s.teams?.[draftedBy] ? { id: `weeklyMock${s.year}`, type: "mock", publishedAt: s.publishedAt, href: weeklyMockHref(draftedBy, s.year), title: weeklyMockTitle(s, draftedBy) } : null;
+        }
+        const at = s.players?.[player?.id];
+        return at ? { id: `weeklyMock${s.year}`, type: "mock", aboutPlayer: true, publishedAt: s.publishedAt, href: weeklyMockHref(at.team, s.year), title: `${weeklyMockTitle(s, at.team)}: ${player.Last} at No. ${at.overall}` } : null;
+      }).filter(Boolean);
+      setWeeklyMockItems(items);
+    });
+    return () => { live = false; };
+  }, [draftedBy, player?.id, player?.Last]);
+  const newsItems = weeklyMockItems.length ? [...weeklyMockItems, ...playerNews] : playerNews;
 
   // ── Videos attached to this player's ID (Google Sheet "Videos" tab synced
   // to the `videos` collection, migrated from slug- to playerId-keyed items —
@@ -2794,6 +2822,7 @@ export default function PlayerProfile() {
 
         if (vids.length > 0) {
           setPlayerVideos(vids);
+          setOwnVideos(true);
           setVisibleVideoCount(1);
           return;
         }
@@ -2805,6 +2834,7 @@ export default function PlayerProfile() {
         const mates = await fetchTeammateVideos(player).catch(() => []);
         if (mates.length > 0) {
           setPlayerVideos(mates);
+          setOwnVideos(false);
           setVisibleVideoCount(1);
           return;
         }
@@ -2835,8 +2865,9 @@ export default function PlayerProfile() {
           .sort((a, b) => toMs(b.date) - toMs(a.date))
           .slice(0, 3);
         setPlayerVideos(fallback);
+        setOwnVideos(false);
         setVisibleVideoCount(1);
-      } catch(e) { setPlayerVideos([]); setWatchClips([]); }
+      } catch(e) { setPlayerVideos([]); setOwnVideos(false); setWatchClips([]); }
     };
     fetch();
   }, [player?.id, player?.School]);
@@ -3646,7 +3677,7 @@ useEffect(() => {
   const pageLastUpdatedMs = Math.max(
     toMsForStamp(player.updatedAt),
     lastEvalUpdate || 0,
-    ...playerNews.map((n) => toMsForStamp(n.publishedAt)),
+    ...newsItems.filter((n) => n.type !== "mock" || n.aboutPlayer).map((n) => toMsForStamp(n.publishedAt)),
   );
 
   // mk = the STAT_METRICS key its percentile comes from (Wingspan has no
@@ -4312,12 +4343,12 @@ useEffect(() => {
   // ── In The News sidebar ──
   const NewsSidebar = (
     <SidebarCard title="In The News" color1={SITE_BLUE} color2={SITE_GOLD}>
-      {playerNews.length === 0 ? (
+      {newsItems.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "13px" }}>No recent news.</div>
       ) : (
-        playerNews.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
-          <Link key={n.slug || n.id} to={`/news/${n.slug}`}
-            style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < Math.min(playerNews.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none" }}
+        newsItems.slice(0, SIDEBAR_NEWS_LIMIT).map((n, i) => (
+          <Link key={n.slug || n.id} to={n.href || `/news/${n.slug}`}
+            style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", textDecoration: "none", borderBottom: i < Math.min(newsItems.length, SIDEBAR_NEWS_LIMIT) - 1 ? "1px solid #f0f0f0" : "none" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#f7f9fc"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
           >
@@ -6266,21 +6297,25 @@ useEffect(() => {
         </div>
         {/* ===== END MAIN COLUMN ===== */}
 
-        {/* ===== RIGHT COLUMN: (live scoreboard) + Draft Sim ad + Videos + Stats + In The News ===== */}
+        {/* ===== RIGHT COLUMN: (live scoreboard) + Draft Sim ad + Videos and In The News + Stats =====
+            His own videos first with In The News right under them; teammates'
+            or the site's newest videos go under In The News instead. */}
         {isMobile ? (
           <div className="wdm-col" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             <SimAdCard player={player} />
-            {playerVideos.length > 0 && VideosSidebar}
-            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
+            {ownVideos && playerVideos.length > 0 && VideosSidebar}
             {NewsSidebar}
+            {!ownVideos && playerVideos.length > 0 && VideosSidebar}
+            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
           </div>
         ) : (
           <div className="wdm-col" style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
             <PlayerLiveCard player={player} />
             <SimAdCard player={player} />
-            {playerVideos.length > 0 && VideosSidebar}
-            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
+            {ownVideos && playerVideos.length > 0 && VideosSidebar}
             {NewsSidebar}
+            {!ownVideos && playerVideos.length > 0 && VideosSidebar}
+            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
           </div>
         )}
 
