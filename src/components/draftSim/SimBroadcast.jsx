@@ -106,12 +106,45 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
     <>
       {s.phase === "user" && (
         <>
-          <button onClick={s.simPick} style={{ ...barBtn, background: GOLD, color: "#111" }} title="The CPU makes this pick">Sim Pick ⏭</button>
+          <button onClick={s.simPick} style={{ ...barBtn, background: GOLD, color: "#fff" }} title="The CPU makes this pick">Sim Pick ⏭</button>
           <button onClick={s.simRound} style={barBtn} title="The CPU makes every pick left this round">Sim Round ⏩</button>
         </>
       )}
       {s.phase !== "intro" && <button onClick={s.undo} disabled={!s.canUndo} style={{ ...barBtn, opacity: s.canUndo ? 1 : 0.4, cursor: s.canUndo ? "pointer" : "default" }} title="Take back your last pick">↶ Undo</button>}
     </>
+  );
+  const canSkip = s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase));
+  // Skip To ▼ opens its options in place, like the speeds: the next pick,
+  // the user's next pick, the end of the draft. All three are always there
+  // (dimmed when they don't apply right now). On the user's own clock the
+  // CPU makes their pick: Next Pick shows it, My Next Pick sims on to the
+  // one after.
+  // It stays open until the user closes it. End asks first: it turns into
+  // "Are You Sure?", and anything else (or closing) takes that back.
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [endSure, setEndSure] = useState(false);
+  const canEnd = !s.skipToUser;
+  const skips = [
+    s.phase === "user"
+      ? ["Next Pick", true, () => { setEndSure(false); s.simPick(); }, "The CPU makes your pick"]
+      : ["Next Pick", canSkip, () => { setEndSure(false); s.skip(); }, "Make the pick now"],
+    s.phase === "user"
+      ? ["My Next Pick", s.userPicksAfter, () => { setEndSure(false); s.simToMyPick(); }, s.userPicksAfter ? "The CPU makes this pick, then sims to your next one" : "This is your last pick"]
+      : ["My Next Pick", s.userPicksLeft && s.phase !== "simming", () => { setEndSure(false); s.simToMyPick(); }, s.userPicksLeft ? "Sim every pick up to your next one" : "You have no picks left"],
+    endSure && canEnd
+      ? ["Are You Sure?", true, () => { setEndSure(false); s.simToEnd(); }, "Click again to sim the rest of the draft", { background: "#c8102e" }]
+      : ["End", canEnd, () => setEndSure(true), s.userPicksLeft ? "Sim the rest of the draft — the CPU makes your picks too" : "Sim the rest of the draft"],
+  ];
+  const skipPill = { border: "none", borderRadius: 999, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap", background: "transparent", color: "#fff" };
+  const skipMenu = !["intro", "done"].includes(s.phase) && (
+    <div role="group" aria-label="Skip" style={{ display: "inline-flex", alignItems: "center", flexShrink: 0, background: "#121c2f", borderRadius: 999, padding: 3 }}>
+      <button onClick={() => { setSkipOpen(!skipOpen); setEndSure(false); }} aria-expanded={skipOpen} style={{ ...skipPill, background: GOLD, color: "#fff" }}>
+        Skip To<span aria-hidden="true" style={{ marginLeft: 5, fontSize: 9 }}>{skipOpen ? "◀" : "▼"}</span>
+      </button>
+      {skipOpen && skips.map(([label, on, fn, title, look]) => (
+        <button key={label} onClick={fn} disabled={!on} title={title} style={{ ...skipPill, ...look, ...(on ? null : { opacity: 0.35, cursor: "default" }) }}>{label}</button>
+      ))}
+    </div>
   );
   // Mock Draft mode has no speeds — CPU picks are instant.
   const controls = live && (
@@ -127,13 +160,8 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
           <button onClick={() => setSpeedsOpen(false)} aria-label="Close speeds" style={{ border: "none", background: "transparent", color: "#9fb0c8", padding: "5px 8px", cursor: "pointer", fontSize: 9, fontFamily: "inherit" }}>◀</button>
         )}
       </div>}
-      {(s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase))) && (
-        <>
-          <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>
-          <button onClick={s.skip} style={barBtn} title="Make the pick now">{isMobile ? "Skip ⏭" : "Skip to Next Pick ⏭"}</button>
-        </>
-      )}
-      {s.userPicksLeft && !["user", "simming", "intro"].includes(s.phase) && <button onClick={s.simToMyPick} style={{ ...barBtn, background: GOLD, color: "#111" }}>Sim to My Pick ⏩</button>}
+      {canSkip && <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>}
+      {skipMenu}
       {mockSims}
       {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
     </>
@@ -181,13 +209,8 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
               ))}
             </div>
           )}
-          {(s.phase === "reveal" || (s.speed !== "instant" && !s.skipToUser && BROADCAST_SKIPPABLE.includes(s.phase))) && (
-            <>
-              <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>
-              <button onClick={s.skip} style={barBtn} title="Make the pick now">Skip to Next Pick ⏭</button>
-            </>
-          )}
-          {s.userPicksLeft && !["user", "simming", "intro"].includes(s.phase) && <button onClick={s.simToMyPick} style={{ ...barBtn, background: GOLD, color: "#111" }}>Sim to My Pick ⏩</button>}
+          {canSkip && <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>}
+          {skipMenu}
           {mockSims}
           {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
         </div>
@@ -709,7 +732,7 @@ function IntroContent({ s, data, isMobile, onPickTeam }) {
   );
 }
 
-// Instant / Sim to My Pick: the board fills while the stage just says so.
+// Instant / Skip to My Pick: the board fills while the stage just says so.
 function SimmingContent({ s, data, isMobile }) {
   const made = s.sim.picks.filter((p) => p.selection).length;
   const total = s.sim.picks.length;
@@ -883,7 +906,7 @@ function UpNextBar({ s, data, isMobile }) {
 const consoleHeight = (isMobile) => (isMobile ? "58vh" : 400);
 // The Draft Board can run 100 deep — it alone scrolls, inside this.
 const boardHeight = (isMobile) => (isMobile ? "70vh" : 720);
-const DRAFT_BTN = { flexShrink: 0, border: "none", borderRadius: 999, padding: "7px 14px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: 12, letterSpacing: "0.06em", background: GOLD, color: "#111" };
+const DRAFT_BTN = { flexShrink: 0, border: "none", borderRadius: 999, padding: "7px 14px", cursor: "pointer", fontFamily: "inherit", fontWeight: 900, fontSize: 12, letterSpacing: "0.06em", background: GOLD, color: "#fff" };
 const EMPTY = { padding: 20, color: "#6f7f99", fontSize: 13, fontFamily: BODY };
 
 // "Your pick" strip across the top of a tab while the user's on the clock.
@@ -907,7 +930,7 @@ function DraftTab({ s, data, isMobile }) {
   const [round, setRound] = useState(null);
   const shownRound = round ?? current?.round ?? rounds[0];
   const picks = s.sim.picks.filter((p) => p.round === shownRound);
-  const chipBtn = (on) => ({ ...barBtn, background: on ? GOLD : "#1a2438", color: on ? "#111" : "#9fb0c8" });
+  const chipBtn = (on) => ({ ...barBtn, background: on ? GOLD : "#1a2438", color: on ? "#fff" : "#9fb0c8" });
   if (isMobile) return <MobileDraftList s={s} data={data} rounds={rounds} shownRound={shownRound} setRound={setRound} picks={picks} current={current} chipBtn={chipBtn} />;
   const cols = 4;
   return (
@@ -1090,7 +1113,7 @@ function DraftBoardTab({ s, data, isMobile }) {
           {["ALL", ...SIM_POSITIONS, ...SPECIALISTS].map((k) => (
             <button key={k} onClick={() => setPos(k)} aria-pressed={pos === k} style={{
               border: "none", borderRadius: 999, padding: "5px 9px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900,
-              background: pos === k ? GOLD : "#1a2438", color: pos === k ? "#111" : "#9fb0c8",
+              background: pos === k ? GOLD : "#1a2438", color: pos === k ? "#fff" : "#9fb0c8",
             }}>{k}</button>
           ))}
         </div>

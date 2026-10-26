@@ -46,7 +46,7 @@ export default function MockExport({ sim, year, isMobile, onUndo }) {
           style={{ flex: "1 1 220px", minWidth: 0, background: "#0e1626", border: "1px solid #2a3a58", borderRadius: 999, color: "#fff", padding: "9px 16px", fontSize: 14, fontFamily: BODY, outline: "none" }} />
         <button onClick={exportMock} disabled={status === "saving"} style={{
           border: "none", borderRadius: 999, padding: "11px 20px", cursor: status === "saving" ? "wait" : "pointer", fontFamily: "inherit",
-          fontWeight: 900, fontSize: 13, letterSpacing: "0.06em", background: GOLD, color: "#111", whiteSpace: "nowrap",
+          fontWeight: 900, fontSize: 13, letterSpacing: "0.06em", background: GOLD, color: "#fff", whiteSpace: "nowrap",
         }}>
           {status === "saving" ? "SAVING…" : user ? "EXPORT AS MOCK DRAFT →" : "SIGN IN TO EXPORT"}
         </button>

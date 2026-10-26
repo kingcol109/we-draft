@@ -82,13 +82,13 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
               <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} isMobile />
             </div>
             {hasMine && <div style={{ display: "grid" }}><SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} full /></div>}
-            <button onClick={onNew} style={{ ...btn, gridColumn: "1 / -1", padding: "12px 16px", fontSize: 13, background: GOLD, color: "#111" }}>NEW SIM</button>
+            <button onClick={onNew} style={{ ...btn, gridColumn: "1 / -1", padding: "12px 16px", fontSize: 13, background: GOLD, color: "#fff" }}>NEW SIM</button>
           </div>
         ) : (
           <>
             <ShareButton sim={sim} data={data} hauls={userHauls} takes={takes} />
             {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
-            <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#111" }}>RUN IT BACK</button>
+            <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#fff" }}>RUN IT BACK</button>
             <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
           </>
         )}
@@ -209,7 +209,7 @@ function FullDraft({ sim, data, isMobile, cols }) {
       <div style={{ ...HEAD, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <span style={{ marginRight: 6 }}>FULL DRAFT</span>
         {rounds.length > 1 && rounds.map((r) => (
-          <button key={r} onClick={() => setRound(r)} aria-pressed={round === r} style={{ border: "none", borderRadius: 999, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, background: round === r ? GOLD : "#1a2438", color: round === r ? "#111" : "#9fb0c8" }}>R{r}</button>
+          <button key={r} onClick={() => setRound(r)} aria-pressed={round === r} style={{ border: "none", borderRadius: 999, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 900, background: round === r ? GOLD : "#1a2438", color: round === r ? "#fff" : "#9fb0c8" }}>R{r}</button>
         ))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(picks.length / cols) || 1}, auto)`, gridAutoFlow: "column", gap: 6, padding: 10 }}>

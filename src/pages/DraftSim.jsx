@@ -276,7 +276,7 @@ class SimErrorBoundary extends Component {
     const { onRestart, onSettings, isMobile } = this.props;
     const btn = (primary) => ({
       border: primary ? "none" : `1px solid ${GOLD}`, borderRadius: 999, padding: "10px 18px", cursor: "pointer", fontFamily: FONT, fontWeight: 900,
-      fontSize: 12, letterSpacing: "0.06em", background: primary ? GOLD : "transparent", color: primary ? "#111" : "#fff",
+      fontSize: 12, letterSpacing: "0.06em", background: primary ? GOLD : "transparent", color: "#fff",
     });
     return (
       <Column isMobile={isMobile}>
@@ -382,7 +382,7 @@ function SetupTabs({ tab, onTab }) {
 }
 
 const chipStyle = (on) => ({
-  border: `2px solid ${on ? GOLD : "#24324d"}`, background: on ? GOLD : "#0e1626", color: on ? "#111" : "#c9d4e5",
+  border: `2px solid ${on ? GOLD : "#24324d"}`, background: on ? GOLD : "#0e1626", color: on ? "#fff" : "#c9d4e5",
   borderRadius: 999, padding: "7px 14px", cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: 12, letterSpacing: "0.05em",
 });
 
@@ -561,7 +561,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
 
         <button onClick={() => onStart({ mode, teams, baseRounds: rounds, speed, chatter, board, expanded, orderMode, orderMap: orderMode === "custom" ? orderMap : null, cpuTrades: mode === "mock" ? "off" : cpuTrades })} disabled={starting} style={{
           marginTop: 20, width: "100%", border: "none", borderRadius: 14, padding: isMobile ? "15px 18px" : "18px 22px", cursor: starting ? "wait" : "pointer",
-          background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#111", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
+          background: `linear-gradient(90deg, ${GOLD}, #ffcc66)`, color: "#fff", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 16 : 20, letterSpacing: "0.08em",
           textTransform: "uppercase", boxShadow: "0 10px 30px rgba(246,162,29,0.25)",
         }}>
           {startLabel} →

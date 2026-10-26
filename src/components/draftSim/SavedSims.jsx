@@ -52,7 +52,7 @@ export default function SavedSims({ branding = {}, isMobile }) {
   if (!user) {
     return empty(<>
       Sign in to see the drafts you&apos;ve saved.
-      <div><button onClick={login} style={{ ...action, background: GOLD, color: "#111", border: "none", marginTop: 12, padding: "9px 18px" }}>SIGN IN</button></div>
+      <div><button onClick={login} style={{ ...action, background: GOLD, color: "#fff", border: "none", marginTop: 12, padding: "9px 18px" }}>SIGN IN</button></div>
     </>);
   }
   if (!sims) return <LoadingSpinner label="Loading your drafts" size={32} minHeight="30vh" />;
