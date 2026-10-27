@@ -32,6 +32,17 @@ export function loadWeeklyMockSummary(year = MAIN_WEEKLY_YEAR) {
 export const weeklyMockTitle = (summary, abbr) => `${summary.teams?.[abbr]?.name || abbr} ${summary.rounds || 7}-Round Mock Draft ${summary.year}`;
 export const weeklyMockHref = (abbr, year = MAIN_WEEKLY_YEAR) =>
   `/mocks/${String(abbr).toLowerCase()}${String(year) === MAIN_WEEKLY_YEAR ? "" : `/${year}`}`;
+// A class's whole Weekly Mock — its current week, at a permanent URL (ViewMock.js).
+export const weeklyYearHref = (year = MAIN_WEEKLY_YEAR) => `/mocks/${year}`;
+
+// The next class's picks that a trade in the main class's mock moved
+// (weeklyMock.js carryTrades — the week's carriedTrades: [{ round, original,
+// from, to }]): the one behind a pick ({ round, original, owner }), while
+// that team still holds it, or null.
+export const carriedTradeOf = (carried, pick) =>
+  (carried || []).find((c) => c.round === pick.round && c.original === pick.original && c.to === pick.owner) || null;
+// "Acquired from the Cowboys in a trade in our 2027 mock draft." nick: abbr → nickname.
+export const carriedTradeText = (c, nick) => (c ? `Acquired from the ${nick(c.from)} in a trade in our ${MAIN_WEEKLY_YEAR} mock draft.` : "");
 
 // A publish date as the site shows it — "October 20, 2026" (opts: other
 // toLocaleDateString fields) — always in Eastern time, so a crawler's

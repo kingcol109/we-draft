@@ -561,8 +561,11 @@ export function swapTeams(to, a, b) {
 // qbTeams: the only CPU teams that take a quarterback — one each, with no
 // "room is full" penalty for it (qbRoomPenalty) — the Weekly Mock's next
 // class (weeklyMock.js qbEligibleTeams). null: every team, as usual.
+// posRules: the positions each CPU team may take, by round, and never one
+// twice — the Weekly Mock's next class too (weeklyMock.js nextYearRules;
+// byPosRules). null: no such rules.
 // variance: how far their boards and picks stray (VARIANCE key).
-export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal", variance = DEFAULT_VARIANCE, qbTeams = null }) {
+export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, seed = Date.now(), chaos = 1, staff = {}, needs = {}, futureOrder = [], futureYear = null, cpuTrades = "normal", variance = DEFAULT_VARIANCE, qbTeams = null, posRules = null }) {
   // Picks in rounds the sim doesn't draft still change hands in trades —
   // a one-round sim's teams can trade up with their 2nd-rounders — and so
   // do next year's.
@@ -591,7 +594,7 @@ export function initSim({ order, board, chart = {}, userTeams = [], rounds = 1, 
     }));
   const teams = [...new Set([...picks, ...capital].flatMap((p) => [p.owner, p.original]))];
   return {
-    picks, capital, board, chart, staff, chaos, needs, cpuTrades, variance, qbTeams: qbTeams ? [...qbTeams] : null,
+    picks, capital, board, chart, staff, chaos, needs, cpuTrades, variance, qbTeams: qbTeams ? [...qbTeams] : null, posRules,
     teamBoards: buildTeamBoards(board, teams, seed | 0, chaos * varianceScale(variance)),
     byId: Object.fromEntries(board.map((p) => [p.id, p])),
     taken: {},
@@ -653,11 +656,35 @@ export function withinValue(list, round) {
   return graded.length ? [...graded, ...specialists] : list;
 }
 
+// posRules (initSim): { [team]: { early: [need keys], qbLate } }. One
+// player a position (by need key — a corner and a safety are two); in
+// rounds 1–POS_RULE_EARLY_ROUNDS only a player at one of `early`; after
+// that any position, a QB only with qbLate. When that leaves nobody, the
+// round's rule goes first (QBs still held to it), then the QB rule.
+export const POS_RULE_EARLY_ROUNDS = 2;
+function byPosRules(state, team, round, list) {
+  const rule = state.posRules[team] || { early: [], qbLate: false };
+  const filled = state.needFilled?.[team] || {};
+  const keys = (p) => needKeysFor(p).map(({ key }) => key);
+  const fresh = list.filter((p) => (isSpecialist(p)
+    ? !state.teamPos[team]?.[p.Position]
+    : keys(p).every((k) => (filled[k] || 0) < 0.5)));
+  const early = round != null && round <= POS_RULE_EARLY_ROUNDS;
+  const qbOk = early ? rule.early.includes("QB") : !!rule.qbLate;
+  const strict = fresh.filter((p) => (p.Position === "QB" ? qbOk : !early || keys(p).some((k) => rule.early.includes(k))));
+  if (strict.length) return strict;
+  const noQb = fresh.filter((p) => p.Position !== "QB" || qbOk);
+  if (noQb.length) return noQb;
+  return fresh.length ? fresh : list;
+}
+
 function candidatesFor(state, team) {
-  // The top of this team's own board.
-  const avail = state.teamBoards?.[team]
+  // The top of this team's own board — of the players its posRules allow, when it has them.
+  const round = currentPick(state)?.round;
+  let avail = state.teamBoards?.[team]
     ? cpuAvailable(state).sort((a, b) => teamRank(state, team, a) - teamRank(state, team, b))
     : cpuAvailable(state);
+  if (state.posRules) avail = byPosRules(state, team, round, avail);
   const top = avail.slice(0, CANDIDATES);
   const fits = avail.slice(CANDIDATES).filter((p) => (fitFor(p, team) || 0) >= STRONG_FIT);
   // The best kicker and punter left, once one could realistically go.
@@ -668,7 +695,6 @@ function candidatesFor(state, team) {
     .filter(Boolean);
   const all = [...top, ...fits, ...specialists];
   // No premium pick on a depth-only position (unless that's all that's left).
-  const round = currentPick(state)?.round;
   let allowed = all.filter((p) => !isPremium(round, p) || !depthOnly(state, team, p));
   if (!allowed.length) allowed = all;
   // (Before the value cut, so it falls to the next-best non-QB.)

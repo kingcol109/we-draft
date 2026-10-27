@@ -1,6 +1,6 @@
 import { buildBoard } from "./engine";
 import { acceptOffer } from "./engine";
-import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock } from "./weeklyMock";
+import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades } from "./weeklyMock";
 import { pickNote } from "./pickNotes";
 
 const TEAMS = ["AAA", "BBB", "CCC", "DDD"];
@@ -257,3 +257,55 @@ test("the next class's mock: only the eligible teams take a QB", () => {
   expect(theirs.length).toBeLessThanOrEqual(1);
   expect(theirs.every((p) => p.owner === one)).toBe(true);
 });
+
+test("next class's position rules: rounds 1–2 a need, want or Set not taken in this year's round 1; a round-3 QB only while one's still needed", () => {
+  const needs = {
+    AAA: { QB: { labels: ["Upgrade Needed"] }, WR: { labels: ["Upgrade Wanted"] }, RB: { labels: ["Depth Needed"] }, TE: { labels: ["Set"] }, LB: { labels: ["Crowded Room"] } },
+    BBB: { QB: { labels: ["Depth Needed"] }, OT: { labels: ["Upgrade Needed"] }, IOL: { labels: ["Upgrade Needed"] } },
+    CCC: { QB: { labels: ["Set"] }, CB: { labels: ["Aging Talent"] } },
+  };
+  const picks = [
+    { owner: "AAA", round: 1, player: { id: "q", Position: "QB" } },
+    { owner: "AAA", round: 2, player: { id: "w", Position: "WR" } },
+    // An OL with no sub-position answers both halves.
+    { owner: "BBB", round: 1, player: { id: "o", Position: "OL" } },
+  ];
+  const rules = nextYearRules(needs, picks);
+  expect(rules.AAA).toEqual({ early: ["WR", "TE"], qbLate: false });
+  expect(rules.BBB).toEqual({ early: [], qbLate: true });
+  expect(rules.CCC).toEqual({ early: ["QB", "CB"], qbLate: false });
+  expect(qbTeamsOf(rules)).toEqual(["BBB", "CCC"]);
+});
+
+test("next class's mock with position rules: rounds 1–2 only eligible positions, never one twice, a round-3 QB only with qbLate", () => {
+  const keyOf = (p) => (p.Position === "OL" ? "OL" : p.Position === "DB" ? "DB" : p.Position);
+  const posRules = {
+    AAA: { early: ["WR", "EDGE"], qbLate: false }, BBB: { early: ["RB", "LB", "TE"], qbLate: true },
+    CCC: { early: ["QB", "IDL"], qbLate: false }, DDD: { early: ["WR", "LB"], qbLate: false },
+  };
+  const sim = runWeeklyMock(data, { seed: 5, rounds: 3, trades: "off", posRules, qbTeams: qbTeamsOf(posRules) });
+  expect(sim.picks.every((p) => p.selection)).toBe(true);
+  const early = { WR: "WR", EDGE: "EDGE", RB: "RB", LB: "LB", TE: "TE", QB: "QB", IDL: "DL" };
+  TEAMS.forEach((t) => {
+    const mine = sim.picks.filter((p) => p.owner === t).map((p) => ({ round: p.round, p: sim.byId[p.selection] }));
+    mine.filter((m) => m.round <= 2).forEach((m) => expect(posRules[t].early.map((k) => early[k])).toContain(m.p.Position));
+    mine.filter((m) => m.round === 3 && m.p.Position === "QB").forEach(() => expect(posRules[t].qbLate).toBe(true));
+    const keys = mine.map((m) => keyOf(m.p));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+test("this year's trades of next year's picks carry onto its order", () => {
+  const next = [{ Pick: 1, Round: 1, Team: "AAA" }, { Pick: 2, Round: 1, Team: "BBB" }, { Pick: 5, Round: 2, Team: "AAA" }, { Pick: 6, Round: 2, Team: "BBB", Traded: "CCC" }];
+  const trades = [
+    { up: "CCC", down: "AAA", at: 3, upGot: [{ year: "2027", round: 1, original: "AAA", overall: 1 }], downGot: [{ year: "2028", round: 1, original: "AAA", overall: null }] },
+    { up: "DDD", down: "CCC", at: 9, upGot: [{ year: "2027", round: 3, original: "CCC", overall: 9 }], downGot: [{ year: "2028", round: 2, original: "BBB", overall: null }, { year: "2029", round: 1, original: "DDD", overall: null }] },
+    { up: "BBB", down: "CCC", at: 10, upGot: [{ year: "2027", round: 3, original: "DDD", overall: 10 }], downGot: [{ year: "2028", round: 1, original: "BBB", overall: null }] },
+  ];
+  const { order: moved, carried } = carryTrades(next, trades, 2028);
+  expect(moved.map((p) => p.Traded || p.Team)).toEqual(["AAA", "CCC", "AAA", "CCC"]);
+  // AAA "got" the pick it already held, and CCC the BBB 2nd it already had (real order), so only BBB's 1st moved; 2029 picks are ignored.
+  expect(carried).toEqual([{ round: 1, original: "BBB", from: "BBB", to: "CCC" }]);
+  expect(next[1].Traded).toBeUndefined();
+});
+

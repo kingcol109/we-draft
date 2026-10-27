@@ -24,14 +24,16 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { teamWeek, teamChanges } from "../utils/draftSim/weeklyMock";
-import { weeklyMockDate, weeklyMockHref, loadWeeklyMockSummary, WEEKLY_YEARS, MAIN_WEEKLY_YEAR } from "../utils/weeklyMockNews";
+import {
+  weeklyMockDate, weeklyMockHref, weeklyYearHref, loadWeeklyMockSummary, carriedTradeOf, carriedTradeText, WEEKLY_YEARS, MAIN_WEEKLY_YEAR,
+} from "../utils/weeklyMockNews";
 import { WEEKLY_ROUNDS_BY_YEAR } from "../utils/draftSim/weeklyMock";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
 import { PickRow } from "./ViewMock";
 import {
   BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner,
-  Breadcrumbs, breadcrumbLd, SITE_PUBLISHER,
+  Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch,
 } from "../components/MockDraftKit";
 
 const playerText = (p) => (p ? `${p.First} ${p.Last}, ${[p.Position, p.School].filter(Boolean).join(", ")}` : "no selection");
@@ -159,7 +161,7 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
     ? `Explore We-Draft's latest ${teamName} ${year} NFL Mock Draft, with ${roundsWord} round${plural} of projected picks, prospect evaluations, team needs and how each selection fits the ${nick(team)}' roster — a year on from the picks they make in our ${MAIN_WEEKLY_YEAR} mock draft.${previous ? " See what's changed from last week." : ""}`
     : `Explore We-Draft's latest ${teamName} ${year} NFL Mock Draft, with ${roundsWord} round${plural} of projected picks, prospect evaluations, team needs and how each selection fits the ${nick(team)}' roster.${previous ? " See what's changed from last week." : ""}`;
   // The whole draft, linked under the team list.
-  const fullMock = latest?.mockId ? { href: `/mocks/${latest.mockId}/view`, label: `Full ${roundsCount}-round ${year} mock draft` } : null;
+  const fullMock = latest ? { href: weeklyYearHref(year), label: `Full ${roundsCount}-round ${year} mock draft` } : null;
   const path = weeklyMockHref(team, year);
   const url = `https://we-draft.com${path}`;
   const crumbs = [
@@ -168,20 +170,15 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
     { name: nextClass ? `${year} Mock Draft` : `${teamName} Mock Draft`, href: path },
   ];
   // The switch between classes: each one that's been published, this one marked.
-  const switcher = WEEKLY_YEARS.filter((y) => y === year || classes?.[y]).length > 1 && (
-    <nav aria-label="Mock draft year" style={{ display: "flex", gap: 6, ...(isMobile ? { flex: "1 1 100%" } : {}) }}>
-      {WEEKLY_YEARS.filter((y) => y === year || classes?.[y]).map((y) => {
-        const on = y === year;
-        return (
-          <Link key={y} to={weeklyMockHref(team, y)} aria-current={on ? "page" : undefined} style={{
-            borderRadius: 999, padding: isMobile ? "6px 12px" : "8px 16px", fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: "0.06em",
-            textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", ...(isMobile ? { flex: 1, textAlign: "center" } : {}),
-            background: on ? heroTeam.ink : "transparent", color: on ? c1 : heroTeam.ink, border: `2px solid ${heroTeam.ink}`,
-          }}>{on ? `${y} Mock` : `Show ${y} Mock →`}</Link>
-        );
-      })}
-    </nav>
+  const switchYears = WEEKLY_YEARS.filter((y) => y === year || classes?.[y]);
+  const switcher = switchYears.length > 1 && (
+    <WeeklyYearSwitch years={switchYears} current={year} hrefOf={(y) => weeklyMockHref(team, y)} ink={heroTeam.ink} bg={c1} isMobile={isMobile} />
   );
+  // This class's picks a trade in the main class's mock moved — the team's
+  // own (got) and the ones it sent away (gave): [{ round, original, from, to }].
+  const carried = latest?.carriedTrades || [];
+  const carriedGot = carried.filter((c) => c.to === team);
+  const carriedGave = carried.filter((c) => c.from === team);
   // The edition's publish time, machine-readable (ISO 8601, UTC) and as shown.
   const publishedIso = latest?.publishedAt?.toDate?.()?.toISOString() || "";
   const updated = weeklyMockDate(latest?.publishedAt);
@@ -246,11 +243,30 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {picks.filter((p) => p.round === r).map((p) => (
                     <PickRow key={p.slot} isMobile={isMobile} brand={brand} sub={subOf(p)} teamPage collegeLogo={p.player?.logo || logos[p.player?.id] || ""}
+                      tradeNote={carriedTradeText(carriedTradeOf(carried, p), nick)}
                       pick={{ pickNumber: p.overall, round: p.round, currentTeam: p.owner, tradedFrom: p.original !== p.owner ? p.original : null, selection: p.player, note: p.note || "" }} />
                   ))}
                 </div>
               </Fragment>
             ))}
+            {/* This class's picks the main class's mock traded, to the team and away. */}
+            {(carriedGot.length > 0 || carriedGave.length > 0) && (
+              <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: isMobile ? "12px 14px" : "16px 20px", marginTop: 18, fontFamily: BODY_FONT, fontSize: 14, color: "#2a313d", lineHeight: 1.55 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "#7a8597", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
+                  {year} picks traded in our {MAIN_WEEKLY_YEAR} mock draft
+                </div>
+                {carriedGot.map((c, i) => (
+                  <div key={`got-${i}`} style={{ marginTop: i ? 6 : 0 }}>
+                    Got {c.original === c.from ? "their" : `the ${nick(c.original)}'`} {year} Round {c.round} pick from the {nick(c.from)}.
+                  </div>
+                ))}
+                {carriedGave.map((c, i) => (
+                  <div key={`gave-${i}`} style={{ marginTop: i || carriedGot.length ? 6 : 0 }}>
+                    Sent {c.original === team ? "their own" : `the ${nick(c.original)}'`} {year} Round {c.round} pick to the {nick(c.to)}.
+                  </div>
+                ))}
+              </div>
+            )}
             {/* The deals this team made — just the picks that changed hands. */}
             {trades.length > 0 && (
               <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: isMobile ? "12px 14px" : "16px 20px", marginTop: 18, fontFamily: BODY_FONT, fontSize: 14, color: "#2a313d", lineHeight: 1.55 }}>
@@ -296,38 +312,5 @@ function WhatChanged({ changes, isMobile }) {
         {lines.map((l, i) => <li key={i} style={{ marginTop: i ? 4 : 0 }}>{l}</li>)}
       </ul>
     </section>
-  );
-}
-
-// Every team's weekly mock page: the left rail on desktop, the bottom of
-// the page on phones. A grid of logos, this team's marked, then the full
-// mock (full: { href, label }). columns: 8 across a phone's full width.
-function TeamMocksRail({ current, year, teams, full = null, columns = 4 }) {
-  const all = [...NFL_TEAM_ABBRS].sort((a, b) => (NFL_TEAMS[a] || a).localeCompare(NFL_TEAMS[b] || b));
-  return (
-    <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 900, color: "#7a8597", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>{year} Team Mock Drafts</div>
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 4 }}>
-        {all.map((t) => {
-          const b = teams[t] || {};
-          const on = t === current;
-          return (
-            <Link key={t} to={weeklyMockHref(t, year)} title={`${NFL_TEAMS[t] || t} ${year} mock draft`} aria-current={on ? "page" : undefined} style={{
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "6px 2px", borderRadius: 8, textDecoration: "none",
-              background: on ? "#eef3fa" : "transparent", outline: on ? `2px solid ${BLUE}` : "none",
-            }}>
-              {b.Logo1 ? <img src={b.Logo1} alt="" style={{ width: 28, height: 28, objectFit: "contain" }} /> : <span style={{ height: 28 }} />}
-              <span style={{ fontSize: 9, fontWeight: 900, color: on ? BLUE : "#5f6b7a" }}>{t}</span>
-            </Link>
-          );
-        })}
-      </div>
-      {full && (
-        <Link to={full.href} style={{
-          display: "block", marginTop: 10, padding: "9px 10px", borderRadius: 8, background: BLUE, color: "#fff", textDecoration: "none",
-          fontSize: 11, fontWeight: 900, letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center",
-        }}>{full.label} →</Link>
-      )}
-    </div>
   );
 }

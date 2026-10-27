@@ -11,16 +11,17 @@
 //
 // A second Weekly Mock, the next class's (2028, three rounds), is drafted
 // after it, on top of it: every team's needs a year on from the picks it
-// made in the latest published 2027 week (nextYearNeeds) — on the real 2028
-// order, with no trades, and QBs only for the teams qbEligibleTeams names.
-// Its pages are /mocks/{team}/2028.
+// made in the latest published 2027 week (nextYearNeeds) — on the 2028
+// order with that week's trades of 2028 picks carried over (carryTrades),
+// no trades of its own, and each team held to the positions nextYearRules
+// allows it. Its pages are /mocks/{team}/2028.
 //
 // Pick numbers move week to week (the order follows the standings), so a
 // pick is known by its slot — round, the team that originally owned it, and
 // which of that team's picks in the round it is (a comp pick is its second):
 // "1-NYJ-1" is the Jets' own first-rounder, "1-DAL-1" the one they got from
 // Dallas, whoever holds it now.
-import { initSim, stepCpu, NEED_LABELS, needKeysFor, specificFits } from "./engine";
+import { initSim, stepCpu, NEED_LABELS, NEED_KEYS, needKeysFor, specificFits } from "./engine";
 import { pickNote } from "./pickNotes";
 
 export const WEEKLY_ROUNDS = 7;
@@ -45,11 +46,12 @@ export function slotKeys(picks) {
 
 // One weekly draft, start to finish (data: loadSimData's) → the finished
 // sim, with its pick events in order (pickEvents — for the notes).
-// qbTeams: the only teams that take a QB, freely (the next class's — qbEligibleTeams).
-export function runWeeklyMock(data, { seed = Date.now(), rounds = WEEKLY_ROUNDS, trades = WEEKLY_TRADES, qbTeams = null } = {}) {
+// qbTeams: the only teams that take a QB, freely; posRules: the positions
+// each team may take (the next class's — nextYearRules).
+export function runWeeklyMock(data, { seed = Date.now(), rounds = WEEKLY_ROUNDS, trades = WEEKLY_TRADES, qbTeams = null, posRules = null } = {}) {
   let s = initSim({
     order: data.order, futureOrder: data.futureOrder, futureYear: data.futureYear, board: data.board, chart: data.chart,
-    staff: data.staff, needs: data.needs, userTeams: [], rounds, seed, cpuTrades: trades, variance: WEEKLY_VARIANCE, qbTeams,
+    staff: data.staff, needs: data.needs, userTeams: [], rounds, seed, cpuTrades: trades, variance: WEEKLY_VARIANCE, qbTeams, posRules,
   });
   const pickEvents = [];
   // A pick a step, and a step never takes more than one pick — the cap is just a guard.
@@ -190,6 +192,61 @@ export function qbEligibleTeams(needs, picks) {
     .filter(([team, n]) => !firstRoundQb.has(team) && (n?.QB?.labels || []).some((l) => QB_ELIGIBLE_LABELS.includes(l)))
     .map(([team]) => team)
     .sort();
+}
+
+// The positions each team may take in the next class's mock (engine
+// posRules): in rounds 1–2, one it lists this year (needs — the labels
+// before nextYearNeeds) at a need, a want or Set, and didn't take in round
+// 1 of this year's mock (picks: the week's; the player as `board` has him,
+// for his sub-position); from round 3, any — a QB only for a team still
+// looking for one a year on (an upgrade or a backup, nextYearNeeds — not
+// Set or a crowded room, as a QB drafted this year leaves it). The engine
+// adds the rest: never one position twice, this year's picks before it
+// included. → { [team]: { early: [need keys], qbLate } }.
+const EARLY_LABELS = ["Upgrade Needed", "Expiring Contract", "Aging Talent", "Upgrade Wanted", "Set"];
+const QB_LATE_LABELS = ["Upgrade Needed", "Expiring Contract", "Aging Talent", "Upgrade Wanted", "Depth Needed"];
+export function nextYearRules(needs, picks, board = []) {
+  const byId = Object.fromEntries(board.map((p) => [p.id, p]));
+  const firstRound = {};
+  (picks || []).filter((pk) => pk.round === 1 && pk.player).forEach((pk) => {
+    const p = byId[pk.player.id] || pk.player;
+    needKeysFor(p).forEach(({ key }) => { (firstRound[pk.owner] = firstRound[pk.owner] || new Set()).add(key); });
+  });
+  const later = nextYearNeeds(needs, picks, board).needs;
+  return Object.fromEntries(Object.entries(needs || {}).map(([team, n]) => [team, {
+    early: NEED_KEYS.filter((k) => (n?.[k]?.labels || []).some((l) => EARLY_LABELS.includes(l)) && !firstRound[team]?.has(k)),
+    qbLate: (later[team]?.QB?.labels || []).some((l) => QB_LATE_LABELS.includes(l)),
+  }]));
+}
+
+// The teams posRules let take a QB at all — no "room is full" penalty for them (engine qbTeams).
+export const qbTeamsOf = (rules) => Object.entries(rules).filter(([, r]) => r.early.includes("QB") || r.qbLate).map(([t]) => t).sort();
+
+// This year's trades (tradesFromSim's) of the next class's picks, carried
+// onto its order (fetchDraft's [{ Pick, Round, Team, Traded }]), in the order
+// they were made. → { order (a copy), carried: [{ round, original, from,
+// to }] } — the picks that end up with a new team: `to` holds it now, got it
+// from `from` (in its last trade).
+export function carryTrades(order, trades, year) {
+  const y = String(year);
+  const holder = (p) => p.Traded || p.Team;
+  const out = (order || []).map((p) => ({ ...p }));
+  const moved = {};
+  (trades || []).forEach((t) => {
+    [[t.upGot, t.up, t.down], [t.downGot, t.down, t.up]].forEach(([got, to, from]) => {
+      (got || []).filter((p) => String(p.year) === y).forEach((p) => {
+        const same = out.filter((o) => o.Round === p.round && o.Team === p.original);
+        const pick = same.find((o) => holder(o) === from) || same[0];
+        if (!pick) return;
+        if (!moved[pick.Pick]) moved[pick.Pick] = { was: holder(pick) };
+        moved[pick.Pick].from = from;
+        pick.Traded = to === pick.Team ? null : to;
+      });
+    });
+  });
+  const carried = out.filter((p) => moved[p.Pick] && holder(p) !== moved[p.Pick].was)
+    .map((p) => ({ round: p.Round, original: p.Team, from: moved[p.Pick].from, to: holder(p) }));
+  return { order: out, carried };
 }
 
 // What a pick does for a need next year, by round: a starter fills it, a

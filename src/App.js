@@ -57,6 +57,7 @@ const MockDraftHub = lazy(() => import("./pages/MockDraftHub"));
 const MyMocksPage = lazy(() => import("./pages/MyMocksPage"));
 const CreateMock = lazy(() => import("./pages/CreateMock"));
 const ViewMock = lazy(() => import("./pages/ViewMock"));
+const WeeklyYearPage = lazy(() => import("./pages/ViewMock").then((m) => ({ default: m.WeeklyYearPage })));
 // /mocks/{team} — a team's picks in the weekly mock.
 const WeeklyTeamMock = lazy(() => import("./pages/WeeklyTeamMock"));
 // Draft Sim — /draftsim, /draftsim/{team} to start as that team, and
@@ -250,13 +251,16 @@ function MainLayout() {
   );
 }
 
-// /mocks/:mockId is the mock editor — unless it's a team code ("nyj"),
-// that team's weekly mock page (WeeklyTeamMock checks it's a real team).
+// /mocks/:mockId is the mock editor — unless it's a Weekly Mock class
+// ("2027"), that class's whole mock (ViewMock.js WeeklyYearPage), or a team
+// code ("nyj"), that team's weekly mock page (WeeklyTeamMock checks it's a
+// real team).
 // Mock IDs are 20-character Firestore IDs, so the two never collide. A
 // team code in capitals (/mocks/MIA) goes to the lowercase URL, the one
 // canonical and in the sitemap.
 function MockOrTeam() {
   const { mockId } = useParams();
+  if (WEEKLY_YEARS.includes(mockId)) return <WeeklyYearPage key={mockId} year={mockId} />;
   if (!/^[a-z]{2,3}$/i.test(mockId || "")) return <CreateMock />;
   if (mockId !== mockId.toLowerCase()) return <Navigate to={`/mocks/${mockId.toLowerCase()}`} replace />;
   return <WeeklyTeamMock key={mockId} team={mockId.toUpperCase()} />;

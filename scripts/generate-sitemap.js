@@ -379,10 +379,11 @@ for (const doc of allTeams) {
   /* =========================
      WEEKLY MOCK
      Each team's page (/mocks/{abbr}, WeeklyTeamMock.jsx — the permanent
-     URLs) and the current week's full mock, dated by when that week was
-     published (Eastern time, the date the pages show) — not by this run.
-     None before the first Weekly Mock is published. Past weeks' full mocks
-     are noindexed (ViewMock.js), so they're left out.
+     URLs) and the class's full mock (/mocks/{year}, its current week),
+     dated by when that week was published (Eastern time, the date the
+     pages show) — not by this run. None before the first Weekly Mock is
+     published. A week's /view URL redirects there (the current week) or is
+     noindexed (past weeks, ViewMock.js), so they're left out.
   ========================= */
   console.log("🔄 Fetching the Weekly Mock summaries from Firestore...");
   const weeklyMockPages = [];
@@ -393,7 +394,7 @@ for (const doc of allTeams) {
     const priority = cls.suffix ? 0.6 : 0.7;
     weeklyMockPages.push(
       ...NFL_TEAM_ABBRS.map((abbr) => ({ path: `/mocks/${abbr.toLowerCase()}${cls.suffix}`, priority, lastmod: weeklyDate })),
-      ...(weekly.mockId && isValidSlug(weekly.mockId.toLowerCase()) ? [{ path: `/mocks/${weekly.mockId}/view`, priority: priority - 0.05, lastmod: weeklyDate }] : []),
+      { path: `/mocks/${cls.year}`, priority: priority + 0.05, lastmod: weeklyDate },
     );
     console.log(`✅ ${cls.year} Weekly Mock published ${weeklyDate}.`);
   }

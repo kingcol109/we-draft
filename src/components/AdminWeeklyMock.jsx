@@ -17,8 +17,10 @@
 // The 2028 switch makes the next class's (three rounds), on top of the
 // latest published 2027 week: each team's needs a year on from the picks it
 // made (weeklyMock.js nextYearNeeds — listed under the run). The 2028 order
-// is the real one — the 2027 mock's trades don't carry over — and no trades. Its team pages are
-// /mocks/{team}/2028 and its summary config/weeklyMock2028.
+// carries the 2027 mock's trades of 2028 picks (carryTrades — saved as
+// carriedTrades, for the pages to say so), there are no trades of its own,
+// and each team is held to the positions nextYearRules allows. Its team
+// pages are /mocks/{team}/2028 and its summary config/weeklyMock2028.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
@@ -26,7 +28,7 @@ import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { loadSimData, maxRounds, teamNamer } from "../utils/draftSim/data";
 import {
-  runWeeklyMock, weeklyFromSim, weeklyNotes, mockPicksFrom, weeklyPicksFromMock, WEEKLY_ROUNDS_BY_YEAR, WEEKLY_TRADES_BY_YEAR, nextYearNeeds, qbEligibleTeams,
+  runWeeklyMock, weeklyFromSim, weeklyNotes, mockPicksFrom, weeklyPicksFromMock, WEEKLY_ROUNDS_BY_YEAR, WEEKLY_TRADES_BY_YEAR, nextYearNeeds, nextYearRules, qbTeamsOf, carryTrades,
 } from "../utils/draftSim/weeklyMock";
 import { rngNext } from "../utils/draftSim/engine";
 import { NoteText } from "../pages/ViewMock";
@@ -102,13 +104,15 @@ export default function AdminWeeklyMock() {
       if (!base?.picks?.length) throw new Error(`Publish a ${MAIN_WEEKLY_YEAR} weekly mock first — the ${year} mock is drafted on top of it.`);
       const main = await loadSimData(MAIN_WEEKLY_YEAR);
       const next = nextYearNeeds(data.needs, base.picks, main.board);
-      carried = { baseWeekId: base.id, baseName: base.name, changes: next.changes, qbTeams: qbEligibleTeams(data.needs, base.picks) };
-      data = { ...data, needs: next.needs };
+      const posRules = nextYearRules(data.needs, base.picks, main.board);
+      const moved = carryTrades(data.order, base.trades, year);
+      carried = { baseWeekId: base.id, baseName: base.name, changes: next.changes, posRules, qbTeams: qbTeamsOf(posRules), trades: moved.carried };
+      data = { ...data, needs: next.needs, order: moved.order };
     }
     const seed = Date.now() | 0;
     const rounds = Math.min(WEEKLY_ROUNDS_BY_YEAR[year] || 7, maxRounds(data.board));
-    // The next class: no trades, and QBs only for the eligible teams.
-    const sim = runWeeklyMock(data, { seed, rounds, trades: WEEKLY_TRADES_BY_YEAR[year] || "normal", qbTeams: carried?.qbTeams || null });
+    // The next class: no trades, and each team held to its positions.
+    const sim = runWeeklyMock(data, { seed, rounds, trades: WEEKLY_TRADES_BY_YEAR[year] || "normal", qbTeams: carried?.qbTeams || null, posRules: carried?.posRules || null });
     // Each pick's note (pickNotes.js), seeded like the draft. PFF ranks are
     // loaded here, admin-side, for the drafted players only.
     // The next class's notes are light (pickNotes.js): no needs, value or pick spot.
@@ -127,11 +131,12 @@ export default function AdminWeeklyMock() {
     const mockName = name.trim() || defaultName(year);
     const mock = await addDoc(collection(db, "mockDrafts"), {
       name: mockName, description: "", rounds: draft.rounds, visibility: "private", draftClass: year, picks: mockPicksFrom(draft.picks),
-      trades: draft.trades, ownerId: user.uid, source: "weeklyMock", official: true, createdAt: now, updatedAt: now,
+      trades: draft.trades, ...(draft.carried ? { carriedTrades: draft.carried.trades } : {}),
+      ownerId: user.uid, source: "weeklyMock", official: true, createdAt: now, updatedAt: now,
     });
     const week = await addDoc(collection(db, "weeklyMocks"), {
       name: mockName, year, rounds: draft.rounds, seed: draft.seed, trades: draft.trades, mockId: mock.id,
-      ...(draft.carried ? { baseWeekId: draft.carried.baseWeekId } : {}),
+      ...(draft.carried ? { baseWeekId: draft.carried.baseWeekId, carriedTrades: draft.carried.trades } : {}),
       createdAt: serverTimestamp(), createdBy: user.uid,
     });
     await updateDoc(mock, { weeklyId: week.id });
@@ -185,11 +190,12 @@ export default function AdminWeeklyMock() {
       <div style={{ ...card, padding: "14px 16px", fontSize: "13px", color: "#33415a", lineHeight: 1.5 }}>
         {year !== MAIN_WEEKLY_YEAR && (
           <p style={{ margin: "0 0 8px" }}>
-            <b>The {year} mock is drafted on top of the latest published {MAIN_WEEKLY_YEAR} mock</b> — publish that one first. It uses the real {year} draft order (the {MAIN_WEEKLY_YEAR} mock's trades don't carry over), and every need moves up a tier unless that team drafted for it in {MAIN_WEEKLY_YEAR}:
+            <b>The {year} mock is drafted on top of the latest published {MAIN_WEEKLY_YEAR} mock</b> — publish that one first. It uses the {year} draft order with
+            the {MAIN_WEEKLY_YEAR} mock&apos;s trades of {year} picks carried over (the pages say which picks moved in the {MAIN_WEEKLY_YEAR} mock), and every need moves up a tier unless that team drafted for it in {MAIN_WEEKLY_YEAR}:
             a round 1–2 pick fills it, round 3–4 holds it where it is, and round 5–7 only answers a depth need. A QB only counts toward an upgrade in round 1; a backup-QB need (Depth Needed) stays one, and any QB answers it.
-            In the {year} mock there are no trades, and only these teams can take a QB: a need, want or Set at QB and no first-round QB
-            in the {MAIN_WEEKLY_YEAR} mock.
-            Set and Crowded Room stay as they are.
+            Set and Crowded Room stay as they are. In the {year} mock there are no trades, and <b>position rules</b>: in rounds 1–2 a team only takes a position it lists
+            as a need, want or Set and didn&apos;t take in round 1 of the {MAIN_WEEKLY_YEAR} mock; round 3 is any position, a QB only for a team still needing a starter or backup
+            a year on; and no team takes one position twice.
           </p>
         )}
         The site&apos;s official {year} mock: the Draft Sim with every team on the CPU, <b>Less</b> board variance and {WEEKLY_TRADES_BY_YEAR[year] === "off" ? <b>no trades</b> : "normal trades"},
@@ -211,6 +217,15 @@ export default function AdminWeeklyMock() {
             Needs a year on from {draft.carried.baseName}: {draft.carried.changes.length} changed
           </summary>
           <div style={{ marginTop: 6 }}><b>Can take a QB:</b> {draft.carried.qbTeams.join(", ") || "none"}</div>
+          <div style={{ marginTop: 6 }}>
+            <b>{year} picks moved in the {MAIN_WEEKLY_YEAR} mock:</b>{" "}
+            {draft.carried.trades.map((c) => `R${c.round} ${c.original} → ${c.to} (from ${c.from})`).join("; ") || "none"}
+          </div>
+          <div style={{ marginTop: 6, lineHeight: 1.6, columns: "2 280px" }}>
+            {Object.entries(draft.carried.posRules).sort(([a], [b]) => a.localeCompare(b)).map(([team, r]) => (
+              <div key={team}><b>{team} R1–2</b>: {r.early.join(", ") || "none (best available)"}{r.qbLate ? " · R3 QB ok" : ""}</div>
+            ))}
+          </div>
           <div style={{ marginTop: 6, lineHeight: 1.6, columns: "2 280px" }}>
             {draft.carried.changes.map((c) => (
               <div key={`${c.team}-${c.key}`}>

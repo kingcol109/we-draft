@@ -6,11 +6,12 @@
 // board. The owner gets Share and Edit (CreateMock.jsx) from here. The
 // site's Weekly Mock (source "weeklyMock", official — utils/draftSim/
 // weeklyMock.js) reads like its team pages instead: the article header,
-// posted by We-Draft.com (verified), and the sim under it. A past week's
-// stays up but is noindexed and points to the current one — the team pages
-// (/mocks/{team}) are the permanent URLs.
+// posted by We-Draft.com (verified), and the sim under it, every team's page
+// in the left rail. Each class's current week lives at /mocks/{year}
+// (WeeklyYearPage, below — its /view URL goes there); a past week's stays
+// up at /view but is noindexed and points to the current one.
 import { Fragment, useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
@@ -19,11 +20,14 @@ import ShareMockButton from "../components/ShareMockButton";
 import { useAuth } from "../context/AuthContext";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { textOn } from "../utils/teamColors";
-import { loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref } from "../utils/weeklyMockNews";
+import {
+  loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, weeklyYearHref, carriedTradeOf, carriedTradeText, WEEKLY_YEARS,
+} from "../utils/weeklyMockNews";
+import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS,
   useIsMobile, MockPageShell, MockHero, heroPill, chip, button, PhoneAd,
-  ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd,
+  ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd, TeamMocksRail, WeeklyYearSwitch,
 } from "../components/MockDraftKit";
 import WdOutline from "../assets/Logo2.png";
 
@@ -34,8 +38,11 @@ const PHONE_AD_AFTER = 5;
 const WEEKLY_HERO = { c1: "#00305c", c2: BLUE, ink: "#fff", accent: GOLD, wordmark: WdOutline };
 
 
-export default function ViewMock() {
-  const { mockId } = useParams();
+// mockId: the mock to show, in place of the URL's; yearPage: the class
+// whose /mocks/{year} page this is (WeeklyYearPage).
+export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
+  const params = useParams();
+  const mockId = shownId || params.mockId;
   const navigate = useNavigate();
   const { user } = useAuth();
   const isMobile = useIsMobile();
@@ -48,6 +55,11 @@ export default function ViewMock() {
   // The current Weekly Mock's id for this mock's class (its summary), to
   // tell a past week's apart; null for any other mock.
   const [currentWeekly, setCurrentWeekly] = useState(undefined);
+  // Which classes have a published Weekly Mock, for the switch: { [year]: bool }.
+  const [classes, setClasses] = useState(null);
+  useEffect(() => {
+    Promise.all(WEEKLY_YEARS.map((y) => loadWeeklyMockSummary(y))).then((all) => setClasses(Object.fromEntries(WEEKLY_YEARS.map((y, i) => [y, !!all[i]]))));
+  }, []);
 
   useEffect(() => { fetchNflBranding().then(setTeams).catch(() => {}).finally(() => setBrandingDone(true)); }, []);
   const weeklyClass = mock?.source === "weeklyMock" && mock?.official ? String(mock.draftClass || "") : "";
@@ -80,7 +92,7 @@ export default function ViewMock() {
   // Prerender.io's cue (public/index.html): the mock, its team branding and
   // the current-week lookup all in — or the mock not found. 8s cap, then a
   // frame for Helmet to write the head.
-  const settled = !loading && brandingDone && currentWeekly !== undefined;
+  const settled = !loading && brandingDone && currentWeekly !== undefined && classes !== null;
   useEffect(() => {
     window.prerenderReady = false;
     const t = setTimeout(() => { window.prerenderReady = true; }, 8000);
@@ -92,7 +104,7 @@ export default function ViewMock() {
     return () => cancelAnimationFrame(frame);
   }, [settled]);
 
-  if (loading) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
+  if (loading || (mock && weeklyClass && currentWeekly === undefined)) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
   if (!mock) return (
     <div style={{ maxWidth: 600, margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -117,10 +129,17 @@ export default function ViewMock() {
   const intro = (mock.description || "").trim();
   const year = mock.draftClass || "2027";
   const updated = weeklyMockDate(mock.updatedAt);
+  // The current week's own URL is its class's page.
+  if (weekly && !yearPage && currentWeekly === mock.id) return <Navigate to={weeklyYearHref(year)} replace />;
   // A past week's Weekly Mock: still readable, not indexed.
   const pastWeek = weekly && !!currentWeekly && currentWeekly !== mock.id;
   const indexable = mock.visibility === "public" && !pastWeek;
-  const crumbs = weekly ? [{ name: "Home", href: "/" }, { name: "Mock Drafts", href: "/mocks" }, { name: "Weekly Mock Draft", href: `/mocks/${mockId}/view` }] : null;
+  const crumbs = weekly ? [
+    { name: "Home", href: "/" }, { name: "Mock Drafts", href: "/mocks" }, { name: `${year} Weekly Mock Draft`, href: weeklyYearHref(year) },
+    ...(pastWeek ? [{ name: mock.name || "Past week", href: `/mocks/${mockId}/view` }] : []),
+  ] : null;
+  const nick = (abbr) => teams[abbr]?.Team || (NFL_TEAMS[abbr] || abbr).split(" ").pop();
+  const switchYears = WEEKLY_YEARS.filter((y) => y === year || classes?.[y]);
   // ShareMockButton takes an already-normalized picks shape — here that's
   // just renaming .selection to .player.
   const sharePicks = roundPicks.map((p) => ({ pickNumber: p.pickNumber, currentTeam: p.currentTeam, tradedFrom: p.tradedFrom, player: p.selection }));
@@ -133,7 +152,7 @@ export default function ViewMock() {
     : intro
     ? intro.slice(0, 155) + (intro.length > 155 ? "…" : "")
     : `A ${mock.draftClass || ""} NFL mock draft${ownerLabel ? ` by ${ownerLabel}` : ""}${firstPick ? `, with ${firstPick.selection.First} ${firstPick.selection.Last} at No. ${firstPick.pickNumber}` : ""}.`;
-  const url = `https://we-draft.com/mocks/${mockId}/view`;
+  const url = `https://we-draft.com${yearPage ? weeklyYearHref(yearPage) : `/mocks/${mockId}/view`}`;
   const heroActions = (
     <>
       {isOwner && (
@@ -151,7 +170,9 @@ export default function ViewMock() {
         />
       )}
       {isOwner && <button onClick={() => navigate(`/mocks/${mockId}`)} style={button("gold", isMobile)}>Edit</button>}
-      <button onClick={() => navigate("/mocks")} style={button("ghost", isMobile)}>All Mocks</button>
+      {weekly && !pastWeek && switchYears.length > 1
+        ? <WeeklyYearSwitch years={switchYears} current={year} hrefOf={weeklyYearHref} ink="#fff" bg={WEEKLY_HERO.c1} isMobile={isMobile} />
+        : <button onClick={() => navigate("/mocks")} style={button("ghost", isMobile)}>All Mocks</button>}
     </>
   );
 
@@ -174,13 +195,13 @@ export default function ViewMock() {
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
 
-      <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile}>
+      <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile} leftRail={weekly ? <TeamMocksRail year={year} teams={teams} /> : null}>
         {weekly ? (
           <>
             <Breadcrumbs items={crumbs} />
             {pastWeek && (
               <div style={{ background: "#fff8e6", border: "1px solid #f6c56b", borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontFamily: BODY_FONT, fontSize: 14, color: "#2a313d" }}>
-                This is a past week&apos;s mock. <Link to={`/mocks/${currentWeekly}/view`} style={{ color: BLUE, fontWeight: 800 }}>See this week&apos;s Weekly Mock Draft →</Link>
+                This is a past week&apos;s mock. <Link to={weeklyYearHref(year)} style={{ color: BLUE, fontWeight: 800 }}>See this week&apos;s Weekly Mock Draft →</Link>
               </div>
             )}
             <ArticleHero hero={WEEKLY_HERO} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
@@ -233,11 +254,14 @@ export default function ViewMock() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {roundPicks.map((pick, i) => (
             <Fragment key={pick.pickNumber}>
-              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={weekly ? year : ""} />
+              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={weekly ? year : ""}
+                tradeNote={carriedTradeText(carriedTradeOf(mock.carriedTrades, { round: pick.round, original: pick.originalTeam, owner: pick.currentTeam }), nick)} />
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
           ))}
         </div>
+        {/* Phones have no side rail: every team's mock, at the bottom. */}
+        {weekly && isMobile && <div style={{ marginTop: 22 }}><TeamMocksRail year={year} teams={teams} columns={8} /></div>}
       </MockPageShell>
     </>
   );
@@ -263,8 +287,10 @@ export function NoteText({ text }) {
 // bigger wordmark, sub (what the pick was last week) and a View more link
 // to the player's page after the write-up. The full Weekly Mock passes
 // teamMock (its class): a link under each pick to all of that team's picks
-// (/mocks/{team}, WeeklyTeamMock.jsx).
-export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", teamMock = "" }) {
+// (/mocks/{team}, WeeklyTeamMock.jsx). tradeNote: how the team came by the
+// pick, when another draft's trade sent it there (the next class's Weekly
+// Mock: a trade in the main class's).
+export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", teamMock = "", tradeNote = "" }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || GOLD;
@@ -341,6 +367,7 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
             ) : (
               <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: "#b0b8c4", fontStyle: "italic" }}>No selection</div>
             )}
+            {tradeNote && <div style={{ fontSize: 12, fontWeight: 700, color: "#8a5a00", fontFamily: BODY_FONT, marginTop: 6 }}>{tradeNote}</div>}
             {sub && <div style={{ fontSize: 12, fontWeight: 700, color: "#7a8597", fontFamily: BODY_FONT, marginTop: 6 }}>{sub}</div>}
           </div>
         </div>
@@ -362,6 +389,32 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// /mocks/{year} (/mocks/2027) — a class's Weekly Mock: its current week
+// (the class's summary names it), shown as ViewMock shows it, at a URL that
+// stays put week to week. Nothing published yet: a note and a 404 status
+// for crawlers.
+export function WeeklyYearPage({ year }) {
+  const [summary, setSummary] = useState(undefined);
+  useEffect(() => { loadWeeklyMockSummary(year).then(setSummary); }, [year]);
+  useEffect(() => {
+    if (summary !== null) return;
+    window.prerenderReady = true;
+  }, [summary]);
+  if (summary === undefined) return <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
+  if (summary?.mockId) return <ViewMock key={summary.mockId} mockId={summary.mockId} yearPage={year} />;
+  return (
+    <div style={{ maxWidth: 600, margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: BODY_FONT }}>
+      <Helmet>
+        <title>{`${year} Weekly Mock Draft | We-Draft`}</title>
+        <meta name="robots" content="noindex, follow" />
+        <meta name="prerender-status-code" content="404" />
+      </Helmet>
+      <div style={{ fontWeight: 900, fontSize: 18, color: BLUE, marginBottom: 16 }}>The first {year} weekly mock draft isn&apos;t out yet.</div>
+      <Link to="/mocks" style={{ color: BLUE, fontWeight: 800 }}>← All Mocks</Link>
     </div>
   );
 }
