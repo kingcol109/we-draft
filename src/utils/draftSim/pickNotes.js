@@ -13,9 +13,13 @@
 //   - the team's draft history since 2000 (draftHistory.json): its Nth
 //     pick at the position from his school, its first first-rounder at the
 //     position in years, its first pick from the school
+//   - Kenneth Cold's own take on him (analysts.js takeLinesOf), any line
+//     the admin marked mock eligible
 //   - PFF: his positional rank, credited — only near the top of the list
 //     (PFF_TOP) with PFF_MIN_SNAPS snaps; the one place PFF reaches the
 //     public site (the caller loads it, admin-only)
+// A pick the sim traded opens with the trade: the trade up into it, or the
+// trade down that brought it (tradeOpener).
 // Lines are data, like the desk's; a template is used again only once the
 // rest of its kind have been, so a mock reads varied.
 // Light notes (ctx.light — the next class's mock, drafted a year out) leave
@@ -23,7 +27,7 @@
 // community board has him (lightRank, lightTopPos — intro when he has no
 // rank), with no pick number; the facts are the same minus the team's
 // draft history.
-import { pickVars, statFacts, ordinal } from "./analysts";
+import { pickVars, statFacts, ordinal, lineText, playerTakesFor, takeLinesOf } from "./analysts";
 import { needWord, subsOf } from "./engine";
 
 export const PFF_TOP = 10;
@@ -34,6 +38,20 @@ export const PFF_MIN_SNAPS = 150;
 // (another way to say his position — "signal caller", "a pass catcher";
 // POS_ALIASES) plus each fact's own.
 export const NOTE_LINES = {
+  // ── Trade openers (before the lead) ──
+  // Traded up into the pick: {fromNick} (who moved back), {got} (what they sent).
+  tradeUp: [
+    "The {nick} trade up to No. {n} with the {fromNick}, sending {got}.",
+    "Trade: the {nick} move up to {n}, giving the {fromNick} {got}.",
+    "The {nick} jump up to No. {n} in a deal with the {fromNick}, who get {got}.",
+    "{Got} to the {fromNick} moves the {nick} up to No. {n}.",
+  ],
+  // A pick acquired by trading down: {upNick} (who moved up), {at} (the pick they moved down from).
+  tradeDown: [
+    "The {nick} pick here with a selection from the {upNick}, acquired when they moved down from No. {at}.",
+    "This pick came from the {upNick} in the {nick}' trade down from No. {at}.",
+    "The {nick} picked up No. {n} from the {upNick} for moving back from No. {at}.",
+  ],
   // ── Lead sentences ──
   steal: [
     "{player} was No. {rank} on the We-Draft.com community board, so the {nick} get him {spots} spots later than the community expected.",
@@ -200,7 +218,7 @@ export const NOTE_LINES = {
 const GROUP = {
   traitsBoth: "traits", traitsStrength: "traits", grade: "grade",
   leaderFirst: "stat", leaderRanked: "stat", passing: "stat", rushing: "stat", receiving: "stat", defensive: "stat", coverage: "stat",
-  staffFit: "fit", pff: "pff",
+  staffFit: "fit", pff: "pff", take: "take",
   teamSchoolPos: "history", teamSchool: "history", teamSchoolFirst: "history", teamSchoolGap: "history", teamRound1Drought: "history", teamRound1First: "history",
 };
 
@@ -295,6 +313,28 @@ function historyFacts(e, ctx, base) {
   return out;
 }
 
+// Picks in prose: "No. 20", "No. 20 and No. 52", "No. 20, No. 52 and a 2028
+// second-rounder".
+const ROUND_WORDS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh"];
+const pickWord = (p) => (p.future ? `a ${p.year} ${ROUND_WORDS[p.round - 1] || ordinal(p.round)}-rounder` : `No. ${p.overall}`);
+function pickList(picks) {
+  const words = picks.filter(Boolean).map(pickWord);
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}` : words[0] || "";
+}
+
+// The sim trade behind a pick, told first: the trade up into it, or the
+// trade down that brought it (ctx.tradeDowns: { [overall]: { down, up, at } }).
+function tradeOpener(e, base, ctx) {
+  const t = e.pick.tradeUp;
+  if (t) {
+    const got = pickList(t.give || []);
+    return got && lineOf("tradeUp", { ...base, fromNick: ctx.nickname(t.from), got, Got: capitalize(got) }, ctx);
+  }
+  const d = ctx.tradeDowns?.[e.pick.overall];
+  if (d && d.down === e.team && d.at) return lineOf("tradeDown", { ...base, upNick: ctx.nickname(d.up), at: d.at }, ctx);
+  return null;
+}
+
 // The lead's kind for a pick.
 function leadOf(e) {
   const p = e.prospect;
@@ -305,7 +345,11 @@ function leadOf(e) {
   return "board";
 }
 
-// Every fact for a pick: [{ cat, vars, weight }].
+// Kenneth's mock-eligible take lines for a pick.
+const mockTakes = (e) => takeLinesOf(playerTakesFor(e.prospect.id)).filter((l) => l.mock).map(lineText);
+
+// Every fact for a pick: [{ cat, vars, weight }] — a take carries its own
+// lines (texts) in place of NOTE_LINES'.
 function factsFor(e, ctx, base) {
   const p = e.prospect;
   const out = [];
@@ -320,6 +364,8 @@ function factsFor(e, ctx, base) {
     const words = PFF_POS[pff.pos] || [base.posPlural, base.posName];
     add("pff", pff.rk <= 3 ? 3 : 2.2, { ...base, pffRankOrd: ordinal(pff.rk), pffPos: words[0], pffOne: words[1] });
   }
+  const texts = mockTakes(e).filter((t) => !blank(t, base));
+  if (texts.length) out.push({ cat: "take", weight: 5, vars: base, texts });
   historyFacts(e, ctx, base).forEach((f) => out.push(f));
   return out;
 }
@@ -361,6 +407,7 @@ export function pickNote(e, ctx) {
   const lead = ctx.light
     ? (e.prospect.positionRank === 1 && lineOf("lightTopPos", base, ctx)) || lineOf("lightRank", base, ctx) || lineOf("intro", base, ctx)
     : lineOf(leadOf(e), base, ctx) || lineOf("board", base, ctx);
+  const opener = tradeOpener(e, base, ctx);
   const sentences = [lead];
   const all = factsFor(e, ctx, { ...base, ...staffLink(e, ctx) }).filter((f) => !ctx.light || !NOT_LIGHT_GROUPS.includes(GROUP[f.cat]));
   const history = all.filter((f) => GROUP[f.cat] === "history").sort((a, b) => b.weight - a.weight)[0] || null;
@@ -375,10 +422,10 @@ export function pickNote(e, ctx) {
     const group = GROUP[f.cat] || f.cat;
     if (groups.has(group)) continue;
     groups.add(group);
-    const line = lineOf(f.cat, f.vars, ctx);
+    const line = f.texts ? capitalize(fill(f.texts[Math.floor(ctx.rand() * f.texts.length)], f.vars)) : lineOf(f.cat, f.vars, ctx);
     if (line) sentences.push(line);
   }
   if (history) sentences.push(lineOf(history.cat, history.vars, ctx));
-  return sentences.filter(Boolean).join(" ");
+  return [opener, ...sentences].filter(Boolean).join(" ");
 }
 

@@ -8,6 +8,9 @@
 // have text), so a plain mock is just the board. Only the owner
 // edits; anyone else (and the owner of a locked 2026 mock) is sent to the
 // read-only /view page.
+// A Weekly Mock (AdminWeeklyMock.jsx) adds "Regenerate analysis" on each
+// pick: its note written again by the sim's pick notes for the mock as it
+// now stands (weeklyMock.js replayNotes) — after picks are moved around.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, Link, Navigate } from "react-router-dom";
 import {
@@ -139,6 +142,10 @@ export default function CreateMock() {
   const [showBank, setShowBank] = useState(true);
   const [draftClass, setDraftClass] = useState(null);
   const [pendingClass, setPendingClass] = useState(null);
+  // A Weekly Mock: its saved trades (for the notes), and each pick's regenerate state.
+  const [weekly, setWeekly] = useState(false);
+  const [weeklyTrades, setWeeklyTrades] = useState([]);
+  const [regen, setRegen] = useState({});
 
   const assignedPlayerIds = useMemo(() => new Set(Object.values(assignedPlayers).map((p) => p.id)), [assignedPlayers]);
   const isOwner = userId && mockOwnerId === userId;
@@ -219,6 +226,8 @@ export default function CreateMock() {
         setRounds(data.rounds || 1);
         setVisibility(data.visibility || "private");
         setDraftClass(data.draftClass || "2026");
+        setWeekly(data.source === "weeklyMock" && !!data.official);
+        setWeeklyTrades(data.trades || []);
         const picksArray = Object.values(data.picks || {}).sort((a, b) => a.pickNumber - b.pickNumber);
         setPicks(picksArray);
         const assigned = {};
@@ -309,6 +318,29 @@ export default function CreateMock() {
   const [introOpen, setIntroOpen] = useState(false);
   const [openNotes, setOpenNotes] = useState({});
   const handleNoteChange = (pickNumber, note) => setPicks((prev) => prev.map((p) => (p.pickNumber === pickNumber ? { ...p, note } : p)));
+
+  // A Weekly Mock pick's note, written again for the mock as it stands (the
+  // sim's data and the pick notes load on first use — editor-only code).
+  const regenerateNote = async (pickNumber) => {
+    setRegen((r) => ({ ...r, [pickNumber]: "busy" }));
+    try {
+      const [{ loadSimData, teamNamer }, { replayNotes }, { loadPffRanks }, { MAIN_WEEKLY_YEAR }] = await Promise.all([
+        import("../utils/draftSim/data"), import("../utils/draftSim/weeklyMock"), import("../utils/draftSim/pffRanks"), import("../utils/weeklyMockNews"),
+      ]);
+      const data = await loadSimData(draftClass);
+      const player = assignedPlayers[pickNumber];
+      const pff = player ? await loadPffRanks([player.id]).catch(() => ({})) : {};
+      const editorPicks = visiblePicks.map((p) => ({ ...p, selection: assignedPlayers[p.pickNumber] || null }));
+      const ctx = { ...teamNamer(data.branding), staff: data.staff, season: data.season, year: draftClass, history: data.history, pff, rand: Math.random, light: draftClass !== MAIN_WEEKLY_YEAR };
+      const note = replayNotes(data, editorPicks, [pickNumber], { trades: weeklyTrades, ctx })[pickNumber];
+      if (!note) throw new Error("Not on the sim board");
+      handleNoteChange(pickNumber, note);
+      setRegen((r) => ({ ...r, [pickNumber]: null }));
+    } catch (err) {
+      console.error("Regenerate analysis error:", err);
+      setRegen((r) => ({ ...r, [pickNumber]: "error" }));
+    }
+  };
 
   const handleSaveMock = async () => {
     if (!userId) return;
@@ -646,6 +678,14 @@ export default function CreateMock() {
                         rows={pick.note ? 3 : 2} placeholder="Why this pick? (optional)" aria-label={`Note for pick ${pick.pickNumber}`}
                         style={{ ...field, border: "1px solid #e1e7ef", borderRadius: 8, padding: "6px 10px", fontSize: 13, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", resize: "vertical", background: "#fbfcfe" }} />
                       {pick.note && <div style={{ textAlign: "right", fontSize: 10, color: "#98a2b3", fontFamily: BODY_FONT }}>{pick.note.length}/{NOTE_MAX}</div>}
+                    </div>
+                  )}
+                  {weekly && isOwner && player && (
+                    <div style={{ padding: "4px 0 0 48px", display: "flex", alignItems: "center", gap: 8 }}>
+                      <button onClick={() => regenerateNote(pick.pickNumber)} disabled={regen[pick.pickNumber] === "busy"} style={addTextBtn}>
+                        {regen[pick.pickNumber] === "busy" ? "Regenerating…" : "↻ Regenerate analysis"}
+                      </button>
+                      {regen[pick.pickNumber] === "error" && <span style={{ fontSize: 11, color: "#c8102e", fontWeight: 700, fontFamily: BODY_FONT }}>Couldn&apos;t regenerate — is he on the sim board?</span>}
                     </div>
                   )}
                 </div>

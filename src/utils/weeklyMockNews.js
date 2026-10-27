@@ -41,8 +41,6 @@ export const weeklyYearHref = (year = MAIN_WEEKLY_YEAR) => `/mocks/${year}`;
 // that team still holds it, or null.
 export const carriedTradeOf = (carried, pick) =>
   (carried || []).find((c) => c.round === pick.round && c.original === pick.original && c.to === pick.owner) || null;
-// "Acquired from the Cowboys in a trade in our 2027 mock draft." nick: abbr → nickname.
-export const carriedTradeText = (c, nick) => (c ? `Acquired from the ${nick(c.from)} in a trade in our ${MAIN_WEEKLY_YEAR} mock draft.` : "");
 
 // A publish date as the site shows it — "October 20, 2026" (opts: other
 // toLocaleDateString fields) — always in Eastern time, so a crawler's

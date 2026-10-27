@@ -5,32 +5,36 @@
 // board variance, normal trades, up to 7 rounds).
 //   1. Run it and look it over beside last week's (by pick slot — the same
 //      team's same pick, whatever its number); run it again if you like.
-//   2. Open in mock editor: saves it as an official mockDrafts post (private,
-//      with its trades) and a weeklyMocks doc, and opens the post in the
-//      mock editor (pages/CreateMock.jsx) to move picks around.
-//   3. Publish (back here): the post goes public, and the edited mock's
-//      picks are copied onto the weeklyMocks doc, which every team's
-//      /mocks/{team} page reads, and config/weeklyMock, the summary that puts
-//      it in drafted players' news and on NFL team pages (weeklyMockNews.js).
-//      "Update team pages" copies them again after a later edit.
+//   2. Publish it right here — or, optionally, Edit in mock editor first:
+//      that saves it as an official mockDrafts post (private, with its
+//      trades) and a weeklyMocks doc, and opens the post in the mock editor
+//      (pages/CreateMock.jsx) to move picks around (each pick's analysis can
+//      be regenerated there), then Publish it from the list below.
+//   3. Publish: the post goes public, and the mock's picks are copied onto
+//      the weeklyMocks doc, which every team's /mocks/{team} page reads, and
+//      config/weeklyMock, the summary that puts it in drafted players' news
+//      and on NFL team pages (weeklyMockNews.js). "Update team pages" copies
+//      them again after a later edit.
 // Every weekly mock, draft or published, is listed underneath.
 // The 2028 switch makes the next class's (three rounds), on top of the
 // latest published 2027 week: each team's needs a year on from the picks it
 // made (weeklyMock.js nextYearNeeds — listed under the run). The 2028 order
+// is shuffled in tiers (tieredOrder — the mock's description says so) and
 // carries the 2027 mock's trades of 2028 picks (carryTrades — saved as
 // carriedTrades, for the pages to say so), there are no trades of its own,
 // and each team is held to the positions nextYearRules allows. Its team
 // pages are /mocks/{team}/2028 and its summary config/weeklyMock2028.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { loadSimData, maxRounds, teamNamer } from "../utils/draftSim/data";
 import {
-  runWeeklyMock, weeklyFromSim, weeklyNotes, mockPicksFrom, weeklyPicksFromMock, WEEKLY_ROUNDS_BY_YEAR, WEEKLY_TRADES_BY_YEAR, nextYearNeeds, nextYearRules, qbTeamsOf, carryTrades,
+  runWeeklyMock, weeklyFromSim, weeklyNotes, mockPicksFrom, weeklyPicksFromMock, WEEKLY_ROUNDS_BY_YEAR, WEEKLY_TRADES_BY_YEAR, nextYearNeeds, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, TIERED_ORDER_NOTE,
 } from "../utils/draftSim/weeklyMock";
 import { rngNext } from "../utils/draftSim/engine";
+import { loadPffRanks } from "../utils/draftSim/pffRanks";
 import { NoteText } from "../pages/ViewMock";
 import { weeklyMockSummary, summaryDocId, weeklyMockHref, WEEKLY_YEARS, MAIN_WEEKLY_YEAR } from "../utils/weeklyMockNews";
 import { NFL_TEAMS } from "../utils/coachHistory";
@@ -47,25 +51,6 @@ const defaultName = (year) => `We-Draft.com ${year} Weekly Mock Draft — ${new 
 // A class's published weeks, newest first.
 const publishedOf = (weeks, year) => (weeks || []).filter((w) => w.publishedAt && String(w.year) === String(year))
   .sort((a, b) => b.publishedAt.toMillis() - a.publishedAt.toMillis());
-// PFF's positional rank for these players ({ [playerId]: { rk, of, sn,
-// pos } }) — admin-only reads: their CFBD links (cfbdPlayers, 30 at a time),
-// then every pffGrades team doc. Only the notes' credited top-of-list line
-// (pickNotes.js PFF_TOP / PFF_MIN_SNAPS) ever reaches the public site.
-async function loadPffRanks(ids) {
-  const cfbdTo = {};
-  for (let i = 0; i < ids.length; i += 30) {
-    const snap = await getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "in", ids.slice(i, i + 30))));
-    snap.docs.forEach((d) => { if (["verified", "suggested"].includes(d.data().mappingStatus)) cfbdTo[d.id] = d.data().wedraftPlayerId; });
-  }
-  const out = {};
-  (await getDocs(collection(db, "pffGrades"))).docs.forEach((d) => Object.entries(d.data().players || {}).forEach(([id, r]) => {
-    const who = cfbdTo[id];
-    if (!who || r.rk == null || (out[who] && (out[who].sn || 0) >= (r.sn || 0))) return;
-    out[who] = { rk: r.rk, of: r.of, sn: r.sn, pos: r.pos };
-  }));
-  return out;
-}
-
 // "2027 R1 (No. 9, NYJ)" / "2028 R2 (DAL)".
 const pickText = (p) => `${p.year} R${p.round} (${p.overall ? `No. ${p.overall}, ` : ""}${p.original})`;
 
@@ -98,6 +83,7 @@ export default function AdminWeeklyMock() {
   const run = () => act("run", async () => {
     let data = await loadSimData(year);
     let carried = null;
+    const seed = Date.now() | 0;
     // The next class: on top of the latest published main-class week.
     if (year !== MAIN_WEEKLY_YEAR) {
       const base = publishedOf(weeks, MAIN_WEEKLY_YEAR)[0];
@@ -105,11 +91,13 @@ export default function AdminWeeklyMock() {
       const main = await loadSimData(MAIN_WEEKLY_YEAR);
       const next = nextYearNeeds(data.needs, base.picks, main.board);
       const posRules = nextYearRules(data.needs, base.picks, main.board);
-      const moved = carryTrades(data.order, base.trades, year);
-      carried = { baseWeekId: base.id, baseName: base.name, changes: next.changes, posRules, qbTeams: qbTeamsOf(posRules), trades: moved.carried };
+      // The order a year out, shuffled in tiers (seeded like the draft), then the trades carried onto it.
+      const shuffle = { seed: seed ^ 0x2c1b3c6d };
+      const tiered = tieredOrder(data.order, () => { const r = rngNext(shuffle.seed); shuffle.seed = r.seed; return r.value; });
+      const moved = carryTrades(tiered, base.trades, year);
+      carried = { baseWeekId: base.id, baseName: base.name, changes: next.changes, posRules, qbTeams: qbTeamsOf(posRules), trades: moved.carried, intro: TIERED_ORDER_NOTE.replace("{year}", year) };
       data = { ...data, needs: next.needs, order: moved.order };
     }
-    const seed = Date.now() | 0;
     const rounds = Math.min(WEEKLY_ROUNDS_BY_YEAR[year] || 7, maxRounds(data.board));
     // The next class: no trades, and each team held to its positions.
     const sim = runWeeklyMock(data, { seed, rounds, trades: WEEKLY_TRADES_BY_YEAR[year] || "normal", qbTeams: carried?.qbTeams || null, posRules: carried?.posRules || null });
@@ -125,12 +113,12 @@ export default function AdminWeeklyMock() {
     setRound(1);
   });
 
-  // Save it (private) and open it in the mock editor.
-  const openInEditor = () => act("open", async () => {
+  // Save the run (private): its mockDrafts post and weeklyMocks doc → the week.
+  const saveDraft = async () => {
     const now = Timestamp.now();
     const mockName = name.trim() || defaultName(year);
     const mock = await addDoc(collection(db, "mockDrafts"), {
-      name: mockName, description: "", rounds: draft.rounds, visibility: "private", draftClass: year, picks: mockPicksFrom(draft.picks),
+      name: mockName, description: draft.carried?.intro || "", rounds: draft.rounds, visibility: "private", draftClass: year, picks: mockPicksFrom(draft.picks),
       trades: draft.trades, ...(draft.carried ? { carriedTrades: draft.carried.trades } : {}),
       ownerId: user.uid, source: "weeklyMock", official: true, createdAt: now, updatedAt: now,
     });
@@ -140,12 +128,27 @@ export default function AdminWeeklyMock() {
       createdAt: serverTimestamp(), createdBy: user.uid,
     });
     await updateDoc(mock, { weeklyId: week.id });
-    navigate(`/mocks/${mock.id}`);
+    return { id: week.id, mockId: mock.id, year, name: mockName, rounds: draft.rounds };
+  };
+  // Optional: save it and open it in the mock editor to move picks around.
+  const openInEditor = () => act("open", async () => {
+    const w = await saveDraft();
+    navigate(`/mocks/${w.mockId}`);
+  });
+  // Publish the run as it is, from here.
+  const publishDraft = () => act("publishDraft", async () => {
+    if (!window.confirm("Publish this weekly mock? It goes public on /mocks and every team's page.")) return;
+    const w = await saveDraft();
+    await copyPicks(w, true);
+    setDraft(null);
   });
 
-  // The edited mock's picks onto the weekly doc; publish: the post goes public too.
+  // The mock's picks (as edited) onto the weekly doc; publish: the post goes public too.
   const syncPicks = (w, publish) => act(`${publish ? "publish" : "sync"}:${w.id}`, async () => {
     if (publish && !window.confirm("Publish this weekly mock? It goes public on /mocks and every team's page.")) return;
+    await copyPicks(w, publish);
+  });
+  const copyPicks = async (w, publish) => {
     const snap = await getDoc(doc(db, "mockDrafts", w.mockId));
     if (!snap.exists()) throw new Error("Its mock draft was deleted — discard this one and run a new one.");
     const mock = snap.data();
@@ -168,7 +171,7 @@ export default function AdminWeeklyMock() {
       }));
     }
     await loadWeeks();
-  });
+  };
 
   const discard = (w) => act(`discard:${w.id}`, async () => {
     if (!window.confirm("Discard this draft weekly mock and its mock draft?")) return;
@@ -190,7 +193,7 @@ export default function AdminWeeklyMock() {
       <div style={{ ...card, padding: "14px 16px", fontSize: "13px", color: "#33415a", lineHeight: 1.5 }}>
         {year !== MAIN_WEEKLY_YEAR && (
           <p style={{ margin: "0 0 8px" }}>
-            <b>The {year} mock is drafted on top of the latest published {MAIN_WEEKLY_YEAR} mock</b> — publish that one first. It uses the {year} draft order with
+            <b>The {year} mock is drafted on top of the latest published {MAIN_WEEKLY_YEAR} mock</b> — publish that one first. It uses the {year} draft order <b>shuffled in tiers</b> — picks 1–10, 11–20 and 21–32 each drawn at random, that first-round order used in every round, and said so at the top of the mock — with
             the {MAIN_WEEKLY_YEAR} mock&apos;s trades of {year} picks carried over (the pages say which picks moved in the {MAIN_WEEKLY_YEAR} mock), and every need moves up a tier unless that team drafted for it in {MAIN_WEEKLY_YEAR}:
             a round 1–2 pick fills it, round 3–4 holds it where it is, and round 5–7 only answers a depth need. A QB only counts toward an upgrade in round 1; a backup-QB need (Depth Needed) stays one, and any QB answers it.
             Set and Crowded Room stay as they are. In the {year} mock there are no trades, and <b>position rules</b>: in rounds 1–2 a team only takes a position it lists
@@ -200,8 +203,8 @@ export default function AdminWeeklyMock() {
         )}
         The site&apos;s official {year} mock: the Draft Sim with every team on the CPU, <b>Less</b> board variance and {WEEKLY_TRADES_BY_YEAR[year] === "off" ? <b>no trades</b> : "normal trades"},
         up to {WEEKLY_ROUNDS_BY_YEAR[year]} rounds. Run it and compare it with last week&apos;s (each pick by its original team and round, so the number
-        can move); run it again if you like. <b>Open in mock editor</b> saves it privately and opens it to move picks around. Then come back
-        and <b>Publish</b> — it goes public on /mocks and updates every team&apos;s page ({weeklyMockHref("nyj", year)}). Uses the current draft order, team
+        can move); run it again if you like. <b>Publish</b> it as it is, or <b>Edit in mock editor</b> first — that saves it privately and opens it to move picks
+        around (with a button on each pick to regenerate its analysis); then come back and <b>Publish</b> it from the list below. Publishing puts it on /mocks and updates every team&apos;s page ({weeklyMockHref("nyj", year)}). Uses the current draft order, team
         needs and community board — rebuild site snapshots first if grades have moved.
       </div>
       {error && <div style={{ color: "#c8102e", fontSize: "13px", fontWeight: 700 }}>{error}</div>}
@@ -277,7 +280,8 @@ export default function AdminWeeklyMock() {
           <div style={{ display: "flex", gap: "8px", alignItems: "center", padding: "12px 16px", borderTop: "1px solid #eef1f5", background: "#f7f9fc", flexWrap: "wrap" }}>
             <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} aria-label="Mock draft name"
               style={{ flex: "1 1 320px", minWidth: 0, border: "1px solid #d5dce6", borderRadius: "999px", padding: "8px 14px", fontSize: "13px" }} />
-            <button onClick={openInEditor} disabled={!!busy || !user} style={btn(true, !busy && !!user)}>{busy === "open" ? "Saving…" : "Open in mock editor →"}</button>
+            <button onClick={openInEditor} disabled={!!busy || !user} style={btn(false, !busy && !!user)}>{busy === "open" ? "Saving…" : "Edit in mock editor →"}</button>
+            <button onClick={publishDraft} disabled={!!busy || !user} style={btn(true, !busy && !!user)}>{busy === "publishDraft" ? "Publishing…" : "Publish"}</button>
           </div>
         </div>
       )}

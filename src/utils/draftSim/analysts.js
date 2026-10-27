@@ -13,9 +13,8 @@
 //                      take on the trade and the pick together, at the pick.
 //   Kenneth Cold       the player analyst (@kingcoldsports): what the
 //                      drafted player actually is — his own written take on
-//                      that player (PLAYER_TAKES, config/draftSimAnalysis),
-//                      by situation: a reach, a steal, a depth pick or a
-//                      normal pick. Silent on players with no take written.
+//                      that player (config/draftSimAnalysis). Silent on
+//                      players with no take written for the sim.
 //   Dr. PP Johnson     the stat guy: reads out the player's CFBD numbers —
 //                      season lines and national ranks.
 //   Makali Pennycooke  the optimist (@timeoutwithmakalipod): loves every
@@ -1647,41 +1646,25 @@ function isaacPick(e, ctx) {
 // ── Kenneth Cold: the player takes ──
 // His own analysis of each player, written per player in Admin → Mock
 // Draft → Personalities (config/draftSimAnalysis.players: { [playerId]:
-// { reach: [line, …], steal, normal, depth } }). Which situation a pick is
-// uses Isaac's steal/reach thresholds; a depth pick is one the team's needs
-// call "Depth Needed". A situation with no lines of its own uses the
-// player's normal lines; a player with none at all gets no Kenneth.
-// Lines take the same {variables} as everyone else's.
-export const PLAYER_TAKES = {
-  reach: { label: "Reach", when: "Taken well before his board rank." },
-  steal: { label: "Steal", when: "Taken well after his board rank." },
-  depth: { label: "Depth pick", when: "The team's need at his position is Depth Needed (and he isn't a reach or steal)." },
-  normal: { label: "Normal", when: "Every other pick — and any situation above that has no lines of its own." },
-};
+// { normal: [line, …] } }) — one list per player, for any pick. A line is
+// its text, or { text, mock?, noSim? }: mock — the Weekly Mock's pick notes
+// may use it too (pickNotes.js); noSim — kept off the sim's desk. Lines
+// saved under the old situations (reach, steal, depth) count as his too.
+// Lines take the same {variables} as everyone else's. A player with no
+// sim lines gets no Kenneth.
+export const TAKE_KEY = "normal";
+const OLD_TAKE_KEYS = ["reach", "steal", "depth"];
 let playerTakes = {};
 export function applyPlayerTakes(players = {}) { playerTakes = players || {}; }
 export const playerTakesFor = (id) => playerTakes[id] || {};
-
-export function takeSituation(e) {
-  if (e.value >= Math.max(6, e.pick.overall * 0.25)) return "steal";
-  if (-e.value >= Math.max(6, e.pick.overall * 0.25)) return "reach";
-  if (e.need?.label === "Depth Needed") return "depth";
-  return "normal";
-}
-
-// The situation whose lines he'd use for this pick, or null (nothing written).
-function takeFor(e) {
-  const takes = playerTakesFor(e.prospect.id);
-  const has = (cat) => (takes[cat] || []).some((l) => lineText(l).trim());
-  const cat = takeSituation(e);
-  return has(cat) ? cat : has("normal") ? "normal" : null;
-}
+// Every line written for a player (a saved { [key]: [line] }), the old situations' after his own.
+export const takeLinesOf = (t = {}) => [TAKE_KEY, ...OLD_TAKE_KEYS].flatMap((k) => t[k] || []).filter((l) => lineText(l).trim());
+const simTakes = (id) => takeLinesOf(playerTakesFor(id)).filter((l) => !l.noSim);
 
 function kennethPick(e, ctx) {
-  const cat = takeFor(e);
-  if (!cat) return null;
-  const table = { [cat]: { lines: playerTakesFor(e.prospect.id)[cat].filter((l) => lineText(l).trim()) } };
-  const text = lineFrom(table, cat, pickVars(e, ctx), ctx, `kenneth:${e.prospect.id}`);
+  const lines = simTakes(e.prospect.id);
+  if (!lines.length) return null;
+  const text = lineFrom({ take: { lines } }, "take", pickVars(e, ctx), ctx, `kenneth:${e.prospect.id}`);
   return text ? { text } : null;
 }
 
@@ -1717,9 +1700,9 @@ export const ANALYSTS = [
   {
     id: "kenneth", name: "Kenneth Cold", handle: "@kingcoldsports", role: "Player Analyst", verified: true, enabled: true,
     color: "#f6a21d", initials: "KC", delay: 1300, lines: {},
-    about: "The player guy — his own written analysis of the player just drafted, with different takes for a reach, a steal, a depth pick and a normal pick.",
+    about: "The player guy — his own written analysis of the player just drafted.",
     cadence: "Picks of players he has a take written for (Player analysis below); never on trades, or a pick a team traded up for (his takes don't tell the trade).",
-    weight: (e) => (e.type === "pick" && e.pick.overall !== 1 && !e.pick.tradeUp && takeFor(e) ? 4 : 0),
+    weight: (e) => (e.type === "pick" && e.pick.overall !== 1 && !e.pick.tradeUp && simTakes(e.prospect.id).length ? 4 : 0),
     react: (e, ctx) => (e.type === "pick" ? kennethPick(e, ctx) : null),
   },
   {

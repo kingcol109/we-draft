@@ -16,6 +16,7 @@ import { SIM_YEAR } from "../utils/draftSim/years";
 import { viewportCssWidth } from "../utils/pageZoom";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { weeklyMockHref } from "../utils/weeklyMockNews";
+import { textOn } from "../utils/teamColors";
 import verifiedBadge from "../assets/verified.png";
 
 export const BLUE = "#0055a5";
@@ -290,18 +291,111 @@ export function TeamMocksRail({ current = "", year, teams, full = null, columns 
 // The sim, for anyone who'd draft it differently: "Don't like the picks?"
 // with the Draft button, on the page's colors. team/nick: draft as that
 // team (its weekly mock page); none: the sim's own start (the full mock).
-// year: a class other than the sim's default (2028's pages).
-export function MakeYourOwnBanner({ team = "", teamName = "", nick = "", year = "", c1, c2, ink, isMobile }) {
+// year: a class other than the sim's default (2028's pages). margin: its
+// own spacing (under the hero by default; between picks, set by the page).
+// Phones: the button in the middle, "Don't like / the picks?" stacked on
+// its left and "Make your / own!" on its right, a size up so the two
+// halves match.
+export function MakeYourOwnBanner({ team = "", teamName = "", nick = "", year = "", c1, c2, ink, isMobile, margin = "0 0 18px" }) {
+  const draftButton = <DraftNowButton team={team} teamName={teamName} year={year && year !== SIM_YEAR ? year : ""} c1={c1} c2={c2} isMobile={isMobile} compact />;
+  if (isMobile) {
+    const half = { fontWeight: 900, lineHeight: 1.1, minWidth: 0 };
+    return (
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 10, margin,
+        background: `linear-gradient(120deg, ${c1} 0%, ${c1} 55%, ${c2} 130%)`, color: ink, borderRadius: 14,
+        boxShadow: "0 6px 18px rgba(0,0,0,0.16)", padding: "12px 12px",
+      }}>
+        <span style={{ ...half, fontSize: 15, textAlign: "right" }}>Don&apos;t like<br />the picks?</span>
+        {draftButton}
+        <span style={{ ...half, fontSize: 19, textAlign: "left" }}>Make your<br />own!</span>
+      </div>
+    );
+  }
   return (
     <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", marginBottom: 18,
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", margin,
       background: `linear-gradient(120deg, ${c1} 0%, ${c1} 55%, ${c2} 130%)`, color: ink, borderRadius: 14,
       boxShadow: "0 6px 18px rgba(0,0,0,0.16)", padding: isMobile ? "14px 16px" : "16px 24px",
     }}>
       <span style={{ fontSize: isMobile ? 17 : 21, fontWeight: 900 }}>
         Don&apos;t like the picks? {nick ? `Draft as the ${nick} and make your own!` : "Make your own!"}
       </span>
-      <DraftNowButton team={team} teamName={teamName} year={year && year !== SIM_YEAR ? year : ""} c1={c1} c2={c2} isMobile={isMobile} compact />
+      {draftButton}
+    </div>
+  );
+}
+
+// A pick in a trade card's chips (a saved trade's: { year, round, original,
+// overall — null for a later draft's }): "No. 9" over "2027 Round 1", or
+// "2028 R2" over "Round 2 pick"; from: the team that gave it up — another
+// team's original pick says whose.
+export const tradeChip = (p, from = "") => ({
+  main: p.overall ? `No. ${p.overall}` : `${p.year} R${p.round}`,
+  sub: `${p.overall ? `${p.year} Round ${p.round}` : `Round ${p.round} pick`}${p.original && from && p.original !== from ? ` · ${p.original}` : ""}`,
+});
+
+// A trade, as a graphic, set right before the pick it's about: a thin
+// strip with the headline, then the two sides in a band — each on its own
+// colors, its dark logo (LogoDark — the band is dark; Logo1 without one),
+// to its team page, beside its name and the picks it
+// received as one-line chips, the second side mirrored — with swap arrows
+// between. sides: two [{ team, brand (fetchNflBranding's), picks:
+// [tradeChip], note (in place of chips when it got none listed), label
+// (after its name — "get" by default), heading (a big header in place of
+// the name — the recap's RECEIVED / GAVE UP) }]. footer: a line under the band.
+export function TradeCard({ title, sides, isMobile, tag = "TRADE", footer = "" }) {
+  const side = ({ team, brand = {}, picks = [], note = "", label = "get", heading = "" }, flip) => {
+    const c1 = brand.Color1 || BLUE;
+    const c2 = brand.Color2 || GOLD;
+    const ink = textOn(c1, c2);
+    const name = brand.Team || NFL_TEAMS[team] || team;
+    const logo = isMobile ? 30 : 40;
+    return (
+      <div key={flip ? "right" : "left"} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: flip ? "row-reverse" : "row", alignItems: "center", gap: isMobile ? 8 : 12,
+        padding: isMobile ? (flip ? "8px 10px 8px 22px" : "8px 22px 8px 10px") : (flip ? "10px 16px 10px 30px" : "10px 30px 10px 16px"),
+        background: `linear-gradient(${flip ? 250 : 110}deg, ${c1} 0%, ${c1} 60%, ${c2} 140%)`, color: ink }}>
+        <Link to={`/nfl/${String(team).toLowerCase()}`} title={name} style={{ flexShrink: 0, lineHeight: 0 }}>
+          {brand.LogoDark || brand.Logo1
+            ? <img src={brand.LogoDark || brand.Logo1} alt={name} style={{ width: logo, height: logo, objectFit: "contain", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.25))" }} />
+            : <span style={{ display: "inline-block", width: logo, height: logo }} />}
+        </Link>
+        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", alignItems: flip ? "flex-end" : "flex-start", gap: 4 }}>
+          {heading ? (
+            <span style={{ fontFamily: FONT, fontSize: isMobile ? 16 : 22, lineHeight: 1, letterSpacing: "0.06em", whiteSpace: "nowrap", textShadow: "0 1px 3px rgba(0,0,0,0.25)" }}>{heading}</span>
+          ) : (
+            <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+              {name}{picks.length ? <span style={{ opacity: 0.7 }}> {label}</span> : null}
+            </span>
+          )}
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: flip ? "flex-end" : "flex-start", gap: 4 }}>
+            {picks.map((p, i) => (
+              <span key={i} style={{ display: "inline-flex", alignItems: "baseline", gap: 5, background: "#fff", color: INK, borderRadius: 6,
+                padding: isMobile ? "2px 6px" : "3px 8px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", whiteSpace: "nowrap" }}>
+                <span style={{ fontFamily: FONT, fontSize: isMobile ? 12 : 14 }}>{p.main}</span>
+                <span style={{ fontFamily: BODY_FONT, fontSize: 10, fontWeight: 700, color: MUTED }}>{p.sub}</span>
+              </span>
+            ))}
+            {!picks.length && note && <span style={{ fontFamily: BODY_FONT, fontSize: 11, fontWeight: 700, opacity: 0.85 }}>{note}</span>}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div className="wd-mock-card" style={{ borderRadius: 14, overflow: "hidden", boxShadow: CARD_SHADOW, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: isMobile ? "5px 10px" : "6px 14px", background: INK, color: "#fff" }}>
+        <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", background: GOLD, color: "#1a1005", borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>{tag}</span>
+        <span style={{ fontFamily: BODY_FONT, fontSize: isMobile ? 11 : 12, fontWeight: 800, minWidth: 0 }}>{title}</span>
+      </div>
+      <div style={{ position: "relative", display: "flex", alignItems: "stretch" }}>
+        {side(sides[0], false)}
+        <span aria-hidden="true" style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%, -50%)", width: isMobile ? 26 : 32, height: isMobile ? 26 : 32,
+          borderRadius: "50%", background: "#fff", color: INK, display: "flex", alignItems: "center", justifyContent: "center", fontSize: isMobile ? 14 : 17, fontWeight: 900,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>⇄</span>
+        {side(sides[1], true)}
+      </div>
+      {footer && <div style={{ padding: isMobile ? "5px 10px" : "6px 14px", fontFamily: BODY_FONT, fontSize: 11, fontWeight: 700, color: MUTED, background: "#f7f9fc" }}>{footer}</div>}
     </div>
   );
 }

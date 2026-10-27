@@ -6,8 +6,9 @@
 // board. The owner gets Share and Edit (CreateMock.jsx) from here. The
 // site's Weekly Mock (source "weeklyMock", official — utils/draftSim/
 // weeklyMock.js) reads like its team pages instead: the article header,
-// posted by We-Draft.com (verified), and the sim under it, every team's page
-// in the left rail. Each class's current week lives at /mocks/{year}
+// posted by We-Draft.com (verified), the sim after the fifth pick, each
+// trade as a graphic right before the pick it's about (TradeCard), every
+// team's page in the left rail. Each class's current week lives at /mocks/{year}
 // (WeeklyYearPage, below — its /view URL goes there); a past week's stays
 // up at /view but is noindexed and points to the current one.
 import { Fragment, useEffect, useState } from "react";
@@ -21,18 +22,20 @@ import { useAuth } from "../context/AuthContext";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { textOn } from "../utils/teamColors";
 import {
-  loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, weeklyYearHref, carriedTradeOf, carriedTradeText, WEEKLY_YEARS,
+  loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, weeklyYearHref, carriedTradeOf, WEEKLY_YEARS, MAIN_WEEKLY_YEAR,
 } from "../utils/weeklyMockNews";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS,
   useIsMobile, MockPageShell, MockHero, heroPill, chip, button, PhoneAd,
-  ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd, TeamMocksRail, WeeklyYearSwitch,
+  ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd, TeamMocksRail, WeeklyYearSwitch, TradeCard, tradeChip,
 } from "../components/MockDraftKit";
 import WdOutline from "../assets/Logo2.png";
 
 // Phones: the Homage card goes after this pick of the round.
 const PHONE_AD_AFTER = 5;
+// The Weekly Mock's "Don't like the picks?" goes after this pick of the round.
+const BANNER_AFTER = 5;
 
 // The Weekly Mock's header, in the site's colors with its wordmark faded behind.
 const WEEKLY_HERO = { c1: "#00305c", c2: BLUE, ink: "#fff", accent: GOLD, wordmark: WdOutline };
@@ -142,6 +145,30 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   const switchYears = WEEKLY_YEARS.filter((y) => y === year || classes?.[y]);
   // ShareMockButton takes an already-normalized picks shape — here that's
   // just renaming .selection to .player.
+  // The Weekly Mock's trades, each by the pick a team moved up to (saved
+  // trades: tradesFromSim's { up, down, at, upGot, downGot }).
+  const tradesAt = {};
+  (weekly ? mock.trades || [] : []).forEach((t) => { if (t.at) (tradesAt[t.at] || (tradesAt[t.at] = [])).push(t); });
+  const brandOf = (abbr) => teams[abbr] || {};
+  const tradeCards = (pick) => {
+    const cards = (tradesAt[pick.pickNumber] || []).map((t, i) => (
+      <TradeCard key={`t${i}`} isMobile={isMobile} title={`The ${nick(t.up)} move up to No. ${t.at} with the ${nick(t.down)}`} sides={[
+        { team: t.up, brand: brandOf(t.up), picks: t.upGot.map((p) => tradeChip(p, t.down)) },
+        { team: t.down, brand: brandOf(t.down), picks: t.downGot.map((p) => tradeChip(p, t.up)) },
+      ]} />
+    ));
+    // The next class's: a pick a trade in the main class's mock sent here.
+    const c = weekly && carriedTradeOf(mock.carriedTrades, { round: pick.round, original: pick.originalTeam, owner: pick.currentTeam });
+    if (c) {
+      cards.push(
+        <TradeCard key="carried" isMobile={isMobile} title={`Acquired from the ${nick(c.from)} in our ${MAIN_WEEKLY_YEAR} mock draft`} sides={[
+          { team: c.to, brand: brandOf(c.to), picks: [{ main: `No. ${pick.pickNumber}`, sub: `${year} Round ${pick.round}` }] },
+          { team: c.from, brand: brandOf(c.from), note: `Traded in our ${MAIN_WEEKLY_YEAR} mock` },
+        ]} />,
+      );
+    }
+    return cards;
+  };
   const sharePicks = roundPicks.map((p) => ({ pickNumber: p.pickNumber, currentTeam: p.currentTeam, tradedFrom: p.tradedFrom, player: p.selection }));
 
   const headline = weekly ? `NFL ${rounds}-Round Mock Draft ${year}` : mock.name || "Mock Draft";
@@ -206,7 +233,6 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
             )}
             <ArticleHero hero={WEEKLY_HERO} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
               headline={headline} dek={description} date={updated ? `Updated ${updated}` : ""} byline={<WeeklyByline />} actions={heroActions} />
-            <MakeYourOwnBanner c1={BLUE} c2={GOLD} ink="#fff" isMobile={isMobile} />
           </>
         ) : (
           <MockHero
@@ -254,8 +280,9 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {roundPicks.map((pick, i) => (
             <Fragment key={pick.pickNumber}>
-              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={weekly ? year : ""}
-                tradeNote={carriedTradeText(carriedTradeOf(mock.carriedTrades, { round: pick.round, original: pick.originalTeam, owner: pick.currentTeam }), nick)} />
+              {tradeCards(pick)}
+              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={weekly ? year : ""} vertical={weekly && isMobile} />
+              {weekly && i === Math.min(BANNER_AFTER, roundPicks.length) - 1 && <MakeYourOwnBanner c1={BLUE} c2={GOLD} ink="#fff" isMobile={isMobile} margin="4px 0" />}
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
           ))}
@@ -287,10 +314,11 @@ export function NoteText({ text }) {
 // bigger wordmark, sub (what the pick was last week) and a View more link
 // to the player's page after the write-up. The full Weekly Mock passes
 // teamMock (its class): a link under each pick to all of that team's picks
-// (/mocks/{team}, WeeklyTeamMock.jsx). tradeNote: how the team came by the
-// pick, when another draft's trade sent it there (the next class's Weekly
-// Mock: a trade in the main class's).
-export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", teamMock = "", tradeNote = "" }) {
+// (/mocks/{team}, WeeklyTeamMock.jsx). A trade is its own card before the
+// row (MockDraftKit's TradeCard). vertical: the pick label turned to read
+// bottom to top in a narrower strip (the Weekly Mock's pages, on phones) —
+// the number anchored in the strip's middle, "PICK" hanging off below it.
+export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", teamMock = "", vertical = false }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || GOLD;
@@ -303,11 +331,21 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
   return (
     <div className="wd-mock-card" style={{ position: "relative", display: "flex", alignItems: "stretch", overflow: "hidden", borderRadius: 14, background: "#fff", boxShadow: CARD_SHADOW }}>
       <span style={{
-        flexShrink: 0, width: isMobile ? 54 : 80, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        flexShrink: 0, width: vertical ? 34 : isMobile ? 54 : 80, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         background: `linear-gradient(160deg, ${c1} 0%, ${c1} 70%, ${c2} 100%)`, color: ink, borderRight: `4px solid ${c2}`,
       }}>
-        <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.8 }}>PICK</span>
-        <span style={{ fontSize: isMobile ? 22 : 34, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{pick.pickNumber}</span>
+        {vertical ? (
+          // Turned 180°, so "PICK" placed above the number lands below it.
+          <span style={{ position: "relative", writingMode: "vertical-rl", transform: "rotate(180deg)", fontSize: 22, fontWeight: 900, lineHeight: 1, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+            {pick.pickNumber}
+            <span style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", marginBottom: 5, fontSize: 10, letterSpacing: "0.16em", opacity: 0.8 }}>PICK</span>
+          </span>
+        ) : (
+          <>
+            <span style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.14em", opacity: 0.8 }}>PICK</span>
+            <span style={{ fontSize: isMobile ? 22 : 34, fontWeight: 900, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{pick.pickNumber}</span>
+          </>
+        )}
       </span>
 
       <div style={{ position: "relative", flex: 1, minWidth: 0, padding: isMobile ? "10px 12px" : "14px 20px" }}>
@@ -367,7 +405,6 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
             ) : (
               <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 800, color: "#b0b8c4", fontStyle: "italic" }}>No selection</div>
             )}
-            {tradeNote && <div style={{ fontSize: 12, fontWeight: 700, color: "#8a5a00", fontFamily: BODY_FONT, marginTop: 6 }}>{tradeNote}</div>}
             {sub && <div style={{ fontSize: 12, fontWeight: 700, color: "#7a8597", fontFamily: BODY_FONT, marginTop: 6 }}>{sub}</div>}
           </div>
         </div>

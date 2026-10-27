@@ -318,23 +318,37 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Mobile, mid-draft: no ticker, edge to edge, and at least a screen tall.
-  // The page scrolls as usual — scrolling down just runs further into the
-  // console's tab — and the site footer is hidden meanwhile, so there's
-  // nothing under the sim to scroll into. The console's tab bar sticks
-  // under the navbar (navBottom).
+  // Mobile, mid-draft: one anchored screen pinned to the viewport — the
+  // stage never moves, and only the console's tab scrolls (SimBroadcast).
+  // The page itself doesn't scroll (wd-sim-lock), the site footer is
+  // hidden, and the navbar slides up out of the way, with an arrow tab at
+  // the top to bring it back down (navOpen).
   const live = isMobile && !finished;
-  const navBottom = useNavBottom(live);
+  const [navOpen, setNavOpen] = useState(false);
+  const navHeight = useNavHeight(live);
   useEffect(() => {
     if (!live) return undefined;
+    const html = document.documentElement;
     document.body.classList.add("wd-sim-nofooter");
-    return () => document.body.classList.remove("wd-sim-nofooter");
+    html.classList.add("wd-sim-lock", "wd-sim-navhide");
+    return () => {
+      document.body.classList.remove("wd-sim-nofooter");
+      html.classList.remove("wd-sim-lock", "wd-sim-navhide", "wd-sim-navopen");
+    };
   }, [live]);
+  useEffect(() => { document.documentElement.classList.toggle("wd-sim-navopen", live && navOpen); }, [live, navOpen]);
   if (live) {
     return (
-      <div style={{ minHeight: `calc(100svh - ${navBottom}px)`, display: "flex", flexDirection: "column", padding: "6px 6px 24px", boxSizing: "border-box", fontFamily: FONT }}>
-        <SimBroadcast s={s} data={data} isMobile stickyTop={navBottom} onSettings={onSettings} onPickTeam={onPickTeam} />
-      </div>
+      <>
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", flexDirection: "column", padding: "6px 6px calc(6px + env(safe-area-inset-bottom))", boxSizing: "border-box", background: STAGE_BG, fontFamily: FONT }}>
+          <SimBroadcast s={s} data={data} isMobile onSettings={onSettings} onPickTeam={onPickTeam} />
+        </div>
+        <button onClick={() => setNavOpen((o) => !o)} aria-label={navOpen ? "Hide the menu" : "Show the menu"} aria-expanded={navOpen} style={{
+          position: "fixed", top: navOpen ? navHeight : 0, left: "50%", transform: "translateX(-50%)", zIndex: 10002, transition: "top .25s ease",
+          border: "none", borderRadius: "0 0 10px 10px", background: "#0055a5", color: "#fff", padding: "1px 16px 3px", fontSize: 11, lineHeight: 1.2, cursor: "pointer",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.35)",
+        }}>{navOpen ? "▲" : "▼"}</button>
+      </>
     );
   }
   return (
@@ -349,21 +363,22 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   );
 }
 
-// The fixed navbar's bottom edge (its height can change — the LIVE button,
-// a font loading), re-read on resize while `on`.
-function useNavBottom(on) {
-  const [bottom, setBottom] = useState(MOBILE_NAV_HEIGHT);
+// The fixed navbar's height (it can change — the LIVE button, a font
+// loading), re-read on resize while `on`: where the arrow tab sits when the
+// navbar's brought back down.
+function useNavHeight(on) {
+  const [height, setHeight] = useState(MOBILE_NAV_HEIGHT);
   useLayoutEffect(() => {
     if (!on) return undefined;
     const read = () => {
       const nav = document.querySelector("nav");
-      if (nav) setBottom(Math.max(0, Math.round(nav.getBoundingClientRect().bottom)));
+      if (nav) setHeight(Math.round(nav.getBoundingClientRect().height));
     };
     read();
     window.addEventListener("resize", read);
     return () => window.removeEventListener("resize", read);
   }, [on]);
-  return bottom;
+  return height;
 }
 
 // ── Setup ──

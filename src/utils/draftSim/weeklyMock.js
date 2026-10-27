@@ -12,7 +12,8 @@
 // A second Weekly Mock, the next class's (2028, three rounds), is drafted
 // after it, on top of it: every team's needs a year on from the picks it
 // made in the latest published 2027 week (nextYearNeeds) — on the 2028
-// order with that week's trades of 2028 picks carried over (carryTrades),
+// order shuffled in tiers (tieredOrder), with that week's trades of 2028
+// picks carried over (carryTrades),
 // no trades of its own, and each team held to the positions nextYearRules
 // allows it. Its pages are /mocks/{team}/2028.
 //
@@ -21,7 +22,7 @@
 // which of that team's picks in the round it is (a comp pick is its second):
 // "1-NYJ-1" is the Jets' own first-rounder, "1-DAL-1" the one they got from
 // Dallas, whoever holds it now.
-import { initSim, stepCpu, NEED_LABELS, NEED_KEYS, needKeysFor, specificFits } from "./engine";
+import { initSim, stepCpu, makePick, NEED_LABELS, NEED_KEYS, needKeysFor, specificFits } from "./engine";
 import { pickNote } from "./pickNotes";
 
 export const WEEKLY_ROUNDS = 7;
@@ -65,9 +66,55 @@ export function runWeeklyMock(data, { seed = Date.now(), rounds = WEEKLY_ROUNDS,
 
 // Every pick's note (pickNotes.js) → { [overall]: text }. ctx: pickNote's
 // (names, staff, season, year, history, rand, pff).
+// Picks a team came away with by trading down are told as such (tradeDowns).
 export function weeklyNotes(sim, ctx) {
-  const shared = { ...ctx, used: {} };
+  const shared = { ...ctx, tradeDowns: tradeDownsOf(tradesFromSim(sim, ctx.year)), used: {} };
   return Object.fromEntries((sim.pickEvents || []).map((e) => [e.pick.overall, pickNote(e, shared)]));
+}
+
+// Saved trades (tradesFromSim's) → the picks each team got for moving
+// down: { [overall]: { down, up, at } } (pickNote's ctx.tradeDowns).
+function tradeDownsOf(trades) {
+  const out = {};
+  (trades || []).forEach((t) => (t.downGot || []).forEach((p) => {
+    if (p.overall != null) out[p.overall] = { down: t.down, up: t.up, at: t.at };
+  }));
+  return out;
+}
+
+// Regenerated notes for some picks of a weekly mock as it stands in the
+// mock editor (picks moved, players swapped): the draft is replayed in
+// order with each pick's team and player (editor picks: [{ pickNumber,
+// currentTeam, selection }]) so needs, value and position runs are the
+// edited mock's. A trade up (saved trades, tradesFromSim's) is still told
+// while the team that made it holds the pick. data: loadSimData's (the
+// next class's needs stand as loaded — its notes are light). overalls:
+// which picks → { [overall]: note }; a pick whose player isn't on the sim
+// board gets none.
+export function replayNotes(data, picks, overalls, { trades = [], ctx }) {
+  const byOverall = Object.fromEntries((picks || []).map((p) => [p.pickNumber, p]));
+  const rounds = Math.max(1, ...(picks || []).filter((p) => p.selection).map((p) => p.round || 1));
+  let s = initSim({ order: data.order, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, rounds, seed: 1 });
+  s = {
+    ...s,
+    picks: s.picks.map((p) => {
+      const owner = byOverall[p.overall]?.currentTeam || p.owner;
+      const up = (trades || []).find((t) => t.at === p.overall && t.up === owner);
+      const give = up && up.downGot.map((g) => (g.overall != null ? { overall: g.overall, round: g.round } : { future: true, year: g.year, round: g.round }));
+      return { ...p, owner, ...(up ? { tradeUp: { from: up.down, give } } : {}) };
+    }),
+  };
+  const want = new Set(overalls);
+  const events = [];
+  s.picks.forEach((p, i) => {
+    const id = byOverall[p.overall]?.selection?.id;
+    const r = id && s.byId[id] && !s.taken[id] ? makePick({ ...s, idx: i }, id) : null;
+    if (!r?.event) return;
+    s = r.state;
+    if (want.has(p.overall)) events.push(r.event);
+  });
+  const shared = { ...ctx, tradeDowns: tradeDownsOf(trades), used: {} };
+  return Object.fromEntries(events.map((e) => [e.pick.overall, pickNote(e, shared)]));
 }
 
 // A drafted player as saved: who he is, plus his college logo (the class
@@ -221,6 +268,36 @@ export function nextYearRules(needs, picks, board = []) {
 
 // The teams posRules let take a QB at all — no "room is full" penalty for them (engine qbTeams).
 export const qbTeamsOf = (rules) => Object.entries(rules).filter(([, r]) => r.early.includes("QB") || r.qbLate).map(([t]) => t).sort();
+
+// The next class's order, a year out, shuffled in tiers of its first round
+// (ORDER_TIERS: picks 1–10, 11–20, the last 12), each team keeping the tier
+// it was in; every round then follows that first-round order. order:
+// fetchDraft's [{ Pick, Round, Team, Traded }]; a team's extra (comp) picks
+// in a round go with its own. → a copy, renumbered.
+export const ORDER_TIERS = [10, 10, 12];
+export const TIERED_ORDER_NOTE = "The {year} draft order is a year away, so this mock shuffles it in tiers: the teams projected to pick 1–10, 11–20 and 21–32 are each drawn at random within their group, and that first-round order carries through every round.";
+export function tieredOrder(order, rand) {
+  const byRound = {};
+  (order || []).forEach((p) => (byRound[p.Round] || (byRound[p.Round] = [])).push(p));
+  const first = [...(byRound[1] || [])].sort((a, b) => a.Pick - b.Pick);
+  const teams = [...new Set(first.map((p) => p.Team))];
+  const ranked = [];
+  let at = 0;
+  ORDER_TIERS.forEach((size, i) => {
+    const tier = teams.slice(at, i === ORDER_TIERS.length - 1 ? teams.length : at + size);
+    at += tier.length;
+    for (let k = tier.length - 1; k > 0; k--) {
+      const j = Math.floor(rand() * (k + 1));
+      [tier[k], tier[j]] = [tier[j], tier[k]];
+    }
+    ranked.push(...tier);
+  });
+  const rank = (t) => (ranked.includes(t) ? ranked.indexOf(t) : ranked.length);
+  return Object.values(byRound).flatMap((picks) => {
+    const numbers = picks.map((p) => p.Pick).sort((a, b) => a - b);
+    return [...picks].sort((a, b) => rank(a.Team) - rank(b.Team) || a.Pick - b.Pick).map((p, i) => ({ ...p, Pick: numbers[i] }));
+  }).sort((a, b) => a.Pick - b.Pick);
+}
 
 // This year's trades (tradesFromSim's) of the next class's picks, carried
 // onto its order (fetchDraft's [{ Pick, Round, Team, Traded }]), in the order

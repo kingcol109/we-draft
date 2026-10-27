@@ -3,7 +3,7 @@ import {
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
-import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, takeSituation } from "./analysts";
+import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes } from "./analysts";
 import { bestGame } from "./data";
 
 const TEAMS = ["AAA", "BBB", "CCC", "DDD"];
@@ -758,26 +758,24 @@ test("the recap knows every trade: what each side got and gave, next year's pick
   expect(teamHaul(state, "T2").trades).toEqual([]);
 });
 
-test("Kenneth: his written take on the player, by situation; quiet without one", () => {
+test("Kenneth: his written take on the player — any pick, old situations' lines too, never one kept off the sim; quiet without one", () => {
   const first = stepCpu(sim({ chaos: 0 })).events.find((e) => e.type === "pick");
   const base = { ...first, pick: { ...first.pick, overall: 20 }, value: 0, need: null };
   const kenneth = ANALYSTS.find((a) => a.id === "kenneth");
-  expect(takeSituation({ ...base, value: 8 })).toBe("steal");
-  expect(takeSituation({ ...base, value: -8 })).toBe("reach");
-  expect(takeSituation({ ...base, need: { key: "QB", label: "Depth Needed", note: "" } })).toBe("depth");
-  expect(takeSituation(base)).toBe("normal");
   applyPlayerTakes({});
   expect(kenneth.weight(base, deskCtx("all"))).toBe(0);
   expect(kenneth.react(base, deskCtx("all"))).toBeNull();
-  applyPlayerTakes({ [base.prospect.id]: { normal: ["Normal take on {last} for the {nick}."], steal: ["Steal take."], depth: ["  "] } });
-  expect(kenneth.react({ ...base, value: 8 }, deskCtx("all")).text).toBe("Steal take.");
-  expect(kenneth.react(base, deskCtx("all")).text).toBe(`Normal take on ${base.prospect.Last} for the ${base.team}.`);
-  // No reach (or only blank depth) lines → his normal lines.
-  expect(kenneth.react({ ...base, value: -8 }, deskCtx("all")).text).toMatch(/^Normal take/);
-  expect(kenneth.react({ ...base, need: { key: "QB", label: "Depth Needed", note: "" } }, deskCtx("all")).text).toMatch(/^Normal take/);
+  applyPlayerTakes({ [base.prospect.id]: { normal: ["Take on {last} for the {nick}.", { text: "Off the sim.", noSim: true, mock: true }], steal: ["Old steal take."], depth: ["  "] } });
+  const ctx = deskCtx("all");
+  const said = new Set([8, -8, 0, 8, -8, 0].map((value) => kenneth.react({ ...base, value }, ctx).text));
+  expect([...said].sort()).toEqual(["Old steal take.", `Take on ${base.prospect.Last} for the ${base.team}.`].sort());
   expect(kenneth.weight(base, deskCtx("all"))).toBeGreaterThan(0);
   expect(kenneth.weight({ ...base, pick: { ...base.pick, overall: 1 } }, deskCtx("all"))).toBe(0);
   expect(kenneth.react({ type: "trade" }, deskCtx("all"))).toBeNull();
+  // Only lines kept off the sim: no Kenneth.
+  applyPlayerTakes({ [base.prospect.id]: { normal: [{ text: "Off the sim.", noSim: true }] } });
+  expect(kenneth.weight(base, deskCtx("all"))).toBe(0);
+  expect(kenneth.react(base, deskCtx("all"))).toBeNull();
   applyPlayerTakes({});
 });
 

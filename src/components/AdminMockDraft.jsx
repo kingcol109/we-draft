@@ -20,7 +20,7 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteField, Field
 import { db } from "../firebase";
 import {
   ANALYSTS, CHATTER, VARIABLES, VARIABLE_GROUPS, DEFAULT_CHATTER, lineText, defaultLines, applyDeskLines, defaultAvatar, applyDeskAvatars,
-  LEGEND_POSITIONS, DEFAULT_LEGENDS, davinLegends, otherSchools, applyDeskLegends, PLAYER_TAKES, applyPlayerTakes,
+  LEGEND_POSITIONS, DEFAULT_LEGENDS, davinLegends, otherSchools, applyDeskLegends, TAKE_KEY, takeLinesOf, applyPlayerTakes,
 } from "../utils/draftSim/analysts";
 import { loadSimData, loadDeskLines, loadBestGame, SIM_YEAR, SIM_YEARS, teamNamer } from "../utils/draftSim/data";
 import { fetchNflBranding } from "../utils/draftProfileData";
@@ -519,17 +519,24 @@ function Personalities() {
 }
 
 // ── Kenneth's player takes: pick a class, find a player, write his lines
-// for each situation (PLAYER_TAKES). Its own Save — config/draftSimAnalysis,
+// (one list — any older reach / steal / depth lines fold into it, and are
+// saved into it the next time that player's saved). Its own Save — config/draftSimAnalysis,
 // separate from the desk lines above. A save writes only the players
 // changed here (players.{id}), so two admins — or an old tab — don't wipe
 // each other's work; then it reloads everyone's. ──
-const TAKE_CATS = Object.keys(PLAYER_TAKES);
 const TAKES_REF = () => doc(db, "config", "draftSimAnalysis");
-const cleanTakes = (t = {}) => Object.fromEntries(TAKE_CATS.map((c) => [c, (t[c] || []).map((l) => l.trim()).filter(Boolean)]).filter(([, ls]) => ls.length));
+// A take line is its text, or { text, mock?, noSim? } (analysts.js):
+// mock — the Weekly Mock's pick notes may use it too; noSim — off the sim.
+const takeLine = (text, { mock, noSim } = {}) => (mock || noSim ? { text, ...(mock ? { mock: true } : {}), ...(noSim ? { noSim: true } : {}) } : text);
+const withLine = (x, patch) => takeLine(patch.text ?? lineText(x), { mock: x.mock, noSim: x.noSim, ...patch });
+const cleanTakes = (t = {}) => {
+  const lines = takeLinesOf(t).map((l) => withLine(l, { text: lineText(l).trim() }));
+  return lines.length ? { [TAKE_KEY]: lines } : {};
+};
 // Firestore caps a doc at 1 MiB; leave headroom for the rest of it.
 const TAKES_MAX_BYTES = 950 * 1024;
 const TAKES_WARN_BYTES = 700 * 1024;
-const takeCount = (t = {}) => TAKE_CATS.reduce((n, c) => n + (t[c] || []).filter((l) => l.trim()).length, 0);
+const takeCount = (t = {}) => takeLinesOf(t).length;
 
 // onFocusLine({ el, edit }, label): hands the line being typed in to the
 // desk's Insert Variable bank (null when none is).
@@ -557,8 +564,10 @@ function PlayerTakesEditor({ onFocusLine }) {
     loadSimData(year).then((d) => setBoard(d.board)).catch(() => setBoard([]));
   }, [year]);
 
-  const change = (id, cat, fn) => {
-    setTakes((t) => ({ ...t, [id]: { ...(t[id] || {}), [cat]: fn(t[id]?.[cat] || []) } }));
+  // A player's lines (blank ones being written included) → fn's.
+  const linesOf = (t = {}) => [TAKE_KEY, "reach", "steal", "depth"].flatMap((k) => t[k] || []);
+  const change = (id, fn) => {
+    setTakes((t) => ({ ...t, [id]: { [TAKE_KEY]: fn(linesOf(t[id])) } }));
     setChanged((c) => new Set(c).add(id));
     setDirty(true);
     setStatus("");
@@ -611,12 +620,9 @@ function PlayerTakesEditor({ onFocusLine }) {
       <div style={{ display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 900, fontSize: "13px", color: "#1a1f2b" }}>Player analysis</span>
         <span style={{ fontSize: "12px", color: "#777" }}>
-          — what he says when a player is drafted. Write as many lines per situation as you like; he rotates through them. Normal lines are all a player needs: on a reach, steal or depth pick with no lines of its own he fires off the Normal ones. A player with no lines at all gets no Kenneth. Click into a line, then use the Insert Variable bank at the top to drop in {"{nick}"}, {"{n}"}, {"{last}"} and the rest.
+          — what he says when a player is drafted. Write as many lines as you like; he rotates through them. Every line is on the sim unless you uncheck <strong>Sim</strong>; check <strong>Mock</strong> to let the Weekly Mock&apos;s pick notes use it too. A player with no sim lines gets no Kenneth. Click into a line, then use the Insert Variable bank at the top to drop in {"{nick}"}, {"{n}"}, {"{last}"} and the rest.
         </span>
       </div>
-      <ul style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "12px", color: "#555", lineHeight: 1.55 }}>
-        {TAKE_CATS.map((c) => <li key={c}><strong>{PLAYER_TAKES[c].label}</strong> — {PLAYER_TAKES[c].when}</li>)}
-      </ul>
 
       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
         {SIM_YEARS.map((y) => <button key={y} onClick={() => { setYear(y); setOpenId(null); setShown(40); unfocus(); }} style={smallBtn(year === y)}>{y}</button>)}
@@ -641,45 +647,44 @@ function PlayerTakesEditor({ onFocusLine }) {
                 <button onClick={() => { setOpenId(isOpen ? null : p.id); unfocus(); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", border: "none", background: isOpen ? "#f7f9fc" : "#fff", cursor: "pointer", textAlign: "left" }}>
                   <span style={{ width: "34px", textAlign: "right", color: "#999", fontSize: "12px", fontWeight: 800 }}>#{p.rank}</span>
                   <span style={{ flex: 1, minWidth: 0, fontSize: "13px" }}><strong>{p.First} {p.Last}</strong> <span style={{ color: "#777" }}>{p.Position} · {p.School}</span></span>
-                  <span style={{ display: "flex", gap: "4px" }}>
-                    {TAKE_CATS.map((c) => {
-                      const k = (t[c] || []).filter((l) => l.trim()).length;
-                      return <span key={c} title={PLAYER_TAKES[c].label} style={{ fontSize: "10px", fontWeight: 900, padding: "1px 6px", borderRadius: "999px", background: k ? "#e8f5e9" : "#f1f4f8", color: k ? "#2e7d32" : "#aab4c3" }}>{PLAYER_TAKES[c].label.split(" ")[0]} {k || ""}</span>;
-                    })}
-                  </span>
+                  {n > 0 && <span style={{ fontSize: "10px", fontWeight: 900, padding: "1px 6px", borderRadius: "999px", background: "#e8f5e9", color: "#2e7d32" }}>{n} line{n === 1 ? "" : "s"}</span>}
                   <span style={{ fontWeight: 900, color: n ? "#2e7d32" : "#aab4c3", fontSize: "12px", width: "16px" }}>{n ? "✓" : ""}</span>
                 </button>
-                {isOpen && (
-                  <div style={{ padding: "4px 12px 12px 54px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {TAKE_CATS.map((c) => {
-                      const list = t[c] || [];
-                      return (
-                        <div key={c}>
-                          <div style={{ fontWeight: 900, fontSize: "12px", color: "#1a1f2b" }}>{PLAYER_TAKES[c].label} <span style={{ fontWeight: 400, color: "#888" }}>— {PLAYER_TAKES[c].when}</span></div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginTop: "5px" }}>
-                            {list.map((l, i) => {
-                              const bad = unknownVars(l);
-                              return (
-                                <div key={i}>
-                                  <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
-                                    <textarea value={l} rows={Math.max(2, Math.ceil(l.length / 110))} autoFocus={!l && i === list.length - 1}
-                                      onFocus={(e) => onFocusLine({ el: e.target, edit: (fn) => change(p.id, c, (ls) => ls.map((x, k) => (k === i ? fn(x) : x))) }, `Kenneth Cold · ${p.First} ${p.Last} · ${PLAYER_TAKES[c].label} · line ${i + 1}`)}
-                                      onChange={(e) => change(p.id, c, (ls) => ls.map((x, k) => (k === i ? e.target.value : x)))}
-                                      style={{ flex: 1, minWidth: 0, border: `1px solid ${bad.length ? "#e4a11b" : "#d8dee8"}`, borderRadius: "6px", padding: "6px 8px", fontSize: "13px", fontFamily: "Arial, sans-serif", lineHeight: 1.45, resize: "vertical" }} />
-                                    <button onClick={() => { unfocus(); change(p.id, c, (ls) => ls.filter((_, k) => k !== i)); }} title="Remove line" style={{ border: "none", background: "none", color: "#b42318", fontSize: "18px", fontWeight: 900, cursor: "pointer", padding: "2px 6px" }}>×</button>
-                                  </div>
-                                  {/\{[\w ]+\}/.test(l) && <div style={{ fontSize: "12px", color: "#555", marginTop: "2px" }}><Line text={l} /></div>}
-                                  {bad.length > 0 && <div style={{ fontSize: "11px", color: "#a06200", fontWeight: 800, marginTop: "2px" }}>Unknown: {bad.map((v) => `{${v}}`).join(" ")} — shows blank</div>}
-                                </div>
-                              );
-                            })}
-                            <button onClick={() => change(p.id, c, (ls) => [...ls, ""])} style={{ alignSelf: "flex-start", border: `1px dashed ${BLUE}`, background: "#fff", color: BLUE, borderRadius: "6px", padding: "3px 9px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>+ Add {PLAYER_TAKES[c].label.toLowerCase()} line</button>
+                {isOpen && (() => {
+                  const list = linesOf(t);
+                  const set = (i, patch) => change(p.id, (ls) => ls.map((x, k) => (k === i ? withLine(x, patch) : x)));
+                  const flag = { display: "flex", alignItems: "center", gap: "3px", fontSize: "11px", fontWeight: 800, whiteSpace: "nowrap", paddingTop: "6px", cursor: "pointer" };
+                  return (
+                    <div style={{ padding: "4px 12px 12px 54px", display: "flex", flexDirection: "column", gap: "5px" }}>
+                      {list.map((line, i) => {
+                        const l = lineText(line);
+                        const bad = unknownVars(l);
+                        return (
+                          <div key={i}>
+                            <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
+                              <textarea value={l} rows={Math.max(2, Math.ceil(l.length / 110))} autoFocus={!l && i === list.length - 1}
+                                onFocus={(e) => onFocusLine({ el: e.target, edit: (fn) => change(p.id, (ls) => ls.map((x, k) => (k === i ? withLine(x, { text: fn(lineText(x)) }) : x))) }, `Kenneth Cold · ${p.First} ${p.Last} · line ${i + 1}`)}
+                                onChange={(e) => set(i, { text: e.target.value })}
+                                style={{ flex: 1, minWidth: 0, border: `1px solid ${bad.length ? "#e4a11b" : "#d8dee8"}`, borderRadius: "6px", padding: "6px 8px", fontSize: "13px", fontFamily: "Arial, sans-serif", lineHeight: 1.45, resize: "vertical", opacity: line.noSim && !line.mock ? 0.6 : 1 }} />
+                              <label title="Sim: Kenneth may say this on the Draft Sim's desk (uncheck to keep it off)" style={{ ...flag, color: line.noSim ? "#888" : "#2e7d32" }}>
+                                <input type="checkbox" checked={!line.noSim} onChange={(e) => set(i, { noSim: !e.target.checked })} />
+                                Sim
+                              </label>
+                              <label title="Mock eligible: the Weekly Mock's pick notes may use this line too" style={{ ...flag, color: line.mock ? "#2e7d32" : "#888" }}>
+                                <input type="checkbox" checked={!!line.mock} onChange={(e) => set(i, { mock: e.target.checked })} />
+                                Mock
+                              </label>
+                              <button onClick={() => { unfocus(); change(p.id, (ls) => ls.filter((_, k) => k !== i)); }} title="Remove line" style={{ border: "none", background: "none", color: "#b42318", fontSize: "18px", fontWeight: 900, cursor: "pointer", padding: "2px 6px" }}>×</button>
+                            </div>
+                            {/\{[\w ]+\}/.test(l) && <div style={{ fontSize: "12px", color: "#555", marginTop: "2px" }}><Line text={l} /></div>}
+                            {bad.length > 0 && <div style={{ fontSize: "11px", color: "#a06200", fontWeight: 800, marginTop: "2px" }}>Unknown: {bad.map((v) => `{${v}}`).join(" ")} — shows blank</div>}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                      <button onClick={() => change(p.id, (ls) => [...ls, ""])} style={{ alignSelf: "flex-start", border: `1px dashed ${BLUE}`, background: "#fff", color: BLUE, borderRadius: "6px", padding: "3px 9px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>+ Add line</button>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}

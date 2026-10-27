@@ -322,7 +322,10 @@ export default function Navbar() {
         .mobile-nav-link:active { background: #f0f5ff; }
       `}</style>
 
+      {/* wd-navbar-wrap: the Draft Sim slides this away on phones while a
+          draft's on, with an arrow to bring it back (DraftSim.jsx). */}
       <div
+        className="wd-navbar-wrap"
         style={{
           position: "fixed",
           top: 0,

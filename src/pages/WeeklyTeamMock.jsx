@@ -4,9 +4,14 @@
 // Weekly Mock (utils/draftSim/weeklyMock.js; published from Admin → Mock
 // Draft → Weekly Mock). Each pick shows, underneath, what the same pick —
 // its original team and round, since the number moves with the order —
-// was in the week before, with last week's number. Then the trades the team
-// made. The header reads like an article's (MockDraftKit's ArticleHero), with the sim under it
-// for anyone who'd draft it differently; the left rail (phones: the bottom)
+// was in the week before, with last week's number. Each trade the team
+// made is a graphic in draft order, where it happened (TradeCard) — at the
+// pick that changed hands, even one it traded away and never made, with
+// who went there — so the page tells the story. The sim comes after its
+// first round for anyone who'd draft it differently, then a trade recap
+// (one card: every pick it got, then every pick it gave up) and "What
+// changed this week?". The header reads like an article's (MockDraftKit's
+// ArticleHero); the left rail (phones: the bottom)
 // goes to every other team's page. Each pick is the mock card without the
 // team name — the player's college logo instead, and a View more link to
 // his page. Each class with a Weekly Mock has its own page — 2027's at
@@ -25,14 +30,14 @@ import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { teamWeek, teamChanges } from "../utils/draftSim/weeklyMock";
 import {
-  weeklyMockDate, weeklyMockHref, weeklyYearHref, loadWeeklyMockSummary, carriedTradeOf, carriedTradeText, WEEKLY_YEARS, MAIN_WEEKLY_YEAR,
+  weeklyMockDate, weeklyMockHref, weeklyYearHref, loadWeeklyMockSummary, WEEKLY_YEARS, MAIN_WEEKLY_YEAR,
 } from "../utils/weeklyMockNews";
 import { WEEKLY_ROUNDS_BY_YEAR } from "../utils/draftSim/weeklyMock";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
 import { PickRow } from "./ViewMock";
 import {
-  BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner,
+  BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner, TradeCard, tradeChip,
   Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch,
 } from "../components/MockDraftKit";
 
@@ -142,8 +147,6 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
   const nextClass = year !== MAIN_WEEKLY_YEAR;
   const { picks, trades } = teamWeek(latest, previous, team);
   const changes = latest ? teamChanges(latest, previous, team) : null;
-  // "2027 Round 1 (No. 9)", "2028 Round 2", with the original team when it isn't either side's own.
-  const pickText = (p, side) => `${p.year} Round ${p.round}${p.overall ? ` (No. ${p.overall})` : ""}${p.original !== side ? ` — originally the ${nick(p.original)}'` : ""}`;
   const rounds = [...new Set(picks.map((p) => p.round))];
   // The H1 — "Miami Dolphins 7-Round Mock Draft 2027" (also the In The News
   // title, utils/weeklyMockNews.js) — the <title>, the meta description,
@@ -175,10 +178,82 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
     <WeeklyYearSwitch years={switchYears} current={year} hrefOf={(y) => weeklyMockHref(team, y)} ink={heroTeam.ink} bg={c1} isMobile={isMobile} />
   );
   // This class's picks a trade in the main class's mock moved — the team's
-  // own (got) and the ones it sent away (gave): [{ round, original, from, to }].
+  // own and the ones it sent away: [{ round, original, from, to }].
   const carried = latest?.carriedTrades || [];
-  const carriedGot = carried.filter((c) => c.to === team);
-  const carriedGave = carried.filter((c) => c.from === team);
+  // Every trade the team made, as a card in draft order where it happened —
+  // the pick that changed hands (TradeCard): { at, round, card }. A trade
+  // up or down is at the pick moved up to; a trade of this class's pick in
+  // the main class's mock (carried) at that pick, sent here or away. Who
+  // went there tells the rest when the team didn't make the pick.
+  const brandOf = (abbr) => teams?.[abbr] || {};
+  const pickAt = (n) => (latest?.picks || []).find((p) => p.overall === n) || null;
+  const takenBy = (p, by) => (p?.player && p.owner === by ? `, who take ${p.player.First} ${p.player.Last}` : "");
+  const tradeCards = [];
+  trades.forEach((t, i) => {
+    const at = pickAt(t.at);
+    const title = !t.at ? `The ${nick(team)} trade with the ${nick(t.with)}`
+      : t.up ? `The ${nick(team)} move up to No. ${t.at} with the ${nick(t.with)}`
+      : `The ${nick(team)} trade No. ${t.at} to the ${nick(t.with)}${takenBy(at, t.with)}`;
+    tradeCards.push({ at: t.at, round: at?.round ?? null, card: (
+      <TradeCard key={`t${i}`} isMobile={isMobile} title={title} sides={[
+        { team, brand, picks: t.got.map((p) => tradeChip(p, t.with)) },
+        { team: t.with, brand: brandOf(t.with), picks: t.gave.map((p) => tradeChip(p, team)) },
+      ]} />
+    ) });
+  });
+  carried.filter((c) => c.to === team || c.from === team).forEach((c, i) => {
+    const at = (latest?.picks || []).find((p) => p.round === c.round && p.original === c.original) || null;
+    const got = c.to === team;
+    const n = at ? `No. ${at.overall}` : `their ${year} Round ${c.round} pick`;
+    const title = got
+      ? `The ${nick(team)} got ${n} from the ${nick(c.from)} in our ${MAIN_WEEKLY_YEAR} mock draft`
+      : `The ${nick(team)} traded ${n} to the ${nick(c.to)} in our ${MAIN_WEEKLY_YEAR} mock draft${takenBy(at, c.to)}`;
+    const chip = tradeChip({ year, round: c.round, original: c.original, overall: at?.overall ?? null }, c.from);
+    tradeCards.push({ at: at?.overall ?? null, round: at?.round ?? c.round, card: (
+      <TradeCard key={`c${i}`} isMobile={isMobile} title={title} sides={got ? [
+        { team, brand, picks: [chip] },
+        { team: c.from, brand: brandOf(c.from), note: `Traded in our ${MAIN_WEEKLY_YEAR} mock` },
+      ] : [
+        { team, brand, note: `Traded in our ${MAIN_WEEKLY_YEAR} mock` },
+        { team: c.to, brand: brandOf(c.to), picks: [chip] },
+      ]} />
+    ) });
+  });
+  // Each round's picks and trades, in draft order (a trade just before the
+  // pick it's at). The team's side is always first: what it got.
+  const placed = tradeCards.filter((t) => t.at && t.round);
+  // The recap: one card, every pick the team got across its trades and
+  // every pick it gave up — one it got and traded on again (No. 23 in, then
+  // out) nets out, and the footer says so.
+  const recap = (() => {
+    const got = [];
+    const gave = [];
+    trades.forEach((t) => { got.push(...t.got); gave.push(...t.gave); });
+    carried.forEach((c) => {
+      if (c.to !== team && c.from !== team) return;
+      const at = (latest?.picks || []).find((p) => p.round === c.round && p.original === c.original);
+      (c.to === team ? got : gave).push({ year, round: c.round, original: c.original, overall: at?.overall ?? null });
+    });
+    if (!got.length && !gave.length) return null;
+    const key = (p) => `${p.year}-${p.round}-${p.original}-${p.overall ?? ""}`;
+    const gaveKeys = new Set(gave.map(key));
+    const flipped = got.filter((p) => gaveKeys.has(key(p)));
+    const flippedKeys = new Set(flipped.map(key));
+    const order = (a, b) => Number(a.year) - Number(b.year) || (a.overall ?? 1e4 + a.round) - (b.overall ?? 1e4 + b.round);
+    const net = (list) => list.filter((p) => !flippedKeys.has(key(p))).sort(order).map((p) => tradeChip(p, team));
+    const deals = trades.length + carried.filter((c) => c.to === team || c.from === team).length;
+    return (
+      <TradeCard isMobile={isMobile} tag="TRADE RECAP" title={`The ${nick(team)} made ${deals} trade${deals === 1 ? "" : "s"}`}
+        footer={flipped.length ? `${flipped.map((p) => tradeChip(p).main).join(", ")} came in and went back out in another trade.` : ""}
+        sides={[{ team, brand, picks: net(got), heading: "RECEIVED", note: "No picks" }, { team, brand, picks: net(gave), heading: "GAVE UP", note: "No picks" }]} />
+    );
+  })();
+  const shownRounds = [...new Set([...rounds, ...placed.map((t) => t.round)])].sort((a, b) => a - b);
+  const roundItems = (r) => [
+    ...picks.filter((p) => p.round === r).map((p) => ({ n: p.overall, pick: p })),
+    ...placed.filter((t) => t.round === r).map((t) => ({ n: t.at - 0.5, card: t.card })),
+  ].sort((a, b) => a.n - b.n);
+  const banner = <MakeYourOwnBanner team={team} year={year} teamName={teamName} nick={nick(team)} c1={heroTeam.c1} c2={heroTeam.c2} ink={heroTeam.ink} isMobile={isMobile} margin="18px 0 4px" />;
   // The edition's publish time, machine-readable (ISO 8601, UTC) and as shown.
   const publishedIso = latest?.publishedAt?.toDate?.()?.toISOString() || "";
   const updated = weeklyMockDate(latest?.publishedAt);
@@ -222,9 +297,6 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
           headline={headline} dek={intro} date={updated ? <time dateTime={publishedIso}>Updated {updated}</time> : ""}
           byline={latest && <WeeklyByline />} actions={switcher} />
 
-        {/* The sim, as this team and class, for anyone who'd draft it differently. */}
-        <MakeYourOwnBanner team={team} year={year} teamName={teamName} nick={nick(team)} c1={heroTeam.c1} c2={heroTeam.c2} ink={heroTeam.ink} isMobile={isMobile} />
-
         {!latest ? (
           <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: 24, textAlign: "center", fontFamily: BODY_FONT, color: "#2a313d" }}>
             The first {year} weekly mock draft isn&apos;t out yet. <Link to="/mocks" style={{ color: BLUE, fontWeight: 800 }}>See all mock drafts →</Link>
@@ -236,51 +308,29 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                 The {nick(team)} don&apos;t make a pick in this week&apos;s mock.
               </div>
             )}
-            {changes && <WhatChanged changes={changes} isMobile={isMobile} />}
-            {rounds.map((r) => (
+            {!shownRounds.length && banner}
+            {shownRounds.map((r, ri) => (
               <Fragment key={r}>
-                <h2 style={{ fontSize: 11, fontWeight: 900, color: "#7a8597", letterSpacing: "0.14em", textTransform: "uppercase", margin: "14px 0 8px" }}>Round {r}</h2>
+                {/* Phones: a bigger heading on a bar of the team's color. */}
+                <h2 style={isMobile
+                  ? { display: "flex", alignItems: "center", gap: 10, fontFamily: "'Arial Black', Arial, sans-serif", fontSize: 18, color: "#1a1f2b", letterSpacing: "0.06em", textTransform: "uppercase", margin: "20px 0 10px" }
+                  : { fontSize: 11, fontWeight: 900, color: "#7a8597", letterSpacing: "0.14em", textTransform: "uppercase", margin: "14px 0 8px" }}>
+                  {isMobile && <span aria-hidden="true" style={{ width: 6, height: 22, borderRadius: 3, background: c1 }} />}
+                  Round {r}
+                  {isMobile && <span aria-hidden="true" style={{ flex: 1, height: 2, background: `linear-gradient(90deg, ${c1}, transparent)`, opacity: 0.5 }} />}
+                </h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {picks.filter((p) => p.round === r).map((p) => (
-                    <PickRow key={p.slot} isMobile={isMobile} brand={brand} sub={subOf(p)} teamPage collegeLogo={p.player?.logo || logos[p.player?.id] || ""}
-                      tradeNote={carriedTradeText(carriedTradeOf(carried, p), nick)}
-                      pick={{ pickNumber: p.overall, round: p.round, currentTeam: p.owner, tradedFrom: p.original !== p.owner ? p.original : null, selection: p.player, note: p.note || "" }} />
-                  ))}
+                  {roundItems(r).map((it) => (it.card ? <Fragment key={`trade-${it.n}`}>{it.card}</Fragment> : (
+                    <PickRow key={it.pick.slot} isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={it.pick.player?.logo || logos[it.pick.player?.id] || ""}
+                      pick={{ pickNumber: it.pick.overall, round: it.pick.round, currentTeam: it.pick.owner, tradedFrom: it.pick.original !== it.pick.owner ? it.pick.original : null, selection: it.pick.player, note: it.pick.note || "" }} />
+                  )))}
                 </div>
+                {/* The sim, as this team and class, after its first round of picks. */}
+                {ri === 0 && banner}
               </Fragment>
             ))}
-            {/* This class's picks the main class's mock traded, to the team and away. */}
-            {(carriedGot.length > 0 || carriedGave.length > 0) && (
-              <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: isMobile ? "12px 14px" : "16px 20px", marginTop: 18, fontFamily: BODY_FONT, fontSize: 14, color: "#2a313d", lineHeight: 1.55 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, color: "#7a8597", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
-                  {year} picks traded in our {MAIN_WEEKLY_YEAR} mock draft
-                </div>
-                {carriedGot.map((c, i) => (
-                  <div key={`got-${i}`} style={{ marginTop: i ? 6 : 0 }}>
-                    Got {c.original === c.from ? "their" : `the ${nick(c.original)}'`} {year} Round {c.round} pick from the {nick(c.from)}.
-                  </div>
-                ))}
-                {carriedGave.map((c, i) => (
-                  <div key={`gave-${i}`} style={{ marginTop: i || carriedGot.length ? 6 : 0 }}>
-                    Sent {c.original === team ? "their own" : `the ${nick(c.original)}'`} {year} Round {c.round} pick to the {nick(c.to)}.
-                  </div>
-                ))}
-              </div>
-            )}
-            {/* The deals this team made — just the picks that changed hands. */}
-            {trades.length > 0 && (
-              <div style={{ background: "#fff", borderRadius: 14, boxShadow: CARD_SHADOW, padding: isMobile ? "12px 14px" : "16px 20px", marginTop: 18, fontFamily: BODY_FONT, fontSize: 14, color: "#2a313d", lineHeight: 1.55 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, color: "#7a8597", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 6 }}>
-                  Trade{trades.length === 1 ? "" : "s"}
-                </div>
-                {trades.map((t, i) => (
-                  <div key={i} style={{ marginTop: i ? 10 : 0 }}>
-                    <strong>{t.at ? `${t.up ? "Traded up to" : "Traded down from"} No. ${t.at}` : "Trade"} with the {nick(t.with)}.</strong>
-                    {" "}Got {t.got.map((p) => pickText(p, t.with)).join(", ")}; sent {t.gave.map((p) => pickText(p, team)).join(", ")}.
-                  </div>
-                ))}
-              </div>
-            )}
+            {recap && <div style={{ marginTop: 18 }}>{recap}</div>}
+            {changes && <div style={{ marginTop: 18 }}><WhatChanged changes={changes} isMobile={isMobile} /></div>}
           </>
         )}
         {/* Phones have no side rail: every team's mock, at the bottom. */}
