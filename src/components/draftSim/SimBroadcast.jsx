@@ -4,14 +4,15 @@
 // (LIVE, round/pick, speed controls), the stage (team on the clock → "the
 // pick is in" → the pick card), the user's war room when they're up (best
 // available + trade offers), the board / best available / my picks tabs,
-// the analyst feed (SimFeed.jsx) and a bottom-line ticker of recent picks.
+// and the analyst feed (SimFeed.jsx).
 // The console under the stage: Draft, Draft Board, Suggestions (three
 // picks, each with a word from the front office), My Picks, Roster (the
 // user's team first) and Trades.
-// Phones: one anchored screen (DraftSim.jsx pins it to the viewport) — the
-// stage, with Up Next as a slim strip of team abbreviations along its
-// bottom, never moves; under it the controls, then the console, whose tab
-// bar stays put while only the tab's own content scrolls.
+// One anchored screen on every device (DraftSim.jsx sizes it to the
+// window): the stage and everything around it never move — only the
+// console's tab content scrolls. Phones: Up Next is a slim strip of team
+// abbreviations along the stage's bottom, the controls sit right above
+// the console. Desktop: the bar on top, the desk down the right side.
 // State comes from useDraftSim.js.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -49,7 +50,6 @@ export const SIM_CSS = `
   @keyframes wdSimPulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
   @keyframes wdSimClock { from { transform: scaleX(0); } to { transform: scaleX(1); } }
   @keyframes wdSimFade { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes wdSimTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   .wd-sim-live-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff3b3b; animation: wdSimPulse 3s ease-in-out infinite; display: inline-block; flex-shrink: 0; }
   .wd-sim-post { animation: wdSimFade .8s ease both; }
   .wd-sim-in { animation: wdSimFade .9s ease both; }
@@ -73,7 +73,7 @@ export const SIM_CSS = `
   .wd-sim-scroll::-webkit-scrollbar-thumb { background: linear-gradient(#f6a21d, #0055a5); border-radius: 999px; border: 2px solid #0b1322; }
   .wd-sim-scroll::-webkit-scrollbar-thumb:hover { background: #f6a21d; }
   @media (prefers-reduced-motion: reduce) {
-    .wd-sim-live-dot, .wd-sim-post, .wd-sim-in, .wd-sim-ticker-track, .wd-sim-flip, .wd-sim-cardflip, .wd-sim-envelope, .wd-sim-cardglow { animation: none !important; }
+    .wd-sim-live-dot, .wd-sim-post, .wd-sim-in, .wd-sim-flip, .wd-sim-cardflip, .wd-sim-envelope, .wd-sim-cardglow { animation: none !important; }
     .wd-sim-sweep { display: none; }
   }
 `;
@@ -1577,7 +1577,7 @@ function Tabs({ tabs, active, onChange }) {
   );
 }
 
-function Console({ s, data, isMobile }) {
+function Console({ s, data, isMobile, fill = false }) {
   const [tab, setTab] = useState(isMobile ? "desk" : "draft");
   // Simming: watch the picks fill in. On the clock: the board, to draft.
   useEffect(() => {
@@ -1602,12 +1602,12 @@ function Console({ s, data, isMobile }) {
     roster: <RosterTab s={s} data={data} isMobile={isMobile} />,
     trades: <TradesTab s={s} data={data} isMobile={isMobile} />,
   }[tab];
-  // Mobile: the console fills the rest of the screen under the stage — the
-  // tab bar stays put and only the tab's content scrolls (from the top
-  // again on each tab).
-  if (isMobile) {
+  // Mobile (and the anchored desktop screen, fill): the console fills the
+  // rest of the screen under the stage — the tab bar stays put and only the
+  // tab's content scrolls (from the top again on each tab).
+  if (isMobile || fill) {
     return (
-      <div style={{ ...PANEL, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ ...PANEL, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", ...(isMobile ? {} : { marginTop: 12 }) }}>
         <Tabs tabs={tabs} active={tab} onChange={setTab} />
         <div key={tab} className="wd-sim-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>{body}</div>
       </div>
@@ -1621,32 +1621,9 @@ function Console({ s, data, isMobile }) {
   );
 }
 
-// ── The picks ticker — a full-width strip across the top of the sim
-// (DraftSim.jsx renders it right under the navbar). ──
-export function SimTicker({ s, data }) {
-  const made = s.sim.picks.filter((p) => p.selection).slice(-12).reverse();
-  const items = made.map((p) => {
-    const pl = s.sim.byId[p.selection];
-    return `${p.overall}. ${(brandOf(data, p.owner).Team || p.owner).toUpperCase()} — ${pl.First} ${pl.Last}, ${pl.Position}, ${pl.School}`;
-  });
-  const up = currentPick(s.sim);
-  const line = items.length
-    ? items.join("     ◆     ")
-    : `THE ${data.year} NFL DRAFT SIM IS UNDERWAY${up ? `     ◆     ${(brandOf(data, up.owner).Team || up.owner).toUpperCase()} ON THE CLOCK` : ""}`;
-  return (
-    <div style={{ display: "flex", alignItems: "stretch", overflow: "hidden", borderBottom: "1px solid #1f2b42", background: "#04080f" }}>
-      <span style={{ flexShrink: 0, background: GOLD, color: "#111", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em", padding: "8px 12px", display: "flex", alignItems: "center" }}>THE PICKS</span>
-      <div style={{ overflow: "hidden", flex: 1, display: "flex", alignItems: "center" }}>
-        <div className="wd-sim-ticker-track" style={{ display: "inline-flex", whiteSpace: "nowrap", animation: `wdSimTicker ${Math.max(70, items.length * 12)}s linear infinite`, color: "#dbe4f0", fontSize: 12, fontWeight: 800, fontFamily: BODY }}>
-          <span style={{ paddingRight: 60 }}>{line}</span>
-          <span style={{ paddingRight: 60 }} aria-hidden="true">{line}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam }) {
+// fill (desktop): the anchored screen — sized by its parent (DraftSim.jsx),
+// the console the only part that scrolls.
+export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam, fill = false }) {
   // Mobile: the anchored part — the stage, Up Next along its bottom — then
   // the controls and the console filling the rest of the screen (DraftSim.jsx
   // pins this to the viewport).
@@ -1656,6 +1633,21 @@ export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam
         <Stage s={s} data={data} isMobile onPickTeam={onPickTeam} strip={<UpNextStrip s={s} />} />
         <BroadcastBar s={s} data={data} isMobile onSettings={onSettings} />
         <Console s={s} data={data} isMobile />
+      </div>
+    );
+  }
+  if (fill) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        <BroadcastBar s={s} data={data} isMobile={false} onSettings={onSettings} />
+        <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 360px", gridTemplateRows: "minmax(0, 1fr)", gap: 12 }}>
+          <div style={{ minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <Stage s={s} data={data} isMobile={false} onPickTeam={onPickTeam} />
+            <UpNextBar s={s} data={data} isMobile={false} />
+            <Console s={s} data={data} isMobile={false} fill />
+          </div>
+          <SimFeed feed={s.feed} height="100%" isMobile={false} />
+        </div>
       </div>
     );
   }

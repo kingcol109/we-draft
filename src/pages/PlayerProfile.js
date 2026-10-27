@@ -4607,16 +4607,19 @@ useEffect(() => {
                 {hasAnyFits && (
                   <div className="px-3 py-3">
                     <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>NFL Fits</h3>
-                    {renderWdFits("40px", true)}
-                    {community.topFits.length === 0 ? null : fitLogos.length > 0 ? (
-                      <div className="flex flex-wrap justify-center gap-3">
-                        {fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"40px", height:"40px", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        {community.topFits.map((t,i) => <p key={i} className="text-xs font-bold text-gray-600 text-center">{t}</p>)}
-                      </div>
-                    )}
+                    {/* One row: the We-Draft.com fits, then the community's, big logos side by side. */}
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-evenly", flexWrap:"nowrap", gap:"8px" }}>
+                      {wdFitsShown.map(({ t }) => (
+                        <Link key={t} to={`/nfl/${t.toLowerCase()}`} title={`We-Draft.com fit: ${teamNameFromAbbr(t)}`} style={{ display:"flex", textDecoration:"none", minWidth:0 }}>
+                          {wdFitLogos[t]
+                            ? <img src={sanitizeUrl(wdFitLogos[t])} alt={teamNameFromAbbr(t)} style={{ width:"60px", height:"60px", maxWidth:"100%", objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" />
+                            : <span style={{ width:"60px", height:"60px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:"13px", fontWeight:900, color:"#9aa5b4" }}>{t}</span>}
+                        </Link>
+                      ))}
+                      {community.topFits.length === 0 ? null : fitLogos.length > 0
+                        ? fitLogos.map(({ teamName, logo }) => logo ? <img key={teamName} src={sanitizeUrl(logo)} alt={teamName} title={teamName} style={{ width:"60px", height:"60px", maxWidth:"100%", minWidth:0, objectFit:"contain" }} loading="lazy" referrerPolicy="no-referrer" onError={(e)=>{e.currentTarget.style.display="none";}} /> : null)
+                        : community.topFits.map((t,i) => <span key={i} className="text-xs font-bold text-gray-600 text-center">{t}</span>)}
+                    </div>
                   </div>
                 )}
                 {measurementsBlock && <div style={{ borderTop: "1px solid #e5e7eb" }}>{measurementsBlock}</div>}

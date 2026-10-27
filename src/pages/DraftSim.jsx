@@ -33,10 +33,11 @@ import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
-import SimBroadcast, { SIM_CSS, SimTicker, introHeadline } from "../components/draftSim/SimBroadcast";
+import SimBroadcast, { SIM_CSS, introHeadline } from "../components/draftSim/SimBroadcast";
 import SimResults from "../components/draftSim/SimResults";
 import SavedSims from "../components/draftSim/SavedSims";
 import MarginAds from "../components/MarginAds";
+import { cssRect, viewportCssHeight } from "../utils/pageZoom";
 
 const BODY = "Arial, sans-serif";
 const FONT = "'Arial Black', Arial, sans-serif";
@@ -367,16 +368,47 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
       </>
     );
   }
-  return (
-    <>
-      {!isMobile && <SimTicker s={s} data={data} />}
+  if (s.phase === "done") {
+    return (
       <Column wide isMobile={isMobile} contentRef={contentRef}>
-        {s.phase === "done"
-          ? <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} onUndo={mock && s.canUndo ? s.undo : undefined} />
-          : <SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} onPickTeam={onPickTeam} />}
+        <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} onUndo={mock && s.canUndo ? s.undo : undefined} />
       </Column>
-    </>
+    );
+  }
+  // Desktop, mid-draft: anchored too — the sim fills the window under the
+  // navbar and only its console scrolls (SimBroadcast fill).
+  return (
+    <Column wide isMobile={isMobile} contentRef={contentRef}>
+      <DesktopFill><SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} onPickTeam={onPickTeam} fill /></DesktopFill>
+    </Column>
   );
+}
+
+// The desktop sim's frame: from where it starts down to the window's
+// bottom edge (in CSS px — the page zoom, utils/pageZoom.js), re-measured
+// on resize. The page itself doesn't scroll meanwhile (wd-sim-lock), and
+// the footer is hidden.
+const FILL_BOTTOM_GAP = 14;
+function DesktopFill({ children }) {
+  const ref = useRef(null);
+  const [height, setHeight] = useState(null);
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+    const html = document.documentElement;
+    html.classList.add("wd-sim-lock");
+    document.body.classList.add("wd-sim-nofooter");
+    const read = () => {
+      if (ref.current) setHeight(Math.max(420, Math.floor(viewportCssHeight() - cssRect(ref.current).top - FILL_BOTTOM_GAP)));
+    };
+    read();
+    window.addEventListener("resize", read);
+    return () => {
+      window.removeEventListener("resize", read);
+      html.classList.remove("wd-sim-lock");
+      document.body.classList.remove("wd-sim-nofooter");
+    };
+  }, []);
+  return <div ref={ref} style={{ height: height ?? "calc(100vh / var(--pz, 1) - 120px)" }}>{children}</div>;
 }
 
 // The fixed navbar's height (it can change — the LIVE button, a font

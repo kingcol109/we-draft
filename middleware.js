@@ -35,16 +35,44 @@ function playerPageYear(pathname) {
   return y ? Number(y[1]) : null;
 }
 
+// Our own prerender cache (api/bot-render.js, policy in
+// api/_botCachePolicy.js) answers first: it serves its stored copy, or
+// renders through Prerender.io on its own schedule for the page types it
+// handles. Only a response marked x-bot-cache is used — a type it doesn't
+// handle (bypass), or any failure at all, falls back to asking Prerender.io
+// directly, exactly as before.
+const BOT_CACHE_ANSWERS = ['hit', 'miss', 'stale', 'pass'];
+async function fromBotCache(req) {
+  try {
+    const r = await fetch(new URL(`/api/bot-render?url=${encodeURIComponent(req.url)}`, req.url), {
+      headers: { 'x-bot-cache-key': process.env.PRERENDER_TOKEN || '' },
+      cache: 'no-store',
+    });
+    if (!BOT_CACHE_ANSWERS.includes(r.headers.get('x-bot-cache'))) return null;
+    const headers = { 'content-type': 'text/html', 'x-bot-cache': r.headers.get('x-bot-cache') };
+    const location = r.headers.get('location');
+    if (location) headers.location = location;
+    return new Response(await r.text(), { status: r.status, headers });
+  } catch {
+    return null;
+  }
+}
+
 export default async function middleware(req) {
   const ua = req.headers.get('user-agent')?.toLowerCase() || '';
   const isSearchBot = SEARCH_BOTS.some((bot) => ua.includes(bot));
   const isSocialBot = SOCIAL_BOTS.some((bot) => ua.includes(bot));
   if (!isSearchBot && !isSocialBot) return;
+  const { pathname } = new URL(req.url);
+  if (pathname.startsWith('/api/')) return;
 
   if (isSearchBot && !isSocialBot) {
-    const year = playerPageYear(new URL(req.url).pathname);
+    const year = playerPageYear(pathname);
     if (year != null && year < FIRST_PROSPECT_YEAR) return; // past class: serve the normal app
   }
+
+  const cached = await fromBotCache(req);
+  if (cached) return cached;
 
   const targetUrl = `https://service.prerender.io/${req.url}`;
   const prerenderRes = await fetch(targetUrl, {

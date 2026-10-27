@@ -72,7 +72,6 @@ export default function SimFeed({ feed, height, isMobile }) {
                 <span style={{ color: "#fff", fontWeight: 900, fontSize: 13 }}>{p.analyst.name}</span>
                 {p.analyst.verified && <Verified />}
                 <span style={{ color: "#6f7f99", fontSize: 12, fontFamily: "Arial, sans-serif" }}>{p.analyst.handle}</span>
-                {p.overall && <span style={{ color: "#6f7f99", fontSize: 12, fontFamily: "Arial, sans-serif" }}>· Pick {p.overall}</span>}
               </div>
               <div style={{ marginTop: 4, color: p.lines ? "#fff" : "#dbe4f0", fontSize: 13.5, fontWeight: p.lines ? 800 : 400, lineHeight: 1.5, fontFamily: "Arial, sans-serif", whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
                 {p.text}

@@ -1,7 +1,8 @@
 // src/components/draftSim/SimResults.jsx
 //
 // The end of a Draft Sim: the user's teams' report cards (engine teamHaul —
-// board value for the slot plus staff fit) with Isaac's take on each
+// value for the slot balanced against the needs answered, on one scale for
+// every team) with Isaac's take on each
 // grade, every team's grade, and the full draft round by round.
 //
 // No account is needed to play. From here the user can share (a branded
@@ -132,16 +133,19 @@ function ReportCard({ h, b, take, isMobile }) {
           </div>
         </div>
       )}
-      {/* The grade balances value and needs: which of the needs the team
-          came in with it met, and which it left open. */}
-      {(h.needs?.met.length > 0 || h.needs?.open.length > 0) && (
+      {/* The grade balances value and needs: the pressing needs the team
+          came in with (as many as it had picks) — met early, answered only
+          late (round 3 on), or left open. */}
+      {h.needs?.items?.length > 0 && (
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid #1f2b42", fontSize: 12, fontFamily: BODY }}>
           <span style={{ color: "#4ade80", fontWeight: 800 }}>Needs met: {h.needs.met.length ? h.needs.met.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ") : "none"}</span>
+          {h.needs.late.length > 0 && <span style={{ color: GOLD, fontWeight: 800 }}>Answered late: {h.needs.late.map((n) => `${NEED_KEY_NAMES[n.key] || n.key} (R${n.round})`).join(", ")}</span>}
           {h.needs.open.length > 0 && <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Still open: {h.needs.open.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ")}</span>}
         </div>
       )}
       {h.rows.length === 0 && <div style={{ padding: 16, color: "#8b9bb4", fontFamily: BODY, fontSize: 13 }}>No picks in this sim — they traded out.</div>}
-      <div style={{ display: "grid", gridTemplateColumns: isMobile || h.rows.length < 3 ? "1fr" : "1fr 1fr" }}>
+      {/* Two columns read down, like the rest of the sim: the first half of the picks on the left. */}
+      <div style={isMobile || h.rows.length < 3 ? { display: "grid" } : { display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: `repeat(${Math.ceil(h.rows.length / 2)}, auto)`, gridAutoFlow: "column" }}>
         {h.rows.map(({ pick, prospect, letter, need }) => (
           <div key={pick.overall} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", borderBottom: "1px solid #18233a", minWidth: 0 }}>
             <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.2 }}>R{pick.round}<br />No. {pick.overall}</span>

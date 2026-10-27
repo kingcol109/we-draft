@@ -7,7 +7,7 @@
 //                      pick with its We-Draft.com board rank and one more
 //                      fact — community traits, position rank, value or
 //                      reach, staff fit, position runs.
-//   Isaac Walker       the draft analyst (@IsaacWalker): opinions —
+//   Walter Donaldson   the draft analyst (@WalterDonaldson; id "isaac"): opinions —
 //                      reaches, value, fits, and the CFBD game that put a
 //                      player on his radar. A team that trades up gets one
 //                      take on the trade and the pick together, at the pick.
@@ -53,7 +53,7 @@
 // { text, minPick } instead of a string — only used from that overall pick
 // on (no "he'd been sitting there a few picks" at No. 1).
 import { gradeLabel } from "../communityGrades";
-import { pickName, SIM_POSITIONS, SPECIALISTS, needWord } from "./engine";
+import { pickName, SIM_POSITIONS, SPECIALISTS, needWord, MAJOR_NEED } from "./engine";
 
 // ── Desk chatter (personalities on CPU picks) ──
 export const CHATTER = [
@@ -83,6 +83,7 @@ export const VARIABLES = {
   to: "Team trading up", from: "Team trading down", toNick: "Nickname trading up", fromNick: "Nickname trading down", fromCity: "City trading down", got: "Picks the team trading down gets", pct: "Trade-chart %",
   fromGm: "GM trading down", fromHc: "Head coach trading down",
   best: "Best pick (results screen)", bestN: "Best pick's number (results screen)",
+  needRound: "Results screen: the round a pressing need was first answered (fourth)",
   prev: "Thad: the earlier player he's comparing to (Bo Nix)", prevYear: "Thad: that player's draft year", prevN: "Thad: his overall pick",
   club: "Thad: the school's (or team's) earlier first-rounders — or Day 2 picks — at the position (Bo Nix and Justin Herbert)", prevRound: "Thad: his round", prevNick: "Thad: the team that took him (Broncos)",
   recordSchool: "Thad: the school that last had that many (Alabama)", recordTimes: "Thad: how many that school, or that draft, had (6)",
@@ -105,7 +106,7 @@ export const VARIABLE_GROUPS = [
   ["Thad (history)", ["club", "prev","prevYear", "prevN", "prevRound", "prevNick", "firstYear", "times", "timesOrd", "recordSchool", "recordTimes", "seatName", "seatLast", "seatPoss", "seatTitle", "seatSince", "drafts", "mascot", "schoolPoss"]],
   ["Stats", ["value", "stat", "statTitle", "rankOrd", "YDS", "TD", "INT", "PCT", "ATT", "COMPLETIONS", "YPA", "CAR", "YPC", "REC", "YPR", "TOT", "TFL", "SACKS", "QB HUR", "PD"]],
   ["Trades", ["to", "from", "toNick", "fromNick", "fromCity", "got", "pct", "fromGm", "fromHc"]],
-  ["Results screen", ["best", "bestN"]],
+  ["Results screen", ["best", "bestN", "needRound"]],
 ];
 
 // A team's GM / head coach / coordinators: { gm, gmLast, hc, … } ("" when
@@ -296,7 +297,7 @@ export const PP_LINES = {
   },
 };
 
-// ── Isaac Walker: the flavor ──
+// ── Walter Donaldson (id "isaac"): the flavor ──
 export const ISAAC_LINES = {
   qbProtect: {
     label: "Protecting his QB", when: "An OL pick by a team that took a QB in round 1 of this sim. {qb} / {qbLast} are that quarterback.",
@@ -422,7 +423,7 @@ export const ISAAC_LINES = {
     ],
   },
   game: {
-    label: "The game that did it", when: "The player had a standout CFBD game this season (when Isaac chimes in on a non-headline pick).",
+    label: "The game that did it", when: "The player had a standout CFBD game this season (when Walter chimes in on a non-headline pick).",
     lines: [
       "{player} put himself on my radar when he had {gameLine} against {opp}.",
       "I keep coming back to the {opp} game — {gameLine}. That's the {last} the {nick} are drafting.",
@@ -604,8 +605,9 @@ export const MAKALI_LINES = {
   },
 };
 
-// Isaac's take on a user team's finished draft (the results screen),
-// by its grade. {grade} is the letter, {best} the best-graded pick.
+// Isaac's take on a user team's finished draft (the results screen): a
+// line by its grade ({grade} is the letter, {best} the best-graded pick),
+// then up to two on why — the grade*Fact lines (see gradeTakeFor).
 Object.assign(ISAAC_LINES, {
   gradeA: {
     label: "Draft grade: A range", when: "Results screen — the user's team graded A+, A or A-.",
@@ -627,17 +629,74 @@ Object.assign(ISAAC_LINES, {
   gradeC: {
     label: "Draft grade: C range", when: "Results screen — the user's team graded C+, C or C-.",
     lines: [
-      "{grade}. The {nick} reached more than I'd like. {best} helps, but there was value left on the table.",
-      "I'm giving the {nick} a {grade}. Some head-scratchers in there — I hope the staff knows something I don't.",
-      "Middle of the pack, a {grade}. The {nick} drafted for need over value and it shows.",
+      "{grade}. Some of this I like, some I'd want back — {best} at No. {bestN} is the keeper.",
+      "I'm giving the {nick} a {grade}. There's a plan in here somewhere; it just didn't all come together.",
+      "Middle of the pack, a {grade}. {best} helps, but this class leaves questions.",
     ],
   },
   gradeD: {
-    label: "Draft grade: D", when: "Results screen — the user's team graded D.",
+    label: "Draft grade: D range", when: "Results screen — the user's team graded D+, D or D-.",
     lines: [
-      "{grade}. Rough one. The {nick} reached early and often.",
+      "{grade}. Rough one for the {nick}.",
       "Oof. A {grade} for the {nick}. {best} is fine — the rest of this I'd rather not talk about.",
       "The {nick} get a {grade} from me. Somewhere a scout is quietly updating his résumé.",
+    ],
+  },
+  gradeF: {
+    label: "Draft grade: F", when: "Results screen — the user's team graded F or F-.",
+    lines: [
+      "{grade}. I don't know what the {nick} were doing, and I'm not sure they do either.",
+      "That's an {grade}. Not a draft so much as a dare.",
+      "{grade} for the {nick}. That war room needs a long, quiet weekend.",
+    ],
+  },
+  // Why — after the grade line, up to two of these, most important first.
+  gradeOffBoardFact: {
+    label: "Why: an off-the-board pick", when: "Results screen — a pick nowhere near the board ({player} at No. {n}); it grades F-.",
+    lines: [
+      "{player} at No. {n} wasn't on anybody's board, and that pick alone drags this class down.",
+      "Nobody had {player} anywhere near No. {n}. That one's going to follow the {nick} around.",
+      "Taking {player} at {n} is the kind of pick that gets a front office investigated.",
+    ],
+  },
+  gradeTwoQbFact: {
+    label: "Why: a second quarterback", when: "Results screen — a second QB in the same class ({player} at No. {n}; {qb} was the first).",
+    lines: [
+      "Two quarterbacks in one class? {player} at No. {n} is a hard sell with {qb} already in the building.",
+      "Doubling up at quarterback with {player} at {n} spends a pick the {nick} needed somewhere else.",
+      "{qb} was the quarterback. {player} at No. {n} is a second one this roster didn't need.",
+    ],
+  },
+  gradeValueNotNeedsFact: {
+    label: "Why: value, but needs left open", when: "Results screen — good value on the board, but its pressing needs went unanswered ({needPos}: the biggest).",
+    lines: [
+      "The {nick} drafted the board well, but {needPos} is still the hole it was coming in.",
+      "Plenty of value in this class. Problem is, nobody answered the {needPos} question.",
+      "Good players, just not where it mattered most — {needPos} never got addressed.",
+    ],
+  },
+  gradeHoleFact: {
+    label: "Why: a major need left open", when: "Results screen — a major need ({needPos}) with no pick at all.",
+    lines: [
+      "{needPos} was the biggest hole on the roster, and the {nick} left without touching it.",
+      "The {nick} never got to {needPos}, and that's going to be the story of this draft.",
+      "Not one pick at {needPos} — for a team that needed one that badly, that's tough to explain.",
+    ],
+  },
+  gradeLateNeedFact: {
+    label: "Why: a major need answered late", when: "Results screen — a major need ({needPos}) answered only in round 3 or later ({needRound}).",
+    lines: [
+      "{needPos} was a pressing need, and the {nick} waited until the {needRound} round to get to it.",
+      "A {needRound}-round pick is a band-aid for a {needPos} need this big.",
+      "The {nick} did address {needPos} — in the {needRound} round. For a need that pressing, that's late.",
+    ],
+  },
+  gradeNeedsMetFact: {
+    label: "Why: every need answered", when: "Results screen — every pressing need it was judged on, answered with an early pick.",
+    lines: [
+      "Every pressing need got an answer, and most of them early.",
+      "Box after box checked — the {nick} came in with holes and filled them.",
+      "This is how you attack a draft: the {nick} knew what they needed and went and got it.",
     ],
   },
 });
@@ -1099,6 +1158,15 @@ const blankVars = (text, vars) => (text.match(/\{([\w ]+)\}/g) || []).filter((v)
 // (memory.roundRule, set by reactTo) never one they've already posted this
 // round (memory.roundLines, by line text) — null when every line's been
 // used, and reactTo hands the post to someone else.
+// A stat count of exactly 1 reads singular: "1 pass defended", "1 sack".
+const SINGULAR = {
+  tackles: "tackle", sacks: "sack", interceptions: "interception", INTs: "INT", touchdowns: "touchdown", TDs: "TD", picks: "pick",
+  "passes defended": "pass defended", "pass breakups": "pass breakup", catches: "catch", grabs: "grab", receptions: "reception",
+  carries: "carry", scores: "score", stops: "stop", "QB hurries": "QB hurry", yards: "yard", "rushing yards": "rushing yard",
+};
+const SINGULAR_RE = new RegExp(`(^|[^\\d.,])1 (${Object.keys(SINGULAR).sort((a, b) => b.length - a.length).join("|")})\\b`, "g");
+export const singular = (text) => String(text).replace(SINGULAR_RE, (_, pre, word) => `${pre}1 ${SINGULAR[word]}`);
+
 function lineFrom(table, cat, vars, ctx, who) {
   const pool = table[cat]?.lines || [];
   // Lines usable at this pick (a { text, minPick } line waits for its pick),
@@ -1118,7 +1186,7 @@ function lineFrom(table, cat, vars, ctx, who) {
   const i = options[Math.floor(ctx.rand() * options.length)];
   memory[key] = [...recent, i].slice(-Math.max(1, pool.length - 1));
   if (used) used[usedKey(i)] = true;
-  return capitalize(fill(lineText(pool[i]), vars));
+  return capitalize(singular(fill(lineText(pool[i]), vars)));
 }
 
 // The staffer whose profile drives a fit: the highest of GM/HC/OC/DC.
@@ -1192,9 +1260,12 @@ export function statFacts(e, ctx) {
   const lines = p.stats?.lines || {};
   // A stat CFBD leaves out of a line is a zero (no INTs → no INT key).
   const ZERO = { passing: ["TD", "INT"], rushing: ["TD"], receiving: ["TD"], defensive: ["TFL", "SACKS", "QB HUR", "PD", "INT"] };
+  // CFBD keeps a defender's interceptions in their own group, not the
+  // defensive line — they're read from there.
   const line = (g) => ({
     ...Object.fromEntries((ZERO[g] || []).map((k) => [k, 0])),
     ...Object.fromEntries(Object.entries(lines[g] || {}).map(([k, v]) => [k, k === "PCT" ? fmt(v * 100) : fmt(v)])),
+    ...(g === "defensive" && lines.interceptions?.INT != null ? { INT: fmt(lines.interceptions.INT) } : {}),
   });
   if (p.Position === "QB" && (lines.passing?.ATT || 0) >= 50) add("passing", 1.4, line("passing"));
   else if (["QB", "RB"].includes(p.Position) && (lines.rushing?.CAR || 0) >= 30) add("rushing", 1.4, line("rushing"));
@@ -1680,8 +1751,8 @@ export const ANALYSTS = [
     react: (e, ctx) => (e.type === "pick" ? weDraftPick(e, ctx) : e.type === "trade" ? weDraftTrade(e, ctx) : null),
   },
   {
-    id: "isaac", name: "Isaac Walker", handle: "@IsaacWalker", role: "Draft Analyst", verified: true, enabled: true,
-    color: "#14a3a3", initials: "IW", delay: 1300, lines: ISAAC_LINES,
+    id: "isaac", name: "Walter Donaldson", handle: "@WalterDonaldson", role: "Draft Analyst", verified: true, enabled: true,
+    color: "#14a3a3", initials: "WD", delay: 1300, lines: ISAAC_LINES,
     about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades up, and your final grade.",
     cadence: "Most likely on a shock (10+ spots off the board in round 1, 25+ on Day 2) and the other headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, a team passing on a big need (more so the second time), and a team trading up — told with the pick.",
     weight: (e) => {
@@ -1706,7 +1777,7 @@ export const ANALYSTS = [
     react: (e, ctx) => (e.type === "pick" ? kennethPick(e, ctx) : null),
   },
   {
-    id: "pp", name: "Dr. PP Johnson", handle: "@DrPPJohnson", role: "Stats", verified: true, enabled: true,
+    id: "pp", name: "Dr. PP Johnson", handle: "@DrPPJohnson", role: "Stats", verified: false, enabled: true,
     color: "#2e9e5b", initials: "PJ", delay: 1300, lines: PP_LINES,
     about: "The stat guy. Reads out the drafted player's CFBD numbers — his season line and where he ranks nationally.",
     cadence: "Picks with a real stat line this season; most likely when the player ranks nationally. Not a pick a team traded up for, or a shock (his stat lines don't tell either).",
@@ -1719,7 +1790,7 @@ export const ANALYSTS = [
     react: (e, ctx) => (e.type === "pick" ? ppPick(e, ctx) : null),
   },
   {
-    id: "makali", name: "Makali Pennycooke", handle: "@timeoutwithmakalipod", role: "Optimist", verified: true, enabled: true,
+    id: "makali", name: "Makali Pennycooke", handle: "@timeoutwithmakalipod", role: "Optimist", verified: false, enabled: true,
     color: "#cc0033", initials: "MP", delay: 1300, lines: MAKALI_LINES, noRepeat: true,
     about: "Loves every pick and thinks every player is going to be great — Rutgers players and Eagles picks most of all.",
     cadence: "Any pick, a team trading up told with the pick; almost always on Rutgers players and Eagles picks.",
@@ -1744,7 +1815,7 @@ export const ANALYSTS = [
     react: (e, ctx) => (e.type === "pick" ? davinPick(e, ctx) : null),
   },
   {
-    id: "thad", name: "Thad Murphy", handle: "@ThadMurphy", role: "Draft Historian", verified: true, enabled: true,
+    id: "thad", name: "Thad Murphy", handle: "@ThadMurphy", role: "Draft Historian", verified: false, enabled: true,
     color: "#a0662b", initials: "TM", delay: 1300, lines: THAD_LINES, noRepeat: true,
     about: "The history books — every NFL pick since 2000 plus this sim's: first-round droughts for a school or team at a position, the last player a team took from that school, the highest one's gone in years, a school's run of first-rounders tonight, the most at a position in a first round in years, the GM's and head coach's record since taking the job, and alma-mater picks. Day 2 (rounds two and three) gets its own version of the first-round facts.",
     cadence: "Picks with real history behind them; most likely on a first or a long drought. Never on trades or a shock (10+ spots off the board in round 1 after No. 1, 25+ on Day 2).",
@@ -1852,6 +1923,35 @@ function davinSuggestionFor(team, ctx) {
 export function gradeTake(haul, ctx) {
   return guarded("grade take", () => gradeTakeFor(haul, ctx));
 }
+// The why, most important first: an off-the-board pick, a second QB,
+// good value with the needs left open, a major need with no pick, one
+// answered only late, or every need answered.
+const ROUND_WORDS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh"];
+const STRONG_VALUE = 0.5;
+function gradeFacts(haul) {
+  const facts = [];
+  const name = (r) => ({ player: `${r.prospect.First} ${r.prospect.Last}`, n: r.pick.overall });
+  const off = haul.rows.find((r) => r.offBoard);
+  if (off) facts.push(["gradeOffBoardFact", name(off)]);
+  const qb2 = haul.rows.find((r) => r.secondQb);
+  if (qb2) {
+    const qb1 = haul.rows.find((r) => r.prospect.Position === "QB");
+    facts.push(["gradeTwoQbFact", { ...name(qb2), qb: `${qb1.prospect.First} ${qb1.prospect.Last}` }]);
+  }
+  const needs = haul.needs || { items: [], open: [], late: [] };
+  const major = (list) => list.filter((n) => n.severity >= MAJOR_NEED).sort((x, y) => y.severity - x.severity);
+  const open = major(needs.open);
+  const late = major(needs.late);
+  if ((haul.value ?? 0) >= STRONG_VALUE && (open.length || late.length)) {
+    facts.push(["gradeValueNotNeedsFact", { needPos: needWord((open[0] || late[0]).key) }]);
+  } else if (open.length) {
+    facts.push(["gradeHoleFact", { needPos: needWord(open[0].key) }]);
+  }
+  if (late.length) facts.push(["gradeLateNeedFact", { needPos: needWord(late[0].key), needRound: ROUND_WORDS[late[0].round - 1] || `round ${late[0].round}` }]);
+  if (!facts.length && needs.items.length >= 2 && needs.items.every((n) => n.status === "met")) facts.push(["gradeNeedsMetFact", {}]);
+  return facts;
+}
+
 function gradeTakeFor(haul, ctx) {
   if (!haul.rows.length) return null;
   const best = [...haul.rows].sort((a, b) => b.score - a.score)[0];
@@ -1861,8 +1961,10 @@ function gradeTakeFor(haul, ctx) {
     best: `${best.prospect.First} ${best.prospect.Last}`, bestN: best.pick.overall, year: ctx.year || "",
     ...staffVars(ctx.staff?.[haul.team]),
   };
-  const text = lineFrom(ISAAC_LINES, cat, vars, ctx, "isaac");
-  return text ? { analyst: byId("isaac"), text } : null;
+  const head = lineFrom(ISAAC_LINES, cat, vars, ctx, "isaac");
+  if (!head) return null;
+  const why = gradeFacts(haul).slice(0, 2).map(([fact, extra]) => lineFrom(ISAAC_LINES, fact, { ...vars, ...extra }, ctx, "isaac")).filter(Boolean);
+  return { analyst: byId("isaac"), text: [head, ...why].join(" ") };
 }
 
 // The desk's wrap-up for a user team's finished draft.

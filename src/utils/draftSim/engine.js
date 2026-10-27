@@ -1030,8 +1030,18 @@ export function withOffers(state) {
 }
 
 // ── Grades ──
+// One scale for every team — the user's and the CPU's alike. Each pick
+// gets a grade (pickScore: value for the slot, staff fit, the need it
+// filled), and the team's draft is its picks' value (the early ones
+// counting most) balanced against how well it answered the needs it came
+// in with (needReport) — a major need left open, or only answered late,
+// costs more than a reach does. A pick nowhere near the board (offBoard)
+// is an F- whatever need it fills, and a second quarterback costs.
 
-const LETTERS = [[1.0, "A+"], [0.6, "A"], [0.3, "A-"], [0.1, "B+"], [-0.1, "B"], [-0.3, "B-"], [-0.6, "C+"], [-0.9, "C"], [-1.3, "C-"], [-Infinity, "D"]];
+const LETTERS = [
+  [1.0, "A+"], [0.6, "A"], [0.3, "A-"], [0.1, "B+"], [-0.1, "B"], [-0.3, "B-"], [-0.6, "C+"], [-0.9, "C"], [-1.2, "C-"],
+  [-1.5, "D+"], [-1.8, "D"], [-2.1, "D-"], [-2.6, "F"], [-Infinity, "F-"],
+];
 export const letterFor = (score) => LETTERS.find(([min]) => score >= min)[1];
 
 // What filling a need adds to a pick's grade (a Crowded Room costs); a
@@ -1039,14 +1049,48 @@ export const letterFor = (score) => LETTERS.find(([min]) => score >= min)[1];
 const NEED_GRADE = { "Upgrade Needed": 0.5, "Expiring Contract": 0.35, "Aging Talent": 0.3, "Upgrade Wanted": 0.25, "Depth Needed": 0.15, "Crowded Room": -0.4 };
 const needGrade = (need) => (need ? (NEED_GRADE[need.label] || 0) * (SPECIFIC_BY_KEY[need.key] ? SPECIFIC_WEIGHT : 1) : 0);
 
-// One pick's grade score: board value for the slot, a little for staff
-// fit, and the need it filled (need: the pick's own, from makePick) — so
-// a reach that fills a hole can grade out, and value into a crowded room
-// costs something.
-export function pickScore(overall, prospect, team, need = null) {
-  const value = isSpecialist(prospect) ? 0 : Math.max(-2, Math.min(2, (overall - prospect.rank) / (6 + overall * 0.25)));
+// Off the board: taken this far ahead of his board rank — not a reach, a
+// player no one had near the slot — or a kicker / punter before any has
+// gone in the last 10 real drafts. Graded OFF_BOARD_SCORE, an F-.
+const OFF_BOARD_SCORE = -4;
+export function offBoard(overall, prospect) {
+  if (isSpecialist(prospect)) {
+    const h = HISTORY.specialists[prospect.Position];
+    return h?.earliest != null && overall < h.earliest;
+  }
+  return prospect.rank - overall >= Math.max(40, overall * 1.5);
+}
+
+// A second quarterback in one draft, by the round it comes in: a late
+// flyer costs a little, a second early one a lot.
+const SECOND_QB = (round) => (round <= 2 ? -1.2 : round <= 4 ? -0.6 : -0.25);
+
+// A steal counts for less the later it comes: ten spots of value is a coup
+// in round 1, less in round 2, and nothing by round 7 (reaches cost in
+// every round — the slot's own scale already eases them late).
+const STEAL_BY_ROUND = [1, 0.75, 0.5, 0.35, 0.2, 0.1, 0];
+// A kicker / punter: never a listed need, so never a steal — taken where
+// they usually go it's a little under par (SPECIALIST_PAR), earlier is a reach.
+const SPECIALIST_PAR = -0.25;
+
+// One pick's grade score: board value for the slot (steals scaled by
+// round; a kicker / punter against where the first one usually goes), a
+// little for staff fit, the need it filled (need: the pick's own, from
+// makePick — half of it for a big reach), and a second QB's cost
+// (opts.secondQb). An off-the-board pick is OFF_BOARD_SCORE, whatever it fills.
+export function pickScore(overall, prospect, team, need = null, { round = 1, secondQb = false } = {}) {
+  if (offBoard(overall, prospect)) return OFF_BOARD_SCORE;
+  const slotValue = (spot) => Math.max(-2.5, Math.min(2, (overall - spot) / (6 + overall * 0.25)));
+  let value;
+  if (isSpecialist(prospect)) {
+    const spot = HISTORY.specialists[prospect.Position]?.slots?.[0];
+    value = (spot ? Math.min(0, slotValue(spot)) : 0) + SPECIALIST_PAR;
+  } else {
+    const v = slotValue(prospect.rank);
+    value = v > 0 ? v * STEAL_BY_ROUND[Math.min(round, STEAL_BY_ROUND.length) - 1] : v;
+  }
   const fit = fitFor(prospect, team) || 0;
-  return value + (fit >= 70 ? ((fit - 70) / 30) * 0.5 : 0) + needGrade(need);
+  return value + (fit >= 70 ? ((fit - 70) / 30) * 0.5 : 0) + needGrade(need) * (value < -1 ? 0.5 : 1) + (secondQb ? SECOND_QB(round) : 0);
 }
 
 // The needs a team came in with that a draft can be judged on (positions
@@ -1059,29 +1103,76 @@ function urgentNeeds(state, team) {
     .filter((n) => n.label);
 }
 
-// A team's draft: [{ pick, prospect, score, letter, need }], its trades
-// ([{ partner, got, gave }] — picks, this draft's and next year's), its needs
-// ({ met, open }: the urgent ones it came in with — see urgentNeeds) and
-// the overall grade: the picks' average, plus up to ±0.4 for how many of
-// those needs it met (out of as many as it had picks to meet). The game is
-// balancing the two: value alone leaves holes, needs alone are reaches.
+// How pressing each need is (a QB need counts QB_SEVERITY times), and how
+// fully a pick in each round answers one: a premium pick (rounds 1–2)
+// does, a third-rounder mostly, a Day 3 pick hardly.
+const NEED_SEVERITY = { "Upgrade Needed": 1, "Expiring Contract": 0.7, "Aging Talent": 0.6, "Upgrade Wanted": 0.45 };
+const QB_SEVERITY = 1.5;
+const ANSWER_BY_ROUND = [1, 0.9, 0.65, 0.45, 0.3, 0.2, 0.2];
+// A need with this severity or more is a major one (the analysis names it).
+export const MAJOR_NEED = 0.7;
+// The needs part of a team's grade: from −1.4 (none answered) to +0.6 (all of them, early).
+const NEEDS_FLOOR = 0.7;
+const NEEDS_SCALE = 2;
+
+// How a team's draft answered its needs → { items: [{ key, label,
+// severity, answer (0–1), round (the pick that best answered it, or
+// null), status: met | late | open }], met, late, open (items by status),
+// score }. Only its most pressing needs, as many as it made picks, are
+// judged — a team with one pick isn't faulted for four holes — and an
+// off-the-board pick answers nothing.
+function needReport(state, team, rows) {
+  const judged = urgentNeeds(state, team)
+    .map((n) => ({ ...n, severity: (NEED_SEVERITY[n.label] || 0.45) * (n.key === "QB" ? QB_SEVERITY : 1) }))
+    .sort((x, y) => y.severity - x.severity)
+    .slice(0, rows.length);
+  const items = judged.map((n) => {
+    let answer = 0;
+    let round = null;
+    rows.forEach((r) => {
+      if (r.offBoard) return;
+      const share = Math.max(0, ...needKeysFor(r.prospect).filter((k) => k.key === n.key).map((k) => k.share), r.need?.key === n.key ? 1 : 0);
+      const a = share ? ANSWER_BY_ROUND[Math.min(r.pick.round, ANSWER_BY_ROUND.length) - 1] * (share >= 1 ? 1 : 0.75) : 0;
+      if (a > answer) { answer = a; round = r.pick.round; }
+    });
+    return { ...n, answer, round, status: answer >= 0.85 ? "met" : answer > 0 ? "late" : "open" };
+  });
+  const total = items.reduce((t, n) => t + n.severity, 0);
+  const missed = items.reduce((t, n) => t + n.severity * (1 - n.answer), 0);
+  const score = total ? (1 - missed / total - NEEDS_FLOOR) * NEEDS_SCALE : 0;
+  const by = (st) => items.filter((n) => n.status === st);
+  return { items, met: by("met"), late: by("late"), open: by("open"), score };
+}
+
+// A pick's weight in the value part of the grade, by round.
+const ROUND_WEIGHT = [3, 2.2, 1.6, 1.2, 1, 1, 1];
+// How much of the team grade the picks' value is (needs are the rest).
+const VALUE_SHARE = 0.6;
+
+// A team's draft: [{ pick, prospect, score, letter, need, offBoard,
+// secondQb }], its trades ([{ partner, got, gave }] — picks, this draft's
+// and next year's), its needs (needReport) and its grade: VALUE_SHARE of
+// its picks' round-weighted value plus the needs score. Value alone with
+// the needs left open grades out around a C+ / B-; needs met with fair
+// value, an A; a draft of off-the-board picks, an F-.
 export function teamHaul(state, team) {
+  let qbs = 0;
   const rows = state.picks
     .filter((p) => p.owner === team && p.selection)
     .map((p) => {
       const prospect = state.byId[p.selection];
-      const score = pickScore(p.overall, prospect, team, p.need);
-      return { pick: p, prospect, score, letter: letterFor(score), need: p.need || null };
+      const secondQb = prospect.Position === "QB" && qbs++ > 0;
+      const score = pickScore(p.overall, prospect, team, p.need, { round: p.round, secondQb });
+      return { pick: p, prospect, score, letter: letterFor(score), need: p.need || null, offBoard: offBoard(p.overall, prospect), secondQb };
     });
-  const urgent = urgentNeeds(state, team);
-  const met = urgent.filter((n) => (state.needFilled?.[team]?.[n.key] || 0) >= 0.5);
-  const open = urgent.filter((n) => !met.includes(n));
-  const chances = Math.min(urgent.length, rows.length);
-  const needScore = chances ? (Math.min(met.length, chances) / chances - 0.5) * 0.8 : 0;
-  const avg = rows.length ? rows.reduce((a, r) => a + r.score, 0) / rows.length + needScore : 0;
+  const needs = needReport(state, team, rows);
+  const weight = (r) => ROUND_WEIGHT[Math.min(r.pick.round, ROUND_WEIGHT.length) - 1];
+  const totalWeight = rows.reduce((t, r) => t + weight(r), 0);
+  const value = totalWeight ? rows.reduce((t, r) => t + r.score * weight(r), 0) / totalWeight : 0;
+  const score = rows.length ? value * VALUE_SHARE + needs.score : 0;
   const trades = (state.trades || []).filter((t) => t.a === team || t.b === team)
     .map((t) => (t.a === team ? { partner: t.b, got: t.aGot, gave: t.bGot } : { partner: t.a, got: t.bGot, gave: t.aGot }));
-  return { team, rows, score: avg, letter: rows.length ? letterFor(avg) : "—", needs: { met, open }, trades };
+  return { team, rows, value, score, letter: rows.length ? letterFor(score) : "—", needs, trades };
 }
 
 // ── User-proposed trades ──

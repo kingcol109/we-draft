@@ -3,7 +3,7 @@ import {
   teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
 } from "./engine";
-import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes } from "./analysts";
+import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, singular } from "./analysts";
 import { bestGame } from "./data";
 
 const TEAMS = ["AAA", "BBB", "CCC", "DDD"];
@@ -96,12 +96,13 @@ test("trade-up offers pay at least the pick's chart value", () => {
 test("grades: letters and a team's haul", () => {
   expect(letterFor(1.2)).toBe("A+");
   expect(letterFor(0)).toBe("B");
-  expect(letterFor(-5)).toBe("D");
+  expect(letterFor(-1.7)).toBe("D");
+  expect(letterFor(-5)).toBe("F-");
   let s = sim({ chaos: 0 });
   while (!s.done) s = stepCpu(s).state;
   const h = teamHaul(s, "BBB");
   expect(h.rows).toHaveLength(3);
-  expect(h.letter).toMatch(/^[A-D][+-]?$/);
+  expect(h.letter).toMatch(/^([A-D][+-]?|F-?)$/);
   const take = gradeTake(h, { teamName: (t) => t, nickname: (t) => t, rand: () => 0.1 });
   expect(take.analyst.id).toBe("isaac");
   expect(take.text).not.toMatch(/[{}]/);
@@ -723,10 +724,63 @@ test("grades weigh needs: a pick that fills an Upgrade Needed grades better, and
   const filled = makePick(s, qb.id).state;
   const h = teamHaul(filled, "AAA");
   expect(h.rows[0].need).toEqual({ key: "QB", label: "Upgrade Needed", note: "" });
+  // One pick: judged on its one most pressing need (QB), not faulted for the WR hole.
   expect(h.needs.met.map((n) => n.key)).toEqual(["QB"]);
-  expect(h.needs.open.map((n) => n.key)).toEqual(["WR"]);
+  expect(h.needs.items.map((n) => n.key)).toEqual(["QB"]);
+  expect(h.needs.open).toEqual([]);
   const plain = teamHaul(makePick(initSim({ order, board, rounds: 3 }), qb.id).state, "AAA");
   expect(h.rows[0].score).toBeGreaterThan(plain.rows[0].score);
+});
+
+// One team's draft on a deep board (700 prospects, positions in POS order):
+// its picks (order rows) made with these players, in turn.
+const deepBoard = buildBoard(Array.from({ length: 700 }, (_, i) => ({ id: `b${i}`, First: "F", Last: `B${i}`, Position: POS[i % POS.length], School: "S", Slug: `b${i}`, cr: i + 1 })));
+const draftAs = (picks, ids, needs = {}) => {
+  let st = initSim({ order: picks.map(([Pick, Round]) => ({ Pick, Round, Team: "AAA" })), board: deepBoard, needs: { AAA: resolveNeeds(needs) }, rounds: 7 });
+  ids.forEach((id) => { st = makePick(st, id).state; });
+  return teamHaul(st, "AAA");
+};
+const SEVEN = [[5, 1], [37, 2], [69, 3], [101, 4], [133, 5], [165, 6], [197, 7]];
+const take = (h) => gradeTake(h, { teamName: (t) => t, nickname: (t) => t, rand: () => 0.1 }).text;
+
+test("grades: an off-the-board pick is an F-, need or not — a draft of them is an F-", () => {
+  const jokes = draftAs(SEVEN, ["b600", "b601", "b602", "b603", "b604", "b605", "b606"], { QB: { labels: ["Upgrade Needed"] } });
+  expect(jokes.rows.every((r) => r.offBoard && r.letter === "F-")).toBe(true);
+  expect(jokes.letter).toBe("F-");
+  expect(take(jokes)).toMatch(/B600/);
+  // The same slots with sensible picks.
+  const fair = draftAs(SEVEN, ["b4", "b36", "b68", "b100", "b132", "b164", "b196"]);
+  expect(fair.rows.some((r) => r.offBoard)).toBe(false);
+  expect(fair.score).toBeGreaterThan(jokes.score + 3);
+});
+
+test("grades: a second quarterback costs — a lot early, a little late", () => {
+  const two = draftAs([[1, 1], [2, 1]], ["b0", "b9"]);
+  const one = draftAs([[1, 1], [2, 1]], ["b1", "b9"]);
+  expect(two.rows[1].secondQb).toBe(true);
+  expect(one.rows[1].secondQb).toBe(false);
+  expect(one.rows[1].score - two.rows[1].score).toBeCloseTo(1.2, 5);
+  expect(take(two)).toMatch(/B9/);
+  const late = draftAs([[1, 1], [197, 7]], ["b0", "b189"]);
+  expect(late.rows[1].secondQb).toBe(true);
+  expect(late.rows[1].score).toBeGreaterThan(two.rows[1].score);
+});
+
+test("grades: value with the major needs left open is alright, not great — and the take says why", () => {
+  const needs = { QB: { labels: ["Upgrade Needed"] }, CB: { labels: ["Upgrade Needed"] } };
+  const steals = draftAs([[20, 1], [52, 2], [84, 3]], ["b1", "b10", "b19"], needs);
+  expect(steals.needs.open.map((n) => n.key).sort()).toEqual(["CB", "QB"]);
+  expect(steals.letter).toMatch(/^[BC]/);
+  expect(take(steals)).toMatch(/quarterback/);
+  // Needs answered early with fair value grades higher.
+  const met = draftAs([[20, 1], [52, 2], [84, 3]], ["b18", "b49", "b82"], needs);
+  expect(met.score).toBeGreaterThan(steals.score);
+});
+
+test("grades: a pressing need answered only late is called out", () => {
+  const h = draftAs([[5, 1], [37, 2], [69, 3], [101, 4]], ["b1", "b37", "b70", "b99"], { QB: { labels: ["Upgrade Needed"] } });
+  expect(h.needs.late).toMatchObject([{ key: "QB", round: 4 }]);
+  expect(take(h)).toMatch(/fourth/);
 });
 
 test("trades: a team that loves who's there is hard to move; one that doesn't gets called", () => {
@@ -1066,4 +1120,11 @@ test("value: no one graded more than three rounds past the pick while someone in
   expect(withinValue([p("a", 7), p("c", null)], 2).map((x) => x.id)).toEqual(["a"]);
   expect(withinValue([p("c", null), p("d", null)], 2).map((x) => x.id)).toEqual(["c", "d"]);
   expect(withinValue(list, 4).map((x) => x.id)).toEqual(["a", "b", "k"]);
+});
+
+test("stat lines: a defender's interceptions come from CFBD's own group, and a count of 1 reads singular", () => {
+  const e = { pick: { overall: 43, round: 2 }, team: "CHI", value: 0, prospect: { First: "K", Last: "Lopa", Position: "DB", stats: { leaders: [], lines: { defensive: { PD: 1, TOT: 31, TFL: 1, SACKS: 0 }, interceptions: { INT: 5 } } } } };
+  const cover = statFacts(e, { teamName: (t) => t, nickname: (t) => t }).find((f) => f.cat === "coverage");
+  expect(cover.vars).toMatchObject({ INT: "5", PD: "1", TOT: "31" });
+  expect(singular("31 tackles, 1 passes defended, 1.5 sacks, 21 sacks and 1 tackles for loss")).toBe("31 tackles, 1 pass defended, 1.5 sacks, 21 sacks and 1 tackle for loss");
 });

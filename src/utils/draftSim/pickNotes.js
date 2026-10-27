@@ -27,7 +27,7 @@
 // community board has him (lightRank, lightTopPos — intro when he has no
 // rank), with no pick number; the facts are the same minus the team's
 // draft history.
-import { pickVars, statFacts, ordinal, lineText, playerTakesFor, takeLinesOf } from "./analysts";
+import { pickVars, statFacts, ordinal, lineText, playerTakesFor, takeLinesOf, singular } from "./analysts";
 import { needWord, subsOf } from "./engine";
 
 export const PFF_TOP = 10;
@@ -381,7 +381,7 @@ function lineOf(cat, vars, ctx) {
   if (!fresh.length) { used[cat] = []; fresh = pool; }
   const [text, i] = fresh[Math.floor(ctx.rand() * fresh.length)];
   used[cat].push(i);
-  return capitalize(fill(text, vars));
+  return capitalize(singular(fill(text, vars)));
 }
 
 // The GM or head coach a staff-fit line names, as a link to his staff page

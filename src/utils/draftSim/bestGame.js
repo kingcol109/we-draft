@@ -1,6 +1,6 @@
 // src/utils/draftSim/bestGame.js
 //
-// A drafted player's standout game for Isaac Walker ("4 sacks against
+// A drafted player's standout game for Walter Donaldson ("4 sacks against
 // Tennessee"). Pure, so both the sim (data.js loadBestGame) and the weekly
 // snapshot build (scripts/buildSimGamesSnapshot.mjs) score games the same way.
 
