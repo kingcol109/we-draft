@@ -215,6 +215,9 @@ function MainLayout() {
             {/* Open to everyone, no account needed (saving and My Board
                 ask for one). SEO tags: DraftSimMeta.jsx. */}
             <Route path="/draftsim" element={<><DraftSimMeta /><DraftSim /></>} />
+            {/* Recent Drafts (public one-team saved sims) and the Sim Profile — ahead of :team. */}
+            <Route path="/draftsim/recent" element={<DraftSim page="recent" />} />
+            <Route path="/draftsim/profile" element={<DraftSim page="profile" />} />
             <Route path="/draftsim/:team" element={<><DraftSimMeta /><DraftSim /></>} />
             <Route path="/draftsim/:year/:team" element={<><DraftSimMeta /><DraftSim /></>} />
             <Route path="/whiteboard" element={<Whiteboard />} />

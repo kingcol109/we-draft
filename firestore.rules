@@ -302,6 +302,26 @@ service cloud.firestore {
         && request.resource.data.p.diff(resource.data.p).affectedKeys().size() == 1
         && request.resource.data.p.size() <= resource.data.p.size() + 1;
     }
+    // Public copies of one-team saved sims (utils/draftSim/publicSims.js),
+    // listed on /draftsim/recent: anyone reads; the owner writes one only
+    // alongside their own saved sim of the same id, and takes it down
+    // (making it private, or deleting); admins can take any down.
+    match /publicDraftSims/{simId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/draftSims/$(simId));
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if resource == null
+        || (request.auth != null && resource.data.uid == request.auth.uid) || isAdmin();
+    }
+    // Draft Sim badges (utils/draftSim/badges.js), written in Admin → Mock
+    // Draft → Badges. Admins see them all; everyone else only active ones
+    // (none until badges go live).
+    match /simBadges/{badgeId} {
+      allow read: if isAdmin() || resource.data.active == true;
+      allow write: if isAdmin();
+    }
     // The teams started sims draft as: one draft class, one day; a start
     // bumps at most every team (32) plus WATCH.
     match /draftSimTeams/{id} {
@@ -790,6 +810,11 @@ service cloud.firestore {
       // Draft Sim results saved from the end screen (SimResults.jsx) —
       // only the user's own teams' picks. Listed on their profile.
       match /draftSims/{simId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      // The user's Sim Profile — running totals over every sim they
+      // finish (utils/draftSim/simProfile.js). Owner only.
+      match /simProfile/{docId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
       // Players a user follows — own-uid-scoped, same shape as evaluations

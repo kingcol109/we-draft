@@ -18,6 +18,7 @@ import { Link } from "react-router-dom";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { topProspects, gradeLabel } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
+import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 import { communityAverage } from "../utils/gradeWindow";
 
 const BLUE = "#0055a5";
@@ -318,6 +319,7 @@ export default function HomeOffSeason() {
   const [recentEvals, setRecentEvals] = useState([]);
   const [news, setNews] = useState([]);
   const [articles, setArticles] = useState([]);
+  const [weeklyMocks, setWeeklyMocks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
 
@@ -346,6 +348,9 @@ export default function HomeOffSeason() {
     };
     fetch();
   }, []);
+
+  // The published Weekly Mocks, as news items (utils/weeklyMockNews.js).
+  useEffect(() => { loadWeeklyMockNews(6).then(setWeeklyMocks); }, []);
 
   useEffect(() => {
     const fetch = async () => {
@@ -378,7 +383,7 @@ export default function HomeOffSeason() {
   // typo fix (which bumps updatedAt) must not jump back to the top of the
   // feed. An article with no publishedAt set sorts to the bottom (0)
   // instead of jumping around based on unrelated edits.
-  const combinedNews = [...news, ...articles]
+  const combinedNews = [...news, ...articles, ...weeklyMocks]
     .sort((a, b) => ((b.publishedAt?.seconds || 0) - (a.publishedAt?.seconds || 0)))
     .slice(0, 6);
 
@@ -503,7 +508,7 @@ export default function HomeOffSeason() {
                 const dateStr = ts?.toDate?.().toLocaleDateString(undefined, { month: "short", day: "numeric" });
                 const [mon, day] = dateStr ? dateStr.split(" ") : [null, null];
                 return (
-                  <Link key={n.id} to={`/news/${n.slug}`} className="wdh-row"
+                  <Link key={n.id} to={n.href || `/news/${n.slug}`} className="wdh-row"
                     style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", background: "#fff", borderBottom: i < combinedNews.length - 1 ? "1px solid #f0f0f0" : "none" }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}

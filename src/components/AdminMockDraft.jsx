@@ -14,7 +14,8 @@
 // .otherSchools). Statistics: Draft Sim usage (AdminSimStats.jsx). Kenneth's panel is his player takes — per player, by
 // situation (reach / steal / depth / normal), saved on their own to
 // config/draftSimAnalysis. Team Needs: AdminTeamNeeds.jsx. Weekly Mock: the
-// site's official weekly mock draft (AdminWeeklyMock.jsx).
+// site's official weekly mock draft (AdminWeeklyMock.jsx). Badges: the
+// Draft Sim's one-time achievements (AdminSimBadges.jsx).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteField, FieldPath, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
@@ -29,10 +30,12 @@ import { initSim, makePick, rngNext } from "../utils/draftSim/engine";
 import { TeamNeeds } from "./AdminTeamNeeds";
 import AdminSimStats from "./AdminSimStats";
 import AdminWeeklyMock from "./AdminWeeklyMock";
+import AdminSimBadges from "./AdminSimBadges";
+import { squareImage as squareImageOf } from "../utils/squareImage";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "weekly", label: "Weekly Mock" }, { key: "stats", label: "Statistics" }];
+const TABS = [{ key: "personalities", label: "Personalities" }, { key: "needs", label: "Team Needs" }, { key: "weekly", label: "Weekly Mock" }, { key: "stats", label: "Statistics" }, { key: "badges", label: "Badges" }];
 
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
 
@@ -73,40 +76,15 @@ export default function AdminMockDraft() {
       {tab === "needs" && <TeamNeeds />}
       {tab === "weekly" && <AdminWeeklyMock />}
       {tab === "stats" && <AdminSimStats />}
+      {tab === "badges" && <AdminSimBadges />}
     </div>
   );
 }
 
-// An uploaded photo → a small square (center-cropped) data: URL, so it
-// lives in the config doc itself — no Storage bucket needed. WebP where
-// the browser can write it (keeps transparency), else PNG.
+// Uploaded photos and logos: small square data: URLs in the config doc
+// itself (utils/squareImage.js).
 const AVATAR_PX = 160;
-// fit "contain" (school logos) keeps the whole image, centered on a
-// transparent square, instead of cropping it.
-function squareImage(file, fit = "cover") {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement("canvas");
-      c.width = AVATAR_PX;
-      c.height = AVATAR_PX;
-      const ctx2d = c.getContext("2d");
-      if (fit === "contain") {
-        const k = AVATAR_PX / Math.max(img.width, img.height);
-        const w = img.width * k;
-        const h = img.height * k;
-        ctx2d.drawImage(img, (AVATAR_PX - w) / 2, (AVATAR_PX - h) / 2, w, h);
-      } else {
-        const m = Math.min(img.width, img.height);
-        ctx2d.drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, AVATAR_PX, AVATAR_PX);
-      }
-      URL.revokeObjectURL(img.src);
-      resolve(c.toDataURL("image/webp", 0.85));
-    };
-    img.onerror = () => reject(new Error("Not an image."));
-    img.src = URL.createObjectURL(file);
-  });
-}
+const squareImage = (file, fit = "cover") => squareImageOf(file, AVATAR_PX, fit);
 
 // Profile picture controls for one personality: upload, paste a URL, or
 // back to the default.

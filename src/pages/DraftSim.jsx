@@ -27,15 +27,19 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { loadSimSetup, loadSimData, loadExpandedBoard, loadMyGrades, SIM_YEAR, SIM_YEARS, maxRounds, teamNamer } from "../utils/draftSim/data";
-import { applyMyGrades, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES, VARIANCE, DEFAULT_VARIANCE } from "../utils/draftSim/engine";
+import { applyMyGrades, teamHaul, shuffleOrder, relabelOrder, orderTeams, randomTeamMap, swapTeams, CPU_TRADES, VARIANCE, DEFAULT_VARIANCE } from "../utils/draftSim/engine";
 import { useAuth } from "../context/AuthContext";
 import { countSim, countTeams, countUserPick } from "../utils/draftSim/stats";
+import { recordSimProfile, recordStreak, onDefaults, PROFILE_PATH } from "../utils/draftSim/simProfile";
 import { CHATTER, DEFAULT_CHATTER } from "../utils/draftSim/analysts";
 import { useIsMobile, BLUE, GOLD } from "../components/MockDraftKit";
 import useDraftSim, { SPEEDS, DEFAULT_SPEED } from "../components/draftSim/useDraftSim";
 import SimBroadcast, { SIM_CSS, introHeadline } from "../components/draftSim/SimBroadcast";
 import SimResults from "../components/draftSim/SimResults";
 import SavedSims from "../components/draftSim/SavedSims";
+import SimProfile from "../components/draftSim/SimProfile";
+import RecentSims from "../components/draftSim/RecentSims";
+import { RECENT_PATH } from "../utils/draftSim/publicSims";
 import MarginAds from "../components/MarginAds";
 import { cssRect, viewportCssHeight } from "../utils/pageZoom";
 
@@ -78,7 +82,10 @@ function Column({ wide, isMobile, contentRef, children }) {
   );
 }
 
-export default function DraftSim() {
+// page: "recent" (/draftsim/recent) or "profile" (/draftsim/profile) — a
+// page of its own, with the setup screen's tabs over it.
+const PAGE_PATHS = { recent: RECENT_PATH, profile: PROFILE_PATH };
+export default function DraftSim({ page = null }) {
   // /draftsim/:team, /draftsim/:year (a SIM_YEARS year in the team slot) or
   // /draftsim/:year/:team.
   const params = useParams();
@@ -167,9 +174,16 @@ export default function DraftSim() {
 
   if ((team && !validTeam) || (params.year && !SIM_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
 
-  // The setup screen's tab: "new" (set up a draft) or "saved" (My Drafts).
-  const tab = new URLSearchParams(location.search).get("tab") === "saved" ? "saved" : "new";
-  const setTab = (t) => navigate({ pathname: location.pathname, search: t === "saved" ? "?tab=saved" : "" }, { replace: true, state: location.state });
+  // The setup screen's tab: "new" (set up a draft) or "saved" (My Drafts,
+  // ?tab=saved) — or a page of its own: "profile" (Sim Profile,
+  // /draftsim/profile) or "recent" (Recent Drafts, /draftsim/recent).
+  const searchTab = new URLSearchParams(location.search).get("tab");
+  const tab = page || (searchTab === "profile" ? "profile" : searchTab === "saved" ? "saved" : "new");
+  if (!page && searchTab === "profile") return <Navigate to={PROFILE_PATH} replace />;
+  const setTab = (t) => {
+    if (PAGE_PATHS[t]) navigate(PAGE_PATHS[t]);
+    else navigate({ pathname: page ? `/draftsim${yearPath}` : location.pathname, search: t === "new" ? "" : `?tab=${t}` }, { replace: !page, state: location.state });
+  };
 
   const names = teamNamer(setup?.branding || {});
   // Title, description and canonical: components/draftSim/DraftSimMeta.jsx (App.js).
@@ -225,8 +239,11 @@ export default function DraftSim() {
           </SimErrorBoundary>
         ) : (
           <Column isMobile={isMobile} contentRef={contentRef}>
-            <SetupTabs tab={tab} onTab={setTab} />
-            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
+            <SetupTabs tab={tab} onTab={setTab} isMobile={isMobile} />
+            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} />
+              : tab === "profile" ? <SimProfile branding={setup.branding} names={names.teamName} isMobile={isMobile} />
+              : tab === "recent" ? <RecentSims branding={setup.branding} names={names.teamName} isMobile={isMobile} />
+              : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
               onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
           </Column>
         )}
@@ -319,6 +336,19 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The signed-in user's Sim Profile (utils/draftSim/simProfile.js), once
+  // the draft's finished: any sim keeps their streak going; only a
+  // single-team sim on the default settings (speed and chatter aside)
+  // goes on the profile. Once a run — and a run finished signed out counts
+  // when they sign in from the end screen (its sign-in prompt).
+  const counted = onDefaults(config, { maxRounds: maxRounds(data.board), defaultRounds: DEFAULT_ROUNDS, defaultExpanded: EXPANDED_YEARS.includes(data.year) });
+  const profiled = useRef(false);
+  useEffect(() => {
+    if (!finished || !uid || profiled.current) return;
+    profiled.current = true;
+    recordStreak(uid);
+    if (counted) recordSimProfile(uid, { year: data.year, hauls: config.teams.map((t) => teamHaul(s.sim, t)) });
+  }, [finished, uid]); // eslint-disable-line react-hooks/exhaustive-deps
   // Mobile, mid-draft: one anchored screen pinned to the viewport — the
   // stage never moves, and only the console's tab scrolls (SimBroadcast).
   // The page itself doesn't scroll (wd-sim-lock), the site footer is
@@ -371,7 +401,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   if (s.phase === "done") {
     return (
       <Column wide isMobile={isMobile} contentRef={contentRef}>
-        <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} onUndo={mock && s.canUndo ? s.undo : undefined} />
+        <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} counted={counted} onUndo={mock && s.canUndo ? s.undo : undefined} />
       </Column>
     );
   }
@@ -431,15 +461,17 @@ function useNavHeight(on) {
 
 // ── Setup ──
 
-function SetupTabs({ tab, onTab }) {
+function SetupTabs({ tab, onTab, isMobile }) {
   const tabStyle = (on) => ({
     border: "none", borderBottom: `3px solid ${on ? GOLD : "transparent"}`, background: "none", color: on ? "#fff" : "#8b9bb4",
-    padding: "8px 4px", marginRight: 18, cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase",
+    padding: "8px 4px", marginRight: isMobile ? 12 : 18, cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 11 : 13, letterSpacing: isMobile ? "0.05em" : "0.1em", textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0,
   });
+  const tabs = [["new", "New Draft", "New"], ["saved", "My Drafts", "My Drafts"], ["profile", "Sim Profile", "Profile"], ["recent", "Recent Drafts", "Recent"]];
   return (
-    <div role="tablist" style={{ display: "flex", borderBottom: "1px solid #1f2b42", marginBottom: 14 }}>
-      <button role="tab" aria-selected={tab === "new"} onClick={() => onTab("new")} style={tabStyle(tab === "new")}>New Draft</button>
-      <button role="tab" aria-selected={tab === "saved"} onClick={() => onTab("saved")} style={tabStyle(tab === "saved")}>My Drafts</button>
+    <div role="tablist" style={{ display: "flex", borderBottom: "1px solid #1f2b42", marginBottom: 14, overflowX: "auto" }}>
+      {tabs.map(([key, label, short]) => (
+        <button key={key} role="tab" aria-selected={tab === key} onClick={() => onTab(key)} style={tabStyle(tab === key)}>{isMobile ? short : label}</button>
+      ))}
     </div>
   );
 }

@@ -1090,7 +1090,7 @@ function MyPicksTab({ s, data, isMobile }) {
               }
               return (
                 <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: "1px solid #18233a", minWidth: 0 }}>
-                  <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
+                  <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.25, textAlign: "center", whiteSpace: "nowrap" }}>R{p.round}<br />No. {p.overall}</span>
                   {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 28, flexShrink: 0 }} />}
                   <span style={{ flex: 1, minWidth: 0 }}>
                     <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
@@ -1113,7 +1113,7 @@ function MyPicksTab({ s, data, isMobile }) {
               const live = away === 0 && s.phase !== "done";
               return (
                 <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid #18233a", background: live ? "rgba(246,162,29,0.1)" : "transparent" }}>
-                  <span style={{ color: live ? GOLD : "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
+                  <span style={{ color: live ? GOLD : "#6f7f99", fontWeight: 900, fontSize: 11, width: 52, flexShrink: 0, lineHeight: 1.25, textAlign: "center", whiteSpace: "nowrap" }}>R{p.round}<br />No. {p.overall}</span>
                   <span style={{ flex: 1, minWidth: 0, color: live ? "#fff" : "#9fb0c8", fontSize: 13, fontWeight: 900 }}>
                     {live ? "On the clock" : away === 1 ? "Next pick" : `In ${away} picks`}
                   </span>

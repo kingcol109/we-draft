@@ -20,7 +20,7 @@ export function Avatar({ analyst, size = 38 }) {
   );
 }
 
-const Verified = () => (
+export const Verified = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" aria-label="Verified" style={{ flexShrink: 0 }}>
     <path fill="#1d9bf0" d="M12 1.5l2.6 2.1 3.3-.4 1.1 3.1 3 1.6-.9 3.2.9 3.2-3 1.6-1.1 3.1-3.3-.4L12 22.5l-2.6-2.1-3.3.4-1.1-3.1-3-1.6.9-3.2-.9-3.2 3-1.6 1.1-3.1 3.3.4z" />
     <path fill="#fff" d="M10.6 15.6l-3.2-3.2 1.3-1.3 1.9 1.9 4.7-4.7 1.3 1.3z" />

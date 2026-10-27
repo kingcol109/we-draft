@@ -6,6 +6,7 @@ import { Helmet } from "react-helmet-async";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginSidebars from "../components/MarginSidebars";
+import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -25,16 +26,17 @@ export default function News() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const [newsSnap, articlesSnap] = await Promise.all([
+        const [newsSnap, articlesSnap, weeklyItems] = await Promise.all([
           getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"))),
           getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"))),
+          loadWeeklyMockNews(),
         ]);
 
         const newsItems = newsSnap.docs.map((d) => ({ id: d.id, type: "news", ...d.data() }));
         const articleItems = articlesSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() }));
 
         // Reverse chronological — unchanged.
-        const combined = [...newsItems, ...articleItems].sort((a, b) =>
+        const combined = [...newsItems, ...articleItems, ...weeklyItems].sort((a, b) =>
           (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0)
         );
 
@@ -102,7 +104,7 @@ export default function News() {
                 {items.map((n) => {
                   const date = n.publishedAt?.toDate?.();
                   const dayStr = date?.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                  const isLinkable = n.slug;
+                  const href = n.href || (n.slug ? `/news/${n.slug}` : null);
                   const accent = n.type === "article" ? GOLD : BLUE;
 
                   const card = (
@@ -114,6 +116,7 @@ export default function News() {
                       {dayStr && (
                         <div style={{ marginBottom: "10px" }}>
                           <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>{dayStr}</span>
+                          {n.type === "weeklyMock" && <span style={{ marginLeft: "8px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Weekly Mock</span>}
                         </div>
                       )}
 
@@ -134,8 +137,8 @@ export default function News() {
                     border: "2px solid #eee", overflow: "hidden", textDecoration: "none",
                   };
 
-                  return isLinkable ? (
-                    <Link key={n.slug || n.id} to={`/news/${n.slug}`} className="wd-news-card" style={cardStyle}>
+                  return href ? (
+                    <Link key={n.slug || n.id} to={href} className="wd-news-card" style={cardStyle}>
                       {card}
                       {body}
                     </Link>

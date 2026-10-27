@@ -11,8 +11,9 @@
 // it. Only the latest — the pages update every week. One read a class,
 // cached for the visit; no engine imports, so the pages that use it stay
 // light.
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, query, orderBy, limit } from "firebase/firestore";
 import { db } from "../firebase";
+import { NFL_TEAMS } from "./coachHistory";
 
 // The classes with a Weekly Mock, the first the main one: its team pages are
 // /mocks/{team}; the others' add the year (/mocks/{team}/2028).
@@ -48,6 +49,32 @@ export const carriedTradeOf = (carried, pick) =>
 export const WEEKLY_TIME_ZONE = "America/New_York";
 export const weeklyMockDate = (ts, opts = { month: "long", day: "numeric", year: "numeric" }) =>
   ts?.toDate?.()?.toLocaleDateString("en-US", { ...opts, timeZone: WEEKLY_TIME_ZONE }) || "";
+
+// The published weeks as items for the home page's News box and /news —
+// { id, type: "weeklyMock", title, summary, publishedAt, href }, newest
+// first. A class's latest week links to /mocks/{year}; older weeks to their
+// own post (/mocks/{mockId}/view, which says it's a past week). max: how
+// many weeks (all of them without one). [] if the read fails.
+export function loadWeeklyMockNews(max) {
+  const q = query(collection(db, "weeklyMocks"), orderBy("publishedAt", "desc"), ...(max ? [limit(max)] : []));
+  return getDocs(q).then((snap) => {
+    const seen = new Set();
+    return snap.docs.map((d) => {
+      const w = d.data();
+      const year = String(w.year);
+      const latest = !seen.has(year);
+      seen.add(year);
+      const first = (w.picks || []).find((p) => p.overall === 1 && p.player);
+      const fp = first?.player;
+      return {
+        id: `weekly-${d.id}`, type: "weeklyMock", publishedAt: w.publishedAt,
+        title: `${year} Weekly Mock Draft — ${w.rounds || 7} Rounds`,
+        summary: fp ? `No. 1 pick: ${fp.First} ${fp.Last}, ${fp.Position}${fp.School ? `, ${fp.School}` : ""} (${NFL_TEAMS[first.owner] || first.owner})` : "",
+        href: latest ? weeklyYearHref(year) : `/mocks/${w.mockId}/view`,
+      };
+    });
+  }).catch(() => []);
+}
 
 // The summary doc for a published week's picks ([{ overall, round, owner,
 // player }]) and its names ({ [abbr]: "Miami Dolphins" }).

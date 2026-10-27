@@ -310,6 +310,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "publicDraftSims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "team",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

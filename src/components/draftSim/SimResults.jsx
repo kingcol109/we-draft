@@ -15,16 +15,16 @@ import { Link } from "react-router-dom";
 import { haulRecords, simShareText, simCallToAction, mockShareText, simUrl } from "../../utils/draftSim/share";
 import MockShareCard, { shareRow } from "../MockShareCard";
 import * as htmlToImage from "html-to-image";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../../firebase";
 import { useAuth } from "../../context/AuthContext";
 import { teamHaul, NEED_KEY_NAMES, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
-import { SIM_YEAR } from "../../utils/draftSim/data";
+import { SIM_YEAR, teamNamer } from "../../utils/draftSim/data";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
 import { withoutPageZoom } from "../../utils/pageZoom";
-import { Avatar } from "./SimFeed";
+import { Avatar, Verified } from "./SimFeed";
+import { saveSim, setSimVisibility, listable, RECENT_PATH } from "../../utils/draftSim/publicSims";
+import { SimSnapshot } from "./SimProfile";
 import MockExport from "./MockExport";
 import { PlayerName } from "./FitName";
 
@@ -40,7 +40,8 @@ const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "p
 
 // mock: a Mock Draft mode run — the export-as-mock-draft panel up top.
 // onUndo (Mock Draft mode): take back the last pick, back into the draft.
-export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, onUndo }) {
+// counted: this run counts toward the Sim Profile (default settings — utils/draftSim/simProfile.js onDefaults).
+export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo }) {
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
   // Isaac's line per team, picked once (it draws on the desk's rng).
@@ -84,6 +85,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
             </div>
             {hasMine && <div style={{ display: "grid" }}><SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} full /></div>}
             <button onClick={onNew} style={{ ...btn, gridColumn: "1 / -1", padding: "12px 16px", fontSize: 13, background: GOLD, color: "#fff" }}>NEW SIM</button>
+            <Link to={RECENT_PATH} style={{ ...btn, gridColumn: "1 / -1", textAlign: "center", textDecoration: "none", background: "#1a2438", color: "#fff" }}>SEE RECENT USER DRAFTS →</Link>
           </div>
         ) : (
           <>
@@ -91,6 +93,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
             {hasMine && <SaveButton sim={sim} data={data} hauls={userHauls} speed={speed} />}
             <button onClick={onRerun} style={{ ...btn, background: GOLD, color: "#fff" }}>RUN IT BACK</button>
             <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>NEW SIM</button>
+            <Link to={RECENT_PATH} style={{ ...btn, textDecoration: "none", background: "#1a2438", color: "#fff" }}>RECENT DRAFTS</Link>
           </>
         )}
       </div>
@@ -100,10 +103,12 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
           {userHauls.map((h) => <ReportCard key={h.team} h={h} b={brand(h.team)} take={takes[h.team]} isMobile={isMobile} />)}
           {userHauls.length === 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 3} />}
         </div>
-        <LeagueGrades league={league} sim={sim} brand={brand} />
+        {/* The user's Sim Profile beside their report card; every team's grade at the bottom. */}
+        <SimSnapshot branding={data.branding} names={teamNamer(data.branding).teamName} year={data.year} counted={counted} />
       </div>
 
       {userHauls.length > 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />}
+      <div style={{ marginTop: 12 }}><LeagueGrades league={league} sim={sim} brand={brand} cols={isMobile ? 2 : 4} /></div>
     </div>
   );
 }
@@ -128,7 +133,7 @@ function ReportCard({ h, b, take, isMobile }) {
         <div style={{ display: "flex", gap: 10, padding: "12px 16px", borderBottom: "1px solid #1f2b42", background: "rgba(246,162,29,0.06)" }}>
           <Avatar analyst={take.analyst} size={34} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: 12 }}>{take.analyst.name} <span style={{ color: "#6f7f99", fontWeight: 700, fontFamily: BODY }}>{take.analyst.handle}</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", color: "#fff", fontWeight: 900, fontSize: 12 }}>{take.analyst.name}{take.analyst.verified && <Verified />} <span style={{ color: "#6f7f99", fontWeight: 700, fontFamily: BODY }}>{take.analyst.handle}</span></div>
             <div style={{ color: "#dbe4f0", fontSize: 14, fontFamily: BODY, lineHeight: 1.4, marginTop: 2 }}>{take.text}</div>
           </div>
         </div>
@@ -156,8 +161,8 @@ function ReportCard({ h, b, take, isMobile }) {
                 {prospect.Position} · {prospect.School} · Board #{prospect.rank}{pick.via ? ` · via ${pick.via}` : ""}
               </span>
               {need && (
-                <span style={{ display: "block", color: need.label === "Crowded Room" ? "#ff8a9a" : "#ffb3bf", fontSize: 11, fontWeight: 800, fontFamily: BODY }}>
-                  {need.label === "Crowded Room" ? "Crowded room" : "Need"}: {NEED_KEY_NAMES[need.key] || need.key} ({need.label})
+                <span style={{ display: "block", color: need.label === "Crowded Room" ? "#ff8a9a" : "#4ade80", fontSize: 11, fontWeight: 800, fontFamily: BODY }}>
+                  {need.label === "Crowded Room" ? "Crowded room" : "Need met"}: {NEED_KEY_NAMES[need.key] || need.key} ({need.label})
                 </span>
               )}
             </span>
@@ -182,13 +187,13 @@ function ReportCard({ h, b, take, isMobile }) {
   );
 }
 
-// Every team's grade, two columns down (1–16, then 17–32).
-function LeagueGrades({ league, sim, brand }) {
-  const rows = Math.ceil(league.length / 2) || 1;
+// Every team's grade, read down the columns (two: 1–16, then 17–32).
+function LeagueGrades({ league, sim, brand, cols = 2 }) {
+  const rows = Math.ceil(league.length / cols) || 1;
   return (
     <div style={PANEL}>
       <div style={HEAD}>EVERY TEAM&apos;S GRADE</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: `repeat(${rows}, auto)`, gridAutoFlow: "column" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, auto)`, gridAutoFlow: "column" }}>
         {league.map((h, i) => (
           <div key={h.team} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", borderBottom: "1px solid #18233a", minWidth: 0, background: sim.userTeams.includes(h.team) ? "rgba(246,162,29,0.1)" : "transparent" }}>
             <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 16, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
@@ -239,20 +244,37 @@ function FullDraft({ sim, data, isMobile, cols }) {
 
 // ── Save to profile: the user's teams' picks only. ──
 // full: fill its cell (the mobile button grid), any note under the button.
+// Saved public (utils/draftSim/publicSims.js — a one-team sim shows on
+// Recent Drafts), with a switch to make it private right there.
 function SaveButton({ sim, data, hauls, speed, full }) {
-  const { user, login } = useAuth();
+  const { user, profile, login } = useAuth();
   const [state, setState] = useState("idle"); // idle | waiting (for sign-in) | saving | saved | error
+  const [saved, setSaved] = useState(null); // the saved sim ({ id, year, rounds, teams, visibility })
+  const [toggling, setToggling] = useState(false);
   const save = async (uid) => {
     setState("saving");
     try {
-      await addDoc(collection(db, "users", uid, "draftSims"), {
-        year: data.year, rounds: Math.max(...sim.picks.map((p) => p.round)), speed: speed || null, createdAt: serverTimestamp(),
-        teams: haulRecords(hauls),
-      });
+      const rec = { year: data.year, rounds: Math.max(...sim.picks.map((p) => p.round)), speed: speed || null, teams: haulRecords(hauls) };
+      const id = await saveSim(uid, profile?.username, rec);
+      setSaved({ ...rec, id, visibility: "public" });
       setState("saved");
     } catch (e) {
       console.error("Draft sim save error:", e);
       setState("error");
+    }
+  };
+  const toggle = async () => {
+    if (toggling) return;
+    const visibility = saved.visibility === "public" ? "private" : "public";
+    setToggling(true);
+    try {
+      await setSimVisibility(user.uid, profile?.username, saved, visibility);
+      setSaved((s) => ({ ...s, visibility }));
+    } catch (e) {
+      console.error("Draft sim visibility error:", e);
+      alert("Couldn't change that — try again.");
+    } finally {
+      setToggling(false);
     }
   };
   // Signed in from the modal → save right away.
@@ -265,7 +287,18 @@ function SaveButton({ sim, data, hauls, speed, full }) {
     else { setState("waiting"); login(); }
   };
   if (state === "saved") {
-    return <Link to={`/draftsim${data.year === SIM_YEAR ? "" : `/${data.year}`}?tab=saved`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none", ...(full ? { textAlign: "center", whiteSpace: "normal" } : {}) }}>{full ? "SAVED ✓ MY DRAFTS" : "SAVED ✓ VIEW MY DRAFTS"}</Link>;
+    const isPublic = saved.visibility === "public";
+    return (
+      <span style={{ display: full ? "flex" : "inline-flex", flexDirection: full ? "column" : "row", alignItems: full ? "stretch" : "center", gap: 6 }}>
+        <Link to={`/draftsim${data.year === SIM_YEAR ? "" : `/${data.year}`}?tab=saved`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none", ...(full ? { textAlign: "center", whiteSpace: "normal" } : {}) }}>{full ? "SAVED ✓ MY DRAFTS" : "SAVED ✓ VIEW MY DRAFTS"}</Link>
+        {listable(saved) && (
+          <button onClick={toggle} disabled={toggling} title={isPublic ? "Showing on Recent Drafts — tap to make it private" : "Private — tap to show it on Recent Drafts"}
+            style={{ ...btn, padding: "7px 12px", fontSize: 11, background: "transparent", color: isPublic ? "#7ee2a0" : "#9fb0c8", border: `1px solid ${isPublic ? "#2e7d4f" : "#2a3a58"}` }}>
+            {toggling ? "…" : isPublic ? "🌐 PUBLIC · MAKE PRIVATE" : "🔒 PRIVATE · MAKE PUBLIC"}
+          </button>
+        )}
+      </span>
+    );
   }
   return (
     <span style={{ display: full ? "flex" : "inline-flex", flexDirection: full ? "column-reverse" : "row", alignItems: full ? "stretch" : "center", gap: full ? 6 : 8 }}>

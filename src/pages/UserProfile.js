@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
 import { wePickHref } from "../utils/wePickRoutes";
+import { deleteSim } from "../utils/draftSim/publicSims";
 import {
   doc,
   getDoc,
@@ -472,7 +473,8 @@ function DraftSimsPanel() {
   }, [user.uid]);
   const remove = async (id) => {
     if (!window.confirm("Delete this draft sim?")) return;
-    await deleteDoc(doc(db, "users", user.uid, "draftSims", id));
+    // Its public copy on Recent Drafts too (utils/draftSim/publicSims.js).
+    await deleteSim(user.uid, id);
     setSims((list) => list.filter((s) => s.id !== id));
   };
   if (!sims) return <LoadingSpinner size={24} minHeight="80px" />;
