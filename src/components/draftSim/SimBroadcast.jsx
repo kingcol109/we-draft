@@ -57,6 +57,9 @@ export const SIM_CSS = `
   .wd-sim-draft:hover { filter: brightness(1.1); }
   .wd-sim-pickteam:hover { opacity: 1 !important; }
   .wd-sim-nofooter footer { display: none; }
+  /* Phones: a player's name isn't a link (too easy to hit mid-draft) — the
+     Draft Board's ↗ box opens his page instead. */
+  @media (max-width: 767px) { .wd-sim-plink { pointer-events: none; cursor: default; } }
   html.wd-sim-lock, html.wd-sim-lock body { overflow: hidden; overscroll-behavior: none; }  html.wd-sim-navhide .wd-navbar-wrap { transform: translateY(-100%); transition: transform .25s ease !important; }
   html.wd-sim-navhide.wd-sim-navopen .wd-navbar-wrap { transform: none; }
   html.wd-sim-dark, html.wd-sim-dark body { background: #070d18; }
@@ -988,7 +991,7 @@ function DraftTab({ s, data, isMobile }) {
               <TeamLogo brand={b} team={p.owner} size={22} />
               <span style={{ minWidth: 0, flex: 1 }}>
                 {pl
-                  ? <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></Link>
+                  ? <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 12, fontWeight: 900 }} /></Link>
                   : <span style={{ display: "block", color: "#55657e", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{live ? "On the clock" : "—"}</span>}
                 {pl && <span style={{ display: "block", color: "#8b9bb4", fontSize: 10, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} {pl.School}</span>}
               </span>
@@ -1028,7 +1031,7 @@ function MobileDraftList({ s, data, rounds, shownRound, setRound, picks, current
             <span style={{ flex: 1, minWidth: 0 }}>
               {pl ? (
                 <>
-                  <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 14, fontWeight: 900 }} /></Link>
+                  <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontSize: 14, fontWeight: 900 }} /></Link>
                   <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {pl.Position} · {pl.School}{p.via ? ` · via ${p.via}` : ""}
                   </span>
@@ -1079,7 +1082,7 @@ function MyPicksTab({ s, data, isMobile }) {
                     <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 30, flexShrink: 0, lineHeight: 1.25, textAlign: "center" }}>R{p.round}<br />{p.overall}</span>
                     {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 30, height: 30, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 30, flexShrink: 0 }} />}
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
+                      <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
                       <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pl.Position} · {pl.School}</span>
                     </span>
                   </div>
@@ -1090,7 +1093,7 @@ function MyPicksTab({ s, data, isMobile }) {
                   <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 56, flexShrink: 0, lineHeight: 1.25 }}>R{p.round} · No. {p.overall}</span>
                   {logoOf(pl) ? <img src={logoOf(pl)} alt="" style={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 28, flexShrink: 0 }} />}
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <Link to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
+                    <Link className="wd-sim-plink" to={`/player/${pl.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textDecoration: "none" }}><PlayerName p={pl} style={{ color: "#fff", fontWeight: 900, fontSize: 14 }} /></Link>
                     <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase" }}>{pl.Position} · {pl.School} · Board #{pl.rank}</span>
                   </span>
                   <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 900, color: value > 0 ? "#4ade80" : value < 0 ? "#ff8a9a" : "#9fb0c8", width: 64, textAlign: "right" }}>
@@ -1156,10 +1159,17 @@ function DraftBoardTab({ s, data, isMobile }) {
             <span style={{ width: 30, textAlign: "right", color: "#6f7f99", fontWeight: 900, fontSize: 13, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{p.rank}</span>
             {logoOf(p) ? <img src={logoOf(p)} alt="" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 26, flexShrink: 0 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <Link to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", fontWeight: 900, fontSize: 14, textDecoration: "none", textTransform: "uppercase" }}>{p.First} {p.Last}</Link>
+              <Link className="wd-sim-plink" to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ color: "#fff", fontWeight: 900, fontSize: 14, textDecoration: "none", textTransform: "uppercase" }}>{p.First} {p.Last}</Link>
               <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{p.Position} · {p.School}{label ? ` · ${label}${p.mine ? " (yours)" : ""}` : ""}</div>
             </div>
             {onClock && <button className="wd-sim-draft" onClick={() => s.draft(p.id)} style={DRAFT_BTN}>DRAFT</button>}
+            {/* Phones: his player page, in a new tab, from a box at the row's end. */}
+            {isMobile && p.Slug && (
+              <Link to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" aria-label={`${p.First} ${p.Last}'s player page`} style={{
+                flexShrink: 0, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8,
+                border: "1px solid #24324d", background: "#121c2f", color: "#9fb0c8", fontSize: 15, fontWeight: 900, textDecoration: "none",
+              }}>↗</Link>
+            )}
           </div>
         );
       })}
@@ -1272,7 +1282,7 @@ function SuggestionCard({ tag, accent, p, onClock, s, quote }) {
       <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
         {logoOf(p) ? <img src={logoOf(p)} alt="" style={{ width: 34, height: 34, objectFit: "contain", flexShrink: 0 }} /> : null}
         <span style={{ minWidth: 0 }}>
-          <Link to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 15, textTransform: "uppercase", textDecoration: "none", lineHeight: 1.1 }}>{p.First} {p.Last}</Link>
+          <Link className="wd-sim-plink" to={`/player/${p.Slug}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", color: "#fff", fontWeight: 900, fontSize: 15, textTransform: "uppercase", textDecoration: "none", lineHeight: 1.1 }}>{p.First} {p.Last}</Link>
           <span style={{ display: "block", color: "#8b9bb4", fontSize: 11, fontWeight: 800, textTransform: "uppercase", marginTop: 2 }}>{p.Position} {p.School} · Board #{p.rank}</span>
         </span>
       </div>

@@ -337,6 +337,22 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
     };
   }, [live]);
   useEffect(() => { document.documentElement.classList.toggle("wd-sim-navopen", live && navOpen); }, [live, navOpen]);
+  // iOS scrolls the page under the fixed screen when the keyboard opens (the
+  // search box) and can leave it there — taps then land below what's shown
+  // (on the board instead of the tabs). Back to the top whenever a field
+  // lets go or the keyboard closes, and on the way in.
+  useEffect(() => {
+    if (!live) return undefined;
+    const reset = () => setTimeout(() => window.scrollTo(0, 0), 60);
+    reset();
+    const vv = window.visualViewport;
+    document.addEventListener("focusout", reset);
+    vv?.addEventListener("resize", reset);
+    return () => {
+      document.removeEventListener("focusout", reset);
+      vv?.removeEventListener("resize", reset);
+    };
+  }, [live]);
   if (live) {
     return (
       <>

@@ -458,22 +458,18 @@ function SidebarCard({ title, color1, color2, children, to }) {
   );
 }
 
-// ── Class rank as a stat (mobile Community Scouting Report): big rank
-// number beside its field on one line ("of 120 2027 WRs") — instead of a
-// "4 / 120 2027 WRs" text line. Renders two cells of its parent's
-// two-column grid, so stacked ranks share columns: numbers right-aligned
-// in one, labels lined up in the other. ──
+// ── Class rank as a stat (mobile Community Scouting Report): the big rank
+// with "of 120" beside it, and its field ("2027 WRs") on its own line
+// underneath — so it fits a half-width column without cutting off. ──
 function RankStat({ rank, of, label, color }) {
   return (
-    <>
-      <div style={{ fontSize:"28px", fontWeight:900, color:"#0f1b2d", lineHeight:1, fontVariantNumeric:"tabular-nums", textAlign:"right" }}>
-        #{rank}
+    <div style={{ textAlign:"center", minWidth:0 }}>
+      <div style={{ display:"flex", alignItems:"baseline", justifyContent:"center", gap:"5px", fontVariantNumeric:"tabular-nums" }}>
+        <span style={{ fontSize:"28px", fontWeight:900, color:"#0f1b2d", lineHeight:1 }}>#{rank}</span>
+        <span style={{ fontSize:"13px", fontWeight:800, color:"#5b6b84" }}>of {of}</span>
       </div>
-      <div style={{ minWidth:0, textAlign:"left", fontSize:"13px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-        <span style={{ fontWeight:800, color:"#5b6b84", fontVariantNumeric:"tabular-nums" }}>of {of}</span>{" "}
-        <span style={{ fontWeight:900, color, textTransform:"uppercase", letterSpacing:"0.04em" }}>{label}</span>
-      </div>
-    </>
+      <div style={{ marginTop:"3px", fontSize:"11px", fontWeight:900, color, textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1.2 }}>{label}</div>
+    </div>
   );
 }
 
@@ -4569,7 +4565,7 @@ useEffect(() => {
                   <div className="flex-1 px-3 py-3">
                     <h3 className="wdm-h text-xs font-black uppercase pb-1 mb-2 text-center" style={{ color:siteC1, borderBottom:`2px solid ${siteC1}`, letterSpacing:"0.12em" }}>Class Rank</h3>
                     {(selfIndex >= 0 || classRank) ? (
-                      <div style={{ display:"grid", gridTemplateColumns:"auto minmax(0, auto)", justifyContent:"center", alignItems:"center", columnGap:"8px", rowGap:"8px" }}>
+                      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"10px" }}>
                         {selfIndex >= 0 && (
                           <RankStat rank={positionRank ?? selfIndex+1} of={draftClassPlayers.length} label={`${formatEligible(player.Eligible)} ${pluralPos(player.Position)}`} color={siteC1} />
                         )}
