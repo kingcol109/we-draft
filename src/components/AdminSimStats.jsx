@@ -9,11 +9,13 @@
 //                   class and date range.
 //   User picks      draftSimPicks — who users take, for which team, at
 //                   which pick, and when: filter by class, date range, team
-//                   and position; names from that class's sim board.
+//                   and position; names from that class's Expanded Board
+//                   (hidden players included), then the players doc for
+//                   anyone since removed from it.
 import { useEffect, useMemo, useState } from "react";
-import { collection, documentId, getDocs, orderBy, query, where } from "firebase/firestore";
+import { collection, doc, documentId, getDoc, getDocs, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { loadSimData, SIM_YEARS, SIM_YEAR } from "../utils/draftSim/data";
+import { loadExpandedBoard, SIM_YEARS, SIM_YEAR } from "../utils/draftSim/data";
 import { statsDay, WATCH_KEY } from "../utils/draftSim/stats";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { SIM_POSITIONS, SPECIALISTS } from "../utils/draftSim/engine";
@@ -176,10 +178,18 @@ function Picks() {
     setDocs(null);
     setBoard(null);
     setError("");
-    getDocs(query(collection(db, "draftSimPicks"), where("year", "==", year)))
-      .then((snap) => setDocs(snap.docs.map((d) => d.data())))
+    let live = true;
+    const picks = getDocs(query(collection(db, "draftSimPicks"), where("year", "==", year))).then((snap) => snap.docs.map((d) => d.data()));
+    picks.then((list) => live && setDocs(list))
       .catch((e) => { console.error("Sim pick stats load error:", e); setError("Couldn't load — check you're signed in as an admin."); });
-    loadSimData(year).then((d) => setBoard(d.board)).catch(() => setBoard([]));
+    Promise.all([picks.catch(() => []), loadExpandedBoard(year).catch(() => [])]).then(async ([list, b]) => {
+      // Picked players no longer on the board: read their players docs.
+      const have = new Set(b.map((p) => p.id));
+      const missing = [...new Set(list.flatMap((d) => Object.keys(d.p || {}).map((k) => k.slice(k.indexOf("_") + 1))))].filter((id) => !have.has(id));
+      const extra = await Promise.all(missing.map((id) => getDoc(doc(db, "players", id)).then((s) => (s.exists() ? { id, ...s.data() } : null)).catch(() => null)));
+      if (live) setBoard([...b, ...extra.filter(Boolean)]);
+    });
+    return () => { live = false; };
   }, [year]);
 
   // [{ overall, team, id, n, share, first, last }] — one doc per team per
