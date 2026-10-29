@@ -2,7 +2,8 @@
 //
 // The Draft Sim's Community tab (/draftsim/community): what everyone
 // running the sim does — the community insights (compSnapshots/simInsights,
-// utils/draftSim/insights.js: simulations ran, the most picked players —
+// utils/draftSim/insights.js: simulations ran and picks made, the most
+// picked players (with their schools' logos) —
 // or, once there's the volume for them (favoritesReady), the community's
 // favorites, the players users take furthest ahead of the board — with
 // the top one up top, the teams users draft as, the community's first
@@ -11,6 +12,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import { getDocs, collection, query, where } from "firebase/firestore";
+import { db } from "../../firebase";
 import { getSiteSnapshot } from "../../utils/siteSnapshots";
 import { SIM_YEARS, SIM_YEAR } from "../../utils/draftSim/data";
 import { INSIGHTS_DOC, FAVORITE_MIN, TOP_FAVORITES, favoritesReady } from "../../utils/draftSim/insights";
@@ -60,6 +63,8 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
     getSiteSnapshot(INSIGHTS_DOC).then((d) => live && setDoc(d || null)).catch(() => live && setDoc(null));
     return () => { live = false; };
   }, []);
+  // The schools' dark logos (the panels are dark), for the players listed.
+  const schoolLogos = useSchoolLogos(doc?.players);
 
   const head = (
     <Helmet>
@@ -74,6 +79,7 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
   const players = doc?.players || {};
   const nameOf = (id) => (players[id] ? `${players[id].F} ${players[id].L}` : "Unknown player");
   const logo = (t) => branding[t]?.LogoDark || branding[t]?.Logo1 || "";
+  const schoolLogo = (id, size) => <SchoolLogo src={schoolLogos[players[id]?.s]} school={players[id]?.s} size={size} />;
   // Who holds each first-round slot, when it's the class on the setup screen.
   const slotTeam = (overall) => (String(orderYear) === String(year) ? order.find((p) => p.Pick === overall) : null);
   const empty = !y || (!y.teams.length && !y.firstRound.length);
@@ -97,16 +103,19 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
       </div>
 
       {totals && (
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 2fr)", gap: 10 }}>
-          <div style={{ ...PANEL, padding: "10px 14px" }}>
-            <div style={label}>SIMULATIONS RAN</div>
-            <div style={{ color: "#fff", fontSize: 22, fontWeight: 900, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{(totals.sims || 0).toLocaleString()}</div>
-          </div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "minmax(0, 1fr) minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr)", gap: 10 }}>
+          {[["SIMULATIONS RAN", totals.sims], ["PICKS MADE", totals.picks]].map(([k, n]) => (
+            <div key={k} style={{ ...PANEL, padding: "10px 14px" }}>
+              <div style={label}>{k}</div>
+              <div style={{ color: "#fff", fontSize: 22, fontWeight: 900, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>{(n || 0).toLocaleString()}</div>
+            </div>
+          ))}
           {/* The favorite — the one users take furthest ahead of the board — or, until there's the volume, the most picked. */}
-          <div style={{ ...PANEL, padding: "10px 14px", minWidth: 0 }}>
+          <div style={{ ...PANEL, padding: "10px 14px", minWidth: 0, gridColumn: isMobile ? "1 / -1" : "auto" }}>
             <div style={label}>{ready ? "FAVORITE PLAYER" : "MOST PICKED PLAYER"}</div>
             {top ? (
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 2, flexWrap: "wrap", fontFamily: BODY }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap", fontFamily: BODY }}>
+                {schoolLogo(top.id, 28)}
                 <PlayerLink p={players[top.id]} name={nameOf(top.id)} big />
                 <span style={{ color: "#8b9bb4", fontSize: 12 }}>{players[top.id]?.pos} {players[top.id]?.s}</span>
                 <span style={{ marginLeft: "auto", color: GOLD, fontSize: 13, fontWeight: 900 }}>{ready ? spotsEarly(top.median) : picksText(top.n)}</span>
@@ -130,8 +139,9 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
               <div style={heading}>{ready ? "COMMUNITY FAVORITES" : "MOST PICKED PLAYERS"}</div>
               {ready && <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>The players users take furthest ahead of their board spot — their median pick ({FAVORITE_MIN}+ selections).</div>}
               {(ready ? favorites : mostPicked).map((p, i) => (
-                <div key={p.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "5px 0", borderTop: i ? "1px solid #18233a" : "none", fontFamily: BODY }}>
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: i ? "1px solid #18233a" : "none", fontFamily: BODY }}>
                   <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 18, textAlign: "right" }}>{i + 1}</span>
+                  {schoolLogo(p.id, 20)}
                   <PlayerLink p={players[p.id]} name={nameOf(p.id)} />
                   <span style={{ color: "#8b9bb4", fontSize: 11 }}>{players[p.id]?.pos} {players[p.id]?.s}</span>
                   <span style={{ marginLeft: "auto", color: "#dbe4f0", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums" }} title={`${p.n} selections`}>{ready ? spotsEarly(p.median) : picksText(p.n)}</span>
@@ -165,6 +175,34 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
 const PlayerLink = ({ p, name, big = false }) => (p?.sl
   ? <Link to={`/player/${p.sl}`} style={{ color: "#fff", fontWeight: 900, fontSize: big ? 18 : 13, textDecoration: "none" }}>{name}</Link>
   : <span style={{ color: "#fff", fontWeight: 900, fontSize: big ? 18 : 13 }}>{name}</span>);
+
+// A school's logo, or the same space empty so the names line up.
+const SchoolLogo = ({ src, school, size }) => (src
+  ? <img src={src} alt={school || ""} title={school || ""} style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }} />
+  : <span style={{ width: size, flexShrink: 0 }} />);
+
+// The insights doc's players' schools → { [School]: dark logo } (LogoBlack,
+// else LogoDark, else Logo1 — as the sim's), 30 names per query.
+function useSchoolLogos(players) {
+  const [logos, setLogos] = useState({});
+  const key = [...new Set(Object.values(players || {}).map((p) => p.s).filter(Boolean))].sort().join("|");
+  useEffect(() => {
+    if (!key) return undefined;
+    let live = true;
+    const names = key.split("|");
+    const chunks = [];
+    for (let i = 0; i < names.length; i += 30) chunks.push(names.slice(i, i + 30));
+    Promise.all(chunks.map((c) => getDocs(query(collection(db, "schools"), where("School", "in", c))).catch(() => null)))
+      .then((snaps) => {
+        if (!live) return;
+        const out = {};
+        snaps.forEach((snap) => snap?.docs.forEach((d) => { const s = d.data(); out[s.School] = s.LogoBlack || s.LogoDark || s.Logo1 || ""; }));
+        setLogos(out);
+      });
+    return () => { live = false; };
+  }, [key]);
+  return logos;
+}
 
 // A median, in board spots ahead: "+12.5 spots early".
 const spotsEarly = (spots) => `+${spots} ${spots === 1 ? "spot" : "spots"} early`;

@@ -122,23 +122,27 @@ export const NEED_KEYS = ["QB", "RB", "WR", "TE", "OT", "G", "C", "IDL", "EDGE",
 // Research's position groups) can be tagged with it. A role can reach past
 // its parent — any DB can be a safety, a slot corner or a sub linebacker,
 // an edge rusher an interior pass rusher or run stopper. `word` is how the
-// analysts say it.
+// analysts say it; `phrase`, the player it describes in a sentence ("a
+// tight end who can help in the run game" — the mock's pick notes, where
+// "a blocking tight end" reads like a label).
 export const ROLES = [
-  { key: "RB3", name: "3rd Down RB", word: "third-down back", parent: "RB", pos: ["RB"], groups: ["RB"] },
-  { key: "SLOTWR", name: "Slot WR", word: "slot receiver", parent: "WR", pos: ["WR"], groups: ["WR"] },
-  { key: "BIGWR", name: "WR Size", word: "big-bodied receiver", parent: "WR", pos: ["WR"], groups: ["WR"] },
-  { key: "DEEPWR", name: "Field Stretching WR", word: "deep threat", parent: "WR", pos: ["WR"], groups: ["WR"] },
-  { key: "BLOCKTE", name: "Blocking TE", word: "blocking tight end", parent: "TE", pos: ["TE"], groups: ["TE"] },
-  { key: "RUSHEDGE", name: "Pass Rushing EDGE", word: "pass rusher", parent: "EDGE", pos: ["EDGE"], groups: ["EDGE"] },
-  { key: "RUSHDL", name: "Pass Rushing DL", word: "interior pass rusher", parent: "IDL", pos: ["DL", "EDGE"], groups: ["IDL", "EDGE"] },
-  { key: "RUNDL", name: "Run Stopping DL", word: "run stopper", parent: "IDL", pos: ["DL", "EDGE"], groups: ["IDL", "EDGE"] },
-  { key: "NOSE", name: "Nose Tackle", word: "nose tackle", parent: "IDL", pos: ["DL"], groups: ["IDL"] },
-  { key: "SUBLB", name: "Sub LB", word: "coverage linebacker", parent: "LB", pos: ["LB", "DB"], groups: ["LB", "CB", "S"] },
-  { key: "SS", name: "Strong Safety", word: "strong safety", parent: "S", pos: ["DB"], groups: ["CB", "S"] },
-  { key: "FS", name: "Free Safety", word: "free safety", parent: "S", pos: ["DB"], groups: ["CB", "S"] },
-  { key: "SLOTCB", name: "Slot Corner", word: "slot corner", parent: "CB", pos: ["DB"], groups: ["CB", "S"] },
+  { key: "RB3", name: "3rd Down RB", word: "third-down back", phrase: "a back who can handle third downs", parent: "RB", pos: ["RB"], groups: ["RB"] },
+  { key: "SLOTWR", name: "Slot WR", word: "slot receiver", phrase: "a receiver who can work out of the slot", parent: "WR", pos: ["WR"], groups: ["WR"] },
+  { key: "BIGWR", name: "WR Size", word: "big-bodied receiver", phrase: "a bigger receiver who can win on the outside", parent: "WR", pos: ["WR"], groups: ["WR"] },
+  { key: "DEEPWR", name: "Field Stretching WR", word: "deep threat", phrase: "a receiver who can stretch the field", parent: "WR", pos: ["WR"], groups: ["WR"] },
+  { key: "BLOCKTE", name: "Blocking TE", word: "blocking tight end", phrase: "a tight end who can help in the run game", parent: "TE", pos: ["TE"], groups: ["TE"] },
+  { key: "RUSHEDGE", name: "Pass Rushing EDGE", word: "pass rusher", phrase: "an edge rusher who can get after the quarterback", parent: "EDGE", pos: ["EDGE"], groups: ["EDGE"] },
+  { key: "RUSHDL", name: "Pass Rushing DL", word: "interior pass rusher", phrase: "an interior lineman who can push the pocket", parent: "IDL", pos: ["DL", "EDGE"], groups: ["IDL", "EDGE"] },
+  { key: "RUNDL", name: "Run Stopping DL", word: "run stopper", phrase: "a defensive lineman who can stop the run", parent: "IDL", pos: ["DL", "EDGE"], groups: ["IDL", "EDGE"] },
+  { key: "NOSE", name: "Nose Tackle", word: "nose tackle", phrase: "a nose tackle who can anchor the middle", parent: "IDL", pos: ["DL"], groups: ["IDL"] },
+  { key: "SUBLB", name: "Sub LB", word: "coverage linebacker", phrase: "a linebacker who can hold up in coverage", parent: "LB", pos: ["LB", "DB"], groups: ["LB", "CB", "S"] },
+  { key: "SS", name: "Strong Safety", word: "strong safety", phrase: "a safety who can play near the line", parent: "S", pos: ["DB"], groups: ["CB", "S"] },
+  { key: "FS", name: "Free Safety", word: "free safety", phrase: "a safety who can play center field", parent: "S", pos: ["DB"], groups: ["CB", "S"] },
+  { key: "SLOTCB", name: "Slot Corner", word: "slot corner", phrase: "a corner who can cover the slot", parent: "CB", pos: ["DB"], groups: ["CB", "S"] },
 ];
 export const ROLE_BY_KEY = Object.fromEntries(ROLES.map((r) => [r.key, r]));
+// A role need as a sentence says it ("a tight end who can help in the run game"), or "" for a position.
+export const rolePhrase = (key) => ROLE_BY_KEY[key]?.phrase || "";
 export const ROLE_WEIGHT = 0.6;
 export const NEED_KEY_NAMES = {
   QB: "Quarterback", RB: "Running Back", WR: "Wide Receiver", TE: "Tight End", OT: "Offensive Tackle", G: "Guard", C: "Center",
@@ -1439,6 +1443,7 @@ const chartTotal = (state, keys) => keys.reduce((a, k) => a + pickWorth(state, p
 // give: the user's pick numbers going to the partner; get: the partner's
 // coming back. → { give, get (chart points), ratio (give / get), accept,
 // short (the points more it would take — the on-the-clock premium too),
+// target (the points it wants in all — the trade meter's full mark),
 // movedUp? }. A CPU partner that's moved up this draft won't trade back
 // down (give up the earliest pick in the deal) — movedUp: true says why.
 export function evaluateProposal(state, { give = [], get = [] }) {
@@ -1460,7 +1465,7 @@ export function evaluateProposal(state, { give = [], get = [] }) {
     ? getValue * tradeUpAsk(wanted.score)
     : getValue * askRatio(CPU_ACCEPT_RATIO, onClock && get.includes(onClock.overall) && !state.userTeams.includes(onClock.owner) ? attachment : null);
   const accept = give.length > 0 && get.length > 0 && giveValue >= target;
-  return { give: giveValue, get: getValue, ratio: getValue ? giveValue / getValue : 0, accept, short: Math.max(1, Math.ceil(target - giveValue)) };
+  return { give: giveValue, get: getValue, ratio: getValue ? giveValue / getValue : 0, accept, short: Math.max(1, Math.ceil(target - giveValue)), target };
 }
 
 // The CPU partner's own offer for a deal the user's started ({ team,

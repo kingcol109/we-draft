@@ -390,3 +390,14 @@ test("2029 weekly mock: one round, every team with its own pick, in a random ord
   expect(WEEKLY_ROUNDS_BY_YEAR[2029]).toBe(1);
   expect(WEEKLY_TRADES_BY_YEAR[2029]).toBe("off");
 });
+
+test("notes: a role need is said as the player it describes, never as a label", () => {
+  const sim = runWeeklyMock(data, { seed: 3, rounds: 1 });
+  const e = { ...sim.pickEvents[0], value: 0, need: { key: "BLOCKTE", label: "Upgrade Needed", note: "" } };
+  const ctx = { teamName: (t) => t, nickname: (t) => `${t}s`, staff: {}, season: 2026, year: "2027", rand: Math.random };
+  const all = new Set();
+  for (let k = 0; k < 30; k++) all.add(pickNote(e, { ...ctx, used: {} }).split(/(?<=\.) /)[0]);
+  const text = [...all].join(" ");
+  expect(text).toMatch(/a tight end who can help in the run game/);
+  expect(text).not.toMatch(/blocking tight end/i);
+});

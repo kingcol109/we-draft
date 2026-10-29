@@ -20,7 +20,8 @@
 //                                  place once there are TOP_FAVORITES
 //                                  (favoritesReady).
 //       firstRound: [{ overall, id, n, of }] — the most common pick at
-//                                  each first-round slot (of: every pick
+//                                  each first-round slot, drafted in order
+//                                  so no player goes twice (of: every pick
 //                                  users made there)
 //     } } },
 //     players: { [id]: { F, L, pos, s, sl } } — everyone named above }
@@ -90,11 +91,22 @@ function yearInsights(teamDocs, pickDocs, ranks = {}, favoriteMin = FAVORITE_MIN
       .map(([id, e]) => ({ id, n: Object.values(e).reduce((a, b) => a + b, 0), median: medianOf(e) }))
       .filter((f) => f.n >= favoriteMin && f.median > 0)
       .sort((a, b) => b.median - a.median || b.n - a.n).slice(0, TOP_FAVORITES),
-    firstRound: Object.entries(slots).map(([overall, counts]) => {
-      const [id, n] = ranked(counts)[0];
-      return { overall: Number(overall), id, n, of: Object.values(counts).reduce((a, b) => a + b, 0) };
-    }).sort((a, b) => a.overall - b.overall),
+    firstRound: communityRound(slots),
   };
+}
+
+// The community's first round, drafted like a real one: slot by slot, each
+// takes its most common pick among the players still on the board. A slot
+// whose every pick went earlier is left out.
+function communityRound(slots) {
+  const taken = new Set();
+  return Object.keys(slots).map(Number).sort((a, b) => a - b).flatMap((overall) => {
+    const counts = slots[overall];
+    const best = ranked(counts).find(([id]) => !taken.has(id));
+    if (!best) return [];
+    taken.add(best[0]);
+    return [{ overall, id: best[0], n: best[1], of: Object.values(counts).reduce((a, b) => a + b, 0) }];
+  });
 }
 
 const sum = (docs) => docs.reduce((t, d) => ({ sims: t.sims + (d.sims || 0), completed: t.completed + (d.completed || 0), picks: t.picks + (d.picks || 0) }), { sims: 0, completed: 0, picks: 0 });

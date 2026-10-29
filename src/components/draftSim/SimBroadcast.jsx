@@ -1791,6 +1791,33 @@ const STANCE = {
   movedUp: { tag: "NOT MOVING BACK", color: "#8b9bb4", text: "We just traded up to get here. We're not moving back down." },
 };
 
+// The trade meter: how close the deal is to a yes (engine evaluateProposal —
+// what the user sends against the partner's price). No chart points, just a
+// bar and the partner's mood, so it reads like a phone call, not a calculator.
+const METER = [
+  { at: 0.5, tag: "NOT CLOSE", color: "#c8102e" },
+  { at: 0.8, tag: "GETTING THERE", color: "#e07b00" },
+  { at: 0.95, tag: "CLOSE", color: GOLD },
+  { at: 1, tag: "ALMOST THERE", color: "#9ccc65" },
+];
+function TradeMeter({ verdict, them }) {
+  const fill = verdict.movedUp ? 0 : Math.min(1, verdict.target ? verdict.give / verdict.target : 0);
+  const level = verdict.movedUp ? { tag: "WON'T MOVE BACK", color: "#8b9bb4" }
+    : verdict.accept ? { tag: "THEY'D ACCEPT", color: "#3fb950" }
+    : METER.find((m) => fill < m.at) || METER[METER.length - 1];
+  return (
+    <div style={{ marginTop: 10 }} role="meter" aria-label={`Trade meter: ${level.tag.toLowerCase()} with the ${them}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fill * 100)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+        <span style={dealLabel}>TRADE METER</span>
+        <span style={{ marginLeft: "auto", color: level.color, fontSize: 10, fontWeight: 900, letterSpacing: "0.12em", textAlign: "right" }}>{level.tag}</span>
+      </div>
+      <div style={{ height: 8, borderRadius: 999, background: "#0b1322", border: "1px solid #24324d", overflow: "hidden" }}>
+        <div style={{ width: `${fill * 100}%`, height: "100%", borderRadius: 999, background: level.color, transition: "width 0.25s ease, background 0.25s ease" }} />
+      </div>
+    </div>
+  );
+}
+
 // One side of a trade: its picks, each a toggle — click (or tap) one to put
 // it in the deal (gold, checked), again to take it out. No chart values:
 // the user offers to find out. onPlace(side, pick, inDeal).
@@ -1858,8 +1885,9 @@ function TradesTab({ s, data, isMobile, seed = null }) {
   const interest = !god && includeCurrent && !stance && partner ? pickInterest(s.sim, partner) : null;
   const banner = stance ? STANCE[stance]
     : interest ? { ...INTEREST[interest], text: INTEREST[interest].text.replace("{n}", pick.overall) } : null;
-  // Mock Draft mode only: there's no one to ask, so the chart's shown.
-  const verdict = god ? evaluateProposal(s.sim, { give, get }) : null;
+  // Mock Draft mode: there's no one to ask, so the chart's shown. Otherwise
+  // it drives the trade meter, once the user's asking for something.
+  const verdict = god || (partner && get.length) ? evaluateProposal(s.sim, { give, get }) : null;
   const sideList = { give: [give, setGive], get: [get, setGet] };
   // Into the deal, or back out of it.
   const place = (side, n, inDeal) => {
@@ -1984,6 +2012,7 @@ function TradesTab({ s, data, isMobile, seed = null }) {
                 );
               })()}
             </div>
+            {!god && verdict && <TradeMeter verdict={verdict} them={brandOf(data, partner).Team || partner} />}
             {god && result && <div style={{ marginTop: 8, color: result.ok ? "#3fb950" : GOLD, fontSize: 13, fontWeight: 800, fontFamily: BODY }}>{result.text}</div>}
           </>
         )}

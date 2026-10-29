@@ -28,6 +28,15 @@ test("community insights: teams, players and the first round, this week and all 
   expect(withNames(out, [{ id: "a", First: "Will", Last: "Echoles", Position: "DL", School: "Ole Miss", Slug: "will" }]).players.a).toEqual({ F: "Will", L: "Echoles", pos: "DL", s: "Ole Miss", sl: "will" });
 });
 
+test("community first round: drafted in order, no player twice", () => {
+  const out = buildSimInsights({
+    years: ["2027"],
+    picks: [{ year: "2027", team: "NYJ", day: "2026-09-01", p: { "1_a": 5, "1_b": 1, "2_a": 4, "2_c": 3, "3_a": 2, "3_c": 6 } }],
+  });
+  // No. 2's favorite went at 1, so it takes its next; No. 3's two are both gone.
+  expect(out.years["2027"].all.firstRound).toEqual([{ overall: 1, id: "a", n: 5, of: 6 }, { overall: 2, id: "c", n: 3, of: 7 }]);
+});
+
 test("community favorites: the median pick furthest ahead of the board, 10 picks at least", () => {
   expect(BOARD_POSITIONS).toEqual(SIM_POSITIONS);
   const ranks = boardRanks({ QB: [{ i: "q", cr: 3 }], WR: [{ i: "w", cr: 1 }, { i: "x", cr: 50 }, { i: "y", cr: 90 }], K: [{ i: "k", cr: 2 }] });

@@ -30,7 +30,7 @@
 // rank), with no pick number; the facts are the same minus the team's
 // draft history.
 import { pickVars, statFacts, ordinal, lineText, playerTakesFor, takeLinesOf, singular } from "./analysts";
-import { needWord, subsOf } from "./engine";
+import { needWord, subsOf, rolePhrase } from "./engine";
 
 export const PFF_TOP = 10;
 export const PFF_MIN_SNAPS = 150;
@@ -78,6 +78,15 @@ export const NOTE_LINES = {
     "The {nick} were in the market for help at {needPos}, and {player} fits the bill.",
     "{needPos} was near the top of the {nick}' shopping list. {player} checks the box.",
     "The {nick} go need-first with {player}, a {posName} for a roster that's been short at {needPos}.",
+  ],
+  // A role need ({rolePhrase}: "a tight end who can help in the run game") —
+  // said as the player it describes, never as a label.
+  needRole: [
+    "The {nick} came into the draft looking for {rolePhrase}, and {player} could be that guy at {n}.",
+    "{player} gives the {nick} {rolePhrase}, one of the clearest needs on the roster.",
+    "One of the {nick}' biggest needs was {rolePhrase}. {player} fits that description.",
+    "{player} could fill a real need for the {nick}: {rolePhrase}.",
+    "The {nick} have been short on {rolePhrase}, which makes {player} a sensible pick at {n}.",
   ],
   board: [
     "{player} goes at {n}, right around the No. {rank} spot the We-Draft.com community has him.",
@@ -343,7 +352,7 @@ function leadOf(e) {
   const p = e.prospect;
   if (e.value >= Math.max(5, e.pick.overall * 0.2)) return "steal";
   if (-e.value >= Math.max(8, e.pick.overall * 0.3)) return "reach";
-  if (e.need && ["Upgrade Needed", "Expiring Contract", "Aging Talent"].includes(e.need.label)) return "need";
+  if (e.need && ["Upgrade Needed", "Expiring Contract", "Aging Talent"].includes(e.need.label)) return rolePhrase(e.need.key) ? "needRole" : "need";
   if (p.positionRank === 1) return "topPos";
   return "board";
 }
@@ -406,7 +415,7 @@ function staffLink(e, ctx) {
 // ctx.light: a light note (see the top).
 const NOT_LIGHT_GROUPS = ["history"];
 export function pickNote(e, ctx) {
-  const base = { ...pickVars(e, ctx), needPos: e.need ? needWord(e.need.key) : "", ...aliasVars(e.prospect, ctx.rand) };
+  const base = { ...pickVars(e, ctx), needPos: e.need ? needWord(e.need.key) : "", rolePhrase: e.need ? rolePhrase(e.need.key) : "", ...aliasVars(e.prospect, ctx.rand) };
   const lead = ctx.light
     ? (e.prospect.positionRank === 1 && lineOf("lightTopPos", base, ctx)) || lineOf("lightRank", base, ctx) || lineOf("intro", base, ctx)
     : lineOf(leadOf(e), base, ctx) || lineOf("board", base, ctx);
