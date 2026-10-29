@@ -38,7 +38,7 @@ import { textOn } from "../utils/teamColors";
 import { PickRow } from "./ViewMock";
 import {
   BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner, TradeCard, tradeChip,
-  Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch,
+  Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, PhoneAd,
 } from "../components/MockDraftKit";
 
 const playerText = (p) => (p ? `${p.First} ${p.Last}, ${[p.Position, p.School].filter(Boolean).join(", ")}` : "no selection");
@@ -64,6 +64,9 @@ async function loadWeeks(year) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((w) => w.publishedAt)
     .sort((a, b) => b.publishedAt.toMillis() - a.publishedAt.toMillis()).slice(0, 2);
 }
+
+// Phones' ad goes after this many rounds of the team's picks.
+const PHONE_AD_ROUND = 3;
 
 export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
   const isMobile = useIsMobile();
@@ -328,6 +331,9 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                 </div>
                 {/* The sim, as this team and class, after its first round of picks. */}
                 {ri === 0 && banner}
+                {/* Phones: the NFL Homage ad (this team's first) after round 3 —
+                    after the last round when the team has fewer listed. */}
+                {ri === Math.min(PHONE_AD_ROUND, shownRounds.length) - 1 && <div style={{ marginTop: 16 }}><PhoneAd isMobile={isMobile} preferTeam={team} /></div>}
               </Fragment>
             ))}
             {recap && <div style={{ marginTop: 18 }}>{recap}</div>}

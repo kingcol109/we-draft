@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
 
@@ -6,7 +6,7 @@ const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
 export default function AuthModal() {
-  const { authModalOpen, closeAuthModal, loginWithGoogle, signInWithEmail, signUpWithEmail, resetPassword } = useAuth();
+  const { authModalOpen, authModalMode, closeAuthModal, loginWithGoogle, signInWithEmail, signUpWithEmail, resetPassword } = useAuth();
 
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "reset"
   const [email, setEmail] = useState("");
@@ -15,6 +15,15 @@ export default function AuthModal() {
   const [error, setError] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Each time it opens: the screen it was asked for (AuthContext
+  // openAuthModal — a Create Account button opens on signup), fields clear.
+  useEffect(() => {
+    if (!authModalOpen) return;
+    setMode(authModalMode || "signin");
+    setEmail(""); setPassword(""); setConfirmPassword("");
+    setError(""); setResetSent(false); setLoading(false);
+  }, [authModalOpen, authModalMode]);
 
   if (!authModalOpen) return null;
 

@@ -47,7 +47,7 @@ const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "p
 // profile snapshot, or signed out in the sign-up pitch in its place (a Mock
 // Draft's: across the top); badgeTotal: how many there are to earn.
 export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo, badges = [], badgeTotal = 0 }) {
-  const { user, login } = useAuth();
+  const { user, login, signup } = useAuth();
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
   // Isaac's line per team, picked once (it draws on the desk's rng).
@@ -116,7 +116,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
             <SimSnapshot branding={data.branding} names={teamNamer(data.branding).teamName} year={data.year} counted={counted} />
             <EndBadges badges={badges} max={isMobile ? 3 : 4} />
           </div>
-        ) : <SignUpPanel badges={badges} total={badgeTotal} login={login} />}
+        ) : <SignUpPanel badges={badges} total={badgeTotal} login={login} signup={signup} />}
       </div>
 
       {userHauls.length > 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />}

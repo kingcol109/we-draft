@@ -21,7 +21,9 @@
 // A pick the sim traded opens with the trade: the trade up into it, or the
 // trade down that brought it (tradeOpener).
 // Lines are data, like the desk's; a template is used again only once the
-// rest of its kind have been, so a mock reads varied.
+// rest of its kind have been, so a mock reads varied. A mock is speculation,
+// not a team's decision: the lines explain why a pick could make sense —
+// never what a team thinks, wants or values.
 // Light notes (ctx.light — the next class's mock, drafted a year out) leave
 // out needs, value and where he was picked: the lead names him and where the
 // community board has him (lightRank, lightTopPos — intro when he has no
@@ -56,20 +58,20 @@ export const NOTE_LINES = {
   steal: [
     "{player} was No. {rank} on the We-Draft.com community board, so the {nick} get him {spots} spots later than the community expected.",
     "Value pick. The community board had {last} at No. {rank}, and the {nick} land him at {n}.",
-    "The {nick} let the board come to them: {player}, the community's No. {rank} prospect, is still there at {n}.",
-    "{last} slides {spots} spots past his community ranking, and the {nick} take advantage.",
+    "{player}, the community's No. {rank} prospect, is still on the board at {n} — a value that's hard to pass up for the {nick}.",
+    "{last} slides {spots} spots past his community ranking here, which makes him a sensible pick for the {nick} at {n}.",
     "At No. {rank} on the We-Draft.com board, {last} is a clear value for the {nick} at {n}.",
-    "The community had {player} going well before {n}. The {nick} are happy to take him here.",
+    "The community had {player} going well before {n}, so he'd be a strong value for the {nick} here.",
   ],
   reach: [
-    "The {nick} go off the board for {player}, the community's No. {rank} prospect, {spots} spots ahead of where the community has him.",
+    "{player} goes {spots} spots ahead of his community ranking (No. {rank}), so the case for him at {n} rests on what he could become for the {nick}.",
     "{player} comes off the board earlier than the community expected — he's No. {rank} on the We-Draft.com board.",
-    "A bet on the player over the ranking: {last} was No. {rank} on the community board, and the {nick} take him at {n}.",
-    "The {nick} clearly value {last} more than the community does; he sits at No. {rank} on the We-Draft.com board.",
-    "{last} at {n} is earlier than the board suggests (No. {rank}), but the {nick} don't wait on their guy.",
+    "This one goes against the ranking: {last} was No. {rank} on the community board, and the case for him at {n} is what he could bring the {nick}.",
+    "{last} sits at No. {rank} on the We-Draft.com board, so No. {n} is early by the community's measure — the case for him is what he'd add to the {nick}.",
+    "{last} at {n} is earlier than the board suggests (No. {rank}), but a team that likes him might not want to risk him being gone by its next pick.",
   ],
   need: [
-    "{needPos} was a big need for the {nick}, and {player} is the answer at {n}.",
+    "{needPos} was a big need for the {nick}, and {player} could be the answer at {n}.",
     "The {nick} address {needPos} with {player}, one of the clearest needs on the roster.",
     "{player} fills a hole: the {nick} came into the draft needing help at {needPos}.",
     "No position needed help more for the {nick} than {needPos}. Enter {player}.",

@@ -147,7 +147,8 @@ export function EndBadges({ badges, max = 4 }) {
 // as fit, rarest first) — and the button. Signing in from here counts
 // this draft (DraftSim.jsx). total: how many badges there are to earn.
 const PERKS = ["Every badge you earn, saved", "Your daily streak & average grade", "Your teams, positions and best picks"];
-export function SignUpPanel({ badges, total, login, max = 3 }) {
+// signup: the Create Account button (the auth modal on its signup screen); login: "Sign in".
+export function SignUpPanel({ badges, total, login, signup = login, max = 3 }) {
   const list = rarestFirst(badges);
   const more = list.length - max;
   return (
@@ -177,7 +178,7 @@ export function SignUpPanel({ badges, total, login, max = 3 }) {
         ))}
       </div>
       <div style={{ padding: 16 }}>
-        <button onClick={login} style={{ width: "100%", border: "none", borderRadius: 999, background: GOLD, color: "#fff", padding: "12px 16px", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", cursor: "pointer", fontFamily: FONT, boxShadow: "0 6px 18px rgba(246,162,29,0.25)" }}>
+        <button onClick={signup} style={{ width: "100%", border: "none", borderRadius: 999, background: GOLD, color: "#fff", padding: "12px 16px", fontWeight: 900, fontSize: 13, letterSpacing: "0.08em", cursor: "pointer", fontFamily: FONT, boxShadow: "0 6px 18px rgba(246,162,29,0.25)" }}>
           {list.length ? "SIGN UP & KEEP THEM" : "CREATE FREE ACCOUNT"}
         </button>
         <div style={{ textAlign: "center", marginTop: 8, color: "#8b9bb4", fontSize: 11, fontFamily: BODY }}>

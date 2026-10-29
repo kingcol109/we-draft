@@ -28,7 +28,7 @@
 // spinner until it lands" shape can share it.
 import { useEffect } from "react";
 
-export function useMobileStuckPageWatchdog(loading, key, { enabled, timeoutMs = 3000 } = {}) {
+export function useMobileStuckPageWatchdog(loading, key, { enabled, timeoutMs = 5000 } = {}) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const isMobile = enabled !== undefined ? enabled : window.innerWidth < 768;

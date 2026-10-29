@@ -8,10 +8,18 @@
 // replaces all of them with one ring (brand blue track + blue/gold rotating
 // arc) plus an optional animated-ellipsis label, sized for three contexts:
 // full-page, section-level, and inline.
+// A page-level spinner (sized to the viewport — minHeight in vh) also
+// tells the mobile stuck-page watchdog the page is still loading
+// (hooks/useStuckSpinnerWatchdog.js).
+import { useEffect } from "react";
+import { trackPageSpinner } from "../hooks/useStuckSpinnerWatchdog";
+
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
 export default function LoadingSpinner({ label, size = 40, minHeight, inline = false }) {
+  const pageLevel = !inline && /vh/.test(String(minHeight || ""));
+  useEffect(() => (pageLevel ? trackPageSpinner() : undefined), [pageLevel]);
   const ringThickness = Math.max(3, Math.round(size / 11));
 
   const ring = (

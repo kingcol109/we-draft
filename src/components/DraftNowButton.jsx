@@ -45,8 +45,9 @@ const CSS = `
 // No team: the sim's own start (/draftsim — the full weekly mock's banner).
 // year: another class than the sim's default (/draftsim/2028/{team}).
 // compact: the phone size everywhere (the weekly mock's pages, where it
-// sits in a banner rather than a hero).
-export default function DraftNowButton({ team, teamName, c1, c2, isMobile, compact = false, year = "" }) {
+// sits in a banner rather than a hero). wide: a phone hero's — the hero's
+// full width under the name, on one line.
+export default function DraftNowButton({ team, teamName, c1, c2, isMobile, compact = false, wide = false, year = "" }) {
   const small = isMobile || compact;
   return (
     <>
@@ -56,10 +57,11 @@ export default function DraftNowButton({ team, teamName, c1, c2, isMobile, compa
         style={{
           "--dc": readableOn(c1, "#ffffff"), "--dg": c2,
           flexShrink: 0, alignSelf: "center", textDecoration: "none",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: small ? 2 : 4,
+          display: "flex", flexDirection: wide ? "row" : "column", alignItems: "center", justifyContent: "center", gap: wide ? 10 : small ? 2 : 4,
+          ...(wide ? { width: "100%", boxSizing: "border-box" } : {}),
           background: "linear-gradient(180deg, #ffffff 0%, #eef1f5 100%)",
           color: "var(--dc)", border: `2px solid ${c2}`, borderRadius: 999,
-          padding: small ? "8px 18px 9px" : "14px 44px 16px",
+          padding: wide ? "10px 18px" : small ? "8px 18px 9px" : "14px 44px 16px",
           boxShadow: "0 8px 22px rgba(0,0,0,0.35)",
         }}>
         <span className="wd-draft-shine" aria-hidden="true" />
@@ -67,7 +69,7 @@ export default function DraftNowButton({ team, teamName, c1, c2, isMobile, compa
           <span className="wd-draft-dot" style={{ width: small ? 6 : 8, height: small ? 6 : 8, borderRadius: "50%", background: "#e11d2e", boxShadow: "0 0 8px rgba(225,29,46,0.7)" }} />
           ON THE CLOCK
         </span>
-        <span style={{ fontSize: small ? 20 : 34, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1 }}>
+        <span style={{ fontSize: wide ? 18 : small ? 20 : 34, fontWeight: 900, letterSpacing: "0.1em", lineHeight: 1 }}>
           DRAFT
         </span>
       </Link>

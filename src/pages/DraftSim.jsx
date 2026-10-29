@@ -158,12 +158,20 @@ export default function DraftSim({ page = null }) {
   }, [pending, data, myGrades, expandedBoard]);
 
   // Stuck on the spinner (a request a backgrounded tab abandoned, or one
-  // that just never comes back): one real page reload, as player pages do —
-  // on desktop too, and with longer to land, since the board is a lot more
-  // to load than one player.
+  // that just never comes back): one real page reload after 5 seconds, as
+  // player pages do — on desktop too.
   // A run on the Expanded Board waits for it too.
   const boardReady = !!data && (!config?.expanded || !!expandedBoard);
-  useMobileStuckPageWatchdog(!error && (!setup || ((config || pending) && !boardReady)), `draftsim_${year}`, { enabled: true, timeoutMs: 8000 });
+  const stuckLoading = !error && (!setup || ((config || pending) && !boardReady));
+  useMobileStuckPageWatchdog(stuckLoading, `draftsim_${year}`, { enabled: true, timeoutMs: 5000 });
+  // Loaded (its tags are DraftSimMeta's, set from the start): tell
+  // Prerender.io the page is ready to snapshot (public/index.html starts it
+  // false) — without it the bots' copy waits out Prerender's timeout.
+  useEffect(() => {
+    if (stuckLoading) return undefined;
+    const frame = requestAnimationFrame(() => { window.prerenderReady = true; });
+    return () => cancelAnimationFrame(frame);
+  }, [stuckLoading]);
 
   // /draftsim/:team starts straight away on the default settings; /draftsim
   // is the setup screen.

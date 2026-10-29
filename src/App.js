@@ -10,6 +10,7 @@ import AuthModal from "./components/AuthModal";
 import AdminRoute from "./components/AdminRoute";
 import SimRoute from "./components/SimRoute";
 import DraftSimMeta from "./components/draftSim/DraftSimMeta";
+import { useStuckSpinnerWatchdog } from "./hooks/useStuckSpinnerWatchdog";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
@@ -120,6 +121,8 @@ const CookiePolicy = lazy(() => import("./pages/CookiePolicy"));
 const RouteFallback = () => <LoadingSpinner label="Loading" size={56} minHeight="calc(60vh / var(--pz, 1))" />;
 
 function App() {
+  // Phones: a page stuck on its loading spinner for 5s gets one reload.
+  useStuckSpinnerWatchdog();
   return (
     <HelmetProvider>
       {/* Site-wide default — every page overrides this via its own <Helmet>

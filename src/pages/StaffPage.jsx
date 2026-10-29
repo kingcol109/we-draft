@@ -17,6 +17,7 @@ import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
 import DraftOrderRail from "../components/DraftOrderRail";
 import DraftNowButton from "../components/DraftNowButton";
+import FitText from "../components/FitLine";
 
 // ── /staff/{slug} — a current head coach's or GM's draft history ──
 // Every pick their team made while they held a creditable job there (see
@@ -280,7 +281,8 @@ export default function StaffPage() {
           background: ["linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.38))", `linear-gradient(120deg, ${c1} 0%, ${c1} 40%, ${c2} 100%)`].join(", "),
           padding: isMobile ? "18px 16px" : "26px 30px",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 14 : 24 }}>
+          {/* Phones: the Draft button gets its own row under the name, so the name has the width. */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 14 : 24, flexWrap: isMobile ? "wrap" : "nowrap" }}>
             {(home.LogoDark || home.Logo1) && (
               <Link to={`/nfl/${homeAbbr.toLowerCase()}`} title={homeName} style={{ flexShrink: 0, display: "flex" }}>
                 <img src={home.LogoDark || home.Logo1} alt={homeName}
@@ -292,15 +294,16 @@ export default function StaffPage() {
               <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 900, color: "rgba(255,255,255,0.85)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 {roleLabel} · {homeName}
               </div>
-              <div style={{ fontSize: isMobile ? "clamp(26px, 8vw, 38px)" : "clamp(36px, 5vw, 58px)", fontWeight: 900, color: "#fff", lineHeight: 1.05, textTransform: "uppercase", letterSpacing: "0.02em", textShadow: "0 2px 8px rgba(0,0,0,0.4)", wordBreak: "break-word" }}>
+              {/* One line, shrunk to fit — long names used to break mid-word. */}
+              <FitText max={isMobile ? 34 : 58} min={isMobile ? 16 : 30} style={{ fontWeight: 900, color: "#fff", lineHeight: 1.05, textTransform: "uppercase", letterSpacing: "0.02em", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
                 {person.Name}
-              </div>
+              </FitText>
               <Link to={`/nfl/${homeAbbr.toLowerCase()}/staff`} style={{ display: "inline-block", marginTop: 8, color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: 700, textDecoration: "underline" }}>
                 ← {homeName} staff
               </Link>
             </div>
             {/* Draft as their team in the Draft Sim, as on the team page. */}
-            <DraftNowButton team={homeAbbr} teamName={homeName} c1={c1} c2={c2} isMobile={isMobile} />
+            <DraftNowButton team={homeAbbr} teamName={homeName} c1={c1} c2={c2} isMobile={isMobile} wide={isMobile} />
           </div>
         </div>
 

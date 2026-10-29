@@ -22,9 +22,16 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  // The screen it opens on: "signin" (the default), "signup" or "reset".
+  const [authModalMode, setAuthModalMode] = useState("signin");
 
-  // ── Modal controls ──
-  const openAuthModal = () => setAuthModalOpen(true);
+  // ── Modal controls ── openAuthModal("signup") for a Create Account button;
+  // anything else (an onClick's event, nothing) opens on Sign In.
+  const openAuthModal = (mode) => {
+    setAuthModalMode(["signin", "signup", "reset"].includes(mode) ? mode : "signin");
+    setAuthModalOpen(true);
+  };
+  const signup = () => openAuthModal("signup");
   const closeAuthModal = () => setAuthModalOpen(false);
 
   // ── `login` now opens the modal — all existing login() calls work unchanged ──
@@ -142,7 +149,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       user, profile, authReady, login, logout, saveProfile,
-      authModalOpen, openAuthModal, closeAuthModal,
+      authModalOpen, authModalMode, openAuthModal, closeAuthModal, signup,
       loginWithGoogle, signInWithEmail, signUpWithEmail, resetPassword,
     }}>
       {children}

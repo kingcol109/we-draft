@@ -1,5 +1,5 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { Fragment, useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import { Fragment, useState, useEffect, useRef, useMemo } from "react";
 import {
   doc, getDoc, collection, query, where, getDocs, orderBy,
 } from "firebase/firestore";
@@ -14,6 +14,7 @@ import ProjectedPicks from "../components/ProjectedPicks";
 import NFLTeamRail from "../components/NFLTeamRail";
 import DraftOrderRail from "../components/DraftOrderRail";
 import DraftNowButton from "../components/DraftNowButton";
+import FitText from "../components/FitLine";
 import UpcomingPicks, { fetchTeamDraftCapital, capitalSentence } from "../components/UpcomingPicks";
 import { ORDER_YEAR } from "../utils/draftOrder";
 import { fetchTeamTargets } from "../utils/draftProfileData";
@@ -755,16 +756,17 @@ export default function NFLTeamPage() {
             )
           )}
 
-          <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? 16 : 28 }}>
+          {/* Phones: the Draft button gets its own row under the name, so the name has the width. */}
+          <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? 16 : 28, flexWrap: isMobile ? "wrap" : "nowrap" }}>
             {heroLogo && (
               <img src={sanitizeUrl(heroLogo)} alt={team.Team}
                 style={{ flexShrink: 0, width: isMobile ? 84 : 150, height: isMobile ? 84 : 150, objectFit: "contain", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.45))" }}
                 onError={(e) => { e.currentTarget.style.display = "none"; }} />
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(28px, 3.4vw, 44px)", fontWeight: 900, color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
+              <FitText max={isMobile ? 26 : 44} min={isMobile ? 13 : 24} style={{ fontWeight: 900, color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
                 {team.City}
-              </div>
+              </FitText>
               {/* One line, shrunk only as far as it takes to fit — long
                   nicknames (Commanders, Buccaneers) used to break mid-word. */}
               <FitText max={isMobile ? 40 : 72} min={isMobile ? 16 : 30} style={{ fontWeight: 900, color: "#fff", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
@@ -776,7 +778,7 @@ export default function NFLTeamPage() {
             </div>
             {/* Right side, over the faded wordmark bleed — starts the
                 Draft Sim as this team (/draftsim/{team}). */}
-            <DraftNowButton team={teamKey} teamName={`${team.City} ${team.Team}`} c1={c1} c2={c2} isMobile={isMobile} />
+            <DraftNowButton team={teamKey} teamName={`${team.City} ${team.Team}`} c1={c1} c2={c2} isMobile={isMobile} wide={isMobile} />
           </div>
         </div>
 
@@ -953,39 +955,6 @@ export default function NFLTeamPage() {
   );
 }
 
-// ── Text on one line at the largest size (max → min px) that fits its
-// container's width — re-fit whenever the container resizes. ──
-function FitText({ children, max, min, style }) {
-  const ref = useRef(null);
-  const [size, setSize] = useState(max);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const fit = () => {
-      // Measure at max, then scale down by how far it overflows. The size
-      // goes back on the element here too: a re-fit that lands on the same
-      // size as before is no state change, so React wouldn't undo the max
-      // measured with — the name sat at max, cut off ("CHARGE…").
-      el.style.fontSize = `${max}px`;
-      const ratio = el.scrollWidth ? el.clientWidth / el.scrollWidth : 1;
-      const next = Math.max(min, Math.min(max, Math.floor(max * ratio)));
-      el.style.fontSize = `${next}px`;
-      setSize(next);
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el.parentElement || el);
-    // A web font landing after the first fit changes the width too.
-    let live = true;
-    document.fonts?.ready.then(() => { if (live) fit(); });
-    return () => { live = false; ro.disconnect(); };
-  }, [children, max, min]);
-  return (
-    <div ref={ref} style={{ ...style, fontSize: size, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-      {children}
-    </div>
-  );
-}
 
 // ── One depth chart player: jersey badge in the team colors, name, and
 // position + experience. Hovering (desktop) opens his

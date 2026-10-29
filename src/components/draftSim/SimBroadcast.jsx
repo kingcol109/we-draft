@@ -16,7 +16,6 @@
 // State comes from useDraftSim.js.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { createPortal } from "react-dom";
 import { gradeLabel, gradeLook } from "../../utils/communityGrades";
 import { starLinks } from "../../utils/draftSim/stars";
 import { openNeeds, currentPick, available, pickName, pickByKey, pickStance, pickInterest, counterOffer, subsOf, SIM_POSITIONS, SPECIALISTS, tradeablePicks, evaluateProposal, warRoomFor, sideOf, positionValue, rngNext, needName, needGroup, needWord, NEED_LABELS, PREMIUM_ROUNDS } from "../../utils/draftSim/engine";
@@ -58,6 +57,9 @@ export const SIM_CSS = `
   .wd-sim-in { animation: wdSimFade .9s ease both; }
   @keyframes wdSimPop { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
   .wd-sim-pop { animation: wdSimPop .5s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes wdSimLeave { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-12px) scale(.98); } }
+  .wd-sim-leave { animation: wdSimLeave .5s cubic-bezier(.4,0,.2,1) both; pointer-events: none; }
+  .wd-sim-back { animation: wdSimFade .45s ease both; }
   @keyframes wdSimConfetti { 0% { transform: translateY(-20px) rotate(0); opacity: 1; } 100% { transform: translateY(520px) rotate(540deg); opacity: 0; } }
   .wd-sim-confetti { position: absolute; top: -12px; animation: wdSimConfetti 2.6s ease-in infinite; }
   @media (prefers-reduced-motion: reduce) { .wd-sim-confetti { display: none; } }
@@ -1789,79 +1791,35 @@ const STANCE = {
   movedUp: { tag: "NOT MOVING BACK", color: "#8b9bb4", text: "We just traded up to get here. We're not moving back down." },
 };
 
-// One side of a trade: its deal (the picks going in) over the rest of its
-// picks. A pick's dragged between the two — mouse or touch (pointer
-// events, so phones work) — or tapped to move it across. No chart values:
+// One side of a trade: its picks, each a toggle — click (or tap) one to put
+// it in the deal (gold, checked), again to take it out. No chart values:
 // the user offers to find out. onPlace(side, pick, inDeal).
-const DRAG_START = 6;
 function DealSide({ side, title, picks, chosen, onPlace }) {
-  const [drag, setDragState] = useState(null);
-  // The live drag, for the window handlers (state lags a render behind).
-  const live = useRef(null);
-  const setDrag = (d) => { live.current = d; setDragState(d); };
-  const zoneOf = (x, y) => document.elementFromPoint(x, y)?.closest("[data-trade-zone]")?.getAttribute("data-trade-zone") || null;
-  useEffect(() => {
-    if (!drag) return undefined;
-    const move = (e) => {
-      const d = live.current;
-      if (d) setDrag({ ...d, x: e.clientX, y: e.clientY, moved: d.moved || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > DRAG_START, over: zoneOf(e.clientX, e.clientY) });
-    };
-    const up = (e) => {
-      const d = live.current;
-      setDrag(null);
-      if (!d) return;
-      const zone = d.moved ? zoneOf(e.clientX, e.clientY) : null;
-      if (!d.moved) onPlace(side, d.n, !d.inDeal);
-      else if (zone === `${side}:deal`) onPlace(side, d.n, true);
-      else if (zone === `${side}:pool`) onPlace(side, d.n, false);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
-  }, [drag?.n, side]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const chip = (p, inDeal) => (
-    <button key={p.overall} type="button"
-      onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); setDrag({ n: p.overall, label: pickLabel(p), inDeal, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, moved: false }); }}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPlace(side, p.overall, !inDeal); } }}
-      aria-label={`${pickLabel(p)} — ${inDeal ? "in the deal; press to take it out" : "press to add it to the deal"}`}
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, fontFamily: BODY, fontSize: 12, fontWeight: 800,
-        cursor: "grab", touchAction: "none", userSelect: "none",
-        background: inDeal ? GOLD : "#121c2f", color: inDeal ? "#111" : "#dbe4f0", border: `1px solid ${inDeal ? GOLD : "#24324d"}`,
-        opacity: drag?.moved && drag.n === p.overall ? 0.35 : 1,
-      }}>
-      {pickLabel(p)}
-      {!p.future && p.capital && <span style={{ color: inDeal ? "#5a3d00" : "#6f7f99", fontSize: 10 }}>(not simmed)</span>}
-    </button>
-  );
-  const inDeal = picks.filter((p) => chosen.includes(p.overall));
-  const rest = picks.filter((p) => !chosen.includes(p.overall));
-  const hot = (zone) => drag?.moved && drag.over === `${side}:${zone}`;
+  const count = picks.filter((p) => chosen.includes(p.overall)).length;
   return (
     <div style={{ flex: 1, minWidth: 0, background: "#0b1322", borderRadius: 12, border: "1px solid #1f2b42" }}>
-      <div style={{ padding: "8px 12px", color: "#fff", fontWeight: 900, fontSize: 11, letterSpacing: "0.12em", borderBottom: "1px solid #1f2b42" }}>{title}</div>
-      <div data-trade-zone={`${side}:deal`} style={{
-        margin: 10, minHeight: 46, padding: 8, borderRadius: 10, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center",
-        border: `2px dashed ${hot("deal") ? GOLD : "#2a3a58"}`, background: hot("deal") ? "rgba(246,162,29,0.08)" : "transparent",
-      }}>
-        {inDeal.length ? inDeal.map((p) => chip(p, true)) : <span style={{ color: "#6f7f99", fontSize: 12, fontFamily: BODY }}>Drag picks here</span>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "#fff", fontWeight: 900, fontSize: 11, letterSpacing: "0.12em", borderBottom: "1px solid #1f2b42" }}>
+        <span style={{ minWidth: 0 }}>{title}</span>
+        {count > 0 && <span style={{ marginLeft: "auto", color: GOLD, flexShrink: 0 }}>{count} IN DEAL</span>}
       </div>
-      <div data-trade-zone={`${side}:pool`} style={{
-        padding: "0 10px 10px", minHeight: 30, display: "flex", flexWrap: "wrap", gap: 6, borderRadius: 10,
-        background: hot("pool") ? "rgba(255,255,255,0.04)" : "transparent",
-      }}>
+      <div style={{ padding: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
         {picks.length === 0 && <div style={{ ...EMPTY, padding: 2 }}>No picks to trade.</div>}
-        {rest.map((p) => chip(p, false))}
+        {picks.map((p) => {
+          const on = chosen.includes(p.overall);
+          return (
+            <button key={p.overall} type="button" onClick={() => onPlace(side, p.overall, !on)} aria-pressed={on}
+              aria-label={`${pickLabel(p)} — ${on ? "in the deal; press to take it out" : "press to add it to the deal"}`}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, fontFamily: BODY, fontSize: 12, fontWeight: 800, cursor: "pointer",
+                background: on ? GOLD : "#121c2f", color: on ? "#111" : "#dbe4f0", border: `1px solid ${on ? GOLD : "#24324d"}`,
+              }}>
+              {on && <span aria-hidden="true">✓</span>}
+              {pickLabel(p)}
+              {!p.future && p.capital && <span style={{ color: on ? "#5a3d00" : "#6f7f99", fontSize: 10 }}>(not simmed)</span>}
+            </button>
+          );
+        })}
       </div>
-      {drag?.moved && createPortal(
-        <div style={{ position: "fixed", left: drag.x, top: drag.y, transform: "translate(-50%, -50%)", pointerEvents: "none", zIndex: 10000,
-          padding: "6px 10px", borderRadius: 8, background: GOLD, color: "#111", fontFamily: BODY, fontSize: 12, fontWeight: 900, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
-          {drag.label}
-        </div>,
-        document.body,
-      )}
     </div>
   );
 }
@@ -2002,7 +1960,7 @@ function TradesTab({ s, data, isMobile, seed = null }) {
                 </span>
               </div>
             )}
-            <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>Drag picks into the deal (or tap them) — then make your offer.</div>
+            <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>Click picks to add them to the deal (click again to take one out) — then make your offer.</div>
             <div style={{ display: "flex", gap: 8, flexDirection: isMobile ? "column" : "row" }}>
               {pickList("give", `${god ? "SENDS" : "YOU GIVE"} · ${(brandOf(data, team).Team || team).toUpperCase()}`, mine)}
               {pickList("get", `${god ? "SENDS" : "YOU GET"} · ${(brandOf(data, partner).Team || partner).toUpperCase()}`, theirs)}
@@ -2058,6 +2016,8 @@ function Tabs({ tabs, active, onChange }) {
 }
 
 const REACTION_MS = 10000;
+// Its way out (SIM_CSS .wd-sim-leave), then the tab fades back in (.wd-sim-back).
+const REACTION_LEAVE_MS = 500;
 function Console({ s, data, isMobile, fill = false }) {
   const [tab, setTab] = useState(isMobile ? "desk" : "draft");
   // A pick clicked on the Draft tab, opened in Trades ({ partner, give, get, key }).
@@ -2083,19 +2043,32 @@ function Console({ s, data, isMobile, fill = false }) {
   ];
   // The war room's reaction to the user's pick, wherever it was made: for
   // REACTION_MS after it (the sim goes on underneath), the War Room tab
-  // shows it — open already or opened then — until they close it.
+  // shows it — open already or opened then — until they close it. It eases
+  // out (leaving), then the tab eases back in (back).
   const [cheer, setCheer] = useState(null);
+  const [leaving, setLeaving] = useState(false);
+  const [back, setBack] = useState(false);
   useEffect(() => {
     const ev = s.phase === "reveal" ? s.reveal?.events.filter((e) => e.type === "pick").pop() : null;
-    if (ev?.isUser && ev.room) setCheer(ev);
+    if (ev?.isUser && ev.room) { setCheer(ev); setLeaving(false); }
   }, [s.reveal]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!cheer) return undefined;
-    const t = setTimeout(() => setCheer(null), REACTION_MS);
+    const t = setTimeout(() => setLeaving(true), REACTION_MS);
     return () => clearTimeout(t);
   }, [cheer]);
+  useEffect(() => {
+    if (!leaving) return undefined;
+    const t = setTimeout(() => { setCheer(null); setLeaving(false); setBack(true); }, REACTION_LEAVE_MS);
+    return () => clearTimeout(t);
+  }, [leaving]);
+  useEffect(() => { setBack(false); }, [tab]);
   const reaction = cheer && tab === "warroom"
-    ? <WarRoomReaction key={cheer.pick.overall} ev={cheer} data={data} isMobile={isMobile} onClose={() => setCheer(null)} />
+    ? (
+      <div className={leaving ? "wd-sim-leave" : undefined}>
+        <WarRoomReaction key={cheer.pick.overall} ev={cheer} data={data} isMobile={isMobile} onClose={() => setLeaving(true)} />
+      </div>
+    )
     : null;
   const body = {
     desk: <SimFeed feed={s.feed} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} />,
@@ -2113,14 +2086,14 @@ function Console({ s, data, isMobile, fill = false }) {
     return (
       <div style={{ ...PANEL, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", ...(isMobile ? {} : { marginTop: 12 }) }}>
         <Tabs tabs={tabs} active={tab} onChange={(k) => { setTradeSeed(null); setTab(k); }} />
-        <div key={tab} className="wd-sim-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>{reaction || body}</div>
+        <div key={tab} className="wd-sim-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>{reaction || (back ? <div className="wd-sim-back">{body}</div> : body)}</div>
       </div>
     );
   }
   return (
     <div style={{ ...PANEL, marginTop: 12 }}>
       <Tabs tabs={tabs} active={tab} onChange={(k) => { setTradeSeed(null); setTab(k); }} />
-      {reaction || (tab === "board" ? <div className="wd-sim-scroll" style={{ maxHeight: boardHeight(isMobile), overflowY: "auto" }}>{body}</div> : body)}
+      {reaction || (tab === "board" ? <div className="wd-sim-scroll" style={{ maxHeight: boardHeight(isMobile), overflowY: "auto" }}>{body}</div> : back ? <div className="wd-sim-back">{body}</div> : body)}
     </div>
   );
 }

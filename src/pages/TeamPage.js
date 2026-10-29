@@ -31,6 +31,7 @@ import { fetchAllRankMaps, ranksForGame, currentRankMap, RANKINGS_LIMIT } from "
 import { scheduleGameHref } from "../utils/live";
 import { cssRect } from "../utils/pageZoom";
 import { textOn } from "../utils/teamColors";
+import FitText from "../components/FitLine";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -2272,7 +2273,8 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile,
         />
       )}
 
-      <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "16px" : "28px" }}>
+      {/* Phones: the Follow buttons get their own row under the name, so the name has the width. */}
+      <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: isMobile ? "16px" : "28px", flexWrap: isMobile ? "wrap" : "nowrap" }}>
         {heroLogo && (
           <img
             src={sanitizeUrl(heroLogo)}
@@ -2284,30 +2286,42 @@ function HeroCard({ school, branding, canonicalSchool, color1, color2, isMobile,
         {/* Sized to this box (cqi), not the window — the header sits between
             sidebars, so viewport units overshoot and split long names. */}
         <div style={{ flex: 1, minWidth: 0, containerType: "inline-size" }}>
-          <div style={{
-            fontSize: isMobile ? "clamp(18px, 6vw, 26px)" : "clamp(24px, 12cqi, 52px)", fontWeight: 900, color: "#fff",
-            lineHeight: 1.05, letterSpacing: "0.02em",
-            textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
-          }}>
-            {/* Current Top 25 standing — its own dimmer color so it reads
-                as a badge, not part of the school's own name. */}
-            {ownCurrentRank && <span style={{ color: "rgba(255,255,255,0.6)" }}>#{ownCurrentRank} </span>}
-            {canonicalSchool}
-          </div>
-          {school?.Mascot && (
+          {/* Phones: one line each, shrunk to fit — long names used to break mid-word. */}
+          {isMobile ? (
+            <FitText max={30} min={14} style={{ fontWeight: 900, color: "#fff", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
+              {ownCurrentRank && <span style={{ color: "rgba(255,255,255,0.6)" }}>#{ownCurrentRank} </span>}
+              {canonicalSchool}
+            </FitText>
+          ) : (
             <div style={{
-              fontSize: isMobile ? "clamp(16px, 5vw, 22px)" : "clamp(20px, 9.5cqi, 42px)", fontWeight: 900,
+              fontSize: "clamp(24px, 12cqi, 52px)", fontWeight: 900, color: "#fff",
+              lineHeight: 1.05, letterSpacing: "0.02em",
+              textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
+            }}>
+              {/* Current Top 25 standing — its own dimmer color so it reads
+                  as a badge, not part of the school's own name. */}
+              {ownCurrentRank && <span style={{ color: "rgba(255,255,255,0.6)" }}>#{ownCurrentRank} </span>}
+              {canonicalSchool}
+            </div>
+          )}
+          {school?.Mascot && (isMobile ? (
+            <FitText max={24} min={12} style={{ fontWeight: 900, color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em", textTransform: "uppercase", textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
+              {school.Mascot}
+            </FitText>
+          ) : (
+            <div style={{
+              fontSize: "clamp(20px, 9.5cqi, 42px)", fontWeight: 900,
               color: "rgba(255,255,255,0.88)", lineHeight: 1.05, letterSpacing: "0.02em",
               textTransform: "uppercase", wordBreak: "break-word", textShadow: "0 2px 8px rgba(0,0,0,0.4)",
             }}>
               {school.Mascot}
             </div>
-          )}
+          ))}
         </div>
         {/* Where the old Depth Chart link was: Follow (We-Draft Live), plus
             a pulsing "Follow Live" into /live while this team is playing. */}
         {canonicalSchool && (
-          <div style={{ flexShrink: 0, display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-end" : "center", gap: isMobile ? "6px" : "10px" }}>
+          <div style={{ flexShrink: 0, display: "flex", flexDirection: "row", alignItems: "center", gap: isMobile ? "8px" : "10px", ...(isMobile ? { flexBasis: "100%" } : {}) }}>
             <FollowLiveButton school={canonicalSchool} size={isMobile ? undefined : "lg"} />
             {school?.CFBDTeamId != null && <TeamFollowButton teamId={school.CFBDTeamId} color2={color2} isMobile={isMobile} />}
           </div>
