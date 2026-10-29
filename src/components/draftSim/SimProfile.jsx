@@ -9,7 +9,8 @@
 // best single draft, and their best value pick and biggest reach. It's all
 // there before the first sim (zeros), and signed out with a prompt to sign
 // in to start tracking. SimSnapshot: a few of those numbers and the streak
-// for the end of a sim (SimResults.jsx).
+// for the end of a sim (SimResults.jsx). Under the rest, the
+// badges they've earned (utils/draftSim/badges.js), by rarity.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -18,6 +19,8 @@ import { useAuth } from "../../context/AuthContext";
 import { simProfileRef, streakRef, liveStreak, averageGrade, profileWritten, PROFILE_PATH } from "../../utils/draftSim/simProfile";
 import { SIM_YEAR, SIM_YEARS } from "../../utils/draftSim/data";
 import { PANEL, action } from "./SavedSims";
+import { BadgeShelf } from "./SimBadges";
+import { loadBadges, loadEarned, badgesWritten } from "../../utils/draftSim/badges";
 import LoadingSpinner from "../LoadingSpinner";
 
 const GOLD = "#f6a21d";
@@ -48,6 +51,21 @@ function useSimProfile(user, year) {
   return prof;
 }
 
+// The badges there are and the ones the user's earned ({ badges, earned }),
+// after the last finished run's award lands; signed out, none earned.
+function useBadgeShelf(user, admin) {
+  const [shelf, setShelf] = useState(null);
+  useEffect(() => {
+    let live = true;
+    new Promise((r) => setTimeout(r, 0)).then(badgesWritten)
+      .then(() => Promise.all([loadBadges(admin), user ? loadEarned(user.uid) : {}]))
+      .then(([badges, earned]) => live && setShelf({ badges, earned }))
+      .catch((e) => { console.warn("Sim badges:", e?.code || e); if (live) setShelf(null); });
+    return () => { live = false; };
+  }, [user, admin]);
+  return shelf;
+}
+
 const streakText = (n) => (n ? `🔥 ${n}-day streak` : "No streak going");
 // Who counts, said once wherever the profile shows.
 const RULE = "Only finished single-team drafts on the default settings go on your profile — speed and desk chatter don't matter. Any finished sim keeps your streak going.";
@@ -66,9 +84,10 @@ function SignInPrompt({ login, compact }) {
 
 // branding / names: the sim's setup (names: abbr → "New York Jets").
 export default function SimProfile({ branding = {}, names, isMobile }) {
-  const { user, login } = useAuth();
+  const { user, login, profile } = useAuth();
   const [year, setYear] = useState(SIM_YEAR);
   const prof = useSimProfile(user, year);
+  const shelf = useBadgeShelf(user, profile?.role === "admin");
   const years = SIM_YEARS.length > 1 && (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <span style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? 18 : 22, marginRight: "auto" }}>{year} SIM PROFILE</span>
@@ -89,10 +108,11 @@ export default function SimProfile({ branding = {}, names, isMobile }) {
   const favB = fav ? branding[fav] || {} : {};
   const totalPicks = positions.reduce((t, [, n]) => t + n, 0) || 1;
 
-  const tile = { ...PANEL, padding: "12px 14px", minWidth: 0 };
-  const label = { color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.14em" };
-  const big = { color: "#fff", fontSize: isMobile ? 22 : 28, fontWeight: 900, lineHeight: 1.1, marginTop: 2 };
-  const sub = { color: "#8b9bb4", fontSize: 11, fontFamily: BODY, marginTop: 2 };
+  // The headline tiles: the number big, centered in its tile.
+  const tile = { ...PANEL, padding: isMobile ? "12px 14px" : "14px 18px", minWidth: 0, display: "flex", flexDirection: "column", minHeight: isMobile ? 112 : 132 };
+  const label = { color: "#8b9bb4", fontSize: isMobile ? 10 : 11, fontWeight: 900, letterSpacing: "0.14em" };
+  const big = { color: "#fff", fontSize: isMobile ? 32 : 44, fontWeight: 900, lineHeight: 1, marginTop: "auto", paddingTop: 6 };
+  const sub = { color: "#8b9bb4", fontSize: isMobile ? 12 : 13, fontFamily: BODY, marginTop: 6, marginBottom: "auto" };
 
   const none = (text) => <div style={{ padding: "10px 14px", color: "#6f7f99", fontSize: 12, fontFamily: BODY }}>{text}</div>;
 
@@ -116,10 +136,10 @@ export default function SimProfile({ branding = {}, names, isMobile }) {
         <div style={tile}><div style={label}>AVERAGE GRADE</div><div style={{ ...big, color: avg ? gradeColor(avg) : "#fff" }}>{avg || "—"}</div><div style={sub}>across your teams</div></div>
         <div style={{ ...tile, ...(prof.streak ? { borderColor: GOLD, background: "rgba(246,162,29,0.08)" } : {}) }}>
           <div style={label}>DAILY STREAK</div>
-          <div style={big}>{prof.streak ? `🔥 ${prof.streak}` : 0}<span style={{ fontSize: 12, color: "#8b9bb4", fontFamily: BODY, fontWeight: 700 }}> day{prof.streak === 1 ? "" : "s"}</span></div>
-          <div style={sub}>Best: {prof.bestStreak || 0} · any sim counts</div>
+          <div style={big}>{prof.streak ? `🔥 ${prof.streak}` : 0}<span style={{ fontSize: isMobile ? 13 : 15, color: "#8b9bb4", fontFamily: BODY, fontWeight: 700 }}> day{prof.streak === 1 ? "" : "s"}</span></div>
+          <div style={sub}>Best: {prof.bestStreak || 0}</div>
         </div>
-        <FavoriteTeam fav={fav} b={favB} sims={teams[0]?.[1]} names={names} style={tile} label={label} big={big} />
+        <FavoriteTeam fav={fav} b={favB} sims={teams[0]?.[1]} names={names} style={tile} label={label} big={big} logoSize={isMobile ? 64 : 84} />
       </div>
 
       {/* Best single draft, best value and biggest reach. */}
@@ -207,13 +227,15 @@ export default function SimProfile({ branding = {}, names, isMobile }) {
           </div>
         </div>
       </div>
+      {user && shelf && <BadgeShelf badges={shelf.badges} earned={shelf.earned} panel={PANEL} head={HEAD} />}
       <div style={{ color: "#6f7f99", fontSize: 11, fontFamily: BODY, textAlign: "center" }}>Counts every sim you finish while signed in, saved or not.</div>
     </div>
   );
 }
 
 // The team they draft for most: its sim count up by the label, and its
-// logo big and centered on its colors — the name's in the logo.
+// logo big and centered on its colors — the name's in the logo. A wide
+// wordmark runs the tile's width (up to logoSize × 2.6), logoSize tall.
 function FavoriteTeam({ fav, b, sims, names, style, label, big, logoSize = 64 }) {
   const logo = b.LogoDark || b.Logo1;
   return (
@@ -223,7 +245,7 @@ function FavoriteTeam({ fav, b, sims, names, style, label, big, logoSize = 64 })
       </div>
       {fav ? (
         <Link to={`/nfl/${fav.toLowerCase()}`} title={names(fav)} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "6px 0 2px", color: "#fff", textDecoration: "none" }}>
-          {logo ? <img src={logo} alt={names(fav)} style={{ width: logoSize * 1.6, height: logoSize, objectFit: "contain" }} /> : <span style={{ fontWeight: 900, fontSize: 24 }}>{fav}</span>}
+          {logo ? <img src={logo} alt={names(fav)} style={{ width: "100%", maxWidth: logoSize * 2.6, height: logoSize, objectFit: "contain" }} /> : <span style={{ fontWeight: 900, fontSize: 24 }}>{fav}</span>}
         </Link>
       ) : <div style={big}>—</div>}
     </div>

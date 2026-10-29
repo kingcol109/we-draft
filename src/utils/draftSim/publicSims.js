@@ -12,7 +12,8 @@
 import { collection, doc, getDocs, limit, orderBy, query, serverTimestamp, where, writeBatch } from "firebase/firestore";
 import { db } from "../../firebase";
 
-// The Recent Drafts page.
+// The Community tab (insights), and Recent Drafts under it.
+export const COMMUNITY_PATH = "/draftsim/community";
 export const RECENT_PATH = "/draftsim/recent";
 const PUBLIC = "publicDraftSims";
 const mineRef = (uid, id) => doc(db, "users", uid, "draftSims", id);

@@ -1,21 +1,26 @@
 // src/components/AdminSimBadges.jsx
 //
 // Admin → Mock Draft → Badges: the Draft Sim's one-time achievements
-// (utils/draftSim/badges.js) — an icon, a title, a description and a
-// rarity (Common, Uncommon, Rare, Elite) each. Not live yet: saved with
-// active: false, and nothing in the sim awards them. The preview is the
-// pop-up a user will see in the sim when they earn one.
-import { useEffect, useRef, useState } from "react";
+// (utils/draftSim/badges.js) — a title, a description and a rarity
+// (Common, Uncommon, Rare, Elite) each, all shown with the circle We-Draft
+// logo. A new badge is saved with active: false. "Wired" means
+// utils/draftSim/badgeRules.js has its rule (by doc id) — a badge that
+// isn't does nothing until one's added there; only a wired badge can be
+// switched Active (awarded to everyone — until then only admins earn it,
+// to try it out). The preview is the pop-up a user will see in the sim
+// when they earn one.
+import { useEffect, useState } from "react";
 import { addDoc, deleteDoc, getDocs, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
-import { badgesCol, badgeRef, RARITIES, rarityOf, BADGE_ICON_PX } from "../utils/draftSim/badges";
-import { squareImage } from "../utils/squareImage";
+import { badgesCol, badgeRef, RARITIES, rarityOf } from "../utils/draftSim/badges";
+import { isWired } from "../utils/draftSim/badgeRules";
+import { BadgeIcon, BadgeToast } from "./draftSim/SimBadges";
 import LoadingSpinner from "./LoadingSpinner";
 
 const BLUE = "#0055a5";
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
 const input = { border: "1px solid #d8dee8", borderRadius: "6px", padding: "7px 9px", fontSize: "13px", fontFamily: "Arial, sans-serif", width: "100%", boxSizing: "border-box" };
 const smallBtn = { border: `1px solid ${BLUE}`, background: "#fff", color: BLUE, borderRadius: "6px", padding: "6px 12px", fontSize: "12px", fontWeight: 800, cursor: "pointer" };
-const EMPTY = { title: "", description: "", rarity: "common", icon: "" };
+const EMPTY = { title: "", description: "", rarity: "common" };
 
 export default function AdminSimBadges() {
   const [badges, setBadges] = useState(null);
@@ -35,7 +40,7 @@ export default function AdminSimBadges() {
     if (!form.title.trim()) { alert("Give the badge a title."); return; }
     setBusy(true);
     try {
-      const data = { title: form.title.trim(), description: form.description.trim(), rarity: form.rarity, icon: form.icon || "", updatedAt: serverTimestamp() };
+      const data = { title: form.title.trim(), description: form.description.trim(), rarity: form.rarity, updatedAt: serverTimestamp() };
       if (editing) await updateDoc(badgeRef(editing), data);
       else await addDoc(badgesCol(), { ...data, active: false, createdAt: serverTimestamp() });
       reset();
@@ -45,6 +50,17 @@ export default function AdminSimBadges() {
       alert("Couldn't save the badge — try again.");
     } finally {
       setBusy(false);
+    }
+  };
+  // Live for everyone, or back off. Only a wired badge goes live.
+  const toggle = async (b) => {
+    if (!b.active && !isWired(b.id)) { alert("This badge isn't wired yet — it needs its rule in badgeRules.js before it can go live."); return; }
+    try {
+      await updateDoc(badgeRef(b.id), { active: !b.active, updatedAt: serverTimestamp() });
+      await load();
+    } catch (e) {
+      console.error("Badge toggle error:", e);
+      alert("Couldn't change the badge — try again.");
     }
   };
   const remove = async (b) => {
@@ -63,7 +79,8 @@ export default function AdminSimBadges() {
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ fontSize: "13px", color: "#555", lineHeight: 1.5 }}>
         One-time achievements for the Draft Sim — each can be earned once, pops up in the sim when it is, and goes on the user&apos;s Sim Profile (signed-out users are asked to make an account to keep theirs).
-        {" "}<strong>Not live yet</strong> — badges saved here aren&apos;t shown or awarded anywhere until they&apos;re switched on.
+        {" "}<strong>Wired</strong> badges have their rule in the sim&apos;s code (badgeRules.js); a new badge shows <strong>Not wired</strong> until it&apos;s added there.
+        {" "}Only <strong>Active</strong> badges are shown and awarded to users — admins earn wired badges either way, to test them first.
       </div>
 
       {/* Add / edit */}
@@ -73,7 +90,6 @@ export default function AdminSimBadges() {
         </div>
         <div style={{ display: "flex", gap: "18px", padding: "14px", flexWrap: "wrap" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: "1 1 320px", minWidth: 0 }}>
-            <IconField value={form.icon} onChange={(icon) => setForm((f) => ({ ...f, icon }))} rarity={form.rarity} />
             <label style={{ fontSize: "12px", fontWeight: 800, color: "#333" }}>Title
               <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} maxLength={60} placeholder="e.g. Steal of the Draft" style={{ ...input, marginTop: "4px" }} />
             </label>
@@ -104,7 +120,7 @@ export default function AdminSimBadges() {
       {/* Every badge */}
       <div style={card}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid #eef1f5", fontWeight: 900, fontSize: "13px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Badges {badges ? `(${badges.length})` : ""}
+          Badges {badges ? `(${badges.length} · ${badges.filter((b) => isWired(b.id)).length} wired · ${badges.filter((b) => b.active).length} active)` : ""}
         </div>
         {error && <div style={{ padding: "12px 14px", color: "#b42318", fontSize: "13px" }}>{error}</div>}
         {!badges ? <LoadingSpinner size={24} minHeight="80px" /> : badges.length === 0 ? (
@@ -113,73 +129,25 @@ export default function AdminSimBadges() {
           const r = rarityOf(b.rarity);
           return (
             <div key={b.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderTop: "1px solid #eef1f5", background: editing === b.id ? "#f4f8fd" : "#fff" }}>
-              <BadgeIcon icon={b.icon} rarity={b.rarity} size={44} />
+              <BadgeIcon rarity={b.rarity} size={44} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 900, fontSize: "14px", color: "#1a1f2b" }}>
                   {b.title} <span style={{ fontSize: "10px", fontWeight: 900, padding: "1px 7px", borderRadius: "999px", background: r.color, color: "#0b1322", marginLeft: "4px", textTransform: "uppercase" }}>{r.label}</span>
                 </div>
                 <div style={{ fontSize: "12px", color: "#666", fontFamily: "Arial, sans-serif" }}>{b.description || <em>No description</em>}</div>
               </div>
-              <span style={{ fontSize: "11px", fontWeight: 800, color: b.active ? "#2e7d32" : "#999" }}>{b.active ? "Active" : "Not active"}</span>
-              <button onClick={() => { setEditing(b.id); setForm({ title: b.title || "", description: b.description || "", rarity: b.rarity || "common", icon: b.icon || "" }); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={smallBtn}>Edit</button>
+              <span title={isWired(b.id) ? "Its rule is in badgeRules.js" : `Needs a rule in badgeRules.js — doc id ${b.id}`} style={{
+                fontSize: "10px", fontWeight: 900, padding: "2px 8px", borderRadius: "999px", textTransform: "uppercase", whiteSpace: "nowrap",
+                ...(isWired(b.id) ? { background: "#e7f5ea", color: "#2e7d32" } : { background: "#fdecea", color: "#b42318" }),
+              }}>{isWired(b.id) ? "Wired" : "Not wired"}</span>
+              <button onClick={() => toggle(b)} aria-pressed={!!b.active} title={b.active ? "Live — click to switch off" : "Off — click to go live"} style={{
+                ...smallBtn, ...(b.active ? { background: "#2e7d32", borderColor: "#2e7d32", color: "#fff" } : { borderColor: "#d8dee8", color: "#888" }),
+              }}>{b.active ? "Active" : "Not active"}</button>
+              <button onClick={() => { setEditing(b.id); setForm({ title: b.title || "", description: b.description || "", rarity: b.rarity || "common" }); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={smallBtn}>Edit</button>
               <button onClick={() => remove(b)} style={{ ...smallBtn, borderColor: "#f1c4c0", color: "#b42318" }}>Delete</button>
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-// The icon: upload (shrunk to a square data: URL) or paste a URL.
-function IconField({ value, onChange, rarity }) {
-  const fileRef = useRef(null);
-  const [url, setUrl] = useState("");
-  const [err, setErr] = useState("");
-  const pick = async (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    try { setErr(""); onChange(await squareImage(f, BADGE_ICON_PX, "contain")); } catch { setErr("Couldn't read that image."); }
-  };
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-      <BadgeIcon icon={value} rarity={rarity} size={56} />
-      <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1, minWidth: 220 }}>
-        <span style={{ fontSize: "12px", fontWeight: 800, color: "#333" }}>Icon</span>
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={() => fileRef.current?.click()} style={{ ...smallBtn, background: BLUE, color: "#fff" }}>Upload icon</button>
-          <input ref={fileRef} type="file" accept="image/*" onChange={pick} style={{ display: "none" }} />
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="…or paste an image URL" style={{ ...input, flex: "1 1 160px", width: "auto", padding: "5px 8px", fontSize: "12px" }} />
-          <button onClick={() => { if (/^https?:\/\//i.test(url.trim())) { onChange(url.trim()); setUrl(""); setErr(""); } else setErr("Paste a full https:// image URL."); }} style={smallBtn}>Use URL</button>
-          {value && <button onClick={() => onChange("")} style={{ ...smallBtn, borderColor: "#d8dee8", color: "#888" }}>Remove</button>}
-        </div>
-        <span style={{ fontSize: "11px", color: err ? "#b42318" : "#888" }}>{err || `Square works best — uploads are fit into ${BADGE_ICON_PX}×${BADGE_ICON_PX}, transparency kept.`}</span>
-      </div>
-    </div>
-  );
-}
-
-// The icon in a ring of its rarity's color (a trophy with none yet).
-export function BadgeIcon({ icon, rarity, size = 48 }) {
-  const r = rarityOf(rarity);
-  return (
-    <span style={{ width: size, height: size, flexShrink: 0, borderRadius: "50%", border: `3px solid ${r.color}`, background: "#0b1322", display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden", boxShadow: `0 0 10px ${r.color}55` }}>
-      {icon ? <img src={icon} alt="" style={{ width: "78%", height: "78%", objectFit: "contain" }} /> : <span style={{ fontSize: size * 0.45 }}>🏆</span>}
-    </span>
-  );
-}
-
-// The pop-up when a badge is earned, in the sim's colors.
-function BadgeToast({ b }) {
-  const r = rarityOf(b.rarity);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "12px", background: "linear-gradient(90deg, #0e1626, #14213a)", border: `1px solid ${r.color}`, borderRadius: "999px", padding: "8px 18px 8px 8px", boxShadow: "0 8px 24px rgba(0,0,0,0.25)", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      <BadgeIcon icon={b.icon} rarity={b.rarity} size={48} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ color: r.color, fontSize: "10px", fontWeight: 900, letterSpacing: "0.12em" }}>BADGE UNLOCKED · {r.label.toUpperCase()}</div>
-        <div style={{ color: "#fff", fontSize: "14px", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.title || "Badge title"}</div>
-        <div style={{ color: "#9fb0c8", fontSize: "11px", fontFamily: "Arial, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.description || "What it takes to earn it."}</div>
       </div>
     </div>
   );

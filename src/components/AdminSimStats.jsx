@@ -13,12 +13,14 @@
 //                   (hidden players included), then the players doc for
 //                   anyone since removed from it.
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, documentId, getDoc, getDocs, orderBy, query, where } from "firebase/firestore";
+import { collection, doc, documentId, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { loadExpandedBoard, SIM_YEARS, SIM_YEAR } from "../utils/draftSim/data";
 import { statsDay, WATCH_KEY } from "../utils/draftSim/stats";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { SIM_POSITIONS, SPECIALISTS } from "../utils/draftSim/engine";
+import { buildSimInsights, playerIds, withNames, boardRanks, BOARD_POSITIONS, INSIGHTS_DOC } from "../utils/draftSim/insights";
+import { COMP_SNAPSHOT_VERSION } from "../utils/historicalStats";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -33,9 +35,46 @@ const shortDay = (day) => new Date(`${day}T12:00:00`).toLocaleDateString(undefin
 export default function AdminSimStats() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <PublishInsights />
       <Daily />
       <Teams />
       <Picks />
+    </div>
+  );
+}
+
+// The Draft Sim's Community tab reads compSnapshots/simInsights
+// (utils/draftSim/insights.js), rebuilt every 3 hours by
+// scripts/buildSimInsights.mjs — this rebuilds it now, the same way.
+function PublishInsights() {
+  const [msg, setMsg] = useState("");
+  const publish = async () => {
+    setMsg("Publishing…");
+    try {
+      const all = async (name) => (await getDocs(collection(db, name))).docs.map((d) => ({ day: d.id, ...d.data() }));
+      const [teams, picks, daily] = await Promise.all([all("draftSimTeams"), all("draftSimPicks"), all("draftSimDaily")]);
+      // Each class's board spots, for the community favorites.
+      const boards = Object.fromEntries(await Promise.all(SIM_YEARS.map(async (y) => {
+        const snaps = await Promise.all(BOARD_POSITIONS.map((pos) => getDoc(doc(db, "compSnapshots", `class_${y}_${pos}`))));
+        return [String(y), boardRanks(Object.fromEntries(snaps.map((d, i) => [BOARD_POSITIONS[i], d.exists() ? d.data().rows || [] : []])))];
+      })));
+      const built = buildSimInsights({ teams, picks, daily, years: SIM_YEARS, boards });
+      const players = await Promise.all(playerIds(built).map((id) => getDoc(doc(db, "players", id)).then((s) => (s.exists() ? { id, ...s.data() } : null)).catch(() => null)));
+      const insights = withNames(built, players);
+      await setDoc(doc(db, "compSnapshots", INSIGHTS_DOC), { version: COMP_SNAPSHOT_VERSION, ...insights, builtAt: serverTimestamp() });
+      setMsg(`Published — ${insights.totals.all.sims.toLocaleString()} sims all time, ${insights.totals.week.sims.toLocaleString()} this week.`);
+    } catch (e) {
+      console.error("Sim insights publish error:", e);
+      setMsg(`Couldn't publish: ${e.message}`);
+    }
+  };
+  return (
+    <div style={{ ...card, display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, minWidth: "240px", fontSize: "13px", color: "#33415a", lineHeight: 1.5 }}>
+        <b>Community insights</b> — the sim&apos;s public Community tab (popular teams, community favorites, the community&apos;s first round). Rebuilt every 3 hours; publish now to refresh it.
+        {msg && <div style={{ marginTop: "4px", color: msg.startsWith("Couldn't") ? "#c8102e" : "#15803d", fontWeight: 700 }}>{msg}</div>}
+      </div>
+      <button onClick={publish} disabled={msg === "Publishing…"} style={{ ...chip(true), padding: "7px 16px" }}>{msg === "Publishing…" ? msg : "Publish community insights"}</button>
     </div>
   );
 }

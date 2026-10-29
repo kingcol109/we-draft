@@ -1,0 +1,34 @@
+name: Build Draft Sim Insights
+
+# Every 3 hours. Rebuilds compSnapshots/simInsights — the Draft Sim's
+# Community tab (most drafted-as teams, most drafted players, the
+# community's first round, sim totals) from the usage counters
+# (scripts/buildSimInsights.mjs). A few thousand reads a run. Also
+# runnable on demand via workflow_dispatch.
+#
+# Needs repo secret GOOGLE_SERVICE_ACCOUNT_KEY.
+on:
+  schedule:
+    - cron: "30 */3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      # Node 22: the script imports the app's own ESM (insights.js) directly.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Draft Sim insights
+        run: node scripts/buildSimInsights.mjs
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

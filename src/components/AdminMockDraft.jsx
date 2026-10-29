@@ -164,7 +164,7 @@ function LegendsEditor({ legends, others, onChange }) {
     <div style={{ padding: "12px 16px", borderTop: "1px solid #eef1f5" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 900, fontSize: "13px", color: "#1a1f2b" }}>Favorite players</span>
-        <span style={{ fontSize: "12px", color: "#777" }}>— his {"{legend}"} list: good-pick comparisons, &ldquo;the next…&rdquo; for FSU players, and his joke pick on the Suggestions tab (shown with the school&apos;s logo).</span>
+        <span style={{ fontSize: "12px", color: "#777" }}>— his {"{legend}"} list: good-pick comparisons, &ldquo;the next…&rdquo; for FSU players, and his joke pick in the War Room (shown with the school&apos;s logo).</span>
         {!isDefault && <button onClick={() => onChange(DEFAULT_LEGENDS)} style={{ marginLeft: "auto", border: "none", background: "none", color: "#888", fontSize: "11px", fontWeight: 800, cursor: "pointer", textDecoration: "underline" }}>Reset to default</button>}
       </div>
       <datalist id="wd-legend-schools">

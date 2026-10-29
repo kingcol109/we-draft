@@ -15,7 +15,7 @@ import Footer from "./components/Footer";
 import LoadingSpinner from "./components/LoadingSpinner";
 import PlayerHeaderShell from "./components/PlayerHeaderShell";
 import { prefetchPlayerFromUrl } from "./utils/playerPrefetch";
-import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref } from "./utils/weeklyMockNews";
+import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, weeklyMockHref, weeklyYearHref, hasTeamPages } from "./utils/weeklyMockNews";
 
 // A cold landing on /player/:slug starts its player query now, alongside
 // the PlayerProfile chunk download rather than after it.
@@ -216,6 +216,7 @@ function MainLayout() {
                 ask for one). SEO tags: DraftSimMeta.jsx. */}
             <Route path="/draftsim" element={<><DraftSimMeta /><DraftSim /></>} />
             {/* Recent Drafts (public one-team saved sims) and the Sim Profile — ahead of :team. */}
+            <Route path="/draftsim/community" element={<DraftSim page="community" />} />
             <Route path="/draftsim/recent" element={<DraftSim page="recent" />} />
             <Route path="/draftsim/profile" element={<DraftSim page="profile" />} />
             <Route path="/draftsim/:team" element={<><DraftSimMeta /><DraftSim /></>} />
@@ -270,11 +271,13 @@ function MockOrTeam() {
 }
 
 // /mocks/{team}/2028 — a team's page in the next class's Weekly Mock. The
-// main class has no year in its URL (/mocks/nyj/2027 goes there); any other
-// year, or a non-team, is WeeklyTeamMock's not found.
+// main class has no year in its URL (/mocks/nyj/2027 goes there); a class
+// with no team pages (2029) goes to its whole mock; any other year, or a
+// non-team, is WeeklyTeamMock's not found.
 function TeamMockYear() {
   const { mockId, year } = useParams();
   const team = String(mockId || "").toLowerCase();
+  if (WEEKLY_YEARS.includes(year) && !hasTeamPages(year)) return <Navigate to={weeklyYearHref(year)} replace />;
   if (year === MAIN_WEEKLY_YEAR || (mockId !== team && WEEKLY_YEARS.includes(year))) return <Navigate to={weeklyMockHref(team, year)} replace />;
   return <WeeklyTeamMock key={`${team}-${year}`} team={WEEKLY_YEARS.includes(year) && /^[a-z]{2,3}$/.test(team) ? team.toUpperCase() : ""} year={year} />;
 }

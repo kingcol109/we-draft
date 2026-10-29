@@ -10,14 +10,31 @@ import { SIM_YEAR } from "./years";
 // The user's teams' hauls (engine teamHaul) → what's saved and shared:
 // [{ team, grade, picks: [{ overall, round, via, grade, id, slug, first, last, pos, school }] }].
 export function haulRecords(hauls) {
-  return hauls.filter((h) => h.rows.length).map((h) => ({
-    team: h.team, grade: h.letter,
-    picks: h.rows.map(({ pick, prospect, letter }) => ({
-      overall: pick.overall, round: pick.round, via: pick.via || null, grade: letter,
-      id: prospect.id, slug: prospect.Slug || "", first: prospect.First, last: prospect.Last,
-      pos: prospect.Position, school: prospect.School || "",
-    })),
-  }));
+  return hauls.filter((h) => h.rows.length).map((h) => {
+    const future = futureMoves(h.trades);
+    return {
+      team: h.team, grade: h.letter,
+      picks: h.rows.map(({ pick, prospect, letter }) => ({
+        overall: pick.overall, round: pick.round, via: pick.via || null, grade: letter,
+        id: prospect.id, slug: prospect.Slug || "", first: prospect.First, last: prospect.Last,
+        pos: prospect.Position, school: prospect.School || "",
+      })),
+      ...(future.got.length || future.gave.length ? { future } : {}),
+    };
+  });
+}
+
+// Next year's picks a team's trades added or gave up, net of any it got
+// and dealt again: { got: [{ year, round, team }], gave: […] } — team: who
+// it came from / went to. (This year's picks show in the selections.)
+export function futureMoves(trades = []) {
+  const net = new Map();
+  trades.forEach((t) => [[t.got, 1], [t.gave, -1]].forEach(([list, d]) => (list || []).filter((p) => p?.future).forEach((p) => {
+    const cur = net.get(p.overall) || { n: 0, year: p.year, round: p.round, team: t.partner };
+    net.set(p.overall, { ...cur, n: cur.n + d, team: t.partner });
+  })));
+  const of = (sign) => [...net.values()].filter((m) => Math.sign(m.n) === sign).map(({ year, round, team }) => ({ year, round, team })).sort((a, b) => a.round - b.round);
+  return { got: of(1), gave: of(-1) };
 }
 
 export const simUrl = (year) => `We-Draft.com/draftsim${String(year) === SIM_YEAR ? "" : `/${year}`}`;

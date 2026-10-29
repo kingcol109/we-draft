@@ -21,10 +21,11 @@
 //                           ranked order, each row with avg community
 //                           grade (g), overall class rank (cr), school
 //                           logo (lg), an OL/DB's sub-position (sp —
-//                           OT / IOL / CB / S: SubPositionOverride, else
-//                           SubPosition), and height in inches (ht) and
-//                           weight (wt) when known — the Draft Sim's
-//                           specific needs size players with them;
+//                           OT / G / C / CB / S: SubPositionOverride, else
+//                           SubPosition), the admin's roles (ro — Roles:
+//                           3rd Down RB, Slot Corner… — the Draft Sim's
+//                           role needs), and height in inches (ht) and
+//                           weight (wt) when known;
 //                           classSize on the doc; `hidden` holds
 //                           each not-Live player's own-page placement
 //                           plus his name/school/size (the Draft Sim's
@@ -285,6 +286,7 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
         i: p.id, F: p.First || "", L: p.Last || "", s: p.School || "", sl: p.Slug || "",
         g: gradeOf(p), cr: idx + 1, lg: logoBySchool[p.School] || "", ld: darkLogoBySchool[p.School] || "",
         ...((p.SubPositionOverride || p.SubPosition) ? { sp: p.SubPositionOverride || p.SubPosition } : {}),
+        ...(Array.isArray(p.Roles) && p.Roles.length ? { ro: p.Roles } : {}),
         ...(heightInches(p.Height) ? { ht: heightInches(p.Height) } : {}),
         ...(parseFloat(p.Weight) > 0 ? { wt: parseFloat(p.Weight) } : {}),
       });
@@ -299,6 +301,7 @@ export function buildSiteSnapshotDocs({ historical, players, draftOrder, evalsBy
         lg: logoBySchool[self.School] || "",
         F: self.First || "", L: self.Last || "", s: self.School || "", sl: self.Slug || "", ld: darkLogoBySchool[self.School] || "",
         ...((self.SubPositionOverride || self.SubPosition) ? { sp: self.SubPositionOverride || self.SubPosition } : {}),
+        ...(Array.isArray(self.Roles) && self.Roles.length ? { ro: self.Roles } : {}),
         ...(heightInches(self.Height) ? { ht: heightInches(self.Height) } : {}),
         ...(parseFloat(self.Weight) > 0 ? { wt: parseFloat(self.Weight) } : {}),
       };

@@ -19,6 +19,7 @@ import DraftOrderEditor from "../components/DraftOrderEditor";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminSubPositions from "../components/AdminSubPositions";
+import AdminProspectRoles from "../components/AdminProspectRoles";
 import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
@@ -269,6 +270,7 @@ const PLAYER_GROUPS = [
       { key: "portal", label: "Transfer Portal" },
       { key: "recruits", label: "Recruits" },
       { key: "subpositions", label: "Sub-positions" },
+      { key: "roles", label: "Roles" },
     ],
   },
   {
@@ -1366,6 +1368,8 @@ function PlayerDataSection() {
         <RecruitsSection />
       ) : playerDataTab === "subpositions" ? (
         <AdminSubPositions />
+      ) : playerDataTab === "roles" ? (
+        <AdminProspectRoles />
       ) : playerDataTab === "historical" ? (
         <HistoricalSection />
       ) : playerDataTab === "comps" ? (

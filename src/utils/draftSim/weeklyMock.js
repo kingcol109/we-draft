@@ -17,21 +17,30 @@
 // no trades of its own, and each team held to the positions nextYearRules
 // allows it. Its pages are /mocks/{team}/2028.
 //
+// A third, 2029's (off for now — weeklyMockNews.js WEEKLY_YEARS turns it
+// on), is one round on the current needs, no trades and no pick notes, on
+// an order drawn at random — every team with its own
+// first-rounder (randomOrder). It's only its whole mock (/mocks/2029): no
+// team pages (weeklyMockNews.js TEAM_PAGE_YEARS), and its post stays off
+// the community mock lists (unlisted).
+//
 // Pick numbers move week to week (the order follows the standings), so a
 // pick is known by its slot — round, the team that originally owned it, and
 // which of that team's picks in the round it is (a comp pick is its second):
 // "1-NYJ-1" is the Jets' own first-rounder, "1-DAL-1" the one they got from
 // Dallas, whoever holds it now.
-import { initSim, stepCpu, makePick, NEED_LABELS, NEED_KEYS, needKeysFor, specificFits } from "./engine";
+import { initSim, stepCpu, makePick, NEED_LABELS, NEED_KEYS, needKeysFor, roleFits } from "./engine";
 import { pickNote } from "./pickNotes";
 
 export const WEEKLY_ROUNDS = 7;
 // Rounds by class: the next class's mock is the first three.
-export const WEEKLY_ROUNDS_BY_YEAR = { 2027: 7, 2028: 3 };
+export const WEEKLY_ROUNDS_BY_YEAR = { 2027: 7, 2028: 3, 2029: 1 };
 export const WEEKLY_VARIANCE = "less";
 export const WEEKLY_TRADES = "normal";
 // CPU trades by class: the next class's mock has none (engine CPU_TRADES "off").
-export const WEEKLY_TRADES_BY_YEAR = { 2027: "normal", 2028: "off" };
+export const WEEKLY_TRADES_BY_YEAR = { 2027: "normal", 2028: "off", 2029: "off" };
+// The classes drafted on a random order (randomOrder) — no notes, no team pages.
+export const RANDOM_ORDER_YEARS = ["2029"];
 
 // Slot keys for a draft's picks: { [overall]: "round-original-n" }.
 export function slotKeys(picks) {
@@ -299,6 +308,18 @@ export function tieredOrder(order, rand) {
   }).sort((a, b) => a.Pick - b.Pick);
 }
 
+// A one-round order drawn at random: each of `teams` with its own pick, as
+// fetchDraft's [{ Pick, Round, Team, Traded }].
+export const RANDOM_ORDER_NOTE = "The {year} draft order is years away, so this mock draws it at random — every team with its own first-round pick.";
+export function randomOrder(teams, rand) {
+  const out = [...teams];
+  for (let k = out.length - 1; k > 0; k--) {
+    const j = Math.floor(rand() * (k + 1));
+    [out[k], out[j]] = [out[j], out[k]];
+  }
+  return out.map((Team, i) => ({ Pick: i + 1, Round: 1, Team, Traded: null }));
+}
+
 // This year's trades (tradesFromSim's) of the next class's picks, carried
 // onto its order (fetchDraft's [{ Pick, Round, Team, Traded }]), in the order
 // they were made. → { order (a copy), carried: [{ round, original, from,
@@ -370,9 +391,9 @@ export function nextYearLabel(label, cover, key = "") {
 // Every team's needs (loadSimData's: { [team]: { [key]: { labels, note } } })
 // a year on from the picks it made (a week's picks: [{ owner, round,
 // player }]). A pick answers the needs its player fills — his position
-// (needKeysFor; half a share, as an OL or DB with no sub-position, counts)
-// and any specific need he fits (specificFits) — the player as `board` has
-// him when he's on it (sub-position, strengths), else as saved.
+// (needKeysFor; a share of half or more counts — a flex OL or DB, or a DB
+// with no sub-position) and any role of his (roleFits) — the player as
+// `board` has him when he's on it (sub-position, roles), else as saved.
 // → { needs, changes: [{ team, key, from, to, cover }] }.
 export function nextYearNeeds(needs, picks, board = []) {
   const byId = Object.fromEntries(board.map((p) => [p.id, p]));
@@ -382,7 +403,7 @@ export function nextYearNeeds(needs, picks, board = []) {
     const p = byId[pk.player.id] || pk.player;
     const keys = [
       ...needKeysFor(p).filter((k) => k.share >= 0.5).map((k) => k.key),
-      ...specificFits(p, board).filter((f) => f.fit >= 0.5).map((f) => f.key),
+      ...roleFits(p).filter((f) => f.fit >= 0.5).map((f) => f.key),
     ];
     const team = (rounds[pk.owner] = rounds[pk.owner] || {});
     keys.forEach((key) => { (team[key] = team[key] || []).push(pk.round); });

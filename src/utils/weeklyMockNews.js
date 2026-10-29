@@ -2,7 +2,7 @@
 //
 // The current Weekly Mocks as news items: one small summary per class,
 // AdminWeeklyMock.jsx writes on Publish (and Update team pages) —
-// config/weeklyMock for 2027, config/weeklyMock2028 for the next class's
+// config/weeklyMock for 2027, config/weeklyMock{year} for the later classes'
 // (summaryDocId) — { mockId, weekId, prevWeekId (the weeklyMocks docs of
 // this week and the one before, for the team pages), year, rounds,
 // publishedAt, teams: { [abbr]: { name, first: { name, overall, pos,
@@ -16,9 +16,15 @@ import { db } from "../firebase";
 import { NFL_TEAMS } from "./coachHistory";
 
 // The classes with a Weekly Mock, the first the main one: its team pages are
-// /mocks/{team}; the others' add the year (/mocks/{team}/2028).
+// /mocks/{team}; the others' add the year (/mocks/{team}/2028). A class
+// outside TEAM_PAGE_YEARS is only its whole mock (/mocks/{year}): no team
+// pages, and not on NFL team pages. (2029 is ready for that — one round, a
+// random order, weeklyMock.js RANDOM_ORDER_YEARS — but off for now: add it
+// here to turn it on, and to generate-sitemap.js's WEEKLY_CLASSES.)
 export const WEEKLY_YEARS = ["2027", "2028"];
 export const MAIN_WEEKLY_YEAR = WEEKLY_YEARS[0];
+export const TEAM_PAGE_YEARS = ["2027", "2028"];
+export const hasTeamPages = (year) => TEAM_PAGE_YEARS.includes(String(year));
 // (2027's kept its original id.)
 export const summaryDocId = (year) => (String(year) === "2027" ? "weeklyMock" : `weeklyMock${year}`);
 
@@ -28,6 +34,10 @@ export function loadWeeklyMockSummary(year = MAIN_WEEKLY_YEAR) {
   if (!cached[y]) cached[y] = getDoc(doc(db, "config", summaryDocId(y))).then((s) => (s.exists() ? s.data() : null)).catch(() => null);
   return cached[y];
 }
+
+// A player's page's link to a Weekly Mock: "2027 Mock Draft: Chiefs Take
+// Simmons" (team: who took him; last: his last name).
+export const weeklyMockPlayerTitle = (year, team, last) => `${year} Mock Draft: ${(NFL_TEAMS[team] || team).split(" ").pop()} Take ${last}`;
 
 // "Miami Dolphins 7-Round Mock Draft 2027".
 export const weeklyMockTitle = (summary, abbr) => `${summary.teams?.[abbr]?.name || abbr} ${summary.rounds || 7}-Round Mock Draft ${summary.year}`;
@@ -68,7 +78,7 @@ export function loadWeeklyMockNews(max) {
       const fp = first?.player;
       return {
         id: `weekly-${d.id}`, type: "weeklyMock", publishedAt: w.publishedAt,
-        title: `${year} Weekly Mock Draft — ${w.rounds || 7} Rounds`,
+        title: `${year} Weekly Mock Draft — ${w.rounds || 7} Round${(w.rounds || 7) === 1 ? "" : "s"}`,
         summary: fp ? `No. 1 pick: ${fp.First} ${fp.Last}, ${fp.Position}${fp.School ? `, ${fp.School}` : ""} (${NFL_TEAMS[first.owner] || first.owner})` : "",
         href: latest ? weeklyYearHref(year) : `/mocks/${w.mockId}/view`,
       };

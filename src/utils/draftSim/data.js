@@ -7,7 +7,8 @@
 // grades + traits (_grades), every prospect's staff fit for all 32 teams
 // plus the staffers' names (nflFit_{Position}), CFBD season stats
 // (cfbLeaders/current + tables), each prospect's best game (simGames), the trade chart (config/draftTradeChart),
-// team needs (compSnapshots/_teamNeeds — the admin's labels), team branding and the
+// team needs (compSnapshots/_teamNeeds — the admin's labels), each team's
+// stars (_teamStars — Franchise / Difference Maker players), team branding and the
 // draft history (draftHistory.json, Thad Murphy's). The Expanded Board
 // (loadExpandedBoard) adds the class's players hidden on the site.
 import { doc, getDoc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
@@ -84,7 +85,7 @@ const inches = (h) => { const m = String(h || "").match(/^(\d)['-](\d{1,2})/); r
 // ({ [id]: { cr, F, L, … } }), for the Expanded Board.
 const fromRow = (r, pos) => ({
   id: r.i, First: r.F || "", Last: r.L || "", Position: pos, School: r.s || "", Slug: r.sl, logo: r.lg || "", logoDark: r.ld, cr: r.cr ?? null,
-  subPosition: r.sp || null, height: r.ht ?? null, weight: r.wt ?? null,
+  subPosition: r.sp || null, roles: r.ro || [], height: r.ht ?? null, weight: r.wt ?? null,
 });
 async function classProspects(year) {
   const fromSnapshot = (d, pos) => d.rows.map((r) => fromRow(r, pos));
@@ -102,7 +103,7 @@ async function classProspects(year) {
   }
   const lists = await Promise.all(SIM_POSITIONS.map((pos) => fetchProspects(year, pos).catch(() => [])));
   return [...lists.flat().map((p) => ({
-    ...p, subPosition: p.subPosition || p.SubPositionOverride || p.SubPosition || null,
+    ...p, subPosition: p.subPosition || p.SubPositionOverride || p.SubPosition || null, roles: p.roles || p.Roles || [],
     height: p.height ?? inches(p.Height), weight: p.weight ?? (parseFloat(p.Weight) || null),
   })), ...specialists.flat()];
 }
@@ -117,6 +118,14 @@ async function loadNeeds() {
   if (combined?.needs) return Object.fromEntries(Object.entries(combined.needs).map(([team, needs]) => [team, resolveNeeds(needs)]));
   const snap = await getDocs(collection(db, "nflTeamNeeds"));
   return Object.fromEntries(snap.docs.map((d) => [d.id, resolveNeeds(d.data().needs)]));
+}
+
+// Every team's stars — its Franchise / Difference Maker players
+// (compSnapshots/_teamStars, published from Admin → Mock Draft → Team
+// Needs): { [team]: [{ n, k, t, ro? }] } (stars.js). None if unread.
+async function loadStars() {
+  const d = await getSiteSnapshot("_teamStars");
+  return d?.stars || {};
 }
 
 // Every prospect's logoDark — LogoBlack, else LogoDark, else Logo1 — set
@@ -188,7 +197,7 @@ export function loadCfbStats() {
 
 export function loadSimData(year = SIM_YEAR) {
   return once(`data:${year}`, async () => {
-    const [setup, chart, gradesSnap, prospectList, fitDocs, cfb, needs, history] = await Promise.all([
+    const [setup, chart, gradesSnap, prospectList, fitDocs, cfb, needs, history, stars] = await Promise.all([
       loadSimSetup(year),
       getDoc(doc(db, "config", "draftTradeChart")).then((s) => (s.exists() ? s.data().values || {} : {})).catch(() => ({})),
       getSiteSnapshot("_grades").catch(() => null),
@@ -198,6 +207,7 @@ export function loadSimData(year = SIM_YEAR) {
       loadNeeds().catch(() => ({})),
       // Every real draft pick since 2000, for Thad Murphy (its own chunk).
       import("./draftHistory.json").then((m) => m.default || m).catch(() => null),
+      loadStars().catch(() => ({})),
       loadDeskLines(),
       loadPlayerTakes(),
     ]);
@@ -218,7 +228,7 @@ export function loadSimData(year = SIM_YEAR) {
     // Warm the best-games snapshot before the first pick needs it.
     simGames(cfb.season).catch(() => null);
     return {
-      ...setup, staff, chart, needs, history, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug, { gradeSpread }),
+      ...setup, staff, chart, needs, history, stars, season: cfb.season, board: buildBoard(prospects, grades, fits, cfb.bySlug, { gradeSpread }),
       // What loadExpandedBoard rebuilds the board from.
       inputs: { prospects, hidden: prospectList.hidden || [], grades, fits, stats: cfb.bySlug, gradeSpread },
     };
@@ -242,7 +252,7 @@ export function loadExpandedBoard(year = SIM_YEAR) {
         .map((p) => ({
           id: p.id, First: p.First || "", Last: p.Last || "", Position: p.Position, School: p.School || "", Slug: p.Slug,
           logo: placed[p.id]?.lg || "", cr: placed[p.id]?.cr ?? null, hidden: true,
-          subPosition: p.SubPositionOverride || p.SubPosition || null, height: inches(p.Height), weight: parseFloat(p.Weight) || null,
+          subPosition: p.SubPositionOverride || p.SubPosition || null, roles: p.Roles || [], height: inches(p.Height), weight: parseFloat(p.Weight) || null,
         })));
     }
     const ids = new Set(inputs.prospects.map((p) => p.id));

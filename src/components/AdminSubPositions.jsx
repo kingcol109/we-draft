@@ -1,23 +1,37 @@
 // src/components/AdminSubPositions.jsx
 //
-// Admin → Players → Data Management → Sub-positions: OL → OT / IOL and
+// Admin → Players → Data Management → Sub-positions: OL → OT / G / C and
 // DB → CB / S, per draft class (players/{id}.SubPositionOverride over the
 // synced SubPosition — scripts/syncSubPositions.mjs, from PFF's position,
 // which PFF sets by where a player lines up). Mostly for the prospects PFF
 // couldn't place. A player can have both (a swing tackle-guard, a
-// corner-safety) — the override is then a list, ["OT", "IOL"]; one stays a
-// plain string. The Draft Sim reads them from the class snapshots, so
-// they apply there after the next Rebuild Site Snapshots.
+// corner-safety) — the override is then a list, ["G", "C"]; one stays a
+// plain string. An old "IOL" (before guards and centers split) shows as
+// both G and C, and is saved as them the next time he's set. The Draft Sim reads them from the class snapshots
+// (compSnapshots/class_{year}_{pos}), so a save patches his row there too —
+// no Rebuild Site Snapshots needed.
 import { useEffect, useState } from "react";
-import { collection, deleteField, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { collection, deleteField, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { SIM_YEAR } from "../utils/draftSim/data";
 
 const BLUE = "#0055a5";
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
-const SUBS = { OL: ["OT", "IOL"], DB: ["CB", "S"] };
-const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+const SUBS = { OL: ["OT", "G", "C"], DB: ["CB", "S"] };
+const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []).flatMap((x) => (x === "IOL" ? ["G", "C"] : [x]));
 const hasSub = (p) => asList(p.SubPositionOverride).length > 0 || !!p.SubPosition;
+
+// His row (or hidden entry) in the class snapshot takes the new sub-position(s).
+async function patchSnapshot(p, sp) {
+  const ref = doc(db, "compSnapshots", `class_${p.Eligible}_${p.Position}`);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const { rows = [], hidden = {} } = snap.data();
+  const put = (r) => { const out = { ...r }; delete out.sp; return sp ? { ...out, sp } : out; };
+  const i = rows.findIndex((r) => r.i === p.id);
+  if (i >= 0) await updateDoc(ref, { rows: rows.map((r, j) => (j === i ? put(r) : r)) });
+  else if (hidden[p.id]) await updateDoc(ref, { [`hidden.${p.id}`]: put(hidden[p.id]) });
+}
 
 export default function AdminSubPositions() {
   const [players, setPlayers] = useState(null);
@@ -38,6 +52,7 @@ export default function AdminSubPositions() {
     const value = subs.length > 1 ? subs : subs[0] || null;
     try {
       await updateDoc(doc(db, "players", p.id), { SubPositionOverride: value || deleteField() });
+      await patchSnapshot(p, value || p.SubPosition || null);
       setPlayers((all) => all.map((x) => (x.id === p.id ? { ...x, SubPositionOverride: value || undefined } : x)));
     } catch (e) {
       setError(e.message);
@@ -60,9 +75,9 @@ export default function AdminSubPositions() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ ...card, padding: "14px 16px", fontSize: "13px", color: "#33415a", lineHeight: 1.5 }}>
-        Team needs split OL into tackles and interior, and DBs into corners and safeties. Most prospects get theirs from PFF
-        (scripts/syncSubPositions.mjs, run with the PFF sync); set the rest here, or correct one. Click both for a player who plays
-        either. An OL or DB with none counts half toward each in the Draft Sim. Changes reach the sim after the next <b>Rebuild Site Snapshots</b>.
+        Team needs split OL into tackles, guards and centers, and DBs into corners and safeties. Most prospects get theirs from PFF
+        (scripts/syncSubPositions.mjs, run with the PFF sync); set the rest here, or correct one. Click more than one for a player who
+        plays either. An OL or DB with none counts an equal share toward each in the Draft Sim. Changes reach the sim after the next <b>Rebuild Site Snapshots</b>.
       </div>
       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
         {years.map((y) => {

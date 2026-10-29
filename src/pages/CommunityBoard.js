@@ -11,6 +11,7 @@ import { canonicalEvalData } from "../utils/evaluationCopies";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { classSnapshotRanks, compareRanks } from "../utils/classRanks";
 import { SideRailAd } from "../components/MarginAds";
+import { SUB_TABS, inSubTab } from "../utils/subPositions";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -465,6 +466,30 @@ function PositionFilterBar({ options, selected, setSelected, isMobile, eligibleY
   );
 }
 
+// The sub-position chips under the position bar, when OL or DB is the one
+// position picked: All, then its tabs (utils/subPositions.js — OT / IOL,
+// CB / S). A player listed at two shows under each.
+function SubPositionBar({ position, selected, setSelected, isMobile }) {
+  const tabs = SUB_TABS[position];
+  if (!tabs) return null;
+  return (
+    <div role="tablist" aria-label={position + " positions"} style={{
+      display: "flex", gap: isMobile ? "5px" : "6px", justifyContent: isMobile ? "flex-start" : "center", marginBottom: isMobile ? "8px" : "12px", flexWrap: "wrap",
+    }}>
+      {[["", "All " + position], ...tabs.map(([k]) => [k, k])].map(([k, text]) => {
+        const active = selected === k;
+        return (
+          <button key={k || "all"} role="tab" aria-selected={active} onClick={() => setSelected(k)} className={"wdb-pill wdb-sel" + (active ? " on" : "")} style={{
+            padding: isMobile ? "5px 10px" : "5px 14px", fontWeight: 900, fontSize: isMobile ? "11px" : "13px", textTransform: "uppercase", letterSpacing: "0.05em",
+            border: "2px solid " + GOLD, borderRadius: "999px", cursor: "pointer", fontFamily: "inherit",
+            background: active ? GOLD : "#fff", color: active ? "#fff" : BLUE, whiteSpace: "nowrap",
+          }}>{text}</button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ArchiveDropdown({ eligibleYear, onSelect }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -803,6 +828,10 @@ export default function CommunityBoard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSchools, setSelectedSchools] = useState([]);
   const [selectedPositions, setSelectedPositions] = useState([]);
+  // The sub-position tab (SubPositionBar) — only while OL or DB is the one position picked.
+  const [selectedSub, setSelectedSub] = useState("");
+  const subPosition = selectedPositions.length === 1 && SUB_TABS[selectedPositions[0]] ? selectedPositions[0] : null;
+  useEffect(() => { setSelectedSub(""); }, [subPosition]);
   const [selectedCommGrades, setSelectedCommGrades] = useState([]);
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
@@ -1118,7 +1147,7 @@ export default function CommunityBoard() {
   };
 
   const resetFilters = () => {
-    setSelectedSchools([]); setSelectedPositions([]);
+    setSelectedSchools([]); setSelectedPositions([]); setSelectedSub("");
     setSelectedCommGrades([]); setSelectedMyGrades([]);
     setSearchQuery(""); setShowAvailableOnly(false); setShowInactive(false);
     setSortKey(null); setSortOrder("asc");
@@ -1138,6 +1167,7 @@ export default function CommunityBoard() {
   const visibleFilteredPlayers = players
     .filter((p) => !searchQuery.trim() ? true : ((p.First || "") + " " + (p.Last || "")).toLowerCase().includes(searchQuery.trim().toLowerCase()))
     .filter((p) => selectedPositions.length === 0 ? true : selectedPositions.includes(p.Position))
+    .filter((p) => !subPosition || !selectedSub || inSubTab(p, subPosition, selectedSub))
     .filter((p) => selectedSchools.length === 0 ? true : selectedSchools.includes(p.School))
     .filter((p) => selectedCommGrades.length === 0 ? true : selectedCommGrades.includes(p.CommunityGrade))
     .filter((p) => {
@@ -1428,7 +1458,10 @@ export default function CommunityBoard() {
           — its own centered row" comment below), scoped to mobile-only
           fixes (single-select toggle, K/P dropped, one-line sizing). */}
       {!is2029Empty && !isMobile && (
-        <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
+        <>
+          <PositionFilterBar options={allPositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
+          {subPosition && <SubPositionBar position={subPosition} selected={selectedSub} setSelected={setSelectedSub} isMobile={isMobile} />}
+        </>
       )}
 
       {is2029Empty ? (
@@ -1514,6 +1547,7 @@ export default function CommunityBoard() {
                   sideways if it still doesn't fit). Desktop's chip row stays
                   up top with the full allPositions list. */}
               <PositionFilterBar options={mobilePositions} selected={selectedPositions} setSelected={setSelectedPositions} isMobile={isMobile} eligibleYear={eligibleYear} />
+              {subPosition && <SubPositionBar position={subPosition} selected={selectedSub} setSelected={setSelectedSub} isMobile={isMobile} />}
               <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                 <input type="search" className="wdb-input" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search player..." aria-label="Search players"
                   style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "2px solid " + GOLD, borderRadius: "8px", padding: "8px 12px", fontWeight: 700, fontSize: "14px", color: BLUE, outline: "none" }} />

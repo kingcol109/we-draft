@@ -22,7 +22,7 @@ import {
 import { db } from "../firebase";
 import { cfbdPlayerFor, setLivePlayerFollow } from "../utils/liveFollowSync";
 import { getSiteSnapshot, fetchAds, fetchCfbAds, fetchAdTeamLogos } from "../utils/siteSnapshots";
-import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, WEEKLY_YEARS } from "../utils/weeklyMockNews";
+import { loadWeeklyMockSummary, weeklyMockPlayerTitle, weeklyYearHref, hasTeamPages, WEEKLY_YEARS } from "../utils/weeklyMockNews";
 import { NflTeamPicker, useMarginAdFit } from "../components/MarginAds";
 import AdBanner, { MobileAdCard, MOBILE_AD_HEIGHT } from "../components/AdBanner";
 import { takePlayerBySlug, takeSchoolByName } from "../utils/playerPrefetch";
@@ -2183,6 +2183,9 @@ const gradeDisplay = (g) => {
   return map[g] || { short:g, bg:"#5F5E5A", border:"#444441" };
 };
 
+// "Ellis Robinson IV" → "Robinson": a full name's last name, without a suffix.
+const lastNameOf = (name) => String(name || "").replace(/\s+(Jr\.?|Sr\.?|II|III|IV|V)$/i, "").split(" ").pop();
+
 export default function PlayerProfile() {
   const { slug } = useParams();
   // Modern look (MODERN_STYLE) — on for every player; ?modern=0 shows the
@@ -2676,9 +2679,11 @@ export default function PlayerProfile() {
 
   // The current Weekly Mocks as the top In The News items (utils/
   // weeklyMockNews.js — one cached config read a class; only the latest,
-  // they're updated in place). A drafted player gets the mocks of the team
-  // that drafted him — 2027's, then the next class's; a prospect gets the
-  // team that takes him in his class's mock, if any.
+  // they're updated in place), each linking to its class's whole mock
+  // (/mocks/{year}) as "2027 Mock Draft: Chiefs Take Simmons". A drafted
+  // player gets the mocks of the team that drafted him (its first pick in
+  // each — the classes with team pages only); a prospect gets the team that
+  // takes him in his class's mock, if any.
   const [weeklyMockItems, setWeeklyMockItems] = useState([]);
   useEffect(() => {
     let live = true;
@@ -2687,10 +2692,11 @@ export default function PlayerProfile() {
       if (!live) return;
       const items = all.filter(Boolean).map((s) => {
         if (draftedBy) {
-          return s.teams?.[draftedBy] ? { id: `weeklyMock${s.year}`, type: "mock", publishedAt: s.publishedAt, href: weeklyMockHref(draftedBy, s.year), title: weeklyMockTitle(s, draftedBy) } : null;
+          const first = hasTeamPages(s.year) ? s.teams?.[draftedBy]?.first : null;
+          return first ? { id: `weeklyMock${s.year}`, type: "mock", publishedAt: s.publishedAt, href: weeklyYearHref(s.year), title: weeklyMockPlayerTitle(s.year, draftedBy, lastNameOf(first.name)) } : null;
         }
         const at = s.players?.[player?.id];
-        return at ? { id: `weeklyMock${s.year}`, type: "mock", aboutPlayer: true, publishedAt: s.publishedAt, href: weeklyMockHref(at.team, s.year), title: `${weeklyMockTitle(s, at.team)}: ${player.Last} at No. ${at.overall}` } : null;
+        return at ? { id: `weeklyMock${s.year}`, type: "mock", aboutPlayer: true, publishedAt: s.publishedAt, href: weeklyYearHref(s.year), title: weeklyMockPlayerTitle(s.year, at.team, player.Last) } : null;
       }).filter(Boolean);
       setWeeklyMockItems(items);
     });

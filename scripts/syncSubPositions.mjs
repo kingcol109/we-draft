@@ -1,11 +1,13 @@
 // scripts/syncSubPositions.mjs
 //
 // Splits OL and DB prospects into the sub-positions NFL team needs are kept
-// by (scripts/nflTeamNeeds.js): OL → OT / IOL, DB → CB / S — so a Draft Sim
-// team that needs a corner doesn't take a safety. From each player's PFF
-// position (pffGrades, linked through cfbdPlayers.wedraftPlayerId):
-// T → OT, G / C → IOL, CB → CB, S → S. A PFF position that crosses
-// groups (a DB PFF lists as DI) is left alone.
+// by (scripts/nflTeamNeeds.js): OL → OT / G / C, DB → CB / S — so a Draft
+// Sim team that needs a corner doesn't take a safety, or one that needs a
+// center a tackle. From each player's PFF position (pffGrades, linked
+// through cfbdPlayers.wedraftPlayerId): T → OT, G → G, C → C, CB → CB,
+// S → S. A PFF position that crosses groups (a DB PFF lists as DI) is left
+// alone. (Before guards and centers split, G and C were both "IOL" — a
+// --write run replaces those.)
 //
 // Writes players/{id}.SubPosition — the label only, no PFF numbers, so it's
 // public like Position. The admin's SubPositionOverride (Admin → Players →
@@ -21,7 +23,7 @@ const require = createRequire(import.meta.url);
 const { getFirestore } = require("./firebaseAdmin");
 const write = process.argv.includes("--write");
 
-const SUB = { OL: { T: "OT", G: "IOL", C: "IOL" }, DB: { CB: "CB", S: "S" } };
+const SUB = { OL: { T: "OT", G: "G", C: "C" }, DB: { CB: "CB", S: "S" } };
 
 const db = getFirestore();
 const [players, links, pff] = await Promise.all([

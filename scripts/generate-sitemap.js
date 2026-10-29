@@ -110,7 +110,9 @@ async function getCurrentStaff() {
 // A class's published Weekly Mock summary (written on Publish in
 // AdminWeeklyMock.jsx; null before the first). Ids and URLs as in
 // src/utils/weeklyMockNews.js: the main class at /mocks/{abbr}, the next at
-// /mocks/{abbr}/{year}.
+// /mocks/{abbr}/{year}. A class with teamPages: false is only its whole
+// mock — 2029's, when it's turned on: { year: "2029", doc: "weeklyMock2029",
+// suffix: "/2029", teamPages: false }.
 const WEEKLY_CLASSES = [
   { year: "2027", doc: "weeklyMock", suffix: "" },
   { year: "2028", doc: "weeklyMock2028", suffix: "/2028" },
@@ -393,7 +395,7 @@ for (const doc of allTeams) {
     if (!weekly || !weeklyDate) continue;
     const priority = cls.suffix ? 0.6 : 0.7;
     weeklyMockPages.push(
-      ...NFL_TEAM_ABBRS.map((abbr) => ({ path: `/mocks/${abbr.toLowerCase()}${cls.suffix}`, priority, lastmod: weeklyDate })),
+      ...(cls.teamPages === false ? [] : NFL_TEAM_ABBRS.map((abbr) => ({ path: `/mocks/${abbr.toLowerCase()}${cls.suffix}`, priority, lastmod: weeklyDate }))),
       { path: `/mocks/${cls.year}`, priority: priority + 0.05, lastmod: weeklyDate },
     );
     console.log(`✅ ${cls.year} Weekly Mock published ${weeklyDate}.`);

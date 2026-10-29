@@ -38,8 +38,10 @@ import SimBroadcast, { SIM_CSS, introHeadline } from "../components/draftSim/Sim
 import SimResults from "../components/draftSim/SimResults";
 import SavedSims from "../components/draftSim/SavedSims";
 import SimProfile from "../components/draftSim/SimProfile";
-import RecentSims from "../components/draftSim/RecentSims";
-import { RECENT_PATH } from "../utils/draftSim/publicSims";
+import SimCommunity, { SubTabs } from "../components/draftSim/SimCommunity";
+import useSimBadges from "../components/draftSim/useSimBadges";
+import { BadgeToasts } from "../components/draftSim/SimBadges";
+import { RECENT_PATH, COMMUNITY_PATH } from "../utils/draftSim/publicSims";
 import MarginAds from "../components/MarginAds";
 import { cssRect, viewportCssHeight } from "../utils/pageZoom";
 
@@ -82,9 +84,11 @@ function Column({ wide, isMobile, contentRef, children }) {
   );
 }
 
-// page: "recent" (/draftsim/recent) or "profile" (/draftsim/profile) — a
-// page of its own, with the setup screen's tabs over it.
-const PAGE_PATHS = { recent: RECENT_PATH, profile: PROFILE_PATH };
+// page: "profile" (/draftsim/profile), "community" (/draftsim/community)
+// or "recent" (/draftsim/recent, Community's Recent Drafts) — a page of its
+// own, with the setup screen's tabs over it.
+const PAGE_PATHS = { profile: PROFILE_PATH, community: COMMUNITY_PATH };
+const PROFILE_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 export default function DraftSim({ page = null }) {
   // /draftsim/:team, /draftsim/:year (a SIM_YEARS year in the team slot) or
   // /draftsim/:year/:team.
@@ -174,16 +178,22 @@ export default function DraftSim({ page = null }) {
 
   if ((team && !validTeam) || (params.year && !SIM_YEARS.includes(params.year))) return <Navigate to={`/draftsim${yearPath}`} replace />;
 
-  // The setup screen's tab: "new" (set up a draft) or "saved" (My Drafts,
-  // ?tab=saved) — or a page of its own: "profile" (Sim Profile,
-  // /draftsim/profile) or "recent" (Recent Drafts, /draftsim/recent).
+  // The setup screen's tabs: "new" (set up a draft), "profile" (Sim
+  // Profile, /draftsim/profile — its sub-tabs the profile itself and My
+  // Drafts, ?view=drafts) and "community" (/draftsim/community — Insights,
+  // and Recent Drafts at /draftsim/recent). The old ?tab=profile /
+  // ?tab=saved links land on the profile.
   const searchTab = new URLSearchParams(location.search).get("tab");
-  const tab = page || (searchTab === "profile" ? "profile" : searchTab === "saved" ? "saved" : "new");
   if (!page && searchTab === "profile") return <Navigate to={PROFILE_PATH} replace />;
+  if (!page && searchTab === "saved") return <Navigate to={`${PROFILE_PATH}?view=drafts`} replace />;
+  const tab = page === "recent" || page === "community" ? "community" : page || "new";
+  const view = page === "recent" ? "recent" : page === "community" ? "insights"
+    : new URLSearchParams(location.search).get("view") === "drafts" ? "drafts" : "profile";
   const setTab = (t) => {
     if (PAGE_PATHS[t]) navigate(PAGE_PATHS[t]);
-    else navigate({ pathname: page ? `/draftsim${yearPath}` : location.pathname, search: t === "new" ? "" : `?tab=${t}` }, { replace: !page, state: location.state });
+    else navigate({ pathname: page ? `/draftsim${yearPath}` : location.pathname, search: "" }, { replace: !page, state: location.state });
   };
+  const setView = (v) => navigate(v === "drafts" ? `${PROFILE_PATH}?view=drafts` : v === "recent" ? RECENT_PATH : v === "insights" ? COMMUNITY_PATH : PROFILE_PATH, { replace: true });
 
   const names = teamNamer(setup?.branding || {});
   // Title, description and canonical: components/draftSim/DraftSimMeta.jsx (App.js).
@@ -240,9 +250,13 @@ export default function DraftSim({ page = null }) {
         ) : (
           <Column isMobile={isMobile} contentRef={contentRef}>
             <SetupTabs tab={tab} onTab={setTab} isMobile={isMobile} />
-            {tab === "saved" ? <SavedSims branding={setup.branding} isMobile={isMobile} />
-              : tab === "profile" ? <SimProfile branding={setup.branding} names={names.teamName} isMobile={isMobile} />
-              : tab === "recent" ? <RecentSims branding={setup.branding} names={names.teamName} isMobile={isMobile} />
+            {tab === "profile" ? (
+              <>
+                <SubTabs views={PROFILE_VIEWS} view={view} onView={setView} />
+                {view === "drafts" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <SimProfile branding={setup.branding} names={names.teamName} isMobile={isMobile} />}
+              </>
+            )
+              : tab === "community" ? <SimCommunity view={view} onView={setView} branding={setup.branding} names={names.teamName} order={setup.order} orderYear={setup.year} isMobile={isMobile} />
               : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
               onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
           </Column>
@@ -328,7 +342,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   // DRAFT takes it past the intro (not just opening it — /draftsim/{team}
   // lands on the intro) and the teams it's drafting as, its finish, and
   // every pick the user makes.
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const uid = user?.uid || null;
   const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
   const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, cpuTrades: config.cpuTrades, variance: config.variance, quick: mock, onUserPick });
@@ -349,6 +363,10 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
     recordStreak(uid);
     if (counted) recordSimProfile(uid, { year: data.year, hauls: config.teams.map((t) => teamHaul(s.sim, t)) });
   }, [finished, uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Badges (components/draftSim/useSimBadges.js): popped up as they're
+  // earned, saved at the end. My Board's ranks don't count for the value ones.
+  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin" });
+  const toasts = <BadgeToasts queue={badges.queue} onDone={badges.dismiss} isMobile={isMobile} />;
   // Mobile, mid-draft: one anchored screen pinned to the viewport — the
   // stage never moves, and only the console's tab scrolls (SimBroadcast).
   // The page itself doesn't scroll (wd-sim-lock), the site footer is
@@ -390,6 +408,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", flexDirection: "column", padding: "6px 6px calc(6px + env(safe-area-inset-bottom))", boxSizing: "border-box", background: STAGE_BG, fontFamily: FONT }}>
           <SimBroadcast s={s} data={data} isMobile onSettings={onSettings} onPickTeam={onPickTeam} />
         </div>
+        {toasts}
         <button onClick={() => setNavOpen((o) => !o)} aria-label={navOpen ? "Hide the menu" : "Show the menu"} aria-expanded={navOpen} style={{
           position: "fixed", top: navOpen ? navHeight : 0, left: "50%", transform: "translateX(-50%)", zIndex: 10002, transition: "top .25s ease",
           border: "none", borderRadius: "0 0 10px 10px", background: "#0055a5", color: "#fff", padding: "1px 16px 3px", fontSize: 11, lineHeight: 1.2, cursor: "pointer",
@@ -401,7 +420,9 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   if (s.phase === "done") {
     return (
       <Column wide isMobile={isMobile} contentRef={contentRef}>
-        <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} counted={counted} onUndo={mock && s.canUndo ? s.undo : undefined} />
+        <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} counted={counted} onUndo={mock && s.canUndo ? s.undo : undefined}
+          badges={badges.runEarned} badgeTotal={badges.total} />
+        {toasts}
       </Column>
     );
   }
@@ -410,6 +431,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   return (
     <Column wide isMobile={isMobile} contentRef={contentRef}>
       <DesktopFill><SimBroadcast s={s} data={data} isMobile={isMobile} onSettings={onSettings} onPickTeam={onPickTeam} fill /></DesktopFill>
+      {toasts}
     </Column>
   );
 }
@@ -417,28 +439,40 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
 // The desktop sim's frame: from where it starts down to the window's
 // bottom edge (in CSS px — the page zoom, utils/pageZoom.js), re-measured
 // on resize. The page itself doesn't scroll meanwhile (wd-sim-lock), and
-// the footer is hidden.
+// the footer is hidden. Fullscreen (the broadcast bar's button —
+// SimBroadcast.jsx SIM_FRAME) takes this frame to the whole screen.
 const FILL_BOTTOM_GAP = 14;
+const FULLSCREEN_PAD = 14;
 function DesktopFill({ children }) {
   const ref = useRef(null);
   const [height, setHeight] = useState(null);
+  const [full, setFull] = useState(false);
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
     const html = document.documentElement;
     html.classList.add("wd-sim-lock");
     document.body.classList.add("wd-sim-nofooter");
     const read = () => {
-      if (ref.current) setHeight(Math.max(420, Math.floor(viewportCssHeight() - cssRect(ref.current).top - FILL_BOTTOM_GAP)));
+      const fs = document.fullscreenElement === ref.current;
+      setFull(fs);
+      if (fs) setHeight(window.innerHeight - FULLSCREEN_PAD * 2);
+      else if (ref.current) setHeight(Math.max(420, Math.floor(viewportCssHeight() - cssRect(ref.current).top - FILL_BOTTOM_GAP)));
     };
     read();
     window.addEventListener("resize", read);
+    document.addEventListener("fullscreenchange", read);
     return () => {
       window.removeEventListener("resize", read);
+      document.removeEventListener("fullscreenchange", read);
       html.classList.remove("wd-sim-lock");
       document.body.classList.remove("wd-sim-nofooter");
     };
   }, []);
-  return <div ref={ref} style={{ height: height ?? "calc(100vh / var(--pz, 1) - 120px)" }}>{children}</div>;
+  return (
+    <div ref={ref} data-sim-frame="" style={{ height: full ? "100vh" : height ?? "calc(100vh / var(--pz, 1) - 120px)", ...(full ? { padding: FULLSCREEN_PAD, background: "#0b1220", boxSizing: "border-box" } : {}) }}>
+      {full ? <div style={{ height: "100%" }}>{children}</div> : children}
+    </div>
+  );
 }
 
 // The fixed navbar's height (it can change — the LIVE button, a font
@@ -466,7 +500,7 @@ function SetupTabs({ tab, onTab, isMobile }) {
     border: "none", borderBottom: `3px solid ${on ? GOLD : "transparent"}`, background: "none", color: on ? "#fff" : "#8b9bb4",
     padding: "8px 4px", marginRight: isMobile ? 12 : 18, cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 11 : 13, letterSpacing: isMobile ? "0.05em" : "0.1em", textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0,
   });
-  const tabs = [["new", "New Draft", "New"], ["saved", "My Drafts", "My Drafts"], ["profile", "Sim Profile", "Profile"], ["recent", "Recent Drafts", "Recent"]];
+  const tabs = [["new", "New Draft", "New"], ["profile", "Sim Profile", "Profile"], ["community", "Community", "Community"]];
   return (
     <div role="tablist" style={{ display: "flex", borderBottom: "1px solid #1f2b42", marginBottom: 14, overflowX: "auto" }}>
       {tabs.map(([key, label, short]) => (
@@ -692,14 +726,13 @@ const ORDER_MODES = [
   { key: "random", label: "Randomize", note: () => "Every team takes over a random team's picks — a new order each run." },
 ];
 
-// Custom order: round 1 as it stands under the map, plus the teams without
-// a first-rounder. Tap one team, then another, to swap them.
+// Custom order: all 32 teams, each in its own first-round slot as it
+// stands under the map — a slot traded away still shows its team, with who
+// owns the pick now. Tap one team, then another, to swap them.
 function OrderEditor({ order, map, onMap, branding, names, isMobile }) {
   const [picked, setPicked] = useState(null);
   const relabeled = useMemo(() => relabelOrder(order, map), [order, map]);
   const firsts = relabeled.filter((p) => p.Round === 1).sort((a, b) => a.Pick - b.Pick);
-  const holders = new Set(firsts.map((p) => p.Traded || p.Team));
-  const without = orderTeams(order).filter((t) => !holders.has(t));
   const tap = (t) => {
     if (!picked) { setPicked(t); return; }
     if (picked !== t) onMap(swapTeams(map, picked, t));
@@ -707,17 +740,22 @@ function OrderEditor({ order, map, onMap, branding, names, isMobile }) {
   };
   const isReal = Object.entries(map).every(([k, v]) => k === v);
   const cols = `repeat(${isMobile ? 3 : 8}, minmax(0, 1fr))`;
-  const slot = (t, label, key) => {
+  const slot = (p) => {
+    const t = p.Team;
+    const owner = p.Traded && p.Traded !== t ? p.Traded : null;
     const b = branding[t] || {};
     const on = picked === t;
     return (
-      <button key={key} onClick={() => tap(t)} aria-pressed={on} title={names.teamName(t)} style={{
+      <button key={p.Pick} onClick={() => tap(t)} aria-pressed={on} title={`${names.teamName(t)}${owner ? ` — pick owned by the ${names.teamName(owner)}` : ""}`} style={{
         display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 10, cursor: "pointer", minWidth: 0,
         border: `2px solid ${on ? GOLD : "#1f2b42"}`, background: on ? `linear-gradient(160deg, ${b.Color1 || BLUE}, #0e1626 130%)` : "#0e1626", fontFamily: FONT,
       }}>
-        {label != null && <span style={{ color: "#6f7f99", fontSize: 10, fontWeight: 900, width: 16, textAlign: "right", flexShrink: 0 }}>{label}</span>}
+        <span style={{ color: "#6f7f99", fontSize: 10, fontWeight: 900, width: 16, textAlign: "right", flexShrink: 0 }}>{p.Pick}</span>
         {b.LogoDark || b.Logo1 ? <img src={b.LogoDark || b.Logo1} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: 22, flexShrink: 0 }} />}
-        <span style={{ color: on ? "#fff" : "#c9d4e5", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em" }}>{t}</span>
+        <span style={{ minWidth: 0, textAlign: "left" }}>
+          <span style={{ display: "block", color: on ? "#fff" : "#c9d4e5", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em" }}>{t}</span>
+          {owner && <span style={{ display: "block", color: GOLD, fontSize: 9, fontWeight: 900, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>OWNED BY {owner}</span>}
+        </span>
       </button>
     );
   };
@@ -730,16 +768,8 @@ function OrderEditor({ order, map, onMap, branding, names, isMobile }) {
         <button onClick={() => { onMap(Object.fromEntries(Object.keys(map).map((t) => [t, t]))); setPicked(null); }} disabled={isReal} style={{ ...chipStyle(false), padding: "5px 12px", fontSize: 11, opacity: isReal ? 0.35 : 1 }}>Reset</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: cols, gap: 5 }}>
-        {firsts.map((p) => slot(p.Traded || p.Team, p.Pick, p.Pick))}
+        {firsts.map(slot)}
       </div>
-      {without.length > 0 && (
-        <>
-          <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, margin: "10px 0 6px" }}>No first-round pick</div>
-          <div style={{ display: "grid", gridTemplateColumns: cols, gap: 5 }}>
-            {without.map((t) => slot(t, null, t))}
-          </div>
-        </>
-      )}
     </div>
   );
 }

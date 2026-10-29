@@ -656,7 +656,6 @@ export default function Navbar() {
               )}
             </div>
 
-            <Link to="/watch" style={baseStyle}>▶ Watch</Link>
 
             {user ? (
               <Link to="/profile" style={baseStyle}>
@@ -713,7 +712,6 @@ export default function Navbar() {
               { path: "/nfl", label: "NFL Teams" },
               { path: "/draftsim", label: "Draft Simulator" },
               { path: "/mocks", label: "Mock Drafts" },
-              { path: "/watch", label: "▶ Watch" },
             ].map((l) => (
               <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
                 {l.label}

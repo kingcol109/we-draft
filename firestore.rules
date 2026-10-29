@@ -419,6 +419,15 @@ service cloud.firestore {
     match /pffNflRosters/{abbr} {
       allow read, write: if isAdmin();
     }
+    // The admin's depth chart notes (per team) and players' talent /
+    // development tags (per PFF player id, following him between teams) —
+    // utils/depthNotes.js, Admin Panel → Research. Back office only.
+    match /nflDepthNotes/{abbr} {
+      allow read, write: if isAdmin();
+    }
+    match /nflPlayerTags/{playerId} {
+      allow read, write: if isAdmin();
+    }
     // No PFF numbers in either, so they're public: nflDepthOrder is each
     // team's player names in snap order (scripts/nflDepthOrder.js, from
     // pffNflRosters — NFLTeamPage.jsx's depth chart sorts by it);

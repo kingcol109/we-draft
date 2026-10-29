@@ -1,4 +1,4 @@
-import { simShareText, haulRecords, mockFromSim, mockShareText } from "./share";
+import { simShareText, haulRecords, mockFromSim, mockShareText, futureMoves } from "./share";
 import { buildBoard, initSim, makePick } from "./engine";
 
 test("share text: the heading, the grade, each pick, then the call to action", () => {
@@ -48,4 +48,15 @@ test("mock share text: every pick, the team and the player, then the link", () =
     "2. New York Jets — Joe Smith, WR",
     "", "Create Your Own On We-Draft.com/draftsim",
   ].join("\n"));
+});
+
+test("saved hauls note next year's picks added or given up, net of re-trades", () => {
+  const f = (overall, round) => ({ overall: 1000 + overall, number: overall, round, year: 2028, future: true });
+  const trades = [
+    { partner: "LV", got: [{ overall: 7 }, f(13, 1)], gave: [{ overall: 3 }] },
+    { partner: "CLE", got: [{ overall: 40 }], gave: [f(45, 2), f(13, 1)] },
+    { partner: "KC", got: [f(60, 3)], gave: [{ overall: 50 }] },
+  ];
+  expect(futureMoves(trades)).toEqual({ got: [{ year: 2028, round: 3, team: "KC" }], gave: [{ year: 2028, round: 2, team: "CLE" }] });
+  expect(futureMoves([])).toEqual({ got: [], gave: [] });
 });

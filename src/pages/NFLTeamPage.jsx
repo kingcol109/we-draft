@@ -21,7 +21,7 @@ import { viewportCssWidth } from "../utils/pageZoom";
 import { ROLE_BY_KEY, isOpenStint, isPlayerStint, stintYearSpan, groupStints } from "../utils/coachHistory";
 import { textOn } from "../utils/teamColors";
 import { depthNameKey, initialKey, fetchEspnRoster, fetchDepthOrder, groupRoster } from "../utils/nflRoster";
-import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, weeklyMockDate, WEEKLY_YEARS } from "../utils/weeklyMockNews";
+import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, weeklyMockDate, TEAM_PAGE_YEARS } from "../utils/weeklyMockNews";
 
 const BLUE = "#0055a5";
 
@@ -205,13 +205,14 @@ const stripSuffix = (last) => String(last || "").replace(/\s+(jr\.?|sr\.?|ii|iii
 const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex || "") ? `${hex}${alpha}` : "transparent");
 
 // In The News: the team's pages in the current Weekly Mocks
-// (utils/weeklyMockNews.js) — 2027's, then the next class's underneath;
+// (utils/weeklyMockNews.js) — 2027's, then the next class's underneath (the
+// classes with team pages — not 2029's);
 // each is updated in place, so only the latest shows, with its date. In the
 // right rail above the draft order (compact); under the hero when there's
 // no rail. Nothing at all when the team has no picks in either.
 function TeamNews({ teamKey, c1, c2, isMobile, compact = false }) {
   const [summaries, setSummaries] = useState([]);
-  useEffect(() => { Promise.all(WEEKLY_YEARS.map((y) => loadWeeklyMockSummary(y))).then(setSummaries); }, []);
+  useEffect(() => { Promise.all(TEAM_PAGE_YEARS.map((y) => loadWeeklyMockSummary(y))).then(setSummaries); }, []);
   const items = summaries.filter((s) => s?.teams?.[teamKey]);
   if (!items.length) return null;
   const ink = textOn(c1, c2);

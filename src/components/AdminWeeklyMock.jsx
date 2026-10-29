@@ -24,6 +24,13 @@
 // carriedTrades, for the pages to say so), there are no trades of its own,
 // and each team is held to the positions nextYearRules allows. Its team
 // pages are /mocks/{team}/2028 and its summary config/weeklyMock2028.
+// The 2029 switch (when weeklyMockNews.js WEEKLY_YEARS has it — off for
+// now): one round on the current needs, the order drawn at random
+// (randomOrder — every team with its own pick, said so at the top), no
+// trades and no pick notes. It's only its whole mock (/mocks/2029; summary
+// config/weeklyMock2029 — players' pages link to it): no team pages, and its
+// post is unlisted (off the community mock lists), still editable in the
+// mock editor from the list below.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc } from "firebase/firestore";
@@ -32,12 +39,13 @@ import { useAuth } from "../context/AuthContext";
 import { loadSimData, maxRounds, teamNamer } from "../utils/draftSim/data";
 import {
   runWeeklyMock, weeklyFromSim, weeklyNotes, mockPicksFrom, weeklyPicksFromMock, WEEKLY_ROUNDS_BY_YEAR, WEEKLY_TRADES_BY_YEAR, nextYearNeeds, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, TIERED_ORDER_NOTE,
+  RANDOM_ORDER_YEARS, RANDOM_ORDER_NOTE, randomOrder,
 } from "../utils/draftSim/weeklyMock";
 import { rngNext } from "../utils/draftSim/engine";
 import { loadPffRanks } from "../utils/draftSim/pffRanks";
 import { NoteText } from "../pages/ViewMock";
 import { weeklyMockSummary, summaryDocId, weeklyMockHref, WEEKLY_YEARS, MAIN_WEEKLY_YEAR } from "../utils/weeklyMockNews";
-import { NFL_TEAMS } from "../utils/coachHistory";
+import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 
 const BLUE = "#0055a5";
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
@@ -83,9 +91,16 @@ export default function AdminWeeklyMock() {
   const run = () => act("run", async () => {
     let data = await loadSimData(year);
     let carried = null;
+    let intro = "";
     const seed = Date.now() | 0;
-    // The next class: on top of the latest published main-class week.
-    if (year !== MAIN_WEEKLY_YEAR) {
+    const random = RANDOM_ORDER_YEARS.includes(year);
+    if (random) {
+      // Current needs; the order drawn at random (seeded like the draft), every team with its own pick.
+      const shuffle = { seed: seed ^ 0x2c1b3c6d };
+      data = { ...data, order: randomOrder(NFL_TEAM_ABBRS, () => { const r = rngNext(shuffle.seed); shuffle.seed = r.seed; return r.value; }), futureOrder: [] };
+      intro = RANDOM_ORDER_NOTE.replace("{year}", year);
+    } else if (year !== MAIN_WEEKLY_YEAR) {
+      // The next class: on top of the latest published main-class week.
       const base = publishedOf(weeks, MAIN_WEEKLY_YEAR)[0];
       if (!base?.picks?.length) throw new Error(`Publish a ${MAIN_WEEKLY_YEAR} weekly mock first — the ${year} mock is drafted on top of it.`);
       const main = await loadSimData(MAIN_WEEKLY_YEAR);
@@ -101,15 +116,19 @@ export default function AdminWeeklyMock() {
     const rounds = Math.min(WEEKLY_ROUNDS_BY_YEAR[year] || 7, maxRounds(data.board));
     // The next class: no trades, and each team held to its positions.
     const sim = runWeeklyMock(data, { seed, rounds, trades: WEEKLY_TRADES_BY_YEAR[year] || "normal", qbTeams: carried?.qbTeams || null, posRules: carried?.posRules || null });
-    // Each pick's note (pickNotes.js), seeded like the draft. PFF ranks are
-    // loaded here, admin-side, for the drafted players only.
-    // The next class's notes are light (pickNotes.js): no needs, value or pick spot.
-    const light = year !== MAIN_WEEKLY_YEAR;
-    const pff = await loadPffRanks(sim.picks.map((p) => p.selection).filter(Boolean)).catch(() => ({}));
-    const work = { seed: seed ^ 0x5bd1e995 };
-    const rand = () => { const r = rngNext(work.seed); work.seed = r.seed; return r.value; };
-    const notes = weeklyNotes(sim, { ...teamNamer(data.branding), staff: data.staff, season: data.season, year, history: data.history, pff, rand, light });
-    setDraft({ ...weeklyFromSim(sim, year, notes), seed, carried });
+    // Each pick's note (pickNotes.js), seeded like the draft — none for a
+    // random-order class. PFF ranks are loaded here, admin-side, for the
+    // drafted players only. The next class's notes are light (pickNotes.js):
+    // no needs, value or pick spot.
+    let notes = {};
+    if (!random) {
+      const light = year !== MAIN_WEEKLY_YEAR;
+      const pff = await loadPffRanks(sim.picks.map((p) => p.selection).filter(Boolean)).catch(() => ({}));
+      const work = { seed: seed ^ 0x5bd1e995 };
+      const rand = () => { const r = rngNext(work.seed); work.seed = r.seed; return r.value; };
+      notes = weeklyNotes(sim, { ...teamNamer(data.branding), staff: data.staff, season: data.season, year, history: data.history, pff, rand, light });
+    }
+    setDraft({ ...weeklyFromSim(sim, year, notes), seed, carried, intro: carried?.intro || intro, unlisted: random });
     setRound(1);
   });
 
@@ -118,8 +137,10 @@ export default function AdminWeeklyMock() {
     const now = Timestamp.now();
     const mockName = name.trim() || defaultName(year);
     const mock = await addDoc(collection(db, "mockDrafts"), {
-      name: mockName, description: draft.carried?.intro || "", rounds: draft.rounds, visibility: "private", draftClass: year, picks: mockPicksFrom(draft.picks),
+      name: mockName, description: draft.intro || "", rounds: draft.rounds, visibility: "private", draftClass: year, picks: mockPicksFrom(draft.picks),
       trades: draft.trades, ...(draft.carried ? { carriedTrades: draft.carried.trades } : {}),
+      // Off the community mock lists (MockDraftHub) — it's only a Weekly Mock.
+      ...(draft.unlisted ? { unlisted: true } : {}),
       ownerId: user.uid, source: "weeklyMock", official: true, createdAt: now, updatedAt: now,
     });
     const week = await addDoc(collection(db, "weeklyMocks"), {
@@ -187,11 +208,18 @@ export default function AdminWeeklyMock() {
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
       <div style={{ display: "flex", gap: "6px" }}>
         {WEEKLY_YEARS.map((y) => (
-          <button key={y} onClick={() => pickYear(y)} disabled={!!busy} style={btn(year === y, !busy)}>{y} · {WEEKLY_ROUNDS_BY_YEAR[y]} rounds</button>
+          <button key={y} onClick={() => pickYear(y)} disabled={!!busy} style={btn(year === y, !busy)}>{y} · {WEEKLY_ROUNDS_BY_YEAR[y]} round{WEEKLY_ROUNDS_BY_YEAR[y] === 1 ? "" : "s"}</button>
         ))}
       </div>
       <div style={{ ...card, padding: "14px 16px", fontSize: "13px", color: "#33415a", lineHeight: 1.5 }}>
-        {year !== MAIN_WEEKLY_YEAR && (
+        {RANDOM_ORDER_YEARS.includes(year) && (
+          <p style={{ margin: "0 0 8px" }}>
+            <b>The {year} mock is one round on the current team needs</b>, on a draft order <b>drawn at random</b> (every team with its own first-round pick — said so at the top of the mock).
+            No trades, and no pick analysis is written. It&apos;s only the whole mock at /mocks/{year} — <b>no team pages</b>, nothing on NFL team pages, and it stays off the community mock lists;
+            drafted players&apos; pages link to it. You can still edit it in the mock editor from the list below.
+          </p>
+        )}
+        {year !== MAIN_WEEKLY_YEAR && !RANDOM_ORDER_YEARS.includes(year) && (
           <p style={{ margin: "0 0 8px" }}>
             <b>The {year} mock is drafted on top of the latest published {MAIN_WEEKLY_YEAR} mock</b> — publish that one first. It uses the {year} draft order <b>shuffled in tiers</b> — picks 1–10, 11–20 and 21–32 each drawn at random, that first-round order used in every round, and said so at the top of the mock — with
             the {MAIN_WEEKLY_YEAR} mock&apos;s trades of {year} picks carried over (the pages say which picks moved in the {MAIN_WEEKLY_YEAR} mock), and every need moves up a tier unless that team drafted for it in {MAIN_WEEKLY_YEAR}:
@@ -204,7 +232,7 @@ export default function AdminWeeklyMock() {
         The site&apos;s official {year} mock: the Draft Sim with every team on the CPU, <b>Less</b> board variance and {WEEKLY_TRADES_BY_YEAR[year] === "off" ? <b>no trades</b> : "normal trades"},
         up to {WEEKLY_ROUNDS_BY_YEAR[year]} rounds. Run it and compare it with last week&apos;s (each pick by its original team and round, so the number
         can move); run it again if you like. <b>Publish</b> it as it is, or <b>Edit in mock editor</b> first — that saves it privately and opens it to move picks
-        around (with a button on each pick to regenerate its analysis); then come back and <b>Publish</b> it from the list below. Publishing puts it on /mocks and updates every team&apos;s page ({weeklyMockHref("nyj", year)}). Uses the current draft order, team
+        around (with a button on each pick to regenerate its analysis); then come back and <b>Publish</b> it from the list below. Publishing puts it on /mocks{RANDOM_ORDER_YEARS.includes(year) ? `/${year}` : <> and updates every team&apos;s page ({weeklyMockHref("nyj", year)})</>}. Uses the current draft order, team
         needs and community board — rebuild site snapshots first if grades have moved.
       </div>
       {error && <div style={{ color: "#c8102e", fontSize: "13px", fontWeight: 700 }}>{error}</div>}

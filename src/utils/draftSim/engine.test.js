@@ -1,7 +1,7 @@
 import {
-  withinValue, buildBoard, applyMyGrades, buildTeamBoards, gradeSpreadFactor, VARIANCE, DEFAULT_VARIANCE, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer, movedUp,
-  teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, suggestionsFor,
-  positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, specificFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, SPECIFIC_NEEDS, SPECIFIC_WEIGHT,
+  withinValue, chooseCpuPick, buildBoard, applyMyGrades, buildTeamBoards, gradeSpreadFactor, VARIANCE, DEFAULT_VARIANCE, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer, movedUp,
+  teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, warRoomFor, sideOf, needName, needWord, groupedNeeds,
+  positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, roleFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, ROLES, ROLE_WEIGHT, needWeight,
 } from "./engine";
 import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, singular } from "./analysts";
 import { bestGame } from "./data";
@@ -306,24 +306,13 @@ test("next year's picks trade at a 15% discount", () => {
   const next = mine.find((p) => p.future);
   expect(next).toMatchObject({ year: 2028, number: 1, round: 1, overall: 1001 });
   expect(pickWorth(s, next)).toBe(2550);
-  expect(pickName(next)).toBe("2028 R1 · No. 1");
+  expect(pickName(next)).toBe("2028 R1");
   // T1's 2028 1st (2550) for T4's 2027 1st (1800): they take it, and the pick moves.
   expect(evaluateProposal(s, { give: [1001], get: [4] })).toMatchObject({ give: 2550, get: 1800, accept: true });
   const { state, event } = applyProposal(s, { team: "T1", partner: "T4", give: [1001], get: [4] });
   expect(event).not.toBeNull();
   expect(pickByKey(state, 1001).owner).toBe("T4");
   expect(pickByKey(state, 4).owner).toBe("T1");
-});
-
-test("suggestions: best value on the board, then the staff's favorite", () => {
-  const b = buildBoard([
-    { id: "v", Position: "QB", cr: 1 }, { id: "h", Position: "WR", cr: 2 }, { id: "g", Position: "LB", cr: 3 }, { id: "k", Position: "K", cr: 4 },
-  ], {}, { h: [{ a: "T1", s: 85, HC: 92 }], g: [{ a: "T1", s: 82, GM: 84, HC: 60 }], v: [{ a: "T1", s: 90, HC: 99 }] });
-  const s = initSim({ order: [{ Pick: 1, Round: 1, Team: "T1" }], board: b, userTeams: ["T1"], rounds: 1, seed: 1 });
-  const { value, coach } = suggestionsFor(s, "T1");
-  expect(value.id).toBe("v");
-  // The HC's 99 is on the value pick, so his card is his next favorite.
-  expect([coach.p.id, coach.slot]).toEqual(["h", "HC"]);
 });
 
 test("Davin's favorites are editable: positions, ANY, and his joke pick", () => {
@@ -403,18 +392,21 @@ test("needs: the admin's labels and notes, known positions and labels only", () 
   expect(r.RB).toBeUndefined();
 });
 
-test("needs: OL and DB fill their sub-position, or half of each without one", () => {
+test("needs: OL and DB fill their sub-position, or an equal share of each without one", () => {
   expect(needKeysFor({ Position: "OL", subPosition: "OT" })).toEqual([{ key: "OT", share: 1 }]);
+  expect(needKeysFor({ Position: "OL" }).map((k) => [k.key, k.share])).toEqual([["OT", 1 / 3], ["G", 1 / 3], ["C", 1 / 3]]);
   expect(needKeysFor({ Position: "DB" })).toEqual([{ key: "CB", share: 0.5 }, { key: "S", share: 0.5 }]);
   expect(needKeysFor({ Position: "DL" })).toEqual([{ key: "IDL", share: 1 }]);
   expect(needKeysFor({ Position: "K" })).toEqual([]);
 });
 
-test("needs: an OL or DB with both sub-positions counts half toward each, but pulls in full toward either", () => {
-  expect(needKeysFor({ Position: "OL", subPosition: ["IOL"] })).toEqual([{ key: "IOL", share: 1 }]);
-  expect(needKeysFor({ Position: "OL", subPosition: ["OT", "IOL"] })).toEqual([{ key: "OT", share: 0.5, flex: true }, { key: "IOL", share: 0.5, flex: true }]);
+test("needs: an OL or DB with several sub-positions shares them, but pulls in full toward any", () => {
+  expect(needKeysFor({ Position: "OL", subPosition: ["C"] })).toEqual([{ key: "C", share: 1 }]);
+  expect(needKeysFor({ Position: "OL", subPosition: ["OT", "G"] })).toEqual([{ key: "OT", share: 0.5, flex: true }, { key: "G", share: 0.5, flex: true }]);
+  // An old IOL is a guard or a center.
+  expect(needKeysFor({ Position: "OL", subPosition: "IOL" })).toEqual([{ key: "G", share: 0.5, flex: true }, { key: "C", share: 0.5, flex: true }]);
   const s = initSim({ order, board, needs: needsOf("AAA", { OT: "Upgrade Needed" }) });
-  const swing = needPull(s, "AAA", { Position: "OL", subPosition: ["OT", "IOL"], rank: 10 }, 10);
+  const swing = needPull(s, "AAA", { Position: "OL", subPosition: ["OT", "G"], rank: 10 }, 10);
   expect(swing).toBe(needPull(s, "AAA", { Position: "OL", subPosition: "OT", rank: 10 }, 10));
   expect(swing).toBeGreaterThan(needPull(s, "AAA", { Position: "OL", rank: 10 }, 10));
 });
@@ -422,7 +414,7 @@ test("needs: an OL or DB with both sub-positions counts half toward each, but pu
 test("needs: Upgrade Needed pulls hardest, depth waits for later rounds, a crowded room pushes away", () => {
   const s = initSim({ order, board, needs: needsOf("AAA", { QB: "Upgrade Needed", WR: "Upgrade Wanted", RB: "Depth Needed", TE: "Crowded Room", LB: "Set" }) });
   const qb = { Position: "QB", rank: 5 };
-  expect(needPull(s, "AAA", qb, 5)).toBe(1);
+  expect(needPull(s, "AAA", qb, 5)).toBe(needWeight("QB"));
   expect(needPull(s, "AAA", { Position: "WR", rank: 5 }, 5)).toBeLessThan(1);
   expect(needPull(s, "AAA", { Position: "RB", rank: 5 }, 1)).toBeLessThan(0.01);
   expect(needPull(s, "AAA", { Position: "RB", rank: 150 }, 150)).toBeGreaterThan(0.3);
@@ -431,6 +423,24 @@ test("needs: Upgrade Needed pulls hardest, depth waits for later rounds, a crowd
   expect(needPull(s, "BBB", qb, 5)).toBe(0);
   // Once the team drafts for it, the need stops pulling.
   expect(needPull({ ...s, needFilled: { AAA: { QB: 1 } } }, "AAA", qb, 40)).toBe(0);
+});
+
+test("needs: a hole at tackle is a bigger deal than one at running back, and starter needs fade by round", () => {
+  const s = initSim({ order, board, needs: needsOf("AAA", { QB: "Upgrade Needed", OT: "Upgrade Needed", WR: "Upgrade Needed", RB: "Upgrade Needed" }) });
+  const at = (Position, n, extra = {}) => needPull(s, "AAA", { Position, rank: n, ...extra }, n);
+  expect(at("QB", 5)).toBeGreaterThan(at("OL", 5, { subPosition: "OT" }));
+  expect(at("OL", 5, { subPosition: "OT" })).toBeGreaterThan(at("WR", 5));
+  expect(at("WR", 5)).toBeGreaterThan(at("RB", 5));
+  // A fourth-rounder is no one's expected starter: the pull's half what it was in round 1.
+  expect(at("WR", 110) / at("WR", 5)).toBeCloseTo(0.5);
+});
+
+test("needs: a team that badly needs a QB still won't reach for one it doesn't rate", () => {
+  const s = initSim({ order, board, needs: needsOf("AAA", { QB: "Upgrade Needed" }) });
+  const pull = (rank) => needPull(s, "AAA", { Position: "QB", rank }, 10);
+  expect(pull(12)).toBe(needWeight("QB"));
+  expect(pull(25)).toBeLessThan(needWeight("QB"));
+  expect(pull(40)).toBe(0);
 });
 
 test("needs settle a close call at No. 1: the team that needs a QB takes him over the top WR", () => {
@@ -492,7 +502,7 @@ test("needs: no premium pick (rounds 1–2) on a depth-only position", () => {
   expect(depthOnly(both, "AAA", { Position: "RB" })).toBe(false);
 });
 
-test("needs: a depth-only QB waits until round 5", () => {
+test("needs: a depth-only QB waits for Day 2's third round, like any backup", () => {
   const NO_QB = POS.filter((p) => p !== "QB");
   const b = buildBoard([
     { id: "qb", Position: "QB", cr: 1 },
@@ -506,8 +516,8 @@ test("needs: a depth-only QB waits until round 5", () => {
     }
     return n;
   };
-  [1, 2, 3, 4].forEach((round) => expect(qbs(round)).toBe(0));
-  expect(qbs(5)).toBeGreaterThan(0);
+  [1, 2].forEach((round) => expect(qbs(round)).toBe(0));
+  expect(qbs(3)).toBeGreaterThan(0);
 });
 
 test("needs: a team with a full QB room passes on a first-round QB unless he's too good", () => {
@@ -612,99 +622,60 @@ test("needs reach the desk: the pick event carries the need, and the lines fill 
   expect(after.need).toBeNull();
 });
 
-// ── Specific needs ──
-const spec = (key) => SPECIFIC_NEEDS.find((s) => s.key === key);
+// ── Roles ──
+const role = (key) => ROLES.find((r) => r.key === key);
 
-test("specific fit: wanted strengths, ruled out by a listed weakness or the size limits", () => {
-  const back = { Position: "RB", strengths: ["Receiving Ability", "Pass Protection"], weaknesses: [] };
-  expect(specificFit(spec("RB3"), back)).toBe(1);
-  expect(specificFit(spec("RB3"), { ...back, strengths: ["Receiving Ability"] })).toBe(1);
-  expect(specificFit(spec("RB3"), { ...back, strengths: ["Downhill"] })).toBe(0);
-  expect(specificFit(spec("RB3"), { ...back, weaknesses: ["Pass Protection"] })).toBe(0);
-  expect(specificFit(spec("RB3"), { ...back, Position: "WR" })).toBe(0);
-  const slot = { Position: "WR", strengths: ["Separation", "Short Routes"], weaknesses: [] };
-  expect(specificFit(spec("SLOTWR"), { ...slot, height: 72 })).toBe(1);
-  expect(specificFit(spec("SLOTWR"), { ...slot, height: 75 })).toBe(0);
-  // Unknown size doesn't rule anyone out.
-  expect(specificFit(spec("SLOTWR"), slot)).toBe(1);
+test("role fit: only the roles the admin's given him, at the role's position", () => {
+  const back = { Position: "RB", roles: ["RB3"], strengths: [] };
+  expect(roleFit(role("RB3"), back)).toBe(1);
+  // Strengths alone no longer make a role.
+  expect(roleFit(role("RB3"), { Position: "RB", strengths: ["Receiving Ability", "Pass Protection"] })).toBe(0);
+  expect(roleFit(role("RB3"), { ...back, Position: "WR" })).toBe(0);
+  expect(roleFit(role("SLOTCB"), { Position: "DB", subPosition: "S", roles: ["SLOTCB"] })).toBe(1);
+  expect(roleFit(role("NOSE"), { Position: "DL" })).toBe(0);
 });
 
-test("specific fit: Frame counts for a prospect who's big for his position; DBs go by sub-position", () => {
-  const tes = [240, 245, 250, 255, 262].map((w, i) => ({ id: `te${i}`, Position: "TE", weight: w, height: 74 + i }));
-  // No wanted strength listed, but big for a tight end → Frame → fits.
-  expect(specificFit(spec("BLOCKTE"), { ...tes[4], strengths: ["Hands"], weaknesses: [] }, tes)).toBe(1);
-  expect(specificFit(spec("BLOCKTE"), { ...tes[0], strengths: ["Hands"], weaknesses: [] }, tes)).toBe(0);
-  const db = { Position: "DB", strengths: ["Man Technique", "Hip Fluidity"], weaknesses: [] };
-  expect(specificFit(spec("SLOTCB"), { ...db, subPosition: "CB" })).toBe(1);
-  expect(specificFit(spec("SLOTCB"), { ...db, subPosition: "S" })).toBe(0);
-  expect(specificFit(spec("SLOTCB"), { ...db, subPosition: ["CB", "S"] })).toBe(1);
-  expect(specificFit(spec("SLOTCB"), db)).toBe(0.5);
+test("old IOL needs count for guards and centers", () => {
+  expect(resolveNeeds({ IOL: { labels: ["Upgrade Needed"], note: "x" } })).toEqual({
+    G: { labels: ["Upgrade Needed"], note: "x" }, C: { labels: ["Upgrade Needed"], note: "x" },
+  });
+  // Once G or C is saved on its own, that one wins.
+  expect(resolveNeeds({ IOL: { labels: ["Upgrade Needed"] }, C: { labels: ["Set"] } }).C.labels).toEqual(["Set"]);
 });
 
-test("suggestions: a need pick for the team's needs, and every card says which need it fills", () => {
-  const b = buildBoard([
-    { id: "wr", Position: "WR", cr: 1 }, { id: "ol", Position: "OL", cr: 2 }, { id: "cb", Position: "DB", subPosition: "CB", cr: 3 },
-    ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: ["RB", "LB", "TE"][i % 3], cr: 4 + i })),
-  ]);
-  const s = initSim({ order: [{ Pick: 5, Round: 1, Team: "T1" }], board: b, rounds: 1, needs: { T1: resolveNeeds({ CB: { labels: ["Upgrade Needed"], note: "Lost both starters" }, WR: { labels: ["Upgrade Wanted"] } }) } });
-  const { value, need, needs } = suggestionsFor(s, "T1");
-  expect(value.id).toBe("wr");
-  expect(need.id).toBe("cb");
-  expect(needs.cb).toEqual({ key: "CB", label: "Upgrade Needed", note: "Lost both starters" });
-  expect(needs.wr.label).toBe("Upgrade Wanted");
-  // No needs → no need pick.
-  expect(suggestionsFor(initSim({ order: [{ Pick: 5, Round: 1, Team: "T1" }], board: b, rounds: 1 }), "T1").need).toBeNull();
-});
-
-test("a specific need pulls the same share of its position's pull for every role", () => {
+test("a role pulls the same share of its position's pull for every role", () => {
   const pull = (key, p) => needPull(initSim({ order, board, needs: { AAA: resolveNeeds({ [key]: { labels: ["Upgrade Needed"] } }) } }), "AAA", p, 10);
-  const nose = { Position: "DL", rank: 10, strengths: ["Run Defense"], weaknesses: [], weight: 320 };
-  const nickel = { Position: "DB", subPosition: "CB", rank: 10, strengths: ["Man Technique"], weaknesses: [] };
-  expect(pull("NOSE", nose) / pull("IDL", nose)).toBeCloseTo(SPECIFIC_WEIGHT);
-  expect(pull("SLOTCB", nickel) / pull("CB", nickel)).toBeCloseTo(SPECIFIC_WEIGHT);
-  expect(SPECIFIC_WEIGHT).toBeLessThan(1);
+  const nose = { Position: "DL", rank: 10, roles: ["NOSE"] };
+  const nickel = { Position: "DB", subPosition: "CB", rank: 10, roles: ["SLOTCB"] };
+  expect(pull("NOSE", nose) / pull("IDL", nose)).toBeCloseTo(ROLE_WEIGHT);
+  expect(pull("SLOTCB", nickel) / pull("CB", nickel)).toBeCloseTo(ROLE_WEIGHT);
+  expect(ROLE_WEIGHT).toBeLessThan(1);
 });
 
-test("a specific need pulls only the prospects who fit it, and fills once one is drafted", () => {
+test("a role pulls only the prospects who have it, and fills once one is drafted", () => {
   const needs = { AAA: resolveNeeds({ RB: { labels: ["Set"] }, RB3: { labels: ["Upgrade Needed"] } }) };
   const s = initSim({ order, board, needs });
-  const receiver = { Position: "RB", rank: 10, strengths: ["Receiving Ability", "Pass Protection"], weaknesses: [] };
-  const plodder = { Position: "RB", rank: 10, strengths: ["Downhill", "Contact Balance"], weaknesses: [] };
-  expect(needPull(s, "AAA", receiver, 10)).toBeCloseTo(SPECIFIC_WEIGHT);
+  const receiver = { Position: "RB", rank: 10, roles: ["RB3"] };
+  const plodder = { Position: "RB", rank: 10, roles: [] };
+  expect(needPull(s, "AAA", receiver, 10)).toBeCloseTo(ROLE_WEIGHT * needWeight("RB"));
   expect(needPull(s, "AAA", plodder, 10)).toBe(0);
   expect(needFor(s, "AAA", receiver)).toEqual({ key: "RB3", label: "Upgrade Needed", note: "" });
   expect(needFor(s, "AAA", plodder)).toBeNull();
   // Draft him → filled.
   const rb = board.find((p) => p.Position === "RB");
-  const withHim = { ...s, byId: { ...s.byId, [rb.id]: { ...rb, strengths: receiver.strengths, weaknesses: [] } } };
+  const withHim = { ...s, byId: { ...s.byId, [rb.id]: { ...rb, roles: ["RB3"] } } };
   const { state } = makePick(withHim, rb.id);
   expect(state.needFilled.AAA.RB3).toBe(1);
   expect(needPull(state, "AAA", receiver, 40)).toBe(0);
 });
 
-test("the desk says the specific need in words", () => {
+test("the desk says the role in words", () => {
   const s = initSim({ order, board, needs: { AAA: resolveNeeds({ SLOTCB: { labels: ["Upgrade Needed"], note: "" } }) } });
   const db = board.find((p) => p.Position === "DB");
-  const withHim = { ...s, byId: { ...s.byId, [db.id]: { ...db, subPosition: "CB", strengths: ["Man Technique", "Transitions"], weaknesses: [] } } };
+  const withHim = { ...s, byId: { ...s.byId, [db.id]: { ...db, subPosition: "CB", roles: ["SLOTCB"] } } };
   const { event } = makePick(withHim, db.id);
   expect(event.need.key).toBe("SLOTCB");
   expect(pickVars({ ...event, pick: { ...event.pick, overall: 9 } }, deskCtx("all")).needPos).toBe("slot corner");
-});
-
-test("suggestions remember what the team drafted: no second QB, from the board or the coach", () => {
-  const b = buildBoard([
-    { id: "qb1", Position: "QB", cr: 1 }, { id: "qb2", Position: "QB", cr: 2 }, { id: "wr", Position: "WR", cr: 3 }, { id: "lb", Position: "LB", cr: 4 },
-    ...Array.from({ length: 20 }, (_, i) => ({ id: `x${i}`, Position: ["RB", "TE", "OL"][i % 3], cr: 5 + i })),
-  ], {}, { qb2: [{ a: "T1", s: 95, HC: 95 }], lb: [{ a: "T1", s: 80, DC: 80 }] });
-  const order = [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 2, Round: 1, Team: "T1" }];
-  const needs = { T1: resolveNeeds({ QB: { labels: ["Upgrade Needed"] }, LB: { labels: ["Upgrade Wanted"] } }) };
-  const s = makePick(initSim({ order, board: b, userTeams: ["T1"], rounds: 1, seed: 1, needs }), "qb1").state;
-  const { value, need, coach, topNeed } = suggestionsFor(s, "T1");
-  expect(value.Position).not.toBe("QB");
-  expect(need.id).toBe("lb");
-  // The HC's 95 is on the second QB — not suggested; nobody else he likes.
-  expect(coach).toBeNull();
-  expect(topNeed).toEqual({ key: "LB", label: "Upgrade Wanted" });
 });
 
 test("trades and doubling up go by need: a corner then a safety isn't doubling up", () => {
@@ -807,7 +778,7 @@ test("the recap knows every trade: what each side got and gave, next year's pick
   expect(mine).toHaveLength(1);
   expect(mine[0].partner).toBe("T4");
   expect(mine[0].got.map(pickName)).toEqual([pickName(pickByKey(s, 4))]);
-  expect(mine[0].gave.map(pickName)).toEqual(["2028 R1 · No. 1"]);
+  expect(mine[0].gave.map(pickName)).toEqual(["2028 R1"]);
   expect(teamHaul(state, "T4").trades[0]).toMatchObject({ partner: "T1" });
   expect(teamHaul(state, "T2").trades).toEqual([]);
 });
@@ -854,6 +825,18 @@ test("team boards: each team's own read of the community board, wider down the b
   const { event } = makePick(s, "n40");
   expect(event.value).toBe(1 - 41);
   expect(teamRank(s, "AAA", big[40])).toBe(s.teamBoards.AAA.n40);
+});
+
+test("user teams draft off the community board — only CPU teams get boards of their own", () => {
+  const big = buildBoard(Array.from({ length: 300 }, (_, i) => ({ id: `n${i}`, Position: POS[i % POS.length], cr: i + 1 })));
+  const ord = [{ Pick: 1, Round: 1, Team: "AAA" }, { Pick: 2, Round: 1, Team: "BBB" }];
+  const s = initSim({ order: ord, board: big, rounds: 1, seed: 7, userTeams: ["AAA"] });
+  expect(s.teamBoards.AAA).toBeUndefined();
+  expect(s.teamBoards.BBB).toBeDefined();
+  expect(teamRank(s, "AAA", big[40])).toBe(big[40].rank);
+  // The same pick whatever the seed: no noise for a user team.
+  const picks = [1, 2, 3, 4, 5].map((seed) => chooseCpuPick(initSim({ order: ord, board: big, rounds: 1, seed, userTeams: ["AAA"] })).prospect.id);
+  expect(new Set(picks).size).toBe(1);
 });
 
 test("board variance: None, Less, Normal, More — in that order; None drafts straight off the board, More strays furthest", () => {
@@ -1127,4 +1110,163 @@ test("stat lines: a defender's interceptions come from CFBD's own group, and a c
   const cover = statFacts(e, { teamName: (t) => t, nickname: (t) => t }).find((f) => f.cat === "coverage");
   expect(cover.vars).toMatchObject({ INT: "5", PD: "1", TOT: "31" });
   expect(singular("31 tackles, 1 passes defended, 1.5 sacks, 21 sacks and 1 tackles for loss")).toBe("31 tackles, 1 pass defended, 1.5 sacks, 21 sacks and 1 tackle for loss");
+});
+
+test("roles reach past their parent: any DB can be a safety, nickel or sub LB; an edge, an interior rusher or run stopper", () => {
+  expect(roleFit(role("SUBLB"), { Position: "DB", roles: ["SUBLB"] })).toBe(1);
+  expect(roleFit(role("FS"), { Position: "DB", subPosition: "CB", roles: ["FS"] })).toBe(1);
+  expect(roleFit(role("RUSHDL"), { Position: "EDGE", roles: ["RUSHDL"] })).toBe(1);
+  expect(roleFit(role("RUNDL"), { Position: "EDGE", roles: ["RUNDL"] })).toBe(1);
+  expect(roleFit(role("NOSE"), { Position: "EDGE", roles: ["NOSE"] })).toBe(0);
+  // A DB tagged Sub LB pulls toward a team's Sub LB need.
+  const s = initSim({ order, board, needs: { AAA: resolveNeeds({ SUBLB: { labels: ["Upgrade Needed"] } }) } });
+  expect(needPull(s, "AAA", { Position: "DB", subPosition: "S", rank: 10, roles: ["SUBLB"] }, 10)).toBeCloseTo(ROLE_WEIGHT);
+});
+
+
+// ── War Room ──
+const roomBoard = (extra = [], fits = {}) => buildBoard([
+  { id: "qb", Position: "QB", cr: 1 }, { id: "wr", Position: "WR", cr: 2 }, { id: "cb", Position: "DB", subPosition: "CB", cr: 3 }, { id: "lb", Position: "LB", cr: 4 },
+  ...extra,
+  ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: ["RB", "TE", "OL"][i % 3], cr: 10 + i })),
+], {}, fits);
+const room = (needs, { board: b = roomBoard(), pickAt = 3, team = "T1" } = {}) => warRoomFor(
+  initSim({ order: [{ Pick: pickAt, Round: 1, Team: team }, { Pick: pickAt + 40, Round: 2, Team: team }], board: b, userTeams: [team], rounds: 2, seed: 1, needs: { [team]: resolveNeeds(needs) } }), team);
+
+test("war room: the GM goes by value, the head coach by needs, a coordinator for his side", () => {
+  const r = room({ CB: { labels: ["Upgrade Needed"], note: "Lost both starters" } });
+  expect(r.gm.slot).toBe("GM");
+  // The GM's value pick can fill the need too; the head coach's always does when one's there.
+  expect(r.hc.need?.key === "CB" || r.gm.need?.key === "CB").toBe(true);
+  // The coordinator's from the other side of the ball from the head coach's
+  // pick — unless the GM and head coach agree on him, and he backs them.
+  expect(r.coordinator.slot).toMatch(/^(OC|DC)$/);
+  const consensus = r.gm.p.id === r.hc.p.id;
+  expect(r.coordinator.slot === sideOf(r.hc.p.Position)).toBe(consensus);
+  expect(r.coordinator.agrees.includes("HC")).toBe(consensus);
+  // Each makes his own call — the same player twice says so.
+  [r.hc, r.coordinator].forEach((c) => expect(c.agrees).toEqual([r.gm, r.hc].filter((x) => x !== c && x.p.id === c.p.id && x.slot !== c.slot).map((x) => x.slot)));
+  expect(sideOf(r.coordinator.p.Position)).toBe(r.coordinator.slot);
+  expect(r.needs).toEqual([{ key: "CB", labels: ["Upgrade Needed"], note: "Lost both starters", filled: false }]);
+});
+
+test("war room: no one suggests a quarterback into a crowded room (the 49ers)", () => {
+  const r = room({ QB: { labels: ["Crowded Room"] }, WR: { labels: ["Upgrade Wanted"] } });
+  [r.gm, r.hc, r.coordinator].forEach((c) => expect(c.p.Position).not.toBe("QB"));
+  // A set QB room keeps the coaches off one with premium capital too.
+  const set = room({ QB: { labels: ["Set"] }, LB: { labels: ["Upgrade Needed"] } });
+  expect(set.hc.p.Position).not.toBe("QB");
+});
+
+test("war room: draft history pulls each staffer to his own players", () => {
+  // Two linebackers side by side on the board; the head coach's history loves the second.
+  const b = roomBoard([{ id: "a", Position: "LB", cr: 5 }, { id: "b", Position: "LB", cr: 6 }], { b: [{ a: "T1", s: 70, HC: 100 }] });
+  const s0 = initSim({ order: [{ Pick: 5, Round: 1, Team: "T1" }, { Pick: 40, Round: 2, Team: "T1" }], board: b, userTeams: ["T1"], rounds: 2, seed: 1 });
+  const s = ["qb", "wr", "cb", "lb"].reduce((st, id) => ({ ...st, taken: { ...st.taken, [id]: true } }), s0);
+  const r = warRoomFor(s, "T1");
+  expect(r.gm.p.id).toBe("a");
+  expect(r.hc.p.id).toBe("b");
+});
+
+test("war room: the GM says trade down when nothing's worth the pick", () => {
+  // Pick 3, but the board's top 8 are gone: the best left is board #9.
+  const s0 = initSim({ order: [{ Pick: 3, Round: 1, Team: "T1" }, { Pick: 40, Round: 2, Team: "T1" }], board: roomBoard(), userTeams: ["T1"], rounds: 2, seed: 1 });
+  const s = ["qb", "wr", "cb", "lb", "x0", "x1", "x2", "x3"].reduce((st, id) => ({ ...st, taken: { ...st.taken, [id]: true } }), s0);
+  expect(warRoomFor(s, "T1").gm.tradeDown).toBe(true);
+  expect(room({}).gm.tradeDown).toBe(false);
+});
+
+test("war room: a coordinator goes after his side's needs", () => {
+  // The head coach goes offense on value; the DC passes on the corner and
+  // linebacker ahead of him for the safety the team wants.
+  const b = roomBoard([{ id: "saf", Position: "DB", subPosition: "S", cr: 12 }]);
+  const r = room({ S: { labels: ["Upgrade Wanted"] } }, { board: b, pickAt: 5 });
+  expect(sideOf(r.hc.p.Position)).toBe("OC");
+  expect(r.coordinator).toMatchObject({ slot: "DC", p: { id: "saf" } });
+});
+
+test("war room: crowded rooms and set positions aren't listed as needs", () => {
+  const r = room({ QB: { labels: ["Crowded Room"] }, WR: { labels: ["Set"] }, CB: { labels: ["Upgrade Needed", "Crowded Room"] } });
+  expect(r.needs).toEqual([{ key: "CB", labels: ["Upgrade Needed"], note: "", filled: false }]);
+});
+
+test("war room: the GM says trade up for a player he loves who won't last", () => {
+  // Another team's on the clock at 8 with the board's #1 still there; ours is 16.
+  const at = (needs, { clock = 8, ours = 16 } = {}) => warRoomFor(initSim({ order: [{ Pick: clock, Round: 1, Team: "T2" }, { Pick: ours, Round: 1, Team: "T1" }, { Pick: 60, Round: 2, Team: "T1" }],
+    board: roomBoard(), userTeams: ["T1"], rounds: 2, seed: 1, needs: { T1: resolveNeeds(needs) } }), "T1", ours);
+  const qbNeed = { QB: { labels: ["Upgrade Needed"] } };
+  const r = at(qbNeed);
+  expect(r.gm.p.id).toBe("qb");
+  expect(r.gm.tradeUp).toBe(true);
+  // No need, no history: he's not worth moving up for.
+  expect(at({}).gm.tradeUp).toBeFalsy();
+  // Depth isn't worth it either.
+  expect(at({ QB: { labels: ["Depth Needed"] } }).gm.tradeUp).toBeFalsy();
+  // He hasn't slid: the pick on the clock is right where he goes.
+  expect(at(qbNeed, { clock: 3 }).gm.tradeUp).toBeFalsy();
+  // Too far to go up.
+  expect(at(qbNeed, { ours: 30 }).gm.tradeUp).toBeFalsy();
+  // On the clock, there's nowhere to go up to.
+  expect(room({ QB: { labels: ["Upgrade Needed"] } }).gm.tradeUp).toBeFalsy();
+});
+
+test("war room: role needs speak for themselves, and drafted needs are checked off", () => {
+  const b = roomBoard([{ id: "rush", Position: "DL", cr: 5, roles: ["RUSHDL"] }]);
+  const r = room({ RUSHDL: { labels: ["Upgrade Needed"] }, IDL: { labels: ["Set"] } }, { board: b, pickAt: 5 });
+  expect([r.hc.p.id, r.coordinator?.p.id]).toContain("rush");
+  const s0 = initSim({ order: [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 30, Round: 2, Team: "T1" }], board: b, userTeams: ["T1"], rounds: 2, seed: 1, needs: { T1: resolveNeeds({ WR: { labels: ["Upgrade Needed"] } }) } });
+  const after = makePick(s0, "wr").state;
+  expect(warRoomFor(after, "T1").needs).toEqual([{ key: "WR", labels: ["Upgrade Needed"], note: "", filled: true }]);
+});
+
+test("war room: staffers who like the same player both suggest him", () => {
+  // A team that needs a QB, one QB worth it: GM, head coach and OC all land on him.
+  const b = roomBoard();
+  const r = room({ QB: { labels: ["Upgrade Needed"] } }, { board: b, pickAt: 1 });
+  expect(r.gm.p.id).toBe("qb");
+  expect(r.hc.p.id).toBe("qb");
+  expect(r.hc.agrees).toEqual(["GM"]);
+  expect(r.coordinator).toMatchObject({ slot: "OC", agrees: ["GM", "HC"] });
+});
+
+test("war room: the coordinator's from the other side of the ball from the head coach's pick", () => {
+  // No needs: the GM and head coach can land on the QB, but he fills none,
+  // so the DC speaks for the defense.
+  const r = room({}, { pickAt: 1 });
+  expect(r.hc.p.Position).toBe("QB");
+  expect(r.coordinator.slot).toBe("DC");
+  // With no defender left, the OC speaks instead.
+  const off = room({}, { board: buildBoard([{ id: "qb", Position: "QB", cr: 1 }, { id: "wr", Position: "WR", cr: 2 }, { id: "rb", Position: "RB", cr: 3 }]), pickAt: 1 });
+  expect(off.coordinator.slot).toBe("OC");
+});
+
+test("an interior lineman fills the need he's taken for in full", () => {
+  const b = buildBoard([{ id: "iol", Position: "OL", subPosition: "IOL", cr: 1 }, ...Array.from({ length: 10 }, (_, i) => ({ id: `x${i}`, Position: "WR", cr: 2 + i }))]);
+  const s = initSim({ order: [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 2, Round: 1, Team: "T1" }], board: b, userTeams: ["T1"], rounds: 1, needs: { T1: resolveNeeds({ IOL: { labels: ["Upgrade Needed"] } }) } });
+  const after = makePick(s, "iol").state;
+  expect(after.needFilled.T1).toMatchObject({ G: 1 });
+  expect(after.needFilled.T1.C || 0).toBe(0);
+  // An old IOL need is a guard and a center: one of two.
+  expect(warRoomFor(after, "T1").needs.find((n) => n.key === "IOL")).toMatchObject({ filled: false, count: { filled: 1, of: 2 } });
+});
+
+test("guards and centers show as one interior need — one pick fills one of two", () => {
+  const b = buildBoard([{ id: "iol", Position: "OL", subPosition: ["G", "C"], cr: 1 }, ...Array.from({ length: 10 }, (_, i) => ({ id: `x${i}`, Position: "WR", cr: 2 + i }))]);
+  const s = initSim({ order: [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 2, Round: 1, Team: "T1" }], board: b, userTeams: ["T1"], rounds: 1,
+    needs: { T1: resolveNeeds({ G: { labels: ["Upgrade Needed"] }, C: { labels: ["Upgrade Wanted"] } }) } });
+  expect(warRoomFor(s, "T1").needs).toEqual([{ key: "IOL", labels: ["Upgrade Needed", "Upgrade Wanted"], note: "", filled: false, count: { filled: 0, of: 2 } }]);
+  const after = makePick(s, "iol").state;
+  expect(warRoomFor(after, "T1").needs[0]).toMatchObject({ key: "IOL", filled: false, count: { filled: 1, of: 2 } });
+  expect(needName("C")).toBe("Interior O-Line");
+  expect(needWord("G")).toBe("interior lineman");
+});
+
+test("the report card counts an interior lineman once — met in round 1, not 'late' at the other spot", () => {
+  const b = buildBoard([{ id: "iol", Position: "OL", subPosition: ["G", "C"], cr: 1 }, ...Array.from({ length: 10 }, (_, i) => ({ id: `x${i}`, Position: "WR", cr: 2 + i }))]);
+  const s = initSim({ order: [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 2, Round: 1, Team: "T1" }], board: b, userTeams: ["T1"], rounds: 1,
+    needs: { T1: resolveNeeds({ IOL: { labels: ["Upgrade Needed"] } }) } });
+  const haul = teamHaul(makePick(makePick(s, "iol").state, "x0").state, "T1");
+  expect(haul.needs.items.filter((n) => n.status === "late")).toEqual([]);
+  expect(groupedNeeds(haul.needs).met).toEqual([expect.objectContaining({ key: "IOL", round: 1, count: { filled: 1, of: 2 } })]);
+  expect(groupedNeeds(haul.needs).open).toEqual([]);
 });

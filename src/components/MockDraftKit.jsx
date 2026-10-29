@@ -49,7 +49,8 @@ export function useIsMobile() {
 // prospects rail. rails={false} drops the side columns (the editor needs the
 // room) but keeps the margin ads. leftRail: a column of the page's own in
 // place of the top prospects (the weekly mock's team pages: every team).
-export function MockPageShell({ width = 1000, year = "2027", rails: allowRails = true, leftRail = null, isMobile, children }) {
+// videoPlayerIds: the players the right rail's videos lead with (RecentVideosRail).
+export function MockPageShell({ width = 1000, year = "2027", rails: allowRails = true, leftRail = null, videoPlayerIds = null, isMobile, children }) {
   const fits = () => typeof window !== "undefined" && viewportCssWidth() >= width + 2 * SIDE + 32;
   const [showRails, setShowRails] = useState(fits);
   const contentRef = useRef(null);
@@ -75,7 +76,7 @@ export function MockPageShell({ width = 1000, year = "2027", rails: allowRails =
               <div style={{ position: "sticky", top: 16 }}>{leftRail || <TopProspectsRail year={year} />}</div>
             </div>
             <div style={{ position: "absolute", top: 24, bottom: 60, right: 0, width: RAIL_WIDTH }}>
-              <div style={{ position: "sticky", top: 16 }}><RecentVideosRail /></div>
+              <div style={{ position: "sticky", top: 16 }}><RecentVideosRail playerIds={videoPlayerIds} /></div>
             </div>
           </>
         )}
@@ -232,21 +233,25 @@ export function WeeklyByline() {
   );
 }
 
-// The Weekly Mock's switch between classes, in a hero's actions: one pill a
-// class (years — the published ones, this one included), this one filled.
-// hrefOf(year): that class's page. ink / bg: the hero's text and background.
+// The Weekly Mock's switch between classes, in a hero's actions: one
+// segmented pill, a segment a class (years — the published ones, this one
+// included, in order), this one filled. hrefOf(year): that class's page.
+// ink / bg: the hero's text and background.
 export function WeeklyYearSwitch({ years, current, hrefOf, ink, bg, isMobile }) {
   if (years.length < 2) return null;
   return (
-    <nav aria-label="Mock draft year" style={{ display: "flex", gap: 6, ...(isMobile ? { flex: "1 1 100%" } : {}) }}>
+    <nav aria-label="Mock draft year" style={{
+      display: "inline-flex", padding: 3, gap: 2, borderRadius: 999, border: `2px solid ${ink}`, boxSizing: "border-box",
+      ...(isMobile ? { flex: "1 1 100%" } : {}),
+    }}>
       {years.map((y) => {
         const on = y === current;
         return (
           <Link key={y} to={hrefOf(y)} aria-current={on ? "page" : undefined} style={{
-            borderRadius: 999, padding: isMobile ? "6px 12px" : "8px 16px", fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: "0.06em",
-            textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", ...(isMobile ? { flex: 1, textAlign: "center" } : {}),
-            background: on ? ink : "transparent", color: on ? bg : ink, border: `2px solid ${ink}`,
-          }}>{on ? `${y} Mock` : `Show ${y} Mock →`}</Link>
+            borderRadius: 999, padding: isMobile ? "5px 12px" : "6px 16px", fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: "0.06em",
+            textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", textAlign: "center", ...(isMobile ? { flex: 1 } : {}),
+            background: on ? ink : "transparent", color: on ? bg : ink, opacity: on ? 1 : 0.85,
+          }}>{y} Mock</Link>
         );
       })}
     </nav>

@@ -30,7 +30,7 @@ import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { teamWeek, teamChanges } from "../utils/draftSim/weeklyMock";
 import {
-  weeklyMockDate, weeklyMockHref, weeklyYearHref, loadWeeklyMockSummary, WEEKLY_YEARS, MAIN_WEEKLY_YEAR,
+  weeklyMockDate, weeklyMockHref, weeklyYearHref, loadWeeklyMockSummary, WEEKLY_YEARS, MAIN_WEEKLY_YEAR, hasTeamPages,
 } from "../utils/weeklyMockNews";
 import { WEEKLY_ROUNDS_BY_YEAR } from "../utils/draftSim/weeklyMock";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
@@ -173,7 +173,8 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
     { name: nextClass ? `${year} Mock Draft` : `${teamName} Mock Draft`, href: path },
   ];
   // The switch between classes: each one that's been published, this one marked.
-  const switchYears = WEEKLY_YEARS.filter((y) => y === year || classes?.[y]);
+  // (A class with no team pages, 2029, has no page here to switch to.)
+  const switchYears = WEEKLY_YEARS.filter((y) => hasTeamPages(y) && (y === year || classes?.[y]));
   const switcher = switchYears.length > 1 && (
     <WeeklyYearSwitch years={switchYears} current={year} hrefOf={(y) => weeklyMockHref(team, y)} ink={heroTeam.ink} bg={c1} isMobile={isMobile} />
   );
@@ -291,7 +292,7 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
 
-      <MockPageShell year={year} isMobile={isMobile} leftRail={<TeamMocksRail current={team} year={year} teams={teams || {}} full={fullMock} />}>
+      <MockPageShell year={year} isMobile={isMobile} videoPlayerIds={picks.map((p) => p.player?.id).filter(Boolean)} leftRail={<TeamMocksRail current={team} year={year} teams={teams || {}} full={fullMock} />}>
         <Breadcrumbs items={crumbs} />
         <ArticleHero hero={heroTeam} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
           headline={headline} dek={intro} date={updated ? <time dateTime={publishedIso}>Updated {updated}</time> : ""}

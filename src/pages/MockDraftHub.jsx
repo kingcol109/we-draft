@@ -76,7 +76,8 @@ export default function MockDraftHub() {
     load();
   }, []);
 
-  const filtered = mocks.filter((m) => (m.draftClass || "2026") === classFilter);
+  // (A whole-mock-only Weekly Mock's post — 2029's — is unlisted: it's on the Weekly Mock links only.)
+  const filtered = mocks.filter((m) => (m.draftClass || "2026") === classFilter && !m.unlisted);
   const isArchive = ARCHIVE_YEARS.includes(classFilter);
   const description = "NFL mock drafts: We-Draft's weekly 7-round mock for all 32 teams, plus mock drafts written by the community for the 2027 and 2028 NFL Drafts.";
 
@@ -196,7 +197,7 @@ function WeeklyMockLinks({ classes, isMobile }) {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, ...(isMobile ? { flex: "1 1 100%" } : {}) }}>
         {classes.map(({ year, summary }) => (
           <Link key={year} to={weeklyYearHref(year)} style={{ ...button("blue", isMobile), ...(isMobile ? { flex: 1, justifyContent: "center" } : {}) }}>
-            {year}{summary?.rounds ? ` · ${summary.rounds} Rounds` : ""} →
+            {year}{summary?.rounds ? ` · ${summary.rounds} Round${summary.rounds === 1 ? "" : "s"}` : ""} →
           </Link>
         ))}
       </div>

@@ -6,8 +6,11 @@
 //                  {abbr}.needs: { [key]: { labels, note } }, the admin's
 //                  own, which the Draft Sim's CPU teams and analysts use
 //                  (data.js loadNeeds). "Suggest changes" works them out
-//                  fresh from the PFF depth charts (pffNflRosters) and the
-//                  live ESPN injury lists (utils/teamNeedSuggestions.js) and
+//                  fresh from the PFF depth charts (pffNflRosters), the
+//                  admin's player tags and depth orders (nflPlayerTags /
+//                  nflDepthNotes, utils/depthNotes.js — set in Research) and
+//                  the live ESPN injury lists
+//                  (utils/teamNeedSuggestions.js) and
 //                  lists every position where the suggestion differs, with
 //                  why, to accept or dismiss — nothing changes until it's
 //                  accepted. Injured starters count as healthy in the
@@ -17,21 +20,25 @@
 //                  accepting a suggestion keeps it. Picking a team lists each position
 //                  group's players with PFF grade, age, snap share and any
 //                  injury (PlayerList — admin-only, PFF numbers included).
-//                  Specific needs (3rd Down RB, Slot Corner… — engine
-//                  SPECIFIC_NEEDS) are labeled the same way and listed under
-//                  their position; the grid marks a position with a
-//                  specific need (•).
+//                  Roles (3rd Down RB, Slot Corner… — engine ROLES) are
+//                  labeled the same way and listed under their position;
+//                  the grid marks a position with a role need (•).
+//                  "Publish roster stars" sends every team's Franchise /
+//                  Difference Maker players (Research tags) to the sim
+//                  (writeTeamStars) — redo it after retagging or a trade.
 // Sub-positions (OT / IOL, CB / S) are kept under Data Management —
-// AdminSubPositions.jsx.
+// AdminSubPositions.jsx. Admin → Research's Team view edits the same labels
+// position by position (AdminResearch.js NeedsBar), through writeTeamNeeds.
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, serverTimestamp, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from "firebase/firestore";
 import { db } from "../firebase";
-import { NEED_LABELS, NEED_KEYS, NEED_KEY_NAMES, MANUAL_LABELS, SPECIFIC_NEEDS, resolveNeeds } from "../utils/draftSim/engine";
+import { NEED_LABELS, NEED_KEYS, NEED_KEY_NAMES, MANUAL_LABELS, ROLES, resolveNeeds } from "../utils/draftSim/engine";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_TEAMS, NFL_TEAM_ABBRS } from "../utils/coachHistory";
 import { fetchEspnRoster } from "../utils/nflRoster";
 import { COMP_SNAPSHOT_VERSION } from "../utils/historicalStats";
-import { suggestNeeds, suggestionReason, positionPlayers } from "../utils/teamNeedSuggestions";
+import { suggestNeeds, suggestionReason, positionPlayers, teamStars } from "../utils/teamNeedSuggestions";
+import { loadPlayerTags, loadTeamNotes } from "../utils/depthNotes";
 
 const BLUE = "#0055a5";
 const card = { background: "#fff", border: "1px solid #e3e8ef", borderRadius: "12px", overflow: "hidden" };
@@ -39,7 +46,7 @@ const btn = (primary, enabled = true) => ({
   border: primary ? "none" : "1px solid #d5dce6", borderRadius: "999px", padding: "7px 16px", fontWeight: 900, fontSize: "12px",
   background: primary ? (enabled ? BLUE : "#c9d2de") : "#fff", color: primary ? "#fff" : "#33415a", cursor: enabled ? "pointer" : "default",
 });
-const LABEL_COLOR = {
+export const LABEL_COLOR = {
   "Upgrade Needed": "#c8102e", "Expiring Contract": "#d9480f", "Aging Talent": "#7a3cff", "Upgrade Wanted": "#b7791f",
   "Depth Needed": "#0055a5", Set: "#8a97ab", "Crowded Room": "#0f766e",
 };
@@ -48,13 +55,13 @@ const LABEL_SHORT = {
   "Upgrade Needed": "NEED", "Expiring Contract": "EXP", "Aging Talent": "AGE", "Upgrade Wanted": "WANT",
   "Depth Needed": "DEPTH", Set: "·", "Crowded Room": "FULL",
 };
-const byUrgency = (a, b) => NEED_LABELS.indexOf(a) - NEED_LABELS.indexOf(b);
-// Every position, each followed by its specific needs.
-const specificsOf = (key) => SPECIFIC_NEEDS.filter((s) => s.parent === key).map((s) => s.key);
+export const byUrgency = (a, b) => NEED_LABELS.indexOf(a) - NEED_LABELS.indexOf(b);
+// Every position, each followed by its roles.
+const specificsOf = (key) => ROLES.filter((r) => r.parent === key).map((r) => r.key);
 const ALL_KEYS = NEED_KEYS.flatMap((k) => [k, ...specificsOf(k)]);
-const IS_SPECIFIC = new Set(SPECIFIC_NEEDS.map((s) => s.key));
+const IS_SPECIFIC = new Set(ROLES.map((r) => r.key));
 
-function Chip({ label, on, onClick, small }) {
+export function Chip({ label, on, onClick, small }) {
   const c = LABEL_COLOR[label] || BLUE;
   return (
     <button type="button" onClick={onClick} style={{
@@ -70,7 +77,7 @@ const Labels = ({ labels }) => <span style={{ display: "inline-flex", gap: "4px"
 const labelsOf = (needs, key) => needs[key]?.labels?.length ? needs[key].labels : ["Set"];
 // A suggestion applied to a position: the suggested label, keeping any
 // hand-set ones (MANUAL_LABELS); the note kept, or the injury note when empty.
-function applied(current, s, label = s.label) {
+export function applied(current, s, label = s.label) {
   const keep = (current?.labels || []).filter((l) => MANUAL_LABELS.includes(l));
   const labels = [...new Set([...(label === "Set" && keep.length ? [] : [label]), ...keep])].sort(byUrgency);
   const injuryNote = s.injured.length ? `Counting ${s.injured.map((i) => `${i.name} (${i.status})`).join(", ")} as healthy` : "";
@@ -80,6 +87,38 @@ function applied(current, s, label = s.label) {
 const compact = (needs) => Object.fromEntries(Object.entries(needs)
   .filter(([, v]) => v && ((v.labels || []).some((l) => l !== "Set") || (v.note || "").trim()))
   .map(([k, v]) => [k, { labels: (v.labels || []).filter((l) => l !== "Set"), note: (v.note || "").trim() }]));
+
+// Teams' needs ({ [abbr]: needs }) → Firestore: each team's nflTeamNeeds
+// doc, and its entry in compSnapshots/_teamNeeds (all 32 in one doc — what
+// the Draft Sim reads, utils/draftSim/data.js loadNeeds), replaced in the
+// same batch so the two never drift. → what was stored, by team.
+export async function writeTeamNeeds(changes) {
+  const batch = writeBatch(db);
+  const combined = { version: COMP_SNAPSHOT_VERSION, updatedAt: serverTimestamp(), needs: {} };
+  const stored = {};
+  Object.entries(changes).forEach(([abbr, needs]) => {
+    stored[abbr] = compact(needs);
+    batch.set(doc(db, "nflTeamNeeds", abbr), { abbr, needs: stored[abbr], updatedAt: serverTimestamp() }, { mergeFields: ["abbr", "needs", "updatedAt"] });
+    combined.needs[abbr] = stored[abbr];
+  });
+  batch.set(doc(db, "compSnapshots", "_teamNeeds"), combined, { mergeFields: ["version", "updatedAt", ...Object.keys(changes).map((abbr) => `needs.${abbr}`)] });
+  await batch.commit();
+  return stored;
+}
+
+// Every team's stars (teamNeedSuggestions.js teamStars — the Franchise /
+// Difference Maker players tagged in Research, where they play now) →
+// compSnapshots/_teamStars, which the Draft Sim's war room and desk read
+// (data.js loadStars). Names and positions only — no PFF numbers. → the stars.
+export async function writeTeamStars() {
+  const [rosters, tags] = await Promise.all([
+    getDocs(collection(db, "pffNflRosters")).then((snap) => snap.docs.map((d) => d.data()).filter((t) => t.abbr)),
+    loadPlayerTags(),
+  ]);
+  const stars = teamStars(rosters, tags);
+  await setDoc(doc(db, "compSnapshots", "_teamStars"), { version: COMP_SNAPSHOT_VERSION, updatedAt: serverTimestamp(), stars });
+  return stars;
+}
 
 // PFF grade colors, like the Research tab's tiers.
 const gradeColor = (g) => (g == null ? "#8a97ab" : g >= 80 ? "#15803d" : g >= 70 ? "#0055a5" : g >= 60 ? "#5b6b84" : "#c8102e");
@@ -126,6 +165,7 @@ export function TeamNeeds() {
   const [suggesting, setSuggesting] = useState("");
   const [dismissed, setDismissed] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
+  const [starsMsg, setStarsMsg] = useState("");
   // The picked team's PFF depth chart + ESPN roster, for its player lists.
   const [roster, setRoster] = useState(null);
 
@@ -153,35 +193,43 @@ export function TeamNeeds() {
     return () => { alive = false; };
   }, [team]);
 
-  // Every team's needs at once → Firestore + local state. Each team's
-  // entry in compSnapshots/_teamNeeds (all 32 in one doc — what the Draft
-  // Sim reads, utils/draftSim/data.js loadNeeds) is replaced in the same
-  // batch, so the two never drift.
+  // Every team's needs at once → Firestore (writeTeamNeeds) + local state.
   const saveTeams = async (changes) => {
-    const batch = writeBatch(db);
-    const combined = { version: COMP_SNAPSHOT_VERSION, updatedAt: serverTimestamp(), needs: {} };
-    Object.entries(changes).forEach(([abbr, needs]) => {
-      batch.set(doc(db, "nflTeamNeeds", abbr), { abbr, needs: compact(needs), updatedAt: serverTimestamp() }, { mergeFields: ["abbr", "needs", "updatedAt"] });
-      combined.needs[abbr] = compact(needs);
-    });
-    batch.set(doc(db, "compSnapshots", "_teamNeeds"), combined, { mergeFields: ["version", "updatedAt", ...Object.keys(changes).map((abbr) => `needs.${abbr}`)] });
-    await batch.commit();
-    setDocs((all) => ({ ...all, ...Object.fromEntries(Object.entries(changes).map(([abbr, needs]) => [abbr, { ...(all[abbr] || {}), needs: compact(needs) }])) }));
+    const stored = await writeTeamNeeds(changes);
+    setDocs((all) => ({ ...all, ...Object.fromEntries(Object.entries(stored).map(([abbr, needs]) => [abbr, { ...(all[abbr] || {}), needs }])) }));
   };
 
   const suggest = async () => {
     setSuggesting("Reading PFF depth charts…");
     try {
-      const rosters = (await getDocs(collection(db, "pffNflRosters"))).docs.map((d) => d.data()).filter((t) => t.abbr);
+      const [rosters, tags, notes] = await Promise.all([
+        getDocs(collection(db, "pffNflRosters")).then((snap) => snap.docs.map((d) => d.data()).filter((t) => t.abbr)),
+        loadPlayerTags().catch(() => ({})),
+        loadTeamNotes().catch(() => ({})),
+      ]);
+      const orders = Object.fromEntries(Object.entries(notes).map(([abbr, n]) => [abbr, n.order]));
+      const roleOrders = Object.fromEntries(Object.entries(notes).map(([abbr, n]) => [abbr, n.roleOrder]));
       setSuggesting("Checking ESPN injury lists…");
       const injuries = {};
       const failed = [];
       await Promise.all(rosters.map((t) => fetchEspnRoster(t.abbr).then((r) => { injuries[t.abbr] = r; }).catch(() => failed.push(t.abbr))));
-      setSuggestions({ byTeam: suggestNeeds(rosters, injuries), at: new Date(), failed, season: rosters[0]?.season });
+      setSuggestions({ byTeam: suggestNeeds(rosters, injuries, Date.now(), tags, orders, roleOrders), at: new Date(), failed, season: rosters[0]?.season });
       setDismissed(new Set());
       setSuggesting("");
     } catch (e) {
       setSuggesting(`Couldn't suggest: ${e.message}`);
+    }
+  };
+
+  // Roster stars → compSnapshots/_teamStars (writeTeamStars).
+  const publishStars = async () => {
+    setStarsMsg("Publishing…");
+    try {
+      const stars = await writeTeamStars();
+      const count = Object.values(stars).reduce((t, list) => t + list.length, 0);
+      setStarsMsg(`Published ${count} stars across ${Object.values(stars).filter((l) => l.length).length} teams — the sim uses them on its next load.`);
+    } catch (e) {
+      setStarsMsg(`Couldn't publish: ${e.message}`);
     }
   };
 
@@ -251,8 +299,12 @@ export function TeamNeeds() {
         <button onClick={suggest} disabled={!!suggesting && !suggesting.startsWith("Couldn't")} style={btn(true)}>
           {suggesting && !suggesting.startsWith("Couldn't") ? suggesting : "Suggest changes"}
         </button>
+        <button onClick={publishStars} disabled={starsMsg === "Publishing…"} style={btn(false)} title="Every team's Franchise / Difference Maker players (Research tags), for the sim's war room and desk to mention">
+          {starsMsg === "Publishing…" ? starsMsg : "Publish roster stars"}
+        </button>
       </div>
       {suggesting.startsWith("Couldn't") && <div style={{ color: "#c8102e", fontSize: "13px" }}>{suggesting}</div>}
+      {starsMsg && starsMsg !== "Publishing…" && <div style={{ color: starsMsg.startsWith("Couldn't") ? "#c8102e" : "#15803d", fontSize: "13px" }}>{starsMsg}</div>}
 
       {suggestions && (
         <div style={card}>
@@ -356,7 +408,7 @@ export function TeamNeeds() {
         </table>
         <div style={{ padding: "8px 10px", fontSize: "11px", color: "#5b6b84", display: "flex", gap: "10px", flexWrap: "wrap" }}>
           {NEED_LABELS.map((l) => <span key={l}><b style={{ color: LABEL_COLOR[l] }}>{LABEL_SHORT[l]}</b> {l}</span>)}
-          <span>· + more than one label · dotted = has a note · • a specific need (hover for which)</span>
+          <span>· + more than one label · dotted = has a note · • a role need (hover for which)</span>
         </div>
       </div>
 

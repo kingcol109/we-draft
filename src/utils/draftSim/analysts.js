@@ -53,7 +53,8 @@
 // { text, minPick } instead of a string — only used from that overall pick
 // on (no "he'd been sitting there a few picks" at No. 1).
 import { gradeLabel } from "../communityGrades";
-import { pickName, SIM_POSITIONS, SPECIALISTS, needWord, MAJOR_NEED } from "./engine";
+import { pickName, SIM_POSITIONS, SPECIALISTS, needWord, MAJOR_NEED, groupedNeeds } from "./engine";
+import { starLinks, starVars } from "./stars";
 
 // ── Desk chatter (personalities on CPU picks) ──
 export const CHATTER = [
@@ -67,6 +68,7 @@ export const VARIABLES = {
   player: "Full name", last: "Last name", lastPoss: "Last name, possessive (Simmons')", pos: "Position (EDGE)",
   posName: "Position in words (edge rusher)", aPosName: "With a/an (an edge rusher)", Strength: "Top strength, capitalized", Weakness: "Top concern, capitalized", posPlural: "Plural (edge rushers)", school: "College", team: "Team abbreviation",
   qb: "The QB this team took in round 1 (protect / weapon lines)", qbLast: "His last name",
+  star: "The team's Franchise / Difference Maker player the pick links to (star lines)", starLast: "His last name", room: "The room the pick joins (receiver room, pass rush, secondary)",
   teamName: "Team full name", city: "Team city (New York)", nick: "Team nickname", n: "Overall pick number", rank: "We-Draft.com board rank",
   posRank: "Position rank (5)", posRankOrd: "Position rank (5th)", spots: "Spots of value / reach", grade: "Community grade (results screen: the team's draft grade)",
   count: "Number of evaluations", strength: "Top community strength", strength2: "Second strength", weakness: "Top community concern",
@@ -96,7 +98,7 @@ export const VARIABLES = {
 // the staff variables are the team trading up's.
 export const VARIABLE_GROUPS = [
   ["Player", ["player", "last", "lastPoss", "pos", "posName", "aPosName", "posPlural", "school"]],
-  ["Team & pick", ["team", "teamName", "city", "nick", "n", "year", "qb", "qbLast"]],
+  ["Team & pick", ["team", "teamName", "city", "nick", "n", "year", "qb", "qbLast", "star", "starLast", "room"]],
   ["Coaches & GM", ["gm", "gmLast", "hc", "hcLast", "oc", "ocLast", "dc", "dcLast"]],
   ["Board & community", ["rank", "posRank", "posRankOrd", "spots", "grade", "count", "strength", "strength2", "Strength", "weakness", "Weakness"]],
   ["Staff fit", ["fit", "fitWord", "staffer", "stafferPoss", "title"]],
@@ -319,6 +321,58 @@ export const ISAAC_LINES = {
       "The {nick} keep stacking pieces around {qbLast}. {player} at {n} is a gift to their young QB.",
     ],
   },
+  // The team's stars (Franchise / Difference Maker players, stars.js):
+  // {star} / {starLast} the star, {room} the room the pick joins.
+  starQbShade: {
+    label: "A first-round QB behind a star", when: "A first-round QB by a team whose quarterback is tagged Franchise / Difference Maker. {star} / {starLast} are that quarterback.",
+    lines: [
+      "I wonder what {star} thinks about that pick.",
+      "The {nick} take {player} in the first round. Somebody check on {starLast}.",
+      "Interesting. The {nick} already have {star}, and they just spent a first on {player}.",
+      "{starLast} is going to have some questions for the front office after this one.",
+    ],
+  },
+  starWeapon: {
+    label: "A weapon for the star QB", when: "A WR or TE pick by a team whose quarterback is tagged Franchise / Difference Maker. {star} / {starLast} are that quarterback.",
+    lines: [
+      "The {nick} get {star} a weapon in {player}.",
+      "{starLast} just got another target. {player} to the {nick} at {n}.",
+      "I'm sure {star} loves the {last} pick.",
+      "You have {star}? You give him guys to throw to. {player} is exactly that.",
+    ],
+  },
+  starProtect: {
+    label: "Protecting the star QB", when: "An OL pick by a team whose quarterback is tagged Franchise / Difference Maker. {star} / {starLast} are that quarterback.",
+    lines: [
+      "The {nick} are investing in keeping {star} upright. {player} is the pick.",
+      "{starLast} just got a new bodyguard. {player} to the {nick}.",
+      "When you have {star}, you protect him. {last} is there to do that.",
+    ],
+  },
+  starLanes: {
+    label: "Blocking for the star RB", when: "An OL pick by a team whose running back is tagged Franchise / Difference Maker. {star} / {starLast} are that back.",
+    lines: [
+      "{star} is going to love running behind {player}.",
+      "The {nick} open up some lanes for {starLast}. {player} at {n}.",
+      "Give {star} a little room and he'll do the rest. {last} gives him room.",
+    ],
+  },
+  starRush: {
+    label: "A pass rusher with a star one", when: "An EDGE (or a DL tagged as a pass rusher) by a team with a Franchise / Difference Maker pass rusher. {star} / {starLast} are that rusher.",
+    lines: [
+      "Good luck stopping the {nick} pass rush with {star} and {player}.",
+      "{starLast} and {last} coming off the edge? Quarterbacks are going to have nightmares.",
+      "The {nick} already had {star}. Now they add {player}. That's a scary pass rush.",
+    ],
+  },
+  starPair: {
+    label: "A second star in the room", when: "A pick at a position where the team already has a Franchise / Difference Maker player. {star} / {starLast} are that player; {room} is the room (receiver room, secondary…).",
+    lines: [
+      "{star} and {player} in the same {room} is a scary sight.",
+      "The {nick} already have {star}. Adding {player} to that {room} isn't fair.",
+      "{starLast} and {last}. The {nick} {room} just got a lot better.",
+    ],
+  },
   tradeUp: {
     label: "Traded up for him", when: "The team just traded up into this pick (he's not a reach or a steal). Trade variables work here: {fromNick}, {fromCity}, {got}.",
     lines: [
@@ -343,6 +397,15 @@ export const ISAAC_LINES = {
       "The {nick} traded UP for {last}? He was sitting at {rank} on the board. They could've had him later.",
       "I don't get it. {got} to the {fromNick} to move up for {player}, a guy the board has at {rank}.",
       "The {nick} paid to jump the line for {last}. Somebody in that room really loves him — I'm not there yet.",
+    ],
+  },
+  tradeUpQb: {
+    label: "Traded up for their QB", when: "A team with a QB need traded up into this pick for a quarterback — never called a reach, however far down the board he was. Trade variables work here.",
+    lines: [
+      "The {nick} didn't want to wait any longer. They move up with the {fromNick} and get their quarterback: {player}.",
+      "You need a quarterback, you go get one. The {nick} jump up for {player}.",
+      "No more waiting in {city}. The {nick} trade up and take {player}.",
+      "The {nick} weren't going to sit there and hope {last} fell to them. Aggressive move, and I get it.",
     ],
   },
   firstOverall: {
@@ -710,7 +773,7 @@ Object.assign(ISAAC_LINES, {
 // own branding), or "". One is picked at
 // random each time: who a good pick gets compared to, who an FSU player is
 // "the next" of (an FSU QB is always the next Jameis Winston), and his joke
-// pick on the Suggestions tab. Editable in Admin → Mock Draft →
+// pick in the War Room. Editable in Admin → Mock Draft →
 // Personalities (config/draftSimDesk.legends); these are the defaults.
 export const LEGEND_POSITIONS = [...SIM_POSITIONS, ...SPECIALISTS, "ANY"];
 const FRONT = ["DL", "EDGE"];
@@ -821,7 +884,7 @@ export const DAVIN_LINES = {
     ],
   },
   suggestion: {
-    label: "His joke pick (Suggestions tab)", when: "Now and then on the Suggestions tab — {legend} is one of his favorites, any position.",
+    label: "His joke pick (War Room)", when: "Now and then in the War Room, in the coordinator's place — {legend} is one of his favorites, any position.",
     lines: [
       "Forget the board. Take {legend}. Trust me.",
       "If {legend} is still on the board, the {nick} have to sprint to the podium.",
@@ -1676,12 +1739,20 @@ function tradeUpVars(e, ctx) {
   return { fromNick: ctx.nickname(t.from), fromCity: cityOf(ctx, t.from), from: t.from, to: e.team, toNick: ctx.nickname(e.team), got: (t.give || []).filter(Boolean).map(pickName).join(" + ") };
 }
 
+// A team with a starter need at QB that traded up for one.
+const QB_CHASE_LABELS = ["Upgrade Needed", "Expiring Contract", "Aging Talent", "Upgrade Wanted"];
+const qbChaseUp = (e) => !!e.pick.tradeUp && e.prospect.Position === "QB" && e.need?.key === "QB" && QB_CHASE_LABELS.includes(e.need.label);
+
+// A star link (stars.js starLinks) → its ISAAC_LINES situation.
+const STAR_CAT = { qbShade: "starQbShade", weapon: "starWeapon", protect: "starProtect", lanes: "starLanes", rush: "starRush", pair: "starPair" };
+
 function isaacPick(e, ctx) {
   const v = pickVars(e, ctx);
   // Traded up for him: the trade and the pick, one take.
   const up = tradeUpVars(e, ctx);
   if (up) {
-    const cat = e.value >= Math.max(6, e.pick.overall * 0.25) ? "tradeUpValue" : -e.value >= Math.max(6, e.pick.overall * 0.25) ? "tradeUpReach" : "tradeUp";
+    // Moving up for the quarterback they need is never a reach.
+    const cat = e.value >= Math.max(6, e.pick.overall * 0.25) ? "tradeUpValue" : qbChaseUp(e) ? "tradeUpQb" : -e.value >= Math.max(6, e.pick.overall * 0.25) ? "tradeUpReach" : "tradeUp";
     return { text: lineFrom(ISAAC_LINES, cat, { ...v, ...up }, ctx, "isaac") };
   }
   // A shock — over the smaller steal / reach takes (No. 1's surprise has its own lines below).
@@ -1693,6 +1764,13 @@ function isaacPick(e, ctx) {
   const qbCat = qbSupport(e);
   if (qbCat && ctx.rand() < 0.75) {
     return { text: lineFrom(ISAAC_LINES, qbCat, { ...v, qb: `${e.rookieQb.First} ${e.rookieQb.Last}`, qbLast: e.rookieQb.Last }, ctx, "isaac") };
+  }
+  // A link to one of the team's stars — always for a first-round QB behind one.
+  const links = starLinks(ctx.stars, e.team, e.prospect, e.pick.round);
+  if (links.length && (links[0].kind === "qbShade" || ctx.rand() < 0.7)) {
+    const link = links[Math.floor(ctx.rand() * links.length)];
+    const text = lineFrom(ISAAC_LINES, STAR_CAT[link.kind], { ...v, ...starVars(link, e.prospect) }, ctx, "isaac");
+    if (text) return { text };
   }
   let cat;
   const need = e.need?.label;
@@ -1754,8 +1832,8 @@ export const ANALYSTS = [
     id: "isaac", name: "Walter Donaldson", handle: "@WalterDonaldson", role: "Draft Analyst", verified: true, enabled: true,
     color: "#14a3a3", initials: "WD", delay: 1300, lines: ISAAC_LINES,
     about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades up, and your final grade.",
-    cadence: "Most likely on a shock (10+ spots off the board in round 1, 25+ on Day 2) and the other headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, a team passing on a big need (more so the second time), and a team trading up — told with the pick.",
-    weight: (e) => {
+    cadence: "Most likely on a shock (10+ spots off the board in round 1, 25+ on Day 2) and the other headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, a pick that links to one of the team's stars (Franchise / Difference Maker players), a team passing on a big need (more so the second time), and a team trading up — told with the pick.",
+    weight: (e, ctx) => {
       if (e.type !== "pick") return 0;
       if (e.pick.overall === 1) return 100;
       if (e.pick.tradeUp) return 8;
@@ -1763,6 +1841,7 @@ export const ANALYSTS = [
       // Passing on a big need — louder each time they do.
       if (e.passedNeed) return e.passedNeed.times ? 6 : 4;
       if (qbSupport(e)) return 4;
+      if (starLinks(ctx?.stars, e.team, e.prospect, e.pick.round).length) return 4;
       const notable = (e.prospect.Position === "QB" && e.pick.round <= 2) || Math.abs(e.value) >= Math.max(6, e.pick.overall * 0.25);
       return notable ? 3 : 1.3;
     },
@@ -1901,7 +1980,7 @@ export function openingPosts({ year, userTeams, ctx }) {
   ];
 }
 
-// Davin's joke pick for the team on the clock (Suggestions tab):
+// Davin's joke pick for the team on the clock (War Room tab):
 // { analyst, legend: { name, positions, school }, pos, text } or null.
 export function davinSuggestion(team, ctx) {
   return guarded("Davin suggestion", () => davinSuggestionFor(team, ctx));
@@ -1938,7 +2017,8 @@ function gradeFacts(haul) {
     const qb1 = haul.rows.find((r) => r.prospect.Position === "QB");
     facts.push(["gradeTwoQbFact", { ...name(qb2), qb: `${qb1.prospect.First} ${qb1.prospect.Last}` }]);
   }
-  const needs = haul.needs || { items: [], open: [], late: [] };
+  // As the report card shows them — a guard and a center one interior need.
+  const needs = { items: haul.needs?.items || [], ...groupedNeeds(haul.needs) };
   const major = (list) => list.filter((n) => n.severity >= MAJOR_NEED).sort((x, y) => y.severity - x.severity);
   const open = major(needs.open);
   const late = major(needs.late);
@@ -1948,7 +2028,7 @@ function gradeFacts(haul) {
     facts.push(["gradeHoleFact", { needPos: needWord(open[0].key) }]);
   }
   if (late.length) facts.push(["gradeLateNeedFact", { needPos: needWord(late[0].key), needRound: ROUND_WORDS[late[0].round - 1] || `round ${late[0].round}` }]);
-  if (!facts.length && needs.items.length >= 2 && needs.items.every((n) => n.status === "met")) facts.push(["gradeNeedsMetFact", {}]);
+  if (!facts.length && needs.items.length >= 2 && !needs.late.length && !needs.open.length) facts.push(["gradeNeedsMetFact", {}]);
   return facts;
 }
 

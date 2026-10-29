@@ -36,10 +36,38 @@
 // "Snap-weighted" means each player counts in proportion to his snaps, so a
 // starter moves the number and a backup who barely plays doesn't. Before
 // anyone has snaps (preseason) the depth-chart starters count equally.
-import { Fragment, useEffect, useMemo, useState } from "react";
+//
+// Each Team card also carries the team's need label for the group (OL: OT
+// and IOL, as the Draft Sim splits them) — the same labels as Admin → Mock
+// Draft → Team Needs (nflTeamNeeds, saved through AdminTeamNeeds.jsx
+// writeTeamNeeds the moment one's clicked), with Suggest Need working one
+// out from these depth charts and the team's ESPN injury list
+// (utils/teamNeedSuggestions.js — which goes by the player tags below
+// where they're set). And its depth chart notes (Notes — utils/depthNotes.js):
+// a note on the group and the traits it wants (kept with the team), and
+// for each player a talent tag, a development tag, Strengths / Weaknesses
+// (the college trait lists) and a note of his own (kept with the player,
+// by his PFF id — they follow him to a new team), with his roles (engine
+// ROLES — Slot WR, Nose Tackle…). Each role then gets a card of its own
+// under the position groups (RoleCard): the team's players with that role
+// — in an order of the admin's own (Set Order, like Set Starters; its
+// first is the one who plays the role) — and the role's need label,
+// Suggest Need and all. Set Starters slides
+// players into the group's starting slots (the team's depth order — the
+// cards' starters and the need suggestions go by it; Reset goes back to
+// PFF's snaps).
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import { sanitizeUrl } from "./MarginAds";
+import { Chip, LABEL_COLOR, byUrgency, applied, writeTeamNeeds } from "./AdminTeamNeeds";
+import { NEED_LABELS, NEED_KEY_NAMES, ROLES, ROLE_BY_KEY, rolesForGroup, resolveNeeds } from "../utils/draftSim/engine";
+import { suggestNeeds, suggestionReason } from "../utils/teamNeedSuggestions";
+import { fetchEspnRoster } from "../utils/nflRoster";
+import {
+  TALENT_TAGS, DEV_TAGS, MAX_TRAITS, talentTag, devTag, loadTeamNotes, loadPlayerTags, loadTraits, traitsFor,
+  saveGroupNote, saveGroupWants, saveGroupOrder, saveRoleOrder, savePlayerTags, cleanPlayerTags,
+} from "../utils/depthNotes";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -76,6 +104,9 @@ const GROUPS = [
   { key: "S", pos: ["S"], unit: "d", starters: 2, subs: ["cov", "rdef", "tkl"] },
 ];
 const GROUP_OF_POS = Object.fromEntries(GROUPS.flatMap((g) => g.pos.map((p) => [p, g.key])));
+// The Draft Sim's need keys (engine NEED_KEYS) for each group.
+const NEED_KEYS_OF = { OL: ["OT", "G", "C"] };
+const needKeysOf = (group) => NEED_KEYS_OF[group] || [group];
 
 // Player stats — keys from scripts/syncPffNflRosters.js STATS: [label, format].
 // Player rates arrive as 0–100.
@@ -226,18 +257,24 @@ const subGrade = (players, key) => weighted(players.filter((p) => p.x?.[key]), (
 
 // One team doc → { groups: { QB: {...} }, OFF, DEF }, each with subs:
 // { [key]: grade } for the specific grades that apply to it.
-function summarizeTeam(team) {
+// order: the admin's depth order, { [group]: [pffId] } — a group with one
+// lists its players in it (anyone not in it after, by snaps) and starts
+// the first g.starters.
+function summarizeTeam(team, order = {}) {
   const players = (team.players || []).map((p) => ({ ...p, age: ageOf(p.dob), group: GROUP_OF_POS[p.pos] }));
   const groups = {};
   GROUPS.forEach((g) => {
+    const slot = new Map((order[g.key] || []).map((id, i) => [String(id), i]));
     const all = players.filter((p) => p.group === g.key)
       .sort((a, b) => (b.sn || 0) - (a.sn || 0) || (a.d || 99) - (b.d || 99));
-    const list = all.filter((p) => !p.off);
+    const list = all.filter((p) => !p.off).sort((a, b) => (slot.get(String(a.id)) ?? Infinity) - (slot.get(String(b.id)) ?? Infinity));
     const gone = all.filter((p) => p.off);
     const hasSnaps = list.some((p) => p.sn);
-    const starters = hasSnaps ? list.slice(0, g.starters) : list.filter((p) => p.d === 1).slice(0, g.starters);
+    const ordered = list.some((p) => slot.has(String(p.id)));
+    const starters = ordered || hasSnaps ? list.slice(0, g.starters) : list.filter((p) => p.d === 1).slice(0, g.starters);
     const pool = hasSnaps ? list : starters;
     groups[g.key] = {
+      ordered,
       list,
       gone,
       starterIds: new Set(starters.map((p) => p.id)),
@@ -297,9 +334,21 @@ export default function AdminResearch() {
   const [teams, setTeams] = useState(null);
   const [nfl, setNfl] = useState({});
   const [error, setError] = useState("");
+  // { [abbr]: needs } (nflTeamNeeds), { [abbr]: { groups, wants, order } }
+  // (nflDepthNotes), { [pffId]: tags } (nflPlayerTags) and the trait lists.
+  const [needs, setNeeds] = useState({});
+  const [notes, setNotes] = useState({});
+  const [tags, setTags] = useState({});
+  const [traits, setTraits] = useState({});
 
   useEffect(() => {
     let alive = true;
+    getDocs(collection(db, "nflTeamNeeds"))
+      .then((snap) => alive && setNeeds(Object.fromEntries(snap.docs.map((d) => [d.id, d.data().needs || {}]))))
+      .catch((e) => console.error("Team needs load error:", e));
+    loadTeamNotes().then((n) => alive && setNotes(n)).catch((e) => console.error("Depth notes load error:", e));
+    loadTraits().then((t) => alive && setTraits(t)).catch((e) => console.error("Traits load error:", e));
+    loadPlayerTags().then((t) => alive && setTags(t)).catch((e) => console.error("Player tags load error:", e));
     Promise.all([getDocs(collection(db, "pffNflRosters")), getDocs(collection(db, "nfl"))])
       .then(([rosterSnap, nflSnap]) => {
         if (!alive) return;
@@ -323,19 +372,21 @@ export default function AdminResearch() {
       </div>
     );
   }
-  return <ResearchView teams={teams} nfl={nfl} />;
+  return <ResearchView teams={teams} nfl={nfl} needs={needs} setNeeds={setNeeds} notes={notes} setNotes={setNotes} tags={tags} setTags={setTags} traits={traits} />;
 }
 
 // The panel itself, given the loaded pffNflRosters docs ({ abbr, ...doc })
-// and nfl docs by abbreviation (logos + colors).
-export function ResearchView({ teams, nfl }) {
+// and nfl docs by abbreviation (logos + colors); needs / notes / tags (and
+// their setters, for what's just been saved): the teams' need labels and
+// group notes, and the players' tags; traits: the trait lists ({ [doc]: [trait] }).
+export function ResearchView({ teams, nfl, needs = {}, setNeeds, notes = {}, setNotes, tags = {}, setTags, traits = {} }) {
   const [view, setView] = useState("league");
   const [metric, setMetric] = useState("grade");
   const [lens, setLens] = useState("overall");
   const [sort, setSort] = useState({ col: "OFF", dir: "desc" });
   const [teamAbbr, setTeamAbbr] = useState("");
   const [focusGroup, setFocusGroup] = useState(null);
-  const summaries = useMemo(() => teams.map((t) => ({ abbr: t.abbr, name: t.name, ...summarizeTeam(t) })), [teams]);
+  const summaries = useMemo(() => teams.map((t) => ({ abbr: t.abbr, name: t.name, ...summarizeTeam(t, notes[t.abbr]?.order) })), [teams, notes]);
   const ranks = useMemo(() => rankColumns(summaries), [summaries]);
   const unitRanks = useMemo(() => rankUnitGrades(teams), [teams]);
 
@@ -367,6 +418,7 @@ export function ResearchView({ teams, nfl }) {
           ranks={ranks} unitRanks={unitRanks} nfl={nfl} teams={teams} season={season}
           onPick={(abbr) => { setTeamAbbr(abbr); setFocusGroup(null); }}
           focusGroup={focusGroup}
+          needs={needs} setNeeds={setNeeds} notes={notes} setNotes={setNotes} tags={tags} setTags={setTags} traits={traits}
         />
       )}
     </div>
@@ -649,9 +701,77 @@ function TeamUnitReport({ team, unitRanks }) {
 }
 
 // ── Team view ──
-function TeamBreakdown({ team, summary, ranks, unitRanks, nfl, teams, season, onPick, focusGroup }) {
+function TeamBreakdown({ team, summary, ranks, unitRanks, nfl, teams, season, onPick, focusGroup, needs, setNeeds, notes, setNotes, tags, setTags, traits }) {
   const brand = nfl[team.abbr] || {};
   const c1 = brand.Color1 || BLUE;
+  const abbr = team.abbr;
+  const teamNeeds = resolveNeeds(needs[abbr]);
+  // The group notes, wants and order are the team's; the players' tags are
+  // everyone's, by PFF id.
+  const mine = notes[abbr] || {};
+  const teamNotes = { groups: mine.groups || {}, wants: mine.wants || {}, order: mine.order || {}, roleOrder: mine.roleOrder || {}, players: tags };
+  const setTeamField = (field, group, value) => setNotes?.((all) => {
+    const t = all[abbr] || { groups: {}, wants: {}, order: {}, roleOrder: {} };
+    const next = { ...(t[field] || {}) };
+    if (value == null || (Array.isArray(value) && !value.length) || value === "") delete next[group]; else next[group] = value;
+    return { ...all, [abbr]: { ...t, [field]: next } };
+  });
+
+  // One position's labels → saved at once (with the rest of the team's).
+  // Built on the latest edits (latest), not the last render — two quick
+  // clicks on different positions both stick.
+  const latest = useRef({});
+  const saveNeed = async (key, value) => {
+    const next = { ...(latest.current[abbr] || teamNeeds), [key]: value };
+    latest.current[abbr] = next;
+    const stored = await writeTeamNeeds({ [abbr]: next });
+    setNeeds?.((all) => ({ ...all, ...stored }));
+  };
+  // Suggest Need: worked out fresh each time from the league's depth
+  // charts, the players' tags as they stand and the team's injury list
+  // (fetched once a visit).
+  const [espn, setEspn] = useState({});
+  const suggestFor = async (key) => {
+    let list = espn[abbr];
+    if (!list) {
+      list = await fetchEspnRoster(abbr).catch(() => []);
+      setEspn((cur) => ({ ...cur, [abbr]: list }));
+    }
+    const orders = Object.fromEntries(Object.entries(notes).map(([a, n]) => [a, n.order || {}]));
+    const roleOrders = Object.fromEntries(Object.entries(notes).map(([a, n]) => [a, n.roleOrder || {}]));
+    return suggestNeeds(teams.filter((t) => t.abbr), { [abbr]: list }, Date.now(), tags, orders, roleOrders)[abbr]?.[key] || null;
+  };
+  const saveGroup = async (group, text) => {
+    await saveGroupNote(abbr, group, text);
+    setTeamField("groups", group, text.trim());
+  };
+  const saveWants = async (group, list) => {
+    await saveGroupWants(abbr, group, list);
+    setTeamField("wants", group, list);
+  };
+  const saveOrder = async (group, ids) => {
+    await saveGroupOrder(abbr, group, ids);
+    setTeamField("order", group, ids ? ids.map(String) : null);
+  };
+  const saveRoleOrderFor = async (role, ids) => {
+    await saveRoleOrder(abbr, role, ids);
+    setTeamField("roleOrder", role, ids ? ids.map(String) : null);
+  };
+  const savePlayer = async (id, entry) => {
+    const full = { ...entry, team: abbr };
+    await savePlayerTags(id, full);
+    const clean = cleanPlayerTags(full);
+    setTags?.((all) => { const next = { ...all }; if (clean) next[id] = clean; else delete next[id]; return next; });
+  };
+
+  // A role's players on the depth chart: the role's own order first, then
+  // the parent group's players and the rest, each in their group's order.
+  const roleList = (r) => {
+    const own = new Map((teamNotes.roleOrder[r.key] || []).map((id, i) => [String(id), i]));
+    const all = [...(summary.groups[r.parent]?.list || []), ...GROUPS.filter((g) => g.key !== r.parent).flatMap((g) => summary.groups[g.key]?.list || [])]
+      .filter((p) => (tags[p.id]?.roles || []).includes(r.key));
+    return all.map((p, i) => ({ p, i })).sort((a, b) => (own.get(String(a.p.id)) ?? Infinity) - (own.get(String(b.p.id)) ?? Infinity) || a.i - b.i).map((x) => x.p);
+  };
 
   useEffect(() => {
     if (!focusGroup) return;
@@ -688,8 +808,22 @@ function TeamBreakdown({ team, summary, ranks, unitRanks, nfl, teams, season, on
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(520px, 1fr))", gap: "14px", alignItems: "start" }}>
         {GROUPS.map((g) => (
-          <GroupCard key={g.key} group={g} data={summary.groups[g.key]} abbr={team.abbr} ranks={ranks}
-            season={season} highlight={focusGroup === g.key} />
+          <GroupCard key={`${team.abbr}-${g.key}`} group={g} data={summary.groups[g.key]} abbr={team.abbr} ranks={ranks}
+            season={season} highlight={focusGroup === g.key}
+            needs={teamNeeds} onNeed={saveNeed} suggestFor={suggestFor}
+            notes={teamNotes} onGroupNote={saveGroup} onPlayerNote={savePlayer}
+            onWants={saveWants} onOrder={saveOrder} traits={traitsFor(traits, g.key)} />
+        ))}
+      </div>
+
+      <div style={{ fontSize: "13px", fontWeight: 900, color: "#111", letterSpacing: "0.04em", marginTop: "4px" }}>
+        ROLES <span style={{ fontSize: "11px", fontWeight: 700, color: "#8a95a5", letterSpacing: 0 }}>· tag players with a role in their group&apos;s Notes</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "14px", alignItems: "start" }}>
+        {ROLES.map((r) => (
+          <RoleCard key={`${team.abbr}-${r.key}`} role={r} players={roleList(r)} ordered={(teamNotes.roleOrder[r.key] || []).length > 0}
+            tags={tags} need={teamNeeds[r.key]} onNeed={(v) => saveNeed(r.key, v)} suggest={() => suggestFor(r.key)}
+            onOrder={(ids) => saveRoleOrderFor(r.key, ids)} />
         ))}
       </div>
     </div>
@@ -707,12 +841,18 @@ function GradeChip({ g, rank, of, title, min = "40px" }) {
   );
 }
 
-function GroupCard({ group, data, abbr, ranks, season, highlight }) {
+function GroupCard({ group, data, abbr, ranks, season, highlight, needs, onNeed, suggestFor, notes, onGroupNote, onPlayerNote, onWants, onOrder, traits }) {
   const tone = gradeTone(data.grade);
   const rank = ranks.overall[group.key].get(abbr);
   // Player stat lines: click a row to open it, or Show stats for all.
   const [open, setOpen] = useState(() => new Set());
   const [allOpen, setAllOpen] = useState(false);
+  // Notes: the group's note and each player's tags + note, to edit.
+  const [editing, setEditing] = useState(false);
+  // Set Starters: the depth order, to slide players around.
+  const [arranging, setArranging] = useState(false);
+  const groupNote = notes.groups?.[group.key] || "";
+  const wants = notes.wants?.[group.key] || [];
   const toggle = (id) => setOpen((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const statKeys = GROUP_STATS[group.key] || [];
   const colCount = 5 + group.subs.length;
@@ -732,12 +872,18 @@ function GroupCard({ group, data, abbr, ranks, season, highlight }) {
             {data.aging}/{data.starters} starters {group.key === "RB" ? "28" : "30"}+
           </span>
         )}
-        <button onClick={() => { setAllOpen((v) => !v); setOpen(new Set()); }} style={{
-          fontSize: "10px", fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase", cursor: "pointer",
-          border: `1px solid ${allOpen ? BLUE : "#d5dbe3"}`, background: allOpen ? BLUE : "#fff", color: allOpen ? "#fff" : "#445",
-          borderRadius: "999px", padding: "3px 9px",
-        }}>{allOpen ? "Hide stats" : "Show stats"}</button>
+        <button onClick={() => setArranging((v) => !v)} style={pillBtn(arranging, "#15803d")}>{arranging ? "Done" : "Set starters"}</button>
+        <button onClick={() => setEditing((v) => !v)} style={pillBtn(editing, GOLD)}>{editing ? "Done" : "Notes"}</button>
+        <button onClick={() => { setAllOpen((v) => !v); setOpen(new Set()); }} style={pillBtn(allOpen, BLUE)}>{allOpen ? "Hide stats" : "Show stats"}</button>
       </div>
+      {needKeysOf(group.key).map((k) => (
+        <NeedsBar key={k} needKey={k} split={needKeysOf(group.key).length > 1} value={needs[k]} onSave={(v) => onNeed(k, v)} suggest={() => suggestFor(k)} />
+      ))}
+      {arranging && <StarterSlots group={group} list={data.list} ordered={data.ordered} onSave={(ids) => onOrder(group.key, ids)} />}
+      {(editing || wants.length > 0) && <GroupWants wants={wants} editing={editing} traits={traits} onSave={(list) => onWants(group.key, list)} />}
+      {(editing || groupNote) && (
+        <GroupNote text={groupNote} editing={editing} onSave={(t) => onGroupNote(group.key, t)} />
+      )}
       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid #eef1f5", background: "#fafbfd" }}>
         {group.subs.map((k) => {
           const g = data.subs[k];
@@ -792,6 +938,7 @@ function GroupCard({ group, data, abbr, ranks, season, highlight }) {
                     <div style={{ fontSize: "10px", color: "#9aa3ad", fontWeight: 700, paddingLeft: "40px" }}>
                       {[p.pos, heightOf(p.ht), p.wt ? `${p.wt}` : "", p.no ? `#${p.no}` : ""].filter(Boolean).join(" · ")}
                     </div>
+                    <PlayerTags entry={notes.players?.[p.id]} />
                   </td>
                   <td style={{ textAlign: "right", fontWeight: 900, color: ageTone(p.age, group.key) }}>{fmt1(p.age)}</td>
                   <td style={{ textAlign: "right", fontWeight: 800, color: "#666" }}>{exp == null ? "—" : exp === 0 ? "R" : exp}</td>
@@ -818,6 +965,13 @@ function GroupCard({ group, data, abbr, ranks, season, highlight }) {
                     </div>
                   </td>
                 </tr>
+                {editing && (
+                  <tr style={{ background: "#fffaf0" }}>
+                    <td colSpan={colCount} style={{ padding: "6px 12px 8px 52px", borderTop: "1px dashed #f1e2c4" }}>
+                      <PlayerNoteEditor entry={notes.players?.[p.id]} traits={traits} roles={rolesForGroup(group.key)} onSave={(e) => onPlayerNote(p.id, { ...e, n: p.n, g: group.key })} />
+                    </td>
+                  </tr>
+                )}
                 {expanded && (
                   <tr style={{ background: "#f7f9fc" }}>
                     <td colSpan={colCount} style={{ padding: "6px 12px 8px 52px", borderTop: "1px dashed #e3e7ee" }}>
@@ -839,6 +993,293 @@ function GroupCard({ group, data, abbr, ranks, season, highlight }) {
             })}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+const pillBtn = (on, color) => ({
+  fontSize: "10px", fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase", cursor: "pointer",
+  border: `1px solid ${on ? color : "#d5dbe3"}`, background: on ? color : "#fff", color: on ? "#fff" : "#445",
+  borderRadius: "999px", padding: "3px 9px",
+});
+
+// A saved / saving / error line for an edit that saves itself.
+function useSaver(save) {
+  const [state, setState] = useState("");
+  const run = async (...args) => {
+    setState("Saving…");
+    try {
+      await save(...args);
+      setState("Saved");
+      setTimeout(() => setState((cur) => (cur === "Saved" ? "" : cur)), 1500);
+    } catch (e) {
+      console.error("Research save error:", e);
+      setState(`Couldn't save: ${e.code || e.message}`);
+    }
+  };
+  return [state, run];
+}
+const SaveState = ({ state }) => (state ? <span style={{ fontSize: "10px", fontWeight: 800, color: state.startsWith("Couldn't") ? "#c8102e" : "#8a95a5" }}>{state}</span> : null);
+
+// A group's need label(s) for one need key — the Draft Sim's (nflTeamNeeds),
+// saved the moment a label's clicked — and Suggest Need: the suggestion
+// with why, to use or leave. split: the group has more than one key (OL:
+// OT and IOL), so each is named. No label = Set.
+function NeedsBar({ needKey, split, value, onSave, suggest }) {
+  const [state, save] = useSaver(onSave);
+  const [sug, setSug] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const labels = (value?.labels || []).filter((l) => l !== "Set");
+  const top = labels[0] || "Set";
+  const toggle = (l) => save({ labels: labels.includes(l) ? labels.filter((x) => x !== l) : [...labels, l].sort(byUrgency), note: value?.note || "" });
+  const ask = async () => {
+    setLoading(true);
+    try { setSug((await suggest()) || { none: true }); } catch (e) { setSug({ error: e.message }); } finally { setLoading(false); }
+  };
+  const same = sug?.label && (labels.length ? labels.join() : "Set") === sug.label;
+  return (
+    <div style={{ padding: "8px 12px", borderBottom: "1px solid #eef1f5", background: "#fcfdff" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+        <span style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", color: "#8a95a5", minWidth: split ? "92px" : "38px" }}>
+          {split ? NEED_KEY_NAMES[needKey].toUpperCase() : "NEED"}
+        </span>
+        <span style={{ fontSize: "12px", fontWeight: 900, color: top === "Set" ? "#8a97ab" : LABEL_COLOR[top], marginRight: "4px" }}>{labels.length ? labels.join(" + ") : "Set"}</span>
+        {NEED_LABELS.filter((l) => l !== "Set").map((l) => <Chip key={l} label={l} small on={labels.includes(l)} onClick={() => toggle(l)} />)}
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+          <SaveState state={state} />
+          <button onClick={ask} disabled={loading} style={pillBtn(false, BLUE)}>{loading ? "Suggesting…" : "Suggest need"}</button>
+        </span>
+      </div>
+      {sug && (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "6px", fontSize: "11px", color: "#5b6b84" }}>
+          {sug.error ? <span style={{ color: "#c8102e" }}>Couldn't suggest: {sug.error}</span> : sug.none ? <span>No suggestion for this position.</span> : (
+            <>
+              <span style={{ fontWeight: 900, color: "#33415a" }}>Suggested</span>
+              <Chip label={sug.label} on small />
+              <span style={{ flex: "1 1 220px", minWidth: 0 }}>{suggestionReason(sug)}</span>
+              {sug.injured?.length > 0 && <span style={{ color: "#d9480f", fontWeight: 700 }}>Counting {sug.injured.map((i) => `${i.name} (${i.status})`).join(", ")} as healthy — without: {sug.without.label}</span>}
+              {same ? <span style={{ fontWeight: 800, color: "#15803d" }}>Matches</span> : (
+                <button onClick={() => save(applied(value, sug))} style={pillBtn(true, BLUE)}>Use it</button>
+              )}
+            </>
+          )}
+          <button onClick={() => setSug(null)} style={{ border: "none", background: "none", color: "#8a95a5", cursor: "pointer", fontSize: "11px", fontWeight: 800 }}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The group's note: read-only, or a box to write in (Notes), saved on blur.
+function GroupNote({ text, editing, onSave }) {
+  const [draft, setDraft] = useState(text);
+  const [state, save] = useSaver(onSave);
+  useEffect(() => { setDraft(text); }, [text]);
+  return (
+    <div style={{ padding: "8px 12px", borderBottom: "1px solid #eef1f5", background: "#fffaf0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: editing ? "4px" : "2px" }}>
+        <span style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", color: "#b7791f" }}>GROUP NOTES</span>
+        <SaveState state={state} />
+      </div>
+      {editing ? (
+        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => { if (draft.trim() !== text.trim()) save(draft); }} rows={3}
+          placeholder="How this room looks — who's ascending, who's on the way out, what it needs…"
+          style={{ width: "100%", boxSizing: "border-box", border: "1px solid #ead9b8", borderRadius: "6px", padding: "6px 8px", fontSize: "12px", fontFamily: "Arial, sans-serif", resize: "vertical" }} />
+      ) : <div style={{ fontSize: "12px", color: "#33415a", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{text}</div>}
+    </div>
+  );
+}
+
+const tagStyle = (color) => ({ fontSize: "9px", fontWeight: 900, color: "#fff", background: color, padding: "1px 6px", borderRadius: "999px", whiteSpace: "nowrap" });
+
+// A player's talent and development tags and note, under his name.
+function PlayerTags({ entry }) {
+  const t = talentTag(entry?.talent);
+  const d = devTag(entry?.dev);
+  const str = entry?.strengths || [];
+  const weak = entry?.weaknesses || [];
+  const roles = (entry?.roles || []).map((k) => ROLE_BY_KEY[k]).filter(Boolean);
+  if (!t && !d && !entry?.note && !str.length && !weak.length && !roles.length) return null;
+  return (
+    <div style={{ paddingLeft: "40px", marginTop: "2px", display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center", whiteSpace: "normal" }}>
+      {t && <span style={tagStyle(t.color)}>{t.label}</span>}
+      {d && <span style={tagStyle(d.color)} title={d.label}>{d.short}</span>}
+      {roles.map((r) => <span key={r.key} style={{ ...tagStyle("#fff"), color: "#33415a", border: "1px solid #c9d2de" }}>{r.name}</span>)}
+      {str.length > 0 && <span style={{ fontSize: "10px", fontWeight: 800, color: "#15803d" }}>+ {str.join(", ")}</span>}
+      {weak.length > 0 && <span style={{ fontSize: "10px", fontWeight: 800, color: "#c8102e" }}>− {weak.join(", ")}</span>}
+      {entry?.note && <span style={{ fontSize: "10px", color: "#5b6b84", fontStyle: "italic" }}>{entry.note}</span>}
+    </div>
+  );
+}
+
+// Notes, a player's row: one talent tag, one development tag (click the
+// one he has to clear it) and a note, saved on blur.
+function PlayerNoteEditor({ entry, onSave, traits = [], roles = [] }) {
+  const cur = { talent: entry?.talent || null, dev: entry?.dev || null, roles: entry?.roles || [], strengths: entry?.strengths || [], weaknesses: entry?.weaknesses || [], note: entry?.note || "" };
+  const [traitsOpen, setTraitsOpen] = useState(false);
+  const [note, setNote] = useState(cur.note);
+  const [state, save] = useSaver(onSave);
+  useEffect(() => { setNote(entry?.note || ""); }, [entry?.note]);
+  const pick = (field, key) => save({ ...cur, note, [field]: cur[field] === key ? null : key });
+  // Roles: any number of his group's.
+  const flipRole = (key) => save({ ...cur, note, roles: cur.roles.includes(key) ? cur.roles.filter((k) => k !== key) : [...cur.roles, key] });
+  // Strengths / Weaknesses: never both, MAX_TRAITS each (the college rules).
+  const flip = (kind, trait) => {
+    const other = kind === "strengths" ? "weaknesses" : "strengths";
+    if (cur[other].includes(trait)) return;
+    if (cur[kind].includes(trait)) save({ ...cur, note, [kind]: cur[kind].filter((x) => x !== trait) });
+    else if (cur[kind].length < MAX_TRAITS) save({ ...cur, note, [kind]: [...cur[kind], trait] });
+  };
+  const pill = (on, color) => ({ border: `1px solid ${on ? color : "#d5dce6"}`, background: on ? color : "#fff", color: on ? "#fff" : "#33415a", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>TALENT</span>
+        {TALENT_TAGS.map((t) => <button key={t.key} onClick={() => pick("talent", t.key)} style={pill(cur.talent === t.key, t.color)}>{t.label}</button>)}
+      </div>
+      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>DEVELOPMENT</span>
+        {DEV_TAGS.map((t) => <button key={t.key} onClick={() => pick("dev", t.key)} style={pill(cur.dev === t.key, t.color)}>{t.label}</button>)}
+      </div>
+      {roles.length > 0 && (
+        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>ROLES</span>
+          {roles.map((r) => <button key={r.key} onClick={() => flipRole(r.key)} style={pill(cur.roles.includes(r.key), "#33415a")}>{r.name}</button>)}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>TRAITS</span>
+        <button onClick={() => setTraitsOpen((v) => !v)} style={pill(traitsOpen, "#33415a")}>
+          Strengths {cur.strengths.length}/{MAX_TRAITS} · Weaknesses {cur.weaknesses.length}/{MAX_TRAITS} {traitsOpen ? "▲" : "▼"}
+        </button>
+      </div>
+      {traitsOpen && (
+        traits.length ? ["strengths", "weaknesses"].map((kind) => (
+          <div key={kind} style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center", paddingLeft: "66px" }}>
+            <span style={{ fontSize: "9px", fontWeight: 900, color: kind === "strengths" ? "#15803d" : "#c8102e", width: "70px" }}>{kind.toUpperCase()}</span>
+            {traits.map((tr) => {
+              const on = cur[kind].includes(tr);
+              const blocked = !on && (cur[kind === "strengths" ? "weaknesses" : "strengths"].includes(tr) || cur[kind].length >= MAX_TRAITS);
+              return <button key={tr} onClick={() => flip(kind, tr)} disabled={blocked} style={{ ...pill(on, kind === "strengths" ? "#15803d" : "#c8102e"), opacity: blocked ? 0.35 : 1, cursor: blocked ? "default" : "pointer" }}>{tr}</button>;
+            })}
+          </div>
+        )) : <div style={{ paddingLeft: "66px", fontSize: "11px", color: "#8a95a5" }}>No trait list for this position.</div>
+      )}
+      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <input value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => { if (note.trim() !== cur.note.trim()) save({ ...cur, note }); }}
+          placeholder="Note on him (optional)"
+          style={{ flex: 1, minWidth: 0, border: "1px solid #ead9b8", borderRadius: "6px", padding: "4px 8px", fontSize: "11px", fontFamily: "Arial, sans-serif" }} />
+        <SaveState state={state} />
+      </div>
+    </div>
+  );
+}
+
+// Set Starters: the group's players in depth order — the first
+// group.starters start (green), the rest are the bench. Drag a row, or
+// nudge it with the arrows, to move him; every move saves the whole order.
+// Reset goes back to PFF's (most snaps start). ordered: an order's saved.
+// title / slotName: the heading and each starter's label (a role's: "Starter").
+function StarterSlots({ group, list, ordered, onSave, title = "STARTING SLOTS — DRAG TO REORDER", slotName = (i) => `${group.key}${i + 1}`, resetLabel = "Reset to PFF", defaultLabel = "PFF order (most snaps)" }) {
+  const [rows, setRows] = useState(list);
+  const [drag, setDrag] = useState(null);
+  const [state, save] = useSaver(onSave);
+  useEffect(() => { setRows(list); }, [list]);
+  const move = (from, to) => {
+    if (to < 0 || to >= rows.length || from === to) return;
+    const next = [...rows];
+    const [p] = next.splice(from, 1);
+    next.splice(to, 0, p);
+    setRows(next);
+    save(next.map((x) => x.id));
+  };
+  const arrow = { border: "1px solid #d5dbe3", background: "#fff", borderRadius: "4px", width: "22px", height: "20px", fontSize: "10px", cursor: "pointer", padding: 0, color: "#445" };
+  return (
+    <div style={{ padding: "8px 12px", borderBottom: "1px solid #eef1f5", background: "#f3faf5" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+        <span style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", color: "#15803d" }}>{title}</span>
+        <SaveState state={state} />
+        <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 800, color: "#8a95a5" }}>{ordered ? "Your order" : defaultLabel}</span>
+        {ordered && <button onClick={() => save(null)} style={pillBtn(false, BLUE)}>{resetLabel}</button>}
+      </div>
+      {rows.map((p, i) => {
+        const starter = i < group.starters;
+        return (
+          <Fragment key={p.id}>
+            {i === group.starters && <div style={{ borderTop: "2px dashed #b9dcc4", margin: "4px 0", fontSize: "9px", fontWeight: 900, color: "#8a95a5", letterSpacing: "0.1em", paddingTop: "2px" }}>BENCH</div>}
+            <div draggable onDragStart={() => setDrag(i)} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (drag != null) move(drag, i); setDrag(null); }} onDragEnd={() => setDrag(null)}
+              style={{
+                display: "flex", alignItems: "center", gap: "8px", padding: "3px 6px", marginBottom: "2px", borderRadius: "6px", cursor: "grab",
+                background: drag === i ? "#e3f1e7" : "#fff", border: `1px solid ${starter ? "#9fd3b0" : "#e3e7ee"}`,
+              }}>
+              <span style={{ color: "#b0b8c4", fontSize: "12px" }}>⠿</span>
+              <span style={{ width: "40px", fontSize: "10px", fontWeight: 900, color: starter ? "#15803d" : "#8a95a5" }}>{starter ? slotName(i) : `#${i + 1}`}</span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: "12px", fontWeight: starter ? 900 : 700, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.n}</span>
+              <span style={{ fontSize: "10px", fontWeight: 800, color: "#8a95a5" }}>{p.pos}{p.sp != null ? ` · ${Math.round(p.sp)}%` : ""}</span>
+              <button onClick={() => move(i, i - 1)} disabled={i === 0} style={{ ...arrow, opacity: i === 0 ? 0.3 : 1 }} aria-label="Move up">▲</button>
+              <button onClick={() => move(i, i + 1)} disabled={i === rows.length - 1} style={{ ...arrow, opacity: i === rows.length - 1 ? 0.3 : 1 }} aria-label="Move down">▼</button>
+            </div>
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+// The traits a group wants: chips, or (Notes) its trait list to pick from.
+function GroupWants({ wants, editing, traits, onSave }) {
+  const [state, save] = useSaver(onSave);
+  const toggle = (t) => save(wants.includes(t) ? wants.filter((x) => x !== t) : [...wants, t]);
+  const chip = (on) => ({ border: `1px solid ${on ? "#7a3cff" : "#d5dce6"}`, background: on ? "#7a3cff" : "#fff", color: on ? "#fff" : "#33415a", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 800, cursor: editing ? "pointer" : "default", whiteSpace: "nowrap" });
+  return (
+    <div style={{ padding: "8px 12px", borderBottom: "1px solid #eef1f5", background: "#f8f5ff" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+        <span style={{ fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", color: "#7a3cff" }}>WANTS</span>
+        <SaveState state={state} />
+      </div>
+      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+        {editing
+          ? (traits.length ? traits.map((t) => <button key={t} onClick={() => toggle(t)} style={chip(wants.includes(t))}>{t}</button>) : <span style={{ fontSize: "11px", color: "#8a95a5" }}>No trait list for this position.</span>)
+          : wants.map((t) => <span key={t} style={chip(true)}>{t}</span>)}
+      </div>
+    </div>
+  );
+}
+
+// A role as its own group: its need label (NeedsBar, the role's key) and
+// the team's players with the role (their tags — players: everyone on the
+// current depth chart with it, the parent group's first and in its order;
+// the suggestion picks its man the same way, by order, then talent).
+function RoleCard({ role, players, ordered, tags, need, onNeed, suggest, onOrder }) {
+  const [arranging, setArranging] = useState(false);
+  return (
+    <div style={{ background: "#fff", borderRadius: "10px", overflow: "hidden", border: "1px solid #e5e7eb" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", borderBottom: "1px solid #eef1f5" }}>
+        <span style={{ fontSize: "14px", fontWeight: 900, color: "#111" }}>{role.name}</span>
+        <span style={{ fontSize: "10px", fontWeight: 900, color: "#8a95a5", letterSpacing: "0.06em" }}>{role.parent} ROLE</span>
+        <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 800, color: "#8a95a5" }}>{players.length} tagged</span>
+        {players.length > 1 && <button onClick={() => setArranging((v) => !v)} style={pillBtn(arranging, "#15803d")}>{arranging ? "Done" : "Set order"}</button>}
+      </div>
+      <NeedsBar needKey={role.key} value={need} onSave={onNeed} suggest={suggest} />
+      {arranging && players.length > 1 && (
+        <StarterSlots group={{ key: role.key, starters: 1 }} list={players} ordered={ordered} onSave={onOrder}
+          title="ROLE ORDER — DRAG TO REORDER" slotName={() => "Starter"} resetLabel="Reset" defaultLabel="Depth chart order" />
+      )}
+      {players.length ? players.map((p, i) => {
+        const t = talentTag(tags[p.id]?.talent);
+        return (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 12px", borderTop: i ? "1px solid #f3f4f7" : "none", fontSize: "12px" }}>
+            <span style={{ fontWeight: i === 0 ? 900 : 700, color: "#111", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.n}</span>
+            {t && <span style={tagStyle(t.color)}>{t.label}</span>}
+            <span style={{ fontSize: "10px", fontWeight: 800, color: "#8a95a5" }}>{p.pos}{p.sp != null ? ` · ${Math.round(p.sp)}%` : ""}</span>
+            <GradeChip g={p.g} min="34px" />
+          </div>
+        );
+      }) : (
+        <div style={{ padding: "10px 12px", fontSize: "11px", color: "#8a95a5", lineHeight: 1.4 }}>
+          No one tagged yet — tag players in the {role.parent} card&apos;s Notes. Until then Suggest Need goes by PFF&apos;s read of the role.
+        </div>
       )}
     </div>
   );

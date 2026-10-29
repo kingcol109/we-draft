@@ -22,7 +22,7 @@ import { useAuth } from "../context/AuthContext";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { textOn } from "../utils/teamColors";
 import {
-  loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, weeklyYearHref, carriedTradeOf, WEEKLY_YEARS, MAIN_WEEKLY_YEAR,
+  loadWeeklyMockSummary, weeklyMockDate, weeklyMockHref, weeklyYearHref, carriedTradeOf, WEEKLY_YEARS, MAIN_WEEKLY_YEAR, hasTeamPages,
 } from "../utils/weeklyMockNews";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import {
@@ -143,6 +143,8 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   ] : null;
   const nick = (abbr) => teams[abbr]?.Team || (NFL_TEAMS[abbr] || abbr).split(" ").pop();
   const switchYears = WEEKLY_YEARS.filter((y) => y === year || classes?.[y]);
+  // Team pages to link to — none for a whole-mock-only class (2029).
+  const teamPages = weekly && hasTeamPages(year);
   // ShareMockButton takes an already-normalized picks shape — here that's
   // just renaming .selection to .player.
   // The Weekly Mock's trades, each by the pick a team moved up to (saved
@@ -222,7 +224,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
 
-      <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile} leftRail={weekly ? <TeamMocksRail year={year} teams={teams} /> : null}>
+      <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile} leftRail={teamPages ? <TeamMocksRail year={year} teams={teams} /> : null}>
         {weekly ? (
           <>
             <Breadcrumbs items={crumbs} />
@@ -281,14 +283,14 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
           {roundPicks.map((pick, i) => (
             <Fragment key={pick.pickNumber}>
               {tradeCards(pick)}
-              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={weekly ? year : ""} vertical={weekly && isMobile} />
+              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} />
               {weekly && i === Math.min(BANNER_AFTER, roundPicks.length) - 1 && <MakeYourOwnBanner c1={BLUE} c2={GOLD} ink="#fff" isMobile={isMobile} margin="4px 0" />}
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
           ))}
         </div>
         {/* Phones have no side rail: every team's mock, at the bottom. */}
-        {weekly && isMobile && <div style={{ marginTop: 22 }}><TeamMocksRail year={year} teams={teams} columns={8} /></div>}
+        {teamPages && isMobile && <div style={{ marginTop: 22 }}><TeamMocksRail year={year} teams={teams} columns={8} /></div>}
       </MockPageShell>
     </>
   );
@@ -388,9 +390,9 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
             )}
             {player ? (
               <>
-                {/* A player with no slug has no page to link to. */}
+                {/* A player with no slug has no page to link to; one with a page is underlined. */}
                 {player.Slug ? (
-                  <Link to={`/player/${player.Slug}`} style={{ display: "block", fontSize: isMobile ? 18 : 24, fontWeight: 900, color: INK, textTransform: "uppercase", lineHeight: 1.05, textDecoration: "none", overflowWrap: "anywhere" }}>
+                  <Link to={`/player/${player.Slug}`} style={{ display: "block", fontSize: isMobile ? 18 : 24, fontWeight: 900, color: BLUE, textTransform: "uppercase", lineHeight: 1.05, textDecoration: "underline", textDecorationThickness: 1, textUnderlineOffset: 3, overflowWrap: "anywhere" }}>
                     {player.First} {player.Last}
                   </Link>
                 ) : (

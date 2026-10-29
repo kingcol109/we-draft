@@ -1,6 +1,6 @@
 import { buildBoard } from "./engine";
 import { acceptOffer } from "./engine";
-import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, replayNotes } from "./weeklyMock";
+import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, replayNotes, randomOrder, WEEKLY_ROUNDS_BY_YEAR } from "./weeklyMock";
 import { pickNote } from "./pickNotes";
 import { applyPlayerTakes } from "./analysts";
 
@@ -377,3 +377,16 @@ test("this year's trades of next year's picks carry onto its order", () => {
   expect(next[1].Traded).toBeUndefined();
 });
 
+
+test("2029 weekly mock: one round, every team with its own pick, in a random order, no trades", () => {
+  const teams = Array.from({ length: 32 }, (_, i) => `T${i}`);
+  let seed = 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const order = randomOrder(teams, rand);
+  expect(order.map((p) => p.Pick)).toEqual(teams.map((_, i) => i + 1));
+  expect(order.every((p) => p.Round === 1 && !p.Traded)).toBe(true);
+  expect([...order.map((p) => p.Team)].sort()).toEqual([...teams].sort());
+  expect(order.map((p) => p.Team)).not.toEqual(teams);
+  expect(WEEKLY_ROUNDS_BY_YEAR[2029]).toBe(1);
+  expect(WEEKLY_TRADES_BY_YEAR[2029]).toBe("off");
+});

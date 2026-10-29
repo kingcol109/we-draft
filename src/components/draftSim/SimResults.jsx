@@ -16,15 +16,17 @@ import { haulRecords, simShareText, simCallToAction, mockShareText, simUrl } fro
 import MockShareCard, { shareRow } from "../MockShareCard";
 import * as htmlToImage from "html-to-image";
 import { useAuth } from "../../context/AuthContext";
-import { teamHaul, NEED_KEY_NAMES, pickName } from "../../utils/draftSim/engine";
+import { teamHaul, needName, groupedNeeds, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
-import { SIM_YEAR, teamNamer } from "../../utils/draftSim/data";
+import { teamNamer } from "../../utils/draftSim/data";
+import { PROFILE_PATH } from "../../utils/draftSim/simProfile";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
 import { withoutPageZoom } from "../../utils/pageZoom";
 import { Avatar, Verified } from "./SimFeed";
 import { saveSim, setSimVisibility, listable, RECENT_PATH } from "../../utils/draftSim/publicSims";
 import { SimSnapshot } from "./SimProfile";
+import { RunBadges, EndBadges, SignUpPanel } from "./SimBadges";
 import MockExport from "./MockExport";
 import { PlayerName } from "./FitName";
 
@@ -41,7 +43,11 @@ const btn = { border: "none", borderRadius: 999, padding: "9px 16px", cursor: "p
 // mock: a Mock Draft mode run — the export-as-mock-draft panel up top.
 // onUndo (Mock Draft mode): take back the last pick, back into the draft.
 // counted: this run counts toward the Sim Profile (default settings — utils/draftSim/simProfile.js onDefaults).
-export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo }) {
+// badges: the badges this run unlocked (useSimBadges runEarned) — under the
+// profile snapshot, or signed out in the sign-up pitch in its place (a Mock
+// Draft's: across the top); badgeTotal: how many there are to earn.
+export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, onNew, mock = false, counted = false, onUndo, badges = [], badgeTotal = 0 }) {
+  const { user, login } = useAuth();
   const brand = (t) => data.branding[t] || {};
   const userHauls = useMemo(() => sim.userTeams.map((t) => teamHaul(sim, t)), [sim]);
   // Isaac's line per team, picked once (it draws on the desk's rng).
@@ -62,6 +68,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
           <button onClick={onRerun} style={{ ...btn, background: "#1a2438", color: "#fff" }}>START OVER</button>
           <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>SETTINGS</button>
         </div>
+        <RunBadges badges={badges} signedIn={!!user} login={login} />
         <MockExport sim={sim} year={data.year} isMobile={isMobile} onUndo={onUndo} />
         <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />
       </div>
@@ -104,7 +111,12 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
           {userHauls.length === 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 3} />}
         </div>
         {/* The user's Sim Profile beside their report card; every team's grade at the bottom. */}
-        <SimSnapshot branding={data.branding} names={teamNamer(data.branding).teamName} year={data.year} counted={counted} />
+        {user ? (
+          <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
+            <SimSnapshot branding={data.branding} names={teamNamer(data.branding).teamName} year={data.year} counted={counted} />
+            <EndBadges badges={badges} max={isMobile ? 3 : 4} />
+          </div>
+        ) : <SignUpPanel badges={badges} total={badgeTotal} login={login} />}
       </div>
 
       {userHauls.length > 0 && <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} />}
@@ -112,6 +124,11 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
     </div>
   );
 }
+
+// Needs by name (groupedNeeds — a guard and a center are one Interior
+// O-Line, "(1 of 2)" while only one's filled).
+const needLabel = (n) => `${needName(n.key)}${n.count && n.count.filled < n.count.of ? ` (${n.count.filled} of ${n.count.of})` : ""}`;
+const names = (list) => list.map(needLabel).join(", ");
 
 function ReportCard({ h, b, take, isMobile }) {
   const c1 = b.Color1 || BLUE;
@@ -143,9 +160,9 @@ function ReportCard({ h, b, take, isMobile }) {
           late (round 3 on), or left open. */}
       {h.needs?.items?.length > 0 && (
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid #1f2b42", fontSize: 12, fontFamily: BODY }}>
-          <span style={{ color: "#4ade80", fontWeight: 800 }}>Needs met: {h.needs.met.length ? h.needs.met.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ") : "none"}</span>
-          {h.needs.late.length > 0 && <span style={{ color: GOLD, fontWeight: 800 }}>Answered late: {h.needs.late.map((n) => `${NEED_KEY_NAMES[n.key] || n.key} (R${n.round})`).join(", ")}</span>}
-          {h.needs.open.length > 0 && <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Still open: {h.needs.open.map((n) => NEED_KEY_NAMES[n.key] || n.key).join(", ")}</span>}
+          <span style={{ color: "#4ade80", fontWeight: 800 }}>Needs met: {groupedNeeds(h.needs).met.length ? names(groupedNeeds(h.needs).met) : "none"}</span>
+          {groupedNeeds(h.needs).late.length > 0 && <span style={{ color: GOLD, fontWeight: 800 }}>Answered late: {groupedNeeds(h.needs).late.map((n) => `${needLabel(n)} (R${n.round})`).join(", ")}</span>}
+          {groupedNeeds(h.needs).open.length > 0 && <span style={{ color: "#ff8a9a", fontWeight: 800 }}>Still open: {names(groupedNeeds(h.needs).open)}</span>}
         </div>
       )}
       {h.rows.length === 0 && <div style={{ padding: 16, color: "#8b9bb4", fontFamily: BODY, fontSize: 13 }}>No picks in this sim — they traded out.</div>}
@@ -162,7 +179,7 @@ function ReportCard({ h, b, take, isMobile }) {
               </span>
               {need && (
                 <span style={{ display: "block", color: need.label === "Crowded Room" ? "#ff8a9a" : "#4ade80", fontSize: 11, fontWeight: 800, fontFamily: BODY }}>
-                  {need.label === "Crowded Room" ? "Crowded room" : "Need met"}: {NEED_KEY_NAMES[need.key] || need.key} ({need.label})
+                  {need.label === "Crowded Room" ? "Crowded room" : "Need met"}: {needName(need.key)} ({need.label})
                 </span>
               )}
             </span>
@@ -290,7 +307,7 @@ function SaveButton({ sim, data, hauls, speed, full }) {
     const isPublic = saved.visibility === "public";
     return (
       <span style={{ display: full ? "flex" : "inline-flex", flexDirection: full ? "column" : "row", alignItems: full ? "stretch" : "center", gap: 6 }}>
-        <Link to={`/draftsim${data.year === SIM_YEAR ? "" : `/${data.year}`}?tab=saved`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none", ...(full ? { textAlign: "center", whiteSpace: "normal" } : {}) }}>{full ? "SAVED ✓ MY DRAFTS" : "SAVED ✓ VIEW MY DRAFTS"}</Link>
+        <Link to={`${PROFILE_PATH}?view=drafts`} style={{ ...btn, background: "#163a24", color: "#7ee2a0", textDecoration: "none", ...(full ? { textAlign: "center", whiteSpace: "normal" } : {}) }}>{full ? "SAVED ✓ MY DRAFTS" : "SAVED ✓ VIEW MY DRAFTS"}</Link>
         {listable(saved) && (
           <button onClick={toggle} disabled={toggling} title={isPublic ? "Showing on Recent Drafts — tap to make it private" : "Private — tap to show it on Recent Drafts"}
             style={{ ...btn, padding: "7px 12px", fontSize: 11, background: "transparent", color: isPublic ? "#7ee2a0" : "#9fb0c8", border: `1px solid ${isPublic ? "#2e7d4f" : "#2a3a58"}` }}>

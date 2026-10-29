@@ -58,6 +58,17 @@ export function SavedTeamCard({ t, branding, teamName, maxPicks = Infinity }) {
             SHOW ALL {picks.length} PICKS ▾
           </button>
         )}
+        {/* Next year's picks traded for or away (this year's are the picks above). */}
+        {t.future && (t.future.got.length > 0 || t.future.gave.length > 0) && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, padding: "6px 12px 4px", borderTop: "1px solid #18233a" }}>
+            {[...t.future.got.map((m) => ({ ...m, got: true })), ...t.future.gave].map((m, i) => (
+              <span key={i} title={m.got ? `From the ${teamName(m.team)}` : `To the ${teamName(m.team)}`} style={{
+                padding: "3px 8px", borderRadius: 7, fontSize: 11, fontWeight: 900, fontFamily: BODY,
+                background: m.got ? "rgba(63,185,80,0.14)" : "rgba(248,81,73,0.12)", color: m.got ? "#7ee08a" : "#ff8a80", border: `1px solid ${m.got ? "#2f6b3a" : "#6b2f2f"}`,
+              }}>{m.got ? "+" : "−"} {m.year} R{m.round} <span style={{ fontWeight: 700, opacity: 0.8 }}>{m.got ? "from" : "to"} {m.team}</span></span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -114,18 +125,23 @@ export default function SavedSims({ branding = {}, isMobile }) {
   if (!sims) return <LoadingSpinner label="Loading your drafts" size={32} minHeight="30vh" />;
   if (!sims.length) return empty(<>No saved drafts yet. Finish a draft and hit <strong style={{ color: "#fff" }}>Save to Profile</strong> — it shows up here.</>);
 
+  // A card per draft, side by side: its class, then its tools under it.
   return (
-    <div style={{ display: "grid", gap: 14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: 12, alignItems: "start" }}>
       {sims.map((s) => {
         const text = simShareText({ year: s.year, teams: s.teams || [], teamName });
         const date = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
         const isPublic = s.visibility === "public";
         return (
           <div key={s.id} style={PANEL}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", borderBottom: "1px solid #1f2b42" }}>
-              <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: "0.14em" }}>{s.year} DRAFT SIM</span>
-              <span style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>{[date, s.rounds ? `${s.rounds} round${s.rounds === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}</span>
-              <span style={{ flex: 1 }} />
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "8px 12px 0" }}>
+              <span style={{ color: "#fff", fontWeight: 900, fontSize: 11, letterSpacing: "0.14em" }}>{s.year} DRAFT SIM</span>
+              <span style={{ color: "#8b9bb4", fontSize: 11, fontFamily: BODY }}>{[date, s.rounds ? `${s.rounds} round${s.rounds === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}</span>
+            </div>
+            <div style={{ display: "grid", gap: 8, padding: "8px 10px" }}>
+              {(s.teams || []).map((t) => <SavedTeamCard key={t.team} t={t} branding={branding} teamName={teamName} />)}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "0 10px 10px" }}>
               {listable(s) && (
                 <button onClick={() => toggle(s)} disabled={busy === s.id} title={isPublic ? "Showing on Recent Drafts — make it private" : "Private — show it on Recent Drafts"}
                   style={{ ...action, color: isPublic ? "#7ee2a0" : "#9fb0c8", borderColor: isPublic ? "#2e7d4f" : "#2a3a58" }}>
@@ -134,10 +150,7 @@ export default function SavedSims({ branding = {}, isMobile }) {
               )}
               <a href={`sms:?&body=${encodeURIComponent(text)}`} style={action}>💬 TEXT</a>
               <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={action}>𝕏 POST</a>
-              <button onClick={() => remove(s.id)} style={{ ...action, color: "#f85149" }}>DELETE</button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: 10, padding: 12 }}>
-              {(s.teams || []).map((t) => <SavedTeamCard key={t.team} t={t} branding={branding} teamName={teamName} />)}
+              <button onClick={() => remove(s.id)} style={{ ...action, color: "#f85149", marginLeft: "auto" }}>DELETE</button>
             </div>
           </div>
         );

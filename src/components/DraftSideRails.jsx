@@ -88,24 +88,53 @@ export function TopProspectsRail({ year }) {
 // The newest Draft-tagged long-form videos (no Shorts or scheduled ones), in
 // the player pages' Videos card. One small indexed query; a wider scan of
 // the newest videos if the index isn't deployed yet.
+// playerIds (a team's Weekly Mock page — its drafted players): their own
+// videos first, newest first — any tag but Recruiting (CFB ones count),
+// each with that player's own title / thumb — then the Draft ones fill out
+// the card. One videos query per 30 players (array-contains-any's cap).
+const live = (x) => !!x.Video && x.Short !== true && (!x.PublishAt || toMs(x.PublishAt) <= Date.now());
 const toCard = (d) => {
   const x = d.data();
   const first = Array.isArray(x.items) ? x.items[0] : null;
   return {
     id: d.id, video: x.Video || "", title: x.GenTitle || first?.title || "", thumb: x.GenThumb || first?.thumb || "",
-    ok: !!x.Video && x.Short !== true && (x.Tags || []).includes("Draft") && (!x.PublishAt || toMs(x.PublishAt) <= Date.now()),
+    ok: live(x) && (x.Tags || []).includes("Draft"),
   };
 };
-export function RecentVideosRail() {
+async function playerVideos(ids) {
+  const idSet = new Set(ids);
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+  const snaps = await Promise.all(chunks.map((c) => getDocs(query(collection(db, "videos"), where("playerIds", "array-contains-any", c)))));
+  const seen = new Set();
+  return snaps.flatMap((s) => s.docs)
+    .filter((d) => !seen.has(d.id) && seen.add(d.id))
+    .filter((d) => live(d.data()) && !(d.data().Tags || []).includes("Recruiting"))
+    .sort((a, b) => toMs(b.data().Date) - toMs(a.data().Date))
+    .map((d) => {
+      const x = d.data();
+      const items = Array.isArray(x.items) ? x.items : [];
+      const mine = items.find((it) => idSet.has(it.playerId)) || items[0] || null;
+      return { id: d.id, video: x.Video || "", title: mine?.title || x.GenTitle || "", thumb: mine?.thumb || x.GenThumb || "" };
+    });
+}
+export function RecentVideosRail({ playerIds = null }) {
   const [videos, setVideos] = useState(null);
+  const key = (playerIds || []).join(",");
   useEffect(() => {
     let cancelled = false;
-    getDocs(query(collection(db, "videos"), where("Tags", "array-contains", "Draft"), orderBy("Date", "desc"), limit(VIDEO_FETCH)))
+    const draft = getDocs(query(collection(db, "videos"), where("Tags", "array-contains", "Draft"), orderBy("Date", "desc"), limit(VIDEO_FETCH)))
       .catch(() => getDocs(query(collection(db, "videos"), orderBy("Date", "desc"), limit(VIDEO_SCAN))))
-      .then((snap) => { if (!cancelled) setVideos(snap.docs.map(toCard).filter((v) => v.ok)); })
-      .catch(() => { if (!cancelled) setVideos([]); });
+      .then((snap) => snap.docs.map(toCard).filter((v) => v.ok))
+      .catch(() => []);
+    const theirs = key ? playerVideos(key.split(",")).catch(() => []) : Promise.resolve([]);
+    Promise.all([theirs, draft]).then(([own, generic]) => {
+      if (cancelled) return;
+      const ownIds = new Set(own.map((v) => v.id));
+      setVideos([...own, ...generic.filter((v) => !ownIds.has(v.id))].slice(0, Math.max(VIDEO_FETCH, own.length)));
+    });
     return () => { cancelled = true; };
-  }, []);
+  }, [key]);
   if (!videos?.length) return null;
   return <PlayerVideosCard videos={videos} initialCount={VIDEOS_SHOWN} />;
 }
