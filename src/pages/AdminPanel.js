@@ -24,6 +24,7 @@ import AdminStreamManager from "../components/AdminStreamManager";
 import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
 import AdminCoachHistory from "../components/AdminCoachHistory";
+import { NFL_TEAMS } from "../utils/coachHistory";
 import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
@@ -3537,10 +3538,17 @@ const TRAIT_SOURCE_OPTIONS = [
 // edits saved this session) plus fresh reads of players, every player's
 // evaluations (one subcollection read each, chunked), draftOrder, schools,
 // and ads — ~4-5k reads per click. Each doc is size-checked (Firestore's
-// 1 MiB cap) before anything is written, and everything goes in one
-// batch, so a failure leaves the previous snapshots fully intact. ──
+// 1 MiB cap) before anything is written. The writes go in several
+// commits, so one failing partway leaves some docs new and the rest from
+// the last build — rebuilding again sets them all. ──
 const COMP_SNAPSHOT_MAX_BYTES = 900 * 1024;
 const EVAL_READ_CHUNK = 50;
+// The browser's commits are smaller than the weekly job's: the web SDK sends
+// each value wrapped in its type ({"integerValue":"5"}), 2–3× the raw JSON,
+// so a 3 MB chunk went out near Firestore's 10 MiB request cap and the SDK
+// retried it forever. 1 MB raw keeps each commit around 3 MiB on the wire.
+const SNAPSHOT_COMMIT_BYTES_WEB = 1024 * 1024;
+const SNAPSHOT_COMMIT_TIMEOUT_MS = 90 * 1000;
 
 function CompSnapshotRebuild({ records }) {
   const [meta, setMeta] = useState(null);
@@ -3594,13 +3602,18 @@ function CompSnapshotRebuild({ records }) {
         if (bytes > COMP_SNAPSHOT_MAX_BYTES) throw new Error(`${id} is ${Math.round(bytes / 1024)}KB — too large for one document`);
       });
 
-      // Several MB in all — committed in chunks under Firestore's per-commit cap.
-      const chunks = snapshotCommitChunks(built);
+      // Several MB in all — committed in chunks under Firestore's per-commit
+      // cap; a commit that doesn't come back fails the rebuild, not hangs it.
+      const chunks = snapshotCommitChunks(built, SNAPSHOT_COMMIT_BYTES_WEB);
       for (let i = 0; i < chunks.length; i += 1) {
         setMessage(`Writing… ${i + 1}/${chunks.length}`);
         const batch = writeBatch(db);
         chunks[i].forEach(({ id, data }) => batch.set(doc(db, "compSnapshots", id), { ...data, builtAt: serverTimestamp(), builtBy: "admin" }));
-        await batch.commit();
+        let timer;
+        await Promise.race([
+          batch.commit(),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`write ${i + 1}/${chunks.length} didn't finish in ${SNAPSHOT_COMMIT_TIMEOUT_MS / 1000}s — check your connection and try again`)), SNAPSHOT_COMMIT_TIMEOUT_MS); }),
+        ]).finally(() => clearTimeout(timer));
       }
 
       const m = built.find((d) => d.id === "_meta").data;
@@ -9134,6 +9147,14 @@ const CONTENT_TABS = [
   { key: "game", label: "Games" },
   { key: "article", label: "Articles" },
   { key: "comparison", label: "Comparisons" },
+  { key: "draftsim", label: "Draft Sim" },
+  { key: "mock", label: "Mocks" },
+  { key: "nfl", label: "NFL Teams" },
+  { key: "staff", label: "Staff" },
+  { key: "board", label: "Boards" },
+  { key: "live", label: "Live" },
+  { key: "team", label: "College Teams" },
+  { key: "cfb", label: "CFB" },
 ];
 
 function AnalyticsSection() {
@@ -9939,10 +9960,133 @@ async function fetchComparisonRows() {
     });
 }
 
+// The analytics docs the sync has written for a type → [slug] (most of the
+// newer tabs list only pages that have had views). seenPaths: slug → the
+// page's URL as the sync saw it (its `path`, on docs synced since it was
+// added) — a row's link when the slug alone can't rebuild it.
+async function fetchSeen(type) {
+  const snap = await getDocs(query(collection(db, "analytics"), where("type", "==", type)));
+  const paths = new Map();
+  snap.docs.forEach((d) => { const x = d.data(); if (x.slug) paths.set(x.slug, x.path || null); });
+  return paths;
+}
+async function fetchSeenSlugs(type) {
+  return [...(await fetchSeen(type)).keys()];
+}
+// "we-pick-standings" → "We Pick Standings"
+const titleWords = (slug) => slug.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+const nflTeamName = (abbr) => NFL_TEAMS[String(abbr || "").toUpperCase()] || String(abbr || "").toUpperCase();
+// Slugs and links per syncGoogleAnalytics.js PAGE_TYPES: "hub" is the bare
+// page, multi-part paths are joined with "-" (2027-nyj ↔ /draftsim/2027/nyj).
+const DRAFTSIM_PAGES = { hub: "Draft Sim", live: "On the Clock (live)", community: "Community drafts", recent: "Recent sims", profile: "Sim profile" };
+async function fetchDraftSimRows() {
+  return (await fetchSeenSlugs("draftsim")).map((slug) => {
+    const [a, b] = slug.split("-");
+    const year = /^\d{4}$/.test(a);
+    // /draftsim/2028 is a class's sim, /draftsim/nyj and /draftsim/2027/nyj a team's.
+    const team = b && year ? { year: a, abbr: b } : !DRAFTSIM_PAGES[slug] && !year ? { abbr: a } : null;
+    return {
+      slug,
+      title: DRAFTSIM_PAGES[slug] || (team ? `${nflTeamName(team.abbr)} Draft Sim` : `${a} Draft Sim`),
+      subtitle: team ? ["Team sim", team.year].filter(Boolean).join(" · ") : year ? "Class" : "Page",
+      href: slug === "hub" ? "/draftsim" : `/draftsim/${team?.year ? `${team.year}/${team.abbr}` : slug}`,
+      dateMs: 0,
+    };
+  });
+}
+const MOCK_PAGES = { hub: "Mock Draft Central", my: "My Mocks", create: "Create a mock", view: "Users' shared mocks (all)", editor: "Mock editor (all)" };
+async function fetchMockRows() {
+  return (await fetchSeenSlugs("mock")).map((slug) => {
+    const [a, b] = slug.split("-");
+    const year = /^\d{4}$/.test(a);
+    return {
+      slug,
+      title: MOCK_PAGES[slug] || (year ? `${a} Weekly Mock` : `${nflTeamName(a)} mock${b ? ` · ${b}` : ""}`),
+      subtitle: MOCK_PAGES[slug] ? "Page" : year ? "Weekly Mock class" : "Team mock",
+      href: slug === "hub" ? "/mocks" : slug === "view" || slug === "editor" ? null : `/mocks/${b ? `${a}/${b}` : a}`,
+      dateMs: 0,
+    };
+  });
+}
+async function fetchNflRows() {
+  // Every team, views or not, plus the /nfl hub.
+  return [
+    { slug: "hub", title: "NFL (all teams)", subtitle: "Page", href: "/nfl", dateMs: 0 },
+    ...Object.entries(NFL_TEAMS).map(([abbr, name]) => ({ slug: abbr.toLowerCase(), title: name, subtitle: abbr, href: `/nfl/${abbr.toLowerCase()}`, dateMs: 0 })),
+  ];
+}
+async function fetchStaffRows() {
+  const [slugs, coachSnap] = await Promise.all([fetchSeenSlugs("staff"), getDocs(query(collection(db, "coaches"), where("Status", "==", "current")))]);
+  const coaches = new Map(coachSnap.docs.map((d) => [d.id, d.data()]));
+  return slugs.map((slug) => {
+    const c = coaches.get(slug);
+    const now = c?.Current || [];
+    return {
+      slug,
+      title: c?.Name || slug,
+      subtitle: now.length ? now.map((x) => `${x.Role} · ${x.Team}`).join(", ") : c ? "" : "Not a current coach",
+      dateMs: 0,
+    };
+  });
+}
+
+async function fetchBoardRows() {
+  return (await fetchSeenSlugs("board")).map((slug) => {
+    const [year, pos] = slug.split("-");
+    return {
+      slug,
+      title: slug === "hub" ? "Community Board" : pos ? `${year} ${pos.toUpperCase()} board` : `${year} big board`,
+      subtitle: slug === "hub" ? "Page" : pos ? "Position board" : "Class board",
+      href: slug === "hub" ? "/community" : `/community/${year}${pos ? `/${pos}` : ""}`,
+      dateMs: 0,
+    };
+  });
+}
+async function fetchLiveRows() {
+  const seen = await fetchSeen("live");
+  return [...seen].map(([slug, path]) => ({
+    slug,
+    title: slug === "hub" ? "We-Draft Live" : titleWords(slug),
+    subtitle: slug === "hub" ? "Page" : "Live page",
+    href: slug === "hub" ? "/live" : path || null,
+    dateMs: 0,
+  }));
+}
+async function fetchCollegeTeamRows() {
+  const [slugs, schoolSnap] = await Promise.all([fetchSeenSlugs("team"), getDocs(collection(db, "schools"))]);
+  const bySlug = new Map();
+  schoolSnap.docs.forEach((d) => { const x = d.data(); if (x.Slug) bySlug.set(String(x.Slug).toLowerCase(), x); });
+  return slugs.map((slug) => {
+    const sc = bySlug.get(slug);
+    return { slug, title: sc?.School || titleWords(slug), subtitle: sc ? sc.Conference || "" : "School not found", dateMs: 0 };
+  });
+}
+async function fetchCfbRows() {
+  const seen = await fetchSeen("cfb");
+  return [...seen].map(([slug, path]) => {
+    const [section, ...rest] = slug.split("-");
+    return {
+      slug,
+      title: slug === "hub" ? "College Football" : `${titleWords(section)}${rest.length ? ` · ${titleWords(rest.join("-"))}` : ""}`,
+      subtitle: slug === "hub" ? "Page" : titleWords(section),
+      href: slug === "hub" ? "/cfb" : path || null,
+      dateMs: 0,
+    };
+  });
+}
+
 const CONTENT_ANALYTICS_CONFIG = {
   game: { label: "Games", noun: "game", publicPrefix: "/live/", fetchRows: fetchGameRows },
   article: { label: "Articles", noun: "article", publicPrefix: "/news/", fetchRows: fetchArticleRows },
   comparison: { label: "Comparisons", noun: "comparison", publicPrefix: "/comparison/", fetchRows: fetchComparisonRows },
+  draftsim: { label: "Draft Sim", noun: "page", publicPrefix: "/draftsim/", fetchRows: fetchDraftSimRows },
+  mock: { label: "Mocks", noun: "page", publicPrefix: "/mocks/", fetchRows: fetchMockRows },
+  nfl: { label: "NFL Teams", noun: "team", publicPrefix: "/nfl/", fetchRows: fetchNflRows },
+  staff: { label: "Staff", noun: "coach", publicPrefix: "/staff/", fetchRows: fetchStaffRows },
+  board: { label: "Boards", noun: "board", publicPrefix: "/community/", fetchRows: fetchBoardRows },
+  live: { label: "Live", noun: "page", publicPrefix: "/live/", fetchRows: fetchLiveRows },
+  team: { label: "College Teams", noun: "team", publicPrefix: "/team/", fetchRows: fetchCollegeTeamRows },
+  cfb: { label: "CFB", noun: "page", publicPrefix: "/cfb/", fetchRows: fetchCfbRows },
 };
 
 // ── Games/Articles page-view table — one reusable component driven by
@@ -10131,9 +10275,12 @@ function ContentAnalyticsTable({ type }) {
               {filtered.map((r, i) => (
                 <tr key={type + "-" + r.slug + "-" + i} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
                   <td style={{ padding: "9px 10px", fontWeight: 900, fontSize: "13px" }}>
-                    <a href={config.publicPrefix + r.slug} target="_blank" rel="noopener noreferrer" style={{ color: BLUE, textDecoration: "none" }}>
-                      {r.title}
-                    </a>
+                    {/* href: a row's own link (null — no single page, e.g. all users' mocks). */}
+                    {r.href === null ? <span style={{ color: BLUE }}>{r.title}</span> : (
+                      <a href={r.href || config.publicPrefix + r.slug} target="_blank" rel="noopener noreferrer" style={{ color: BLUE, textDecoration: "none" }}>
+                        {r.title}
+                      </a>
+                    )}
                   </td>
                   <td style={{ padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666" }}>{r.subtitle || "—"}</td>
                   <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#999", textAlign: "right", whiteSpace: "nowrap" }}>

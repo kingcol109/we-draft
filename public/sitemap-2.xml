@@ -677,6 +677,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/chase-sowell-2027-wr</loc>
+    <lastmod>2026-10-30</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/chauncey-bowens-2027-rb</loc>
     <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
@@ -4994,11 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/noah-fifita-2027-qb</loc>
     <lastmod>2026-08-26</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/noah-thomas-2026-wr</loc>
-    <lastmod>2026-10-30</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>

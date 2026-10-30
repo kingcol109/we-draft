@@ -16,9 +16,41 @@
 // same transaction as the voter's own record (users/{uid}/chatVotes/{gameId}
 // — { [msgId]: 1 | -1 }, readable only by them), so a vote can't double
 // count. Signed in, not chat-banned, not on your own message.
+//
+// On the Clock's chat (/draftsim/live, pages/DraftSimLive.jsx) is the same
+// thing for a show: { showId } in place of { gameId }. Its messages are
+// simShows/{id}/chat/{msg}, open from SHOW_CHAT_EARLY_MS before the stream
+// goes up until the show ends (config/onTheClockShows — the schedule), and
+// its votes users/{uid}/chatVotes/otc-{id}.
 
 const WEB_API_KEY = "AIzaSyCdxYPX6WjKEd_x8nKPqpXuqPAsE6k8op4"; // public web key (src/firebase.js)
 const RATE_MS = 4000;
+const SHOW_CHAT_EARLY_MS = 60 * 60 * 1000; // utils/draftSim/onTheClock.js SHOW_CHAT_EARLY_MS
+
+// The chat a request is for: a live game's or a show's.
+function roomOf(body) {
+  const showId = String(body?.showId || "");
+  if (showId) return /^\d{4}-\d{2}-\d{2}$/.test(showId) ? { col: "simShows", id: showId, votesKey: `otc-${showId}` } : null;
+  const gameId = String(body?.gameId || "");
+  return /^\d+$/.test(gameId) ? { col: "liveGames", id: gameId, votesKey: gameId } : null;
+}
+
+// Why the room's closed to new messages, or "" when it's open.
+async function closedWhy(db, room) {
+  if (room.col === "simShows") {
+    const e = (await db.collection("config").doc("onTheClockShows").get()).data()?.shows?.[room.id];
+    const now = Date.now();
+    if (!e) return "Unknown show.";
+    if (now >= e.endsAt) return "Chat is closed — this show is over.";
+    if (now < (e.streamAt ?? e.startAt) - SHOW_CHAT_EARLY_MS) return "Chat opens an hour before the show.";
+    return "";
+  }
+  // Open from game week (the game's liveGames doc exists — /live is
+  // tracking it) through the final whistle: pregame and live.
+  const status = (await db.collection("liveGames").doc(room.id).get()).data()?.status;
+  if (status === "scheduled" || status === "in_progress") return "";
+  return status === "final" ? "Chat is closed — this game is final." : "Chat opens game week.";
+}
 
 async function uidFromToken(idToken) {
   const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${WEB_API_KEY}`, {
@@ -28,7 +60,7 @@ async function uidFromToken(idToken) {
   return (await r.json()).users?.[0]?.localId || null;
 }
 
-async function vote(req, res, uid, gameId) {
+async function vote(req, res, uid, room) {
   const msgId = String(req.body?.msgId || "");
   const v = Number(req.body?.vote);
   if (!/^[A-Za-z0-9]{1,40}$/.test(msgId) || ![1, -1, 0].includes(v)) return res.status(400).json({ error: "Bad vote." });
@@ -36,8 +68,8 @@ async function vote(req, res, uid, gameId) {
   const { FieldValue } = require("firebase-admin/firestore");
   const db = getFirestore();
   if ((await db.collection("users").doc(uid).get()).data()?.chatBanned) return res.status(403).json({ error: "You can't vote in chat." });
-  const msgRef = db.collection("liveGames").doc(gameId).collection("chat").doc(msgId);
-  const mineRef = db.collection("users").doc(uid).collection("chatVotes").doc(gameId);
+  const msgRef = db.collection(room.col).doc(room.id).collection("chat").doc(msgId);
+  const mineRef = db.collection("users").doc(uid).collection("chatVotes").doc(room.votesKey);
   const result = await db.runTransaction(async (tx) => {
     const [msg, mine] = await Promise.all([tx.get(msgRef), tx.get(mineRef)]);
     if (!msg.exists) return { status: 404, error: "That message is gone." };
@@ -63,9 +95,9 @@ module.exports = async function handler(req, res) {
     const uid = await uidFromToken(token);
     if (!uid) return res.status(401).json({ error: "Log in to chat." });
 
-    const gameId = String(req.body?.gameId || "");
-    if (!/^\d+$/.test(gameId)) return res.status(400).json({ error: "Unknown game." });
-    if (req.body?.action === "vote") return await vote(req, res, uid, gameId);
+    const room = roomOf(req.body);
+    if (!room) return res.status(400).json({ error: req.body?.showId ? "Unknown show." : "Unknown game." });
+    if (req.body?.action === "vote") return await vote(req, res, uid, room);
     const text = String(req.body?.text || "").trim();
     const { chatProblem } = await import("../src/utils/chatFilter.mjs");
     const problem = chatProblem(text);
@@ -74,19 +106,14 @@ module.exports = async function handler(req, res) {
     const { getFirestore } = require("../scripts/firebaseAdmin");
     const { FieldValue } = require("firebase-admin/firestore");
     const db = getFirestore();
-    const [userSnap, gameSnap] = await Promise.all([db.collection("users").doc(uid).get(), db.collection("liveGames").doc(gameId).get()]);
+    const [userSnap, closed] = await Promise.all([db.collection("users").doc(uid).get(), closedWhy(db, room)]);
     const user = userSnap.data() || {};
     if (user.chatBanned) return res.status(403).json({ error: "You can't post in chat." });
-    // Open from game week (the game's liveGames doc exists — /live is
-    // tracking it) through the final whistle: pregame and live.
-    const status = gameSnap.data()?.status;
-    if (status !== "scheduled" && status !== "in_progress") {
-      return res.status(400).json({ error: status === "final" ? "Chat is closed — this game is final." : "Chat opens game week." });
-    }
+    if (closed) return res.status(400).json({ error: closed });
 
     // Rate limit + write together, so two quick sends can't both pass.
     const rateRef = db.collection("liveChatRate").doc(uid);
-    const msgRef = db.collection("liveGames").doc(gameId).collection("chat").doc();
+    const msgRef = db.collection(room.col).doc(room.id).collection("chat").doc();
     const now = Date.now();
     const ok = await db.runTransaction(async (tx) => {
       const last = (await tx.get(rateRef)).data()?.at || 0;

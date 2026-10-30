@@ -1,5 +1,5 @@
 import { buildBoard } from "./engine";
-import { buildShowScript, showTimeline, momentAt, postsAt, showTimes, startForFirstPick, spotlightOf, spotlights, pregamePosts, firstOnClock, easternClock, SPOTLIGHT, SPOTLIGHT_DEPTH, INTRO_MS, ROUND_BREAK_MS, PACE, PRESHOW_MS } from "./onTheClock";
+import { buildShowScript, showTimeline, momentAt, postsAt, showTimes, startForFirstPick, spotlightOf, spotlights, pregamePosts, firstOnClock, easternClock, ownersAt, tradesAired, SPOTLIGHT, SPOTLIGHT_DEPTH, INTRO_MS, ROUND_BREAK_MS, PACE, PRESHOW_MS } from "./onTheClock";
 import { minutesBefore, easternTime } from "./onTheClockData";
 
 const POS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB"];
@@ -127,4 +127,27 @@ test("on the clock: the countdown shows the admin's first-pick time, in Eastern"
     // The desk's line says the same time.
     expect(pregamePosts(s).some((p) => p.text.includes("at 6:00 PM ET"))).toBe(true);
   }
+});
+
+test("on the clock: the order on screen is the one before the draft, each sim trade applied only once it airs", () => {
+  // At No. 2, AAA (holding it) trades it to DDD for No. 4 — AAA then picks at 4.
+  const script = {
+    beats: [
+      { overall: 1, team: "BBB" },
+      { overall: 2, team: "DDD", trade: { from: "AAA", to: "DDD", give: ["No. 4", "2028 R2"] } },
+      { overall: 3, team: "CCC" },
+      { overall: 4, team: "AAA" },
+    ],
+  };
+  // Before the draft: No. 2 is AAA's, No. 4 DDD's.
+  expect(ownersAt(script, 0)).toEqual({ 1: "BBB", 2: "AAA", 3: "CCC", 4: "DDD" });
+  expect(firstOnClock(script)).toBe("BBB");
+  // While No. 2 is on the clock, its trade hasn't aired.
+  const clock = { kind: "clock", beatIdx: 1 };
+  expect(ownersAt(script, tradesAired(script, clock))[4]).toBe("DDD");
+  // Once its trade screen is up, both picks have moved.
+  const trade = { kind: "trade", beatIdx: 1 };
+  expect(ownersAt(script, tradesAired(script, trade))).toEqual({ 1: "BBB", 2: "DDD", 3: "CCC", 4: "AAA" });
+  expect(tradesAired(script, { kind: "preshow", beatIdx: null })).toBe(0);
+  expect(tradesAired(script, { kind: "final" })).toBe(4);
 });

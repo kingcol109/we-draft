@@ -70,6 +70,9 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   // The sim before each of the user's picks and trades, for undo().
   const history = useRef([]);
   const [skipToUser, setSkipToUser] = useState(false);
+  // Counts sim-aheads (Skip To: My Pick / round / end), so the console can
+  // close the war room's celebration when the user moves on.
+  const [simAhead, setSimAhead] = useState(0);
   // The CPU pick made at the end of the clock, held through "the pick is in".
   const pending = useRef(null);
   const timers = useRef([]);
@@ -253,6 +256,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
   // The CPU makes every pick while `more(state)` holds — the user's too.
   const simThrough = useCallback((more) => {
     pending.current = null;
+    setSimAhead((n) => n + 1);
     let s = sim;
     const events = [];
     while (!s.done && more(s)) {
@@ -342,12 +346,13 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     pending.current = null;
     // Skipping ahead un-pauses: a paused clock never runs the sim.
     setPaused(false);
+    setSimAhead((n) => n + 1);
     setSkipToUser(true);
     setPhase("simming");
   }, [phase, sim, userPicksLeft, userPicksAfter, announce]);
 
   return {
-    sim, phase, reveal, feed, paused, speed, timing, ctx, userPicksLeft, userPicksAfter, skipToUser, pendingEvents: pending.current?.events || null,
+    sim, phase, reveal, feed, paused, speed, timing, ctx, userPicksLeft, userPicksAfter, skipToUser, simAhead, pendingEvents: pending.current?.events || null,
     setPaused: pause, setSpeed, draft, takeOffer, declineOffer, skip, proposeTrade, simPick, simRound, simToEnd, undo, canUndo: history.current.length > 0, quick,
     start: () => { if (phase === "intro") setPhase("clock"); },
     simToMyPick,

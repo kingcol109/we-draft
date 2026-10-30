@@ -7,9 +7,8 @@
 import { Link } from "react-router-dom";
 import { useNow, useShowLive } from "../../utils/draftSim/onTheClockData";
 
-// Where to watch: the broadcast frame, until the site's own watch page
-// (/draftsim/live) is built.
-export const WATCH_PATH = "/broadcast/ontheclock";
+// Where to watch: the site's own, interactive version (pages/DraftSimLive.jsx).
+export const WATCH_PATH = "/draftsim/live";
 
 const CSS = `
   @keyframes wdOtcPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -21,7 +20,7 @@ export default function OnTheClockLive({ isMobile }) {
   const live = useShowLive(useNow(15000));
   if (!live) return null;
   return (
-    <Link to={WATCH_PATH} title="On the Clock is live — watch the Draft Sim broadcast" style={{
+    <Link to={WATCH_PATH} title="On the Clock is live — watch it here" style={{
       display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0, borderRadius: 999, padding: isMobile ? "5px 11px" : "6px 14px",
       background: "#c8102e", color: "#fff", textDecoration: "none", fontWeight: 900, fontSize: isMobile ? 11 : 12, letterSpacing: "0.1em",
       textTransform: "uppercase", whiteSpace: "nowrap", boxShadow: "0 2px 10px rgba(200,16,46,0.45)",

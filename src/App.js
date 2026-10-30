@@ -64,6 +64,8 @@ const WeeklyTeamMock = lazy(() => import("./pages/WeeklyTeamMock"));
 // Draft Sim — /draftsim, /draftsim/{team} to start as that team, and
 // /draftsim/2028 (/draftsim/2028/{team}) for the 2028 class.
 const DraftSim = lazy(() => import("./pages/DraftSim"));
+// /draftsim/live — On the Clock on the site: the broadcast frame, interactive and full-screen-able.
+const DraftSimLive = lazy(() => import("./pages/DraftSimLive"));
 
 // Whiteboard
 const Whiteboard = lazy(() => import("./pages/Whiteboard"));
@@ -223,6 +225,7 @@ function MainLayout() {
                 ask for one). SEO tags: DraftSimMeta.jsx. */}
             <Route path="/draftsim" element={<><DraftSimMeta /><DraftSim /></>} />
             {/* Recent Drafts (public one-team saved sims) and the Sim Profile — ahead of :team. */}
+            <Route path="/draftsim/live" element={<DraftSimLive />} />
             <Route path="/draftsim/community" element={<DraftSim page="community" />} />
             <Route path="/draftsim/recent" element={<DraftSim page="recent" />} />
             <Route path="/draftsim/profile" element={<DraftSim page="profile" />} />

@@ -68,6 +68,9 @@ export const paceFor = (pace, round) => pace?.[round] || pace?.late || PACE[roun
 export const INTRO_MS = 45000;       // "Tonight on On the Clock" + the opening posts
 export const ROUND_BREAK_MS = 40000; // "Round 2 is complete" + the round's picks
 export const PRESHOW_MS = 15 * 60000; // the countdown's length when a script has no streamAt
+// The show's chat on /draftsim/live opens this long before the stream goes
+// up and closes when the show ends (api/live-chat.js checks the same).
+export const SHOW_CHAT_EARLY_MS = 60 * 60000;
 export const POSTSHOW_MS = 10 * 60000; // the final grades stay on air this long after
 
 // A show's clock times (ms): the stream goes up (the countdown screen) at
@@ -272,8 +275,36 @@ export function spotlights(script) {
 const boardTop = (script) => Object.values(script.board || {}).flat().map((pid) => script.players?.[pid])
   .filter((p) => p?.rank != null).sort((a, b) => a.rank - b.rank)[0] || null;
 
-// The team on the clock first (before any trade of the pick).
-export const firstOnClock = (script) => { const b = script.beats?.[0]; return b ? (b.trade ? b.trade.from : b.team) : null; };
+// Who holds each pick (by overall) with only the first `aired` beats'
+// trades on the air: the order as it stood before the show — every sim
+// trade undone, last first — then those trades applied. A trade up moves
+// its pick from → to and the picks given for it (this draft's, "No. N")
+// to → from. So an order on screen never shows a trade the draft hasn't
+// reached (No. 24 stays Pittsburgh's until the trade at No. 12 airs).
+const startHolders = new WeakMap();
+const tradeMoves = (b) => [
+  [b.overall, b.trade.from, b.trade.to],
+  ...(b.trade.give || []).map((g) => /^No\. (\d+)$/.exec(g)).filter(Boolean).map((x) => [Number(x[1]), b.trade.to, b.trade.from]),
+];
+function holdersBefore(script) {
+  if (startHolders.has(script)) return startHolders.get(script);
+  const own = Object.fromEntries((script.beats || []).map((b) => [b.overall, b.team]));
+  [...(script.beats || [])].reverse().filter((b) => b.trade).forEach((b) => tradeMoves(b).forEach(([o, before]) => { if (o in own) own[o] = before; }));
+  startHolders.set(script, own);
+  return own;
+}
+export function ownersAt(script, aired = 0) {
+  const own = { ...holdersBefore(script) };
+  (script.beats || []).slice(0, aired).forEach((b) => { if (b.trade) tradeMoves(b).forEach(([o, , after]) => { if (o in own) own[o] = after; }); });
+  return own;
+}
+// How many beats' trades are on the air at moment m: none before the
+// first pick; a beat's own trade once its trade screen is up.
+export const tradesAired = (script, m) => (m.kind === "final" ? (script.beats || []).length
+  : m.beatIdx == null ? 0 : m.kind === "clock" ? m.beatIdx : m.beatIdx + 1);
+
+// The team on the clock first, before any trade.
+export const firstOnClock = (script) => { const b = script.beats?.[0]; return b ? ownersAt(script, 0)[b.overall] : null; };
 export const easternClock = (ms) => `${new Date(ms).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} ET`;
 
 // The desk before the draft: lines in each analyst's voice from what the

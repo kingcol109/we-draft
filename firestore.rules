@@ -473,6 +473,13 @@ service cloud.firestore {
         allow read: if true;
         allow write: if false;
       }
+      // The show's chat on /draftsim/live — like a live game's: public
+      // read, written only by api/live-chat.js, admins can remove a message.
+      match /chat/{msgId} {
+        allow read: if true;
+        allow create, update: if false;
+        allow delete: if isAdmin();
+      }
     }
     match /broadcasts/{id} {
       allow read: if isAdmin();

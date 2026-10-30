@@ -26,9 +26,14 @@
 // Desk posts and previous picks slide in as they're added. Each animation
 // runs once. The clock bar is one CSS animation per beat, offset to where
 // the beat is.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+//
+// links: the site's interactive version (pages/DraftSimLive.jsx) — every
+// player's name a link to his page and every team's logo and name to its
+// NFL page, each in a new tab so the show keeps playing. Off on the YouTube
+// frame, which renders exactly as before.
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { gradeLabel, gradeLook } from "../utils/communityGrades";
-import { postsAt, INTRO_MS, showTimes, spotlights, firstOnClock, easternClock, pregamePosts, PREGAME_POST_MS } from "../utils/draftSim/onTheClock";
+import { postsAt, INTRO_MS, showTimes, spotlights, firstOnClock, easternClock, pregamePosts, PREGAME_POST_MS, ownersAt, tradesAired } from "../utils/draftSim/onTheClock";
 import { ordinal } from "../utils/draftSim/analysts";
 import { textOn } from "../utils/teamColors";
 import { GOLD, SITE_BLUE } from "./broadcastStyle";
@@ -119,6 +124,10 @@ export const OTC_STYLE = `
 .otc-cand { display: flex; align-items: center; gap: 18px; height: 78px; padding: 0 22px; border-radius: 14px; background: rgba(0,0,0,.28); position: relative; overflow: hidden; }
 .otc-cand .bar { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,.12); transition: width .8s ease; }
 .otc-cand > *:not(.bar) { position: relative; }
+.otc-x { color: inherit; text-decoration: none; cursor: pointer; pointer-events: auto; }
+.otc-x:hover { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
+.otc-x:hover img { filter: brightness(1.12) drop-shadow(0 0 10px rgba(255,255,255,.35)); }
+.otc-x img { transition: filter .15s ease; }
 .otc-grade { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 8px; font-size: 22px; font-weight: 800; letter-spacing: .06em; color: #fff; }
 `;
 
@@ -156,8 +165,84 @@ function ClockFill({ m, color }) {
   return <div style={{ height: "100%", background: color, transformOrigin: "0 50%", ...bar }} />;
 }
 
+// The interactive version's links ({ abbrOf: team → abbr }), null on the
+// YouTube frame — where these render their children as they are.
+const Links = createContext(null);
+function PlayerLink({ p, children }) {
+  const on = useContext(Links);
+  if (!on || !p?.slug) return children;
+  return <a className="otc-x" href={`/player/${p.slug}`} target="_blank" rel="noopener noreferrer" title={`${name(p)} — player page`}>{children}</a>;
+}
+// team: a script team (or abbr: its abbreviation).
+function TeamLink({ team, abbr, children }) {
+  const on = useContext(Links);
+  const a = abbr || on?.abbrOf.get(team);
+  if (!on || !a) return children;
+  return <a className="otc-x" href={`/nfl/${String(a).toLowerCase()}`} target="_blank" rel="noopener noreferrer" title={`${on.nameOf(a)} — team page`}>{children}</a>;
+}
+const PName = ({ p }) => <PlayerLink p={p}>{name(p)}</PlayerLink>;
+
 function TeamLogo({ team, size }) {
-  return team?.logo ? <img src={team.logo} alt="" style={{ width: size, height: size, objectFit: "contain" }} /> : <span style={{ width: size, height: size }} />;
+  const logo = team?.logo ? <img src={team.logo} alt="" style={{ width: size, height: size, objectFit: "contain" }} /> : <span style={{ width: size, height: size }} />;
+  return <TeamLink team={team}>{logo}</TeamLink>;
+}
+
+// One line of text at the largest size from max down to min (step 2) that
+// fits its box; still too long at min, it's cut with an ellipsis. Measured
+// again when the text changes and once the fonts are in (the frame's
+// scaled with a transform, which doesn't change these widths). text: what's
+// shown (and what it's measured on — children may wrap it in a link).
+function FitText({ text, max, min, className = "", style, children }) {
+  const ref = useRef(null);
+  const [size, setSize] = useState(max);
+  // from: the size to start at — max (a new text, the fonts loaded), else
+  // the current one (it's come to overflow: a font swapped in late).
+  const fit = useCallback((from) => {
+    const el = ref.current;
+    if (!el) return;
+    let px = from;
+    el.style.fontSize = `${px}px`;
+    while (px > min && el.scrollWidth > el.clientWidth + 1) { px -= 2; el.style.fontSize = `${px}px`; }
+    setSize(px);
+  }, [min]);
+  useLayoutEffect(() => {
+    fit(max);
+    let alive = true;
+    const again = () => { if (alive) fit(max); };
+    document.fonts?.ready?.then(again);
+    document.fonts?.addEventListener?.("loadingdone", again);
+    return () => { alive = false; document.fonts?.removeEventListener?.("loadingdone", again); };
+  }, [text, max, fit]);
+  // Every render (the show's clock ticks): still overflowing? fit again.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && size > min && el.scrollWidth > el.clientWidth + 1) fit(size);
+  });
+  return <div ref={ref} className={`bc-ell ${className}`} style={{ ...style, fontSize: size }}>{children ?? text}</div>;
+}
+
+// A community grade, as the site brands it (components/GradeChip.jsx, the
+// player pages' badge): the grade's own colors with its darker border — the
+// qualifier ("LATE") over the round ("1st") over ROUND — and its full name
+// beside it. None yet: a dash.
+function GradeTile({ label, title = "Community grade" }) {
+  const look = label ? gradeLook(label) : null;
+  return (
+    <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,.06)", minWidth: 0 }}>
+      <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#9fb0c8", marginBottom: 6 }}>{title}</div>
+      {look ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+          <span style={{ flexShrink: 0, minWidth: 76, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, padding: "6px 10px",
+            background: look.bg, border: `4px solid ${look.border}`, borderRadius: 10, color: "#fff", lineHeight: 1, textAlign: "center" }}>
+            {look.qualifier && <span style={{ fontSize: 13, fontWeight: 900, letterSpacing: ".08em", opacity: 0.9 }}>{look.qualifier}</span>}
+            <span className="bc-disp" style={{ fontSize: 42, lineHeight: 0.9 }}>{look.short}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".1em", opacity: 0.8 }}>ROUND</span>
+          </span>
+          <span className="bc-disp bc-ell" style={{ fontSize: 36, lineHeight: 1, minWidth: 0 }}>{label}</span>
+        </div>
+      ) : <div className="bc-disp" style={{ fontSize: 46, lineHeight: 1.05 }}>—</div>}
+    </div>
+  );
 }
 
 // The team on the clock (before a trade: the team that held the pick).
@@ -205,7 +290,7 @@ function Countdown({ script, m }) {
         <TeamLogo team={team} size={180} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="otc-label bc-ell" style={{ fontSize: 24, opacity: 0.85 }}>Tonight · {script.format.label}</div>
-          <div className="bc-disp" style={{ fontSize: 40, lineHeight: 1, marginTop: 14, opacity: 0.9 }}>The {team.nick || "first team"} are on the clock at</div>
+          <div className="bc-disp" style={{ fontSize: 40, lineHeight: 1, marginTop: 14, opacity: 0.9 }}>The <TeamLink team={team}>{team.nick || "first team"}</TeamLink> are on the clock at</div>
           <div className="bc-disp" style={{ fontSize: 120, lineHeight: 0.9, marginTop: 4, whiteSpace: "nowrap" }}>{easternClock(showTimes(script).firstPick)}</div>
         </div>
         <div style={{ flexShrink: 0, textAlign: "center", padding: "16px 26px 10px", borderRadius: 18, background: "rgba(0,0,0,.42)", color: "#fff" }}>
@@ -255,7 +340,6 @@ function Spotlight({ script, sp }) {
     p.count >= 10 && { label: "Community boards", v: String(p.count) },
   ].filter(Boolean);
   const label = gradeLabel(p.avg);
-  const look = label ? gradeLook(label) : null;
   const traits = (title, color, mark, list, delay) => (list?.length ? (
     <div>
       <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color, marginBottom: 4 }}>{title}</div>
@@ -280,7 +364,7 @@ function Spotlight({ script, sp }) {
         <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
           {p.logo ? <img className="otc-pop" src={p.logo} alt="" style={{ height: SPOT_LOGO, width: "auto", maxWidth: SPOT_LOGO_MAX_W, objectFit: "contain", flexShrink: 0, ...d(120) }} /> : null}
           <div style={{ flex: 1, minWidth: 0, height: SPOT_LOGO - 2 * SPOT_LOGO_INSET, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-            <div className="bc-disp bc-ell otc-in" style={{ fontSize: 86, lineHeight: 1, margin: "-8px 0 -10px", ...d(160) }}>{name(p)}</div>
+            <FitText text={name(p)} max={86} min={48} className="bc-disp otc-in" style={{ lineHeight: 1, margin: "-0.093em 0 -0.116em", ...d(160) }}><PName p={p} /></FitText>
             <div className="otc-in bc-ell" style={{ fontSize: 28, fontWeight: 700, lineHeight: 1, color: "#b9c6d8", marginBottom: -3, ...d(220) }}>{facts.join(" · ")}</div>
           </div>
         </div>
@@ -314,7 +398,7 @@ function Spotlight({ script, sp }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <Stat k="Board" v={p.rank != null ? `#${p.rank}` : "—"} />
           <Stat k={`${p.pos} rank`} v={p.posRank != null ? `${p.pos}${p.posRank}` : "—"} />
-          <Stat wide k="Community grade" v={look ? <span style={{ color: look.bg === "#5F5E5A" ? "#fff" : "#7fd35a" }}>{look.qualifier ? `${look.qualifier} ` : ""}{look.short}</span> : "—"} />
+          <GradeTile label={label} />
         </div>
         {traits("Strengths", "#5fd38a", "+", p.str, 420)}
         {traits("Concerns", "#ff7a6b", "−", p.wk, 640)}
@@ -324,23 +408,24 @@ function Spotlight({ script, sp }) {
   );
 }
 
-// The first round's order as it stands before the draft (a pick traded
-// tonight shows the team that held it).
+// The first round's order as it stands before the draft: none of the sim's
+// trades yet (ownersAt).
 function FirstRoundOrder({ script }) {
   const r1 = script.beats.filter((b) => b.round === 1);
+  const owners = ownersAt(script, 0);
   return (
     <div style={{ height: "100%", padding: "26px 36px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="otc-label otc-in" style={{ fontSize: 22, color: GOLD }}>The First Round Order</div>
       <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gridAutoRows: "1fr", gap: 10 }}>
         {r1.map((b, k) => {
-          const abbr = b.trade ? b.trade.from : b.team;
+          const abbr = owners[b.overall] || b.team;
           const t = script.teams[abbr] || {};
           return (
             <div key={b.overall} className="otc-in" style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", borderRadius: 12,
               background: `linear-gradient(135deg, color-mix(in srgb, ${t.c1 || SITE_BLUE} 70%, #0b1424), #0b1424)`, ...d(30 * k) }}>
               <span className="bc-disp" style={{ fontSize: 34, color: GOLD, minWidth: 34, textAlign: "right" }}>{b.overall}</span>
               <TeamLogo team={t} size={52} />
-              <span style={{ fontSize: 20, fontWeight: 800 }}>{abbr}</span>
+              <span style={{ fontSize: 20, fontWeight: 800 }}><TeamLink abbr={abbr}>{abbr}</TeamLink></span>
             </div>
           );
         })}
@@ -394,7 +479,7 @@ function OnClock({ script, m }) {
         <div className={pickIn ? "otc-beat" : undefined}><TeamLogo team={team} size={180} /></div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="otc-label bc-ell" style={{ opacity: 0.85 }}>{pickIn ? "The pick is in" : "On the Clock"} · Pick {b.overall} · {team.city}</div>
-          <div className="bc-disp bc-ell" style={{ fontSize: 140 }}>{team.nick || abbr}</div>
+          <FitText text={team.nick || abbr} max={140} min={80} className="bc-disp"><TeamLink abbr={abbr}>{team.nick || abbr}</TeamLink></FitText>
           <div style={{ fontSize: 30, fontWeight: 700, opacity: 0.85 }}>{ROUND_WORD[b.round] || `Round ${b.round}`} round · pick {b.inRound}{b.via && !b.trade ? ` · via ${script.teams[b.via]?.nick || b.via}` : ""}</div>
           <TeamPicks picks={traded ? b.trade.picks : b.picks} />
         </div>
@@ -443,7 +528,7 @@ function Targets({ script, targets }) {
             <div key={pid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 16px", borderRadius: 14, background: "rgba(5,10,20,.55)", color: "#fff", minWidth: 0 }}>
               {p.logo ? <img src={p.logo} alt="" style={{ width: 58, height: 58, objectFit: "contain", flexShrink: 0 }} /> : null}
               <div style={{ minWidth: 0 }}>
-                <div className="bc-ell" style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1 }}>{name(p)}</div>
+                <FitText text={name(p)} max={28} min={20} style={{ fontWeight: 800, lineHeight: 1.1 }}><PName p={p} /></FitText>
                 <div className="bc-ell" style={{ fontSize: 19, color: "#b9c6d8", marginTop: 3 }}>{p.pos} · {p.sch}</div>
                 <div className="bc-ell" style={{ fontSize: 17, fontWeight: 800, color: GOLD, marginTop: 3, letterSpacing: ".04em" }}>Board #{p.rank}{p.posRank ? ` · ${p.pos}${p.posRank}` : ""}</div>
               </div>
@@ -484,7 +569,7 @@ function SoFar({ script, m, abbr, team }) {
                 <span className="bc-disp" style={{ fontSize: tight ? 28 : 34, color: GOLD, minWidth: tight ? 36 : 44 }}>{x.overall}</span>
                 {p.logo ? <img src={p.logo} alt="" style={{ width: tight ? 30 : 38, height: tight ? 30 : 38, objectFit: "contain", flexShrink: 0 }} /> : null}
                 <div style={{ minWidth: 0 }}>
-                  <div className="bc-ell" style={{ fontSize: tight ? 20 : 23, fontWeight: 800 }}>{tight ? `${(p.f || "")[0] || ""}. ${p.l}` : name(p)}</div>
+                  <div className="bc-ell" style={{ fontSize: tight ? 20 : 23, fontWeight: 800 }}><PlayerLink p={p}>{tight ? `${(p.f || "")[0] || ""}. ${p.l}` : name(p)}</PlayerLink></div>
                   <div className="bc-ell" style={{ fontSize: tight ? 15 : 17, color: "#b9c6d8" }}>R{x.round} · {p.pos}{tight ? "" : ` · ${p.sch}`}</div>
                 </div>
               </div>
@@ -525,7 +610,6 @@ function Reveal({ script, m }) {
   const fg = textOn(team.c1);
   const tag = b.value >= 5 ? { t: `Value +${b.value}`, c: "#2e9d4f" } : b.value <= -8 ? { t: `Reach ${b.value}`, c: "#c0392b" } : null;
   const label = gradeLabel(p.avg);
-  const look = label ? gradeLook(label) : null;
   // The name as big as it fits the left column (Bebas runs ~0.42em a letter).
   const longest = Math.max((p.f || "").length, (p.l || "").length, 1);
   const nameSize = Math.min(190, Math.floor(640 / (longest * 0.43)));
@@ -537,12 +621,12 @@ function Reveal({ script, m }) {
       <div style={{ position: "relative", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 22 }}>
         <div className="otc-in" style={{ display: "flex", alignItems: "center", gap: 18, ...d(250) }}>
           <TeamLogo team={team} size={80} />
-          <div className="otc-label bc-ell" style={{ opacity: 0.9, minWidth: 0 }}>Pick {b.overall} · {team.nick}</div>
+          <div className="otc-label bc-ell" style={{ opacity: 0.9, minWidth: 0 }}>Pick {b.overall} · <TeamLink abbr={b.team}>{team.nick}</TeamLink></div>
           {b.trade && <span className="otc-pill" style={{ flexShrink: 0, height: 36, fontSize: 20, background: GOLD, color: "#111" }}>Trade</span>}
         </div>
         <div className="bc-disp" style={{ fontSize: nameSize, lineHeight: 0.86 }}>
-          <div className="otc-slam" style={d(380)}>{p.f}</div>
-          <div className="otc-slam" style={d(520)}>{p.l}</div>
+          <div className="otc-slam" style={d(380)}><PlayerLink p={p}>{p.f}</PlayerLink></div>
+          <div className="otc-slam" style={d(520)}><PlayerLink p={p}>{p.l}</PlayerLink></div>
         </div>
         <div className="otc-in" style={{ display: "flex", alignItems: "center", gap: 26, marginTop: 8, ...d(900) }}>
           {p.logo ? <img src={p.logo} alt="" style={{ width: 150, height: 150, objectFit: "contain", flexShrink: 0 }} /> : null}
@@ -561,7 +645,7 @@ function Reveal({ script, m }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <Stat k="Board" v={p.rank != null ? `#${p.rank}` : "—"} />
           <Stat k={`${p.pos} rank`} v={p.posRank != null ? `${p.pos}${p.posRank}` : "—"} />
-          <Stat wide k="Grade" v={look ? <span style={{ color: look.bg === "#5F5E5A" ? "#fff" : "#7fd35a" }}>{look.qualifier ? `${look.qualifier} ` : ""}{look.short}</span> : "—"} />
+          <GradeTile label={label} />
           {size && <Stat wide v={size} small />}
         </div>
         <Traits title="Strengths" color="#5fd38a" mark="+" list={p.str} delay={1250} />
@@ -612,7 +696,7 @@ function RoundBreak({ script, m }) {
             <div key={b.overall} className="otc-in" style={{ ...d(600 + k * 35), display: "flex", alignItems: "center", gap: 12, fontSize: 21, fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,.06)" }}>
               <span style={{ width: 44, color: "#7f91ab", textAlign: "right" }}>{b.overall}</span>
               <TeamLogo team={t} size={28} />
-              <span className="bc-ell" style={{ flex: 1 }}>{name(p)}</span>
+              <span className="bc-ell" style={{ flex: 1 }}><PName p={p} /></span>
               <span style={{ color: "#9fb0c8", width: 60 }}>{p.pos}</span>
               <span className="bc-ell" style={{ color: "#7f91ab", width: 170 }}>{p.sch}</span>
             </div>
@@ -671,7 +755,7 @@ function GradeBoard({ script }) {
             <TeamLogo team={t} size={52} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="bc-ell" style={{ fontSize: 27, fontWeight: 800, color: "#fff" }}>{t.nick || g.team}</div>
-              {best && <div className="bc-ell" style={{ fontSize: 16, color: "#dbe4f0" }}>Best: {name(best)} · No. {g.best.overall}</div>}
+              {best && <div className="bc-ell" style={{ fontSize: 16, color: "#dbe4f0" }}>Best: <PName p={best} /> · No. {g.best.overall}</div>}
             </div>
             <GradeLetter size={62}>{g.letter}</GradeLetter>
           </div>
@@ -717,7 +801,7 @@ function TeamClass({ script, g, rank, delay }) {
               <span className="bc-disp" style={{ fontSize: tight ? 24 : 30, color: GOLD, minWidth: tight ? 36 : 44, textAlign: "right" }}>{r.o}</span>
               {p.logo ? <img src={p.logo} alt="" style={{ width: tight ? 24 : 30, height: tight ? 24 : 30, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: tight ? 24 : 30, flexShrink: 0 }} />}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="bc-ell" style={{ fontSize: tight ? 18 : 21, fontWeight: 800, lineHeight: 1.1 }}>{name(p)}</div>
+                <div className="bc-ell" style={{ fontSize: tight ? 18 : 21, fontWeight: 800, lineHeight: 1.1 }}><PName p={p} /></div>
                 {!tight && <div className="bc-ell" style={{ fontSize: 15, color: "#9fb0c8" }}>R{r.r} · {p.pos} · {p.sch}</div>}
               </div>
               {tight && <span style={{ fontSize: 15, color: "#9fb0c8", flexShrink: 0 }}>{p.pos}</span>}
@@ -780,7 +864,7 @@ function upBeat(script, m) {
   if (m.kind === "final") return null;
   const idx = m.kind === "preshow" || m.kind === "intro" ? 0 : m.made;
   const b = script.beats[idx];
-  return b ? { b, idx, team: b.trade ? b.trade.from : b.team } : null;
+  return b ? { b, idx, team: ownersAt(script, tradesAired(script, m))[b.overall] || b.team } : null;
 }
 
 // Best Available rotates: Overall, then each position — the top BA_SIZE still
@@ -861,7 +945,7 @@ function Desk({ script, timeline, m }) {
                   <span className="bc-disp" style={{ fontSize: 30, color: "#7f91ab", width: 22, textAlign: "right" }}>{k + 1}</span>
                   {p.logo ? <img src={p.logo} alt="" style={{ width: 38, height: 38, objectFit: "contain" }} /> : <span style={{ width: 38 }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="bc-ell" style={{ fontSize: 24, fontWeight: 800 }}>{name(p)}</div>
+                    <FitText text={name(p)} max={24} min={18} style={{ fontWeight: 800 }}><PName p={p} /></FitText>
                     <div className="bc-ell" style={{ fontSize: 17, color: "#b9c6d8" }}>{p.pos}{p.posRank || ""} · {p.sch} · #{p.rank} overall</div>
                   </div>
                 </div>
@@ -902,6 +986,8 @@ function UpNext({ script, m }) {
   const onStage = m.beat && ["clock", "trade", "pickIn"].includes(m.kind) ? m.beatIdx : null;
   const from = onStage ?? Math.min(m.kind === "preshow" || m.kind === "intro" ? 0 : m.made, beats.length);
   const slots = beats.slice(from, from + UP_NEXT);
+  // Each pick's team as of now: only the trades that have aired.
+  const owners = ownersAt(script, tradesAired(script, m));
   return (
     <div className="otc-next">
       <div className="lbl">Up Next</div>
@@ -909,11 +995,11 @@ function UpNext({ script, m }) {
         {!slots.length && <span className="it" style={{ color: "#fff" }}>That&apos;s the draft · Run your own at <span style={{ color: GOLD }}>we-draft.com/draftsim</span></span>}
         {slots.map((b, k) => {
           const i = from + k;
-          const abbr = i === onStage ? onClockTeam(m) : b.trade ? b.trade.from : b.team;
+          const abbr = i === onStage ? onClockTeam(m) : owners[b.overall] || b.team;
           const newRound = k > 0 && b.round !== slots[k - 1].round;
           return [
             newRound ? <span key={`r${b.round}`} className="rd">R{b.round}</span> : null,
-            <span key={b.overall} className={`it${i === onStage ? " now" : ""}`}><b>{b.overall}</b>{abbr}</span>,
+            <span key={b.overall} className={`it${i === onStage ? " now" : ""}`}><b>{b.overall}</b><TeamLink abbr={abbr}>{abbr}</TeamLink></span>,
           ];
         })}
       </div>
@@ -937,8 +1023,8 @@ function Recap({ script, m }) {
               <span className="n">{b.overall}</span>
               <TeamLogo team={script.teams[b.team]} size={46} />
               <div style={{ minWidth: 0 }}>
-                <div className="nm">{name(p)}</div>
-                <div className="sub"><span className="ab">{b.team}</span> · {p.pos} · {p.sch}</div>
+                <div className="nm"><PName p={p} /></div>
+                <div className="sub"><span className="ab"><TeamLink abbr={b.team}>{b.team}</TeamLink></span> · {p.pos} · {p.sch}</div>
               </div>
             </div>
           );
@@ -981,7 +1067,11 @@ function StageSwap({ id, children, slide = false }) {
 // The beats that open with the wipe (the team screen just updates).
 const WIPE = ["intro", "trade", "reveal", "roundBreak", "final"];
 
-export default function OnTheClockScreen({ script, timeline, m }) {
+export default function OnTheClockScreen({ script, timeline, m, links = false }) {
+  const linkCtx = useMemo(() => (links ? {
+    abbrOf: new Map(Object.entries(script.teams || {}).map(([abbr, t]) => [t, abbr])),
+    nameOf: (abbr) => script.teams?.[abbr]?.name || abbr,
+  } : null), [links, script]);
   const stageTeam = ["clock", "trade", "pickIn", "reveal"].includes(m.kind)
     ? script.teams[m.kind === "trade" ? m.beat.trade.to : onClockTeam(m)] : null;
   const bg = stageTeam
@@ -993,6 +1083,7 @@ export default function OnTheClockScreen({ script, timeline, m }) {
   const b = m.beat;
   const ctx = m.kind === "preshow" ? "Starting soon" : m.kind === "intro" ? "Opening" : m.kind === "final" ? "Final" : b ? `Round ${b.round} · Pick ${b.overall}` : "";
   return (
+    <Links.Provider value={linkCtx}>
     <div className="otc">
       <div className="otc-bg" style={{ background: bg }} />
       <UpNext script={script} m={m} />
@@ -1020,5 +1111,6 @@ export default function OnTheClockScreen({ script, timeline, m }) {
       {!final && <Desk script={script} timeline={timeline} m={m} />}
       {!final && <Recap script={script} m={m} />}
     </div>
+    </Links.Provider>
   );
 }

@@ -19,6 +19,11 @@
 // (kickoff, each quarter, halftime, OT, final: server/live/store.js
 // chatMarkOf) — show as dividers, so the chat reads in game time later;
 // anything before the kickoff marker sits under a "Pregame" divider.
+//
+// The same chat runs On the Clock's (/draftsim/live, pages/DraftSimLive.jsx):
+// showId in place of gameId — simShows/{id}/chat — with the page saying
+// whether it's open (open) and what to say when it isn't (closedNote);
+// className "overlay" is its see-through look over the frame's desk.
 import { Fragment, useEffect, useRef, useState } from "react";
 import { collection, deleteDoc, doc, limit, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
@@ -76,11 +81,21 @@ export const LIVE_CHAT_STYLE = `
 .lch-mark.pre { color: #8193ad; }
 .lch-mark.pre::before, .lch-mark.pre::after { background: linear-gradient(90deg, transparent, rgba(129,147,173,0.4), transparent); }
 .lch-msg.buried:hover { opacity: 1; }
+/* over On the Clock's desk: fills its box, see-through, a little tighter */
+.lch.overlay { flex: 1; min-height: 0; background: transparent; border: 0; border-radius: 0; }
+.lch.overlay .lch-list { height: auto; flex: 1; min-height: 0; }
+.lch.overlay .lch-msg { padding: 6px 12px 7px; }
+.lch.overlay .lch-msg + .lch-msg { border-top-color: rgba(255,255,255,.06); }
+.lch.overlay .lch-text { font-size: 14px; }
+.lch.overlay .lch-form, .lch.overlay .lch-note, .lch.overlay .lch-err { background: rgba(5,10,20,.55); border-top-color: rgba(255,255,255,.08); }
+.lch.overlay .lch-form input { background: rgba(17,26,43,.8); font-size: 14px; padding: 8px 12px; }
+.lch.overlay .lch-form button { padding: 8px 14px; font-size: 13px; }
+.lch.overlay .lch-note { font-size: 13px; }
 `;
 
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "");
 
-export default function LiveChat({ gameId, game }) {
+export default function LiveChat({ gameId, game, showId, open, closedNote, className = "" }) {
   const { user, profile, login } = useAuth();
   const [msgs, setMsgs] = useState(null);
   const [text, setText] = useState("");
@@ -91,7 +106,11 @@ export default function LiveChat({ gameId, game }) {
   const atBottom = useRef(true);
   // Open pregame and live; a game /live isn't tracking yet (a future week,
   // built from the schedule) opens game week.
-  const isLive = (game?.status === "in_progress" || game?.status === "scheduled") && !game?.scheduleOnly;
+  const isLive = showId ? !!open : (game?.status === "in_progress" || game?.status === "scheduled") && !game?.scheduleOnly;
+  // Where the messages live, my votes' doc, and the API's key for the room.
+  const room = showId ? ["simShows", String(showId)] : ["liveGames", String(gameId)];
+  const votesKey = showId ? `otc-${showId}` : String(gameId);
+  const roomBody = showId ? { showId: String(showId) } : { gameId: String(gameId) };
   const isAdmin = profile?.role === "admin";
 
   // My votes in this game's chat ({ [msgId]: 1 | -1 }), plus the ones I've
@@ -101,13 +120,14 @@ export default function LiveChat({ gameId, game }) {
   useEffect(() => {
     setMyVotes({}); setPending({});
     if (!user?.uid) return undefined;
-    return onSnapshot(doc(db, "users", user.uid, "chatVotes", String(gameId)), (d) => setMyVotes(d.data() || {}), () => {});
-  }, [user?.uid, gameId]);
+    return onSnapshot(doc(db, "users", user.uid, "chatVotes", votesKey), (d) => setMyVotes(d.data() || {}), () => {});
+  }, [user?.uid, votesKey]);
 
   useEffect(() => {
-    const q = query(collection(db, "liveGames", String(gameId), "chat"), orderBy("atMs", "desc"), limit(CHAT_SHOWN));
+    setMsgs(null);
+    const q = query(collection(db, ...room, "chat"), orderBy("atMs", "desc"), limit(CHAT_SHOWN));
     return onSnapshot(q, (s) => setMsgs(s.docs.map((d) => ({ id: d.id, ...d.data() })).reverse()), () => setMsgs([]));
-  }, [gameId]);
+  }, [room[0], room[1]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Follow new messages while scrolled to the bottom; otherwise count them.
   const prevCount = useRef(0);
@@ -135,7 +155,7 @@ export default function LiveChat({ gameId, game }) {
     try {
       const token = await auth.currentUser?.getIdToken();
       const r = await fetch("/api/live-chat", {
-        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ gameId: String(gameId), text: t }),
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...roomBody, text: t }),
       });
       if (r.status === 404) throw new Error("Chat posting runs on the live site.");
       const j = await r.json().catch(() => ({}));
@@ -160,7 +180,7 @@ export default function LiveChat({ gameId, game }) {
       const token = await auth.currentUser?.getIdToken();
       const r = await fetch("/api/live-chat", {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action: "vote", gameId: String(gameId), msgId: m.id, vote: next }),
+        body: JSON.stringify({ action: "vote", ...roomBody, msgId: m.id, vote: next }),
       });
       if (r.status === 404) throw new Error("Chat voting runs on the live site.");
       const j = await r.json().catch(() => ({}));
@@ -181,7 +201,7 @@ export default function LiveChat({ gameId, game }) {
 
   const remove = async (m) => {
     if (!window.confirm(`Delete this message from ${m.name}?`)) return;
-    try { await deleteDoc(doc(db, "liveGames", String(gameId), "chat", m.id)); } catch (e) { console.error(e); alert("Couldn't delete — check console."); }
+    try { await deleteDoc(doc(db, ...room, "chat", m.id)); } catch (e) { console.error(e); alert("Couldn't delete — check console."); }
   };
   const ban = async (m) => {
     if (!window.confirm(`Ban ${m.name} from chat? Their messages stay until deleted.`)) return;
@@ -189,10 +209,10 @@ export default function LiveChat({ gameId, game }) {
   };
 
   return (
-    <div className="lch">
+    <div className={`lch${className ? ` ${className}` : ""}`}>
       <div className="lch-list" ref={listRef} onScroll={onScroll}>
         {!msgs ? <div className="lch-empty">Loading chat…</div>
-          : !msgs.length ? <div className="lch-empty">{isLive ? (game?.status === "scheduled" ? "No messages yet — get the pregame talk going." : "No messages yet — start the conversation.") : "No one chatted during this game."}</div>
+          : !msgs.length ? <div className="lch-empty">{showId ? (isLive ? "No messages yet — start the conversation." : "No one's chatted yet.") : isLive ? (game?.status === "scheduled" ? "No messages yet — get the pregame talk going." : "No messages yet — start the conversation.") : "No one chatted during this game."}</div>
           : msgs.map((m, i) => {
             // A game marker: a divider, not a message (no name or votes).
             if (m.system) {
@@ -237,7 +257,7 @@ export default function LiveChat({ gameId, game }) {
         {unseen > 0 && <button type="button" className="lch-new" onClick={toBottom}>↓ {unseen} new message{unseen === 1 ? "" : "s"}</button>}
       </div>
       {!isLive ? (
-        <div className="lch-note">{game?.status === "final" ? "Chat is closed — this game is final." : "Chat opens game week."}</div>
+        <div className="lch-note">{showId ? closedNote || "Chat is closed." : game?.status === "final" ? "Chat is closed — this game is final." : "Chat opens game week."}</div>
       ) : !user ? (
         <div className="lch-note"><button type="button" onClick={login}>Log in</button> to join the chat.</div>
       ) : (

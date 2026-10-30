@@ -118,6 +118,20 @@ export async function saveShow(script) {
   await setDoc(SCHEDULE_REF(), { shows: { [script.id]: entry } }, { merge: true });
 }
 
+// The show to watch at `now` (the site's watch page, DraftSimLive.jsx): the
+// one on (stream up → end of the final grades' hold), else the next one up,
+// by the schedule — { id, entry } — null when there's none ahead, undefined
+// until the schedule's read.
+export function useWatchShow(now) {
+  const [shows, setShows] = useState(undefined);
+  useEffect(() => onSnapshot(SCHEDULE_REF(), (s) => setShows(s.data()?.shows || {}), () => setShows({})), []);
+  return useMemo(() => {
+    if (shows === undefined) return undefined;
+    const ahead = Object.entries(shows).filter(([, e]) => now < e.endsAt).sort(([, a], [, b]) => a.startAt - b.startAt);
+    return ahead.length ? { id: ahead[0][0], entry: ahead[0][1] } : null;
+  }, [shows, now]);
+}
+
 // Whether a show is live at `now` — from the stream going up to the end of
 // the final grades' hold — by the schedule.
 export function useShowLive(now) {

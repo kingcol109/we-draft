@@ -31,13 +31,25 @@ const { FieldValue } = require("firebase-admin/firestore");
 // a future path pattern (e.g. /team/{slug}) only needs a new entry here.
 // Order matters only in that prefixes must not be prefixes of each other,
 // which none of these are.
+//
+// hub: the bare prefix (/draftsim, /mocks, /nfl) is a page too, tracked as
+// slug "hub" — those prefixes have no trailing slash, so they only match the
+// prefix itself or prefix + "/…". parse(segments): the path after the
+// prefix, split on "/", → the slug (or null to skip). A slug never holds
+// "/" (it's part of a Firestore doc id), so multi-part paths join with "-".
+const HUB = "hub";
+const isTeam = (seg) => /^[a-z]{2,3}$/i.test(seg || "");
+const isYear = (seg) => /^\d{4}$/.test(seg || "");
+const GAME_SLUG = /-\d{1,2}-\d{1,2}-\d{4}$/;
+// "Week 1" → "week-1": a slug is lowercase words joined by "-".
+const words = (segs) => segs.join("-").toLowerCase().replace(/\s+/g, "-");
 const PAGE_TYPES = [
   { type: "player", prefix: "/player/" },
   { type: "game", prefix: "/game/" },
   // Games moved to We-Draft Live (/live/{slug}, the same slug) — summed
   // with the old /game/ views per game. Only game slugs (they end in the
   // date, e.g. -9-5-2026), not /live/we-pick….
-  { type: "game", prefix: "/live/", match: (slug) => /-\d{1,2}-\d{1,2}-\d{4}$/.test(slug) },
+  { type: "game", prefix: "/live/", match: (slug) => GAME_SLUG.test(slug) },
   // Articles and plain news items share the /news/:id route (see
   // NewsArticle.jsx) — both are tracked under the same "article" type here
   // since there's no separate URL prefix to tell them apart by.
@@ -45,6 +57,43 @@ const PAGE_TYPES = [
   // Find Comparison pages (/comparison/<player Slug>, see Comparison.js).
   // The bare /comparison calculator has no slug and isn't tracked.
   { type: "comparison", prefix: "/comparison/" },
+  // Draft Sim: the hub, /draftsim/live (On the Clock), community / recent /
+  // profile, and each team's sim (/draftsim/nyj, /draftsim/2027/nyj).
+  { type: "draftsim", prefix: "/draftsim", hub: true, parse: (segs) => segs.join("-").toLowerCase() },
+  // Mocks: Mock Draft Central (the hub), My Mocks, Create, the Weekly Mock
+  // class pages (/mocks/2027), each team's mock (/mocks/nyj,
+  // /mocks/nyj/2027). Users' own mocks are one row each kind — every shared
+  // one (/mocks/{id}/view) as "view", every editor (/mocks/{id}) as "editor"
+  // — not a row per mock.
+  {
+    type: "mock", prefix: "/mocks", hub: true,
+    parse: ([a, b]) => {
+      if (b === "view") return "view";
+      if (b) return isTeam(a) && isYear(b) ? `${a.toLowerCase()}-${b}` : null;
+      if (a === "my" || a === "create" || isYear(a) || isTeam(a)) return a.toLowerCase();
+      return "editor";
+    },
+  },
+  // NFL team pages (/nfl/nyj and its tabs, /nfl/nyj/draft…, summed per
+  // team) and the /nfl hub.
+  { type: "nfl", prefix: "/nfl", hub: true, parse: ([team]) => (isTeam(team) ? team.toLowerCase() : null) },
+  // Staff pages (/staff/{coach slug} and its tabs, summed per coach).
+  { type: "staff", prefix: "/staff/", parse: ([slug]) => slug || null },
+  // Community boards: the Community Board (hub), each class's board
+  // (/community/2028 → "2028") and each position's (/community/2028/qb →
+  // "2028-qb").
+  {
+    type: "board", prefix: "/community", hub: true,
+    parse: ([year, pos]) => (isYear(year) ? (pos ? `${year}-${pos.toLowerCase()}` : year) : null),
+  },
+  // We-Draft Live's other pages — the /live hub, We-Pick and its standings…
+  // (games are the "game" entry above; anything shaped like one isn't here).
+  { type: "live", prefix: "/live", hub: true, parse: (segs) => (GAME_SLUG.test(segs[0] || "") ? null : words(segs)) },
+  // College team pages (/team/{school Slug}).
+  { type: "team", prefix: "/team/", parse: ([slug]) => (slug ? slug.toLowerCase() : null) },
+  // College football: the /cfb hub, schedule (and each week), stats (and
+  // each category) — /cfb/schedule/Week 1 → "schedule-week-1".
+  { type: "cfb", prefix: "/cfb", hub: true, parse: words },
 ];
 
 const FIRESTORE_BATCH_LIMIT = 500; // Firestore's hard cap on ops per batch
@@ -57,12 +106,14 @@ const FIRESTORE_BATCH_LIMIT = 500; // Firestore's hard cap on ops per batch
 // can skip it. ──
 function classifyPath(pagePath) {
   if (!pagePath) return null;
-  for (const { type, prefix, match } of PAGE_TYPES) {
-    if (!pagePath.startsWith(prefix)) continue;
-    let slug = pagePath.slice(prefix.length);
-    slug = slug.split("?")[0].split("#")[0];
-    slug = slug.replace(/\/+$/, ""); // trailing slash(es)
-    if (match && !match(slug)) return null;
+  const path = pagePath.split("?")[0].split("#")[0].replace(/\/+$/, "") || "/"; // trailing slash(es)
+  for (const { type, prefix, match, hub, parse } of PAGE_TYPES) {
+    if (hub && path === prefix) return { type, slug: HUB };
+    const base = hub ? prefix + "/" : prefix;
+    if (!path.startsWith(base)) continue;
+    let slug = path.slice(base.length);
+    if (parse) slug = parse(slug.split("/").filter(Boolean));
+    if (match && !match(slug)) continue;
     return slug ? { type, slug } : null;
   }
   return null;
@@ -88,11 +139,14 @@ function aggregateByTypeAndSlug(rows) {
 
     if (!byKey.has(key)) {
       byKey.set(key, {
-        type, slug,
+        type, slug, path: null, pathViews: -1,
         pageViews: { last24Hours: 0, last7Days: 0, last30Days: 0, last90Days: 0, lastYear: 0, total: 0 },
       });
     }
-    const entry = byKey.get(key).pageViews;
+    // The page's URL (for the admin's links): its most-viewed variant.
+    const page = byKey.get(key);
+    if (dateRangeName === "total" && views > page.pathViews) { page.path = pagePath.split("?")[0].split("#")[0]; page.pathViews = views; }
+    const entry = page.pageViews;
 
     // GA can return multiple pagePath variants for the same logical page
     // (e.g. differing only in a tracked query param); sum rather than
@@ -123,7 +177,7 @@ async function writeAnalyticsDocs(db, byKey) {
     const batch = db.batch();
 
     for (const key of chunk) {
-      const { type, slug, pageViews } = byKey.get(key);
+      const { type, slug, path, pageViews } = byKey.get(key);
       // Player keeps the original bare-slug doc ID every existing reader
       // already keys off of; every other type is namespaced so it can't
       // collide with a player slug (or another type's) in the same
@@ -135,6 +189,7 @@ async function writeAnalyticsDocs(db, byKey) {
         {
           slug,
           type,
+          ...(path ? { path } : {}),
           pageViews,
           updatedAt: FieldValue.serverTimestamp(),
         },
