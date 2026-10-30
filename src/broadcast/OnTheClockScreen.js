@@ -6,10 +6,14 @@
 // (script, now) — the stream and every site viewer render the same frame.
 //
 //   top bar      brand, LIVE, the format, round · pick, the show clock
-//   stage        (left) pre-show countdown → intro → team on the clock (best
-//                available + the site's vote) → trade → the pick is in →
+//   stage        (left) pre-show countdown (who's on the clock first and
+//                when, over rotating prospect spotlights, the first-round
+//                order and the sim's ad) → intro → team on the clock (best
+//                available) → trade → the pick is in →
 //                the pick → round break (the round's picks) → final grades
-//   desk         (right) the analyst desk's posts, newest on top
+//   desk         (right) the analyst desk's posts, newest on top — before
+//                the draft, its pre-draft lines in rotation; verified
+//                analysts carry the check
 //   up next      (bottom) the next picks, then the last few made
 //
 // Motion: the team screen just updates — the new team's colors cross-fade
@@ -24,7 +28,8 @@
 // the beat is.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { gradeLabel, gradeLook } from "../utils/communityGrades";
-import { postsAt } from "../utils/draftSim/onTheClock";
+import { postsAt, INTRO_MS, showTimes, spotlights, firstOnClock, easternClock, pregamePosts, PREGAME_POST_MS } from "../utils/draftSim/onTheClock";
+import { ordinal } from "../utils/draftSim/analysts";
 import { textOn } from "../utils/teamColors";
 import { GOLD, SITE_BLUE } from "./broadcastStyle";
 
@@ -162,14 +167,201 @@ function onClockTeam(m) {
   return m.beat.team;
 }
 
-function Countdown({ script, m }) {
+// The verified check (SimFeed.jsx's), sized for the frame.
+function Verified({ size = 22 }) {
   return (
-    <div className="otc-fade" style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 26, textAlign: "center" }}>
-      <div className="otc-label" style={{ color: GOLD }}>Tonight</div>
-      <div className="bc-disp" style={{ fontSize: 120 }}>{script.format.label}</div>
-      <div style={{ fontSize: 34, color: "#9fb0c8", fontWeight: 700 }}>{script.beats.length} picks · every war room run by the CPU</div>
-      <div className="bc-disp" style={{ fontSize: 200, color: GOLD, marginTop: 10 }}>{fmtClock(m.left)}</div>
-      <div style={{ fontSize: 30, fontWeight: 700 }}>Vote on every pick at <span style={{ color: GOLD }}>we-draft.com/draftsim/live</span></div>
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Verified" style={{ flexShrink: 0, alignSelf: "center" }}>
+      <path fill="#1d9bf0" d="M12 1.5l2.6 2.1 3.3-.4 1.1 3.1 3 1.6-.9 3.2.9 3.2-3 1.6-1.1 3.1-3.3-.4L12 22.5l-2.6-2.1-3.3.4-1.1-3.1-3-1.6.9-3.2-.9-3.2 3-1.6 1.1-3.1 3.3.4z" />
+      <path fill="#fff" d="M10.6 15.6l-3.2-3.2 1.3-1.3 1.9 1.9 4.7-4.7 1.3 1.3z" />
+    </svg>
+  );
+}
+
+// The countdown: who's on the clock first and when, in that team's colors,
+// with the clock to Round 1 Pick 1 (the intro fills its last INTRO_MS);
+// under it, a card every PRESHOW_CARD_MS on the show clock — prospect
+// spotlights, with the first round's order and the sim's ad between.
+const PRESHOW_CARD_MS = 20000;
+const mod = (n, k) => ((n % k) + k) % k;
+function preshowCards(script) {
+  const out = [];
+  spotlights(script).forEach((sp, i) => {
+    out.push({ key: `sp${sp.pid}`, kind: "spot", sp });
+    if (i % 3 === 2) out.push(i % 6 === 2 ? { key: `order${i}`, kind: "order" } : { key: `ad${i}`, kind: "ad" });
+  });
+  return out.length ? out : [{ key: "order", kind: "order" }];
+}
+function Countdown({ script, m }) {
+  const team = script.teams[firstOnClock(script)] || {};
+  const c1 = team.c1 || SITE_BLUE;
+  const c2 = team.c2 || GOLD;
+  const ink = textOn(c1, c2);
+  const cards = preshowCards(script);
+  const card = cards[mod(Math.floor(m.t / PRESHOW_CARD_MS), cards.length)];
+  return (
+    <div className="otc-fade" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 30, padding: "30px 36px", color: ink, overflow: "hidden",
+        background: `linear-gradient(120deg, ${c1} 0%, ${c1} 55%, color-mix(in srgb, ${c2} 70%, ${c1}) 130%)`, borderBottom: `6px solid ${c2}` }}>
+        <TeamLogo team={team} size={180} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="otc-label bc-ell" style={{ fontSize: 24, opacity: 0.85 }}>Tonight · {script.format.label}</div>
+          <div className="bc-disp" style={{ fontSize: 40, lineHeight: 1, marginTop: 14, opacity: 0.9 }}>The {team.nick || "first team"} are on the clock at</div>
+          <div className="bc-disp" style={{ fontSize: 120, lineHeight: 0.9, marginTop: 4, whiteSpace: "nowrap" }}>{easternClock(showTimes(script).firstPick)}</div>
+        </div>
+        <div style={{ flexShrink: 0, textAlign: "center", padding: "16px 26px 10px", borderRadius: 18, background: "rgba(0,0,0,.42)", color: "#fff" }}>
+          <div className="otc-label" style={{ fontSize: 20, color: "#c3cfdf" }}>Draft starts in</div>
+          {/* To Round 1 Pick 1 — the intro fills the countdown's last INTRO_MS. */}
+          <div className="bc-disp" style={{ fontSize: 118, lineHeight: 1, color: GOLD, fontVariantNumeric: "tabular-nums" }}>{fmtClock(m.left + INTRO_MS)}</div>
+        </div>
+      </div>
+      <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <StageSwap id={card.key} slide>
+          {card.kind === "spot" && <Spotlight script={script} sp={card.sp} />}
+          {card.kind === "order" && <FirstRoundOrder script={script} />}
+          {card.kind === "ad" && <PreshowAd />}
+        </StageSwap>
+      </div>
+    </div>
+  );
+}
+
+const SPOT_LOGO = 118;
+const SPOT_LOGO_MAX_W = 220;
+const SPOT_LOGO_INSET = 5;
+const heightText = (inches) => (inches ? `${Math.floor(inches / 12)}'${inches % 12}"` : "");
+
+// Each position's name and color on the spotlight's badge.
+const POSITION = {
+  QB: ["Quarterback", "#d62828"], RB: ["Running Back", "#2e9e5b"], WR: ["Wide Receiver", "#1d6fc0"], TE: ["Tight End", "#7a3cff"],
+  OL: ["Offensive Line", "#a0662b"], DL: ["Defensive Line", "#c2410c"], EDGE: ["Edge Rusher", "#db2777"], LB: ["Linebacker", "#0e9f9f"],
+  DB: ["Defensive Back", "#b7791f"],
+};
+
+// A prospect on the countdown. Left: his name, school and size, then his
+// position — a badge in its color, named in full — and his season line
+// (where he led the nation, too). Right, as the pick screen has it (Reveal): his board
+// and position ranks, the community's grade, strengths and concerns.
+function Spotlight({ script, sp }) {
+  const p = script.players[sp.pid] || {};
+  const season = script.preshow?.season;
+  const [posName, posColor] = POSITION[p.pos] || [p.pos, SITE_BLUE];
+  const hasLine = sp.stats?.length > 0;
+  // (His size is in the boxes when there's no season line.)
+  const facts = [p.sch, ...(hasLine ? [heightText(p.ht), p.wt ? `${p.wt} lbs` : ""] : [])].filter(Boolean);
+  // No season line (a lineman, mostly): his size in the boxes instead.
+  const chips = hasLine ? sp.stats : [
+    p.ht && { label: "Height", v: heightText(p.ht) },
+    p.wt && { label: "Weight", v: `${p.wt} lbs` },
+    p.count >= 10 && { label: "Community boards", v: String(p.count) },
+  ].filter(Boolean);
+  const label = gradeLabel(p.avg);
+  const look = label ? gradeLook(label) : null;
+  const traits = (title, color, mark, list, delay) => (list?.length ? (
+    <div>
+      <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color, marginBottom: 4 }}>{title}</div>
+      {list.slice(0, 3).map((t, k) => (
+        <div key={t} className="otc-in" style={{ display: "flex", gap: 10, fontSize: 22, fontWeight: 700, lineHeight: 1.2, padding: "2px 0", ...d(delay + k * 110) }}>
+          <span style={{ color, fontWeight: 800, width: 14 }}>{mark}</span><span className="bc-ell">{t}</span>
+        </div>
+      ))}
+    </div>
+  ) : null);
+  return (
+    <div style={{ height: "100%", padding: "24px 32px 24px 36px", display: "flex", gap: 28, boxSizing: "border-box" }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="otc-in" style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span className="otc-label" style={{ fontSize: 20, color: GOLD }}>Prospect Spotlight</span>
+        </div>
+        {/* The name's cap tops the logo and the school line's baseline meets
+            its bottom: the logo set by its height (a wide one gets its width,
+            up to SPOT_LOGO_MAX_W), the column that height less the padding
+            a logo file carries (SPOT_LOGO_INSET), each line's leading trimmed
+            (line-height 1, pulled in by the font's own margins). */}
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          {p.logo ? <img className="otc-pop" src={p.logo} alt="" style={{ height: SPOT_LOGO, width: "auto", maxWidth: SPOT_LOGO_MAX_W, objectFit: "contain", flexShrink: 0, ...d(120) }} /> : null}
+          <div style={{ flex: 1, minWidth: 0, height: SPOT_LOGO - 2 * SPOT_LOGO_INSET, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div className="bc-disp bc-ell otc-in" style={{ fontSize: 86, lineHeight: 1, margin: "-8px 0 -10px", ...d(160) }}>{name(p)}</div>
+            <div className="otc-in bc-ell" style={{ fontSize: 28, fontWeight: 700, lineHeight: 1, color: "#b9c6d8", marginBottom: -3, ...d(220) }}>{facts.join(" · ")}</div>
+          </div>
+        </div>
+        <div className="otc-in" style={{ display: "flex", alignItems: "stretch", alignSelf: "flex-start", borderRadius: 12, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,.3)", ...d(260) }}>
+          <span className="bc-disp" style={{ display: "flex", alignItems: "center", padding: "4px 18px", fontSize: 54, lineHeight: 1, background: posColor, color: "#fff" }}>{p.pos}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 18px", background: `color-mix(in srgb, ${posColor} 28%, #0b1424)`, color: "#fff" }}>
+            <span className="bc-disp" style={{ fontSize: 40, lineHeight: 1 }}>{posName}</span>
+            {p.posRank ? <span style={{ fontSize: 22, fontWeight: 800, color: "#dbe6f5", letterSpacing: ".06em" }}>{p.pos}{p.posRank} on the board</span> : null}
+          </span>
+        </div>
+        {chips.length > 0 && (
+          <>
+            {hasLine && (
+              <div className="otc-in" style={{ fontSize: 22, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "#9fb0c8", marginBottom: -6, ...d(320) }}>
+                {season ? `${season} season` : "This season"}
+                {sp.leader && <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 700 }}> · <span style={{ color: GOLD }}>{sp.leader.tied ? "Tied for " : ""}{ordinal(sp.leader.rank)} in the nation in {sp.leader.stat}</span> <span style={{ color: "#e7edf6" }}>({sp.leader.v})</span></span>}
+              </div>
+            )}
+            <div className="otc-in" style={{ display: "flex", gap: 12, ...d(380) }}>
+              {chips.map((c) => (
+                <div key={c.label} style={{ flex: 1, minWidth: 0, padding: "10px 14px", borderRadius: 14, background: "rgba(255,255,255,.06)", border: "1px solid rgba(255,255,255,.08)" }}>
+                  <div className="bc-disp" style={{ fontSize: 54, lineHeight: 1 }}>{c.v}</div>
+                  <div className="bc-ell" style={{ fontSize: 17, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "#9fb0c8" }}>{c.label}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="otc-in-r" style={{ width: 390, flexShrink: 0, alignSelf: "center", borderRadius: 18, background: "rgba(5,10,20,.72)", border: "1px solid rgba(255,255,255,.1)", padding: "18px 20px", color: "#fff", display: "flex", flexDirection: "column", gap: 12, ...d(260) }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Stat k="Board" v={p.rank != null ? `#${p.rank}` : "—"} />
+          <Stat k={`${p.pos} rank`} v={p.posRank != null ? `${p.pos}${p.posRank}` : "—"} />
+          <Stat wide k="Community grade" v={look ? <span style={{ color: look.bg === "#5F5E5A" ? "#fff" : "#7fd35a" }}>{look.qualifier ? `${look.qualifier} ` : ""}{look.short}</span> : "—"} />
+        </div>
+        {traits("Strengths", "#5fd38a", "+", p.str, 420)}
+        {traits("Concerns", "#ff7a6b", "−", p.wk, 640)}
+        {!(p.str || []).length && !(p.wk || []).length && <div style={{ fontSize: 19, color: "#9fb0c8" }}>No community evaluations yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+// The first round's order as it stands before the draft (a pick traded
+// tonight shows the team that held it).
+function FirstRoundOrder({ script }) {
+  const r1 = script.beats.filter((b) => b.round === 1);
+  return (
+    <div style={{ height: "100%", padding: "26px 36px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="otc-label otc-in" style={{ fontSize: 22, color: GOLD }}>The First Round Order</div>
+      <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gridAutoRows: "1fr", gap: 10 }}>
+        {r1.map((b, k) => {
+          const abbr = b.trade ? b.trade.from : b.team;
+          const t = script.teams[abbr] || {};
+          return (
+            <div key={b.overall} className="otc-in" style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", borderRadius: 12,
+              background: `linear-gradient(135deg, color-mix(in srgb, ${t.c1 || SITE_BLUE} 70%, #0b1424), #0b1424)`, ...d(30 * k) }}>
+              <span className="bc-disp" style={{ fontSize: 34, color: GOLD, minWidth: 34, textAlign: "right" }}>{b.overall}</span>
+              <TeamLogo team={t} size={52} />
+              <span style={{ fontSize: 20, fontWeight: 800 }}>{abbr}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// The sim's ad, as a countdown card.
+function PreshowAd() {
+  return (
+    <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 40, padding: "0 50px",
+      background: `linear-gradient(135deg, ${SITE_BLUE}, #0b2a52 70%)` }}>
+      <img className="otc-pop" src={WD_ICON} alt="" style={{ width: 190, height: 190 }} />
+      <div>
+        <div className="bc-disp otc-in" style={{ fontSize: 100, lineHeight: 0.9 }}>Run your own draft</div>
+        <div className="otc-in" style={{ fontSize: 30, fontWeight: 700, color: "#dbe6f5", marginTop: 14, maxWidth: 720, ...d(120) }}>
+          Pick for your team, make trades, and get your draft graded in the We-Draft.com Draft Sim.
+        </div>
+        <div className="bc-disp otc-in" style={{ fontSize: 54, color: GOLD, marginTop: 14, ...d(220) }}>we-draft.com/draftsim</div>
+      </div>
     </div>
   );
 }
@@ -326,13 +518,12 @@ function Trade({ script, m }) {
 // right — board rank, position rank, community grade, size, and the
 // community's strengths and concerns.
 const sizeOf = (p) => [p.ht ? `${Math.floor(p.ht / 12)}-${p.ht % 12}` : null, p.wt ? `${p.wt} lbs` : null].filter(Boolean).join(" · ");
-function Reveal({ script, m, votes }) {
+function Reveal({ script, m }) {
   const b = m.beat;
   const team = script.teams[b.team] || {};
   const p = script.players[b.pid] || {};
   const fg = textOn(team.c1);
   const tag = b.value >= 5 ? { t: `Value +${b.value}`, c: "#2e9d4f" } : b.value <= -8 ? { t: `Reach ${b.value}`, c: "#c0392b" } : null;
-  const g = votes?.[b.overall]?.grade;
   const label = gradeLabel(p.avg);
   const look = label ? gradeLook(label) : null;
   // The name as big as it fits the left column (Bebas runs ~0.42em a letter).
@@ -360,10 +551,9 @@ function Reveal({ script, m, votes }) {
             <div className="bc-ell" style={{ fontSize: 32, fontWeight: 800, opacity: 0.9, marginTop: 6 }}>{p.pos} · {ROUND_WORD[b.round] || `Round ${b.round}`} round, pick {b.inRound}</div>
           </div>
         </div>
-        {(tag || g?.count) ? (
+        {tag ? (
           <div className="otc-in" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", ...d(1050) }}>
-            {tag && <span className="otc-pill" style={{ background: tag.c, color: "#fff" }}>{tag.t}</span>}
-            {g?.count ? <span className="otc-pill" style={{ background: "rgba(0,0,0,.3)", color: "#fff" }}>Fans grade the pick: {g.letter} ({g.count})</span> : null}
+            <span className="otc-pill" style={{ background: tag.c, color: "#fff" }}>{tag.t}</span>
           </div>
         ) : null}
       </div>
@@ -575,7 +765,7 @@ function DeskPost({ post, a }) {
     <div ref={ref} className="otc-post otc-post-in" style={{ borderBottom: "none", padding: "20px 22px", "--k": k }}>
       <Avatar a={a} size={58} />
       <div style={{ minWidth: 0 }}>
-        <div className="who" style={{ fontSize: "calc(24px * var(--k))" }}><span style={{ color: a.color === SITE_BLUE ? "#6fb1ff" : a.color }}>{a.name}</span><span className="h">{a.handle}</span></div>
+        <div className="who" style={{ fontSize: "calc(24px * var(--k))" }}><span style={{ color: a.color === SITE_BLUE ? "#6fb1ff" : a.color }}>{a.name}</span>{a.verified && <Verified size={24} />}<span className="h">{a.handle}</span></div>
         <div className="tx" style={{ fontSize: "calc(26px * var(--k))", lineHeight: 1.3, marginTop: 6 }}>{post.text}</div>
         {(post.lines || []).slice(0, 1).map((l) => <div key={l} className="ln" style={{ fontSize: "calc(21px * var(--k))" }}>{l}</div>)}
       </div>
@@ -637,15 +827,16 @@ function SimAd() {
 }
 
 // The desk panel: Best Available for the pick that's up (rotating through
-// the positions, with the site's votes), and under it the desk's latest
-// comment.
-function Desk({ script, timeline, m, votes }) {
+// the positions), and under it the desk's latest comment.
+function Desk({ script, timeline, m }) {
   // We-Draft.com's own posts stay off the desk — the stage tells the pick.
-  const post = postsAt(script, timeline, m.t, 12).find((p) => p.a !== DESK_SKIP);
+  // Before the draft, the pre-draft lines in rotation (We-Draft.com's too).
+  const pregame = m.kind === "preshow" ? pregamePosts(script) : null;
+  const post = pregame
+    ? (pregame.length ? pregame[mod(Math.floor(m.t / PREGAME_POST_MS), pregame.length)] : null)
+    : postsAt(script, timeline, m.t, 12).find((p) => p.a !== DESK_SKIP);
   const up = upBeat(script, m);
   const ba = up ? bestAvailable(script, up.idx, m.t) : null;
-  const tally = (up && votes?.[up.b.overall]?.take) || {};
-  const total = Object.values(tally).reduce((t, n) => t + n, 0);
   const a = post ? script.analysts[post.a] || {} : null;
   return (
     <div className="otc-desk">
@@ -665,22 +856,19 @@ function Desk({ script, timeline, m, votes }) {
           <div style={{ padding: "10px 16px 6px", display: "flex", flexDirection: "column", gap: 8 }}>
             {ba.page.list.map((pid, k) => {
               const p = script.players[pid] || {};
-              const pct = total ? Math.round(((tally[pid] || 0) / total) * 100) : 0;
               return (
                 <div key={pid} className="otc-cand" style={{ color: "#fff", height: 62, padding: "0 14px", gap: 12 }}>
-                  <div className="bar" style={{ width: `${pct}%` }} />
                   <span className="bc-disp" style={{ fontSize: 30, color: "#7f91ab", width: 22, textAlign: "right" }}>{k + 1}</span>
                   {p.logo ? <img src={p.logo} alt="" style={{ width: 38, height: 38, objectFit: "contain" }} /> : <span style={{ width: 38 }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="bc-ell" style={{ fontSize: 24, fontWeight: 800 }}>{name(p)}</div>
                     <div className="bc-ell" style={{ fontSize: 17, color: "#b9c6d8" }}>{p.pos}{p.posRank || ""} · {p.sch} · #{p.rank} overall</div>
                   </div>
-                  {pct ? <div className="bc-disp" style={{ fontSize: 36 }}>{pct}%</div> : null}
                 </div>
               );
             })}
             <div style={{ fontSize: 18, fontWeight: 700, color: "#9fb0c8", padding: "2px 4px" }}>
-              {total ? `${total} vote${total === 1 ? "" : "s"} · ` : ""}Vote at <span style={{ color: GOLD }}>we-draft.com/draftsim/live</span>
+              Run your own draft at <span style={{ color: GOLD }}>we-draft.com/draftsim</span>
             </div>
           </div>
           )}
@@ -696,7 +884,7 @@ function Desk({ script, timeline, m, votes }) {
           <div style={{ padding: "16px 22px", display: "flex", flexWrap: "wrap", gap: 14 }}>
             {Object.entries(script.analysts).filter(([id]) => id !== DESK_SKIP).map(([id, x]) => (
               <div key={id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 20, fontWeight: 800 }}>
-                <Avatar a={x} size={40} /><span style={{ color: x.color === SITE_BLUE ? "#6fb1ff" : x.color }}>{x.name}</span>
+                <Avatar a={x} size={40} /><span style={{ color: x.color === SITE_BLUE ? "#6fb1ff" : x.color }}>{x.name}</span>{x.verified && <Verified size={20} />}
               </div>
             ))}
           </div>
@@ -793,7 +981,7 @@ function StageSwap({ id, children, slide = false }) {
 // The beats that open with the wipe (the team screen just updates).
 const WIPE = ["intro", "trade", "reveal", "roundBreak", "final"];
 
-export default function OnTheClockScreen({ script, timeline, m, votes }) {
+export default function OnTheClockScreen({ script, timeline, m }) {
   const stageTeam = ["clock", "trade", "pickIn", "reveal"].includes(m.kind)
     ? script.teams[m.kind === "trade" ? m.beat.trade.to : onClockTeam(m)] : null;
   const bg = stageTeam
@@ -824,12 +1012,12 @@ export default function OnTheClockScreen({ script, timeline, m, votes }) {
           {m.kind === "intro" && <Intro script={script} />}
           {m.kind === "clock" || m.kind === "pickIn" ? <OnClock script={script} m={m} /> : null}
           {m.kind === "trade" && <Trade script={script} m={m} />}
-          {m.kind === "reveal" && <Reveal script={script} m={m} votes={votes} />}
+          {m.kind === "reveal" && <Reveal script={script} m={m} />}
           {m.kind === "roundBreak" && <RoundBreak script={script} m={m} />}
           {m.kind === "final" && <Final script={script} m={m} />}
         </StageSwap>
       </div>
-      {!final && <Desk script={script} timeline={timeline} m={m} votes={votes} />}
+      {!final && <Desk script={script} timeline={timeline} m={m} />}
       {!final && <Recap script={script} m={m} />}
     </div>
   );

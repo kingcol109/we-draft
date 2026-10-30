@@ -110,7 +110,9 @@ const fmtFull = (t) => (t ? `${fmtDay(t)} · ${fmtTime(t)}` : "—");
 const toLocalInput = (t) => (t ? new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const teamName = (t) => t?.school || t?.short || "TBD";
 const isNational = (b) => b?.kind === "national";
-const matchup = (b) => (isNational(b) ? "National Coverage" : `${teamName(b.awayTeam)} vs ${teamName(b.homeTeam)}`);
+// On the Clock (orchestrator kind "otc"): scheduled from Stream Manager → On the Clock.
+const isOtc = (b) => b?.kind === "otc";
+const matchup = (b) => (isNational(b) ? "National Coverage" : isOtc(b) ? `On the Clock · ${b.auto?.showId || ""}` : `${teamName(b.awayTeam)} vs ${teamName(b.homeTeam)}`);
 // Same defaults as server/stream-manager/broadcasts.js.
 const defaultTitle = (g) => `We-Draft Live: ${teamName(g.away)} vs ${teamName(g.home)}`;
 const defaultDescription = (g) =>
@@ -654,12 +656,16 @@ export function AutoSchedule({ games, statusById = {}, rows = [], orchDoc, agent
 //   national: { startAt, endAt } (ms) instead — the national stream's
 //     draft and thumbnail (broadcastMetadata/national), generated for that
 //     window (its Game of the Week / Featured games)
+//   otc: { showId, title } instead — one On the Clock show's draft and
+//     thumbnail (broadcastMetadata/otc-{showId}), generated from the show
+//     (its format, the first team on the clock, the top of the board)
 const fmtSaved = (t) => (t ? new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
-export function MetadataEditor({ game, national, onClose }) {
+export function MetadataEditor({ game, national, otc, onClose }) {
   // What every request is about.
-  const req = useMemo(() => (national
+  const req = useMemo(() => (otc ? { otc: true, showId: otc.showId } : national
     ? { national: true, startAt: new Date(national.startAt).toISOString(), endAt: new Date(national.endAt).toISOString() }
-    : { scheduleId: game.id }), [national?.startAt, national?.endAt, game?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    : { scheduleId: game.id }), [otc?.showId, national?.startAt, national?.endAt, game?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const what = otc ? "This show's" : national ? "This window's" : "This game's";
   const [data, setData] = useState(null); // metadata-get's answer
   const [loadErr, setLoadErr] = useState(null);
   const [title, setTitle] = useState("");
@@ -776,7 +782,12 @@ export function MetadataEditor({ game, national, onClose }) {
         <div style={{ padding: "16px 20px", borderBottom: "2px solid #eef1f5", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={label}>YouTube metadata</div>
-            {national ? (
+            {otc ? (
+              <>
+                <div style={{ fontWeight: 900, fontSize: 17, color: INK }}>On the Clock · {otc.showId}</div>
+                <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>{otc.title}{data?.otc?.firstPickAt ? ` · first pick ${fmtFull(data.otc.firstPickAt)}` : ""}</div>
+              </>
+            ) : national ? (
               <>
                 <div style={{ fontWeight: 900, fontSize: 17, color: INK }}>National Coverage</div>
                 <div style={{ fontSize: 12, color: "#778", fontWeight: 700 }}>{fmtFull(national.startAt)} → {fmtTime(national.endAt)} · used for every national window</div>
@@ -799,8 +810,9 @@ export function MetadataEditor({ game, national, onClose }) {
             <>
               <div style={{ fontSize: 12, color: "#556", fontWeight: 700, marginBottom: 12, lineHeight: 1.5 }}>
                 {data.broadcast?.youtubeCreated
-                  ? <span style={{ color: RED, fontWeight: 900 }}>{national ? "This window's" : "This game's"} YouTube broadcast already exists. Saving here does not change it — edit it in YouTube Studio. The draft is only used for a broadcast created later.</span>
-                  : draft ? "Saved as a draft only: nothing is created on YouTube and automation isn't enabled. When automation creates this game's YouTube broadcast, it uses this title and description."
+                  ? <span style={{ color: RED, fontWeight: 900 }}>{what} YouTube broadcast already exists. Saving here does not change it — edit it in YouTube Studio. The draft is only used for a broadcast created later.</span>
+                  : draft ? `Saved as a draft only: nothing is created on YouTube and automation isn't enabled. When automation creates ${otc ? "this show's" : "this game's"} YouTube broadcast, it uses this title and description.`
+                    : otc ? "Generated automatically from the show — its format, date, the first team on the clock and the top of the We-Draft board (never a pick). Automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and nothing is scheduled."
                     : national ? "Generated automatically — the window's top game (Game of the Week, else Featured) goes in the hashtags. Automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and nothing is scheduled."
                       : "Generated automatically from the matchup, ranks and kickoff — automation uses this unless you save your own. Saving a draft only stores it: nothing is created on YouTube and automation isn't enabled."}
               </div>
@@ -829,7 +841,7 @@ export function MetadataEditor({ game, national, onClose }) {
               <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
                 <div style={{ width: 384, maxWidth: "100%", aspectRatio: "16 / 9", borderRadius: 8, overflow: "hidden", background: "#eef1f5", border: `2px solid ${thumbDirty ? AMBER : "#e3e8ef"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {shown ? <img src={shown.dataUrl} alt={thumbDirty ? "Thumbnail preview (not saved)" : "Saved thumbnail"} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
-                    : <span style={{ fontSize: 12, fontWeight: 800, color: "#99a", padding: 12, textAlign: "center" }}>{thumbBusy === "generate" ? "Generating…" : national ? "Generate one from the window's Game of the Week and Featured games" : "Generate one from the teams' colors and logos"}</span>}
+                    : <span style={{ fontSize: 12, fontWeight: 800, color: "#99a", padding: 12, textAlign: "center" }}>{thumbBusy === "generate" ? "Generating…" : otc ? "Generate one from the first team on the clock and the top of the board" : national ? "Generate one from the window's Game of the Week and Featured games" : "Generate one from the teams' colors and logos"}</span>}
                 </div>
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -841,7 +853,7 @@ export function MetadataEditor({ game, national, onClose }) {
                   </div>
                   {(preview?.notes || []).map((n) => <div key={n} style={{ fontSize: 12, color: "#8a6100", fontWeight: 800, marginTop: 6 }}>{n}</div>)}
                   <div style={{ fontSize: 11, color: "#889", fontWeight: 700, marginTop: 8, lineHeight: 1.45 }}>
-                    {national ? "1280×720 PNG from the national template — a tile per Game of the Week / Featured game in the window (schools' colors and logos), then the rest as “+N more”." : "1280×720 PNG from the We-Draft template — the schools' saved colors and logos."} It becomes the YouTube thumbnail automatically: when automation creates the broadcast, or right away on save if the broadcast already exists.
+                    {otc ? "1280×720 PNG from the On the Clock template — the first team on the clock in its colors, the format, and the top three on the We-Draft board (their schools' logos)." : national ? "1280×720 PNG from the national template — a tile per Game of the Week / Featured game in the window (schools' colors and logos), then the rest as “+N more”." : "1280×720 PNG from the We-Draft template — the schools' saved colors and logos."} It becomes the YouTube thumbnail automatically: when automation creates the broadcast, or right away on save if the broadcast already exists.
                   </div>
                   <Message msg={thumbMsg} />
                 </div>
@@ -1329,6 +1341,16 @@ function BroadcastDetail({ b, onBack, onEdit }) {
               <a href="/broadcast/national" target="_blank" rel="noreferrer" style={{ ...btn(BLUE, false), textDecoration: "none", padding: "6px 10px", fontSize: 11 }}>Broadcast preview</a>
             </div>
           </Panel>
+        ) : isOtc(b) ? (
+          <Panel title="On the Clock">
+            <Row k="Show">{b.otc?.title || b.auto?.showId}</Row>
+            <Row k="Stream starts">{fmtFull(b.auto?.kickoffAt)}</Row>
+            <Row k="Show ends">{fmtFull(b.auto?.endAt)}</Row>
+            <Row k="Broadcast start">{fmtFull(ms(b.scheduledStart))}</Row>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <a href={`/broadcast/ontheclock?show=${b.auto?.showId}&at=-20`} target="_blank" rel="noreferrer" style={{ ...btn(BLUE, false), textDecoration: "none", padding: "6px 10px", fontSize: 11 }}>Broadcast preview</a>
+            </div>
+          </Panel>
         ) : (
         <Panel title="Game">
           <Row k="Matchup">{matchup(b)}</Row>
@@ -1390,7 +1412,7 @@ function BroadcastDetail({ b, onBack, onEdit }) {
             <Row k="State"><Pill s={autoState(b) || AUTO.selected} small /></Row>
             <Row k="Mode">{b.rehearsal ? "Rehearsal (simulated, no YouTube)" : "Real broadcast"}</Row>
             <Row k="Phase" mono>{b.auto.phase}</Row>
-            <Row k={isNational(b) ? "Window" : "Kickoff"}>{isNational(b) ? `${fmtFull(b.auto.kickoffAt)} → ${b.auto.openEnded ? "until ended" : fmtTime(b.auto.endAt)}` : fmtFull(b.auto.kickoffAt)}</Row>
+            <Row k={isNational(b) || isOtc(b) ? "Window" : "Kickoff"}>{isNational(b) || isOtc(b) ? `${fmtFull(b.auto.kickoffAt)} → ${b.auto.openEnded ? "until ended" : fmtTime(b.auto.endAt)}` : fmtFull(b.auto.kickoffAt)}</Row>
             <Row k="Prep starts">{fmtFull(b.auto.prepAt)}</Row>
             <Row k="Stream slot">{b.auto.slot ?? "—"}</Row>
             <Row k={isNational(b) ? "All final seen" : "Final seen"}>{b.auto.finalSeenAt ? fmtFull(b.auto.finalSeenAt) : "—"}</Row>

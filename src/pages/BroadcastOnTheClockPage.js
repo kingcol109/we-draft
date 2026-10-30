@@ -28,10 +28,9 @@ import { useSearchParams } from "react-router-dom";
 import OnTheClockScreen, { OTC_STYLE } from "../broadcast/OnTheClockScreen";
 import { BROADCAST_STYLE } from "../broadcast/broadcastStyle";
 import { usePageShell, useFontsReady, useFit, stageTransform, useCaptureReport } from "../broadcast/useBroadcastShell";
-import { useShow, useCurrentShow, useNow, generateShow } from "../utils/draftSim/onTheClockData";
+import { useShow, useCurrentShow, useNow, generateShow, useFilledSpotlights } from "../utils/draftSim/onTheClockData";
 import { showTimeline, momentAt } from "../utils/draftSim/onTheClock";
 import OnTheClockPreviewBar from "../broadcast/OnTheClockPreviewBar";
-import { useShowVotes } from "../utils/draftSim/onTheClockVotes";
 
 export default function BroadcastOnTheClockPage() {
   const [params] = useSearchParams();
@@ -45,32 +44,37 @@ export default function BroadcastOnTheClockPage() {
   const preview = !!(demoKey || local || at != null);
   const now = useNow(preview ? 100 : 250);
   const [opened] = useState(() => Date.now());
+  // Where a preview starts (ms into the show). A demo or local show is
+  // anchored so that's now — its clock times (the first pick on the
+  // countdown) are real ones.
+  const startT = (at != null ? Number(at) : local ? -10 : 0) * 1000;
 
   const demoSeed = params.get("seed");
   const demoRounds = Number(params.get("rounds")) || null;
   const [demo, setDemo] = useState(null);
   useEffect(() => {
     if (!demoKey) return;
-    generateShow({ formatKey: demoKey, rounds: demoRounds, seed: demoSeed ? Number(demoSeed) : undefined, startAt: opened, id: "demo" })
+    generateShow({ formatKey: demoKey, rounds: demoRounds, seed: demoSeed ? Number(demoSeed) : undefined, startAt: opened - startT, id: "demo" })
       .then((s) => { window.__OTC_SCRIPT__ = s; setDemo(s); })
       .catch((e) => { console.error("On the Clock demo", e); setDemo(false); });
-  }, [demoKey, demoSeed, demoRounds, opened]);
+  }, [demoKey, demoSeed, demoRounds, opened]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!local) return;
     fetch(`/ontheclock-local.json?${Date.now()}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
-      .then(setDemo).catch((e) => { console.error("On the Clock local show", e); setDemo(false); });
-  }, [local]);
+      .then((s) => setDemo({ ...s, startAt: opened - startT, streamAt: undefined })).catch((e) => { console.error("On the Clock local show", e); setDemo(false); });
+  }, [local]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const offline = !!(demoKey || local);
   const id = offline ? null : params.get("show");
   const one = useShow(id);
   const current = useCurrentShow(now);
-  const script = offline ? demo || null : id ? one.script : current;
+  // (A script saved before the spotlights kept stats gets them read now.)
+  const script = useFilledSpotlights(offline ? demo || null : id ? one.script : current);
   const loading = offline ? demo === null : id ? one.loading : current === undefined;
   const timeline = useMemo(() => (script ? showTimeline(script) : null), [script]);
 
   // The preview's own clock: ms into the show, played at `speed`, pausable.
-  const [vc, setVc] = useState(() => ({ t: (at != null ? Number(at) : local ? -10 : 0) * 1000, wall: Date.now(), speed: 1, paused: false }));
+  const [vc, setVc] = useState(() => ({ t: startT, wall: Date.now(), speed: 1, paused: false }));
   const vt = vc.paused ? vc.t : vc.t + (now - vc.wall) * vc.speed;
   const seek = useCallback((t) => setVc((c) => ({ ...c, t, wall: Date.now() })), []);
   const control = useCallback((patch) => setVc((c) => {
@@ -80,7 +84,6 @@ export default function BroadcastOnTheClockPage() {
 
   const clock = preview && script ? script.startAt + vt : now;
   const m = script && timeline ? { ...momentAt(script, timeline, clock), realtime: !preview || (!vc.paused && vc.speed === 1) } : null;
-  const votes = useShowVotes(offline ? null : script?.id);
 
   const phase = loading ? "loading" : !script ? "empty" : m.kind === "preshow" ? "preshow" : m.kind === "final" ? "final" : "live";
   useCaptureReport({ ready: fontsOk && !loading, phase, stale: false, gameId: `ontheclock:${script?.id || ""}` });
@@ -93,7 +96,7 @@ export default function BroadcastOnTheClockPage() {
     <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000" }}>
       <style>{BROADCAST_STYLE}{OTC_STYLE}</style>
       <div className="bc-stage" style={{ transform: stageTransform(fit), opacity: fontsOk ? 1 : 0 }}>
-        {m ? <OnTheClockScreen script={script} timeline={timeline} m={m} votes={votes} /> : (
+        {m ? <OnTheClockScreen script={script} timeline={timeline} m={m} /> : (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 20 }}>
             <img src="/wd-icon.png" alt="" style={{ width: 140, height: 140 }} />
             <div className="bc-disp" style={{ fontSize: 120 }}>On the Clock</div>

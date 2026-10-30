@@ -543,6 +543,70 @@ test("national thumbnail: Upload Thumbnail sends it to a created national broadc
   assert.ok(sent[0].buf.equals(db.data("broadcastThumbnails/national").png));
 });
 
+// ── On the Clock ──
+// One show: its schedule entry (config/onTheClockShows) and a small script
+// (simShows/{id}) — two picks, the board's top three.
+const OTC_DAY = "2026-10-30";
+const OTC_FIRST = Date.parse("2026-10-30T22:00:00Z"); // Fri Oct 30, 6:00 PM ET
+const otcScript = (more = {}) => ({
+  id: OTC_DAY, title: "On the Clock: 2027 NFL Draft · All 7 Rounds", startAt: OTC_FIRST - 45e3, streamAt: OTC_FIRST - 15 * 60e3,
+  format: { key: "full2027", label: "2027 NFL Draft · All 7 Rounds", year: "2027", rounds: 7 },
+  teams: {
+    LAC: { name: "Los Angeles Chargers", nick: "Chargers", c1: "#0080c6", c2: "#ffc20e", logo: "https://cdn.example.com/unc-dark.png" },
+    TEN: { name: "Tennessee Titans", nick: "Titans", c1: "#0c2340", c2: "#4b92db", logo: "" },
+  },
+  players: {
+    p1: { f: "Jeremiah", l: "Smith", pos: "WR", sch: "Ohio State", rank: 1, logo: "https://cdn.example.com/wake-1.png" },
+    p2: { f: "Leonard", l: "Moore", pos: "DB", sch: "Notre Dame", rank: 2, logo: "" },
+    p3: { f: "Colin", l: "Simmons", pos: "EDGE", sch: "Texas", rank: 3, logo: "https://cdn.example.com/missing.png" },
+  },
+  board: { WR: ["p1"], DB: ["p2"], EDGE: ["p3"] },
+  beats: [{ overall: 1, round: 1, team: "LAC", pid: "p3" }, { overall: 224, round: 7, team: "TEN", pid: "p1" }],
+  ...more,
+});
+const otcEntry = { streamAt: OTC_FIRST - 15 * 60e3, startAt: OTC_FIRST - 45e3, endsAt: OTC_FIRST + 2 * 3600e3, title: "On the Clock: 2027 NFL Draft · All 7 Rounds" };
+const otcDocs = (script = otcScript()) => ({ [`simShows/${OTC_DAY}`]: script, "config/onTheClockShows": { shows: { [OTC_DAY]: otcEntry } } });
+const otcReq = { otc: true, showId: OTC_DAY };
+
+test("On the Clock thumbnail: the first team's logo and the board's top three; a logo that won't load shows initials", async () => {
+  db = seed(otcDocs());
+  const r = await t.generateOtc(db, OTC_DAY);
+  assert.deepEqual(t.pngSize(r.png), { w: 1280, h: 720 });
+  assert.equal(r.game.gameId, `otc-${OTC_DAY}`);
+  assert.equal(r.inputs.templateVersion, t.OTC_TEMPLATE);
+  assert.deepEqual(r.inputs.team.logo, { source: "script", url: "https://cdn.example.com/unc-dark.png" });
+  assert.deepEqual(r.inputs.tiles.map((x) => x.name), ["Smith", "Moore", "Simmons"]);
+  assert.ok(r.notes.some((n) => /Leonard Moore \(Notre Dame\): no logo saved/.test(n)));
+  assert.ok(r.notes.some((n) => /Colin Simmons \(Texas\): the logo couldn't be loaded/.test(n)));
+  assert.equal(t.firstPickLabel(OTC_FIRST), "FRIDAY, OCT 30 · FIRST PICK 6:00 PM ET");
+  const svg = (await t.otcSpec(db, OTC_DAY)).spec;
+  assert.match(t.buildOtcSvg(svg), /CHARGERS/);
+  assert.match(t.buildOtcSvg(svg), /2027 NFL MOCK DRAFT/);
+  assertNoYoutubeOrVm();
+});
+
+test("On the Clock thumbnail: generating stores nothing; saving stores broadcastThumbnails/otc-{show} only; Upload sends it to the show's broadcast", async () => {
+  db = seed(otcDocs());
+  let before = snapshot();
+  const gen = await call({ body: { action: "metadata-thumbnail-generate", ...otcReq } });
+  assert.equal(gen.statusCode, 200, JSON.stringify(gen.body));
+  assert.equal(gen.body.gameId, `otc-${OTC_DAY}`);
+  assert.deepEqual(changedSince(before), []);
+  before = snapshot();
+  const saved = await call({ body: { action: "metadata-thumbnail-save", ...otcReq, sha256: gen.body.sha256 } });
+  assert.equal(saved.statusCode, 200, JSON.stringify(saved.body));
+  assert.deepEqual(changedSince(before), [`broadcastThumbnails/otc-${OTC_DAY}`]);
+  assert.equal(db.data(`broadcastThumbnails/otc-${OTC_DAY}`).kind, "otc");
+  assertNoYoutubeOrVm();
+  db.store.set("streamManager/youtube", { connected: true, channelId: "UC1" });
+  db.store.set("broadcasts/o20261030", record({ kind: "otc", gameId: null, auto: { showId: OTC_DAY } }));
+  const sent = [];
+  yt.accessToken = async () => "access-token-never-logged";
+  yt.setThumbnail = async (_t, videoId, buf) => { sent.push({ videoId, buf }); return { url: null }; };
+  assert.equal((await call({ body: { action: "youtube-thumbnail", id: "o20261030" } })).statusCode, 200);
+  assert.ok(sent[0].buf.equals(db.data(`broadcastThumbnails/otc-${OTC_DAY}`).png));
+});
+
 test("secrets never reach the logs", () => {
   for (const l of logs) assert.ok(!l.includes("access-token-never-logged") && !l.includes("tok-admin"), l);
 });

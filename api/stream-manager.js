@@ -132,6 +132,7 @@ module.exports = async function handler(req, res) {
       }
       case "auto-select": return res.status(200).json(await orch.selectGame(db, uid, body));
       case "auto-national": return res.status(200).json(await orch.selectNational(db, uid, body));
+      case "auto-otc": return res.status(200).json(await orch.selectOtc(db, uid, body));
       case "auto-start-now": return res.status(200).json(await orch.startNow(db, uid, body));
       case "auto-cancel": return res.status(200).json(await orch.cancelGame(db, uid, body));
       case "auto-retry": return res.status(200).json(await orch.retryGame(db, uid, body));

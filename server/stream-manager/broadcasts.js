@@ -75,7 +75,7 @@ function deriveStatus(b) {
 }
 
 // A record's name in lists and logs.
-const recordName = (b) => (b?.kind === "national" ? "National Coverage" : `${teamName(b?.awayTeam)} vs ${teamName(b?.homeTeam)}`);
+const recordName = (b) => (b?.kind === "national" ? "National Coverage" : b?.kind === "otc" ? "On the Clock" : `${teamName(b?.awayTeam)} vs ${teamName(b?.homeTeam)}`);
 // A national record's own title / description (the stream's standard text,
 // without the window's top-game hashtag, which the generated text adds at
 // broadcast creation — metadata.js).
@@ -293,7 +293,7 @@ async function broadcastText(db, rec, useDraft) {
   const own = { title: rec.youtube.title, description: rec.youtube.description, source: "record", version: null };
   if (!useDraft || rec.rehearsal === true) return own;
   const md = require("./metadata");
-  const key = rec.kind === "national" ? md.NATIONAL_KEY : rec.gameId;
+  const key = md.keyForRecord(rec);
   try {
     const d = await md.draftForBroadcast(db, key);
     if (d) return { title: d.title, description: d.description, source: "draft", version: d.version };
@@ -336,7 +336,8 @@ async function youtubeCreate(db, body) {
   });
 
   try {
-    if (rec.kind !== "national") await loadGame(db, rec.gameId);
+    // National coverage and On the Clock have no game to check.
+    if (rec.kind !== "national" && rec.kind !== "otc") await loadGame(db, rec.gameId);
     const s = await settings(db);
     const token = await yt.accessToken(db);
     if (!s.channelId) throw httpError(409, "No YouTube channel is connected.");
@@ -421,8 +422,9 @@ async function youtubeThumbnail(db, body) {
   if (data.rehearsal === true) throw httpError(409, "This is a rehearsal record — it has no YouTube broadcast.");
   if (!data.youtube?.broadcastId) throw httpError(400, "No YouTube broadcast yet — the thumbnail can be uploaded once it's created.");
   const md = require("./metadata");
-  const t = await md.thumbnailForBroadcast(db, data.kind === "national" ? md.NATIONAL_KEY : data.gameId);
-  if (!t) throw httpError(404, `${data.kind === "national" ? "National coverage" : "This game"} has no saved thumbnail — generate and save one in Auto Schedule → Edit Metadata.`);
+  const t = await md.thumbnailForBroadcast(db, md.keyForRecord(data));
+  if (!t) throw httpError(404, data.kind === "otc" ? "This show has no saved thumbnail — generate and save one in Stream Manager → On the Clock → Edit Metadata."
+    : `${data.kind === "national" ? "National coverage" : "This game"} has no saved thumbnail — generate and save one in Auto Schedule → Edit Metadata.`);
   const s = await settings(db);
   if (data.youtube.channelId && s.channelId && data.youtube.channelId !== s.channelId) throw httpError(409, "This broadcast belongs to a different YouTube channel than the one connected now.");
   const token = await yt.accessToken(db);
@@ -447,7 +449,7 @@ async function autoThumbnail(db, ref, token = null) {
     const y = data.youtube || {};
     if (!y.broadcastId || OFF_AIR_ENDED.includes(y.lifecycleStatus)) return null;
     const md = require("./metadata");
-    const t = await md.thumbnailForBroadcast(db, data.kind === "national" ? md.NATIONAL_KEY : data.gameId);
+    const t = await md.thumbnailForBroadcast(db, md.keyForRecord(data));
     if (!t) return null;
     if (y.thumbnailSha256 === t.sha256) return { skipped: "already uploaded" };
     try {
@@ -472,13 +474,14 @@ const OFF_AIR_ENDED = ["complete", "revoked"];
 // and is already created on YouTube. key: a CFBD game id or "national".
 async function syncSavedThumbnail(db, key) {
   const md = require("./metadata");
-  const q = key === md.NATIONAL_KEY
-    ? db.collection("broadcasts").where("kind", "==", "national")
-    : db.collection("broadcasts").where("gameId", "==", String(key));
+  const otc = md.OTC_KEY_RE.test(String(key));
+  const q = key === md.NATIONAL_KEY ? db.collection("broadcasts").where("kind", "==", "national")
+    : otc ? db.collection("broadcasts").where("kind", "==", "otc")
+      : db.collection("broadcasts").where("gameId", "==", String(key));
   const docs = (await q.get()).docs.filter((d) => {
     const x = d.data();
     return x.rehearsal !== true && x.youtube?.broadcastId && !OFF_AIR_ENDED.includes(x.youtube.lifecycleStatus)
-      && (key !== md.NATIONAL_KEY || x.auto?.open);
+      && (key !== md.NATIONAL_KEY || x.auto?.open) && (!otc || md.keyForRecord(x) === key);
   });
   const out = [];
   for (const d of docs) out.push({ id: d.id, ...((await autoThumbnail(db, d.ref)) || { skipped: true }) });

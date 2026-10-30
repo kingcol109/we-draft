@@ -7,7 +7,8 @@
 // (broadcasts.js youtubeCreate with useDraft).
 //
 //   broadcastMetadata/{CFBDGameId}   (…/national: the national stream —
-//                                kind "national", used by every national window)
+//                                kind "national", used by every national window;
+//                                …/otc-YYYY-MM-DD: one On the Clock show — kind "otc")
 //     gameId, scheduleId         which game (the key is the CFBD id; the
 //                                schedule26 doc stays the source of truth for
 //                                matchup, kickoff and slug)
@@ -16,7 +17,7 @@
 //     version                    +1 per save (an edit made from an older copy is refused)
 //     createdAt/By, updatedAt/By
 //
-//   broadcastThumbnails/{CFBDGameId | national}   the generated thumbnail
+//   broadcastThumbnails/{CFBDGameId | national | otc-YYYY-MM-DD}   the generated thumbnail
 //     gameId, scheduleId         (thumbnail.js — drawn from a fixed template,
 //     png (bytes), width, height, bytes, sha256      no AI, no image service)
 //     inputs { away, home: { name, color, logo: { source, url } }, kickoffAt, templateVersion }
@@ -246,10 +247,89 @@ async function generatedNational(db, w) {
   return { title: v.title, description: v.description };
 }
 
+// ── On the Clock ──
+// One draft and one thumbnail a show (broadcastMetadata/otc-YYYY-MM-DD,
+// broadcastThumbnails/otc-…): each night's format, date and board differ.
+// Generated from what the show already knows before a pick is made — its
+// format, the first team on the clock and when, the top of the board — from
+// its schedule entry (config/onTheClockShows) and its script
+// (simShows/{id}: teams, players, board, beats). Never a pick itself.
+const OTC_SHOW_RE = /^\d{4}-\d{2}-\d{2}$/;
+const OTC_KEY_RE = /^otc-\d{4}-\d{2}-\d{2}$/;
+const otcKey = (showId) => `otc-${showId}`;
+// The show's intro before Round 1 Pick 1 (src/utils/draftSim/onTheClock.js INTRO_MS).
+const OTC_INTRO_MS = 45e3;
+const OTC_TOP = 5;
+
+// { showId, title, formatKey, label, year, rounds, picks, streamAt,
+//   firstPickAt, first: { abbr, name, nick, color, color2, logo }, top: [{ name, pos, school, logo, rank }] }
+async function otcInputs(db, showId) {
+  const id = String(showId || "");
+  if (!OTC_SHOW_RE.test(id)) throw httpError(400, "Pick an On the Clock show (its night, YYYY-MM-DD).");
+  const [entry, script] = await Promise.all([
+    db.doc("config/onTheClockShows").get().then((s) => s.data()?.shows?.[id] || null),
+    db.collection("simShows").doc(id).get().then((s) => s.data() || null),
+  ]);
+  if (!script) throw httpError(404, `There's no On the Clock show for ${id} — generate it first.`);
+  const beats = script.beats || [];
+  const b0 = beats[0];
+  const firstAbbr = b0 ? (b0.trade ? b0.trade.from : b0.team) : null;
+  const t = script.teams?.[firstAbbr] || {};
+  const players = script.players || {};
+  const top = [...new Set(Object.values(script.board || {}).flat())].map((pid) => players[pid]).filter((p) => p?.rank != null)
+    .sort((a, b) => a.rank - b.rank).slice(0, OTC_TOP)
+    .map((p) => ({ name: `${p.f} ${p.l}`.trim(), pos: p.pos || "", school: p.sch || "", logo: p.logo || null, rank: p.rank }));
+  const startAt = entry?.startAt ?? script.startAt;
+  return {
+    showId: id, title: script.title || entry?.title || "", formatKey: script.format?.key || "", label: script.format?.label || "",
+    year: String(script.format?.year || ""), rounds: Math.max(0, ...beats.map((b) => b.round || 0)), picks: beats.length,
+    streamAt: entry?.streamAt ?? script.streamAt ?? null, firstPickAt: startAt != null ? startAt + OTC_INTRO_MS : null,
+    first: firstAbbr ? { abbr: firstAbbr, name: t.name || firstAbbr, nick: t.nick || "", color: t.c1 || null, color2: t.c2 || null, logo: t.logo || null } : null,
+    top,
+  };
+}
+
+const roundsText = (n) => (n === 7 ? "All 7 Rounds" : `${n} Round${n === 1 ? "" : "s"}`);
+const otcKind = (i) => (/chaos/i.test(i.formatKey) ? "Chaos Mock Draft" : "Mock Draft");
+// "#Chargers" — the first team's nickname, letters and digits only.
+const nickTag = (nick) => { const w = plain(nick).replace(/[^A-Za-z0-9]+/g, ""); return w ? `#${w}` : ""; };
+
+function buildOtcGenerated(i) {
+  const title = `${i.year} NFL ${otcKind(i)} LIVE | ${roundsText(i.rounds)} | On the Clock Draft Sim`;
+  const board = i.top.map((p, k) => `${k + 1}. ${p.name} (${[p.pos, p.school].filter(Boolean).join(", ")})`).join("\n");
+  const description = [
+    `The ${i.year} NFL Draft, LIVE — ${roundsText(i.rounds).toLowerCase()}, ${i.picks} picks, with all 32 war rooms run by the We-Draft.com Draft Sim and the analyst desk reacting to every pick.`,
+    /chaos/i.test(i.formatKey) ? "Tonight is a Chaos Draft: every war room drafts off its own board, so expect reaches, runs and trades." : "",
+    "",
+    `🏈 Tonight: ${i.label || `${i.year} NFL Draft`}`,
+    `📅 Date: ${genDate(i.firstPickAt)}`,
+    `⏰ First pick: ${genTime(i.firstPickAt)}${i.first ? ` — the ${i.first.name} are on the clock` : ""}`,
+    ...(board ? ["", "⭐ Top of the We-Draft board:", board] : []),
+    "",
+    "🎯 Run your own draft: https://we-draft.com/draftsim",
+    "📝 Mock drafts: https://we-draft.com/mocks",
+    "📺 YouTube: https://www.youtube.com/@kingcoldsports",
+    "Subscribe for NFL Draft coverage, prospect evaluations and mock drafts all year.",
+    "",
+    `#NFLDraft #MockDraft #${i.year}NFLDraft${i.first ? ` ${nickTag(i.first.nick)}` : ""} #WeDraft`.replace(/\s+/g, " ").trim(),
+  ].filter((l, k, all) => !(l === "" && all[k - 1] === "")).join("\n");
+  return validateMetadata({ title, description });
+}
+
+async function generatedOtc(db, showId) {
+  const v = buildOtcGenerated(await otcInputs(db, showId));
+  return { title: v.title, description: v.description };
+}
+
 // For youtubeCreate: the generated text for a broadcast record — national
 // coverage by its window; a game by its automation's schedule game, else the
 // schedule doc with its CFBD id — or null.
 async function generatedForBroadcast(db, rec) {
+  if (rec.kind === "otc") {
+    if (!rec.auto?.showId) return null;
+    const v = buildOtcGenerated(await otcInputs(db, rec.auto.showId));
+    return Object.keys(v.errors).length ? null : { title: v.title, description: v.description };
+  }
   if (rec.kind === "national") {
     const start = rec.auto?.kickoffAt ?? rec.national?.startAt;
     // An open-ended national (Start Now) has no end: the day ahead stands in.
@@ -285,8 +365,10 @@ const thumbView = (t) => {
     dataUrl: `data:image/png;base64,${png.toString("base64")}`,
   } : null;
 };
-// A draft / thumbnail key: a CFBD game id, or "national".
-const validKey = (k) => GAME_ID_RE.test(String(k || "")) || k === NATIONAL_KEY;
+// A draft / thumbnail key: a CFBD game id, "national", or an On the Clock show (otc-YYYY-MM-DD).
+const validKey = (k) => GAME_ID_RE.test(String(k || "")) || k === NATIONAL_KEY || OTC_KEY_RE.test(String(k || ""));
+// A broadcast record's key (broadcasts.js youtubeCreate / thumbnails).
+const keyForRecord = (rec) => (rec?.kind === "national" ? NATIONAL_KEY : rec?.kind === "otc" ? (rec.auto?.showId ? otcKey(rec.auto.showId) : null) : rec?.gameId);
 
 // The saved thumbnail doc, only when it's really this key's.
 async function readThumbnail(db, key) {
@@ -303,9 +385,15 @@ async function readDraft(db, key) {
 }
 
 // What an editor request is for: { national: true, startAt, endAt } — the
-// national stream for that window — or { scheduleId } — that game.
+// national stream for that window — { otc: true, showId } — that On the
+// Clock show — or { scheduleId } — that game.
 async function target(db, body = {}) {
   if (body.national === true) return { key: NATIONAL_KEY, national: true, window: nationalWindow(body) };
+  if (body.otc === true) {
+    const showId = String(body.showId || "");
+    if (!OTC_SHOW_RE.test(showId)) throw httpError(400, "Pick an On the Clock show (its night, YYYY-MM-DD).");
+    return { key: otcKey(showId), otc: true, showId };
+  }
   const g = await scheduleGame(db, body.scheduleId);
   return { key: g.gameId, game: g };
 }
@@ -319,13 +407,17 @@ async function getMetadata(db, body = {}) {
   const recs = t.national
     ? (await db.collection("broadcasts").where("kind", "==", "national").get()).docs.map((x) => x.data())
       .filter((b) => b.rehearsal !== true && b.auto?.open && (b.auto.kickoffAt || 0) < t.window.end && (b.auto.endAt ?? Infinity) > t.window.start)
-    : (await db.collection("broadcasts").where("gameId", "==", t.key).get()).docs.map((x) => x.data()).filter((b) => b.rehearsal !== true);
+    : t.otc
+      ? (await db.collection("broadcasts").where("kind", "==", "otc").get()).docs.map((x) => x.data()).filter((b) => b.rehearsal !== true && b.auto?.showId === t.showId)
+      : (await db.collection("broadcasts").where("gameId", "==", t.key).get()).docs.map((x) => x.data()).filter((b) => b.rehearsal !== true);
+  const otc = t.otc ? await otcInputs(db, t.showId) : null;
   return {
     game: t.game || null,
     national: t.national ? { startAt: t.window.start, endAt: t.window.end } : null,
+    otc: otc ? { showId: otc.showId, title: otc.title, streamAt: otc.streamAt, firstPickAt: otc.firstPickAt } : null,
     draft: draftView(await readDraft(db, t.key)),
     thumbnail: thumbView(await readThumbnail(db, t.key)),
-    defaults: t.national ? await generatedNational(db, t.window) : await generatedMetadata(db, t.game),
+    defaults: t.national ? await generatedNational(db, t.window) : otc ? (({ title, description }) => ({ title, description }))(buildOtcGenerated(otc)) : await generatedMetadata(db, t.game),
     limits: LIMITS,
     broadcast: { exists: recs.length > 0, youtubeCreated: recs.some((b) => b.youtube?.broadcastId) },
   };
@@ -350,7 +442,7 @@ async function saveMetadata(db, uid, body = {}, now = Date.now()) {
     const at = Timestamp.fromMillis(now);
     const doc = {
       gameId: t.key,
-      ...(t.national ? { kind: "national" } : { scheduleId: t.game.scheduleId, home: t.game.home, away: t.game.away }),
+      ...(t.national ? { kind: "national" } : t.otc ? { kind: "otc", showId: t.showId } : { scheduleId: t.game.scheduleId, home: t.game.home, away: t.game.away }),
       title: v.title, description: v.description,
       version: version + 1,
       createdAt: cur?.createdAt || at, createdBy: cur?.createdBy || uid,
@@ -362,10 +454,11 @@ async function saveMetadata(db, uid, body = {}, now = Date.now()) {
   return { ok: true, gameId: t.key, draft: draftView(saved) };
 }
 
-// Renders the target's thumbnail: a game's matchup template, or the national
-// template for the window (thumbnail.js).
+// Renders the target's thumbnail: a game's matchup template, the national
+// template for the window, or On the Clock's for the show (thumbnail.js).
 async function renderThumbnail(db, t, opts) {
   const th = require("./thumbnail");
+  if (t.otc) return th.generateOtc(db, t.showId, opts);
   return t.national ? th.generateNational(db, t.window, opts) : th.generate(db, t.game.scheduleId, opts);
 }
 
@@ -398,7 +491,7 @@ async function saveThumbnail(db, uid, body = {}, now = Date.now(), opts = {}) {
     const at = Timestamp.fromMillis(now);
     const doc = {
       gameId: t.key,
-      ...(t.national ? { kind: "national", window: { startAt: t.window.start, endAt: t.window.end } } : { scheduleId: t.game.scheduleId }),
+      ...(t.national ? { kind: "national", window: { startAt: t.window.start, endAt: t.window.end } } : t.otc ? { kind: "otc", showId: t.showId } : { scheduleId: t.game.scheduleId }),
       png: r.png, width: r.width, height: r.height, bytes: r.png.length, sha256: r.sha256,
       inputs: r.inputs, notes: r.notes, templateVersion: r.inputs.templateVersion,
       version: (cur?.version || 0) + 1,
@@ -435,5 +528,6 @@ module.exports = {
   buildGenerated, generatedMetadata, generatedForBroadcast, hashtag, teamAbbr, matchupTag,
   buildNationalGenerated, nationalDescriptionText, nationalWindow, nationalInputs, generatedNational,
   getMetadata, saveMetadata, draftForBroadcast,
+  OTC_KEY_RE, otcKey, otcInputs, buildOtcGenerated, generatedOtc, keyForRecord,
   generateThumbnail, saveThumbnail, thumbnailForBroadcast,
 };

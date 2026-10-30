@@ -6,7 +6,7 @@
 // 1920×1080 stream frame on the VM and each viewer on the site — plays that
 // same script against the wall clock (now − startAt), so they all see the
 // same pick at the same moment, a late joiner lands mid-draft, and nothing
-// a viewer does (votes, chat) can change a pick.
+// a viewer does can change a pick.
 //
 // No Firestore calls here: the formats, buildShowScript() (the
 // engine + the analyst desk, exactly as the site's Draft Sim runs them) and
@@ -14,16 +14,21 @@
 //
 // Script shape (one doc, well under Firestore's 1 MB):
 //   { v, id, format: { key, label, year, rounds, variance, cpuTrades }, seed,
-//     title, startAt (ms), generatedAt, pace: { [round]: { clock, trade, pickIn, reveal } },
+//     title, startAt (ms — the timeline's zero: the intro), streamAt (ms — the
+//     stream goes up on the countdown; showTimes()), generatedAt, pace: { [round]: { clock, trade, pickIn, reveal } },
 //     teams:   { [abbr]: { name, nick, city, c1, c2, logo } },
 //     players: { [id]: { f, l, pos, sch, logo, slug, rank, posRank, avg, count, str, wk, ht, wt } },
 //     analysts:{ [id]: { name, handle, color, avatar, initials, verified } },
 //     board:   { [position]: [pid] } — the class board's top BOARD_DEPTH at each
 //              position, best first (Best Available drops the ones drafted),
+//     preshow: { season, spotlight: [{ pid, stats: [{ label, v }], leader:
+//              { rank, tied, stat, v } | null }] } — the countdown's prospect
+//              spotlights (spotlightOf): SPOTLIGHT drawn from each
+//              position's top SPOTLIGHT_DEPTH (spotlightPool),
 //     opening: [post], beats: [beat], grades: [{ team, letter, score, best, rows: [{ o, r, pid, g }] }] }
 //   beat: { kind: "pick", overall, round, inRound, team, via?, pid, value, need?,
 //           trade?: { from, to, give: [pick name] }, top: [pid] (best available
-//           at the start of the clock — the "who should they take?" vote),
+//           at the start of the clock),
 //           picks: [overall] (the team on the clock's picks left, this one first),
 //           targets: [pid] (three players it might take — Potential Targets);
 //           a trade up's trade.picks / trade.targets are the same for the team
@@ -31,7 +36,7 @@
 //           posts: [post], tradePosts?: [post] }
 //   post: { a: analyst id, text, lines?, d: delay ms }
 import { initSim, stepCpu, available, currentPick, teamHaul, rngNext, pickName, isSpecialist, warRoomFor, teamRank, acceptOffer, VARIANCE, CPU_TRADES, SIM_POSITIONS } from "./engine";
-import { reactTo, ANALYSTS, DEFAULT_CHATTER } from "./analysts";
+import { reactTo, ANALYSTS, DEFAULT_CHATTER, STAT_LABEL, ordinal } from "./analysts";
 import { teamNamer } from "./data";
 
 export const SCRIPT_VERSION = 1;
@@ -62,8 +67,19 @@ export const paceFor = (pace, round) => pace?.[round] || pace?.late || PACE[roun
 // The show's fixed segments (ms).
 export const INTRO_MS = 45000;       // "Tonight on On the Clock" + the opening posts
 export const ROUND_BREAK_MS = 40000; // "Round 2 is complete" + the round's picks
-export const PRESHOW_MS = 15 * 60000; // the countdown screen is up this long before start
+export const PRESHOW_MS = 15 * 60000; // the countdown's length when a script has no streamAt
 export const POSTSHOW_MS = 10 * 60000; // the final grades stay on air this long after
+
+// A show's clock times (ms): the stream goes up (the countdown screen) at
+// stream, the show opens (the intro) at start, Round 1 Pick 1 goes on the
+// clock INTRO_MS later at firstPick. The admin sets the stream and the
+// first pick; startForFirstPick turns the first pick into the start.
+export const showTimes = (script) => ({
+  stream: script.streamAt ?? script.startAt - PRESHOW_MS,
+  start: script.startAt,
+  firstPick: script.startAt + INTRO_MS,
+});
+export const startForFirstPick = (firstPickAt) => firstPickAt - INTRO_MS;
 
 const compactPost = (p) => ({ a: p.analyst?.id || "wedraft", text: p.text, ...(p.lines?.length ? { lines: p.lines } : {}), d: p.delay || 0 });
 
@@ -75,10 +91,72 @@ const compactPlayer = (p) => ({
   str: (p.strengths || []).slice(0, 3), wk: (p.weaknesses || []).slice(0, 3), ht: p.height ?? null, wt: p.weight ?? null,
 });
 
+// The countdown's spotlights: SPOTLIGHT players drawn at random — on the
+// show's seed, so every screen shows the same ones — from each position's
+// top SPOTLIGHT_DEPTH (spotlightPool), each with his season line as chips for his position — CFBD's, the same
+// numbers Dr. PP reads (analysts.js statFacts) — and his best national
+// leaderboard spot in the top 25.
+export const SPOTLIGHT = 24;
+export const SPOTLIGHT_DEPTH = 15;
+// The draw: every position's top SPOTLIGHT_DEPTH (lists: [[player or id]],
+// best first), shuffled on `seed`, the first SPOTLIGHT.
+export function spotlightPool(lists, seed) {
+  const pool = lists.flatMap((l) => l.slice(0, SPOTLIGHT_DEPTH));
+  let sd = (seed ^ 0x5f3759df) | 0;
+  for (let i = pool.length - 1; i > 0; i--) {
+    const r = rngNext(sd);
+    sd = r.seed;
+    const j = Math.floor(r.value * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, SPOTLIGHT);
+}
+const num = (v) => (typeof v === "number" ? (Number.isInteger(v) ? v.toLocaleString("en-US") : String(Math.round(v * 10) / 10)) : String(v));
+const CHIPS = {
+  passing: [["YDS", "Pass Yds"], ["TD", "Pass TD"], ["INT", "INT"], ["PCT", "Comp %"]],
+  rushing: [["YDS", "Rush Yds"], ["TD", "Rush TD"], ["YPC", "Yds / Carry"]],
+  receiving: [["REC", "Catches"], ["YDS", "Rec Yds"], ["TD", "Rec TD"], ["YPR", "Yds / Catch"]],
+  defensive: [["TOT", "Tackles"], ["TFL", "TFL"], ["SACKS", "Sacks"], ["QB HUR", "QB Hurries"]],
+  coverage: [["TOT", "Tackles"], ["INT", "INT"], ["PD", "Passes Def"], ["TFL", "TFL"]],
+};
+// A stat CFBD leaves out of a line is a zero.
+const ZERO_KEYS = ["TD", "INT", "TFL", "SACKS", "QB HUR", "PD"];
+// The groups a position's line can come from, first that has any: [chips
+// group, line group, the stat that says he played].
+const SPOT_GROUPS = {
+  QB: [["passing", "passing", "ATT"], ["rushing", "rushing", "CAR"]],
+  RB: [["rushing", "rushing", "CAR"], ["receiving", "receiving", "REC"]],
+  WR: [["receiving", "receiving", "REC"]],
+  TE: [["receiving", "receiving", "REC"]],
+  DL: [["defensive", "defensive", "TOT"]],
+  EDGE: [["defensive", "defensive", "TOT"]],
+  LB: [["defensive", "defensive", "TOT"]],
+  DB: [["coverage", "defensive", "TOT"]],
+};
+// season: his season totals from his school's roster (cfbRosters' s, the
+// same CFBD lines) — for a player off the national tables (p.stats).
+export function spotlightOf(p, season = null) {
+  const own = p.stats?.lines || {};
+  const lines = Object.keys(own).length ? own : season || {};
+  const chips = (group, from = group) => {
+    const line = { ...(lines[from] || {}), ...(group === "coverage" && lines.interceptions?.INT != null ? { INT: lines.interceptions.INT } : {}) };
+    return CHIPS[group].map(([k, label]) => {
+      const v = line[k] ?? (ZERO_KEYS.includes(k) ? 0 : null);
+      return v == null ? null : { label, v: k === "PCT" ? num(v * 100) : num(v) };
+    }).filter(Boolean);
+  };
+  const g = (SPOT_GROUPS[p.Position] || []).find(([, from, key]) => (lines[from]?.[key] || 0) > 0);
+  const stats = g ? chips(g[0], g[1]) : [];
+  const top = (p.stats?.leaders || []).filter((l) => STAT_LABEL[l.key] && l.rank <= 25).sort((a, b) => a.rank - b.rank)[0];
+  return { stats, leader: top ? { rank: top.rank, tied: !!top.tied, stat: STAT_LABEL[top.key], v: num(top.v) } : null };
+}
+
 // Runs the whole draft and the desk once → the script.
 //   data      loadSimData(year) (plus branding/staff/history/stars/season)
 //   bestGame  async (playerId, season) → { line, opp } | null — Isaac's big games
-export async function buildShowScript({ data, formatKey = DEFAULT_FORMAT, rounds, seed, startAt, id, title, bestGame = async () => null, pace = PACE }) {
+//   seasonLines  async (prospects) → { [slug]: season totals } — the
+//             spotlights' lines from their schools' rosters (onTheClockData.js)
+export async function buildShowScript({ data, formatKey = DEFAULT_FORMAT, rounds, seed, startAt, streamAt = null, id, title, bestGame = async () => null, seasonLines = async () => ({}), pace = PACE }) {
   const format = { key: formatKey, ...(SHOW_FORMATS[formatKey] || SHOW_FORMATS[DEFAULT_FORMAT]) };
   if (rounds) format.rounds = rounds;
   if (!VARIANCE[format.variance]) format.variance = "normal";
@@ -165,16 +243,71 @@ export async function buildShowScript({ data, formatKey = DEFAULT_FORMAT, rounds
     name: a.name, handle: a.handle || "", color: a.color || "#0055a5", avatar: a.avatar || "", initials: a.initials || "", verified: !!a.verified,
   }]));
 
+  const drawn = spotlightPool(SIM_POSITIONS.map((pos) => data.board.filter((p) => p.Position === pos)), s0);
+  const season = await seasonLines(drawn).catch(() => ({}));
+  const spotlight = drawn.map((p) => ({ pid: keep(p), ...spotlightOf(p, season?.[p.Slug] || null) }));
+  const preshow = { season: data.season || null, spotlight };
+
   const roundCount = Math.max(0, ...beats.map((b) => b.round));
   const opening = [
-    { a: "wedraft", text: `On the Clock is LIVE. Tonight: the ${data.year} NFL Draft, ${roundCount === 7 ? "all 7 rounds" : `${roundCount} round${roundCount === 1 ? "" : "s"}`}${format.variance === "more" ? ", with every war room on its own board" : ""}.`, lines: [`${beats.length} picks, every war room run by the CPU. Vote on every pick at we-draft.com/draftsim/live.`], d: 0 },
+    { a: "wedraft", text: `On the Clock is LIVE. Tonight: the ${data.year} NFL Draft, ${roundCount === 7 ? "all 7 rounds" : `${roundCount} round${roundCount === 1 ? "" : "s"}`}${format.variance === "more" ? ", with every war room on its own board" : ""}.`, lines: [`${beats.length} picks, every war room run by the CPU. Run your own at we-draft.com/draftsim.`], d: 0 },
     { a: "isaac", text: "Pull up a chair. Let's see who's got a plan and who's winging it.", d: 4000 },
   ].filter((p) => analysts[p.a]);
 
   return {
-    v: SCRIPT_VERSION, id, title: title || `On the Clock: ${format.label}`, format, seed: s0, startAt, generatedAt: Date.now(),
-    pace, teams, players, board, analysts, opening, beats, grades,
+    v: SCRIPT_VERSION, id, title: title || `On the Clock: ${format.label}`, format, seed: s0, startAt, ...(streamAt != null ? { streamAt } : {}), generatedAt: Date.now(),
+    pace, teams, players, board, analysts, preshow, opening, beats, grades,
   };
+}
+
+// The countdown's spotlights: the script's, or — a script from before it
+// kept them — the same draw from its board (script.board), no stats.
+export function spotlights(script) {
+  if (script.preshow?.spotlight?.length) return script.preshow.spotlight;
+  const lists = SIM_POSITIONS.map((pos) => (script.board?.[pos] || []).filter((pid) => script.players[pid]));
+  return spotlightPool(lists, script.seed | 0).map((pid) => ({ pid, stats: [], leader: null }));
+}
+
+// The board's No. 1 (the best rank the script's board has).
+const boardTop = (script) => Object.values(script.board || {}).flat().map((pid) => script.players?.[pid])
+  .filter((p) => p?.rank != null).sort((a, b) => a.rank - b.rank)[0] || null;
+
+// The team on the clock first (before any trade of the pick).
+export const firstOnClock = (script) => { const b = script.beats?.[0]; return b ? (b.trade ? b.trade.from : b.team) : null; };
+export const easternClock = (ms) => `${new Date(ms).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} ET`;
+
+// The desk before the draft: lines in each analyst's voice from what the
+// script knows before a pick is made — the format, who's up first, the
+// board — never a pick itself (nothing's spoiled). The countdown rotates
+// through them (PREGAME_POST_MS each). [{ a, text, key }], the analysts the
+// script has only.
+export const PREGAME_POST_MS = 12000;
+export function pregamePosts(script) {
+  const P = script.players || {};
+  const team = script.teams?.[firstOnClock(script)] || {};
+  const nick = team.nick || "team on the clock";
+  const ranked = spotlights(script).map((s) => ({ ...s, p: P[s.pid] })).filter((s) => s.p);
+  const top = boardTop(script);
+  const qb = (script.board?.QB || []).map((pid) => P[pid]).find(Boolean);
+  const leader = ranked.find((s) => s.leader);
+  const rounds = Math.max(0, ...(script.beats || []).map((b) => b.round));
+  const picks = script.beats?.length || 0;
+  const nm = (p) => `${p.f} ${p.l}`;
+  const lines = [
+    ["wedraft", `Welcome to On the Clock. Tonight: ${script.format?.label || "the NFL Draft"} — ${picks} picks, every war room run by the CPU.`],
+    top && ["isaac", `The board says ${nm(top)} goes first. Boards don't run war rooms. Let's see if the ${nick} agree.`],
+    ["makali", "Calling it now: all 32 teams nail their first pick tonight. Every single one. I can feel it."],
+    leader && ["pp", `${nm(leader.p)} finished ${leader.leader.tied ? "tied for " : ""}${ordinal(leader.leader.rank)} in the nation in ${leader.leader.stat} (${leader.leader.v}). I've got the numbers on every pick.`],
+    ["davin", "Somebody take a fullback in the first round tonight. I'm begging you."],
+    top && ["kenneth", `${nm(top)} sits at No. 1 on the We-Draft board. I'll have my notes up on the players I've written up as they come off the board.`],
+    ["thad", `${rounds} round${rounds === 1 ? "" : "s"}, ${picks} picks. I've got every draft since 2000 in front of me, and I'll be checking.`],
+    team.name && ["wedraft", `The ${team.name} are on the clock first at ${easternClock(showTimes(script).firstPick)}. Think you'd do better? Run your own at we-draft.com/draftsim.`],
+    qb && ["isaac", `Watch the quarterbacks. ${nm(qb)} is QB1 on our board, and somebody's going to talk themselves into moving up.`],
+    ["davin", `Two cheeseburgers in and I already don't trust the ${nick}.`],
+    ["makali", "Eagles fans, I'm already excited. Whoever they take is going to be a star."],
+    !leader && ["pp", "I've got the season numbers on every prospect tonight. Bring a calculator."],
+  ].filter((l) => l && script.analysts?.[l[0]]);
+  return lines.map(([a, text], k) => ({ a, text, key: `pre${k}` }));
 }
 
 // Potential Targets: three players the team on the clock might take — its

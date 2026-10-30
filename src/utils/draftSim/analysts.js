@@ -1189,7 +1189,7 @@ export const THAD_LINES = {
 
 const POS_NAME = { K: "kicker", P: "punter", QB: "quarterback", RB: "running back", WR: "wide receiver", TE: "tight end", OL: "offensive lineman", DL: "defensive tackle", EDGE: "edge rusher", LB: "linebacker", DB: "defensive back" };
 const POS_PLURAL = { OL: "offensive linemen" };
-const STAT_LABEL = {
+export const STAT_LABEL = {
   passYds: "passing yards", passTd: "passing TDs", rushYds: "rushing yards", rushTd: "rushing TDs", recYds: "receiving yards",
   rec: "receptions", recTd: "receiving TDs", tackles: "tackles", sacks: "sacks", tfl: "tackles for loss", ints: "interceptions", pbu: "passes defended",
 };

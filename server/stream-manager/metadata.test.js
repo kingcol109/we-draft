@@ -539,6 +539,105 @@ test("national: a rehearsal window never takes the draft and never reaches YouTu
   assert.equal(made.length, 0);
 });
 
+// ── On the Clock ──
+// One show: its schedule entry (config/onTheClockShows) and a small script
+// (simShows/{id}) — two picks, the board's top three.
+const OTC_DAY = "2026-10-30";
+const OTC_FIRST = Date.parse("2026-10-30T22:00:00Z"); // Fri Oct 30, 6:00 PM ET
+const otcScript = (more = {}) => ({
+  id: OTC_DAY, title: "On the Clock: 2027 NFL Draft · All 7 Rounds", startAt: OTC_FIRST - 45e3, streamAt: OTC_FIRST - 15 * 60e3,
+  format: { key: "full2027", label: "2027 NFL Draft · All 7 Rounds", year: "2027", rounds: 7 },
+  teams: {
+    LAC: { name: "Los Angeles Chargers", nick: "Chargers", c1: "#0080c6", c2: "#ffc20e", logo: "" },
+    TEN: { name: "Tennessee Titans", nick: "Titans", c1: "#0c2340", c2: "#4b92db", logo: "" },
+  },
+  players: {
+    p1: { f: "Jeremiah", l: "Smith", pos: "WR", sch: "Ohio State", rank: 1, logo: "" },
+    p2: { f: "Leonard", l: "Moore", pos: "DB", sch: "Notre Dame", rank: 2, logo: "" },
+    p3: { f: "Colin", l: "Simmons", pos: "EDGE", sch: "Texas", rank: 3, logo: "https://cdn.example.com/missing.png" },
+  },
+  board: { WR: ["p1"], DB: ["p2"], EDGE: ["p3"] },
+  beats: [{ overall: 1, round: 1, team: "LAC", pid: "p3" }, { overall: 224, round: 7, team: "TEN", pid: "p1" }],
+  ...more,
+});
+const otcEntry = { streamAt: OTC_FIRST - 15 * 60e3, startAt: OTC_FIRST - 45e3, endsAt: OTC_FIRST + 2 * 3600e3, title: "On the Clock: 2027 NFL Draft · All 7 Rounds" };
+const otcDocs = (script = otcScript()) => ({ [`simShows/${OTC_DAY}`]: script, "config/onTheClockShows": { shows: { [OTC_DAY]: otcEntry } } });
+const otcReq = { otc: true, showId: OTC_DAY };
+const otcSeed = (more = {}) => seed({ ...otcDocs(), ...more });
+
+test("On the Clock: the generated title and description come from the show — format, date, first team, top of the board", async () => {
+  db = otcSeed();
+  const v = md.buildOtcGenerated(await md.otcInputs(db, OTC_DAY));
+  assert.deepEqual(v.errors, {});
+  assert.equal(v.title, "2027 NFL Mock Draft LIVE | All 7 Rounds | On the Clock Draft Sim");
+  assert.equal(v.description, `The 2027 NFL Draft, LIVE — all 7 rounds, 2 picks, with all 32 war rooms run by the We-Draft.com Draft Sim and the analyst desk reacting to every pick.
+
+🏈 Tonight: 2027 NFL Draft · All 7 Rounds
+📅 Date: Friday, October 30, 2026
+⏰ First pick: 6:00 PM ET — the Los Angeles Chargers are on the clock
+
+⭐ Top of the We-Draft board:
+1. Jeremiah Smith (WR, Ohio State)
+2. Leonard Moore (DB, Notre Dame)
+3. Colin Simmons (EDGE, Texas)
+
+🎯 Run your own draft: https://we-draft.com/draftsim
+📝 Mock drafts: https://we-draft.com/mocks
+📺 YouTube: https://www.youtube.com/@kingcoldsports
+Subscribe for NFL Draft coverage, prospect evaluations and mock drafts all year.
+
+#NFLDraft #MockDraft #2027NFLDraft #Chargers #WeDraft`);
+  // A chaos night says so.
+  db = otcSeed({ [`simShows/${OTC_DAY}`]: otcScript({ format: { key: "chaos2027", label: "2027 Chaos Draft · High-Variance Boards", year: "2027", rounds: 7 } }) });
+  const c = md.buildOtcGenerated(await md.otcInputs(db, OTC_DAY));
+  assert.equal(c.title, "2027 NFL Chaos Mock Draft LIVE | All 7 Rounds | On the Clock Draft Sim");
+  assert.match(c.description, /Tonight is a Chaos Draft/);
+});
+
+test("On the Clock: opening the editor reads the show's generated text and writes nothing; a bad or missing show is refused", async () => {
+  db = otcSeed();
+  const before = docPaths();
+  const r = await call({ body: { action: "metadata-get", ...otcReq } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.equal(r.body.draft, null);
+  assert.equal(r.body.defaults.title, "2027 NFL Mock Draft LIVE | All 7 Rounds | On the Clock Draft Sim");
+  assert.deepEqual(r.body.otc, { showId: OTC_DAY, title: otcEntry.title, streamAt: otcEntry.streamAt, firstPickAt: OTC_FIRST });
+  assert.deepEqual(r.body.broadcast, { exists: false, youtubeCreated: false });
+  assert.deepEqual(docPaths(), before);
+  assertNothingExternal();
+  assert.equal((await call({ body: { action: "metadata-get", otc: true, showId: "tonight" } })).statusCode, 400);
+  assert.equal((await call({ body: { action: "metadata-get", otc: true, showId: "2026-11-01" } })).statusCode, 404);
+});
+
+test("On the Clock: saving stores broadcastMetadata/otc-{show} only; a created show broadcast takes the draft, else the generated text", async () => {
+  db = otcSeed({ "streamManager/youtube": { connected: true, channelId: "UC1", workerStreamId: "streamA" } });
+  const create = async () => {
+    const { id } = await orch.selectOtc(db, "admin1", { showId: OTC_DAY }, OTC_FIRST - 86400e3);
+    await db.doc(`broadcasts/${id}`).update({ scheduledStart: Timestamp.fromMillis(Date.now() + 86400e3) });
+    const made = realYoutube();
+    await bc.youtubeCreate(db, { id, streamId: "streamA", useDraft: true });
+    return { id, made };
+  };
+  let { id, made } = await create();
+  assert.equal(made[0].title, "2027 NFL Mock Draft LIVE | All 7 Rounds | On the Clock Draft Sim");
+  assert.match(made[0].description, /#Chargers #WeDraft$/);
+  assert.equal(db.data(`broadcasts/${id}`).youtube.metadataSource, "generated");
+
+  db = otcSeed({ "streamManager/youtube": { connected: true, channelId: "UC1", workerStreamId: "streamA" } });
+  forbidExternal();
+  const before = new Map([...db.store.entries()].map(([k, v]) => [k, JSON.stringify(v)]));
+  const r = await call({ body: { action: "metadata-save", ...otcReq, title: "Friday Night Draft", description: "Tonight's show", baseVersion: 0 } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  const changed = [...db.store.keys()].filter((k) => before.get(k) !== JSON.stringify(db.store.get(k)));
+  assert.deepEqual(changed, [`broadcastMetadata/otc-${OTC_DAY}`]);
+  assert.equal(db.data(`broadcastMetadata/otc-${OTC_DAY}`).kind, "otc");
+  assert.equal(db.data(`broadcastMetadata/otc-${OTC_DAY}`).showId, OTC_DAY);
+  assertNothingExternal();
+  ({ id, made } = await create());
+  assert.equal(made[0].title, "Friday Night Draft");
+  assert.equal(db.data(`broadcasts/${id}`).youtube.metadataSource, "draft");
+});
+
 test("secrets never reach the logs", () => {
   for (const l of logs) assert.ok(!l.includes("access-token-never-logged") && !l.includes("tok-admin"), l);
 });

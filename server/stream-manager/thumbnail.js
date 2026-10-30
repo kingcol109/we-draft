@@ -16,7 +16,8 @@
 //   src/assets/Logo2.png         the We-Draft logo, embedded as-is
 //
 // National coverage has its own template (buildNationalSvg — the window's
-// lead games as equal tiles, "+N more") and is stored under "national".
+// lead games as equal tiles, "+N more") and is stored under "national";
+// On the Clock its own too (buildOtcSvg), stored under otc-YYYY-MM-DD.
 //
 // Stored (metadata.js saveThumbnail) in broadcastThumbnails/{CFBDGameId}.
 // Generating or saving one never calls YouTube; uploading it to a created
@@ -439,9 +440,148 @@ async function generateNational(db, w, opts = {}) {
   };
 }
 
+// ── On the Clock template ──
+// The nightly Draft Sim show: the first team on the clock on its own color
+// panel (its logo, "on the clock first", its nickname) beside ON THE CLOCK,
+// a gold "{year} NFL MOCK DRAFT" band with LIVE, the rounds and picks, and
+// the top of the We-Draft board — the first OTC_TILES prospects' school
+// logos, last names and positions. The We-Draft logo and the first pick's
+// day and time on the blue bar. Everything from the show (metadata.js
+// otcInputs) — never a pick.
+const OTC_TEMPLATE = "otc-1";
+const OTC_TILES = 3;
+const OTC_PANEL = { top: 560, bottom: 440 }; // the team panel's right edge, top and bottom (it meets the bar)
+const OTC_TILE = { w: 196, h: 150, gap: 18, x: 588, y: 428, logo: 70 };
+
+// The team panel's color: its primary, else its second color; a near-white
+// one gives way to the second, else is darkened (white text on it).
+function otcPanelColor(t) {
+  const c1 = hex(t.color);
+  const c2 = hex(t.color2);
+  if (c1 && lum(c1) < 0.75) return c1;
+  if (c2 && lum(c2) < 0.75) return c2;
+  return c1 ? shade(c1, 0.55) : BLUE;
+}
+
+// "FRIDAY, OCT 30 · FIRST PICK 6:00 PM ET"
+function firstPickLabel(ms) {
+  if (!ms) return "FIRST PICK TBA";
+  const d = new Date(ms);
+  const day = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "America/New_York" });
+  const t = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+  return `${day} · First pick ${t} ET`.toUpperCase();
+}
+
+// spec: { year, rounds, picks, chaos, firstPickAt, team: { name, nick, color,
+//         color2, logo } | null, tiles: [{ last, pos, school, logo }] }
+function buildOtcSvg(spec, measureFn = measure) {
+  const a = loadAssets();
+  const team = spec.team || { name: "", nick: "", color: BLUE };
+  const panel = otcPanelColor(team);
+  const panelCx = 268;
+  const logo = { w: 300, h: 260, cy: 225 };
+  const nick = fitText(team.nick || team.name || "", null, { maxW: 430, size: 92, minSize: 40, shortBelow: 0 }, measureFn);
+  const head = fitText("On the Clock", null, { maxW: 650, size: 150, minSize: 70, shortBelow: 0 }, measureFn);
+  const bandText = `${spec.year} NFL ${spec.chaos ? "Chaos Mock" : "Mock Draft"}`.toUpperCase();
+  const bandFit = fitText(bandText, null, { maxW: 470, size: 62, minSize: 36, shortBelow: 0 }, measureFn);
+  const bandW = Math.ceil(measureFn(bandFit.text, bandFit.size));
+  const live = { w: 124, h: 54 };
+  const band = { x: 588, y: 200, h: 82, skew: 20 };
+  const bandRight = band.x + 34 + bandW + 22 + live.w + 30;
+  const sub = `${spec.rounds === 7 ? "All 7 rounds" : `${spec.rounds} round${spec.rounds === 1 ? "" : "s"}`} · ${spec.picks} picks · 32 war rooms`.toUpperCase();
+  const subFit = fitText(sub, null, { maxW: 650, size: 46, minSize: 28, shortBelow: 0 }, measureFn);
+  const when = fitText(firstPickLabel(spec.firstPickAt), null, { maxW: 820, size: 44, minSize: 26, shortBelow: 0 }, measureFn);
+  const wdH = 52;
+  const wdW = Math.round((a.wdLogo.w * wdH) / a.wdLogo.h);
+
+  const teamLogo = team.logo
+    ? `<image x="${panelCx - logo.w / 2}" y="${logo.cy - logo.h / 2}" width="${logo.w}" height="${logo.h}" preserveAspectRatio="xMidYMid meet" filter="url(#lift)" href="data:${team.logo.mime};base64,${team.logo.b64}"/>`
+    : `<text x="${panelCx}" y="${logo.cy + 50}" text-anchor="middle" font-family="${FONT}" font-size="150" fill="#ffffff" filter="url(#shadow)">${esc(initials(team.name || "?"))}</text>`;
+
+  const tiles = (spec.tiles || []).slice(0, OTC_TILES).map((p, i) => {
+    const x = OTC_TILE.x + i * (OTC_TILE.w + OTC_TILE.gap);
+    const cx = x + OTC_TILE.w / 2;
+    const last = fitText(p.last, null, { maxW: OTC_TILE.w - 20, size: 40, minSize: 22, shortBelow: 0 }, measureFn);
+    const mark = p.logo
+      ? `<image x="${cx - OTC_TILE.logo / 2}" y="${OTC_TILE.y + 12}" width="${OTC_TILE.logo}" height="${OTC_TILE.logo}" preserveAspectRatio="xMidYMid meet" href="data:${p.logo.mime};base64,${p.logo.b64}"/>`
+      : `<text x="${cx}" y="${OTC_TILE.y + 70}" text-anchor="middle" font-family="${FONT}" font-size="48" fill="#ffffff">${esc(initials(p.school))}</text>`;
+    return `<rect x="${x}" y="${OTC_TILE.y}" width="${OTC_TILE.w}" height="${OTC_TILE.h}" rx="14" fill="#ffffff" fill-opacity="0.07" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>`
+      + `<rect x="${x + 10}" y="${OTC_TILE.y + 10}" width="40" height="34" rx="7" fill="${GOLD}"/>`
+      + `<text x="${x + 30}" y="${OTC_TILE.y + 38}" text-anchor="middle" font-family="${FONT}" font-size="30" fill="${NAVY}">${i + 1}</text>`
+      + mark
+      + `<text x="${cx}" y="${OTC_TILE.y + 118}" text-anchor="middle" font-family="${FONT}" font-size="${last.size}" fill="#ffffff">${esc(last.text)}</text>`
+      + `<text x="${cx}" y="${OTC_TILE.y + 141}" text-anchor="middle" font-family="${FONT}" font-size="22" fill="${GOLD}">${esc(String(p.pos || "").toUpperCase())}</text>`;
+  }).join("\n");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<defs>
+  <linearGradient id="tp" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="${panel}"/><stop offset="1" stop-color="${shade(panel, 0.5)}"/></linearGradient>
+  <radialGradient id="glow"><stop offset="0" stop-color="#000000" stop-opacity="0.4"/><stop offset="0.6" stop-color="#000000" stop-opacity="0.22"/><stop offset="1" stop-color="#000000" stop-opacity="0"/></radialGradient>
+  <filter id="shadow" x="-10%" y="-30%" width="120%" height="160%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.55"/></filter>
+  <filter id="lift" x="-15%" y="-15%" width="130%" height="130%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.45"/></filter>
+</defs>
+<rect width="${W}" height="${H}" fill="${NAVY}"/>
+<polygon points="${OTC_PANEL.top + 150},0 ${W},0 ${W},${BAR_Y} ${OTC_PANEL.bottom + 150},${BAR_Y}" fill="${BLUE}" fill-opacity="0.16"/>
+<polygon points="0,0 ${OTC_PANEL.top},0 ${OTC_PANEL.bottom},${BAR_Y} 0,${BAR_Y}" fill="url(#tp)"/>
+<polygon points="${OTC_PANEL.top - 12},0 ${OTC_PANEL.top + 12},0 ${OTC_PANEL.bottom + 12},${BAR_Y} ${OTC_PANEL.bottom - 12},${BAR_Y}" fill="${GOLD}"/>
+<circle cx="${panelCx}" cy="${logo.cy}" r="190" fill="url(#glow)"/>
+${teamLogo}
+<text x="${panelCx}" y="452" text-anchor="middle" font-family="${FONT}" font-size="34" fill="#ffffff" fill-opacity="0.85">ON THE CLOCK FIRST</text>
+<text x="${panelCx}" y="540" text-anchor="middle" font-family="${FONT}" font-size="${nick.size}" fill="#ffffff" filter="url(#shadow)">${esc(nick.text)}</text>
+<text x="${band.x}" y="172" font-family="${FONT}" font-size="${head.size}" fill="#ffffff" filter="url(#shadow)">${esc(head.text)}</text>
+<polygon points="${band.x + band.skew},${band.y} ${bandRight},${band.y} ${bandRight - band.skew},${band.y + band.h} ${band.x},${band.y + band.h}" fill="${GOLD}"/>
+<text x="${band.x + 34}" y="${band.y + 62}" font-family="${FONT}" font-size="${bandFit.size}" fill="${NAVY}">${esc(bandFit.text)}</text>
+<rect x="${band.x + 34 + bandW + 22}" y="${band.y + (band.h - live.h) / 2}" width="${live.w}" height="${live.h}" rx="10" fill="${NAVY}"/>
+<circle cx="${band.x + 34 + bandW + 22 + 28}" cy="${band.y + band.h / 2}" r="10" fill="#e0262b"/>
+<text x="${band.x + 34 + bandW + 22 + 46}" y="${band.y + band.h / 2 + 17}" font-family="${FONT}" font-size="46" fill="#ffffff">LIVE</text>
+<text x="${band.x}" y="344" font-family="${FONT}" font-size="${subFit.size}" fill="#ffffff">${esc(subFit.text)}</text>
+${tiles ? `<text x="${band.x}" y="410" font-family="${FONT}" font-size="30" fill="${GOLD}">TOP OF THE WE-DRAFT BOARD</text>` : ""}
+${tiles}
+<rect x="0" y="${BAR_Y}" width="${W}" height="${H - BAR_Y}" fill="${BLUE}"/>
+<rect x="0" y="${BAR_Y}" width="${W}" height="7" fill="${GOLD}"/>
+<image x="40" y="${BAR_Y + 7 + Math.round((H - BAR_Y - 7 - wdH) / 2)}" width="${wdW}" height="${wdH}" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${a.wdLogo.b64}"/>
+<text x="${W - 40}" y="${BAR_Y + 33 + 42}" text-anchor="end" font-family="${FONT}" font-size="${when.size}" fill="#ffffff">${esc(when.text)}</text>
+</svg>`;
+}
+
+// The show's inputs (metadata.js otcInputs) with its logos loaded.
+async function otcSpec(db, showId, { fetchImpl } = {}) {
+  const i = await require("./metadata").otcInputs(db, showId);
+  const notes = [];
+  const load = async (url, label) => {
+    if (!url) { notes.push(`${label}: no logo saved — showing initials.`); return null; }
+    const { logo, tried } = await firstLogo([{ source: "script", url }], fetchImpl);
+    if (!logo) notes.push(`${label}: the logo couldn't be loaded (${tried.join("; ")}) — showing initials.`);
+    return logo;
+  };
+  const team = i.first ? { name: i.first.name, nick: i.first.nick, color: i.first.color, color2: i.first.color2, logo: await load(i.first.logo, i.first.name) } : null;
+  if (!team) notes.push("The show has no picks — no team on the clock to show.");
+  const tiles = [];
+  for (const p of i.top.slice(0, OTC_TILES)) {
+    tiles.push({ last: p.name.split(" ").slice(1).join(" ") || p.name, pos: p.pos, school: p.school, logo: await load(p.logo, `${p.name} (${p.school})`) });
+  }
+  return { inputs: i, spec: { year: i.year, rounds: i.rounds, picks: i.picks, chaos: /chaos/i.test(i.formatKey), firstPickAt: i.firstPickAt, team, tiles }, notes };
+}
+
+async function generateOtc(db, showId, opts = {}) {
+  const { inputs, spec, notes } = await otcSpec(db, showId, opts);
+  const out = renderPng(buildOtcSvg(spec));
+  const logoOf = (l) => (l ? { source: l.source, url: l.url } : null);
+  return {
+    game: { gameId: `otc-${showId}`, scheduleId: null }, ...out, notes,
+    inputs: {
+      showId, firstPickAt: inputs.firstPickAt, format: inputs.label,
+      team: spec.team ? { name: spec.team.name, color: spec.team.color, logo: logoOf(spec.team.logo) } : null,
+      tiles: spec.tiles.map((t) => ({ name: t.last, pos: t.pos, school: t.school, logo: logoOf(t.logo) })),
+      templateVersion: OTC_TEMPLATE,
+    },
+  };
+}
+
 module.exports = {
   W, H, TEMPLATE_VERSION, BLUE, GOLD,
   logoCandidates, safeLogoUrl, imageType, fetchLogo, firstLogo, panelColors, fitText, kickoffLabel, initials,
   buildSvg, renderPng, gameSpec, generate, pngSize, measure,
   teamBranding, buildNationalSvg, nationalSpec, generateNational, NATIONAL_TEMPLATE,
+  buildOtcSvg, otcSpec, generateOtc, OTC_TEMPLATE, firstPickLabel,
 };

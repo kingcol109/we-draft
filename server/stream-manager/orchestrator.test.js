@@ -1270,6 +1270,72 @@ test("national Start Now on a scheduled window starts it now and keeps its end",
   assert.equal(rec(id).auto.openEnded, false);
 });
 
+// ── On the Clock ──
+
+// The show's schedule entry, as On the Clock's saveShow writes it.
+const OTC_DAY = "2026-10-10";
+const otcShow = (streamAt, endsAt) => db.doc("config/onTheClockShows").set({ shows: { [OTC_DAY]: { streamAt, startAt: streamAt + 15 * MIN - 45e3, endsAt, title: "On the Clock: 2027 NFL Draft · All 7 Rounds" } } }, { merge: true });
+
+test("On the Clock: prepares 15 min before the stream, the worker opens /broadcast/ontheclock, follows a retime, ends at the show's end", async () => {
+  await otcShow(K1, K1 + 2 * 60 * MIN);
+  const r = await orch.selectOtc(db, "admin1", { showId: OTC_DAY }, clock);
+  assert.deepEqual(r, { id: "o20261010", created: true });
+  const id = r.id;
+  assert.equal(rec(id).kind, "otc");
+  assert.equal(rec(id).auto.kickoffAt, K1);
+  assert.equal(rec(id).youtube.title, "On the Clock: 2027 NFL Draft · All 7 Rounds | Oct 10, 2026");
+  assert.equal(rec(id).youtube.privacyStatus, "unlisted");
+  // Selecting the same show again changes nothing.
+  assert.deepEqual(await orch.selectOtc(db, "admin1", { showId: OTC_DAY }, clock), { id, already: true });
+
+  // The show's retimed (stream 30 min later): the record follows the schedule.
+  const S = K1 + 30 * MIN;
+  const END = S + 2 * 60 * MIN;
+  await otcShow(S, END);
+  await minute();
+  assert.equal(rec(id).auto.kickoffAt, S);
+  assert.equal(rec(id).auto.endAt, END);
+  await until(() => phase(id) !== "selected");
+  assert.ok(clock >= S - CFG.PREP_LEAD_MS && clock < S - CFG.PREP_LEAD_MS + 2 * MIN, "prepares 15 min before the stream starts");
+
+  await until(() => phase(id) === "live");
+  assert.equal(w.containers.get(id)?.game, "ontheclock", "the worker opens /broadcast/ontheclock");
+  assert.ok(clock < S, "on air before the stream's start");
+  // Its failsafe follows the show's end, not the 6h game limit.
+  assert.equal(rec(id).auto.deadlineAt, END + CFG.NATIONAL_TAIL_MS);
+
+  // Never "final": still live right up to the show's end, then it ends.
+  clock = END - 2 * MIN;
+  await minute();
+  assert.equal(phase(id), "live");
+  await until(() => phase(id) === "completed", 30);
+  assert.ok(clock >= END);
+  assert.equal(rec(id).auto.endReason, "show ended");
+  assert.ok(!w.containers.has(id), "the worker is stopped");
+  assert.ok(w.transitions.includes(`yt-${id}:complete`), "the YouTube broadcast is completed");
+});
+
+test("On the Clock: only a show in the schedule that isn't over can be scheduled; public needs confirmation", async () => {
+  const sel = (body, at = clock) => orch.selectOtc(db, "admin1", body, at).then(() => 200, (e) => e.status);
+  assert.equal(await sel({ showId: "tonight" }), 400);
+  assert.equal(await sel({ showId: OTC_DAY }), 404, "no show generated yet");
+  await otcShow(K1, K1 + 2 * 60 * MIN);
+  assert.equal(await sel({ showId: OTC_DAY, privacyStatus: "public" }), 400, "public without confirmPublic");
+  assert.equal(await sel({ showId: OTC_DAY }, K1 + 2 * 60 * MIN - 5 * MIN), 400, "ends within 10 min");
+  assert.equal(await sel({ showId: OTC_DAY, privacyStatus: "public", confirmPublic: true }), 200);
+  assert.equal(rec("o20261010").youtube.privacyStatus, "public");
+});
+
+test("On the Clock: a show removed from the schedule never starts", async () => {
+  await otcShow(K1, K1 + 2 * 60 * MIN);
+  const { id } = await orch.selectOtc(db, "admin1", { showId: OTC_DAY }, clock);
+  await db.doc("config/onTheClockShows").set({ shows: {} });
+  await minute(60);
+  assert.notEqual(phase(id), "live");
+  assert.equal(w.creates, 0, "no YouTube broadcast is created");
+  assert.match(rec(id).auto.error || "", /isn't in On the Clock's schedule/);
+});
+
 test("nothing logged contains a token", () => {
   for (const l of logs) assert.ok(!l.includes("yt-access-token-never-logged"), l);
   console.log = realLog;
