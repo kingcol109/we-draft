@@ -94,6 +94,9 @@ const LivePage = lazy(() => import("./pages/LivePage"));
 const BroadcastPage = lazy(() => import("./pages/BroadcastPage"));
 // …and the national one: every game on right now in one frame.
 const BroadcastNationalPage = lazy(() => import("./pages/BroadcastNationalPage"));
+// …and On the Clock, the nightly Draft Sim show (not beta-gated: the
+// capture worker can't sign in — the show's data is public anyway).
+const BroadcastOnTheClockPage = lazy(() => import("./pages/BroadcastOnTheClockPage"));
 const MyFeed = lazy(() => import("./pages/MyFeed"));
 
 // Admin — the single biggest chunk to keep out of everyone else's download
@@ -149,6 +152,7 @@ function App() {
             {/* /broadcast/national — every game on now (a static segment, so
                 it wins over :slug). */}
             <Route path="/broadcast/national" element={<BroadcastNationalPage />} />
+            <Route path="/broadcast/ontheclock" element={<BroadcastOnTheClockPage />} />
             <Route path="/broadcast/:slug" element={<BroadcastPage />} />
             <Route path="/sim" element={<SimRoute><SimPage /></SimRoute>} />
 

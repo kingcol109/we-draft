@@ -24,6 +24,7 @@
 // here writes Firestore or sees a token or stream key. The per-broadcast
 // worker controls are placeholders until the orchestration phase.
 import { useEffect, useMemo, useRef, useState } from "react";
+import AdminOnTheClock from "./AdminOnTheClock";
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { LIMITS as YT_LIMITS, validateMetadata, charCount, byteCount } from "../utils/youtubeMetadata";
@@ -1490,7 +1491,7 @@ export default function AdminStreamManager() {
   const [rows, setRows] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [games, setGames] = useState([]);
-  const [view, setView] = useState({ kind: "list" }); // list | auto | new | detail {id} | edit {id}
+  const [view, setView] = useState({ kind: "list" }); // list | auto | otc | new | detail {id} | edit {id}
   const [filter, setFilter] = useState("upcoming");
   const [msg, setMsg] = useState(null);
   const [now, setNow] = useState(Date.now());
@@ -1566,6 +1567,7 @@ export default function AdminStreamManager() {
       <ChannelPanel onMessage={setMsg} />
       <VmPanel liveCount={counts.live} />
 
+      {view.kind === "otc" && <AdminOnTheClock onBack={() => setView({ kind: "list" })} />}
       {view.kind === "auto" && (
         <AutoPanel rows={rows} now={now} onOpen={(id) => setView({ kind: "detail", id })} onBack={() => setView({ kind: "list" })} />
       )}
@@ -1593,6 +1595,7 @@ export default function AdminStreamManager() {
             ))}
             <span style={{ flex: 1 }} />
             <button onClick={repairStatuses} disabled={repairing} style={btn("#556", false, repairing)} title="Recompute stored statuses of closed records (shows the changes first)">{repairing ? "Checking…" : "Repair Statuses"}</button>
+            <button onClick={() => setView({ kind: "otc" })} style={btn(GOLD, true)}>On the Clock</button>
             <button onClick={() => setView({ kind: "auto" })} style={btn(BLUE, true)}>Auto Schedule</button>
             <button onClick={() => setView({ kind: "new" })} style={btn(GOLD, true)}>+ New Broadcast</button>
           </div>

@@ -35,3 +35,6 @@ yarn-error.log*
 /server/broadcast-worker/*.env
 /server/broadcast-worker/*.key
 /server/broadcast-worker/youtube-key*
+
+# On the Clock local preview show (scripts/onTheClockLocal.mjs)
+public/ontheclock-local.json
