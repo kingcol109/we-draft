@@ -9165,6 +9165,7 @@ function AnalyticsSection() {
   const [allEvals, setAllEvals] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [pageViewTotals, setPageViewTotals] = useState({ last24: 0, last7: 0, last30: 0, total: 0, lastSyncedMs: 0, playerCount: 0 });
+  const [allPages, setAllPages] = useState([]); // every analytics doc, for Top Pages
   const [fetchErrors, setFetchErrors] = useState([]);
 
   // ── Two evaluation copies exist per save: the canonical
@@ -9225,6 +9226,10 @@ function AnalyticsSection() {
         // syncGoogleAnalytics.js), each with its own tab below. A doc with
         // no `type` at all predates that field and is still a player doc.
         let last24 = 0, last7 = 0, last30 = 0, total = 0, lastSyncedMs = 0, playerCount = 0;
+        setAllPages(analyticsRes.value.docs.map((d) => {
+          const data = d.data();
+          return { type: data.type || "player", slug: data.slug || d.id, path: data.path || null, pageViews: data.pageViews || {} };
+        }));
         analyticsRes.value.docs.forEach((d) => {
           const data = d.data();
           if (data.type && data.type !== "player") return;
@@ -9241,6 +9246,7 @@ function AnalyticsSection() {
       } else {
         console.error("Admin analytics page-views fetch error:", analyticsRes.reason);
         setPageViewTotals({ last24: 0, last7: 0, last30: 0, total: 0, lastSyncedMs: 0, playerCount: 0 });
+        setAllPages([]);
         errors.push("Page Views: " + (analyticsRes.reason?.message || "read failed."));
       }
 
@@ -9417,6 +9423,8 @@ function AnalyticsSection() {
           ))}
         </div>
       </div>
+
+      <TopPagesPanel pages={allPages} loading={loading} />
 
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden" }}>
         <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
@@ -10073,6 +10081,156 @@ async function fetchCfbRows() {
       dateMs: 0,
     };
   });
+}
+
+// ── Top Pages (Overview): every page the sync tracks, all sections in one
+// ranking. Players' names come from the players collection (one read);
+// every other title is built from the slug — the section tabs have the
+// full details. ──
+const TOP_PAGES_RANGES = [{ field: "last24Hours", label: "24H" }, { field: "last7Days", label: "7D" }, { field: "last30Days", label: "30D" }, { field: "last90Days", label: "90D" }, { field: "lastYear", label: "1Y" }, { field: "total", label: "All Time" }];
+const TOP_PAGES_SHOWN = 25;
+const TOP_PAGES_MORE = 100;
+const SECTION_LABEL = { player: "Players", ...Object.fromEntries(CONTENT_TABS.filter((t) => t.key !== "overview").map((t) => [t.key, t.label])) };
+// "bear-bachmeier-2027-qb" → "Bear Bachmeier · 2027 QB" — the player's
+// real name when it's known (names: slug → "JJ Buchanan").
+function playerTitle(slug, names) {
+  const m = slug.match(/^(.*)-(\d{4})-([a-z]+)$/);
+  const name = names?.get(slug);
+  return m ? `${name || titleWords(m[1])} · ${m[2]} ${m[3].toUpperCase()}` : name || titleWords(slug);
+}
+function pageTitleOf({ type, slug }, names) {
+  const [a, b] = slug.split("-");
+  const year = /^\d{4}$/.test(a);
+  switch (type) {
+    case "player": return playerTitle(slug, names);
+    case "comparison": return `Comparison: ${playerTitle(slug, names)}`;
+    case "game": {
+      const m = slug.match(/^(.*)-(\d{1,2})-(\d{1,2})-(\d{4})$/);
+      return m ? `${titleWords(m[1]).replace(/ Vs /, " vs ")} · ${m[2]}/${m[3]}/${m[4]}` : titleWords(slug);
+    }
+    case "draftsim": return DRAFTSIM_PAGES[slug] || (b && year ? `${nflTeamName(b)} Draft Sim · ${a}` : year ? `${a} Draft Sim` : `${nflTeamName(a)} Draft Sim`);
+    case "mock": return MOCK_PAGES[slug] || (year ? `${a} Weekly Mock` : `${nflTeamName(a)} mock${b ? ` · ${b}` : ""}`);
+    case "nfl": return slug === "hub" ? "NFL (all teams)" : nflTeamName(slug);
+    case "board": return slug === "hub" ? "Community Board" : b ? `${a} ${b.toUpperCase()} board` : `${a} big board`;
+    case "live": return slug === "hub" ? "We-Draft Live" : titleWords(slug);
+    case "cfb": return slug === "hub" ? "College Football" : titleWords(slug);
+    default: return titleWords(slug);
+  }
+}
+// A page's link: the URL the sync saw, except NFL teams (their main page,
+// not a tab) and hubs; null where there's no one page (all users' mocks).
+function pageHrefOf({ type, slug, path }) {
+  if (type === "mock" && (slug === "view" || slug === "editor")) return null;
+  if (type === "nfl") return slug === "hub" ? "/nfl" : `/nfl/${slug}`;
+  if (path) return path;
+  if (type === "player") return `/player/${slug}`;
+  const prefix = CONTENT_ANALYTICS_CONFIG[type]?.publicPrefix;
+  if (!prefix) return null;
+  return slug === "hub" ? prefix.replace(/\/$/, "") : prefix + slug;
+}
+
+function TopPagesPanel({ pages, loading }) {
+  const [field, setField] = useState("last7Days");
+  const [section, setSection] = useState("all");
+  const [more, setMore] = useState(false);
+  const [names, setNames] = useState(null);
+  useEffect(() => {
+    let live = true;
+    getDocs(collection(db, "players")).then((snap) => {
+      if (!live) return;
+      const m = new Map();
+      snap.docs.forEach((d) => { const x = d.data(); if (x.Slug) m.set(x.Slug, `${x.First || ""} ${x.Last || ""}`.trim()); });
+      setNames(m);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const sections = useMemo(() => {
+    const seen = new Set(pages.map((p) => p.type));
+    return Object.keys(SECTION_LABEL).filter((k) => seen.has(k));
+  }, [pages]);
+  const ranked = useMemo(() => pages
+    .filter((p) => section === "all" || p.type === section)
+    .map((p) => ({ ...p, views: Number(p.pageViews[field]) || 0 }))
+    .filter((p) => p.views > 0)
+    .sort((x, y) => y.views - x.views), [pages, field, section]);
+  const totalViews = ranked.reduce((t, p) => t + p.views, 0);
+  const shown = ranked.slice(0, more ? TOP_PAGES_MORE : TOP_PAGES_SHOWN);
+  const chip = (on, onClick, label, key) => (
+    <button key={key || label} onClick={onClick} style={{
+      padding: "5px 12px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
+      border: "2px solid " + BLUE, borderRadius: "20px", cursor: "pointer", whiteSpace: "nowrap",
+      background: on ? BLUE : "#fff", color: on ? "#fff" : BLUE,
+    }}>{label}</button>
+  );
+  const th = { padding: "9px 10px", fontSize: "10px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "left", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ background: BLUE, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>Top Pages</div>
+        <div style={{ fontSize: "9px", fontWeight: 900, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Whole site</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          {TOP_PAGES_RANGES.map((o) => (
+            <button key={o.field} onClick={() => setField(o.field)} style={{
+              padding: "6px 14px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em",
+              border: "2px solid " + GOLD, borderRadius: "20px", cursor: "pointer", whiteSpace: "nowrap",
+              background: field === o.field ? GOLD : "transparent", color: "#fff",
+            }}>{o.label}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid #eee", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        {chip(section === "all", () => setSection("all"), "All")}
+        {sections.map((k) => chip(section === k, () => setSection(k), SECTION_LABEL[k], k))}
+      </div>
+      {loading ? (
+        <LoadingSpinner label="Loading" size={28} minHeight="100px" />
+      ) : !ranked.length ? (
+        <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>No views in this window.</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
+            {ranked.length.toLocaleString()} page{ranked.length !== 1 ? "s" : ""} with views · {totalViews.toLocaleString()} views
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: BLUE }}>
+                <th style={{ ...th, textAlign: "right", width: 36 }}>#</th>
+                <th style={th}>Page</th>
+                <th style={th}>Section</th>
+                <th style={{ ...th, textAlign: "center" }}>Views</th>
+                <th style={{ ...th, textAlign: "right" }}>Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((p, i) => {
+                const href = pageHrefOf(p);
+                const title = pageTitleOf(p, names);
+                return (
+                  <tr key={p.type + ":" + p.slug} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 900, color: "#aaa", textAlign: "right" }}>{i + 1}</td>
+                    <td style={{ padding: "9px 10px", fontWeight: 900, fontSize: "13px" }}>
+                      {href ? <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: BLUE, textDecoration: "none" }}>{title}</a> : <span style={{ color: BLUE }}>{title}</span>}
+                    </td>
+                    <td style={{ padding: "9px 10px", fontSize: "12px", fontWeight: 700, color: "#666", whiteSpace: "nowrap" }}>{SECTION_LABEL[p.type] || p.type}</td>
+                    <td style={{ padding: "9px 10px", fontSize: "13px", fontWeight: 900, color: BLUE, textAlign: "center" }}>{p.views.toLocaleString()}</td>
+                    <td style={{ padding: "9px 10px", fontSize: "11px", fontWeight: 700, color: "#999", textAlign: "right" }}>{totalViews ? `${((p.views / totalViews) * 100).toFixed(1)}%` : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {ranked.length > TOP_PAGES_SHOWN && (
+            <div style={{ padding: "10px 14px", textAlign: "center" }}>
+              <button onClick={() => setMore((m) => !m)} style={{ background: "none", border: 0, color: BLUE, fontWeight: 900, fontSize: "12px", cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {more ? "Show top " + TOP_PAGES_SHOWN : "Show top " + Math.min(TOP_PAGES_MORE, ranked.length)}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const CONTENT_ANALYTICS_CONFIG = {
