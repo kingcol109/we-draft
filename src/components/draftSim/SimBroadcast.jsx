@@ -1426,14 +1426,15 @@ const ODD_LINES = {
   repeat: ["Another {pos}? We just took one. I guess they can compete for it.", "Two {plural} in a row. I hope someone has a plan for the depth chart.", "Okay, so we really like {plural}. Noted."],
   crowded: ["We're already deep at {pos}. Not where I'd have gone, but we'll find him a role.", "That room's crowded already. {last} is going to have to fight for snaps."],
 };
-const PLURAL = { "defensive back": "defensive backs", "running back": "running backs", "tight end": "tight ends", "edge rusher": "edge rushers" };
+// "lineman" → "linemen", everything else takes an s.
+const pluralOf = (word) => (/man$/.test(word) ? word.replace(/man$/, "men") : `${word}s`);
 function reactionFor(ev, ctx) {
   const p = ev.prospect;
   const n = ev.pick.overall;
   const pos = POS_WORD[p.Position] || p.Position;
   const fill = (lines, slot) => lines[(p.rank + n + slot.length) % lines.length]
     .replace(/\{name\}/g, `${p.First} ${p.Last}`).replace(/\{last\}/g, p.Last).replace(/\{n\}/g, n)
-    .replace(/\{pos\}/g, pos).replace(/\{plural\}/g, PLURAL[pos] || `${pos}s`);
+    .replace(/\{pos\}/g, pos).replace(/\{plural\}/g, pluralOf(pos));
   const side = sideOf(p.Position) || "GM";
   if (ev.oddity) {
     const slot = ODD_SPEAKER[ev.oddity] === "side" ? side : ODD_SPEAKER[ev.oddity];

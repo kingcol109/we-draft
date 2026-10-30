@@ -1189,6 +1189,8 @@ export const THAD_LINES = {
 
 const POS_NAME = { K: "kicker", P: "punter", QB: "quarterback", RB: "running back", WR: "wide receiver", TE: "tight end", OL: "offensive lineman", DL: "defensive tackle", EDGE: "edge rusher", LB: "linebacker", DB: "defensive back" };
 const POS_PLURAL = { OL: "offensive linemen" };
+// "lineman" → "linemen", everything else takes an s.
+const pluralOf = (word) => (/man$/.test(word) ? word.replace(/man$/, "men") : `${word}s`);
 export const STAT_LABEL = {
   passYds: "passing yards", passTd: "passing TDs", rushYds: "rushing yards", rushTd: "rushing TDs", recYds: "receiving yards",
   rec: "receptions", recTd: "receiving TDs", tackles: "tackles", sacks: "sacks", tfl: "tackles for loss", ints: "interceptions", pbu: "passes defended",
@@ -1273,7 +1275,7 @@ export function pickVars(e, ctx) {
   const lead = fitLead(e.fit, ctx.staff?.[e.team]);
   return {
     player: `${p.First} ${p.Last}`, last: p.Last, lastPoss: possessive(p.Last), pos: p.Position,
-    posName: POS_NAME[p.Position] || p.Position, posPlural: POS_PLURAL[p.Position] || `${POS_NAME[p.Position] || p.Position}s`,
+    posName: POS_NAME[p.Position] || p.Position, posPlural: POS_PLURAL[p.Position] || pluralOf(POS_NAME[p.Position] || p.Position),
     school: p.School || "", team: e.team, teamName: ctx.teamName(e.team), city: cityOf(ctx, e.team), nick: ctx.nickname(e.team), n: e.pick.overall,
     rank: p.rank, posRank: p.positionRank, posRankOrd: ordinal(p.positionRank || 0), spots: Math.abs(e.value),
     grade: gradeLabel(p.avg) || "", count: p.count, strength: p.strengths?.[0] ? traitText(p.strengths[0]) : "",
