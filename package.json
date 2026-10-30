@@ -37,7 +37,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "node scripts/generate-sitemap.js && react-scripts build && node scripts/buildDraftSimPreviewPages.mjs",
+    "build": "node scripts/generate-sitemap.js && react-scripts build && node scripts/buildDraftSimPreviewPages.mjs && node -e \"require('fs').rmSync('build/ontheclock-local.json',{force:true})\"",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "sync": "node sync.js",

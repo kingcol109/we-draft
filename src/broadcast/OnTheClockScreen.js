@@ -518,7 +518,8 @@ function TeamClass({ script, g, rank, delay }) {
         </div>
         <GradeLetter size={76}>{g.letter}</GradeLetter>
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-evenly", padding: "6px 14px 8px" }}>
+      {/* Listed from the top at a steady spacing — a small class leaves the bottom empty. */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: tight ? 9 : 16, padding: tight ? "12px 14px 8px" : "18px 14px 8px" }}>
         {rows.map((r) => {
           const p = script.players[r.pid] || {};
           return (
