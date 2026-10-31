@@ -710,7 +710,6 @@ export default function Navbar() {
               { path: wePickHref(), label: "We-Pick" },
               { path: "/cfb", label: "CFB Teams" },
               { path: "/nfl", label: "NFL Teams" },
-              { path: "/draftsim", label: "Draft Simulator" },
               { path: "/mocks", label: "Mock Drafts" },
             ].map((l) => (
               <Link key={l.path} to={l.path} className="mobile-nav-link" onClick={() => setMenuOpen(false)}>

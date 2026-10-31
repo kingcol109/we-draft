@@ -216,7 +216,7 @@ export const breadcrumbLd = (items, site = "https://we-draft.com") => ({
   itemListElement: items.map((it, i) => ({ "@type": "ListItem", position: i + 1, name: it.name, item: `${site}${it.href}` })),
 });
 // The site as a publisher, for a page's JSON-LD (NewsArticle.jsx's).
-export const SITE_PUBLISHER = { "@type": "Organization", name: "We-Draft", url: "https://we-draft.com", logo: { "@type": "ImageObject", url: "https://we-draft.com/logo512.png" } };
+export const SITE_PUBLISHER = { "@type": "Organization", name: "We-Draft", url: "https://we-draft.com", logo: { "@type": "ImageObject", url: "https://we-draft.com/wd-icon-512.png" } };
 
 // The Weekly Mock's byline: posted as We-Draft.com, with the site's
 // verified badge, made by the Draft Sim.

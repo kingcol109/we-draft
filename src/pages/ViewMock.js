@@ -3,7 +3,9 @@
 // /mocks/:mockId/view — a published mock draft, read like a column: the
 // author's intro, then one row per pick in the picking team's colors with
 // the author's note on that pick — no player grades, it's the author's
-// board. The owner gets Share and Edit (CreateMock.jsx) from here. The
+// board. The owner gets Share and Edit (CreateMock.jsx) from here; the
+// Weekly Mock gets everyone a Share that sends its link (ShareLinkButton,
+// previewed by api/mock-og.js's image). The
 // site's Weekly Mock (source "weeklyMock", official — utils/draftSim/
 // weeklyMock.js) reads like its team pages instead: the article header,
 // posted by We-Draft.com (verified), the sim after the fifth pick, each
@@ -18,6 +20,7 @@ import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import ShareMockButton from "../components/ShareMockButton";
+import ShareLinkButton from "../components/ShareLinkButton";
 import { useAuth } from "../context/AuthContext";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { textOn } from "../utils/teamColors";
@@ -182,9 +185,14 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
     ? intro.slice(0, 155) + (intro.length > 155 ? "…" : "")
     : `A ${mock.draftClass || ""} NFL mock draft${ownerLabel ? ` by ${ownerLabel}` : ""}${firstPick ? `, with ${firstPick.selection.First} ${firstPick.selection.Last} at No. ${firstPick.pickNumber}` : ""}.`;
   const url = `https://we-draft.com${yearPage ? weeklyYearHref(yearPage) : `/mocks/${mockId}/view`}`;
+  // The Weekly Mock's link preview: its first picks, drawn by api/mock-og.js
+  // (the week's id only keys the cache). A past week's has none — the image
+  // is always the current week's.
+  const ogImage = weekly && !pastWeek ? `https://we-draft.com/api/mock-og?year=${year}&v=${mock.id}` : "";
   const heroActions = (
     <>
-      {isOwner && (
+      {weekly && <ShareLinkButton url={url} title={`${year} NFL Mock Draft — We-Draft.com`} ink="#fff" bg={WEEKLY_HERO.c1} isMobile={isMobile} />}
+      {isOwner && !weekly && (
         <ShareMockButton
           mockName={mock.name}
           ownerLabel={ownerLabel}
@@ -216,9 +224,14 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
         <meta property="og:description" content={description} />
         <meta property="og:url" content={url} />
         <meta property="og:site_name" content="We-Draft.com" />
-        <meta name="twitter:card" content="summary" />
+        {ogImage && <meta property="og:image" content={ogImage} />}
+        {ogImage && <meta property="og:image:width" content="1200" />}
+        {ogImage && <meta property="og:image:height" content="630" />}
+        {ogImage && <meta property="og:image:alt" content={`${year} NFL mock draft — the first picks`} />}
+        <meta name="twitter:card" content={ogImage ? "summary_large_image" : "summary"} />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
+        {ogImage && <meta name="twitter:image" content={ogImage} />}
         {!indexable && <meta name="robots" content="noindex, follow" />}
         {crumbs && <script type="application/ld+json">{JSON.stringify(breadcrumbLd(crumbs))}</script>}
       </Helmet>

@@ -31,7 +31,6 @@ import { useAuth } from "../context/AuthContext";
 import LoadingSpinner from "../components/LoadingSpinner";
 import PlayerHeaderShell from "../components/PlayerHeaderShell";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
-import { getAnonId } from "../utils/anonId";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 // 2026 season stats + game log from the linked CFBD player (right column).
 import PlayerStatsCard from "../components/PlayerStatsCard";
@@ -39,7 +38,7 @@ import PlayerStatsCard from "../components/PlayerStatsCard";
 import PlayerLiveCard, { LivePill, usePlayerLiveGame } from "../components/PlayerLiveCard";
 import SimAdCard from "../components/draftSim/SimAdCard";
 import { Helmet } from "react-helmet-async";
-import * as htmlToImage from "html-to-image";
+import ShareTextButton from "../components/ShareTextButton";
 import confetti from "canvas-confetti";
 
 // ── Flair badge images (dropped into assets — filenames as uploaded) ───────
@@ -62,7 +61,7 @@ import ProvenFlair from "../assets/proven.png";
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
 import { fetchTeammateVideos } from "../components/PlayerSidebars";
-import { cssRect, withoutPageZoom } from "../utils/pageZoom";
+import { cssRect } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 import { classSnapshotRanks } from "../utils/classRanks";
@@ -409,6 +408,100 @@ const formatEligible = (eligible) => {
   if (match) return `${match[1]} (Supplemental)`;
   return String(eligible);
 };
+
+// The player page's Share and Share Evaluation (ShareTextButton): what goes
+// in the message, and the card the share dialog shows of it (PlayerShareCard)
+// — name, position and school; height and weight; the grade; class ranks
+// (ranks — the page's Share only); strengths; weaknesses; a piece of the
+// written evaluation (Share Evaluation only); the page's link. A line with
+// nothing to say is left out of both.
+const EVAL_EXCERPT_CHARS = 240;
+function playerShare({ player, gradeLabel, gradeTitle, ranks = [], strengths = [], weaknesses = [], evaluation, url }) {
+  const ht = formatHeightForDisplay(player.Height);
+  const wt = player.Weight ? (/^\d+$/.test(String(player.Weight).trim()) ? `${String(player.Weight).trim()} lbs` : String(player.Weight)) : "";
+  const posSchool = [player.Position, player.School].filter(Boolean).join(", ");
+  // The evaluation as one paragraph — bullets and line breaks flattened —
+  // cut at a word near EVAL_EXCERPT_CHARS.
+  let excerpt = String(evaluation || "").split("\n").map((l) => l.trim().replace(/^[•\-*]\s+/, "")).filter(Boolean).join(" ");
+  if (excerpt.length > EVAL_EXCERPT_CHARS) excerpt = `${excerpt.slice(0, EVAL_EXCERPT_CHARS).replace(/\s+\S*$/, "")}…`;
+  const text = [
+    `${player.First} ${player.Last}${posSchool ? ` — ${posSchool}` : ""}`,
+    [ht && `Ht: ${ht}`, wt && `Wt: ${wt}`].filter(Boolean).join(" · "),
+    gradeLabel && `${gradeTitle}: ${gradeLabel}`,
+    ranks.length && `Class Rank: ${ranks.join(" · ")}`,
+    strengths.length && `Strengths: ${strengths.join(", ")}`,
+    weaknesses.length && `Weaknesses: ${weaknesses.join(", ")}`,
+    excerpt && `"${excerpt}"`,
+    url,
+  ].filter(Boolean).join("\n");
+  return { text, card: { player, ht, wt, gradeLabel, gradeTitle, ranks, strengths, weaknesses, excerpt, url } };
+}
+
+// The share dialog's picture of the message: a header in the team's colors
+// (logo, name, position · school · class, height and weight), the grade and
+// class ranks, strengths and weaknesses as tags, the evaluation's excerpt,
+// and the link along the bottom.
+function PlayerShareCard({ card, color1, color2, logo }) {
+  const { player, ht, wt, gradeLabel, gradeTitle, ranks, strengths, weaknesses, excerpt, url } = card;
+  const ink = textOn(color1, color2);
+  const grade = gradeLabel ? gradeDisplay(gradeLabel) : null;
+  const label = { fontSize: 10, fontWeight: 900, color: "#8a94a6", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 };
+  const tag = (bg, fg) => ({ display: "inline-block", background: bg, color: fg, borderRadius: 999, padding: "3px 9px", fontSize: 11, fontWeight: 800, margin: "0 5px 5px 0", textTransform: "uppercase", letterSpacing: "0.03em" });
+  const facts = [[player.Position, player.School].filter(Boolean).join(" · "), formatEligible(player.Eligible)].filter(Boolean).join(" · ");
+  return (
+    <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid #e3e7ee", background: "#fff", textAlign: "left", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: `linear-gradient(135deg, ${color1} 0%, ${color1} 60%, ${color2} 140%)`, color: ink, borderBottom: `4px solid ${color2}` }}>
+        {logo && <img src={logo} alt="" style={{ width: 52, height: 52, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.25))" }} />}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase", overflowWrap: "anywhere" }}>{player.First} {player.Last}</div>
+          {facts && <div style={{ fontSize: 12, fontWeight: 800, opacity: 0.9, marginTop: 4 }}>{facts}</div>}
+          {(ht || wt) && <div style={{ fontSize: 11, fontWeight: 800, opacity: 0.75, marginTop: 2 }}>{[ht, wt].filter(Boolean).join(" · ")}</div>}
+        </div>
+      </div>
+      <div style={{ padding: "12px 16px 4px" }}>
+        {(grade || ranks.length > 0) && (
+          <div style={{ display: "flex", gap: 12, alignItems: "stretch", marginBottom: 12 }}>
+            {grade && (
+              <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 8, background: grade.bg, border: `2px solid ${grade.border}`, borderRadius: 8, padding: "6px 10px", color: "#fff" }}>
+                <span style={{ fontSize: 24, fontWeight: 900, lineHeight: 1 }}>{grade.short}</span>
+                <span style={{ display: "flex", flexDirection: "column", gap: 2, textTransform: "uppercase", maxWidth: 110 }}>
+                  <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: "0.1em", opacity: 0.75 }}>{gradeTitle}</span>
+                  <span style={{ fontSize: 10, fontWeight: 900, lineHeight: 1.2 }}>{gradeLabel}</span>
+                </span>
+              </div>
+            )}
+            {ranks.length > 0 && (
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <div style={{ ...label, marginBottom: 3 }}>Class Rank</div>
+                {ranks.map((r) => <div key={r} style={{ fontSize: 12, fontWeight: 900, color: readableOn(color1, "#ffffff"), lineHeight: 1.4 }}>{r}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+        {strengths.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={label}>Strengths</div>
+            {strengths.map((s) => <span key={s} style={tag("#e7f6ec", "#15803d")}>✓ {s}</span>)}
+          </div>
+        )}
+        {weaknesses.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={label}>Weaknesses</div>
+            {weaknesses.map((w) => <span key={w} style={tag("#fdecec", "#b91c1c")}>✕ {w}</span>)}
+          </div>
+        )}
+        {excerpt && (
+          <div style={{ margin: "4px 0 12px", borderLeft: `4px solid ${color2}`, background: `${color1}0d`, borderRadius: "0 10px 10px 0", padding: "10px 12px", fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontSize: 13, lineHeight: 1.55, color: "#2a313d" }}>
+            “{excerpt}”
+          </div>
+        )}
+      </div>
+      <div style={{ background: color1, color: ink, padding: "8px 16px", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {url.replace(/^https?:\/\//, "")}
+      </div>
+    </div>
+  );
+}
 
 // A cfbAds row carries School instead of Team (same as MarginAds.js).
 const isCfbAd = (ad) => !!ad?.School && !ad?.Team;
@@ -2199,12 +2292,6 @@ export default function PlayerProfile() {
   // the default on every player) or "mine" (My Evaluation).
   const [scoutTab, setScoutTab] = useState("community");
   useEffect(() => { setScoutTab("community"); }, [slug]);
-  const exportCardRef = useRef(null);
-  // Share-evaluation modal — see handleShareEvaluation. null until a share
-  // image has actually been generated; evalShareOpen gates the dialog
-  // itself so closing it doesn't have to also clear the cached image.
-  const [evalShareImageUrl, setEvalShareImageUrl] = useState(null);
-  const [evalShareOpen, setEvalShareOpen] = useState(false);
   // Bio starts collapsed behind a "Show Bio" button so it doesn't push the
   // rest of the page down for visitors who don't want the long writeup.
   const [bioOpen, setBioOpen] = useState(false);
@@ -2247,7 +2334,6 @@ export default function PlayerProfile() {
     });
     return () => { cancelled = true; };
   }, [player?.Position, player?.Eligible]);
-  const [scoutName, setScoutName] = useState("");
   const [branding, setBranding] = useState(null);
   const cfbLogoRef = useRef("");
   const schoolSlugRef = useRef("");
@@ -2307,8 +2393,6 @@ export default function PlayerProfile() {
   const [archiving, setArchiving] = useState(false);
   const [playerStats, setPlayerStats] = useState(null);
   const [trend, setTrend] = useState(null);
-  const [reactionCounts, setReactionCounts] = useState({ likes: 0, up: 0, down: 0 });
-  const [myReaction, setMyReaction] = useState({ liked: false, vote: null });
   // Whether the signed-in user follows this player — separate from evaluations/
   // reactions above, stored at users/{uid}/follows/{playerId} so "My Feed"
   // (MyFeed.js) can list a user's own follows without a collection-group scan.
@@ -2411,8 +2495,6 @@ export default function PlayerProfile() {
     setPageVisible(false);
     setSeoDataReady(false);
     setBrandingReady(false);
-    setReactionCounts({ likes: 0, up: 0, down: 0 });
-    setMyReaction({ liked: false, vote: null });
     setLastEvalUpdate(null);
     // draftedBy/draftInfo used to survive a slug change untouched — the
     // draftOrder lookup below only ever *sets* them, never clears them, so
@@ -2596,17 +2678,6 @@ export default function PlayerProfile() {
     };
     fetch();
   }, [slug]);
-
-  useEffect(() => {
-    const fetch = async () => {
-      if (!user?.uid) return;
-      try {
-        const snap = await getDoc(doc(db,"users",user.uid));
-        setScoutName(snap.exists() ? (snap.data().username || user.email || "Anonymous Scout") : (user.email || "Anonymous Scout"));
-      } catch(e) { setScoutName(user.email || "Anonymous Scout"); }
-    };
-    fetch();
-  }, [user]);
 
   useEffect(() => {
     if (!slug) return;
@@ -3116,73 +3187,8 @@ useEffect(() => {
     fetch();
   }, [player]);
 
-  // ── Reactions (like/upvote/downvote) — same aggregation pattern as
-  // community evaluations above: read the whole subcollection, compute
-  // totals client-side. No Cloud Functions/counters needed at this scale.
-  // Liking doesn't require an account — a logged-out visitor's own doc is
-  // keyed by a persisted anon id (see utils/anonId.js) instead of a real
-  // uid, so "mine" below checks that id too, falling back to it only once
-  // we know there's no real user (avoids briefly reading the anon doc as
-  // "mine" while auth is still resolving on load). ──
-  useEffect(() => {
-    const fetch = async () => {
-      if (!player?.id) return;
-      try {
-        const snap = await getDocs(collection(db,"players",player.id,"reactions"));
-        const myId = user ? user.uid : getAnonId();
-        let likes = 0, up = 0, down = 0;
-        let mine = { liked: false, vote: null };
-        snap.forEach((d) => {
-          const data = d.data();
-          if (data.liked) likes++;
-          if (data.vote === "up") up++;
-          else if (data.vote === "down") down++;
-          if (d.id === myId) mine = { liked: !!data.liked, vote: data.vote || null };
-        });
-        setReactionCounts({ likes, up, down });
-        setMyReaction(mine);
-      } catch(e) { console.error(e); }
-    };
-    fetch();
-  }, [player, user]);
-
-  // ── Toggle like: independent of up/down vote. No login required — a
-  // guest's like is keyed by their persisted anon id (see utils/anonId.js)
-  // instead of a real uid; firestore.rules accepts either for this
-  // subcollection's `liked` field specifically. ──
-  const handleToggleLike = () => {
-    if (!player?.id) return;
-    const myId = user ? user.uid : getAnonId();
-    const nextLiked = !myReaction.liked;
-    setReactionCounts((c) => ({ ...c, likes: c.likes + (nextLiked ? 1 : -1) }));
-    setMyReaction((r) => ({ ...r, liked: nextLiked }));
-    setDoc(doc(db,"players",player.id,"reactions",myId), {
-      uid: myId, liked: nextLiked, vote: myReaction.vote, updatedAt: serverTimestamp(),
-    }, { merge: true }).catch((e) => console.error(e));
-  };
-
-  // ── Toggle vote: picking the currently-selected direction again clears it;
-  // picking the opposite direction switches (removing the old one). ──
-  const handleVote = (direction) => {
-    if (!user) { login(); return; }
-    if (!player?.id) return;
-    const nextVote = myReaction.vote === direction ? null : direction;
-    setReactionCounts((c) => {
-      const n = { ...c };
-      if (myReaction.vote === "up") n.up -= 1;
-      if (myReaction.vote === "down") n.down -= 1;
-      if (nextVote === "up") n.up += 1;
-      if (nextVote === "down") n.down += 1;
-      return n;
-    });
-    setMyReaction((r) => ({ ...r, vote: nextVote }));
-    setDoc(doc(db,"players",player.id,"reactions",user.uid), {
-      uid: user.uid, liked: myReaction.liked, vote: nextVote, updatedAt: serverTimestamp(),
-    }, { merge: true }).catch((e) => console.error(e));
-  };
-
   // ── Follow status — single-doc read at users/{uid}/follows/{playerId},
-  // not a whole-subcollection scan like reactions above (there's nothing to
+  // not a whole-subcollection scan (there's nothing to
   // aggregate here, just "does this doc exist"). ──
   useEffect(() => {
     const fetch = async () => {
@@ -3436,26 +3442,6 @@ useEffect(() => {
     });
     return () => { cancelled = true; };
   }, [player?.id]);
-
-  // Same share-modal pattern WePickHub.js's own share buttons use: build the
-  // image first, show it in a preview dialog, then offer Email/X/Text/Save
-  // from there — instead of silently downloading a file the moment the
-  // button's clicked, with no chance to see what it looks like first.
-  const handleShareEvaluation = async () => {
-    if (!exportCardRef.current) return;
-    try {
-      const dataUrl = await withoutPageZoom(() => htmlToImage.toPng(exportCardRef.current, { pixelRatio:2, backgroundColor:"#ffffff", skipFonts:true, filter:(node)=>node.tagName!=="IMG" }));
-      setEvalShareImageUrl(dataUrl);
-      setEvalShareOpen(true);
-    } catch(e) { alert("Failed to build the share image. Please try again."); }
-  };
-
-  const handleSaveEvalImage = () => {
-    if (!evalShareImageUrl) return;
-    const link = document.createElement("a");
-    link.download = `${player.First}_${player.Last}_Evaluation.png`;
-    link.href = evalShareImageUrl; link.click();
-  };
 
   // ── Insert a bullet line into the evaluation textarea at the cursor,
   // starting a new line if the cursor isn't already at the start of one.
@@ -3983,19 +3969,6 @@ useEffect(() => {
     </>
   );
 
-  const GradeBadge = ({ g, large=false }) => {
-    const { short, bg, border } = gradeDisplay(g);
-    const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(g);
-    const qualifier = isFirstRound ? g.replace(" First Round", "").toUpperCase() : null;
-    return (
-      <div className="rounded text-center" style={{ backgroundColor:bg, border:`${large?4:3}px solid ${border}`, padding:large?"10px 16px":"8px 10px", minWidth:large?"100%":"auto", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"1px" }}>
-        {qualifier && <div style={{ fontSize:large?"12px":"8px", fontWeight:900, color:"rgba(255,255,255,0.9)", textTransform:"uppercase", letterSpacing:"0.06em", lineHeight:1, textAlign:"center" }}>{qualifier}</div>}
-        <div style={{ fontSize:large?"52px":"30px", fontWeight:900, color:"#fff", lineHeight:1, letterSpacing:"-0.02em", textAlign:"center" }}>{short}</div>
-        <div style={{ fontSize:large?"10px":"8px", fontWeight:800, color:"rgba(255,255,255,0.8)", textTransform:"uppercase", letterSpacing:"0.07em", textAlign:"center" }}>ROUND</div>
-      </div>
-    );
-  };
-
   // ── Draft Class list (shared between desktop sidebar and mobile dropdown) ──
   const draftClassLabel = `${formatEligible(player.Eligible)} ${player.Position}`.trim();
   const communityYearPath = String(player.Eligible) === "2027" ? "/community" : `/community/${player.Eligible}`;
@@ -4475,6 +4448,24 @@ useEffect(() => {
   // more. `row` lays them out side by side (mobile / narrow) instead of
   // stacked.
   const hasAnyFits = wdFits.length > 0 || community.topFits.length > 0;
+  // The Share (hero toolbar) and Share Evaluation messages — the community's
+  // grade, ranks, strengths and weaknesses as the page shows them; the
+  // evaluator's own for theirs.
+  const playerUrl = `https://we-draft.com/player/${slug}`;
+  const classYear = formatEligible(player.Eligible);
+  const ranks = [
+    classRank && `#${classRank} of ${classSize} ${classYear} prospects`,
+    selfIndex >= 0 && `#${positionRank ?? selfIndex + 1} of ${draftClassPlayers.length} ${classYear} ${pluralPos(player.Position)}`,
+  ].filter(Boolean);
+  const pageShare = playerShare({
+    player, url: playerUrl, ranks,
+    gradeTitle: "Round Grade", gradeLabel: community.avgGrade != null ? gradeLabels[Math.round(community.avgGrade)] : "",
+    strengths: community.topStrengths.map((s) => s.term), weaknesses: community.topWeaknesses.map((w) => w.term),
+  });
+  const evalShare = playerShare({
+    player, url: playerUrl, gradeTitle: "My Grade", gradeLabel: grade, strengths, weaknesses, evaluation,
+  });
+  const shareCard = (s) => <PlayerShareCard card={s.card} color1={color1 || SITE_BLUE} color2={color2 || SITE_GOLD} logo={heroLogo} />;
   const wdFitsShown = wdFits.slice(0, community.topFits.length >= 2 ? 1 : community.topFits.length === 1 ? 2 : 3);
   const renderWdFits = (size, row) => wdFitsShown.length > 0 && (
     <div style={{ width: "100%" }}>
@@ -5130,28 +5121,30 @@ useEffect(() => {
             </button>
 
             <div className="flex gap-2" style={{ flexWrap:"wrap", rowGap:"6px" }}>
-              {/* Mirrors the Follow/Evaluate pill buttons beside it — same
-                  border/fill/padding language, filled solid white (like
-                  Follow's "following" state) once liked instead of its old
-                  plain icon-only look. */}
-              <button
-                onClick={handleToggleLike}
-                title={myReaction.liked ? "Unlike" : "Like"}
-                className={"font-extrabold rounded-full transition hover:opacity-90 wdm-tb" + (myReaction.liked ? " on" : "")}
+              {/* Share (where Like was) — sends the player as a message
+                  (pageShare). Same pill as Follow/Evaluate beside it. */}
+              <ShareTextButton
+                text={pageShare.text} preview={shareCard(pageShare)}
+                subject={`${player.First} ${player.Last} — We-Draft.com`}
+                color={siteC1}
+                title="Share this player"
+                className="font-extrabold rounded-full transition hover:opacity-90 wdm-tb"
                 style={{
                   display:"flex", alignItems:"center", gap:"6px",
                   border: "2px solid #fff",
-                  background: myReaction.liked ? "#fff" : "rgba(255,255,255,0.12)",
-                  color: myReaction.liked ? "#ff4d6d" : "#fff",
+                  background: "rgba(255,255,255,0.12)",
+                  color: "#fff",
                   fontSize: isMobile ? "14px" : "16px",
                   padding: isMobile ? "7px 14px" : "9px 18px",
                   fontWeight: 900,
                   cursor: "pointer",
                 }}
               >
-                <span style={{ fontSize: isMobile ? "16px" : "18px", lineHeight: 1 }}>♥</span>
-                {reactionCounts.likes}
-              </button>
+                <svg width={isMobile ? 14 : 16} height={isMobile ? 14 : 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" />
+                </svg>
+                Share
+              </ShareTextButton>
               {/* Mobile drops Follow entirely, per explicit request — worth
                   knowing this is the *only* place a user can ever follow a
                   player (MyFeed.js reads the same users/{uid}/follows
@@ -5905,9 +5898,10 @@ useEffect(() => {
                   <button onClick={() => handleSaveEvaluation()} disabled={saving} className="wdm-btn-primary w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:siteC1, border:`2px solid ${siteC2}`, color:"#fff", letterSpacing:"0.08em" }}>
                     {saving?"Saving...":"Save Evaluation"}
                   </button>
-                  <button onClick={handleShareEvaluation} className="wdm-btn-ghost w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${siteC1}`, color:siteC1, letterSpacing:"0.08em" }}>
+                  <ShareTextButton text={evalShare.text} preview={shareCard(evalShare)} subject={`My scouting report: ${player.First} ${player.Last}`} color={siteC1}
+                    className="wdm-btn-ghost w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${siteC1}`, color:siteC1, letterSpacing:"0.08em" }}>
                     Share Evaluation
-                  </button>
+                  </ShareTextButton>
                   {(lastUpdated || archivedEval) && (
                     <button onClick={handleArchiveEvaluation} disabled={archiving || !lastUpdated} className="w-full font-black uppercase py-3 rounded transition hover:opacity-90"
                       style={{ backgroundColor:"#fff", border:`2px solid ${SITE_GOLD}`, color: lastUpdated ? "#7a5c00" : "#bbb", letterSpacing:"0.08em", cursor: lastUpdated ? "pointer" : "default" }}>
@@ -5926,128 +5920,6 @@ useEffect(() => {
 
           <div className="wdm-stripe" style={{ height:"5px", backgroundColor:siteC2 }} />
         </div>
-
-        {/* ===== Hidden Export Card ===== */}
-        {/* Same overall vibe as before (light card, color1/color2 branding)
-            but sleeker: rounded throughout instead of hard rectangular
-            borders, Grade/Strengths/Weaknesses/NFL Fit sit in their own
-            soft rounded panels with breathing room between them instead of
-            thin dividers crammed edge-to-edge, and the header/footer get a
-            subtle gradient for depth instead of a flat fill. The footer
-            also no longer just repeats "WE-DRAFT.COM" from the header —
-            it's the player's own shareable URL instead, actual information
-            rather than the same wordmark twice. */}
-        <div style={{ position:"absolute", left:"-9999px", top:0 }}>
-          <div ref={exportCardRef} style={{ width:"700px", backgroundColor:"#ffffff", borderRadius:"28px", overflow:"hidden", boxShadow:"0 24px 60px rgba(0,0,0,0.22)", border:"1px solid rgba(0,0,0,0.06)", fontFamily:"'Arial Black', Arial, sans-serif" }}>
-            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"20px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ color:textOn(color1, color2), fontSize:"26px", fontWeight:900, letterSpacing:"0.16em", textTransform:"uppercase" }}>WE-DRAFT.COM</div>
-            </div>
-            <div style={{ height:"4px", background:`linear-gradient(90deg, ${color2}, ${color1})` }} />
-            <div style={{ padding:"32px 32px 20px", textAlign:"center" }}>
-              <div style={{ fontSize:"52px", fontWeight:900, color:color1, lineHeight:1.05, letterSpacing:"0.01em", textTransform:"uppercase" }}>{player.First} {player.Last}</div>
-              <div style={{ fontSize:"12px", fontWeight:700, color:"#aaa", letterSpacing:"0.12em", textTransform:"uppercase", marginTop:"10px" }}>Scouted by {scoutName}</div>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
-                <span style={{ backgroundColor:color1, color:"#fff", fontWeight:900, fontSize:"14px", padding:"6px 18px", borderRadius:"20px", letterSpacing:"0.05em" }}>{player.Position}</span>
-                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
-                <span style={{ color:color1, fontWeight:900, fontSize:"18px" }}>{player.School}</span>
-                <span style={{ color:"#ddd", fontSize:"18px" }}>·</span>
-                <span style={{ color:"#888", fontWeight:800, fontSize:"18px" }}>{formatEligible(player.Eligible)}</span>
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:"12px", padding:"4px 24px 24px", alignItems:"stretch" }}>
-              <div style={{ flex:"0 0 150px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"14px" }}>Grade</div>
-                {grade ? <GradeBadge g={grade} large={true} /> : <div style={{ color:"#ccc", fontSize:"13px", fontStyle:"italic" }}>No grade</div>}
-              </div>
-              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Strengths</div>
-                {strengths.length > 0 ? strengths.map((s,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<strengths.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{s}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
-              </div>
-              <div style={{ flex:1, background:"#fafafa", borderRadius:"16px", padding:"18px 20px", border:"1px solid rgba(0,0,0,0.05)" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px" }}>Weaknesses</div>
-                {weaknesses.length > 0 ? weaknesses.map((w,i) => <div key={i} style={{ fontSize:"12px", fontWeight:900, textTransform:"uppercase", color:"#222", letterSpacing:"0.04em", padding:"5px 0", borderBottom:i<weaknesses.length-1?"1px solid rgba(0,0,0,0.06)":"none" }}>{w}</div>) : <div style={{ color:"#ccc", fontSize:"12px", fontStyle:"italic" }}>—</div>}
-              </div>
-              {nflFit && (
-                <div style={{ flex:"0 0 110px", background:"#fafafa", borderRadius:"16px", padding:"18px 14px", border:"1px solid rgba(0,0,0,0.05)", display:"flex", flexDirection:"column", alignItems:"center" }}>
-                  <div style={{ fontSize:"10px", fontWeight:900, color:"#999", letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"10px", textAlign:"center" }}>NFL Fit</div>
-                  <div style={{ fontSize:"12px", fontWeight:900, color:color1, textAlign:"center", textTransform:"uppercase", letterSpacing:"0.04em", lineHeight:1.3 }}>{nflFit}</div>
-                </div>
-              )}
-            </div>
-            {evaluation && (
-              <div style={{ margin:"0 24px 28px", background:`${color1}0d`, borderLeft:`4px solid ${color2}`, borderRadius:"0 16px 16px 0", padding:"18px 22px" }}>
-                <div style={{ fontSize:"10px", fontWeight:900, color:color1, letterSpacing:"0.14em", textTransform:"uppercase", marginBottom:"8px" }}>Scout's Take</div>
-                <div style={{ fontStyle:"italic", color:"#333", fontSize:"13px", lineHeight:1.7 }}>
-                  {renderEvaluationText(evaluation, "export")}
-                </div>
-              </div>
-            )}
-            <div style={{ background:`linear-gradient(135deg, ${color1}, ${color1}cc)`, padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ color:textOn(color1, color2), fontSize:"18px", fontWeight:900, letterSpacing:"0.1em", textTransform:"uppercase" }}>Create Player Evaluations on We-Draft.com</div>
-            </div>
-          </div>
-        </div>
-
-        {/* ===== Share Evaluation Modal ===== */}
-        {evalShareOpen && (
-          <div
-            onClick={() => setEvalShareOpen(false)}
-            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{ background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"16px", maxWidth:"460px", width:"100%", maxHeight:"calc(90vh / var(--pz, 1))", overflowY:"auto", padding:"20px", boxShadow:"0 20px 50px rgba(0,0,0,0.5)" }}
-            >
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"14px" }}>
-                <div style={{ color:siteC1, fontWeight:900, fontSize:"14px", textTransform:"uppercase", letterSpacing:"0.06em" }}>Share Evaluation</div>
-                <button
-                  onClick={() => setEvalShareOpen(false)}
-                  style={{ background:"none", border:"none", color:"#999", fontSize:"22px", cursor:"pointer", lineHeight:1, padding:0 }}
-                >
-                  ×
-                </button>
-              </div>
-              <div style={{ borderRadius:"10px", overflow:"hidden", border:"1px solid #eee", marginBottom:"16px", background:"#fafafa", minHeight:"160px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                {evalShareImageUrl ? (
-                  <img src={evalShareImageUrl} alt="Evaluation preview" style={{ width:"100%", display:"block" }} />
-                ) : (
-                  <div style={{ padding:"50px 0", color:"#999", fontSize:"13px", fontWeight:700 }}>Building image…</div>
-                )}
-              </div>
-              <div style={{ fontSize:"11px", fontWeight:800, color:"#999", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:"8px" }}>
-                Share to
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px" }}>
-                <a
-                  href={`mailto:?subject=${encodeURIComponent(`${player.First} ${player.Last} — Scouting Report`)}&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position}):\nwe-draft.com/player/${slug}`)}`}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
-                >
-                  📧 Email
-                </a>
-                <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`My scouting report on ${player.First} ${player.Last} (${player.School} ${player.Position})`)}&url=${encodeURIComponent(`https://we-draft.com/player/${slug}`)}`}
-                  target="_blank" rel="noopener noreferrer"
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
-                >
-                  𝕏 X
-                </a>
-                <a
-                  href={`sms:?&body=${encodeURIComponent(`Check out my scouting report on ${player.First} ${player.Last}: we-draft.com/player/${slug}`)}`}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:"#fff", border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:siteC1, fontWeight:800, fontSize:"13px", textDecoration:"none" }}
-                >
-                  💬 Text
-                </a>
-                <button
-                  onClick={handleSaveEvalImage}
-                  disabled={!evalShareImageUrl}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"6px", background:siteC1, border:`2px solid ${siteC1}`, borderRadius:"8px", padding:"10px", color:"#fff", fontWeight:800, fontSize:"13px", cursor:evalShareImageUrl?"pointer":"default", opacity:evalShareImageUrl?1:0.6 }}
-                >
-                  💾 Save Image
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ===== Homage ad — same ad the margin rails are showing. Desktop:
             the wordmark banner. Phones (no rails): MobileAdCard, with the

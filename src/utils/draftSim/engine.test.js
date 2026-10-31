@@ -1,6 +1,6 @@
 import {
   withinValue, chooseCpuPick, buildBoard, applyMyGrades, buildTeamBoards, gradeSpreadFactor, VARIANCE, DEFAULT_VARIANCE, teamRank, initSim, stepCpu, makePick, isUserOnClock, currentPick, findTradeUpOffers, acceptOffer, movedUp,
-  teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, warRoomFor, sideOf, needName, needWord, groupedNeeds,
+  teamHaul, pickValue, letterFor, evaluateProposal, applyProposal, tradeablePicks, pickWorth, pickName, pickByKey, warRoomFor, likelyPicks, sideOf, needName, needWord, groupedNeeds,
   positionValue, earlyNudge, resolveNeeds, needKeysFor, needPull, roleFit, needFor, depthOnly, shuffleOrder, relabelOrder, swapTeams, orderTeams, ROLES, ROLE_WEIGHT, needWeight,
 } from "./engine";
 import { reactTo, shockOf, LIVE_ANALYSTS, ANALYSTS, weDraftFacts, statFacts, pickVars, ISAAC_LINES, MAKALI_LINES, DAVIN_LINES, lineText, gradeTake, applyDeskLines, applyDeskLegends, davinSuggestion, applyPlayerTakes, singular } from "./analysts";
@@ -1156,6 +1156,25 @@ test("war room: no one suggests a quarterback into a crowded room (the 49ers)", 
   // A set QB room keeps the coaches off one with premium capital too.
   const set = room({ QB: { labels: ["Set"] }, LB: { labels: ["Upgrade Needed"] } });
   expect(set.hc.p.Position).not.toBe("QB");
+});
+
+test("likely picks: one per position, no second quarterback, nor one into a full QB room or a player into a crowded room", () => {
+  const b = buildBoard([
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `qb${i}`, Position: "QB", cr: i + 1 })),
+    { id: "lb", Position: "LB", cr: 6 },
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `x${i}`, Position: ["RB", "TE", "OL", "WR"][i % 4], cr: 10 + i })),
+  ]);
+  const order = [{ Pick: 1, Round: 1, Team: "T1" }, { Pick: 33, Round: 2, Team: "T1" }];
+  // Took a quarterback at 1: at 33 the four left at the top of the board aren't targets.
+  const s = makePick(initSim({ order, board: b, userTeams: ["T1"], rounds: 2, seed: 1 }), "qb0").state;
+  const after = likelyPicks(s, "T1", 33, 3);
+  expect(after).toHaveLength(3);
+  after.forEach((p) => expect(p.Position).not.toBe("QB"));
+  // Set at quarterback, crowded at linebacker: neither shows up.
+  const set = initSim({ order, board: b, userTeams: ["T1"], rounds: 2, seed: 1, needs: { T1: resolveNeeds({ QB: { labels: ["Set"] }, LB: { labels: ["Crowded Room"] }, WR: { labels: ["Upgrade Needed"] } }) } });
+  likelyPicks(set, "T1", 1, 3).forEach((p) => { expect(p.Position).not.toBe("QB"); expect(p.id).not.toBe("lb"); });
+  // One per position.
+  expect(new Set(after.map((p) => p.Position)).size).toBe(after.length);
 });
 
 test("war room: draft history pulls each staffer to his own players", () => {

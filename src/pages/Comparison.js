@@ -1133,7 +1133,7 @@ export default function Comparison() {
   // is no player photo in the data model — same reasoning as
   // PlayerProfile.js's Helmet), falling back to the site logo like
   // TeamPage.js's og:image does.
-  const seoImage = (schoolBranding?.Logo1 && sanitizeUrl(schoolBranding.Logo1)) || `${SITE_URL}/logo512.png`;
+  const seoImage = (schoolBranding?.Logo1 && sanitizeUrl(schoolBranding.Logo1)) || `${SITE_URL}/wd-icon-512.png`;
   const seoHead = (
     <Helmet>
       <title>{seoTitle}</title>

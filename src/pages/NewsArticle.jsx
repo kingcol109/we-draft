@@ -468,7 +468,7 @@ export default function NewsArticle() {
         <meta property="og:description" content={description} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:site_name" content="We-Draft" />
-        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={article.title} />
         <meta name="twitter:description" content={description} />
         {article.publishedAt?.toDate && <meta property="article:published_time" content={article.publishedAt.toDate().toISOString()} />}
@@ -502,7 +502,7 @@ export default function NewsArticle() {
           "datePublished": article.publishedAt?.toDate?.()?.toISOString() || "",
           "dateModified": article.updatedAt?.toDate?.()?.toISOString() || article.publishedAt?.toDate?.()?.toISOString() || "",
           "author": { "@type": "Person", "name": article.author || "We-Draft" },
-          "publisher": { "@type": "Organization", "name": "We-Draft", "url": "https://we-draft.com", "logo": { "@type": "ImageObject", "url": "https://we-draft.com/logo512.png" } },
+          "publisher": { "@type": "Organization", "name": "We-Draft", "url": "https://we-draft.com", "logo": { "@type": "ImageObject", "url": "https://we-draft.com/wd-icon-512.png" } },
           "mainEntityOfPage": { "@type": "WebPage", "@id": canonicalUrl }
         })}</script>
       </Helmet>

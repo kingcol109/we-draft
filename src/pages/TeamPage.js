@@ -2033,11 +2033,11 @@ export default function TeamPage() {
         <meta property="og:description" content={pageDescription} />
         <meta property="og:url" content={`https://we-draft.com/team/${slug}`} />
         <meta property="og:site_name" content="We-Draft.com" />
-        <meta property="og:image" content={sanitizeUrl(branding?.logo1) || "https://we-draft.com/logo512.png"} />
+        <meta property="og:image" content={sanitizeUrl(branding?.logo1) || "https://we-draft.com/wd-icon-512.png"} />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={pageTitle} />
         <meta name="twitter:description" content={pageDescription} />
-        <meta name="twitter:image" content={sanitizeUrl(branding?.logo1) || "https://we-draft.com/logo512.png"} />
+        <meta name="twitter:image" content={sanitizeUrl(branding?.logo1) || "https://we-draft.com/wd-icon-512.png"} />
         <script type="application/ld+json">{JSON.stringify({
           "@context": "https://schema.org", "@type": "BreadcrumbList",
           "itemListElement": [

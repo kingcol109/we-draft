@@ -36,6 +36,7 @@ import { WEEKLY_ROUNDS_BY_YEAR } from "../utils/draftSim/weeklyMock";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
 import { PickRow } from "./ViewMock";
+import ShareLinkButton from "../components/ShareLinkButton";
 import {
   BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner, TradeCard, tradeChip,
   Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, PhoneAd,
@@ -178,8 +179,14 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
   // The switch between classes: each one that's been published, this one marked.
   // (A class with no team pages, 2029, has no page here to switch to.)
   const switchYears = WEEKLY_YEARS.filter((y) => hasTeamPages(y) && (y === year || classes?.[y]));
-  const switcher = switchYears.length > 1 && (
-    <WeeklyYearSwitch years={switchYears} current={year} hrefOf={(y) => weeklyMockHref(team, y)} ink={heroTeam.ink} bg={c1} isMobile={isMobile} />
+  // The link preview: the team's picks, drawn by api/mock-og.js (the week's
+  // id only keys the cache).
+  const ogImage = latest ? `https://we-draft.com/api/mock-og?year=${year}&team=${team}&v=${latest.id}` : "";
+  const switcher = (
+    <>
+      {latest && <ShareLinkButton url={url} title={`${teamName} ${year} Mock Draft — We-Draft.com`} ink={heroTeam.ink} bg={c1} isMobile={isMobile} />}
+      {switchYears.length > 1 && <WeeklyYearSwitch years={switchYears} current={year} hrefOf={(y) => weeklyMockHref(team, y)} ink={heroTeam.ink} bg={c1} isMobile={isMobile} />}
+    </>
   );
   // This class's picks a trade in the main class's mock moved — the team's
   // own and the ones it sent away: [{ round, original, from, to }].
@@ -281,9 +288,14 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
         <meta property="og:description" content={description} />
         <meta property="og:url" content={url} />
         <meta property="og:site_name" content="We-Draft.com" />
-        <meta name="twitter:card" content="summary" />
+        {ogImage && <meta property="og:image" content={ogImage} />}
+        {ogImage && <meta property="og:image:width" content="1200" />}
+        {ogImage && <meta property="og:image:height" content="630" />}
+        {ogImage && <meta property="og:image:alt" content={`${teamName} ${year} mock draft picks`} />}
+        <meta name="twitter:card" content={ogImage ? "summary_large_image" : "summary"} />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
+        {ogImage && <meta name="twitter:image" content={ogImage} />}
         {publishedIso && <meta property="article:modified_time" content={publishedIso} />}
         <script type="application/ld+json">{JSON.stringify({
           "@context": "https://schema.org", "@type": "WebPage", url, name: headline, description,

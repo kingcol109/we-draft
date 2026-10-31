@@ -140,6 +140,10 @@ function App() {
       <Helmet>
         <title>We-Draft.com — Community NFL Draft Scouting</title>
         <meta name="description" content="The community-powered NFL Draft scouting platform. Grade prospects, build your personal draft board, and see how your takes compare — free to join." />
+        {/* The link-preview image for any page without its own: the WD
+            logo, as the small square beside the title (a "summary" card). */}
+        <meta property="og:image" content="https://we-draft.com/wd-icon-512.png" />
+        <meta name="twitter:image" content="https://we-draft.com/wd-icon-512.png" />
       </Helmet>
       <Router>
         <Suspense fallback={<RouteFallback />}>

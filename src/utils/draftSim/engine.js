@@ -966,6 +966,27 @@ export function warRoomFor(state, team, overall = currentPick(state)?.overall ||
   return { gm, hc, coordinator, needs: teamNeedList(state, team), topNeed: openNeeds(state, team)[0] || null };
 }
 
+// The players a team would most likely take at a pick, one per position:
+// how the CPU ranks them (effectiveRank, without its noise — board, needs,
+// staff fit, a spot it's already drafted for), never a quarterback once it
+// has one or into a full QB room, nor a player into a Crowded Room. On the
+// Clock's Potential Targets. [prospect], most likely first.
+export function likelyPicks(state, team, overall, n) {
+  const round = roundAt(state, overall);
+  const blocked = (p) => crowdedFor(state, team, p)
+    || (p.Position === "QB" && (repeatOf(state, team, p) > 0 || qbRoomPenalty(state, team, p, overall, round) > 0));
+  const ranked = cpuAvailable(state).slice(0, CANDIDATES * 2)
+    .filter((p) => !blocked(p))
+    .map((p) => ({ p, v: effectiveRank(state, team, p, overall, round) }))
+    .sort((x, y) => x.v - y.v);
+  const out = [];
+  for (const { p } of ranked) {
+    if (out.length >= n) break;
+    if (!out.some((q) => q.Position === p.Position)) out.push(p);
+  }
+  return out;
+}
+
 // A team's needs (not Set or Crowded Room), most urgent first, positions before roles:
 // [{ key, labels, note, filled, count }]. Guards and centers come as one
 // (key IOL — needGroup): their labels together, filled once both are,

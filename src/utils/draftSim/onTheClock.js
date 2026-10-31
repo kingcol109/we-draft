@@ -35,7 +35,7 @@
 //           that moved up (shown once the pick is in),
 //           posts: [post], tradePosts?: [post] }
 //   post: { a: analyst id, text, lines?, d: delay ms }
-import { initSim, stepCpu, available, currentPick, teamHaul, rngNext, pickName, isSpecialist, warRoomFor, teamRank, acceptOffer, VARIANCE, CPU_TRADES, SIM_POSITIONS } from "./engine";
+import { initSim, stepCpu, available, currentPick, teamHaul, rngNext, pickName, isSpecialist, likelyPicks, acceptOffer, VARIANCE, CPU_TRADES, SIM_POSITIONS } from "./engine";
 import { reactTo, ANALYSTS, DEFAULT_CHATTER, STAT_LABEL, ordinal } from "./analysts";
 import { teamNamer } from "./data";
 
@@ -341,19 +341,15 @@ export function pregamePosts(script) {
   return lines.map(([a, text], k) => ({ a, text, key: `pre${k}` }));
 }
 
-// Potential Targets: three players the team on the clock might take — its
-// war room's picks (engine warRoomFor: the GM's, the head coach's, a
-// coordinator's; one each, no repeats), filled out from the team's own
-// board (teamRank) when they agree. [pid]; [] if it can't be read.
+// Potential Targets: three players the team on the clock might take — the
+// ones the CPU would most likely pick there, each at a different position
+// (engine likelyPicks: its board, needs and staff fit, and what it's already
+// drafted — never a second quarterback, one into a full QB room or a player
+// into a Crowded Room). [pid]; [] if it can't be read.
 const TARGETS = 3;
 function potentialTargets(state, team, pick, keep) {
   try {
-    const room = warRoomFor(state, team, pick.overall);
-    const ids = [...new Set([room.gm, room.hc, room.coordinator].filter((c) => c?.p).map((c) => c.p.id))];
-    const fill = available(state).filter((p) => !isSpecialist(p) && !ids.includes(p.id))
-      .sort((x, y) => teamRank(state, team, x) - teamRank(state, team, y));
-    for (const p of fill) { if (ids.length >= TARGETS) break; ids.push(p.id); }
-    return ids.slice(0, TARGETS).map((id) => keep(state.byId[id]));
+    return likelyPicks(state, team, pick.overall, TARGETS).map(keep);
   } catch (err) {
     console.error("On the Clock: potential targets for", team, pick?.overall, err);
     return [];

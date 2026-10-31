@@ -16,6 +16,7 @@
     "api/youtube-analytics.js": { "maxDuration": 300 },
     "api/bot-render.js": { "maxDuration": 30 },
     "api/bot-render-clear.js": { "maxDuration": 15 },
-    "api/recache-mocks.js": { "maxDuration": 30 }
+    "api/recache-mocks.js": { "maxDuration": 30 },
+    "api/mock-og.js": { "maxDuration": 20, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" }
   }
 }

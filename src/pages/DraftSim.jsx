@@ -115,6 +115,15 @@ export default function DraftSim({ page = null }) {
   const contentRef = useRef(null);
   // The signed-in user's own grades ({} signed out or unreadable), for My Board.
   const [myGrades, setMyGrades] = useState(null);
+  // A finished run: its results sit under the setup screen's tabs, "New
+  // Draft" as "This Draft". Sim Profile and Community open in place (doneTab,
+  // doneView) rather than by route — another route remounts the page and
+  // the run's gone; This Draft brings the results back. null until the run's
+  // finished.
+  const [doneTab, setDoneTab] = useState(null);
+  const [doneView, setDoneView] = useState({ profile: "profile", community: "insights" });
+  useEffect(() => { setDoneTab(null); }, [config]);
+  const openDoneTab = (t) => { setDoneTab(t); window.scrollTo(0, 0); };
 
   // The whole page dark while it's up — the strip the body's navbar padding
   // leaves above the stage, the footer and anything under it (SIM_CSS).
@@ -202,6 +211,14 @@ export default function DraftSim({ page = null }) {
     else navigate({ pathname: page ? `/draftsim${yearPath}` : location.pathname, search: "" }, { replace: !page, state: location.state });
   };
   const setView = (v) => navigate(v === "drafts" ? `${PROFILE_PATH}?view=drafts` : v === "recent" ? RECENT_PATH : v === "insights" ? COMMUNITY_PATH : PROFILE_PATH, { replace: true });
+  // The Sim Profile and Community tabs' contents, for the setup screen and a finished run.
+  const tabBody = (t, v, onView) => (t === "profile" ? (
+    <>
+      <SubTabs views={PROFILE_VIEWS} view={v} onView={onView} />
+      {v === "drafts" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <SimProfile branding={setup.branding} names={names.teamName} isMobile={isMobile} />}
+    </>
+  ) : <SimCommunity view={v} onView={onView} branding={setup.branding} names={names.teamName} order={setup.order} orderYear={setup.year} isMobile={isMobile} />);
+  const doneAway = doneTab && doneTab !== "new";
 
   const names = teamNamer(setup?.branding || {});
   // Title, description and canonical: components/draftSim/DraftSimMeta.jsx (App.js).
@@ -247,24 +264,31 @@ export default function DraftSim({ page = null }) {
         ) : !setup || (config && !boardReady) ? (
           <Column isMobile={isMobile}><LoadingSpinner label="Loading the draft" size={40} minHeight="50vh" /></Column>
         ) : config ? (
-          <SimErrorBoundary key={config.seed} isMobile={isMobile}
-            onRestart={() => start(rerunOf(config))}
-            onSettings={() => openSettings(config.teams, config.board, optsOf(config))}>
-            <LiveSim data={config.expanded && expandedBoard ? { ...data, board: expandedBoard } : data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
-              onRerun={() => start(rerunOf(config))}
-              onSettings={() => openSettings(config.teams, config.board, optsOf(config))}
-              onPickTeam={pickAnother} />
-          </SimErrorBoundary>
+          <>
+            {/* Kept mounted (hidden) while a finished run's other tab is open. */}
+            <div style={doneAway ? { display: "none" } : undefined}>
+              <SimErrorBoundary key={config.seed} isMobile={isMobile}
+                onRestart={() => start(rerunOf(config))}
+                onSettings={() => openSettings(config.teams, config.board, optsOf(config))}>
+                <LiveSim data={config.expanded && expandedBoard ? { ...data, board: expandedBoard } : data} config={config} myGrades={myGrades} isMobile={isMobile} contentRef={contentRef}
+                  onRerun={() => start(rerunOf(config))}
+                  onSettings={() => openSettings(config.teams, config.board, optsOf(config))}
+                  onPickTeam={pickAnother}
+                  onDone={() => setDoneTab((t) => t || "new")}
+                  tabs={<SetupTabs tab="new" thisDraft onTab={openDoneTab} isMobile={isMobile} />} />
+              </SimErrorBoundary>
+            </div>
+            {doneAway && (
+              <Column wide isMobile={isMobile}>
+                <SetupTabs tab={doneTab} thisDraft onTab={openDoneTab} isMobile={isMobile} />
+                {tabBody(doneTab, doneView[doneTab], (v) => setDoneView((d) => ({ ...d, [doneTab]: v })))}
+              </Column>
+            )}
+          </>
         ) : (
           <Column isMobile={isMobile} contentRef={contentRef}>
             <SetupTabs tab={tab} onTab={setTab} isMobile={isMobile} />
-            {tab === "profile" ? (
-              <>
-                <SubTabs views={PROFILE_VIEWS} view={view} onView={setView} />
-                {view === "drafts" ? <SavedSims branding={setup.branding} isMobile={isMobile} /> : <SimProfile branding={setup.branding} names={names.teamName} isMobile={isMobile} />}
-              </>
-            )
-              : tab === "community" ? <SimCommunity view={view} onView={setView} branding={setup.branding} names={names.teamName} order={setup.order} orderYear={setup.year} isMobile={isMobile} />
+            {tab !== "new" ? tabBody(tab, view, setView)
               : <Setup key={year} setup={setup} year={year} rounds={data ? maxRounds(data.board) : null} initialTeams={location.state?.teams || []} initialBoard={location.state?.board} initialOpts={location.state?.opts} signedIn={!!user} myCount={myCount} isMobile={isMobile} names={names} onStart={start} starting={!!pending} onTeams={setSetupTeams}
               onYear={(y) => navigate(`/draftsim${y === SIM_YEAR ? "" : `/${y}`}`, { replace: true, state: location.state })} />}
           </Column>
@@ -333,7 +357,8 @@ class SimErrorBoundary extends Component {
   }
 }
 
-function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam }) {
+// onDone: the run's finished; tabs: the tab bar over its results.
+function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, onRerun, onSettings, onPickTeam, onDone, tabs }) {
   // My Board: their grades over the community's (fixed for this run — the
   // sim remounts on every start).
   // A random order (config.order) over the real one.
@@ -357,7 +382,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   const started = s.phase !== "intro";
   useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
-  useEffect(() => { if (finished) countSim(uid, "completed"); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (finished) { countSim(uid, "completed"); onDone?.(); } }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   // The signed-in user's Sim Profile (utils/draftSim/simProfile.js), once
   // the draft's finished: any sim keeps their streak going; only a
   // single-team sim on the default settings (speed and chatter aside)
@@ -428,6 +453,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   if (s.phase === "done") {
     return (
       <Column wide isMobile={isMobile} contentRef={contentRef}>
+        {tabs}
         <SimResults sim={s.sim} data={data} ctx={s.ctx} speed={s.speed} isMobile={isMobile} onRerun={onRerun} onNew={onSettings} mock={mock} counted={counted} onUndo={mock && s.canUndo ? s.undo : undefined}
           badges={badges.runEarned} badgeTotal={badges.total} />
         {toasts}
@@ -503,12 +529,13 @@ function useNavHeight(on) {
 
 // ── Setup ──
 
-function SetupTabs({ tab, onTab, isMobile }) {
+// thisDraft: over a finished run — "New Draft" is "This Draft", its results.
+function SetupTabs({ tab, onTab, isMobile, thisDraft = false }) {
   const tabStyle = (on) => ({
     border: "none", borderBottom: `3px solid ${on ? GOLD : "transparent"}`, background: "none", color: on ? "#fff" : "#8b9bb4",
     padding: "8px 4px", marginRight: isMobile ? 12 : 18, cursor: "pointer", fontFamily: FONT, fontWeight: 900, fontSize: isMobile ? 11 : 13, letterSpacing: isMobile ? "0.05em" : "0.1em", textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0,
   });
-  const tabs = [["new", "New Draft", "New"], ["profile", "Sim Profile", "Profile"], ["community", "Community", "Community"]];
+  const tabs = [["new", thisDraft ? "This Draft" : "New Draft", thisDraft ? "This Draft" : "New"], ["profile", "Sim Profile", "Profile"], ["community", "Community", "Community"]];
   return (
     <div role="tablist" style={{ display: "flex", borderBottom: "1px solid #1f2b42", marginBottom: 14, overflowX: "auto" }}>
       {tabs.map(([key, label, short]) => (

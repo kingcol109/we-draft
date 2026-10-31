@@ -308,12 +308,11 @@ function Door({ door, isMobile }) {
 
 // The current Weekly Mock's first round, a tile a pick (to that team's
 // page in the mock, for a class with team pages), the first BOARD_PREVIEW
-// until it's opened up; then every team's logo, to its page. classes: the
+// and a button to the whole mock; then every team's logo, to its page. classes: the
 // published ones (WEEKLY_YEARS order) — a switch when there's more than one.
 function WeeklyBoard({ isMobile, teams, classes, year, onYear, summary, mock }) {
-  const [open, setOpen] = useState(false);
   const firstRound = useMemo(() => (mock ? pickList(mock).filter((p) => (p.round || 1) === 1) : []), [mock]);
-  const shown = open ? firstRound : firstRound.slice(0, BOARD_PREVIEW);
+  const shown = firstRound.slice(0, BOARD_PREVIEW);
   const date = weeklyMockDate(summary?.publishedAt);
   const teamPages = hasTeamPages(year);
   const allTeams = useMemo(() => [...NFL_TEAM_ABBRS].sort((a, b) => (NFL_TEAMS[a] || a).localeCompare(NFL_TEAMS[b] || b)), []);
@@ -332,7 +331,7 @@ function WeeklyBoard({ isMobile, teams, classes, year, onYear, summary, mock }) 
         {classes.length > 1 && (
           <Segmented
             isMobile={isMobile} value={year} label="Weekly Mock class"
-            onChange={(y) => { onYear(y); setOpen(false); }}
+            onChange={onYear}
             options={classes.map((c) => ({ value: c.year, label: `${c.year}${c.summary?.rounds ? ` · ${c.summary.rounds}R` : ""}` }))}
           />
         )}
@@ -347,15 +346,13 @@ function WeeklyBoard({ isMobile, teams, classes, year, onYear, summary, mock }) 
           </div>
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? 6 : 8 }}>
+            {/* Two columns read down, not across: 1–5 on the left, 6–10 on the right. */}
+            <div style={isMobile ? { display: "grid", gap: 6 } : {
+              display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: `repeat(${Math.ceil(shown.length / 2)}, auto)`, gridAutoFlow: "column", gap: 8,
+            }}>
               {shown.map((p) => <BoardPick key={p.pickNumber} pick={p} brand={teams[p.currentTeam] || {}} year={year} teamPages={teamPages} isMobile={isMobile} />)}
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 12 }}>
-              {firstRound.length > BOARD_PREVIEW ? (
-                <button onClick={() => setOpen((o) => !o)} style={{ ...button("outline", isMobile), ...(isMobile ? { flex: "1 1 100%", justifyContent: "center" } : {}) }}>
-                  {open ? "Show fewer ▴" : `Show all ${firstRound.length} picks ▾`}
-                </button>
-              ) : <span />}
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
               <Link to={weeklyYearHref(year)} style={{ ...button("blue", isMobile), ...(isMobile ? { flex: "1 1 100%", justifyContent: "center" } : {}) }}>
                 Full {summary?.rounds || mock?.rounds || 7}-round mock →
               </Link>

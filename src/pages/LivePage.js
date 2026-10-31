@@ -3799,11 +3799,11 @@ export default function LivePage() {
         <meta property="og:title" content={seo.title} />
         <meta property="og:description" content={seo.description} />
         <meta property="og:url" content={seo.url} />
-        <meta property="og:image" content={seo.image || "https://we-draft.com/logo512.png"} />
+        <meta property="og:image" content={seo.image || "https://we-draft.com/wd-icon-512.png"} />
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={seo.title} />
         <meta name="twitter:description" content={seo.description} />
-        <meta name="twitter:image" content={seo.image || "https://we-draft.com/logo512.png"} />
+        <meta name="twitter:image" content={seo.image || "https://we-draft.com/wd-icon-512.png"} />
         {seo.jsonLd && <script type="application/ld+json">{JSON.stringify(seo.jsonLd)}</script>}
       </Helmet>
       <style>{STYLE}</style>
