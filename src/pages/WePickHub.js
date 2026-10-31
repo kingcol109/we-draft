@@ -16,7 +16,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { wePickHref, useWePickRoute } from "../utils/wePickRoutes";
 import { scrollActiveTabIntoView, liveGameHref } from "../utils/live";
 import { Helmet } from "react-helmet-async";
-import * as htmlToImage from "html-to-image";
+import { renderShareImage } from "../utils/exportImages";
 import { db } from "../firebase";
 // Pick scoring (pickedSideOf / isGameFinal / hasScorePick / scoreGamePick)
 // lives in utils/wePickScoring.js, shared with /live's Your Week.
@@ -29,7 +29,6 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { useAuth } from "../context/AuthContext";
 import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
-import { withoutPageZoom } from "../utils/pageZoom";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -593,11 +592,8 @@ function MyPicksSection() {
   // Waits a frame after shareModal's data lands so the hidden card (below,
   // in the render) has actually painted with that content before capturing
   // it — capturing on the same tick as setShareModal would grab whatever
-  // was there before (usually nothing). skipFonts avoids inlining every
-  // site font as base64 (slow, unnecessary for this card's plain system
-  // stack); the IMG filter avoids CORS-tainting the canvas on an
-  // externally-hosted logo, same reasoning as PlayerProfile.js's own
-  // handleExportImage — this card is text-only for the same reason.
+  // was there before (usually nothing). renderShareImage (utils/
+  // exportImages.js) inlines the school logos first so they're drawn.
   useEffect(() => {
     if (!shareModal) { setShareImageUrl(null); return; }
     let cancelled = false;
@@ -609,10 +605,7 @@ function MyPicksSection() {
           // border-radius cuts away from its bounding box — matched to
           // PAGE_BG's darkest stop (not white) so those corners blend into
           // the card instead of showing as pale triangles.
-          const dataUrl = await withoutPageZoom(() => htmlToImage.toPng(shareCardRef.current, {
-            pixelRatio: 2, backgroundColor: "#06162c", skipFonts: true,
-            filter: (node) => node.tagName !== "IMG",
-          }));
+          const dataUrl = await renderShareImage(shareCardRef.current, { pixelRatio: 2, backgroundColor: "#06162c" });
           if (!cancelled) setShareImageUrl(dataUrl);
         } catch (e) {
           console.error("We-Pick share-image render error:", e);
@@ -1186,11 +1179,11 @@ function MyPicksSection() {
   // returning null — no explicit pickedTeam and no scores to infer a side
   // from), which shouldn't happen for anything in rankedGames but is kept
   // as a plain "Away vs Home" rather than rendering "null over null".
-  // accentColor is the favored team's own Color1 — the one bit of real
-  // team-color flavor this text-only card (see the html-to-image IMG
-  // filter below) can still carry without risking a CORS-tainted canvas on
-  // a logo image.
+  // accentColor is the favored team's own Color1, down the row's edge;
+  // winnerLogo / loserLogo go beside the names (the dark-background
+  // versions, as the page's own rows use — the card's navy).
   const handleSharePicks = () => {
+    const logoOf = (s) => sanitizeUrl(s?.LogoBlack || s?.LogoDark || s?.Logo1 || "");
     const rows = rankedGames.map((g) => {
       const p = myPicksById[g.id];
       const awaySchool = schoolsByName?.[g.Away];
@@ -1204,6 +1197,7 @@ function MyPicksSection() {
         const loserScore = awayWinning ? p.homeScore : p.awayScore;
         return {
           kind: "matchup", winnerName, loserName, fallbackLabel,
+          winnerLogo: logoOf(awayWinning ? awaySchool : homeSchool), loserLogo: logoOf(awayWinning ? homeSchool : awaySchool),
           value: `${winnerScore}-${loserScore}`,
           accentColor: (awayWinning ? awaySchool : homeSchool)?.Color1 || GOLD,
         };
@@ -1213,6 +1207,8 @@ function MyPicksSection() {
       const loserName = side === "away" ? g.Home : side === "home" ? g.Away : null;
       return {
         kind: "matchup", winnerName, loserName, fallbackLabel,
+        winnerLogo: logoOf(side === "away" ? awaySchool : side === "home" ? homeSchool : null),
+        loserLogo: logoOf(side === "away" ? homeSchool : side === "home" ? awaySchool : null),
         value: "TO WIN",
         accentColor: (side === "away" ? awaySchool : side === "home" ? homeSchool : null)?.Color1 || GOLD,
       };
@@ -1660,10 +1656,8 @@ function MyPicksSection() {
           We-Pick (PAGE_BG's navy gradient, gold borders/accents, each row
           styled like a compact GameRow) instead of the plain white card
           PlayerProfile.js's own export uses — this one's meant to be posted,
-          not printed. Still text-only (no logos) so html-to-image never
-          trips over an externally-hosted image tainting the canvas; each
-          row's accentColor (a flat CSS color, not an image) is as far as
-          real team branding can safely go here. */}
+          not printed. A matchup row carries both schools' logos (inlined
+          by renderShareImage) and the favored team's color down its edge. */}
       {shareModal && (
         <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
           <div ref={shareCardRef} style={{ width: "640px", background: PAGE_BG, border: `3px solid ${GOLD}`, borderRadius: "22px", fontFamily: "'Arial Black', Arial, sans-serif", overflow: "hidden" }}>
@@ -1713,11 +1707,13 @@ function MyPicksSection() {
                       // instead of a neutral "Away vs Home" — who's picked
                       // to win reads instantly instead of only living in
                       // the score off to the side.
-                      <span style={{ fontSize: "14px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                      <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", fontSize: "14px", fontWeight: 800, color: "#fff", textTransform: "uppercase", letterSpacing: "0.02em" }}>
                         {row.winnerName ? (
                           <>
+                            {row.winnerLogo && <img src={row.winnerLogo} alt="" style={{ width: "30px", height: "30px", objectFit: "contain", flexShrink: 0 }} />}
                             {row.winnerName}
-                            <span style={{ color: "rgba(255,255,255,0.5)", fontWeight: 700 }}> over </span>
+                            <span style={{ color: "rgba(255,255,255,0.5)", fontWeight: 700 }}>over</span>
+                            {row.loserLogo && <img src={row.loserLogo} alt="" style={{ width: "24px", height: "24px", objectFit: "contain", flexShrink: 0, opacity: 0.8 }} />}
                             {row.loserName}
                           </>
                         ) : row.fallbackLabel}

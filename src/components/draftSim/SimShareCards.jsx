@@ -32,7 +32,7 @@ const fitSize = (text, max, width) => Math.max(16, Math.min(max, Math.floor(widt
 
 const Frame = forwardRef(function Frame({ background, children }, ref) {
   return (
-    <div ref={ref} style={{ position: "relative", width: STORY_W, height: STORY_H, background, fontFamily: HEAVY, color: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div ref={ref} style={{ position: "relative", width: STORY_W, height: STORY_H, background, fontFamily: HEAVY, fontWeight: 900, color: "#fff", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {children}
     </div>
   );

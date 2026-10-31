@@ -19,8 +19,7 @@
 // mock's own owner — it doesn't check ownership itself, since "own mocks
 // only" already gates which pages/branches render it at all.
 import { useRef, useState } from "react";
-import * as htmlToImage from "html-to-image";
-import { withoutPageZoom } from "../utils/pageZoom";
+import { renderShareImage } from "../utils/exportImages";
 import MockShareCard, { shareRow } from "./MockShareCard";
 
 const BLUE = "#0055a5";
@@ -62,10 +61,7 @@ export default function ShareMockButton({
   const handleShare = async () => {
     if (!cardRef.current) return;
     try {
-      const dataUrl = await withoutPageZoom(() => htmlToImage.toPng(cardRef.current, {
-        pixelRatio: 2, backgroundColor: "#071a33", skipFonts: true,
-        filter: (node) => node.tagName !== "IMG",
-      }));
+      const dataUrl = await renderShareImage(cardRef.current, { pixelRatio: 2, backgroundColor: "#071a33" });
       setImageUrl(dataUrl);
       setOpen(true);
     } catch (e) {

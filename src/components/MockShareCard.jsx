@@ -5,11 +5,12 @@
 // (ShareMockButton.jsx) and the Draft Sim's Mock Draft results
 // (draftSim/SimResults.jsx). Near square for X / Instagram: a header with
 // the title, two columns of picks down the page (a full 32-pick round fits)
-// each with its team's color stripe and abbreviation, the player big and
-// his position and school under him, and the site along the bottom.
+// each with its team's logo on the team's color, the player big and his
+// position and school under him, and the site along the bottom.
 //
-// Flat colors and text only — an externally hosted logo can taint the
-// canvas and blank the whole export, so no images.
+// The logos are plain <img>s — the caller captures with renderShareImage
+// (utils/exportImages.js), which inlines them first. A logo that can't load
+// shows the team's abbreviation (its alt) in its place.
 import { forwardRef } from "react";
 import { textOn } from "../utils/teamColors";
 
@@ -20,13 +21,13 @@ const CARD_W = 1000;
 const BODY = "Arial, Helvetica, sans-serif";
 const HEAVY = "'Arial Black', Arial, sans-serif";
 
-// rows: [{ pickNumber, team (abbr), color1, color2, player: { First, Last,
-// Position, School } | null, via }]; eyebrow ("2027 NFL MOCK DRAFT · ROUND
+// rows: [{ pickNumber, team (abbr), color1, color2, logo, player: { First,
+// Last, Position, School } | null, via }]; eyebrow ("2027 NFL MOCK DRAFT · ROUND
 // 1"), title, byline, footer (the site line).
 const MockShareCard = forwardRef(function MockShareCard({ eyebrow, title, byline, rows, footer, moreNote }, ref) {
   const perCol = Math.max(1, Math.ceil(rows.length / 2));
   return (
-    <div ref={ref} style={{ width: CARD_W, background: NAVY, fontFamily: HEAVY, color: "#fff", overflow: "hidden" }}>
+    <div ref={ref} style={{ width: CARD_W, background: NAVY, fontFamily: HEAVY, fontWeight: 900, color: "#fff", overflow: "hidden" }}>
       {/* Header */}
       <div style={{ position: "relative", padding: "34px 44px 28px", background: `linear-gradient(120deg, #0a2a52 0%, ${BLUE} 70%, #1c6fc4 100%)` }}>
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 10, background: GOLD }} />
@@ -54,7 +55,9 @@ const MockShareCard = forwardRef(function MockShareCard({ eyebrow, title, byline
               return (
                 <div key={r.pickNumber} style={{ display: "flex", alignItems: "stretch", minWidth: 0, height: 52, background: "rgba(255,255,255,0.055)", borderRadius: 8, overflow: "hidden" }}>
                   <div style={{ width: 46, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: GOLD, background: "rgba(0,0,0,0.25)" }}>{r.pickNumber}</div>
-                  <div style={{ width: 62, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: c1, color: textOn(c1, c2), fontSize: 15, letterSpacing: "0.04em", borderRight: `4px solid ${c2}` }}>{r.team}</div>
+                  <div style={{ width: 62, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: c1, color: textOn(c1, c2), fontSize: 15, letterSpacing: "0.04em", borderRight: `4px solid ${c2}` }}>
+                    {r.logo ? <img src={r.logo} alt={r.team} style={{ width: 42, height: 42, objectFit: "contain" }} /> : r.team}
+                  </div>
                   <div style={{ flex: 1, minWidth: 0, padding: "0 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
                     {r.player ? (
                       <>
@@ -86,7 +89,9 @@ const MockShareCard = forwardRef(function MockShareCard({ eyebrow, title, byline
 
 export default MockShareCard;
 
-// A pick row from a team map ({ [abbr]: { Color1, Color2 } }).
+// A pick row from a team map ({ [abbr]: { Color1, Color2, LogoDark, Logo1 } })
+// — the logo's the dark-background one, as it sits on the team's color.
 export const shareRow = (teams, { pickNumber, team, player, via }) => ({
   pickNumber, team, player, via: via || null, color1: teams?.[team]?.Color1, color2: teams?.[team]?.Color2,
+  logo: teams?.[team]?.LogoDark || teams?.[team]?.Logo1 || "",
 });

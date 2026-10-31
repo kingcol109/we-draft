@@ -16,7 +16,6 @@ import { Link } from "react-router-dom";
 import { haulRecords, simShareText, simCallToAction, mockShareText, simUrl } from "../../utils/draftSim/share";
 import { shareRow } from "../MockShareCard";
 import { SimReportStory, BoardStory } from "./SimShareCards";
-import * as htmlToImage from "html-to-image";
 import { useAuth } from "../../context/AuthContext";
 import { teamHaul, needName, groupedNeeds, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
@@ -24,8 +23,7 @@ import { teamNamer } from "../../utils/draftSim/data";
 import { PROFILE_PATH } from "../../utils/draftSim/simProfile";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
-import { withoutPageZoom } from "../../utils/pageZoom";
-import { inlineImages } from "../../utils/exportImages";
+import { renderShareImage } from "../../utils/exportImages";
 import { Avatar, Verified } from "./SimFeed";
 import { saveSim, setSimVisibility, listable, RECENT_PATH } from "../../utils/draftSim/publicSims";
 import { SimSnapshot } from "./SimProfile";
@@ -351,10 +349,9 @@ function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, 
     building.current = true;
     setFailed(false);
     try {
-      await inlineImages(cardRef.current);
-      const url = await withoutPageZoom(() => htmlToImage.toPng(cardRef.current, {
-        pixelRatio: 1.5, backgroundColor: "#06162c", skipFonts: true, // 720 × 1280 → 1080 × 1920
-      }));
+      const url = await renderShareImage(cardRef.current, {
+        pixelRatio: 1.5, backgroundColor: "#06162c", // 720 × 1280 → 1080 × 1920
+      });
       const blob = await (await fetch(url)).blob();
       setImage({ url, file: new File([blob], fileName, { type: "image/png" }) });
     } catch (e) {
