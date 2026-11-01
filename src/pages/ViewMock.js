@@ -31,7 +31,7 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   BLUE, GOLD, INK, MUTED, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS,
   useIsMobile, MockPageShell, MockHero, heroPill, chip, button, PhoneAd,
-  ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd, TeamMocksRail, WeeklyYearSwitch, TradeCard, tradeChip,
+  ArticleHero, WeeklyByline, MakeYourOwnBanner, Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, TradeCard, tradeChip,
 } from "../components/MockDraftKit";
 import WdOutline from "../assets/Logo2.png";
 
@@ -61,6 +61,8 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   // The current Weekly Mock's id for this mock's class (its summary), to
   // tell a past week's apart; null for any other mock.
   const [currentWeekly, setCurrentWeekly] = useState(undefined);
+  // When that week was published — the date its team pages and the sitemap use.
+  const [currentPublishedAt, setCurrentPublishedAt] = useState(null);
   // Which classes have a published Weekly Mock, for the switch: { [year]: bool }.
   const [classes, setClasses] = useState(null);
   useEffect(() => {
@@ -72,7 +74,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   useEffect(() => {
     if (loading) return;
     if (!weeklyClass) { setCurrentWeekly(null); return; }
-    loadWeeklyMockSummary(weeklyClass).then((s) => setCurrentWeekly(s?.mockId || null));
+    loadWeeklyMockSummary(weeklyClass).then((s) => { setCurrentPublishedAt(s?.publishedAt || null); setCurrentWeekly(s?.mockId || null); });
   }, [loading, weeklyClass]);
 
   useEffect(() => {
@@ -134,7 +136,11 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   const weekly = mock.source === "weeklyMock" && !!mock.official;
   const intro = (mock.description || "").trim();
   const year = mock.draftClass || "2027";
-  const updated = weeklyMockDate(mock.updatedAt);
+  // The current week is dated by when it was published, same as its team
+  // pages and the sitemap; anything else by its last edit.
+  const dateTs = weekly && currentWeekly === mock.id && currentPublishedAt ? currentPublishedAt : mock.updatedAt;
+  const updated = weeklyMockDate(dateTs);
+  const modifiedIso = weekly ? dateTs?.toDate?.()?.toISOString() || "" : "";
   // The current week's own URL is its class's page.
   if (weekly && !yearPage && currentWeekly === mock.id) return <Navigate to={weeklyYearHref(year)} replace />;
   // A past week's Weekly Mock: still readable, not indexed.
@@ -233,6 +239,12 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
         <meta name="twitter:description" content={description} />
         {ogImage && <meta name="twitter:image" content={ogImage} />}
         {!indexable && <meta name="robots" content="noindex, follow" />}
+        {modifiedIso && <meta property="article:modified_time" content={modifiedIso} />}
+        {weekly && <script type="application/ld+json">{JSON.stringify({
+          "@context": "https://schema.org", "@type": "WebPage", url, name: headline, description,
+          ...(modifiedIso ? { dateModified: modifiedIso } : {}), inLanguage: "en-US",
+          isPartOf: { "@type": "WebSite", name: "We-Draft", url: "https://we-draft.com" }, publisher: SITE_PUBLISHER,
+        })}</script>}
         {crumbs && <script type="application/ld+json">{JSON.stringify(breadcrumbLd(crumbs))}</script>}
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
