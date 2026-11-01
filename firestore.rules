@@ -915,6 +915,13 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow update, delete: if false;
     }
+    // Admin → Content → Photos (AdminPhotos.jsx): each player's headshot
+    // and action shots (image links), for YouTube thumbnails. Readable by
+    // anyone — player pages show the headshot (PlayerProfile.js).
+    match /playerPhotos/{playerId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /whiteboards/{docId} {
       allow get: if request.auth != null
                  && (resource == null || resource.data.uid == request.auth.uid);

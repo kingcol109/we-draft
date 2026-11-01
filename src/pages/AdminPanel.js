@@ -27,6 +27,7 @@ import AdminCoachHistory from "../components/AdminCoachHistory";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
+import AdminPhotos from "../components/AdminPhotos";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../utils/snapshotBuilders";
@@ -289,14 +290,9 @@ const PLAYER_GROUPS = [
 const SECTIONS = [
   { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
+  { key: "content", label: "Content", icon: "📝", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
-  { key: "youtube", label: "YouTube Analytics", icon: "▶️", ready: true },
-  { key: "research", label: "Research", icon: "🔬", ready: true },
   { key: "coaches", label: "Coach History", icon: "📋", ready: true },
-  { key: "mockdraft", label: "Mock Draft", icon: "📺", ready: true },
-  { key: "branding", label: "Branding", icon: "🎨", ready: true },
-  { key: "articles", label: "Articles", icon: "📰", ready: true },
-  { key: "calendar", label: "Content Calendar", icon: "🗓️", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
   { key: "requests", label: "Requests", icon: "📥", ready: true },
   { key: "users", label: "Users", icon: "👤", ready: true },
@@ -305,6 +301,54 @@ const SECTIONS = [
   { key: "sync", label: "Sync / System", icon: "🔄", ready: false },
   { key: "ads", label: "Ads", icon: "🎯", ready: true },
 ];
+
+// Content section: its tabs, each the section it used to be on its own.
+const CONTENT_SECTION_TABS = [
+  { key: "research", label: "Research" },
+  { key: "mockdraft", label: "Mock Draft" },
+  { key: "articles", label: "Articles" },
+  { key: "branding", label: "Branding" },
+  { key: "calendar", label: "Content Calendar" },
+  { key: "photos", label: "Photos" },
+];
+
+// Old ?section= keys, now tabs: [section, tab]. YouTube Analytics' sign-in
+// (api/youtube-analytics.js) still returns to ?section=youtube.
+const MOVED_SECTIONS = {
+  youtube: ["videos", "youtube"],
+  ...Object.fromEntries(CONTENT_SECTION_TABS.map((t) => [t.key, ["content", t.key]])),
+};
+
+function ContentSection({ initialTab }) {
+  const [tab, setTab] = useState(initialTab || "research");
+  return (
+    <>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+        {CONTENT_SECTION_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              padding: "8px 18px", fontWeight: 900, fontSize: "13px",
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              border: "2px solid " + BLUE, borderRadius: "8px", cursor: "pointer",
+              background: tab === t.key ? BLUE : "#fff",
+              color: tab === t.key ? "#fff" : BLUE,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "research" && <AdminResearch />}
+      {tab === "mockdraft" && <AdminMockDraft />}
+      {tab === "articles" && <ArticlesManager />}
+      {tab === "branding" && <BrandingSection />}
+      {tab === "calendar" && <ContentCalendarManager />}
+      {tab === "photos" && <AdminPhotos />}
+    </>
+  );
+}
 
 function SidebarNav({ active, setActive, badgeCounts }) {
   return (
@@ -7545,6 +7589,7 @@ const VIDEO_TAGS = ["Draft", "Recruiting", "CFB"];
 // sub-tabs. A group without tabs is a single tab of its own.
 const VIDEO_GROUPS = [
   { key: "manage", label: "Video Management" },
+  { key: "youtube", label: "YouTube Analytics" },
   {
     key: "create", label: "Video Creation", tabs: [
       { key: "suggest", label: "Suggest Video" },
@@ -7554,7 +7599,7 @@ const VIDEO_GROUPS = [
   },
 ];
 
-function VideosSection() {
+function VideosSection({ initialTab }) {
   const [videos, setVideos] = useState([]);
   const [allPlayers, setAllPlayers] = useState([]);
   // Recruits (high schoolers with no player page yet) are taggable too —
@@ -7579,9 +7624,9 @@ function VideosSection() {
   const [saveMessage, setSaveMessage] = useState("");
   const [migrating, setMigrating] = useState(false);
   const [migrateMessage, setMigrateMessage] = useState("");
-  // VIDEO_GROUPS tab: "manage" (the list + editor), "suggest", "workshop",
-  // "concepts".
-  const [videoTab, setVideoTab] = useState("manage");
+  // VIDEO_GROUPS tab: "manage" (the list + editor), "youtube" (YouTube
+  // Analytics), "suggest", "workshop", "concepts".
+  const [videoTab, setVideoTab] = useState(initialTab || "manage");
   // The workshop idea to open (just added from Suggest Video).
   const [workshopFocus, setWorkshopFocus] = useState(null);
 
@@ -8053,6 +8098,7 @@ function VideosSection() {
     )}
     {videoTab === "workshop" && <VideoWorkshop players={allPlayers} focusId={workshopFocus} onCreateVideo={startSuggestedVideo} />}
     {videoTab === "concepts" && <VideoConcepts players={allPlayers} onCreateVideo={startConceptVideo} />}
+    {videoTab === "youtube" && <AdminYouTubeAnalytics />}
     {videoTab === "manage" && (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
@@ -14283,11 +14329,14 @@ function TvChannelsManager() {
 export default function AdminPanel() {
   const { user } = useAuth();
   // ?section=<key> opens that section — Stream Manager's YouTube sign-in
-  // returns to /admin?section=streams, YouTube Analytics' to ?section=youtube.
-  const [activeSection, setActiveSection] = useState(() => {
+  // returns to /admin?section=streams — or the tab a moved one became
+  // (MOVED_SECTIONS: YouTube Analytics' ?section=youtube).
+  const [opened] = useState(() => {
     const k = new URLSearchParams(window.location.search).get("section");
-    return SECTIONS.some((s) => s.key === k) ? k : "players";
+    if (MOVED_SECTIONS[k]) return { section: MOVED_SECTIONS[k][0], tab: MOVED_SECTIONS[k][1] };
+    return { section: SECTIONS.some((s) => s.key === k) ? k : "players", tab: null };
   });
+  const [activeSection, setActiveSection] = useState(opened.section);
   const [unreadRequestCount, setUnreadRequestCount] = useState(0);
 
   // ── Sidebar badge for the Requests section — lives up here (not inside
@@ -14336,15 +14385,10 @@ export default function AdminPanel() {
 
           <div>
             {activeSection === "players" && <PlayerDataSection />}
-            {activeSection === "videos" && <VideosSection />}
+            {activeSection === "videos" && <VideosSection initialTab={opened.section === "videos" ? opened.tab : null} />}
+            {activeSection === "content" && <ContentSection initialTab={opened.section === "content" ? opened.tab : null} />}
             {activeSection === "analytics" && <AnalyticsSection />}
-            {activeSection === "youtube" && <AdminYouTubeAnalytics />}
-            {activeSection === "research" && <AdminResearch />}
             {activeSection === "coaches" && <AdminCoachHistory />}
-            {activeSection === "mockdraft" && <AdminMockDraft />}
-            {activeSection === "branding" && <BrandingSection />}
-            {activeSection === "articles" && <ArticlesManager />}
-            {activeSection === "calendar" && <ContentCalendarManager />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}
             {activeSection === "requests" && <RequestsSection />}
             {activeSection === "users" && <UsersSection />}

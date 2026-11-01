@@ -64,7 +64,7 @@ export function teamNameFromAbbr(abbr) {
 export const isCfbAd = (ad) => !!ad?.School && !ad?.Team;
 export const adTeamLabel = (ad) => (isCfbAd(ad) ? ad.School : teamNameFromAbbr(ad.Team) || ad.Team);
 
-function sanitizeImgur(url) {
+export function sanitizeImgur(url) {
   if (!url) return "";
   if (/^https?:\/\/i\.imgur\.com\/.+\.(png|jpe?g|gif|webp)$/i.test(url)) return url;
   // imgur.com/xxxx.png (how most logos/wordmarks are stored) only 302s to
