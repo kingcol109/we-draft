@@ -41,20 +41,6 @@ import { Helmet } from "react-helmet-async";
 import ShareTextButton from "../components/ShareTextButton";
 import confetti from "canvas-confetti";
 
-// ── Flair badge images (dropped into assets — filenames as uploaded) ───────
-import EliteFlair from "../assets/elite.png";
-import StarFlair from "../assets/star.png";
-import DiamondFlair from "../assets/dir.png";
-import RadarFlair from "../assets/radar.png";
-import SecondFlair from "../assets/second.png";
-import AlienFlair from "../assets/alien.png";
-import FutureStarFlair from "../assets/futurestar.png";
-import CurveFlair from "../assets/curve.png";
-import EarlyImpactFlair from "../assets/early impact.png";
-import EarlyContributorFlair from "../assets/early contributor.png";
-import Year2ContributorFlair from "../assets/y2contributor.png";
-import DevelopmentalFlair from "../assets/developmental.png";
-import ProvenFlair from "../assets/proven.png";
 
 // ── Trend icons — Breakout/On Fire use these custom images sitewide now
 // instead of the ⚡/🔥 emoji glyphs (Up keeps its ▲ triangle text). ──
@@ -315,28 +301,6 @@ const MODERN_STYLE = `
   .wdm [style*="font-size: 8px"] { font-size: 10px !important; }
   .wdm [style*="font-size: 9px"] { font-size: 11px !important; }
 `;
-
-// ── Flair → { image, stroke color } config. The image renders in the
-// right-side hero logo square (replacing the second school/CFB logo) and
-// the square gets a border in the matching stroke color. Key must match
-// the exact string stored in Firestore player.Flair. ──
-const FLAIR_CONFIG = {
-  "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
-  "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
-  "Diamond in the Rough": { img: DiamondFlair,   stroke: "#00d2ff", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
-  "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
-  "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
-  "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
-  "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
-  "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
-  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. \"High 5-Star\".", tag: "Recruit Grade" },
-  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. \"Low 5-Star/High 4-Star\".", tag: "Recruit Grade" },
-  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. \"4-Star\".", tag: "Recruit Grade" },
-  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. \"3-Star\".", tag: "Recruit Grade" },
-  // "Raw Talent": image not uploaded yet — add here once you have it, e.g.
-  // "Raw Talent": { img: RawTalentFlair, stroke: "#hexcode", desc: "..." },
-  "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
-};
 
 // ── Trend → visual treatment. badgeBg/badgeBorder are the trend's own
 // colors — badgeBg fills the Top 5 Trending sidebar chip on hover (and
@@ -2344,6 +2308,10 @@ export default function PlayerProfile() {
   const [evalCount, setEvalCount] = useState(0);
   const [seoDataReady, setSeoDataReady] = useState(false);
   const [brandingReady, setBrandingReady] = useState(false);
+  // The player's headshot (playerPhotos, Admin → Content → Photos) — the
+  // hero's left side when there is one, with the team logo moved right.
+  const [headshot, setHeadshot] = useState("");
+  const [headshotReady, setHeadshotReady] = useState(false);
   const [pageVisible, setPageVisible] = useState(false);
   // Find Comparison button — gated on config/features.comparisonEnabled
   // (toggled in Admin > Branding > Misc, see AdminPanel.js's
@@ -2398,12 +2366,6 @@ export default function PlayerProfile() {
   // (MyFeed.js) can list a user's own follows without a collection-group scan.
   const [following, setFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
-  // Right-side hero box (flair badge, or team logo when there's no flair)
-  // "grows" into its own popup on hover/tap rather than showing a separate
-  // floating tooltip card. The left-side school/NFL logo used to have the
-  // same treatment, but now lives as a full-opacity background layer in the
-  // hero instead of a foreground box, so it has no hover state of its own.
-  const [showRightBoxTip, setShowRightBoxTip] = useState(false);
   const [showBreakoutAnim, setShowBreakoutAnim] = useState(false);
   // Trending Up / Breakout / On Fire tag tooltips each manage their own
   // show/hide + position state internally now (see TrendTag) — they used
@@ -2531,8 +2493,19 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (seoDataReady && brandingReady) window.prerenderReady = true;
-  }, [seoDataReady, brandingReady]);
+    if (seoDataReady && brandingReady && headshotReady) window.prerenderReady = true;
+  }, [seoDataReady, brandingReady, headshotReady]);
+
+  useEffect(() => {
+    if (!player?.id) return undefined;
+    let live = true;
+    setHeadshot(""); setHeadshotReady(false);
+    getDoc(doc(db, "playerPhotos", player.id))
+      .then((snap) => { if (live) setHeadshot(snap.exists() ? snap.data().headshot?.url || "" : ""); })
+      .catch(() => {})
+      .finally(() => { if (live) setHeadshotReady(true); });
+    return () => { live = false; };
+  }, [player?.id]);
 
   useEffect(() => {
     const fetch = async () => {
@@ -2977,10 +2950,9 @@ export default function PlayerProfile() {
       } catch(e) { setBranding(null); }
       finally {
         // Marks the school logo/branding fetch as done, same reasoning as
-        // seoDataReady below — the flair icon renders instantly from
-        // player.Flair (no fetch needed), but the school logo box depends on
-        // this separate async call, and was slipping through the original
-        // prerenderReady gate because it only watched the evaluations fetch.
+        // seoDataReady below — the school logo depends on this separate
+        // async call, and was slipping through the original prerenderReady
+        // gate because it only watched the evaluations fetch.
         setBrandingReady(true);
       }
     };
@@ -3631,13 +3603,6 @@ useEffect(() => {
   const isOnFireTrend = (trend?.Trend || "").toString().trim().toLowerCase() === "on fire";
   const breakoutStats = (trend?.Notes || "").toString().split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
   const trendNotesList = breakoutStats;
-
-  // ── Flair lookup — drives the right-side hero logo square + its stroke ──
-  const flairInfo = player.Flair ? FLAIR_CONFIG[String(player.Flair).trim()] : null;
-  // The right-side box is flair-only now — every other logo (team/NFL,
-  // college) lives in the hero's background instead (see heroLogo /
-  // heroCollegeLogo). No flair means no box at all, drafted or not.
-  const hasRightBoxContent = !!flairInfo;
 
   // Built from the player record + community aggregates only (all loaded
   // before prerenderReady), never from an evaluation's written text.
@@ -4359,15 +4324,22 @@ useEffect(() => {
   // The main team/NFL logo, now rendered as a full-opacity background layer
   // (no white card behind it) instead of a small foreground box — same
   // dark-background-variant preference as heroWatermark above.
+  // The hero name's size cap: its longest unbreakable piece (a word, or
+  // each part of a hyphenated one) fits the name column's width — about
+  // 0.75em a letter in this font. Only ever shrinks a long name.
+  const nameFit = (() => {
+    const pieces = `${player.First || ""} ${player.Last || ""}`.split(/\s+/).flatMap((w) => w.split("-").map((x, i, all) => x + (i < all.length - 1 ? "-" : "")));
+    const longest = Math.max(4, ...pieces.map((x) => x.length));
+    return `calc(100cqw / ${(longest * 0.75).toFixed(2)})`;
+  })();
   const heroLogo = draftedBy
     ? (branding?.nflLogoDark || branding?.nflLogo || "")
     : (branding?.logoDark || branding?.logo1 || "");
   // Drafted players only: the college logo used to sit in the right-side
   // box, but now joins the NFL logo as a second full-opacity background
   // layer instead (branding.cfbLogo already prefers LogoDark — see the
-  // school-fetch effect above). Shown regardless of flair — the drafted
-  // hero has no flair badge box to fall back on, so this is the only
-  // college branding on the page at that point.
+  // school-fetch effect above). Not shown with a headshot, when the NFL
+  // logo takes the right side.
   const heroCollegeLogo = draftedBy ? (branding?.cfbLogo || "") : "";
 
   // Find Comparison — a compact pill beside the Community Scouting Report
@@ -4748,10 +4720,8 @@ useEffect(() => {
 
         {/* ProfilePage/Person structured data — only populated from fields
             that actually exist on the player doc (see BLANK_PLAYER_FORM /
-            AdminPanel.js's Player Data form for the full field list). There
-            is no player headshot/photo field anywhere in the data model
-            (players are only ever shown via team/school logos on this
-            site), so "image" is intentionally omitted rather than guessed. */}
+            AdminPanel.js's Player Data form for the full field list), plus
+            the headshot (playerPhotos) as "image" when there is one. */}
         <script type="application/ld+json">{JSON.stringify({
           "@context": "https://schema.org", "@type": "ProfilePage",
           "url": `https://we-draft.com/player/${slug}`,
@@ -4762,6 +4732,7 @@ useEffect(() => {
             "url": `https://we-draft.com/player/${slug}`,
             ...(player.School ? { "affiliation": { "@type": "SportsTeam", "name": player.School } } : {}),
             ...(player.Position ? { "jobTitle": player.Position } : {}),
+            ...(headshot ? { "image": sanitizeUrl(headshot) } : {}),
           },
         })}</script>
       </Helmet>
@@ -4799,16 +4770,6 @@ useEffect(() => {
         `}</style>
       )}
 
-      {flairInfo && (
-        <style>{`
-          @keyframes wdFlairShine {
-            0%   { left: -60%; }
-            12%  { left: 130%; }
-            100% { left: 130%; }
-          }
-          .wd-flair-shine { animation: wdFlairShine 10s ease-in-out infinite; }
-        `}</style>
-      )}
 
       {/* Trend glow/icon-animation keyframes — rendered unconditionally (not
           gated on this page's own trend) since the Top 5 Trending sidebar
@@ -5213,7 +5174,7 @@ useEffect(() => {
               stripe texture + breathing spotlight (PLAYER_HERO_STYLE above),
               a giant faded wordmark bleeding off the edge, and each team
               color's own soft corner glow — instead of the old plain white
-              card. Just wraps the logo/name/flair band; the toolbar above
+              card. Just wraps the headshot/logo/name band; the toolbar above
               stays its own flat color1 bar. */}
           <div style={{
             position: "relative", overflow: "hidden",
@@ -5252,14 +5213,30 @@ useEffect(() => {
                 hero's own art, not a soft decoration. Still a live link back
                 to the team page (with its own hover reaction, see
                 .wd-hero-logo-link below), same as the old foreground box. */}
+            {/* The headshot (a transparent cutout, uncropped) stands on the
+                hero's bottom edge on the left, behind the name row — the
+                position pill sits over the player. The team logo then moves
+                to the right, where the flair badge used to be. */}
+            {headshot && (
+              <img
+                src={sanitizeUrl(headshot)} alt={`${player.First || ""} ${player.Last || ""}`.trim()}
+                style={{
+                  position: "absolute", bottom: 0, left: isMobile ? "1%" : "2%",
+                  height: isMobile ? "88%" : "92%", width: "auto", maxWidth: isMobile ? "140px" : "260px", objectFit: "contain", objectPosition: "bottom",
+                  zIndex: 1, pointerEvents: "none",
+                }}
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            )}
             {heroLogo && (
               <Link
                 to={draftedBy ? `/nfl/${draftedBy.toLowerCase()}` : `/team/${teamSlug}`}
                 aria-label={draftedBy ? teamNameFromAbbr(draftedBy) : player.School}
                 className="wd-hero-logo-link"
                 style={{
-                  position: "absolute", top: "50%", left: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
-                  height: isMobile ? "60%" : "70%", zIndex: 2,
+                  position: "absolute", top: "50%", [headshot ? "right" : "left"]: isMobile ? "4%" : "3%", transform: "translateY(-50%)",
+                  // Phones with a headshot: a smaller logo, leaving the name room.
+                  height: isMobile ? (headshot ? "48%" : "60%") : "70%", zIndex: 2,
                   display: "flex", alignItems: "center",
                 }}
               >
@@ -5267,7 +5244,7 @@ useEffect(() => {
                   src={sanitizeUrl(heroLogo)} alt={draftedBy ? teamNameFromAbbr(draftedBy) : player.School}
                   className="wd-hero-logo-img"
                   style={{
-                    height: "100%", width: "auto", maxWidth: isMobile ? "90px" : "220px", objectFit: "contain",
+                    height: "100%", width: "auto", maxWidth: isMobile ? (headshot ? "64px" : "90px") : "220px", objectFit: "contain",
                     opacity: 1, filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.45))",
                   }}
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
@@ -5277,7 +5254,7 @@ useEffect(() => {
             {/* College logo — drafted players only, a smaller second
                 background layer opposite the NFL logo (used to live in the
                 right-side box; see heroCollegeLogo above for why it moved). */}
-            {heroCollegeLogo && (
+            {heroCollegeLogo && !headshot && (
               <Link
                 to={`/team/${teamSlug}`}
                 aria-label={player.School}
@@ -5312,11 +5289,13 @@ useEffect(() => {
               trending-tag popovers, "Selected by" team link) opts back in
               with its own pointerEvents:"auto". */}
           <div className="flex items-center" style={{ position:"relative", padding:isMobile?"12px 10px 8px":"20px 24px 10px", pointerEvents:"none" }}>
-            {/* Now the sole flex child (the flair box floats out of flow to
-                the right, absolutely positioned, below) so text-center here
-                centers the name/tags on the row's true middle instead of
-                being skewed off-axis by a sibling box eating space. */}
-            <div className="flex-1 text-center">
+            {/* The sole flex child, so text-center here centers the
+                name/tags on the row's true middle. */}
+            {/* With a headshot, the name and pills keep to the space between
+                it and the logo (wrapping, a hyphenated name at the hyphen)
+                rather than running under the logo. containerType lets the
+                name's size follow this column's width (nameFit below). */}
+            <div className="flex-1 text-center" style={{ containerType: "inline-size", ...(headshot ? { paddingLeft: isMobile ? 64 : 150, paddingRight: isMobile ? 76 : 170 } : {}) }}>
               {/* Transfer Portal banner — the one thing on this page that
                   reacts to AdminPanel.js's "Move to Transfer Portal"
                   action (see PlayerDataSection there); everything else
@@ -5334,12 +5313,12 @@ useEffect(() => {
                   🔄 In the Transfer Portal
                 </div>
               )}
-              <h1 className="font-black uppercase leading-none" style={{ fontSize:isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)", color:"#fff", letterSpacing:"0.02em", textShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
+              <h1 className="font-black uppercase leading-none" style={{ fontSize:`min(${isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)"}, ${nameFit})`, color:"#fff", letterSpacing:"0.02em", textShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
                 <div>{player.First}</div>
                 <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
               </h1>
               <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:isMobile?"6px":"10px" }}>
-                <span className="font-extrabold rounded-full wdm-pospill" style={{ background:"rgba(255,255,255,0.14)", border:"2px solid #fff", color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
+                <span className="font-extrabold rounded-full wdm-pospill" style={{ background:headshot?"rgba(0,0,0,0.45)":"rgba(255,255,255,0.14)", backdropFilter:headshot?"blur(4px)":undefined, border:"2px solid #fff", color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
                   {player.Position}
                 </span>
                 <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
@@ -5475,99 +5454,6 @@ useEffect(() => {
               )}
             </div>
 
-            {/* Floated out of the flex flow (absolute, anchored to the
-                row's right edge) so it no longer competes with the name
-                block for width — that's what was skewing the centered name
-                off-axis. Only rendered when there's actually something to
-                put in it (see hasRightBoxContent above). */}
-            {hasRightBoxContent && (
-            <div style={{ position:"absolute", top:"50%", right:isMobile?"10px":"24px", transform:"translateY(-50%)", width:isMobile?60:112, height:isMobile?60:112, pointerEvents:"auto" }}>
-              <div
-                className="flex items-center justify-center"
-                style={{
-                  position:"absolute", top:0, right:0, overflow:"hidden", boxSizing:"border-box",
-                  width: showRightBoxTip ? (isMobile?200:250) : (isMobile?60:112),
-                  height: showRightBoxTip ? "auto" : (isMobile?60:112),
-                  minHeight: isMobile?60:112,
-                  background: `radial-gradient(circle at 35% 28%, rgba(255,255,255,0.95), #f2f4f6 55%, #e9edf0 100%)`,
-                  border:`2px solid ${flairInfo.stroke}`,
-                  borderRadius:"8px",
-                  boxShadow: showRightBoxTip ? "0 14px 30px rgba(0,0,0,0.16)" : "none",
-                  zIndex: showRightBoxTip ? 50 : 1,
-                  flexDirection:"column",
-                  alignItems: showRightBoxTip ? "flex-start" : "center",
-                  justifyContent: showRightBoxTip ? "flex-start" : "center",
-                  textAlign: showRightBoxTip ? "left" : "center",
-                  padding: showRightBoxTip ? "12px 14px" : 0,
-                  transition:"width 0.22s ease, height 0.22s ease, box-shadow 0.22s ease",
-                }}
-                onMouseEnter={() => setShowRightBoxTip(true)}
-                onMouseLeave={() => setShowRightBoxTip(false)}
-                onClick={() => setShowRightBoxTip((v) => !v)}
-              >
-                {(
-                  showRightBoxTip ? (
-                    <>
-                      <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:"7px", rowGap:"5px", marginBottom:"7px", width:"100%" }}>
-                        <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:flairInfo.stroke, flexShrink:0 }} />
-                        <div
-                          style={{
-                            fontSize:isMobile?"11px":"12px",
-                            fontWeight:900,
-                            textTransform:"uppercase",
-                            letterSpacing:"0.06em",
-                            color:flairInfo.stroke,
-                          }}
-                        >
-                          {player.Flair}
-                        </div>
-                        {/* Outlined (not solid-fill) so the tag stays readable
-                            regardless of how light the flair's own accent color
-                            is — a white-on-bright-yellow solid fill was
-                            unreadable for "Developmental". */}
-                        {flairInfo.tag && (
-                          <span style={{
-                            fontSize:"8px", fontWeight:900, textTransform:"uppercase", letterSpacing:"0.05em",
-                            color:flairInfo.stroke, background:"#fff", border:`1px solid ${flairInfo.stroke}`,
-                            padding:"2px 6px", borderRadius:"20px", whiteSpace:"nowrap", flexShrink:0,
-                          }}>
-                            {flairInfo.tag}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ height:"1px", background:`linear-gradient(90deg, ${flairInfo.stroke}66, transparent)`, marginBottom:"8px", width:"100%" }} />
-                      <div style={{ fontSize:isMobile?"11px":"12px", fontWeight:600, color:"#555", lineHeight:1.5 }}>
-                        {flairInfo.desc || "Description coming soon."}
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ position:"relative", width:"100%", height:"100%", overflow:"hidden", borderRadius:"6px", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                      <img
-                        src={flairInfo.img}
-                        alt={player.Flair}
-                        style={{
-                          height:isMobile?50:96, objectFit:"contain", cursor:"pointer",
-                          filter:"drop-shadow(0 3px 5px rgba(0,0,0,0.18))",
-                          position:"relative", zIndex:1,
-                        }}
-                      />
-                      {/* glossy sheen sweep — gives the badge a bit of life instead of sitting flat */}
-                      <div
-                        className="wd-flair-shine"
-                        style={{
-                          position:"absolute", top:0, left:"-60%", width:"40%", height:"100%",
-                          background:"linear-gradient(115deg, transparent, rgba(255,255,255,0.65), transparent)",
-                          transform:"skewX(-20deg)",
-                          pointerEvents:"none",
-                          zIndex:2,
-                        }}
-                      />
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-            )}
           </div>
             </div>
           </div>
