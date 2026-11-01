@@ -4,8 +4,8 @@
 // itself (the circle We-Draft logo in a ring of its rarity's color), the
 // pop-up when one's earned (BadgeToasts, over the sim), the end screen's
 // (EndBadges under the Sim Profile snapshot; signed out, SignUpPanel in
-// their place — the account pitch, with the badges they'd keep; RunBadges
-// across the top of a Mock Draft's) and the Sim Profile's list of the
+// their place — the account pitch, with the badges they'd keep; a Mock
+// Draft earns none) and the Sim Profile's list of the
 // badges earned, by rarity (BadgeShelf).
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -88,30 +88,6 @@ export function BadgeToasts({ queue, onDone, isMobile }) {
 .wd-badge-pop>div{animation:wdBadgeIn .35s ease-out both}
 .wd-badge-pop.out>div{animation:wdBadgeOut ${LEAVE_MS}ms cubic-bezier(.4,0,.2,1) both}`}</style>
       <BadgeToast b={b} isMobile={isMobile} />
-    </div>
-  );
-}
-
-// A Mock Draft's end screen: the badges this draft unlocked, across the
-// top. Signed out: sign in to keep them.
-export function RunBadges({ badges, signedIn, login }) {
-  if (!badges.length) return null;
-  return (
-    <div style={{ background: "#0e1626", border: `1px solid ${GOLD}`, borderRadius: 14, padding: "10px 14px", marginBottom: 12, fontFamily: FONT }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <span style={{ color: GOLD, fontSize: 11, fontWeight: 900, letterSpacing: "0.16em", marginRight: "auto" }}>
-          {badges.length} BADGE{badges.length === 1 ? "" : "S"} UNLOCKED THIS DRAFT
-        </span>
-        {!signedIn && (
-          <button onClick={login} style={{ border: "none", borderRadius: 8, background: GOLD, color: "#fff", padding: "7px 14px", fontWeight: 900, fontSize: 11, letterSpacing: "0.06em", cursor: "pointer", fontFamily: FONT }}>
-            SIGN IN TO KEEP THEM
-          </button>
-        )}
-      </div>
-      {!signedIn && <div style={{ color: "#9fb0c8", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>Badges only stay on your Sim Profile with a free account — sign in now and this draft&apos;s count.</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
-        {rarestFirst(badges).map((b) => <BadgeRow key={b.id} b={b} />)}
-      </div>
     </div>
   );
 }

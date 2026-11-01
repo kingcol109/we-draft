@@ -27,7 +27,7 @@ import { renderShareImage } from "../../utils/exportImages";
 import { Avatar, Verified } from "./SimFeed";
 import { saveSim, setSimVisibility, listable, RECENT_PATH } from "../../utils/draftSim/publicSims";
 import { SimSnapshot } from "./SimProfile";
-import { RunBadges, EndBadges, SignUpPanel } from "./SimBadges";
+import { EndBadges, SignUpPanel } from "./SimBadges";
 import MockExport from "./MockExport";
 import { PlayerName } from "./FitName";
 
@@ -56,7 +56,7 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
   const league = useMemo(() => NFL_TEAM_ABBRS.map((t) => teamHaul(sim, t)).filter((h) => h.rows.length).sort((a, b) => b.score - a.score), [sim]);
   const hasMine = userHauls.some((h) => h.rows.length);
 
-  // Mock Draft mode: no grades — the export and the draft itself.
+  // Mock Draft mode: no grades and no badges — the export and the draft itself.
   if (mock) {
     return (
       <div className="wd-sim-in">
@@ -68,7 +68,6 @@ export default function SimResults({ sim, data, ctx, speed, isMobile, onRerun, o
           <button onClick={onRerun} style={{ ...btn, background: "#1a2438", color: "#fff" }}>START OVER</button>
           <button onClick={onNew} style={{ ...btn, background: "#1a2438", color: "#fff" }}>SETTINGS</button>
         </div>
-        <RunBadges badges={badges} signedIn={!!user} login={login} />
         <FullDraft sim={sim} data={data} isMobile={isMobile} cols={isMobile ? 1 : 4} action={<MockShare sim={sim} data={data} isMobile={isMobile} />} />
         {/* Post it as a mock draft, under the picks. */}
         <div style={{ marginTop: 12 }}><MockExport sim={sim} year={data.year} isMobile={isMobile} onUndo={onUndo} /></div>
@@ -340,7 +339,7 @@ function SaveButton({ sim, data, hauls, speed, full }) {
 function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, showText = true }) {
   const cardRef = useRef(null);
   const building = useRef(false);
-  const [image, setImage] = useState(null); // { url, file }
+  const [image, setImage] = useState(null); // { url }
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -352,8 +351,7 @@ function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, 
       const url = await renderShareImage(cardRef.current, {
         pixelRatio: 1.5, backgroundColor: "#06162c", // 720 × 1280 → 1080 × 1920
       });
-      const blob = await (await fetch(url)).blob();
-      setImage({ url, file: new File([blob], fileName, { type: "image/png" }) });
+      setImage({ url });
     } catch (e) {
       setFailed(true);
     } finally {
@@ -362,14 +360,9 @@ function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, 
   };
   const openShare = () => { setOpen(true); build(); };
 
+  // 𝕏 Post opens X itself with the post written, phone or not — no share
+  // sheet in between (Save Image is there to attach the picture).
   const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(xText)}`;
-  // Phone: the share sheet with the image attached. No image yet, or no
-  // file sharing, and the link opens the plain post.
-  const postToX = (e) => {
-    if (!image || !navigator.canShare?.({ files: [image.file] })) return;
-    e.preventDefault();
-    navigator.share({ files: [image.file], text }).catch(() => {});
-  };
   const saveImage = () => {
     if (!image) return;
     const a = document.createElement("a");
@@ -394,7 +387,7 @@ function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, 
       {createPortal(<div style={{ position: "absolute", left: -9999, top: 0 }} aria-hidden="true">{card(cardRef)}</div>, document.body)}
 
       {open && isMobile && (
-        <MobileShareSheet title={title} text={text} showText={showText} preview={preview} intent={intent} onX={postToX} onSave={image ? saveImage : null} onClose={() => setOpen(false)} />
+        <MobileShareSheet title={title} text={text} showText={showText} preview={preview} intent={intent} onSave={image ? saveImage : null} onClose={() => setOpen(false)} />
       )}
       {open && !isMobile && (
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -480,9 +473,9 @@ function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
 }
 
 // The phone's share sheet: up from the bottom in the sim's colors, the
-// image, the message as it'll be sent, and three big buttons — Save, X (the
-// phone's share sheet with the image attached) and Messages.
-function MobileShareSheet({ title, text, showText, preview, intent, onX, onSave, onClose }) {
+// image, the message as it'll be sent, and three big buttons — Save, X (X
+// itself, the post written) and Messages.
+function MobileShareSheet({ title, text, showText, preview, intent, onSave, onClose }) {
   const big = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 14, padding: "15px 8px", fontWeight: 900, fontSize: 14, whiteSpace: "nowrap", letterSpacing: "0.04em", textDecoration: "none", fontFamily: "inherit", border: "none", cursor: "pointer" };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10002, display: "flex", alignItems: "flex-end" }}>
@@ -501,7 +494,7 @@ function MobileShareSheet({ title, text, showText, preview, intent, onX, onSave,
         </div>}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           <button onClick={onSave || undefined} disabled={!onSave} style={{ ...big, background: BLUE, color: "#fff", opacity: onSave ? 1 : 0.5 }}>💾 Save</button>
-          <a href={intent} onClick={onX} target="_blank" rel="noopener noreferrer" style={{ ...big, background: "#000", color: "#fff", border: "1px solid #2f3336" }}>𝕏 Post</a>
+          <a href={intent} target="_blank" rel="noopener noreferrer" style={{ ...big, background: "#000", color: "#fff", border: "1px solid #2f3336" }}>𝕏 Post</a>
           <a href={`sms:?&body=${encodeURIComponent(text)}`} style={{ ...big, background: "#2ea043", color: "#fff" }}>💬 Message</a>
         </div>
       </div>

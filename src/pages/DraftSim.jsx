@@ -398,7 +398,7 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   }, [finished, uid]); // eslint-disable-line react-hooks/exhaustive-deps
   // Badges (components/draftSim/useSimBadges.js): popped up as they're
   // earned, saved at the end. My Board's ranks don't count for the value ones.
-  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin" });
+  const badges = useSimBadges({ sim: s.sim, year: data.year, valueBoard: config.board !== "mine", uid, admin: profile?.role === "admin", off: mock });
   const toasts = <BadgeToasts queue={badges.queue} onDone={badges.dismiss} isMobile={isMobile} />;
   // Mobile, mid-draft: one anchored screen pinned to the viewport — the
   // stage never moves, and only the console's tab scrolls (SimBroadcast).
