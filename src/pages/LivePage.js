@@ -31,9 +31,10 @@ import { communityFor, gradeLabel } from "../utils/communityGrades";
 import { fetchCurrentRankMap } from "../utils/rankings";
 import { isPickable, mondayOfWeekUtc, toMs } from "../utils/wePickLocks";
 import { summarizePicks, pickView, pickPublic, listedPick } from "../utils/wePickSummary";
-import { pickedSideOf, isGameFinal, hasScorePick, scoreGamePick, compareStandingsEntries } from "../utils/wePickScoring";
+import { hasScorePick, scoreGamePick } from "../utils/wePickScoring";
 import { hasRankedRoom, loadWeekRanked, swapRanked, RANKED_SIZE } from "../utils/wePickRanked";
 import RankedSwap from "../components/RankedSwap";
+import { useRankedPicks, useWeekStanding, YourWeekPicks } from "../components/WePickRanked";
 import { useLiveGameDocs, useRankedSixIds, useGamePlays, useCfbdSchools, searchCfbdPlayers } from "../hooks/useLiveFeed";
 import { useGameFeed } from "../hooks/useGameFeed";
 import { useInsightReveal, useDevInsights } from "../hooks/useInsightReveal";
@@ -954,113 +955,6 @@ function PhaseBanner({ phase, slate, games, setView }) {
 // results, followed teams' scores and followed players' stat lines. Lives
 // all week — during games everything updates in place (the slate listener
 // for scores, one live-stats listener per game a followed player is in).
-
-// The user's pick + the schedule26 game for each ranked game (official
-// final scores, and which side is "home" for the pick) — two reads a game,
-// once.
-function useRankedPicks(uid, ids) {
-  const key = [...ids].sort().join("|");
-  const [rows, setRows] = useState({});
-  useEffect(() => {
-    let alive = true;
-    setRows({});
-    if (!uid || !key) return undefined;
-    Promise.all(key.split("|").map((id) => Promise.all([
-      getDoc(doc(db, "users", uid, "picks", id)).catch(() => null),
-      getDoc(doc(db, "schedule26", id)).catch(() => null),
-    ]).then(([p, g]) => [id, { pick: p?.exists() ? p.data() : null, sched: g?.exists() ? g.data() : null }])))
-      .then((list) => { if (alive) setRows(Object.fromEntries(list)); });
-    return () => { alive = false; };
-  }, [uid, key]);
-  return rows;
-}
-
-// One ranked game: the pick vs. the score. Points are official once the
-// schedule has the final (same as We-Pick's grading); before that they're
-// what the pick would score if the game ended now.
-function rankedPickRow(game, row) {
-  const sched = row?.sched || {};
-  // schedule26's Home/Away can be flipped from CFBD's (neutral sites).
-  const swapped = !!sched.Home && sched.Home === game.away.school;
-  const home = swapped ? game.away : game.home;
-  const away = swapped ? game.home : game.away;
-  const official = isGameFinal(sched);
-  const started = game.status === "in_progress" || game.status === "final";
-  const scored = official ? sched
-    : started ? { Final: true, HomeScore: home.points ?? 0, AwayScore: away.points ?? 0 } : null;
-  const pick = row?.pick;
-  const points = scored && hasScorePick(pick) ? scoreGamePick(pick, scored) : null;
-  const state = !started && !official ? "wait" : game.status === "in_progress" && !official ? "live" : points > 0 ? "win" : "loss";
-  return { home, away, pick, points, state, official };
-}
-
-// The week's final We-Pick standings (wePickStandings2026/{week}, written
-// by scripts/gradeWePickWeek.js once every game is final) — one doc,
-// listened to so the rank appears the moment the week is graded.
-function useWeekStanding(uid, week) {
-  const [state, setState] = useState(null);
-  useEffect(() => {
-    setState(null);
-    if (!uid || !week) return undefined;
-    return onSnapshot(doc(db, "wePickStandings2026", week), (snap) => {
-      const d = snap.exists() ? snap.data() : null;
-      if (!d?.graded || !Array.isArray(d.entries)) { setState({ graded: false }); return; }
-      const sorted = [...d.entries].sort(compareStandingsEntries);
-      const at = sorted.findIndex((e) => e.uid === uid);
-      setState({ graded: true, rank: at < 0 ? null : at + 1, of: sorted.length, entry: at < 0 ? null : sorted[at] });
-    }, () => setState(null));
-  }, [uid, week]);
-  return state;
-}
-
-function YourWeekPicks({ games, rows, standing, onOpen }) {
-  const list = games.map((g) => ({ g, r: rankedPickRow(g, rows[g.wedraftGameId]) }));
-  const total = standing?.entry ? standing.entry.points : list.reduce((t, x) => t + (x.r.points || 0), 0);
-  const anyLive = list.some((x) => x.r.state === "live");
-  return (
-    <>
-      <div className="wdl-yw-stats">
-        <div className="wdl-yw-stat"><b>{total.toLocaleString()}</b><span>{anyLive ? "Points if it ended now" : standing?.graded ? "Final points" : "Points so far"}</span></div>
-        <div className="wdl-yw-stat">
-          {standing?.graded
-            ? (standing.rank ? <b>#{standing.rank}<small style={{ fontSize: 13, color: "#9fb0c8" }}> of {standing.of}</small></b> : <b className="dim">Didn't qualify</b>)
-            : <b className="dim">Pending</b>}
-          <span>{standing?.graded ? "Final ranking" : "Final ranking · after every game ends"}</span>
-        </div>
-      </div>
-      <div className="wdl-yw-list">
-        {list.map(({ g, r }) => {
-          const side = r.pick ? pickedSideOf(r.pick) : null;
-          const picked = side === "home" ? r.home : side === "away" ? r.away : null;
-          return (
-            <div key={g.id} className={`wdl-yw-pick${r.state === "live" ? " live" : ""}`} onClick={() => onOpen(g.id)}>
-              <div className="wdl-yw-teams">
-                {[r.away, r.home].map((t, i) => (
-                  <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    {i === 1 && <span style={{ color: "#6f819c" }}>@</span>}
-                    {(darkLogo(t)) && <img src={darkLogo(t)} alt="" />}
-                    {t.rank ? <span className="rk">{t.rank}</span> : null}{teamShort(t)}
-                    {t.points != null && <span className="sc">{t.points}</span>}
-                  </span>
-                ))}
-              </div>
-              <div className={`wdl-yw-pts ${r.state}`}>
-                <b>{r.points == null ? "—" : r.points}</b>
-                <small>{r.state === "live" ? "Live" : r.state === "wait" ? kickoffLabel(g.startDate, g.startTimeTBD) : r.official ? "Final" : "Final · unofficial"}</small>
-              </div>
-              <div className="wdl-yw-meta">
-                {hasScorePick(r.pick)
-                  ? <>Your pick: <span className="mine">{picked ? teamShort(picked).toUpperCase() : "—"}</span> · {teamShort(r.away).toUpperCase()} {r.pick.awayScore} – {teamShort(r.home).toUpperCase()} {r.pick.homeScore}</>
-                  : "No score pick on this game"}
-                {g.status === "in_progress" && <> · <span style={{ color: LIVE_RED }}>{statusLabel(g)}</span></>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
 
 const YW_CATS = { passing: "PASS", rushing: "RUSH", receiving: "REC", defense: "DEF" };
 const ywNorm = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");

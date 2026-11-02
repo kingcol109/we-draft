@@ -88,6 +88,8 @@ export default function HomeHero({ mode }) {
         }
         .mobile-chip:active { background: rgba(255,255,255,0.22); }
         .mobile-chip.hot { background: ${GOLD}; border-color: #fff; }
+        .mobile-chip-label { color: #fff; }
+        .mobile-chip.hot .mobile-chip-label { color: #111; }
         .wdh-sim-cta { transition: transform 0.15s, box-shadow 0.15s; }
         .wdh-sim-cta:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,0.35); }
         .wdh-sim-tile { position: relative; }
@@ -194,7 +196,7 @@ export default function HomeHero({ mode }) {
                 {mobileChips.map(({ label, to, icon, hot }) => (
                   <Link key={label} to={to} className={`mobile-chip${hot ? " hot" : ""}`}>
                     <span style={{ fontSize: "20px", lineHeight: 1 }}>{icon}</span>
-                    <span style={{ fontWeight: 900, fontSize: "10px", color: hot ? "#111" : "#fff", textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.2 }}>{label}</span>
+                    <span className="mobile-chip-label" style={{ fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center", lineHeight: 1.2 }}>{label}</span>
                   </Link>
                 ))}
               </div>

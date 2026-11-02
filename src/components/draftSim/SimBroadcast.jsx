@@ -28,6 +28,8 @@ import SimFeed, { Avatar } from "./SimFeed";
 import { SPEEDS } from "./useDraftSim";
 import { PlayerName } from "./FitName";
 import { fetchEspnRoster, fetchDepthOrder, groupRoster } from "../../utils/nflRoster";
+import { doc as fsDoc, getDoc } from "firebase/firestore";
+import { db } from "../../firebase";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -357,9 +359,12 @@ function ShrinkText({ text, max, min, style }) {
     };
     fit();
     if (typeof ResizeObserver === "undefined") return undefined;
-    const ro = new ResizeObserver(fit);
+    // Re-fit a frame later, not inside the observer's callback — resizing
+    // the text there re-triggers it ("ResizeObserver loop completed").
+    let frame = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); });
     ro.observe(el.parentElement || el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(frame); ro.disconnect(); };
   }, [text, max, min]);
   return <div ref={ref} style={{ ...style, fontSize: size, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{text}</div>;
 }
@@ -370,7 +375,7 @@ function ShrinkText({ text, max, min, style }) {
 // team's fades in where the last one was), the label, name and numbers
 // flip over in place, and the card on the right turns over to show the
 // pick. ──
-const LOGO_SIZE = (isMobile) => (isMobile ? 76 : 132);
+const LOGO_SIZE = (isMobile) => (isMobile ? 76 : 156);
 
 function StageLogo({ brand, team, isMobile }) {
   const size = LOGO_SIZE(isMobile);
@@ -518,44 +523,98 @@ function PickInFace({ pick, isMobile }) {
   );
 }
 
-function RevealFace({ event, data, isMobile, ink }) {
+// ── Headshots on the pick card: playerPhotos/{playerId}.headshot (Admin →
+// Content → Photos; ESPN's transparent 600×436 head-and-shoulders PNGs). A
+// prospect's id is his players doc id. Loaded once each, from "the pick is
+// in" (Stage prefetches it) so the card has it when it turns over; the
+// image is warmed too. resolvedHeadshots holds the finished lookups so a
+// card mounting after one has the photo on its first frame.
+const headshots = new Map();
+const resolvedHeadshots = new Map();
+function loadHeadshot(id) {
+  if (!id) return Promise.resolve("");
+  if (!headshots.has(id)) {
+    headshots.set(id, getDoc(fsDoc(db, "playerPhotos", id))
+      .then((snap) => (snap.exists() ? snap.data().headshot?.url || "" : ""))
+      .catch(() => "")
+      .then((url) => {
+        if (url) new Image().src = url;
+        resolvedHeadshots.set(id, url);
+        return url;
+      }));
+  }
+  return headshots.get(id);
+}
+function useHeadshot(id) {
+  const [url, setUrl] = useState(() => resolvedHeadshots.get(id) || "");
+  useEffect(() => {
+    let live = true;
+    setUrl(resolvedHeadshots.get(id) || "");
+    loadHeadshot(id).then((u) => { if (live) setUrl(u); });
+    return () => { live = false; };
+  }, [id]);
+  return url;
+}
+// The pick card's 600×436 headshot, bottom-right and bleeding off the
+// card's edges. The name beside it keeps clear of his head
+// (HEADSHOT_CLEAR); his chest can sit under the stats.
+// Phones: the photo tops out at 60% of the card's width and the text stops at
+// 58% (padding is a share of the card), so a wide-framed photo shrinks
+// rather than running into the name.
+const HEADSHOT_CLEAR = (isMobile) => (isMobile ? "42%" : 185);
+function CardHeadshot({ url, height = "100%", maxWidth = "none" }) {
+  return (
+    <div aria-hidden="true" style={{ position: "absolute", right: 0, bottom: 0, height, maxWidth, aspectRatio: "600 / 436", pointerEvents: "none" }}>
+      <img src={url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", maxWidth: "none", objectFit: "contain", objectPosition: "bottom" }} />
+    </div>
+  );
+}
+
+function RevealFace({ event, data, isMobile, ink, headshot }) {
   const p = event.prospect;
-  const brand = brandOf(data, event.team);
   const label = gradeLabel(p.avg);
   const schoolLogo = p.logo || logoOf(p);
   // Off the board's order only — a pick right on it needs no note.
   const valueText = event.value === 0 ? null : event.value > 0 ? `+${event.value} value` : `${event.value} reach`;
   const gradeName = p.mine ? "My Grade" : "Comm. Grade";
+  // Board rank and position rank ("WR1") side by side.
+  const posRank = p.positionRank ? `${p.Position}${p.positionRank}` : null;
   if (isMobile) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, height: "100%", minWidth: 0 }}>
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <span style={{ ...cardLabel, color: ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
-          <div style={{ fontSize: 15, fontWeight: 900, lineHeight: 1.1, marginTop: 4, color: "#33415a", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.First}</div>
-          <ShrinkText text={p.Last} max={34} min={18} style={{ flexShrink: 0, fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: "0 0 6px" }} />
+        {headshot && <CardHeadshot url={headshot} maxWidth="60%" />}
+        <div style={{ position: "relative", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", paddingRight: headshot ? HEADSHOT_CLEAR(true) : 0 }}>
+          {/* No "THE CHARGERS SELECT": the stage says CHARGERS right above. */}
+          <ShrinkText text={p.First} max={16} min={10} style={{ fontWeight: 900, lineHeight: 1.1, color: "#33415a", textTransform: "uppercase" }} />
+          <ShrinkText text={p.Last} max={34} min={12} style={{ flexShrink: 0, fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: "0 0 6px" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: BODY, minWidth: 0 }}>
             <span style={{ background: ink, color: "#fff", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: 12, flexShrink: 0 }}>{p.Position}</span>
+            {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 18, height: 18, maxWidth: "none", objectFit: "contain", flexShrink: 0 }} />}
             <span style={{ fontWeight: 800, fontSize: 13, color: "#0f1b2d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.School}</span>
           </div>
-          <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-            {label && <GradeBadge label={label} small />}
-            <span style={{ fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Board #{p.rank}{valueText ? ` (${valueText})` : ""}</span>
-          </div>
+          {/* The grade, then board and position rank under it. */}
+          {label && <div style={{ marginTop: 6, display: "flex" }}><GradeBadge label={label} small /></div>}
+          <span style={{ marginTop: 4, alignSelf: "flex-start", maxWidth: "100%", boxSizing: "border-box", fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...(headshot ? { background: "rgba(255,255,255,0.92)", borderRadius: 6, padding: "1px 6px 1px 0", marginRight: "-72%", maxWidth: "172%" } : null) }}>Board #{p.rank}{posRank ? ` · ${posRank}` : ""}{valueText ? ` (${valueText})` : ""}</span>
         </div>
-        {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 92, height: 92, objectFit: "contain", flexShrink: 0, marginRight: -4 }} />}
+        {!headshot && schoolLogo && <img src={schoolLogo} alt="" style={{ width: 92, height: 92, objectFit: "contain", flexShrink: 0, marginRight: -4 }} />}
       </div>
     );
   }
   return (
     <>
-      <span style={{ ...cardLabel, color: ink, flexShrink: 0 }}>THE {(brand.Team || event.team).toUpperCase()} SELECT</span>
-      {!isMobile && <div style={{ flexShrink: 0, fontSize: 18, fontWeight: 900, lineHeight: 1.1, marginTop: 6, color: "#33415a", textTransform: "uppercase" }}>{p.First}</div>}
-      <ShrinkText text={isMobile ? `${p.First} ${p.Last}` : p.Last} max={isMobile ? 26 : 38} min={isMobile ? 15 : 20}
+      {headshot && <CardHeadshot url={headshot} />}
+      {/* The name block keeps clear of the headshot's head; the stats row
+          below may run over his chest. */}
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", minWidth: 0, flexShrink: 0, paddingRight: headshot ? HEADSHOT_CLEAR(false) : 0 }}>
+      {/* No "THE CHARGERS SELECT" here — "CHARGERS SELECTION" beside the card says it. */}
+      {!isMobile && <ShrinkText text={p.First} max={18} min={12} style={{ flexShrink: 0, fontWeight: 900, lineHeight: 1.1, color: "#33415a", textTransform: "uppercase" }} />}
+      <ShrinkText text={isMobile ? `${p.First} ${p.Last}` : p.Last} max={isMobile ? 26 : 38} min={isMobile ? 15 : 14}
         style={{ flexShrink: 0, fontWeight: 900, lineHeight: 1.02, textTransform: "uppercase", color: ink, margin: isMobile ? "3px 0 5px" : "0 0 8px" }} />
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: BODY, minWidth: 0, flexShrink: 0 }}>
         <span style={{ background: ink, color: "#fff", borderRadius: 6, padding: "2px 8px", fontWeight: 900, fontSize: 12, flexShrink: 0 }}>{p.Position}</span>
         {schoolLogo && <img src={schoolLogo} alt="" style={{ width: 22, height: 22, objectFit: "contain", flexShrink: 0 }} />}
         <span style={{ fontWeight: 800, fontSize: isMobile ? 12 : 14, color: "#0f1b2d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.School}</span>
+      </div>
       </div>
       {isMobile ? (
         <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 7 }}>
@@ -563,18 +622,15 @@ function RevealFace({ event, data, isMobile, ink }) {
           <span style={{ fontSize: 11, fontWeight: 800, fontFamily: BODY, color: "#5b6b84" }}>Board #{p.rank}{valueText ? ` (${valueText})` : ""}</span>
         </div>
       ) : (
-        // One row, always — the card's a fixed height.
-        <div style={{ display: "flex", gap: 8, alignItems: "stretch", marginTop: 10, minWidth: 0, flexShrink: 0 }}>
-          <Stat label="Board" value={`#${p.rank}`} sub={valueText} />
-          {label && (
-            <span style={{ display: "flex", alignItems: "center", gap: 8, background: "#f1f4f8", borderRadius: 10, padding: "5px 10px 5px 5px", minWidth: 0 }}>
-              <GradeBadge label={label} />
-              <span style={{ minWidth: 0, fontSize: 9, fontWeight: 900, letterSpacing: "0.12em", color: "#5b6b84", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {gradeName.toUpperCase()}<br /><span style={{ fontSize: 11, color: "#0f1b2d", letterSpacing: "0.04em" }}>{label.toUpperCase()}</span>
-              </span>
-            </span>
-          )}
-        </div>
+        // The grade's badge, laid flat (its name on hover), then board rank
+        // and position rank under it.
+        <>
+          {label && <span title={`${gradeName}: ${label}`} style={{ position: "relative", display: "flex", marginTop: 8, flexShrink: 0, zoom: 1.25 }}><GradeBadge label={label} small /></span>}
+          <div style={{ position: "relative", display: "flex", gap: 8, alignItems: "stretch", marginTop: 6, minWidth: 0, flexShrink: 0 }}>
+            <Stat label="Board" value={`#${p.rank}`} sub={valueText} />
+            {posRank && <Stat label="Pos" value={posRank} />}
+          </div>
+        </>
       )}
     </>
   );
@@ -618,14 +674,16 @@ function Stat({ label, value, sub }) {
 function StageCard({ mode, s, data, isMobile, pick, team, look, event }) {
   const reveal = mode === "reveal";
   const ink = readableOn(look.c1, "#ffffff");
+  const headshot = useHeadshot(reveal ? event?.prospect?.id : null);
   const faceKey = mode === "reveal" ? `reveal-${pick.overall}` : mode === "pickIn" ? `in-${pick.overall}` : `clock-${pick.overall}-${s.speed}`;
   let face;
-  if (reveal) face = <RevealFace event={event} data={data} isMobile={isMobile} ink={ink} />;
+  if (reveal) face = <RevealFace event={event} data={data} isMobile={isMobile} ink={ink} headshot={headshot} />;
   else if (mode === "pickIn") face = <PickInFace pick={pick} isMobile={isMobile} />;
   else face = <ClockFace s={s} team={team} isMobile={isMobile} isUser={mode === "user"} />;
   return (
     <div className={mode === "pickIn" ? "wd-sim-cardglow" : undefined} style={{
-      position: "relative", flex: isMobile ? 1 : "0 0 40%", maxWidth: isMobile ? "none" : 400, minHeight: 0,
+      // Wide enough on desktop for the pick's name beside his headshot.
+      position: "relative", flex: isMobile ? 1 : "0 0 48%", maxWidth: isMobile ? "none" : 470, minHeight: 0,
       borderRadius: 14, overflow: "hidden",
       background: reveal ? "#fff" : "rgba(0,0,0,0.3)",
       border: `1px solid ${reveal ? "#fff" : "rgba(255,255,255,0.18)"}`,
@@ -649,16 +707,21 @@ function PickStage({ s, data, isMobile, mode, pick, team, look, event, trade }) 
   const { c1 } = colors(brand);
   const info = (
     <div style={{ minWidth: 0, flex: 1 }}>
-      <StageTag mode={mode} isUser={isUser} isMobile={isMobile} />
+      {/* The pick itself drops the tag ("OFFICIAL PICK"): on desktop the
+          name reads "CHARGERS / SELECTION"; on phones the card gets the room. */}
+      {mode !== "reveal" && <StageTag mode={mode} isUser={isUser} isMobile={isMobile} />}
       <div style={{ margin: isMobile ? "4px 0 6px" : "8px 0 10px" }}>
         <div key={team} className="wd-sim-flip">
-          <ShrinkText text={brand.Team || team} max={isMobile ? 30 : 48} min={isMobile ? 16 : 22} style={{ fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase" }} />
+          <ShrinkText text={brand.Team || team} max={isMobile ? 30 : 52} min={isMobile ? 16 : 22} style={{ fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase" }} />
         </div>
+        {mode === "reveal" && !isMobile && (
+          <div className="wd-sim-flip" style={{ fontSize: 22, fontWeight: 900, letterSpacing: "0.28em", lineHeight: 1.1, opacity: 0.85, marginTop: 2 }}>SELECTION</div>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "stretch", gap: isMobile ? 6 : 8, flexWrap: "wrap" }}>
-        <PickBox label="ROUND" value={pick.round} isMobile={isMobile} />
-        <PickBox label="PICK" value={pick.inRound} isMobile={isMobile} solid={c1} />
-        <PickBox label="OVERALL" value={pick.overall} isMobile={isMobile} />
+        {/* Round highlighted, then the overall pick number (called PICK). */}
+        <PickBox label="ROUND" value={pick.round} isMobile={isMobile} solid={c1} />
+        <PickBox label="PICK" value={pick.overall} isMobile={isMobile} />
         {/* A trade up shows where the pick came from, beside the numbers —
             not over the player's name. */}
         {trade ? <PickBox label="TRADED UP" value={trade.from} isMobile={isMobile} />
@@ -857,6 +920,9 @@ function Stage({ s, data, isMobile, onPickTeam, strip = null }) {
   const pendingTrade = ["trade", "pickIn"].includes(s.phase) ? s.pendingEvents?.find((e) => e.type === "trade") : null;
   const pendingPick = s.phase === "pickIn" ? s.pendingEvents?.find((e) => e.type === "pick") : null;
   const pick = currentPick(s.sim);
+  // "The pick is in": fetch the pick's headshot for the card that's next.
+  const pendingId = pendingPick?.prospect?.id;
+  useEffect(() => { if (pendingId) loadHeadshot(pendingId); }, [pendingId]);
 
   if (s.phase === "intro") {
     if (s.sim.userTeams.length === 1) look = teamLook(brandOf(data, s.sim.userTeams[0]));
@@ -2001,9 +2067,10 @@ function useStageZoom(on) {
     const stage = STAGE_HEIGHT(false) + STRIP_HEIGHT(false);
     const read = () => setZoom(Math.min(1, Math.max(STAGE_MIN_ZOOM, Math.round(((el.offsetHeight - CONSOLE_ROOM) / stage) * 100) / 100)));
     read();
-    const ro = new ResizeObserver(read);
+    let frame = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(read); });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(frame); ro.disconnect(); };
   }, [on]);
   return [ref, zoom];
 }

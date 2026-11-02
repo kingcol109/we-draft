@@ -7,6 +7,12 @@
 // scripts/syncCfbdPlayerStats.js, game logs from the live ingester / that
 // script's backfill). Renders nothing when there's no linked player or no
 // stats yet, so a profile without them just doesn't show the card.
+//
+// With espnId (players with the page's Stats tab, PlayerEspnStats) the card
+// is just the season totals — the tab has his game logs — and the numbers
+// are ESPN's, which are up after every game (cfbdPlayers.seasons waits for
+// the weekly sync), with CFBD's FBS ranks still on hover. Anything ESPN
+// doesn't have falls back to CFBD's number.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, doc as fsDoc, getDoc, getDocs, limit, orderBy, query, where } from "firebase/firestore";
@@ -164,12 +170,41 @@ const LOGO_CELL = "44px";
 const INT_RED = "#c62828";
 const valueColor = (group, label, value, base) => (group === "qb" && label === "INT" && n(value) > 0 ? INT_RED : base);
 
+// ESPN's season line in the CFBD shape seasonTiles/seasonExtra read:
+// { passing: { YDS, TD, … }, … }. Its whole season, bowls included — the
+// regular-season (types/2) and postseason (types/3) URLs both return the
+// full-season totals.
+const ESPN_SEASON = (id) => `https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/${SEASON}/types/2/athletes/${id}/statistics`;
+const ESPN_MAP = {
+  passing: { passing: { COMPLETIONS: "completions", ATT: "passingAttempts", YDS: "passingYards", TD: "passingTouchdowns", INT: "interceptions" } },
+  rushing: { rushing: { CAR: "rushingAttempts", YDS: "rushingYards", TD: "rushingTouchdowns" } },
+  receiving: { receiving: { REC: "receptions", YDS: "receivingYards", TD: "receivingTouchdowns" } },
+  defensive: { defensive: { TOT: "totalTackles", TFL: "tacklesForLoss", SACKS: "sacks", PD: "passesDefended" } },
+  defensiveInterceptions: { interceptions: { INT: "interceptions" } },
+  kicking: { kicking: { FGM: "fieldGoalsMade", FGA: "fieldGoalAttempts", LONG: "longFieldGoalMade", XPM: "extraPointsMade", XPA: "extraPointAttempts", PTS: "totalKickingPoints" } },
+  punting: { punting: { NO: "punts", LONG: "longPunt", "In 20": "puntsInside20", YDS: "puntYards" } },
+};
+export async function fetchEspnSeason(espnId) {
+  const j = await fetch(ESPN_SEASON(espnId)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const out = {};
+  (j?.splits?.categories || []).forEach((cat) => {
+    const map = ESPN_MAP[cat.name];
+    if (!map) return;
+    const byName = Object.fromEntries((cat.stats || []).map((st) => [st.name, Number(st.value) || 0]));
+    Object.entries(map).forEach(([group, fields]) => Object.entries(fields).forEach(([key, name]) => {
+      if (name in byName) (out[group] = out[group] || {})[key] = byName[name];
+    }));
+  });
+  if (out.punting?.NO) out.punting.YPP = out.punting.YDS / out.punting.NO;
+  return Object.keys(out).length ? out : null;
+}
+
 const dateLabel = (iso) => {
   const d = iso ? new Date(iso) : null;
   return d && !isNaN(d) ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
 };
 
-export default function PlayerStatsCard({ player, color1, color2 }) {
+export default function PlayerStatsCard({ player, color1, color2, espnId }) {
   const [data, setData] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const [altTile, setAltTile] = useState(null); // label of the tile showing its hover stat
@@ -181,6 +216,19 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
     if (!player?.id) return undefined;
     (async () => {
       try {
+        const espnSeason = espnId ? await fetchEspnSeason(espnId) : null;
+        if (espnId) {
+          // Season totals only: ESPN's numbers, CFBD's ranks when he's mapped.
+          const snap = await getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "==", player.id), limit(1))).catch(() => null);
+          const cfbd = snap?.docs[0]?.data();
+          const mapped = cfbd && ["verified", "suggested"].includes(cfbd.mappingStatus) ? cfbd : null;
+          const cfbdSeason = mapped?.seasons?.[SEASON] || {};
+          const merged = espnSeason
+            ? Object.fromEntries([...new Set([...Object.keys(cfbdSeason), ...Object.keys(espnSeason)])].map((k) => [k, { ...cfbdSeason[k], ...espnSeason[k] }]))
+            : mapped?.seasons?.[SEASON];
+          if (!cancelled) setData(merged ? { cfbd: { ...(mapped || {}), seasons: { [SEASON]: merged } }, games: [] } : { none: true });
+          return;
+        }
         const snap = await getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "==", player.id), limit(1)));
         const doc = snap.docs[0];
         if (!doc || !["verified", "suggested"].includes(doc.data().mappingStatus)) { if (!cancelled) setData({ none: true }); return; }
@@ -201,7 +249,7 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [player?.id]);
+  }, [player?.id, espnId]);
 
   if (!data || data.none) return null;
   const season = data.cfbd.seasons?.[SEASON];
@@ -209,7 +257,8 @@ export default function PlayerStatsCard({ player, color1, color2 }) {
   const tiles = season ? seasonTiles(group, season) : [];
   const ranks = data.cfbd.seasonRanks?.[SEASON];
   const extra = season ? seasonExtra(group, season) : "";
-  const gameCols = GAME_COLS[group] || [];
+  // With espnId: just the season totals (the Stats tab has his game logs).
+  const gameCols = espnId ? [] : GAME_COLS[group] || [];
   const gameGrid = gridOf(gameCols);
   if (!tiles.length && !(gameCols.length && data.games.length)) return null;
 

@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuth } from "../context/AuthContext";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { wePickHref } from "../utils/wePickRoutes";
-import { deleteSim } from "../utils/draftSim/publicSims";
 import {
   doc,
   getDoc,
@@ -15,16 +14,31 @@ import {
   deleteDoc,
   writeBatch,
   serverTimestamp,
-  orderBy,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import Logo from "../assets/Logo1.png";
 import verifiedBadge from "../assets/verified.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { fetchNflBranding } from "../utils/draftProfileData";
+import { countNewFeed } from "../utils/profileFeed";
+import FeedTab from "../components/profileHub/FeedTab";
+import FollowingTab from "../components/profileHub/FollowingTab";
+import BoardsTab from "../components/profileHub/BoardsTab";
+import WePickTab from "../components/profileHub/WePickTab";
 
 // The article editor (Tiptap, ~400 KB) loads only for writers who have the
 // My Articles section, not on every profile visit.
 const ArticlesManager = lazy(() => import("../components/ArticlesManager"));
+// The Draft Sim tab's pieces and My Draft Class load when their tab opens.
+const SimProfile = lazy(() => import("../components/draftSim/SimProfile"));
+const SavedSims = lazy(() => import("../components/draftSim/SavedSims"));
+const MyDraftClass = lazy(() => import("./MyDraftClass"));
+
+// The profile hub's tabs (?tab=…, Feed by default): [key, label, phone label].
+const HUB_TABS = [
+  ["feed", "Feed"], ["following", "Following"], ["boards", "Boards"], ["draftclass", "My Draft Class"],
+  ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["settings", "Settings"],
+];
+const SIM_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -105,8 +119,21 @@ export default function UserProfile() {
 
   const [showRequest, setShowRequest] = useState(false);
   const [showIssue, setShowIssue] = useState(false);
-  const [showFriends, setShowFriends] = useState(false);
-  const [showSims, setShowSims] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const tabs = HUB_TABS.concat(role === "writer" ? [["articles", "My Articles"]] : []);
+  const tab = tabs.some(([k]) => k === params.get("tab")) ? params.get("tab") : "feed";
+  const openTab = (k) => setParams(k === "feed" ? {} : { tab: k }, { replace: true });
+  const [simView, setSimView] = useState("profile");
+  const [branding, setBranding] = useState({});
+  useEffect(() => { if (tab === "sim") fetchNflBranding().then(setBranding).catch(() => {}); }, [tab]);
+  // New feed items since the last visit (utils/profileFeed.js) — the Feed tab's badge.
+  const [feedNew, setFeedNew] = useState(0);
+  useEffect(() => {
+    if (!user) return undefined;
+    let live = true;
+    countNewFeed(user.uid).then((n) => { if (live) setFeedNew(n); }).catch(() => {});
+    return () => { live = false; };
+  }, [user]);
 
   // Pending incoming friend requests — fetched independently of FriendsPanel
   // (which only mounts once the section is expanded) so the "👥 Friends"
@@ -122,7 +149,7 @@ export default function UserProfile() {
       .then((snap) => { if (!cancelled) setPendingFriendRequests(snap.size); })
       .catch((e) => { console.error("Profile pending-requests count error:", e); if (!cancelled) setPendingFriendRequests(0); });
     return () => { cancelled = true; };
-  }, [user, showFriends]);
+  }, [user, tab]);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -234,38 +261,11 @@ export default function UserProfile() {
   if (!user) return <p style={{ textAlign: "center", color: "red", marginTop: "40px" }}>Please sign in first.</p>;
   if (loading) return <LoadingSpinner label="Loading" size={48} minHeight="calc(60vh / var(--pz, 1))" />;
 
-  const SectionHeader = ({ label, open, onToggle, badge }) => (
-    <button
-      onClick={onToggle}
-      style={{
-        width: "100%", background: "none", border: "none", cursor: "pointer",
-        padding: "10px 0", display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: "4px",
-      }}
-    >
-      <div style={{ textAlign: "left", display: "flex", alignItems: "center", gap: "8px" }}>
-        <div>
-          <div style={{ fontSize: "16px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
-            {label}
-          </div>
-          <div style={{ height: "3px", backgroundColor: BLUE, borderRadius: "2px", marginTop: "4px" }} />
-        </div>
-        {/* Same red-pill badge as Navbar.js's Profile-link sticker and
-            We-Pick's own Friends-tab badge — this section can carry the
-            same kind of notification even while collapsed. */}
-        {!!badge && (
-          <span style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
-            background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900, flexShrink: 0,
-          }}>
-            {badge > 99 ? "99+" : badge}
-          </span>
-        )}
-      </div>
-      <span style={{ color: BLUE, fontWeight: 900, fontSize: "14px", marginLeft: "12px", flexShrink: 0 }}>
-        {open ? "▲" : "▼"}
-      </span>
+  // Settings' collapsible sections (Request a Player, Report an Issue).
+  const SectionHeader = ({ label, open, onToggle }) => (
+    <button onClick={onToggle} style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: "10px 0", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", fontFamily: "inherit" }}>
+      <span style={{ fontSize: "14px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>{label}</span>
+      <span style={{ color: BLUE, fontWeight: 900, fontSize: "14px" }}>{open ? "▲" : "▼"}</span>
     </button>
   );
 
@@ -288,36 +288,40 @@ export default function UserProfile() {
     marginBottom: "10px",
   });
 
-  return (
-    <div style={{ maxWidth: role === "writer" ? "1200px" : "520px", margin: "0 auto", padding: isMobile ? "12px 12px 60px" : "28px 16px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-    <div style={{ maxWidth: "520px", margin: role === "writer" ? "0 auto 32px" : "0 auto" }}>
+  const names = (abbr) => (branding[abbr]?.Team ? `${branding[abbr].City || ""} ${branding[abbr].Team}`.trim() : abbr);
+  const badge = (n, color = "#c0392b") => !!n && (
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 16, height: 16, borderRadius: 8, padding: "0 4px", marginLeft: 6, background: color, color: "#fff", fontSize: 10, fontWeight: 900, letterSpacing: 0, verticalAlign: 2 }}>
+      {n > 99 ? "99+" : n}
+    </span>
+  );
+  const card = { background: "#fff", borderRadius: 14, border: "1px solid #e6ebf2", boxShadow: "0 4px 16px rgba(15,27,45,.08)" };
+  const initial = (displayedUsername || user.email || "?").trim()[0]?.toUpperCase() || "?";
+  const lazyTab = (el) => <Suspense fallback={<LoadingSpinner size={32} minHeight="30vh" />}>{el}</Suspense>;
 
-      {/* Page Header */}
-      <div style={{ marginBottom: "24px" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", marginBottom: "6px" }}>
-          <img src={Logo} alt="We-Draft.com" style={{ height: "30px", objectFit: "contain" }} />
-          <div style={{ fontSize: "24px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>
-            My Profile
-          </div>
+  let body = null;
+  if (tab === "feed") body = <FeedTab uid={user.uid} isMobile={isMobile} onSeen={() => setFeedNew(0)} />;
+  else if (tab === "following") body = <FollowingTab uid={user.uid} isMobile={isMobile} />;
+  else if (tab === "boards") body = <BoardsTab uid={user.uid} isMobile={isMobile} />;
+  else if (tab === "draftclass") body = lazyTab(<MyDraftClass embedded />);
+  else if (tab === "wepick") body = <WePickTab uid={user.uid} />;
+  else if (tab === "friends") body = <div style={{ ...card, padding: isMobile ? 14 : 22 }}><FriendsPanel isMobile={isMobile} /></div>;
+  else if (tab === "articles") body = lazyTab(<ArticlesManager />);
+  else if (tab === "sim") {
+    // The Draft Sim page's own Sim Profile and saved drafts, on its dark panel.
+    body = (
+      <div style={{ background: "#070d18", borderRadius: 16, padding: isMobile ? 12 : 18 }}>
+        <div role="tablist" style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+          {SIM_VIEWS.map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={simView === k} onClick={() => setSimView(k)} style={{ border: `1px solid ${simView === k ? GOLD : "#2a3a58"}`, background: simView === k ? GOLD : "#121c2f", color: simView === k ? "#0b2545" : "#fff", borderRadius: 999, padding: "6px 14px", fontSize: 11, fontWeight: 900, letterSpacing: "0.06em", cursor: "pointer", fontFamily: "inherit" }}>{label.toUpperCase()}</button>
+          ))}
+          <Link to="/draftsim" style={{ marginLeft: "auto", alignSelf: "center", color: GOLD, fontSize: 12, fontWeight: 900, textDecoration: "none" }}>Run a sim →</Link>
         </div>
-        <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-        <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
+        {lazyTab(simView === "drafts" ? <SavedSims branding={branding} isMobile={isMobile} /> : <SimProfile branding={branding} names={names} isMobile={isMobile} />)}
       </div>
-
-      {/* Main Card */}
-      <div style={{ border: "3px solid " + BLUE, borderRadius: "10px", overflow: "hidden", backgroundColor: "#fff" }}>
-
-        {/* Card top bar */}
-        <div style={{ backgroundColor: BLUE, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-          <span style={{ fontSize: "20px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            {displayedUsername || user.email}
-          </span>
-          {verified && <img src={verifiedBadge} alt="Verified" style={{ width: "20px", height: "20px" }} />}
-        </div>
-        <div style={{ height: "4px", backgroundColor: GOLD }} />
-
-        <div style={{ padding: isMobile ? "16px" : "24px" }}>
-
+    );
+  } else if (tab === "settings") {
+    body = (
+      <div style={{ ...card, padding: isMobile ? 16 : 24, maxWidth: 560 }}>
           {/* Email */}
           <div style={{ marginBottom: "18px" }}>
             <div style={{ fontSize: "11px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: "#999", marginBottom: "4px" }}>Account Email</div>
@@ -364,54 +368,8 @@ export default function UserProfile() {
 
           <div style={{ height: "1px", backgroundColor: "#eee", margin: "4px 0 16px" }} />
 
-          {/* Quick Links */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "16px" }}>
-            {[
-              { to: "/my-draft-class", emoji: "🏈", label: "My Draft Class", sub: "Build your perfect 2026 draft class" },
-              { to: "/boards", emoji: "📋", label: "My Boards", sub: "View and manage your scouting boards" },
-              { to: "/whiteboard", emoji: "🗂", label: "Whiteboard", sub: "Organize your draft board" },
-              ...(simBeta || role === "admin" ? [
-                { to: "/sim", emoji: "🎮", label: "Football Sim", sub: "Beta — play the We-Draft football sim" },
-                { to: "/draftsim", emoji: "🏈", label: "Draft Sim", sub: "Beta — run the NFL draft live" },
-              ] : []),
-            ].map(({ to, emoji, label, sub }) => (
-              <Link key={to} to={to} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", boxSizing: "border-box", backgroundColor: "#fff", border: "2px solid " + BLUE, borderRadius: "8px", padding: isMobile ? "14px 16px" : "12px 16px", textDecoration: "none" }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-              >
-                <div>
-                  <div style={{ fontSize: isMobile ? "14px" : "13px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1.2 }}>{emoji} {label}</div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "3px" }}>{sub}</div>
-                </div>
-                <span style={{ color: GOLD, fontWeight: 900, fontSize: "18px" }}>→</span>
-              </Link>
-            ))}
-          </div>
 
-          <button onClick={logout} style={btnStyle("secondary")}>Log Out</button>
-
-          {role === "admin" && (
-            <button onClick={() => window.location.href = "/admin"} style={btnStyle("gold")}>
-              Admin Panel
-            </button>
-          )}
-
-          <div style={{ height: "1px", backgroundColor: "#eee", margin: "6px 0 18px" }} />
-
-          {/* Friends — code, add-by-code, requests, friend list. Same
-              functionality as We-Pick's own Friends tab (WePickHub.js),
-              see FriendsPanel below. */}
-          <div style={{ marginBottom: "18px" }}>
-            <SectionHeader label="👥 Friends" open={showFriends} onToggle={() => setShowFriends((p) => !p)} badge={pendingFriendRequests} />
-            {showFriends && <FriendsPanel isMobile={isMobile} />}
-          </div>
-
-          {/* Draft Sims saved from the sim's end screen (SimResults.jsx). */}
-          <div style={{ marginBottom: "18px" }}>
-            <SectionHeader label="🏈 My Draft Sims" open={showSims} onToggle={() => setShowSims((p) => !p)} />
-            {showSims && <DraftSimsPanel />}
-          </div>
-
+          <div style={{ height: "1px", backgroundColor: "#eee", margin: "4px 0 16px" }} />
           {/* Request a Player */}
           <div style={{ marginBottom: "18px" }}>
             <SectionHeader label="Request a Player" open={showRequest} onToggle={() => setShowRequest((p) => !p)} />
@@ -438,84 +396,49 @@ export default function UserProfile() {
             )}
           </div>
 
-        </div>
-      </div>
-    </div>
 
-    {role === "writer" && (
-      <div>
-        <div style={{ marginBottom: "14px" }}>
-          <div style={{ fontSize: "20px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE, lineHeight: 1 }}>
-            My Articles
-          </div>
-          <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginTop: "6px", marginBottom: "3px" }} />
-          <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-        </div>
-        <Suspense fallback={<LoadingSpinner label="Loading Articles" size={32} minHeight="160px" />}><ArticlesManager /></Suspense>
+          <div style={{ height: "1px", backgroundColor: "#eee", margin: "18px 0 16px" }} />
+          {(simBeta || role === "admin") && (
+            <Link to="/sim" style={{ display: "block", textAlign: "center", color: BLUE, fontWeight: 900, fontSize: "13px", marginBottom: "12px" }}>🎮 Football Sim (beta) →</Link>
+          )}
+          <button onClick={logout} style={btnStyle("secondary")}>Log Out</button>
       </div>
-    )}
-    </div>
-  );
-}
+    );
+  }
 
-// ── My Draft Sims — the user's own teams' picks from each Draft Sim they
-// saved (users/{uid}/draftSims, written by components/draftSim/
-// SimResults.jsx), newest first. ──
-function DraftSimsPanel() {
-  const { user } = useAuth();
-  const [sims, setSims] = useState(null);
-  useEffect(() => {
-    let cancelled = false;
-    getDocs(query(collection(db, "users", user.uid, "draftSims"), orderBy("createdAt", "desc")))
-      .then((snap) => { if (!cancelled) setSims(snap.docs.map((d) => ({ id: d.id, ...d.data() }))); })
-      .catch((e) => { console.error("Draft sims load error:", e); if (!cancelled) setSims([]); });
-    return () => { cancelled = true; };
-  }, [user.uid]);
-  const remove = async (id) => {
-    if (!window.confirm("Delete this draft sim?")) return;
-    // Its public copy on Recent Drafts too (utils/draftSim/publicSims.js).
-    await deleteSim(user.uid, id);
-    setSims((list) => list.filter((s) => s.id !== id));
-  };
-  if (!sims) return <LoadingSpinner size={24} minHeight="80px" />;
   return (
-    <div style={{ marginTop: "12px" }}>
-      {sims.length === 0 && (
-        <p style={{ fontSize: "13px", fontWeight: 700, color: "#666", fontFamily: "Arial, sans-serif" }}>
-          No saved sims yet. Finish a draft and hit Save to Profile.
-        </p>
-      )}
-      {sims.map((s) => (
-        <div key={s.id} style={{ border: "2px solid " + BLUE, borderRadius: "10px", marginBottom: "12px", overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: BLUE, color: "#fff" }}>
-            <span style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "0.06em", flex: 1 }}>
-              {s.year} DRAFT SIM{s.createdAt?.toDate ? ` · ${s.createdAt.toDate().toLocaleDateString()}` : ""}
-            </span>
-            <button onClick={() => remove(s.id)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.7, cursor: "pointer", fontSize: "11px", fontWeight: 900 }}>DELETE</button>
-          </div>
-          {(s.teams || []).map((t) => (
-            <div key={t.team} style={{ padding: "8px 12px", borderTop: "1px solid #e6ecf3" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                <Link to={`/nfl/${t.team.toLowerCase()}`} style={{ color: BLUE, fontWeight: 900, fontSize: "14px", textDecoration: "none" }}>{t.team}</Link>
-                <span style={{ fontWeight: 900, fontSize: "16px", color: GOLD }}>{t.grade}</span>
-              </div>
-              {(t.picks || []).map((p) => (
-                <div key={p.overall} style={{ display: "flex", gap: "8px", fontSize: "12px", padding: "2px 0", fontFamily: "Arial, sans-serif" }}>
-                  <span style={{ color: "#888", fontWeight: 700, width: "62px", flexShrink: 0 }}>R{p.round} · {p.overall}</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    {p.slug
-                      ? <Link to={`/player/${p.slug}`} style={{ color: "#111", fontWeight: 900, textDecoration: "none" }}>{p.first} {p.last}</Link>
-                      : <span style={{ fontWeight: 900 }}>{p.first} {p.last}</span>}
-                    <span style={{ color: "#666" }}> · {p.pos} · {p.school}</span>
-                  </span>
-                  <span style={{ fontWeight: 900 }}>{p.grade}</span>
-                </div>
-              ))}
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: isMobile ? "12px 12px 60px" : "24px 20px 60px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      {/* Header: who you are, then the hub's tabs. */}
+      <div style={{ position: "relative", overflow: "hidden", borderRadius: 18, background: "linear-gradient(120deg, #062a55 0%, #0055a5 70%, #1f74c8 100%)", color: "#fff", padding: isMobile ? "18px 16px 0" : "22px 26px 0", boxShadow: "0 10px 30px rgba(0,40,90,.18)" }}>
+        <span aria-hidden="true" style={{ position: "absolute", right: -10, top: 6, font: "italic 900 92px/1 Arial, sans-serif", color: "rgba(255,255,255,.06)", pointerEvents: "none", whiteSpace: "nowrap" }}>We-Draft.com</span>
+        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ width: isMobile ? 54 : 64, height: isMobile ? 54 : 64, borderRadius: "50%", background: GOLD, color: "#0b2545", fontSize: isMobile ? 24 : 28, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", border: "3px solid #fff", flexShrink: 0 }}>{initial}</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: isMobile ? 22 : 26, fontWeight: 900, lineHeight: 1.1, overflowWrap: "anywhere" }}>
+              {displayedUsername || user.email}
+              {verified && <img src={verifiedBadge} alt="Verified" style={{ width: 20, height: 20 }} />}
             </div>
-          ))}
+            <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,.75)", fontFamily: "Arial, sans-serif" }}>{user.email}</div>
+          </div>
+          {role === "admin" && (
+            <button onClick={() => { window.location.href = "/admin"; }} style={{ flexShrink: 0, background: GOLD, color: "#0b2545", border: "none", borderRadius: 999, padding: "8px 14px", fontWeight: 900, fontSize: 11, letterSpacing: "0.08em", cursor: "pointer" }}>ADMIN</button>
+          )}
         </div>
-      ))}
-      <Link to="/draftsim" style={{ display: "inline-block", color: BLUE, fontWeight: 900, fontSize: "13px", textDecoration: "none" }}>Run a new draft sim →</Link>
+        <div role="tablist" className="wd-hub-tabs" style={{ position: "relative", display: "flex", gap: isMobile ? 20 : 26, marginTop: 18, overflowX: "auto", scrollbarWidth: "none" }}>
+          {tabs.map(([k, label]) => {
+            const on = tab === k;
+            return (
+              <button key={k} role="tab" aria-selected={on} onClick={() => openTab(k)} style={{ flexShrink: 0, background: "none", border: "none", borderBottom: `3px solid ${on ? GOLD : "transparent"}`, padding: "10px 0 9px", color: on ? "#fff" : "rgba(255,255,255,.65)", fontSize: 13, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}>
+                {label}
+                {k === "feed" && badge(feedNew)}
+                {k === "friends" && badge(pendingFriendRequests)}
+              </button>
+            );
+          })}
+        </div>
+        <style>{".wd-hub-tabs::-webkit-scrollbar { display: none; }"}</style>
+      </div>
+      <div style={{ marginTop: 22 }}>{body}</div>
     </div>
   );
 }

@@ -182,9 +182,10 @@ function FitLine({ max, min, children }) {
       setSize(s);
     };
     fit();
-    const ro = new ResizeObserver(fit);
+    let frame = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(frame); ro.disconnect(); };
   }, [max, min, children]);
   return <span ref={ref} style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: size }}>{children}</span>;
 }
@@ -332,12 +333,12 @@ export function MakeYourOwnBanner({ team = "", teamName = "", nick = "", year = 
 }
 
 // A pick in a trade card's chips (a saved trade's: { year, round, original,
-// overall — null for a later draft's }): "No. 9" over "2027 Round 1", or
-// "2028 R2" over "Round 2 pick"; from: the team that gave it up — another
-// team's original pick says whose.
+// overall — null for a later draft's }): this draft's by its number
+// ("No. 9"), a later draft's by year and round ("2028 R2"). from: the team
+// that gave it up — another team's original pick adds whose ("PHI").
 export const tradeChip = (p, from = "") => ({
   main: p.overall ? `No. ${p.overall}` : `${p.year} R${p.round}`,
-  sub: `${p.overall ? `${p.year} Round ${p.round}` : `Round ${p.round} pick`}${p.original && from && p.original !== from ? ` · ${p.original}` : ""}`,
+  sub: p.original && from && p.original !== from ? p.original : "",
 });
 
 // A trade, as a graphic, set right before the pick it's about: a thin
@@ -378,7 +379,7 @@ export function TradeCard({ title, sides, isMobile, tag = "TRADE", footer = "" }
               <span key={i} style={{ display: "inline-flex", alignItems: "baseline", gap: 5, background: "#fff", color: INK, borderRadius: 6,
                 padding: isMobile ? "2px 6px" : "3px 8px", boxShadow: "0 1px 3px rgba(0,0,0,0.2)", whiteSpace: "nowrap" }}>
                 <span style={{ fontFamily: FONT, fontSize: isMobile ? 12 : 14 }}>{p.main}</span>
-                <span style={{ fontFamily: BODY_FONT, fontSize: 10, fontWeight: 700, color: MUTED }}>{p.sub}</span>
+                {p.sub && <span style={{ fontFamily: BODY_FONT, fontSize: 10, fontWeight: 700, color: MUTED }}>{p.sub}</span>}
               </span>
             ))}
             {!picks.length && note && <span style={{ fontFamily: BODY_FONT, fontSize: 11, fontWeight: 700, opacity: 0.85 }}>{note}</span>}

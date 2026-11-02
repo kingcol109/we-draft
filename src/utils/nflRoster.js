@@ -65,7 +65,8 @@ export function fetchDepthOrder(abbr) {
 export async function fetchEspnRoster(abbr) {
   const espnId = ESPN_TEAM_IDS[abbr];
   if (!espnId) return [];
-  const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnId}/roster`);
+  // site.web.api — site.api.espn.com fails CORS in the browser.
+  const res = await fetch(`https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnId}/roster`);
   const data = await res.json();
   // ESPN returns athletes grouped by roster status (see ROSTER_GROUP_STATUS)
   return (data.athletes || []).flatMap((group) =>

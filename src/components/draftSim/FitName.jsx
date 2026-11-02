@@ -24,9 +24,10 @@ export default function FitName({ full, short, style }) {
     };
     check();
     if (typeof ResizeObserver === "undefined") return undefined;
-    const ro = new ResizeObserver(check);
+    let frame = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(check); });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { cancelAnimationFrame(frame); ro.disconnect(); };
   }, [full]);
   return (
     <span ref={ref} title={full} style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textTransform: "uppercase", ...style }}>

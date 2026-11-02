@@ -17,7 +17,8 @@
 //     title, startAt (ms — the timeline's zero: the intro), streamAt (ms — the
 //     stream goes up on the countdown; showTimes()), generatedAt, pace: { [round]: { clock, trade, pickIn, reveal } },
 //     teams:   { [abbr]: { name, nick, city, c1, c2, logo } },
-//     players: { [id]: { f, l, pos, sch, logo, slug, rank, posRank, avg, count, str, wk, ht, wt } },
+//     players: { [id]: { f, l, pos, sch, logo, slug, rank, posRank, avg, count, str, wk, ht, wt, hs? } },
+//              hs: his headshot's URL (playerPhotos), when he has one
 //     analysts:{ [id]: { name, handle, color, avatar, initials, verified } },
 //     board:   { [position]: [pid] } — the class board's top BOARD_DEPTH at each
 //              position, best first (Best Available drops the ones drafted),
@@ -159,7 +160,7 @@ export function spotlightOf(p, season = null) {
 //   bestGame  async (playerId, season) → { line, opp } | null — Isaac's big games
 //   seasonLines  async (prospects) → { [slug]: season totals } — the
 //             spotlights' lines from their schools' rosters (onTheClockData.js)
-export async function buildShowScript({ data, formatKey = DEFAULT_FORMAT, rounds, seed, startAt, streamAt = null, id, title, bestGame = async () => null, seasonLines = async () => ({}), pace = PACE }) {
+export async function buildShowScript({ data, formatKey = DEFAULT_FORMAT, rounds, seed, startAt, streamAt = null, id, title, bestGame = async () => null, seasonLines = async () => ({}), headshots = async () => ({}), pace = PACE }) {
   const format = { key: formatKey, ...(SHOW_FORMATS[formatKey] || SHOW_FORMATS[DEFAULT_FORMAT]) };
   if (rounds) format.rounds = rounds;
   if (!VARIANCE[format.variance]) format.variance = "normal";
@@ -250,6 +251,10 @@ export async function buildShowScript({ data, formatKey = DEFAULT_FORMAT, rounds
   const season = await seasonLines(drawn).catch(() => ({}));
   const spotlight = drawn.map((p) => ({ pid: keep(p), ...spotlightOf(p, season?.[p.Slug] || null) }));
   const preshow = { season: data.season || null, spotlight };
+
+  // Headshots for every player the script kept: { [id]: url }.
+  const shots = await headshots(Object.keys(players)).catch(() => ({}));
+  Object.entries(shots || {}).forEach(([pid, url]) => { if (url && players[pid]) players[pid].hs = url; });
 
   const roundCount = Math.max(0, ...beats.map((b) => b.round));
   const opening = [

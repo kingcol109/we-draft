@@ -18,6 +18,7 @@ import { doc as fsDoc, onSnapshot as fsOnSnapshot } from "firebase/firestore";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_DIVISIONS } from "./NFLTeamRail";
+import { countNewFeed } from "../utils/profileFeed";
 
 const FALLBACK_MESSAGE =
   "WELCOME TO WE-DRAFT.COM - CREATE DRAFT EVALUATIONS, VIEW COMMUNITY GRADES, DISCOVER HIDDEN GEMS, AND MORE - FOLLOW US ON INSTAGRAM AND X @WEDRAFTSITE FOR DAILY DRAFT CONTENT";
@@ -66,6 +67,17 @@ export default function Navbar() {
   // pattern — it's what catches the count dropping after accepting/
   // declining a request on the Profile or We-Pick Friends page.
   const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
+  // New items in the profile hub's Feed since the user last opened it
+  // (utils/profileFeed.js — cached for the session, so a page change
+  // rarely reads). Added to the same Profile sticker.
+  const [feedNew, setFeedNew] = useState(0);
+  useEffect(() => {
+    if (!user) { setFeedNew(0); return undefined; }
+    let live = true;
+    countNewFeed(user.uid).then((n) => { if (live) setFeedNew(n); }).catch(() => {});
+    return () => { live = false; };
+  }, [user, location.pathname, location.search]);
+  const profileBadge = pendingFriendRequests + feedNew;
   // Games in progress right now (liveSlate/status — a tiny doc the live
   // ingester only rewrites when the count changes). >0 shows the pulsing
   // LIVE button next to the logo.
@@ -227,21 +239,32 @@ export default function Navbar() {
   /* ======================
      STYLES
   ====================== */
-  const baseStyle = {
-    margin: "0 0.35rem",
-    padding: "0.45rem 0.9rem",
-    color: "#0055a5",
-    border: "2px solid #f6a21d",
-    borderRadius: "6px",
+  // Desktop links: white all-caps text on the bar, the section you're in
+  // underlined in gold (onSection). Sign In is the one gold pill.
+  const onSection = (...prefixes) => prefixes.some((pre) => location.pathname === pre || location.pathname.startsWith(`${pre}/`));
+  const navLink = (active = false) => ({
+    margin: "0 2px",
+    padding: "8px 12px 6px",
+    color: "#ffffff",
+    background: "none",
+    border: "none",
+    borderBottom: `3px solid ${active ? "#f6a21d" : "transparent"}`,
     textDecoration: "none",
-    fontWeight: "bold",
-    backgroundColor: "#ffffff",
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    fontWeight: 800,
+    fontSize: "13px",
     cursor: "pointer",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "14px",
     whiteSpace: "nowrap",
+    fontFamily: "inherit",
+    transition: "border-color 0.15s ease",
+  });
+  const signInStyle = {
+    ...navLink(), marginLeft: "14px", padding: "9px 20px", borderBottom: "none", borderRadius: "999px",
+    background: "#f6a21d", color: "#0b2545", boxShadow: "0 3px 10px rgba(0,0,0,0.2)",
   };
 
   return (
@@ -303,23 +326,32 @@ export default function Navbar() {
         }
         .boards-link:last-child { border-bottom: none; }
         .boards-link:hover { background: #f0f5ff; color: #0055a5; }
+        .wd-nav-link:hover { border-bottom-color: rgba(246,162,29,0.65) !important; }
+        .wd-nav-signin:hover { background: #ffb43c !important; }
+        /* Phone menu: full-width rows on navy, a gold arrow on each. */
         .mobile-nav-link {
           display: flex;
           align-items: center;
-          justify-content: center;
-          padding: 12px;
-          border-radius: 8px;
+          justify-content: space-between;
+          padding: 16px 22px;
           text-decoration: none;
           font-weight: 900;
           font-size: 15px;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-          background: #fff;
-          color: #0055a5;
-          border: 2px solid #f6a21d;
+          letter-spacing: 0.1em;
+          background: transparent;
+          color: #fff;
+          border: none;
+          border-bottom: 1px solid rgba(255,255,255,0.1);
           transition: background 0.12s ease;
+          font-family: inherit;
         }
-        .mobile-nav-link:active { background: #f0f5ff; }
+        .mobile-nav-link::after { content: "›"; color: #f6a21d; font-size: 24px; line-height: 1; }
+        .mobile-nav-link:active { background: rgba(255,255,255,0.06); }
+        .mobile-nav-signin {
+          margin: 14px 22px 0; padding: 14px; border: none; border-radius: 999px; cursor: pointer;
+          background: #f6a21d; color: #0b2545; font-weight: 900; font-size: 15px; text-transform: uppercase; letter-spacing: 0.1em; font-family: inherit;
+        }
       `}</style>
 
       {/* wd-navbar-wrap: the Draft Sim slides this away on phones while a
@@ -340,7 +372,9 @@ export default function Navbar() {
         {/* ================= NAVBAR ================= */}
         <nav
           style={{
-            backgroundColor: "#0055a5",
+            // Navy into the site blue, a gold rule along the bottom.
+            background: "linear-gradient(90deg, #003a78 0%, #0055a5 55%, #0b67c2 100%)",
+            boxShadow: "inset 0 -3px 0 #f6a21d, 0 4px 18px rgba(0,30,70,0.28)",
             padding: "0.75rem 1.25rem",
             // The desktop height (42px logo + padding) everywhere — the
             // phone's scaled-down logo would make it shorter, and pages
@@ -399,7 +433,7 @@ export default function Navbar() {
               onMouseEnter={() => { if (communityTimeout) clearTimeout(communityTimeout); setCommunityOpen(true); }}
               onMouseLeave={() => { const t = setTimeout(() => setCommunityOpen(false), 150); setCommunityTimeout(t); }}
             >
-              <Link to="/community" style={baseStyle}>Community Board</Link>
+              <Link to="/community" className="wd-nav-link" style={navLink(onSection("/community"))}>Community Board</Link>
 
               {communityOpen && (
                 <div
@@ -449,7 +483,7 @@ export default function Navbar() {
                 onMouseEnter={() => { if (boardsTimeout) clearTimeout(boardsTimeout); setBoardsOpen(true); }}
                 onMouseLeave={() => { const t = setTimeout(() => setBoardsOpen(false), 150); setBoardsTimeout(t); }}
               >
-                <Link to="/boards" style={baseStyle}>My Boards</Link>
+                <Link to="/boards" className="wd-nav-link" style={navLink(onSection("/boards", "/whiteboard"))}>My Boards</Link>
 
                 {boardsOpen && (
                   <div
@@ -493,7 +527,7 @@ export default function Navbar() {
               </div>
             )}
 
-            <Link to={wePickHref()} style={baseStyle}>We-Pick</Link>
+            <Link to={wePickHref()} className="wd-nav-link" style={navLink(onSection(wePickHref()))}>We-Pick</Link>
 
             {/* ── CFB DROPDOWN ── */}
             <div
@@ -501,7 +535,7 @@ export default function Navbar() {
               onMouseEnter={() => { if (cfbTimeout) clearTimeout(cfbTimeout); setCfbOpen(true); }}
               onMouseLeave={() => { const t = setTimeout(() => setCfbOpen(false), 150); setCfbTimeout(t); }}
             >
-              <Link to="/cfb" style={baseStyle}>CFB</Link>
+              <Link to="/cfb" className="wd-nav-link" style={navLink(onSection("/cfb"))}>CFB</Link>
 
               {cfbOpen && (
                 <div
@@ -577,7 +611,7 @@ export default function Navbar() {
               onMouseEnter={() => { if (nflTimeout) clearTimeout(nflTimeout); setNflOpen(true); }}
               onMouseLeave={() => { const t = setTimeout(() => setNflOpen(false), 150); setNflTimeout(t); }}
             >
-              <Link to="/nfl" style={baseStyle}>NFL</Link>
+              <Link to="/nfl" className="wd-nav-link" style={navLink(onSection("/nfl"))}>NFL</Link>
 
               {nflOpen && (
                 <div
@@ -635,7 +669,7 @@ export default function Navbar() {
               onMouseEnter={() => { if (mocksTimeout) clearTimeout(mocksTimeout); setMocksOpen(true); }}
               onMouseLeave={() => { const t = setTimeout(() => setMocksOpen(false), 150); setMocksTimeout(t); }}
             >
-              <Link to="/mocks" style={baseStyle}>Mock Drafts</Link>
+              <Link to="/mocks" className="wd-nav-link" style={navLink(onSection("/mocks", "/draftsim"))}>Mock Drafts</Link>
               {mocksOpen && (
                 <div style={{
                   position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", minWidth: "220px",
@@ -658,28 +692,29 @@ export default function Navbar() {
 
 
             {user ? (
-              <Link to="/profile" style={baseStyle}>
+              <Link to="/profile" className="wd-nav-link" style={navLink(onSection("/profile"))}>
                 Profile
-                {pendingFriendRequests > 0 && (
+                {profileBadge > 0 && (
                   <span style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     minWidth: "16px", height: "16px", borderRadius: "8px", padding: "0 4px",
                     marginLeft: "6px", background: "#c0392b", color: "#fff", fontSize: "9px", fontWeight: 900,
                   }}>
-                    {pendingFriendRequests > 99 ? "99+" : pendingFriendRequests}
+                    {profileBadge > 99 ? "99+" : profileBadge}
                   </span>
                 )}
               </Link>
             ) : (
-              <button onClick={login} style={baseStyle}>Sign In</button>
+              <button onClick={login} className="wd-nav-signin" style={signInStyle}>Sign In</button>
             )}
           </div>
 
           {/* MOBILE HAMBURGER — pinned right, over the logo if it runs long. */}
-          <div className="md:hidden" style={{ position: "absolute", right: "1.25rem", top: "50%", transform: "translateY(-50%)", zIndex: 2, background: "#0055a5", paddingLeft: 6 }}>
+          <div className="md:hidden" style={{ position: "absolute", right: "1.25rem", top: "50%", transform: "translateY(-50%)", zIndex: 2, background: "#0b67c2", paddingLeft: 6 }}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              style={{ background: "none", border: "none", color: "#ffffff", fontSize: "2rem", cursor: "pointer", lineHeight: 1 }}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              style={{ width: 42, height: 42, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.22)", borderRadius: 12, color: "#ffffff", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}
             >
               {menuOpen ? "✕" : "☰"}
             </button>
@@ -690,14 +725,11 @@ export default function Navbar() {
         {isMobile && menuOpen && (
           <div
             style={{
-              backgroundColor: "#ffffff",
-              borderTop: "3px solid #f6a21d",
-              borderBottom: "3px solid #0055a5",
-              boxShadow: "0 6px 16px rgba(0,0,0,0.15)",
-              padding: "16px",
+              backgroundColor: "#06264d",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.3)",
+              padding: "6px 0 18px",
               display: "flex",
               flexDirection: "column",
-              gap: "10px",
               zIndex: 10001,
               position: "relative",
             }}
@@ -720,19 +752,18 @@ export default function Navbar() {
             {user ? (
               <Link to="/profile" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>
                 Profile
-                {pendingFriendRequests > 0 && (
+                {profileBadge > 0 && (
                   <span style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     minWidth: "16px", height: "16px", borderRadius: "8px", padding: "0 4px",
                     marginLeft: "6px", background: "#c0392b", color: "#fff", fontSize: "9px", fontWeight: 900,
                   }}>
-                    {pendingFriendRequests > 99 ? "99+" : pendingFriendRequests}
+                    {profileBadge > 99 ? "99+" : profileBadge}
                   </span>
                 )}
               </Link>
             ) : (
-              <button onClick={() => { login(); setMenuOpen(false); }} className="mobile-nav-link"
-                style={{ border: "2px solid #f6a21d", cursor: "pointer" }}>
+              <button onClick={() => { login(); setMenuOpen(false); }} className="mobile-nav-signin">
                 Sign In
               </button>
             )}

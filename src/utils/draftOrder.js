@@ -184,7 +184,8 @@ export function gamesFromScoreboard(json, type, week) {
 export const seasonForDraft = (draftYear) => Number(draftYear) - 1;
 // Scoreboard URLs for one season — 18 regular-season weeks + the playoffs.
 export function scoreboardUrls(season) {
-  const base = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+  // site.web.api — site.api.espn.com fails CORS in the browser (the admin editor).
+  const base = "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
   return [
     ...Array.from({ length: 18 }, (_, i) => ({ type: 2, week: i + 1, url: `${base}?seasontype=2&week=${i + 1}&dates=${season}` })),
     ...[1, 2, 3, 5].map((w) => ({ type: 3, week: w, url: `${base}?seasontype=3&week=${w}&dates=${season}` })),

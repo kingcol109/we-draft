@@ -34,6 +34,8 @@ import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog"
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 // 2026 season stats + game log from the linked CFBD player (right column).
 import PlayerStatsCard from "../components/PlayerStatsCard";
+// The Stats tab: ESPN season-by-season and game logs (players with an ESPN id).
+import PlayerEspnStats from "../components/PlayerEspnStats";
 // "Playing now" + Follow Live while the player's team is on the field.
 import PlayerLiveCard, { LivePill, usePlayerLiveGame } from "../components/PlayerLiveCard";
 import SimAdCard from "../components/draftSim/SimAdCard";
@@ -2252,7 +2254,7 @@ export default function PlayerProfile() {
   const [player, setPlayer] = useState(null);
   const { user, login } = useAuth();
   const evaluationFormRef = useRef(null);
-  // Scouting tabs under the hero — "community" (Community Scouting Report,
+  // Scouting tabs under the hero — "community" (Scouting Report,
   // the default on every player) or "mine" (My Evaluation).
   const [scoutTab, setScoutTab] = useState("community");
   useEffect(() => { setScoutTab("community"); }, [slug]);
@@ -2311,6 +2313,12 @@ export default function PlayerProfile() {
   // The player's headshot (playerPhotos, Admin → Content → Photos) — the
   // hero's left side when there is one, with the team logo moved right.
   const [headshot, setHeadshot] = useState("");
+  // The ESPN athlete id his headshot was matched on — turns on the Stats
+  // tab (PlayerEspnStats); the sidebar's PlayerStatsCard then shows just
+  // the season totals, ESPN's numbers with CFBD's ranks.
+  const [espnId, setEspnId] = useState("");
+  // ESPN came back with no stats for him: the tab goes away again.
+  const [espnEmpty, setEspnEmpty] = useState(false);
   const [headshotReady, setHeadshotReady] = useState(false);
   const [pageVisible, setPageVisible] = useState(false);
   // Find Comparison button — gated on config/features.comparisonEnabled
@@ -2499,9 +2507,14 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!player?.id) return undefined;
     let live = true;
-    setHeadshot(""); setHeadshotReady(false);
+    setHeadshot(""); setHeadshotReady(false); setEspnId(""); setEspnEmpty(false);
     getDoc(doc(db, "playerPhotos", player.id))
-      .then((snap) => { if (live) setHeadshot(snap.exists() ? snap.data().headshot?.url || "" : ""); })
+      .then((snap) => {
+        if (!live) return;
+        const hs = snap.exists() ? snap.data().headshot : null;
+        setHeadshot(hs?.url || "");
+        setEspnId(hs?.espnId ? String(hs.espnId) : "");
+      })
       .catch(() => {})
       .finally(() => { if (live) setHeadshotReady(true); });
     return () => { live = false; };
@@ -4457,13 +4470,14 @@ useEffect(() => {
   );
   // The tab row: both tabs where the section heading used to be, Find
   // Comparison still on the right.
+  const showStatsTab = !!espnId && !espnEmpty;
   const scoutTabs = (
     <>
       {/* One row, never wrapping — on phones the labels and the Find
           Comparison pill shorten to fit. */}
       <div className="flex items-center justify-between mb-2" style={{ gap: "10px", flexWrap: "nowrap" }}>
         <div role="tablist" style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? "10px" : "24px", minWidth: 0 }}>
-          {[["community", isMobile ? "Community" : "Community Scouting Report"], ["mine", "My Evaluation"]].map(([key, label]) => {
+          {[["community", isMobile ? "Scouting" : "Scouting Report"], ["mine", isMobile && showStatsTab ? "My Eval" : "My Evaluation"], ...(showStatsTab ? [["stats", "Stats"]] : [])].map(([key, label]) => {
             const on = scoutTab === key;
             return (
               <button
@@ -4471,8 +4485,7 @@ useEffect(() => {
                 className="font-black uppercase"
                 style={{
                   background: "none", border: "none", margin: 0, padding: "0 0 5px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-                  // My Evaluation stays blue either way — only the underline marks it selected.
-                  color: on || key === "mine" ? siteC1 : "#9aa5b4", fontSize: isMobile ? "12px" : modern ? "14px" : "22px", letterSpacing: isMobile ? "0.06em" : modern ? "0.1em" : "0.08em",
+                  color: on ? siteC1 : "#9aa5b4", fontSize: isMobile ? "12px" : modern ? "14px" : "22px", letterSpacing: isMobile ? "0.06em" : modern ? "0.1em" : "0.08em",
                   borderBottom: `3px solid ${on ? siteC2 : "transparent"}`, transition: "color 0.15s ease",
                 }}
               >
@@ -5468,7 +5481,9 @@ useEffect(() => {
               below the ad. */}
           <div ref={evaluationFormRef} className="bg-white" style={{ padding: isMobile ? "10px 10px 8px" : "16px 24px 10px", scrollMarginTop: "80px" }}>
             {scoutTabs}
-            {scoutTab === "mine" ? (
+            {scoutTab === "stats" && showStatsTab ? (
+              <PlayerEspnStats espnId={espnId} color1={siteC1} color2={siteC2} isMobile={isMobile} onEmpty={() => { setEspnEmpty(true); setScoutTab("community"); }} />
+            ) : scoutTab === "mine" ? (
           <div className="bg-white rounded-lg overflow-hidden wdm-card wdm-form" style={{ border:`2px solid ${siteC1}` }}>
             <div className="flex items-center justify-between wdm-cardhead" style={{ backgroundColor:siteC1, padding:isMobile?"8px 12px":"10px 20px" }}>
               <div className="font-black uppercase text-white tracking-wide" style={{ fontSize:isMobile?"13px":"18px" }}>
@@ -6069,7 +6084,7 @@ useEffect(() => {
             {ownVideos && playerVideos.length > 0 && VideosSidebar}
             {NewsSidebar}
             {!ownVideos && playerVideos.length > 0 && VideosSidebar}
-            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
+            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} espnId={showStatsTab ? espnId : ""} />
           </div>
         ) : (
           <div className="wdm-col" style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
@@ -6078,7 +6093,7 @@ useEffect(() => {
             {ownVideos && playerVideos.length > 0 && VideosSidebar}
             {NewsSidebar}
             {!ownVideos && playerVideos.length > 0 && VideosSidebar}
-            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} />
+            <PlayerStatsCard player={player} color1={SITE_BLUE} color2={SITE_GOLD} espnId={showStatsTab ? espnId : ""} />
           </div>
         )}
 

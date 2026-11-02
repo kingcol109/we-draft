@@ -22,6 +22,8 @@ import { viewportCssWidth } from "../utils/pageZoom";
 import { ROLE_BY_KEY, isOpenStint, isPlayerStint, stintYearSpan, groupStints } from "../utils/coachHistory";
 import { textOn } from "../utils/teamColors";
 import { depthNameKey, initialKey, fetchEspnRoster, fetchDepthOrder, groupRoster } from "../utils/nflRoster";
+import { useAuth } from "../context/AuthContext";
+import { loadNflFollows, setNflFollow } from "../utils/nflFollows";
 import { loadWeeklyMockSummary, weeklyMockTitle, weeklyMockHref, weeklyMockDate, TEAM_PAGE_YEARS } from "../utils/weeklyMockNews";
 
 const BLUE = "#0055a5";
@@ -283,6 +285,40 @@ function sanitizeUrl(url) {
   const u = url.trim();
   if (!/^https?:\/\//i.test(u)) return `https://${u}`;
   return u;
+}
+
+// Follow the team (utils/nflFollows.js) — it shows up in the profile's
+// Following and Feed tabs. Signed out, the button opens log in.
+function NflFollowButton({ team, c2, isMobile }) {
+  const { user, authReady, login } = useAuth();
+  const uid = user?.uid || null;
+  const [followed, setFollowed] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!authReady) return undefined;
+    if (!uid) { setFollowed(false); return undefined; }
+    loadNflFollows(uid).then((t) => { if (alive) setFollowed(t.includes(team)); }).catch(() => { if (alive) setFollowed(false); });
+    return () => { alive = false; };
+  }, [uid, team, authReady]);
+  if (followed == null) return null;
+  const toggle = async () => {
+    if (!uid) { login(); return; }
+    if (busy) return;
+    const next = !followed;
+    setFollowed(next);
+    setBusy(true);
+    try { await setNflFollow(uid, team, next); } catch { setFollowed(!next); } finally { setBusy(false); }
+  };
+  return (
+    <button onClick={toggle} title={followed ? "Following — click to unfollow" : "Follow this team on your profile"} style={{
+      marginTop: 10, marginLeft: 8, background: followed ? "#fff" : c2, color: followed ? "#1d2733" : textOn(c2, "#ffffff"),
+      border: "2px solid #fff", borderRadius: 20, padding: isMobile ? "3px 12px" : "4px 16px", cursor: "pointer",
+      fontWeight: 900, fontSize: isMobile ? 11 : 13, letterSpacing: "0.05em", textTransform: "uppercase", verticalAlign: "top",
+    }}>
+      {followed ? "★ Following" : "☆ Follow"}
+    </button>
+  );
 }
 
 export default function NFLTeamPage() {
@@ -775,6 +811,7 @@ export default function NFLTeamPage() {
               <div style={{ marginTop: 10, display: "inline-block", background: "rgba(0,0,0,0.32)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", fontWeight: 900, fontSize: isMobile ? 11 : 13, padding: "4px 16px", borderRadius: 20, letterSpacing: "0.05em" }}>
                 {team.Conference} · {team.Division}
               </div>
+              <NflFollowButton team={teamKey} c2={c2} isMobile={isMobile} />
             </div>
             {/* Right side, over the faded wordmark bleed — starts the
                 Draft Sim as this team (/draftsim/{team}). */}

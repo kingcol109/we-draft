@@ -922,6 +922,26 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Up / down votes on a Weekly Mock team page's picks
+    // (components/PickVotes.jsx). Anyone can vote — no sign-in — so a write
+    // can only move each count by one, never below zero, and can't touch
+    // the doc's other fields once it exists.
+    match /mockPickVotes/{key} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['up', 'down', 'team', 'year', 'playerId'])
+                    && request.resource.data.up is int && request.resource.data.down is int
+                    && request.resource.data.up >= 0 && request.resource.data.down >= 0
+                    && request.resource.data.up + request.resource.data.down <= 1
+                    && request.resource.data.team is string && request.resource.data.team.size() <= 4
+                    && request.resource.data.year is string && request.resource.data.year.size() == 4
+                    && request.resource.data.playerId is string && request.resource.data.playerId.size() <= 64;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['up', 'down'])
+                    && request.resource.data.up is int && request.resource.data.down is int
+                    && request.resource.data.up >= 0 && request.resource.data.down >= 0
+                    && math.abs(request.resource.data.up - resource.data.up) <= 1
+                    && math.abs(request.resource.data.down - resource.data.down) <= 1;
+      allow delete: if isAdmin();
+    }
     match /whiteboards/{docId} {
       allow get: if request.auth != null
                  && (resource == null || resource.data.uid == request.auth.uid);

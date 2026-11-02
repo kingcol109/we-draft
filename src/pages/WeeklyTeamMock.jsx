@@ -22,7 +22,7 @@
 // editor swapped in, with no saved logo, costs his position's class snapshot).
 import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where, documentId } from "firebase/firestore";
 import { Helmet } from "react-helmet-async";
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -37,6 +37,7 @@ import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { textOn } from "../utils/teamColors";
 import { PickRow } from "./ViewMock";
 import ShareLinkButton from "../components/ShareLinkButton";
+import PickVotes, { pickVoteKey, loadPickVotes } from "../components/PickVotes";
 import {
   BLUE, CARD_SHADOW, BODY_FONT, MOCK_CARD_CSS, useIsMobile, MockPageShell, ArticleHero, WeeklyByline, MakeYourOwnBanner, TradeCard, tradeChip,
   Breadcrumbs, breadcrumbLd, SITE_PUBLISHER, TeamMocksRail, WeeklyYearSwitch, PhoneAd,
@@ -99,6 +100,34 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
       });
       setLogos(map);
     });
+    return () => { live = false; };
+  }, [weeks, team]);
+
+  // Headshots for the team's picks (playerPhotos/{playerId}.headshot, Admin
+  // → Content → Photos): { [playerId]: url }, 30 ids a query. A pick
+  // without one keeps his college logo.
+  const [headshots, setHeadshots] = useState({});
+  useEffect(() => {
+    const ids = [...new Set((weeks?.[0]?.picks || []).filter((p) => p.owner === team && p.player?.id).map((p) => p.player.id))];
+    if (!ids.length) return undefined;
+    let live = true;
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+    Promise.all(chunks.map((c) => getDocs(query(collection(db, "playerPhotos"), where(documentId(), "in", c))).catch(() => null))).then((snaps) => {
+      if (!live) return;
+      const map = {};
+      snaps.forEach((snap) => snap?.docs.forEach((d) => { const url = d.data().headshot?.url; if (url) map[d.id] = url; }));
+      setHeadshots(map);
+    });
+    return () => { live = false; };
+  }, [weeks, team]);
+
+  // Up / down vote counts for the team's picks (PickVotes): { [key]: { up, down } }.
+  const [votes, setVotes] = useState({});
+  useEffect(() => {
+    if (!weeks?.[0]) return undefined;
+    let live = true;
+    loadPickVotes(weeks[0].year, team).then((v) => { if (live) setVotes(v); }).catch(() => {});
     return () => { live = false; };
   }, [weeks, team]);
 
@@ -337,7 +366,11 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
                 </h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {roundItems(r).map((it) => (it.card ? <Fragment key={`trade-${it.n}`}>{it.card}</Fragment> : (
-                    <PickRow key={it.pick.slot} isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={it.pick.player?.logo || logos[it.pick.player?.id] || ""}
+                    <PickRow key={it.pick.slot} isMobile={isMobile} vertical={isMobile} brand={brand} sub={subOf(it.pick)} teamPage collegeLogo={it.pick.player?.logo || logos[it.pick.player?.id] || ""} headshot={headshots[it.pick.player?.id] || ""}
+                      actions={(() => {
+                        const key = pickVoteKey(latest?.year, it.pick);
+                        return key && <PickVotes key={key} voteKey={key} year={latest.year} team={team} playerId={it.pick.player.id} counts={votes[key]} />;
+                      })()}
                       pick={{ pickNumber: it.pick.overall, round: it.pick.round, currentTeam: it.pick.owner, tradedFrom: it.pick.original !== it.pick.owner ? it.pick.original : null, selection: it.pick.player, note: it.pick.note || "" }} />
                   )))}
                 </div>

@@ -10,7 +10,7 @@
 // generateShow() runs the draft in this browser, from the same data the
 // site's Draft Sim loads (data.js), so the desk sounds exactly like it.
 import { useEffect, useMemo, useState } from "react";
-import { doc, getDoc, getDocs, setDoc, onSnapshot, collection, query, orderBy, limit, where } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, onSnapshot, collection, query, orderBy, limit, where, documentId } from "firebase/firestore";
 import { db } from "../../firebase";
 import { loadSimData, loadBestGame, maxRounds } from "./data";
 import { buildShowScript, showTimeline, SHOW_FORMATS, DEFAULT_FORMAT, PRESHOW_MS, showEndsAt, showIdFor, showTimes, spotlights, spotlightOf } from "./onTheClock";
@@ -95,6 +95,19 @@ export function useFilledSpotlights(script) {
   return useMemo(() => (needs && fill?.key === key ? { ...script, preshow: fill.preshow } : script), [script, needs, fill, key]);
 }
 
+// Headshots (playerPhotos/{playerId}.headshot.url) for the script's
+// players → { [id]: url }: 30 ids a query, only the ones that exist read.
+export async function loadHeadshots(ids) {
+  const out = {};
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+  await Promise.all(chunks.map(async (chunk) => {
+    const snap = await getDocs(query(collection(db, "playerPhotos"), where(documentId(), "in", chunk))).catch(() => null);
+    snap?.docs.forEach((d) => { const url = d.data().headshot?.url; if (url) out[d.id] = url; });
+  }));
+  return out;
+}
+
 // Runs a whole show's draft → its script (not saved).
 export async function generateShow({ formatKey = DEFAULT_FORMAT, rounds, seed, startAt, streamAt = null, id }) {
   const format = SHOW_FORMATS[formatKey] || SHOW_FORMATS[DEFAULT_FORMAT];
@@ -104,6 +117,7 @@ export async function generateShow({ formatKey = DEFAULT_FORMAT, rounds, seed, s
     data, formatKey, rounds: Math.min(rounds || format.rounds, cap), seed, startAt, streamAt, id,
     bestGame: (pid, season) => loadBestGame(pid, season),
     seasonLines: loadSeasonLines,
+    headshots: loadHeadshots,
   });
 }
 

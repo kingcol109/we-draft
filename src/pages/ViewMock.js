@@ -15,7 +15,7 @@
 // up at /view but is noindexed and points to the current one.
 import { Fragment, useEffect, useState } from "react";
 import { useParams, useNavigate, Link, Navigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, getDocs, collection, query, where, documentId } from "firebase/firestore";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -96,6 +96,26 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
     };
     load();
   }, [mockId]);
+
+  // The Weekly Mock's headshots (playerPhotos/{playerId}.headshot — Admin →
+  // Content → Photos): { [playerId]: url }, 30 ids a query. Community mocks
+  // don't show them.
+  const [headshots, setHeadshots] = useState({});
+  useEffect(() => {
+    if (!weeklyClass || !mock?.picks) return undefined;
+    const ids = [...new Set(Object.values(mock.picks).map((p) => p.selection?.id).filter(Boolean))];
+    if (!ids.length) return undefined;
+    let live = true;
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+    Promise.all(chunks.map((c) => getDocs(query(collection(db, "playerPhotos"), where(documentId(), "in", c))).catch(() => null))).then((snaps) => {
+      if (!live) return;
+      const map = {};
+      snaps.forEach((snap) => snap?.docs.forEach((d) => { const url = d.data().headshot?.url; if (url) map[d.id] = url; }));
+      setHeadshots(map);
+    });
+    return () => { live = false; };
+  }, [weeklyClass, mock]);
 
   // Prerender.io's cue (public/index.html): the mock, its team branding and
   // the current-week lookup all in — or the mock not found. 8s cap, then a
@@ -308,7 +328,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
           {roundPicks.map((pick, i) => (
             <Fragment key={pick.pickNumber}>
               {tradeCards(pick)}
-              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} />
+              <PickRow pick={pick} brand={teams[pick.currentTeam] || {}} isMobile={isMobile} teamMock={teamPages ? year : ""} vertical={weekly && isMobile} headshot={weekly ? headshots[pick.selection?.id] || "" : ""} />
               {weekly && i === Math.min(BANNER_AFTER, roundPicks.length) - 1 && <MakeYourOwnBanner c1={BLUE} c2={GOLD} ink="#fff" isMobile={isMobile} margin="4px 0" />}
               {i === Math.min(PHONE_AD_AFTER, roundPicks.length) - 1 && <PhoneAd isMobile={isMobile} preferTeam={roundPicks[0]?.currentTeam || ""} />}
             </Fragment>
@@ -345,7 +365,13 @@ export function NoteText({ text }) {
 // row (MockDraftKit's TradeCard). vertical: the pick label turned to read
 // bottom to top in a narrower strip (the Weekly Mock's pages, on phones) —
 // the number anchored in the strip's middle, "PICK" hanging off below it.
-export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", teamMock = "", vertical = false }) {
+// headshot (the Weekly Mock: its team pages and the full mock): the
+// player's photo where the logo goes, the logo as a small badge on its
+// corner — his college's on a team page, the NFL team's (linked to its
+// page) on the full mock.
+// actions: shown at the right end of the card's bottom row (a team page's
+// up / down votes, components/PickVotes.jsx).
+export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, collegeLogo = "", headshot = "", teamMock = "", vertical = false, actions = null }) {
   const player = pick.selection;
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || GOLD;
@@ -385,7 +411,23 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
         )}
 
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: isMobile ? 10 : 16 }}>
-          {teamPage ? (
+          {headshot ? (() => {
+            const badgeSrc = teamPage ? collegeLogo : brand.Logo1;
+            const badge = badgeSrc && (
+              <img src={badgeSrc} alt={teamPage ? player?.School || "" : teamName} style={{
+                position: "absolute", right: -4, bottom: -4, width: isMobile ? 30 : 40, height: isMobile ? 30 : 40, maxWidth: "none", boxSizing: "border-box",
+                objectFit: "contain", background: "#fff", borderRadius: "50%", padding: isMobile ? 3 : 4, boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
+              }} />
+            );
+            return (
+              <span style={{ position: "relative", flexShrink: 0, display: "block", width: isMobile ? 96 : 140, height: isMobile ? 70 : 102 }}>
+                <img src={headshot} alt={player ? `${player.First} ${player.Last}` : ""} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", maxWidth: "none", objectFit: "contain", objectPosition: "bottom" }} />
+                {badge && !teamPage
+                  ? <Link to={`/nfl/${String(pick.currentTeam).toLowerCase()}`} title={teamName}>{badge}</Link>
+                  : badge}
+              </span>
+            );
+          })() : teamPage ? (
             <span style={{ flexShrink: 0, lineHeight: 0 }}>
               {collegeLogo
                 ? <img src={collegeLogo} alt={player?.School || ""} style={{ width: logoSize, height: logoSize, objectFit: "contain", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18))" }} />
@@ -444,12 +486,15 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
             <NoteText text={note} />
           </p>
         )}
-        {((teamPage && player?.Slug) || teamMock) && (
-          <div style={{ position: "relative", marginTop: isMobile ? 8 : 10 }}>
-            <Link to={teamPage ? `/player/${player.Slug}` : weeklyMockHref(pick.currentTeam, teamMock)} style={{
-              display: "inline-block", borderRadius: 999, padding: "6px 14px", background: c1, color: ink, fontSize: 11, fontWeight: 900,
-              letterSpacing: "0.06em", textTransform: "uppercase", textDecoration: "none",
-            }}>{teamPage ? "View more" : `View all ${brand.Team || pick.currentTeam} picks`} →</Link>
+        {((teamPage && player?.Slug) || teamMock || actions) && (
+          <div style={{ position: "relative", marginTop: isMobile ? 8 : 10, display: "flex", alignItems: "center", gap: 10 }}>
+            {((teamPage && player?.Slug) || teamMock) && (
+              <Link to={teamPage ? `/player/${player.Slug}` : weeklyMockHref(pick.currentTeam, teamMock)} style={{
+                display: "inline-block", borderRadius: 999, padding: "6px 14px", background: c1, color: ink, fontSize: 11, fontWeight: 900,
+                letterSpacing: "0.06em", textTransform: "uppercase", textDecoration: "none",
+              }}>{teamPage ? "View more" : `View all ${brand.Team || pick.currentTeam} picks`} →</Link>
+            )}
+            {actions}
           </div>
         )}
       </div>

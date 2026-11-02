@@ -225,8 +225,24 @@ function FitText({ text, max, min, className = "", style, children }) {
 // player pages' badge): the grade's own colors with its darker border — the
 // qualifier ("LATE") over the round ("1st") over ROUND — and its full name
 // beside it. None yet: a dash.
-function GradeTile({ label, title = "Community grade" }) {
+// compact: the badge alone in a tile beside Board and the position rank
+// (the pick card with a headshot), its full name on hover.
+function GradeTile({ label, title = "Community grade", compact = false }) {
   const look = label ? gradeLook(label) : null;
+  if (compact) {
+    return (
+      <div title={label ? `${title}: ${label}` : title} style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 0 }}>
+        {look ? (
+          <span style={{ minWidth: 76, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, padding: "5px 10px",
+            background: look.bg, border: `4px solid ${look.border}`, borderRadius: 10, color: "#fff", lineHeight: 1, textAlign: "center" }}>
+            {look.qualifier && <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: ".08em", opacity: 0.9 }}>{look.qualifier}</span>}
+            <span className="bc-disp" style={{ fontSize: 36, lineHeight: 0.9 }}>{look.short}</span>
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".1em", opacity: 0.8 }}>ROUND</span>
+          </span>
+        ) : <div className="bc-disp" style={{ fontSize: 46, lineHeight: 1.05 }}>—</div>}
+      </div>
+    );
+  }
   return (
     <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,.06)", minWidth: 0 }}>
       <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase", color: "#9fb0c8", marginBottom: 6 }}>{title}</div>
@@ -601,7 +617,9 @@ function Trade({ script, m }) {
 
 // The selection: the pick lands big on the left; the scouting card on the
 // right — board rank, position rank, community grade, size, and the
-// community's strengths and concerns.
+// community's strengths and concerns. With a headshot (script.players[].hs)
+// the card opens with his photo, size along its bottom, and Board, the
+// position rank and the grade's badge share one row.
 const sizeOf = (p) => [p.ht ? `${Math.floor(p.ht / 12)}-${p.ht % 12}` : null, p.wt ? `${p.wt} lbs` : null].filter(Boolean).join(" · ");
 function Reveal({ script, m }) {
   const b = m.beat;
@@ -642,12 +660,26 @@ function Reveal({ script, m }) {
         ) : null}
       </div>
       <div className="otc-in-r" style={{ position: "relative", width: 440, flexShrink: 0, alignSelf: "center", borderRadius: 18, background: "rgba(5,10,20,.72)", border: "1px solid rgba(255,255,255,.1)", padding: "24px 26px", color: "#fff", display: "flex", flexDirection: "column", gap: 18, ...d(1000) }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Stat k="Board" v={p.rank != null ? `#${p.rank}` : "—"} />
-          <Stat k={`${p.pos} rank`} v={p.posRank != null ? `${p.pos}${p.posRank}` : "—"} />
-          <GradeTile label={label} />
-          {size && <Stat wide v={size} small />}
-        </div>
+        {p.hs ? (
+          <>
+            <div style={{ position: "relative", height: 230, margin: "-24px -26px 0", borderRadius: "18px 18px 0 0", overflow: "hidden", background: `linear-gradient(180deg, ${team.c1 || "#0055a5"}66 0%, rgba(5,10,20,0) 100%)` }}>
+              <img src={p.hs} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 12%" }} />
+              {size && <div className="bc-disp" style={{ position: "absolute", left: 18, bottom: 10, fontSize: 30, lineHeight: 1, textShadow: "0 2px 10px rgba(0,0,0,.7)" }}>{size}</div>}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10 }}>
+              <Stat k="Board" v={p.rank != null ? `#${p.rank}` : "—"} />
+              <Stat k={`${p.pos} rank`} v={p.posRank != null ? `${p.pos}${p.posRank}` : "—"} />
+              <GradeTile label={label} compact />
+            </div>
+          </>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Stat k="Board" v={p.rank != null ? `#${p.rank}` : "—"} />
+            <Stat k={`${p.pos} rank`} v={p.posRank != null ? `${p.pos}${p.posRank}` : "—"} />
+            <GradeTile label={label} />
+            {size && <Stat wide v={size} small />}
+          </div>
+        )}
         <Traits title="Strengths" color="#5fd38a" mark="+" list={p.str} delay={1250} />
         <Traits title="Concerns" color="#ff7a6b" mark="−" list={p.wk} delay={1450} />
         {!(p.str || []).length && !(p.wk || []).length && <div style={{ fontSize: 20, color: "#9fb0c8" }}>No community evaluations yet.</div>}

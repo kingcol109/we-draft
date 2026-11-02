@@ -56,7 +56,9 @@ function GradeBadge({ grade }) {
   );
 }
 
-export default function MyDraftClass() {
+// embedded: the profile's My Draft Class tab (UserProfile.js) — no page
+// title or header, and a note that the next class opens after the draft.
+export default function MyDraftClass({ embedded = false }) {
   const { user, login } = useAuth();
   const [draftedPlayers, setDraftedPlayers] = useState([]);
   const [nflTeams, setNflTeams] = useState({});
@@ -231,7 +233,7 @@ export default function MyDraftClass() {
 
   return (
     <>
-      <Helmet><title>My Draft Class | We-Draft</title></Helmet>
+      {!embedded && <Helmet><title>My Draft Class | We-Draft</title></Helmet>}
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .pick-row { transition: background 0.12s; }
@@ -240,10 +242,19 @@ export default function MyDraftClass() {
         .player-option:hover { background: #f0f5ff !important; }
       `}</style>
 
-      <div style={{ maxWidth: "820px", margin: "0 auto", padding: isMobile ? "12px 10px 80px" : "24px 20px 80px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+      <div style={{ maxWidth: "820px", margin: "0 auto", padding: embedded ? "0 0 20px" : isMobile ? "12px 10px 80px" : "24px 20px 80px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
+
+        {embedded && (
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "#fff8e6", border: `2px solid ${GOLD}`, borderRadius: "10px", padding: "10px 14px", marginBottom: "18px", fontFamily: "Arial, sans-serif" }}>
+            <span style={{ fontSize: "18px" }}>🗓️</span>
+            <div style={{ fontSize: "13px", fontWeight: 800, color: "#5c4300", lineHeight: 1.4 }}>
+              Your 2026 draft class is final. The 2027 class opens after the draft in April.
+            </div>
+          </div>
+        )}
 
         {/* Header */}
-        <div style={{ marginBottom: "20px" }}>
+        {!embedded && <div style={{ marginBottom: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
             <img src={Logo1} alt="We-Draft" style={{ height: isMobile ? "22px" : "28px", objectFit: "contain" }} />
             <div style={{ fontSize: isMobile ? "20px" : "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
@@ -252,7 +263,7 @@ export default function MyDraftClass() {
           </div>
           <div style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-        </div>
+        </div>}
 
         {/* Explainer banner */}
         <div style={{

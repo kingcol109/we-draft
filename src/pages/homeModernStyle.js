@@ -29,6 +29,9 @@ const HOME_MODERN_STYLE = `
   .wdh .wdh-cta { border: 1px solid rgba(255,255,255,0.6) !important; border-radius: 999px !important; transition: filter 0.15s; }
   .wdh .wdh-cta:hover { filter: brightness(1.08); }
   .wdh .mobile-chip { border-radius: 12px !important; background: rgba(255,255,255,0.06) !important; border-color: rgba(255,255,255,0.22) !important; }
+  /* The Draft Sim chip: gold-tinted like the desktop tile, its label white on it. */
+  .wdh .mobile-chip.hot { background: rgba(246,162,29,0.22) !important; border: 2px solid #f6a21d !important; }
+  .wdh .mobile-chip.hot .mobile-chip-label { color: #fff !important; }
 
   /* section titles: a quiet eyebrow, not a 22px banner + double rule */
   .wdh .wdh-sectitle { font-size: 14px !important; letter-spacing: 0.14em !important; color: ${BLUE} !important; margin-left: 2px; }
