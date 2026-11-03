@@ -8,7 +8,7 @@
 // plus the staffers' names (nflFit_{Position}), CFBD season stats
 // (cfbLeaders/current + tables), each prospect's best game (simGames), the trade chart (config/draftTradeChart),
 // team needs (compSnapshots/_teamNeeds — the admin's labels), each team's
-// stars (_teamStars — Franchise / Difference Maker players), team branding and the
+// stars (_teamStars — Elite / Difference Maker players), team branding and the
 // draft history (draftHistory.json, Thad Murphy's). The Expanded Board
 // (loadExpandedBoard) adds the class's players hidden on the site.
 import { doc, getDoc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
@@ -120,7 +120,7 @@ async function loadNeeds() {
   return Object.fromEntries(snap.docs.map((d) => [d.id, resolveNeeds(d.data().needs)]));
 }
 
-// Every team's stars — its Franchise / Difference Maker players
+// Every team's stars — its Elite / Difference Maker players
 // (compSnapshots/_teamStars, published from Admin → Mock Draft → Team
 // Needs): { [team]: [{ n, k, t, ro? }] } (stars.js). None if unread.
 async function loadStars() {

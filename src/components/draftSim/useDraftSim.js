@@ -89,7 +89,7 @@ export default function useDraftSim(data, { userTeams, rounds, speed: initialSpe
     year: data.year,
     chatter,
     history: data.history,
-    // Each team's Franchise / Difference Maker players (stars.js).
+    // Each team's Elite / Difference Maker players (stars.js).
     stars: data.stars || {},
     memory: {},
     rand: () => { const r = rngNext(feedSeed.current); feedSeed.current = r.seed; return r.value; },

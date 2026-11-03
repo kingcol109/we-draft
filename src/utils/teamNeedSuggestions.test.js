@@ -105,7 +105,7 @@ describe("player tags", () => {
     const s = suggestNeeds(league(), {}, NOW, { "T00-qb": { talent: "franchise" } }).T00.QB;
     expect(s.label).toBe("Set");
     expect(s.byTags).toBe(true);
-    expect(suggestionReason(s)).toMatch(/by tags: T00 Starter \(Franchise\)/);
+    expect(suggestionReason(s)).toMatch(/by tags: T00 Starter \(Elite\)/);
     // And an average starter at the league's best-graded spot is still a want.
     expect(suggestNeeds(league(), {}, NOW, { "T31-qb": { talent: "average" } }).T31.QB.label).toBe("Upgrade Wanted");
   });
@@ -123,6 +123,8 @@ describe("player tags", () => {
     expect(suggestNeeds(teams, {}, NOW).T31.RB.label).toBe("Depth Needed");
     expect(suggestNeeds(teams, {}, NOW, { "T31-rb2": { talent: "lowDepth", dev: "high" } }).T31.RB.label).toBe("Set");
     expect(suggestNeeds(teams, {}, NOW, { "T31-rb2": { talent: "lowDepth", dev: "low" } }).T31.RB.label).toBe("Depth Needed");
+    // Watchlist has no tier — he's judged on his snaps, like an untagged backup.
+    expect(suggestNeeds(teams, {}, NOW, { "T31-rb2": { talent: "watchlist" } }).T31.RB.label).toBe("Depth Needed");
   });
 });
 
@@ -140,7 +142,7 @@ test("the admin's depth order picks the starters", () => {
 
 
 test("a role goes by the players tagged with it", () => {
-  // Every team's nickel grades the same on coverage; T00's is tagged Plus Starter, T01's Average.
+  // Every team's nickel grades the same on coverage; T00's is tagged Quality Starter, T01's Average.
   const teams = Array.from({ length: 32 }, (_, i) => ({
     abbr: `T${String(i).padStart(2, "0")}`,
     players: [
@@ -152,7 +154,7 @@ test("a role goes by the players tagged with it", () => {
   const s = suggestNeeds(teams, {}, NOW, tags);
   expect(s.T00.SLOTCB).toMatchObject({ label: "Set", byTags: true, starters: ["Nickel 0"] });
   expect(s.T01.SLOTCB.label).toBe("Upgrade Wanted");
-  // A safety tagged for the slot plays it, at the tier his grade suggests (60 → High-End Depth).
+  // A safety tagged for the slot plays it, at the tier his grade suggests (60 → Quality Depth).
   expect(s.T02.SLOTCB).toMatchObject({ starters: ["Safety 2"], label: "Upgrade Needed" });
   // Untagged teams still go by PFF.
   expect(s.T31.SLOTCB.byTags).toBeUndefined();

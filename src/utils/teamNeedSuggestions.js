@@ -25,10 +25,10 @@
 // Once any of a position's starters is tagged, its upgrade call goes by
 // talent tier instead of league rank (tagUpgrade) — an untagged starter
 // beside him counts at the tier his PFF grade suggests (gradeTier):
-//   one starter (QB, RB, TE): Plus Starter or better — no upgrade (a
-//     Franchise / Difference Maker quarterback is never Upgrade Needed or
+//   one starter (QB, RB, TE): Quality Starter or better — no upgrade (an
+//     Elite / Difference Maker quarterback is never Upgrade Needed or
 //     Wanted); Average Starter — Upgrade Wanted; a depth player — Needed.
-//   several: fewer than all-but-one of them Plus Starter or better —
+//   several: fewer than all-but-one of them Quality Starter or better —
 //     Upgrade Needed (one good receiver and two average ones), or Wanted
 //     when it's two starters and neither's below average; else a starter
 //     tagged as depth — Upgrade Wanted (two good receivers, the third
@@ -37,8 +37,8 @@
 // set in Research) picks a position's starters when there is one: the first
 // `starters` of the players in it, in order; otherwise the most snaps do.
 // Aging, depth and a crowded room are judged after that as before, but a
-// tagged backup counts by his tags: High-End Depth or better, or a
-// High-End Developmental player, is a real backup (no Depth Needed for a
+// tagged backup counts by his tags: Quality Depth or better, or a
+// 5-Star developmental player, is a real backup (no Depth Needed for a
 // raw but promising one); Average Starter or better, a starter-quality one.
 //
 // Roles (engine ROLES — 3rd Down RB, Slot Corner…) go by the admin's role
@@ -95,9 +95,10 @@ const CROWDED_GRADE = 65;
 const INJURED_MIN_SNAP_PCT = 20;
 
 // Talent tiers (depthNotes.js TALENT_TAGS — kept here too, so this stays
-// pure): Franchise 7 … Low-End Depth 1.
+// pure): Elite 7 … Practice Squad 1, under the keys first saved (Franchise,
+// Plus Starter… — renamed since). Watchlist has no tier.
 const TIER = { franchise: 7, difference: 6, plus: 5, average: 4, highDepth: 3, avgDepth: 2, lowDepth: 1 };
-const TIER_LABEL = { franchise: "Franchise", difference: "Difference Maker", plus: "Plus Starter", average: "Average Starter", highDepth: "High-End Depth", avgDepth: "Average Depth", lowDepth: "Low-End Depth" };
+const TIER_LABEL = { watchlist: "Watchlist", franchise: "Elite", difference: "Difference Maker", plus: "Quality Starter", average: "Average Starter", highDepth: "Quality Depth", avgDepth: "Depth", lowDepth: "Practice Squad" };
 const PLUS_STARTER = 5;
 const STARTER = 4;
 const REAL_BACKUP = 3;
@@ -159,7 +160,7 @@ function summarize(team, lookup, withInjured, now, tags = {}, order = {}) {
     // A backup by his tags when he has them, else by his PFF grade on real snaps.
     const proven = (p, grade) => (p.g || 0) >= grade && (p.sn || 0) >= MIN_BACKUP_SNAPS;
     const backups = list.filter((p) => !ids.has(p.id));
-    const isBackup = (p) => (tags[p.id] ? (tierOf(p, tags) ?? 0) >= REAL_BACKUP || tags[p.id].dev === "high" || (!tags[p.id].talent && proven(p, BACKUP_GRADE)) : proven(p, BACKUP_GRADE));
+    const isBackup = (p) => (tags[p.id] ? (tierOf(p, tags) ?? 0) >= REAL_BACKUP || tags[p.id].dev === "high" || (!TIER[tags[p.id].talent] && proven(p, BACKUP_GRADE)) : proven(p, BACKUP_GRADE));
     const isStrong = (p) => (tierOf(p, tags) != null ? tierOf(p, tags) >= STARTER : proven(p, CROWDED_GRADE));
     const taggedStarters = starters.filter((p) => tierOf(p, tags) != null);
     out[P.key] = {
@@ -353,7 +354,7 @@ export function positionPlayers(team, espnRoster = [], key, now = Date.now()) {
 const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"}`;
 
 // One line on why, for the review list — the tags first when they made the call.
-const DEV_SHORT = { high: "high dev", medium: "med dev", low: "low dev" };
+const DEV_SHORT = { high: "5-Star", medium: "4-Star", low: "3-Star", camp: "Camp Body" };
 export function suggestionReason(s) {
   const parts = [];
   const tagged = (s.tags || []).map((t) => `${t.name} (${[t.talent, DEV_SHORT[t.dev]].filter(Boolean).join(", ")})`);
@@ -366,13 +367,13 @@ export function suggestionReason(s) {
   return parts.join(" · ");
 }
 
-// Every team's stars — its players tagged Franchise or Difference Maker,
+// Every team's stars — its players tagged Elite or Difference Maker,
 // for the Draft Sim's war room and desk to name ("We need to get Josh
 // Allen somebody to throw to"). Only who they are, never PFF numbers, so
 // it's public (compSnapshots/_teamStars). teams: pffNflRosters docs (where
 // each plays now — off the depth chart doesn't count); tags: nflPlayerTags.
-// → { [abbr]: [{ n, k (need key — QB, OT, EDGE…), t (franchise |
-// difference), ro? (role keys) }] }, franchise first.
+// → { [abbr]: [{ n, k (need key — QB, OT, EDGE…), t (franchise — Elite |
+// difference), ro? (role keys) }] }, Elite first.
 export const STAR_TAGS = ["franchise", "difference"];
 export function teamStars(teams, tags = {}) {
   const keyOf = (pos) => NEED_POSITIONS.find((P) => P.pos.includes(pos))?.key || null;

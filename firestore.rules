@@ -437,6 +437,13 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // The admin's player grades, label only (src/utils/depthNotes.js
+    // savePlayerTags) — the NFL page's starting grade. Public: no PFF
+    // numbers, unlike the nflPlayerTags they mirror.
+    match /nflPlayerGrades/{pffId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     match /nflTeamNeeds/{abbr} {
       allow read: if true;
       allow write: if isAdmin();

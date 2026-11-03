@@ -26,30 +26,44 @@
 //                          team and group he was tagged at — for reading the
 //                          doc on its own; where he plays now comes from the
 //                          depth charts.
+//   nflPlayerGrades/{pffId} { n, k, team, grade } — his grade's label alone
+//                          (talent, else development), public: the NFL
+//                          page's starting grade (nflEvaluations.js
+//                          adminGradeFor). Written with every save; no PFF
+//                          numbers, so the public site may read it.
 // roles: the jobs he does within his position (engine ROLES keys — Slot
 // WR, Nose Tackle…); Research lists each role as its own group, and the
 // role needs go by who has it.
-// Each player has at most one talent tag and one development tag, and up
-// to MAX_TRAITS strengths and weaknesses (never the same trait as both) —
-// the college rules (AdminPanel.js handleToggleTrait).
+// Each player has one grade — a talent tag or a development tag, the NFL
+// page's player and developmental grades (nflEvaluations.js); some tagged
+// before that still hold both until the admin picks one — and up to
+// MAX_TRAITS strengths and weaknesses (never the same trait as both) — the
+// college rules (AdminPanel.js handleToggleTrait).
 import { doc, getDocs, collection, setDoc, deleteDoc, deleteField, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
+import { nflGradeLook, nameKey } from "./nflEvaluations";
 
-// tier: how good — what the need suggestions weigh (higher = better).
+// The NFL page's grades, under the keys the tags were first saved with
+// (Franchise, Plus Starter, High-End Depth… — renamed, same tiers, so the
+// stored keys stay). tier: how good — what the need suggestions weigh
+// (higher = better); Watchlist has none. Colors are the grade chips'.
+const withColor = (t) => ({ ...t, short: nflGradeLook(t.label).chip || t.label, color: nflGradeLook(t.label).bg });
 export const TALENT_TAGS = [
-  { key: "franchise", label: "Franchise", color: "#7a3cff", tier: 7 },
-  { key: "difference", label: "Difference Maker", color: "#15803d", tier: 6 },
-  { key: "plus", label: "Plus Starter", color: "#0055a5", tier: 5 },
-  { key: "average", label: "Average Starter", color: "#3b82c4", tier: 4 },
-  { key: "highDepth", label: "High-End Depth", color: "#b7791f", tier: 3 },
-  { key: "avgDepth", label: "Average Depth", color: "#8a6d3b", tier: 2 },
-  { key: "lowDepth", label: "Low-End Depth", color: "#8a97ab", tier: 1 },
-];
+  { key: "watchlist", label: "Watchlist", tier: null },
+  { key: "franchise", label: "Elite", tier: 7 },
+  { key: "difference", label: "Difference Maker", tier: 6 },
+  { key: "plus", label: "Quality Starter", tier: 5 },
+  { key: "average", label: "Average Starter", tier: 4 },
+  { key: "highDepth", label: "Quality Depth", tier: 3 },
+  { key: "avgDepth", label: "Depth", tier: 2 },
+  { key: "lowDepth", label: "Practice Squad", tier: 1 },
+].map(withColor);
 export const DEV_TAGS = [
-  { key: "high", label: "High-End Developmental", short: "High Dev", color: "#0f766e" },
-  { key: "medium", label: "Medium Developmental", short: "Med Dev", color: "#14b8a6" },
-  { key: "low", label: "Low Developmental", short: "Low Dev", color: "#8a97ab" },
-];
+  { key: "high", label: "5-Star" },
+  { key: "medium", label: "4-Star" },
+  { key: "low", label: "3-Star" },
+  { key: "camp", label: "Camp Body" },
+].map(withColor);
 export const MAX_TRAITS = 5;
 // Each Research group's traits/{doc} (+ traits/Generic).
 export const TRAIT_DOC = { QB: "QB", RB: "RB", WR: "WR", TE: "TE", OL: "OL", IDL: "DL", EDGE: "EDGE", LB: "LB", CB: "DB", S: "DB" };
@@ -100,9 +114,18 @@ export function cleanPlayerTags(entry) {
   return !clean.talent && !clean.dev && !clean.note && !clean.roles.length && !clean.strengths.length && !clean.weaknesses.length ? null : clean;
 }
 
-// A player's tags and note — an empty entry removes his doc.
+// A player's grade label — his talent tag's, else his development tag's.
+export const tagGrade = (entry) => talentTag(entry?.talent)?.label || devTag(entry?.dev)?.label || null;
+
+// A player's tags and note — an empty entry removes his doc — and his
+// public grade with them.
 export function savePlayerTags(id, entry) {
   const clean = cleanPlayerTags(entry);
   const ref = doc(db, "nflPlayerTags", String(id));
-  return clean ? setDoc(ref, { ...clean, updatedAt: serverTimestamp() }) : deleteDoc(ref);
+  const grade = clean && tagGrade(clean);
+  const pub = doc(db, "nflPlayerGrades", String(id));
+  return Promise.all([
+    clean ? setDoc(ref, { ...clean, updatedAt: serverTimestamp() }) : deleteDoc(ref),
+    grade ? setDoc(pub, { n: clean.n, k: nameKey(clean.n), team: clean.team, grade }) : deleteDoc(pub),
+  ]);
 }

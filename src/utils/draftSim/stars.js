@@ -1,9 +1,9 @@
 // src/utils/draftSim/stars.js
 //
-// A team's stars — its NFL players tagged Franchise or Difference Maker in
+// A team's stars — its NFL players tagged Elite or Difference Maker in
 // Admin → Research (compSnapshots/_teamStars, data.js loadStars):
-//   { [team]: [{ n (name), k (need key — QB, WR, OT, EDGE…), t (franchise |
-//   difference), ro? (role keys) }] }, franchise first.
+//   { [team]: [{ n (name), k (need key — QB, WR, OT, EDGE…), t (franchise —
+//   Elite's stored key | difference), ro? (role keys) }] }, Elite first.
 // The war room and the desk name them where a pick links to one — a
 // weapon for the star quarterback, a blocker for him or the star back, a
 // second star in the same room, a first-round QB behind one. Only stars

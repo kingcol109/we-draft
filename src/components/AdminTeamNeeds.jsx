@@ -23,7 +23,7 @@
 //                  Roles (3rd Down RB, Slot Corner… — engine ROLES) are
 //                  labeled the same way and listed under their position;
 //                  the grid marks a position with a role need (•).
-//                  "Publish roster stars" sends every team's Franchise /
+//                  "Publish roster stars" sends every team's Elite /
 //                  Difference Maker players (Research tags) to the sim
 //                  (writeTeamStars) — redo it after retagging or a trade.
 // Sub-positions (OT / IOL, CB / S) are kept under Data Management —
@@ -106,7 +106,7 @@ export async function writeTeamNeeds(changes) {
   return stored;
 }
 
-// Every team's stars (teamNeedSuggestions.js teamStars — the Franchise /
+// Every team's stars (teamNeedSuggestions.js teamStars — the Elite /
 // Difference Maker players tagged in Research, where they play now) →
 // compSnapshots/_teamStars, which the Draft Sim's war room and desk read
 // (data.js loadStars). Names and positions only — no PFF numbers. → the stars.
@@ -299,7 +299,7 @@ export function TeamNeeds() {
         <button onClick={suggest} disabled={!!suggesting && !suggesting.startsWith("Couldn't")} style={btn(true)}>
           {suggesting && !suggesting.startsWith("Couldn't") ? suggesting : "Suggest changes"}
         </button>
-        <button onClick={publishStars} disabled={starsMsg === "Publishing…"} style={btn(false)} title="Every team's Franchise / Difference Maker players (Research tags), for the sim's war room and desk to mention">
+        <button onClick={publishStars} disabled={starsMsg === "Publishing…"} style={btn(false)} title="Every team's Elite / Difference Maker players (Research tags), for the sim's war room and desk to mention">
           {starsMsg === "Publishing…" ? starsMsg : "Publish roster stars"}
         </button>
       </div>

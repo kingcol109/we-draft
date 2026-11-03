@@ -1105,6 +1105,7 @@ function PlayerTags({ entry }) {
     <div style={{ paddingLeft: "40px", marginTop: "2px", display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center", whiteSpace: "normal" }}>
       {t && <span style={tagStyle(t.color)}>{t.label}</span>}
       {d && <span style={tagStyle(d.color)} title={d.label}>{d.short}</span>}
+      {t && d && <span style={{ fontSize: "10px", fontWeight: 900, color: "#c8102e" }}>Two grades — pick one</span>}
       {roles.map((r) => <span key={r.key} style={{ ...tagStyle("#fff"), color: "#33415a", border: "1px solid #c9d2de" }}>{r.name}</span>)}
       {str.length > 0 && <span style={{ fontSize: "10px", fontWeight: 800, color: "#15803d" }}>+ {str.join(", ")}</span>}
       {weak.length > 0 && <span style={{ fontSize: "10px", fontWeight: 800, color: "#c8102e" }}>− {weak.join(", ")}</span>}
@@ -1113,15 +1114,16 @@ function PlayerTags({ entry }) {
   );
 }
 
-// Notes, a player's row: one talent tag, one development tag (click the
-// one he has to clear it) and a note, saved on blur.
+// Notes, a player's row: one grade — a player or a developmental one;
+// picking either clears the other, clicking the one he has clears it —
+// and a note, saved on blur.
 function PlayerNoteEditor({ entry, onSave, traits = [], roles = [] }) {
   const cur = { talent: entry?.talent || null, dev: entry?.dev || null, roles: entry?.roles || [], strengths: entry?.strengths || [], weaknesses: entry?.weaknesses || [], note: entry?.note || "" };
   const [traitsOpen, setTraitsOpen] = useState(false);
   const [note, setNote] = useState(cur.note);
   const [state, save] = useSaver(onSave);
   useEffect(() => { setNote(entry?.note || ""); }, [entry?.note]);
-  const pick = (field, key) => save({ ...cur, note, [field]: cur[field] === key ? null : key });
+  const pick = (field, key) => save({ ...cur, note, talent: null, dev: null, [field]: cur[field] === key ? null : key });
   // Roles: any number of his group's.
   const flipRole = (key) => save({ ...cur, note, roles: cur.roles.includes(key) ? cur.roles.filter((k) => k !== key) : [...cur.roles, key] });
   // Strengths / Weaknesses: never both, MAX_TRAITS each (the college rules).
@@ -1135,11 +1137,11 @@ function PlayerNoteEditor({ entry, onSave, traits = [], roles = [] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "5px" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>TALENT</span>
+        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>GRADE</span>
         {TALENT_TAGS.map((t) => <button key={t.key} onClick={() => pick("talent", t.key)} style={pill(cur.talent === t.key, t.color)}>{t.label}</button>)}
       </div>
       <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>DEVELOPMENT</span>
+        <span style={{ fontSize: "9px", fontWeight: 900, color: "#8a95a5", width: "62px" }}>DEV GRADE</span>
         {DEV_TAGS.map((t) => <button key={t.key} onClick={() => pick("dev", t.key)} style={pill(cur.dev === t.key, t.color)}>{t.label}</button>)}
       </div>
       {roles.length > 0 && (
