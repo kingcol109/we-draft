@@ -317,6 +317,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/qwantavius-wiggins-2029-rb</loc>
+    <lastmod>2026-11-03</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/r-mason-thomas-2026-dl</loc>
     <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
@@ -818,6 +823,11 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/tae-johnson-2027-db</loc>
+    <lastmod>2026-11-03</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/player/taimane-purcell-2029-te</loc>
     <lastmod>2026-11-03</lastmod>
     <priority>0.7</priority>
   </url>
@@ -4989,16 +4999,6 @@
   <url>
     <loc>https://we-draft.com/comparison/james-johnson-2029-dl</loc>
     <lastmod>2026-11-03</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/james-neal-iii-2026-ol</loc>
-    <lastmod>2026-11-03</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/james-peoples-2027-rb</loc>
-    <lastmod>2026-08-26</lastmod>
     <priority>0.6</priority>
   </url>
 </urlset>
