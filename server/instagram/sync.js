@@ -182,6 +182,14 @@ async function syncMedia(ctx) {
     }
     await batch.commit();
   }
+  // Posts no longer on the account (deleted on Instagram): kept, marked, and
+  // left out of the analytics. The list is complete here (every page read).
+  const listed = new Set(list.map((m) => m.id));
+  for (const [id, m] of Object.entries(have)) {
+    if (listed.has(id) || m.deleted) continue;
+    await db.collection("igMedia").doc(id).set({ deleted: true, deletedAt: now }, { merge: true });
+    ctx.inc("deleted");
+  }
   // A post published from We-Draft whose permalink wasn't read back then.
   for (const m of list) {
     const pid = have[m.id]?.postId;

@@ -45,16 +45,30 @@ test("a pick a Draft Sim trade moved says SIM TRADE; a real trade only VIA", () 
   expect(mockInput({ week: next }).picks.filter((p) => p.simTrade)).toHaveLength(31);
 });
 
-test("slide 2 is the Draft Sim ad, unless it's turned off", () => {
+test("the Draft Sim ad comes after round 1, unless it's turned off", () => {
   const withAd = mockSlides(mockInput({ week: draft(2) }), env);
-  expect(withAd.map((s) => s.name)).toEqual(["round-1-1", "draft-sim-ad", "round-1-2", "round-2"]);
-  expect(withAd[1].svg).toContain("MAKE YOUR OWN!");
-  expect(withAd[1].svg).toContain("WE-DRAFT.COM/DRAFTSIM");
-  expect(withAd[1].svg).toContain("SWIPE FOR THE REST OF ROUND 1");
+  expect(withAd.map((s) => s.name)).toEqual(["round-1-1", "round-1-2", "draft-sim-ad", "round-2"]);
+  expect(withAd[2].svg).toContain("MAKE YOUR OWN!");
+  expect(withAd[2].svg).toContain("WE-DRAFT.COM/DRAFTSIM");
+  expect(withAd[2].svg).toContain("SWIPE FOR ROUND 2");
+  // A one-round mock: the ad is the last slide.
+  expect(mockSlides(mockInput({ week: draft(1) }), env).map((s) => s.name)).toEqual(["round-1-1", "round-1-2", "draft-sim-ad"]);
   expect(mockCaption(mockInput({ week: draft(2) }))).toContain("we-draft.com/draftsim");
   const without = mockSlides(mockInput({ week: draft(2), simAd: false }), env);
   expect(without.map((s) => s.name)).toEqual(["round-1-1", "round-1-2", "round-2"]);
   expect(mockCaption(mockInput({ week: draft(2), simAd: false }))).not.toContain("draftsim");
+});
+
+test("the caption opens with the class, the week and how its pick order was set", () => {
+  const cap = (week) => mockCaption(mockInput({ week, dated: "Nov 3, 2026" }));
+  const sim = "We used our We-Draft sim to drive team logic and Community Grades to set player values. Check out the results here:";
+  expect(cap(draft(7)).split("\n").slice(0, 4)).toEqual(["We-Draft.com's Weekly 2027 Mock Draft (Nov 3, 2026)", sim, "", "Round 1:"]);
+  expect(cap(draft(7))).toContain("1. NYJ: First Last1");
+  expect(cap({ ...draft(3), year: "2028" }).split("\n")[1]).toBe(`The 2028 draft order is a year away, so we shuffled the projected order in tiers: picks 1–10, 11–20 and 21–32 are each drawn at random within their group. ${sim}`);
+  const y29 = cap({ ...draft(1), year: "2029" }).split("\n");
+  expect(y29[1]).toBe(`It's too early to project the 2029 order, so this one-round mock uses a random pick order. ${sim}`);
+  // One round: the picks follow straight on.
+  expect(y29[3]).toMatch(/^1\. /);
 });
 
 test("never more slides than Instagram takes", () => {
@@ -71,7 +85,7 @@ test("mockInput marks traded picks and picks dark logos on the dark look", () =>
   const light = mockInput({ week: draft(1), branding, theme: "light" });
   expect(light.picks[0].team.logo).toBe("light.png");
   expect(imageUrls(dark)).toEqual(expect.arrayContaining(["dark.png", "tx-dark.png"]));
-  expect(mockCaption(dark)).toContain("4. New York Jets (via IND): First Last4, QB, Texas");
+  expect(mockCaption(dark)).toContain("4. Jets (via IND): First Last4, QB, Texas");
 });
 
 test("slides are 1080×1350 SVG with every pick on them, text escaped", () => {
@@ -80,7 +94,7 @@ test("slides are 1080×1350 SVG with every pick on them, text escaped", () => {
   const slides = mockSlides(mockInput({ week }), env);
   slides.forEach((s) => expect(s.svg).toMatch(/^<svg [^>]*width="1080" height="1350"/));
   expect(slides[0].svg).toContain("O'NEIL &amp; SONS");
-  expect(slides[1].name).toBe("draft-sim-ad");
+  expect(slides[2].name).toBe("draft-sim-ad");
   expect(slides[3].svg).toContain("LAST64");
 });
 
@@ -91,8 +105,8 @@ test("each round-1 slide features its own pick over his photo, his row highlight
   expect(slides[0].svg).toContain("base64,AA");
   expect(slides[0].svg).toContain("NO. 3");
   expect(slides[0].svg).toContain('stroke="#f6a21d"');
-  expect(slides[2].svg).toContain("base64,BB");
-  expect(slides[2].svg).toContain("NO. 20");
+  expect(slides[1].svg).toContain("base64,BB");
+  expect(slides[1].svg).toContain("NO. 20");
   // A photo that didn't load: the plain list.
   expect(mockSlides(mockInput({ week: draft(1), features }), env)[0].svg).not.toContain("NO. 3");
 });

@@ -713,7 +713,7 @@ function MockCarousel({ setMsg, saved, onSaved }) {
   // Round 1's action shots ({ [playerId]: [...] }) and each round-1 slide's featured pick.
   const [shots, setShots] = useState({});
   const [cutout, setCutout] = useState(st.cutout ?? true);
-  // Slide 2: the Draft Sim ad.
+  // After round 1: the Draft Sim ad.
   const [simAd, setSimAd] = useState(st.simAd ?? true);
 
   // The class's published weeks, newest first.
@@ -837,12 +837,12 @@ function MockCarousel({ setMsg, saved, onSaved }) {
         )}
         {week && (
           <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
-            <input type="checkbox" checked={simAd} onChange={(e) => setSimAd(e.target.checked)} /> Slide 2: Draft Sim ad (&ldquo;Don&apos;t like the picks? Make your own!&rdquo;)
+            <input type="checkbox" checked={simAd} onChange={(e) => setSimAd(e.target.checked)} /> After round 1: Draft Sim ad (&ldquo;Don&apos;t like the picks? Make your own!&rdquo;)
           </label>
         )}
         {week && (
           <div style={{ fontSize: "12px", fontWeight: 700, color: "#5b6b84" }}>
-            {total + (simAd ? 1 : 0)} slides: round 1 on two (picks 1–16, 17–32){simAd ? " with the Draft Sim ad between them" : ""}{week.rounds > 1 ? `, then rounds 2–${week.rounds}, one a slide` : ""}. Picks a Draft Sim trade moved say SIM TRADE.
+            {total + (simAd ? 1 : 0)} slides: round 1 on two (picks 1–16, 17–32){simAd ? ", then the Draft Sim ad" : ""}{week.rounds > 1 ? `, then rounds 2–${week.rounds}, one a slide` : ""}. Picks a Draft Sim trade moved say SIM TRADE.
             {total > IG_MAX_SLIDES && <span style={{ color: "#a52a1e" }}> Instagram takes {IG_MAX_SLIDES}; the rest are left off.</span>}
           </div>
         )}

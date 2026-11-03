@@ -126,6 +126,14 @@ test("media sync: every page listed, insights by type, snapshot a day, the We-Dr
   const r2 = await sync.runOp(db, "media", opts);
   assert.equal(r2.counts.insights, undefined);
   assert.equal([...db.store.keys()].filter((k) => k.startsWith("igMedia/P1/daily/")).length, 1);
+  assert.equal(r2.counts.deleted, undefined);
+  // A post deleted on Instagram: marked, its record and link kept.
+  db.store.set("igMedia/GONE", { id: "GONE", postId: "post8", timestampMs: 1 });
+  const r3 = await sync.runOp(db, "media", opts);
+  assert.equal(r3.counts.deleted, 1);
+  assert.equal(db.data("igMedia/GONE").deleted, true);
+  assert.equal(db.data("igMedia/GONE").postId, "post8");
+  assert.equal(db.data("igMedia/R1").deleted, undefined);
 });
 
 test("one sync at a time", async () => {

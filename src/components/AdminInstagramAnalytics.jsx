@@ -269,7 +269,7 @@ export default function AdminInstagramAnalytics() {
     getDoc(doc(db, "igAnalytics", "account")).then((d) => setAccount(d.data() || null)).catch(() => {});
     getDoc(doc(db, "igAnalytics", "demographics")).then((d) => setDemo(d.data() || null)).catch(() => {});
     getDocs(query(collection(db, "igAccountDaily"), where("day", ">=", addDays(today, -400)))).then((s) => setDaily(Object.fromEntries(s.docs.map((d) => [d.id, d.data()])))).catch((e) => setMsg(`Couldn't load the account's days: ${e.message}`));
-    getDocs(collection(db, "igMedia")).then((s) => setMedia(s.docs.map((d) => d.data()).filter((m) => m.timestampMs))).catch((e) => { setMedia([]); setMsg(`Couldn't load the posts: ${e.message}`); });
+    getDocs(collection(db, "igMedia")).then((s) => setMedia(s.docs.map((d) => d.data()).filter((m) => m.timestampMs && !m.deleted))).catch((e) => { setMedia([]); setMsg(`Couldn't load the posts: ${e.message}`); });
   }, [version, today]);
   // Names for the players linked to posts.
   useEffect(() => {

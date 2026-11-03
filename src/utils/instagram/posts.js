@@ -11,9 +11,9 @@
 //               on the team's color, logo, headshot, name, position ·
 //               school, college logo). Then a slide a round, its picks in
 //               two columns (down the left, then the right). A pick a Draft
-//               Sim trade moved says SIM TRADE (simTradeSlots). Second, an
-//               ad for the Draft Sim: "Don't like the picks? Make your own!"
-//               (simAdSvg — input.simAd false leaves it out).
+//               Sim trade moved says SIM TRADE (simTradeSlots). After round
+//               1, an ad for the Draft Sim: "Don't like the picks? Make your
+//               own!" (simAdSvg — input.simAd false leaves it out).
 //   playerPost  one player over an action shot (playerPhotos action[]):
 //               a kicker, his name, position · school and up to three chips
 //               on his school's color.
@@ -32,6 +32,7 @@
 //                        draws the SVG as an image, which can't reach the
 //                        page's fonts; resvg is handed the font file)
 import { textOn, contrastRatio } from "../teamColors.js";
+import { ORDER_YEAR, UPCOMING_DRAFT_YEARS } from "../draftOrder.js";
 
 export const IG_W = 1080;
 export const IG_H = 1350;
@@ -258,6 +259,10 @@ function smallRow(env, t, p, x, y, w, h, id, featured = false) {
 // slide's picks down the right on one line each, his row highlighted.
 const PHOTO_COL = 470;
 const LIST_X = 452;
+// The faded team logo's spot: a 380 box in the photo column's top-left
+// corner, the same on every featured slide — the player's photo is framed
+// under it (most of the logo above his head) with PhotoAdjust.
+const STAR_LOGO_AT = (top) => [0, top, 380, 380];
 
 function featureSlideSvg(env, input, slide, i, total) {
   // Always the dark look: the photo needs it.
@@ -277,7 +282,7 @@ function featureSlideSvg(env, input, slide, i, total) {
   let body = mockHeader(env, t, input, slide)
     + `<g clip-path="url(#feat${i})">`
     + `<rect x="-240" y="${top}" width="${PHOTO_COL + 480}" height="${ph}" fill="url(#glow${i})"/>`
-    + image(env, star.team?.logo, 30, top + 170, PHOTO_COL - 60, PHOTO_COL - 60, "xMidYMid meet", 0.13)
+    + image(env, star.team?.logo, ...STAR_LOGO_AT(top), "xMidYMid meet", 0.13)
     + placed(image(env, f.photo, ...box, par), ...box, f.adjust)
     + `<rect x="0" y="${top}" width="${PHOTO_COL}" height="${ph}" fill="url(#fadeR${i})"/>`
     + `<rect x="0" y="${top}" width="${PHOTO_COL}" height="${ph}" fill="url(#fadeB${i})"/></g>`;
@@ -383,17 +388,18 @@ function simAdSvg(env, input, i, total, next = null) {
     + text(IG_W / 2, by + 43 + bs * 0.36, cta, bs, NAVY, { anchor: "middle", spacing: 2 });
 
   const more = i < total - 1;
-  const swipe = next?.part === 2 ? "SWIPE FOR THE REST OF ROUND 1" : "SWIPE FOR MORE";
+  const swipe = next?.part === 2 ? "SWIPE FOR THE REST OF ROUND 1" : next?.round ? `SWIPE FOR ROUND ${next.round}` : "SWIPE FOR MORE";
   body += footer(env, t, { logo: input.brandLogo, cta: more ? (input.swipeText || swipe) : (input.address || "WE-DRAFT.COM"), more });
   return svgDoc(env, defs, body, NAVY);
 }
 
-// The carousel → [{ name, round, part, svg }], at most IG_MAX_SLIDES: the
-// first slide, the Draft Sim ad (unless simAd is false), then the rest.
+// The carousel → [{ name, round, part, svg }], at most IG_MAX_SLIDES: round
+// 1's slides, the Draft Sim ad (unless simAd is false), then the rest.
 export function mockSlides(input, env) {
   const ad = input.simAd !== false;
   const plan = mockSlidePlan(input.picks).slice(0, IG_MAX_SLIDES - (ad ? 1 : 0));
-  const order = ad && plan.length ? [plan[0], { ad: true }, ...plan.slice(1)] : plan;
+  const after = plan.filter((s) => s.round === 1).length || 1;
+  const order = ad && plan.length ? [...plan.slice(0, after), { ad: true }, ...plan.slice(after)] : plan;
   return order.map((s, i) => (s.ad
     ? { name: "draft-sim-ad", ad: true, round: 0, part: 0, picks: 0, svg: simAdSvg(env, input, i, order.length, order[i + 1]) }
     : {
@@ -435,7 +441,7 @@ export function mockInput({ week, branding = {}, headshots = {}, collegeLogos = 
       player: { id: p.player.id, First: p.player.First, Last: p.player.Last, Position: p.player.Position, School: p.player.School },
       headshot: headshots[p.player.id] || "",
       collegeLogo: pickLogo(cl.lg || p.player.logo, cl.ld),
-      team: { abbr: p.owner, name: [b.City, b.Team].filter(Boolean).join(" "), color: b.Color1 || "", color2: b.Color2 || "", logo: pickLogo(b.Logo1, b.LogoDark) },
+      team: { abbr: p.owner, name: [b.City, b.Team].filter(Boolean).join(" "), nickname: b.Team || "", color: b.Color1 || "", color2: b.Color2 || "", logo: pickLogo(b.Logo1, b.LogoDark) },
     };
   });
   return {
@@ -449,15 +455,33 @@ export function mockInput({ week, branding = {}, headshots = {}, collegeLogos = 
 }
 
 // The carousel's caption: the first round, the link and tags.
+// The caption's opening: the class, the week, and how its pick order was
+// set — the upcoming draft's is projected from the standings (draftOrder.js
+// ORDER_YEAR); a later projected draft's is that order shuffled in tiers
+// (weeklyMock.js tieredOrder / TIERED_ORDER_NOTE, as its mock page says); a
+// class past those is drawn at random (weeklyMock.js RANDOM_ORDER_YEARS).
+function mockIntro(input) {
+  const y = String(input.year);
+  const order = y === ORDER_YEAR ? ""
+    : UPCOMING_DRAFT_YEARS.includes(y) ? `The ${y} draft order is a year away, so we shuffled the projected order in tiers: picks 1–10, 11–20 and 21–32 are each drawn at random within their group. `
+      : `It's too early to project the ${y} order, so this ${input.rounds === 1 ? "one-round " : ""}mock uses a random pick order. `;
+  return [
+    `We-Draft.com's Weekly ${y} Mock Draft${input.dated ? ` (${input.dated})` : ""}`,
+    `${order}We used our We-Draft sim to drive team logic and Community Grades to set player values. Check out the results here:`,
+  ];
+}
+
+// Round 1's picks, a line each — the team by its nickname ("Chargers"), so
+// 32 of them and the opening fit Instagram's 2,200 characters
+// (server/instagram/publish.js refuses a longer caption).
 export function mockCaption(input) {
   const first = input.picks.filter((p) => p.round === 1).sort((a, b) => a.overall - b.overall);
   const trade = (p) => [p.via && `via ${p.via}`, p.simTrade && "sim trade"].filter(Boolean).join(", ");
-  const lines = first.map((p) => `${p.overall}. ${p.team.name || p.owner}${trade(p) ? ` (${trade(p)})` : ""}: ${p.player.First} ${p.player.Last}, ${p.player.Position}, ${p.player.School}`);
-  const rounds = input.rounds > 1 ? `${input.rounds}-round ` : "";
+  const lines = first.map((p) => `${p.overall}. ${p.team.nickname || p.team.name || p.owner}${trade(p) ? ` (${trade(p)})` : ""}: ${p.player.First} ${p.player.Last}, ${p.player.Position}, ${p.player.School}`);
   return [
-    `Our ${input.year} NFL Mock Draft${input.dated ? ` (${input.dated})` : ""}. Swipe through the full ${rounds}mock.`,
+    ...mockIntro(input),
     "",
-    "Round 1:",
+    ...(input.rounds > 1 ? ["Round 1:"] : []),
     ...lines,
     ...(input.picks.some((p) => p.simTrade) ? ["", "Sim trade: a trade the We-Draft.com Draft Sim made in this mock, not a real one."] : []),
     "",

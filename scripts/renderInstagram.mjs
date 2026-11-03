@@ -6,6 +6,9 @@
 // with the Admin SDK, as the admin page reads it with the client SDK.
 //
 //   node scripts/renderInstagram.mjs mock 2027 [--theme light] [--shot 0] [--no-feature] [--out dir]
+//   node scripts/renderInstagram.mjs mock --post <instagramPosts id> [--out dir]
+//     (a saved Weekly Mock post as saved: its week, look, featured picks and
+//     their photos' framing)
 //   node scripts/renderInstagram.mjs player <playerId> [--photo 0] [--kicker "..."] [--out dir]
 //   node scripts/renderInstagram.mjs spotlight <playerId> [--photo 0] [--look spotlight] [--accent #f6a21d] [--badge plate] [--out dir]
 //
@@ -40,7 +43,8 @@ const summaryDocId = (year) => (String(year) === "2027" ? "weeklyMock" : `weekly
 
 const args = process.argv.slice(2);
 const flag = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : dflt; };
-const [kind, id] = args;
+const kind = args[0];
+const id = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
 const out = path.resolve(flag("out", "instagram-out"));
 
 // Every url → { href (data URI), w, h }; ones that won't load are left out.
@@ -147,15 +151,18 @@ async function main() {
   const db = getFirestore();
   fs.mkdirSync(out, { recursive: true });
   if (kind === "mock") {
-    const year = id || "2027";
-    const summary = (await db.collection("config").doc(summaryDocId(year)).get()).data();
-    if (!summary?.weekId) throw new Error(`No published ${year} Weekly Mock.`);
-    const week = (await db.collection("weeklyMocks").doc(summary.weekId).get()).data();
+    const post = flag("post");
+    const st = post ? (await db.collection("instagramPosts").doc(post).get()).data()?.state : null;
+    if (post && !st) throw new Error(`No saved post ${post}.`);
+    const year = st?.year || id || "2027";
+    const weekId = st?.weekId || (await db.collection("config").doc(summaryDocId(year)).get()).data()?.weekId;
+    if (!weekId) throw new Error(`No published ${year} Weekly Mock.`);
+    const week = (await db.collection("weeklyMocks").doc(weekId).get()).data();
     const r1 = (week.picks || []).filter((p) => p.round === 1 && p.player).map((p) => p.player.id);
-    // Each round-1 slide's featured pick: the first of its picks with an
-    // action shot (--shot: which of his; --no-feature: none).
-    const features = {};
-    if (!args.includes("--no-feature")) {
+    // Each round-1 slide's featured pick: a saved post's, else the first of
+    // its picks with an action shot (--shot: which of his; --no-feature: none).
+    const features = st ? Object.fromEntries(Object.entries(st.features || {}).filter(([, f]) => f)) : {};
+    if (!st && !args.includes("--no-feature")) {
       const first = (week.picks || []).filter((p) => p.round === 1 && p.player).sort((a, b) => a.overall - b.overall);
       const snaps = await db.getAll(...first.map((p) => db.collection("playerPhotos").doc(p.player.id)));
       const action = first.map((p, k) => ({ p, action: (snaps[k].exists && snaps[k].data().action) || [] }));
@@ -167,11 +174,13 @@ async function main() {
     }
     const input = mockInput({ features,
       week, branding: await branding(db), headshots: await headshots(db, r1), collegeLogos: await collegeLogos(db, year),
-      theme: flag("theme", "dark"), dated: dated(week.publishedAt), brandLogo: WD_LOGO,
+      theme: st?.theme || flag("theme", "dark"), dated: st?.dated ?? dated(week.publishedAt), brandLogo: WD_LOGO,
+      ...(st ? { kicker: st.kicker, title: st.title, simAd: st.simAd } : {}),
     });
     const photos = Object.values(features).map((f) => f.photo);
     const env = { measure, images: await loadImages([WD_LOGO, ...imageUrls(input)], new Set(photos)) };
-    photos.forEach((u) => { if (env.images[u] && !args.includes("--no-cutout")) env.images[u] = cutout(env.images[u]); });
+    const cut = st ? st.cutout !== false : !args.includes("--no-cutout");
+    photos.forEach((u) => { if (env.images[u] && cut) env.images[u] = cutout(env.images[u]); });
     const slides = mockSlides(input, env);
     slides.forEach((s, i) => fs.writeFileSync(path.join(out, `mock-${year}-${String(i + 1).padStart(2, "0")}-${s.name}.png`), render(s.svg)));
     fs.writeFileSync(path.join(out, `mock-${year}-caption.txt`), mockCaption(input));
