@@ -30,6 +30,8 @@ import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminSideGraphics from "../components/AdminSideGraphics";
+import AdminInstagram from "../components/AdminInstagram";
+import AdminInstagramAnalytics from "../components/AdminInstagramAnalytics";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../utils/snapshotBuilders";
@@ -313,6 +315,8 @@ const CONTENT_SECTION_TABS = [
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
   { key: "sidegraphics", label: "Side Graphics" },
+  { key: "instagram", label: "Instagram" },
+  { key: "instagramAnalytics", label: "Instagram Analytics" },
 ];
 
 // Old ?section= keys, now tabs: [section, tab]. YouTube Analytics' sign-in
@@ -350,6 +354,8 @@ function ContentSection({ initialTab }) {
       {tab === "calendar" && <ContentCalendarManager />}
       {tab === "photos" && <AdminPhotos />}
       {tab === "sidegraphics" && <AdminSideGraphics />}
+      {tab === "instagram" && <AdminInstagram />}
+      {tab === "instagramAnalytics" && <AdminInstagramAnalytics />}
     </>
   );
 }

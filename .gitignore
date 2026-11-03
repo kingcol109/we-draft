@@ -38,3 +38,6 @@ yarn-error.log*
 
 # On the Clock local preview show (scripts/onTheClockLocal.mjs)
 public/ontheclock-local.json
+
+.vercel
+.env*

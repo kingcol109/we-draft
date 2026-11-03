@@ -51,4 +51,11 @@ function getAuth() {
   return getAuthService(getApp());
 }
 
-module.exports = { getFirestore, getAuth };
+// A Cloud Storage bucket, loaded only when asked for like Auth (Instagram
+// publishing's staging, server/instagram/staging.js — the only caller).
+function getBucket(name) {
+  const { getStorage } = require("firebase-admin/storage");
+  return getStorage(getApp()).bucket(name);
+}
+
+module.exports = { getFirestore, getAuth, getBucket };

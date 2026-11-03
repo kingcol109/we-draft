@@ -4,7 +4,8 @@
     { "path": "/api/stream-orchestrator", "schedule": "* * * * *" },
     { "path": "/api/youtube-analytics", "schedule": "23 * * * *" },
     { "path": "/api/recache-mocks", "schedule": "0 12,13 * * 2" },
-    { "path": "/api/bot-render-clear", "schedule": "41 * * * *" }
+    { "path": "/api/bot-render-clear", "schedule": "41 * * * *" },
+    { "path": "/api/instagram", "schedule": "47 * * * *" }
   ],
   "functions": {
     "api/live-ingest.js": { "maxDuration": 300, "includeFiles": "src/utils/liveStats.mjs" },
@@ -17,6 +18,7 @@
     "api/bot-render.js": { "maxDuration": 30 },
     "api/bot-render-clear.js": { "maxDuration": 15 },
     "api/recache-mocks.js": { "maxDuration": 30 },
-    "api/mock-og.js": { "maxDuration": 20, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" }
+    "api/mock-og.js": { "maxDuration": 20, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" },
+    "api/instagram.js": { "maxDuration": 300 }
   }
 }

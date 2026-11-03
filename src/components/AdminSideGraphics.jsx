@@ -1272,7 +1272,7 @@ export default function AdminSideGraphics() {
 }
 
 // Headshots by player id (playerPhotos), 30 ids a query.
-async function headshotsFor(ids) {
+export async function headshotsFor(ids) {
   const out = {};
   for (let i = 0; i < ids.length; i += 30) {
     const chunk = ids.slice(i, i + 30);
