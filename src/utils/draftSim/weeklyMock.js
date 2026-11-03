@@ -29,7 +29,7 @@
 // which of that team's picks in the round it is (a comp pick is its second):
 // "1-NYJ-1" is the Jets' own first-rounder, "1-DAL-1" the one they got from
 // Dallas, whoever holds it now.
-import { initSim, stepCpu, makePick, NEED_LABELS, NEED_KEYS, needKeysFor, roleFits } from "./engine";
+import { initSim, stepCpu, makePick, chooseCpuPick, NEED_LABELS, NEED_KEYS, needKeysFor, roleFits } from "./engine";
 import { pickNote } from "./pickNotes";
 
 export const WEEKLY_ROUNDS = 7;
@@ -37,8 +37,9 @@ export const WEEKLY_ROUNDS = 7;
 export const WEEKLY_ROUNDS_BY_YEAR = { 2027: 7, 2028: 3, 2029: 1 };
 export const WEEKLY_VARIANCE = "less";
 export const WEEKLY_TRADES = "normal";
-// CPU trades by class: the next class's mock has none (engine CPU_TRADES "off").
-export const WEEKLY_TRADES_BY_YEAR = { 2027: "normal", 2028: "off", 2029: "off" };
+// CPU trades by class: 2027's are normal in round 1 and Less after (engine
+// CPU_TRADES, by round); the next class's mock has none ("off").
+export const WEEKLY_TRADES_BY_YEAR = { 2027: { 1: "normal", late: "less" }, 2028: "off", 2029: "off" };
 // The classes drafted on a random order (randomOrder) — no notes, no team pages.
 export const RANDOM_ORDER_YEARS = ["2029"];
 
@@ -124,6 +125,29 @@ export function replayNotes(data, picks, overalls, { trades = [], ctx }) {
   });
   const shared = { ...ctx, tradeDowns: tradeDownsOf(trades), used: {} };
   return Object.fromEntries(events.map((e) => [e.pick.overall, pickNote(e, shared)]));
+}
+
+// Sim Pick in the mock editor: the player the CPU would take at one pick
+// of a weekly mock as it stands — the picks before it replayed in order
+// (each with its team and player, like replayNotes), every player already
+// on a later pick off the board, then the team's own sim logic (board,
+// needs, staff, WEEKLY_VARIANCE noise on `seed`; qbTeams / posRules for the
+// next class). → board prospect, or null (nobody left it would take).
+export function simPickFor(data, picks, overall, { seed = Date.now(), qbTeams = null, posRules = null } = {}) {
+  const byOverall = Object.fromEntries((picks || []).map((p) => [p.pickNumber, p]));
+  const rounds = Math.max(1, ...(picks || []).map((p) => p.round || 1));
+  let s = initSim({ order: data.order, board: data.board, chart: data.chart, staff: data.staff, needs: data.needs, userTeams: [], rounds, seed, variance: WEEKLY_VARIANCE, qbTeams, posRules });
+  s = { ...s, picks: s.picks.map((p) => ({ ...p, owner: byOverall[p.overall]?.currentTeam || p.owner })) };
+  const at = s.picks.findIndex((p) => p.overall === overall);
+  if (at < 0) return null;
+  s.picks.slice(0, at).forEach((p, i) => {
+    const id = byOverall[p.overall]?.selection?.id;
+    const r = id && s.byId[id] && !s.taken[id] ? makePick({ ...s, idx: i }, id) : null;
+    if (r?.event) s = r.state;
+  });
+  const later = s.picks.slice(at + 1).map((p) => byOverall[p.overall]?.selection?.id).filter(Boolean);
+  s = { ...s, idx: at, done: false, taken: { ...s.taken, ...Object.fromEntries(later.map((id) => [id, true])) } };
+  return chooseCpuPick(s)?.prospect || null;
 }
 
 // A drafted player as saved: who he is, plus his college logo (the class
@@ -310,7 +334,6 @@ export function tieredOrder(order, rand) {
 
 // A one-round order drawn at random: each of `teams` with its own pick, as
 // fetchDraft's [{ Pick, Round, Team, Traded }].
-export const RANDOM_ORDER_NOTE = "The {year} draft order is years away, so this mock draws it at random — every team with its own first-round pick.";
 export function randomOrder(teams, rand) {
   const out = [...teams];
   for (let k = out.length - 1; k > 0; k--) {

@@ -698,7 +698,7 @@ function Setup({ setup, year, rounds: maxRoundsForYear, onYear, initialTeams, in
             {mode === "sim" && (
               <div style={{ marginTop: 18 }}>
                 <Field label="CPU Trades" note={CPU_TRADES[cpuTrades].note}>
-                  {Object.entries(CPU_TRADES).map(([k, v]) => <button key={k} onClick={() => setCpuTrades(k)} aria-pressed={cpuTrades === k} style={chipStyle(cpuTrades === k)}>{v.label}</button>)}
+                  {Object.entries(CPU_TRADES).filter(([, v]) => !v.hidden).map(([k, v]) => <button key={k} onClick={() => setCpuTrades(k)} aria-pressed={cpuTrades === k} style={chipStyle(cpuTrades === k)}>{v.label}</button>)}
                 </Field>
               </div>
             )}

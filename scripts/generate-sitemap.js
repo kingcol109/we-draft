@@ -111,11 +111,11 @@ async function getCurrentStaff() {
 // AdminWeeklyMock.jsx; null before the first). Ids and URLs as in
 // src/utils/weeklyMockNews.js: the main class at /mocks/{abbr}, the next at
 // /mocks/{abbr}/{year}. A class with teamPages: false is only its whole
-// mock — 2029's, when it's turned on: { year: "2029", doc: "weeklyMock2029",
-// suffix: "/2029", teamPages: false }.
+// mock (2029's).
 const WEEKLY_CLASSES = [
   { year: "2027", doc: "weeklyMock", suffix: "" },
   { year: "2028", doc: "weeklyMock2028", suffix: "/2028" },
+  { year: "2029", doc: "weeklyMock2029", suffix: "/2029", teamPages: false },
 ];
 async function getWeeklyMockSummary(docId) {
   const snap = await getDoc(doc(db, "config", docId));

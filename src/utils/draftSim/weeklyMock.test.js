@@ -1,6 +1,6 @@
 import { buildBoard } from "./engine";
 import { acceptOffer } from "./engine";
-import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, replayNotes, randomOrder, WEEKLY_ROUNDS_BY_YEAR } from "./weeklyMock";
+import { WEEKLY_TRADES_BY_YEAR, slotKeys, runWeeklyMock, weeklyFromSim, weeklyNotes, teamWeek, teamChanges, tradesFromSim, nextYearNeeds, qbEligibleTeams, nextYearLabel, mockPicksFrom, weeklyPicksFromMock, nextYearRules, qbTeamsOf, carryTrades, tieredOrder, replayNotes, simPickFor, randomOrder, WEEKLY_ROUNDS_BY_YEAR } from "./weeklyMock";
 import { pickNote } from "./pickNotes";
 import { applyPlayerTakes } from "./analysts";
 
@@ -134,6 +134,22 @@ test("regenerate: a moved pick's note is written for its new team and spot; a tr
   // Swapped back to someone else: no trade-up opener.
   const other = editor.map((p) => (p.pickNumber === 5 ? { ...p, currentTeam: "CCC" } : p));
   expect(replayNotes(data, other, [5], { trades, ctx })[5]).not.toMatch(/AAAs/);
+});
+
+test("sim pick: the team's pick with the mock as it stands — never a player taken before it or placed after it", () => {
+  const w = weeklyFromSim(runWeeklyMock(data, { seed: 3, rounds: 2, trades: "off" }), "2027");
+  const editor = Object.values(mockPicksFrom(w.picks)).sort((a, b) => a.pickNumber - b.pickNumber);
+  const before = new Set(editor.slice(0, 4).map((p) => p.selection.id));
+  const after = new Set(editor.slice(5).map((p) => p.selection.id));
+  for (let seed = 1; seed <= 20; seed++) {
+    const p = simPickFor(data, editor, 5, { seed });
+    expect(p).toBeTruthy();
+    expect(before.has(p.id) || after.has(p.id)).toBe(false);
+  }
+  // Pick 5 cleared and every later pick open: it takes from what's left after 1–4.
+  const open = editor.map((p, i) => (i >= 4 ? { ...p, selection: null } : p));
+  expect(before.has(simPickFor(data, open, 5, { seed: 1 }).id)).toBe(false);
+  expect(simPickFor(data, editor, 999)).toBeNull();
 });
 
 test("2028 order: shuffled within 1–10, 11–20 and 21–32, and every round follows round 1", () => {

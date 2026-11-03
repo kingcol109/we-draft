@@ -3,7 +3,7 @@
 // Vercel Cron target (vercel.json): every Tuesday at 8am Eastern, asks
 // Prerender.io to re-render the Weekly Mock pages — each team's page for
 // every class (/mocks/{team}, /mocks/{team}/2028) and each class's full
-// mock (/mocks/2027, /mocks/2028) — so crawlers and link previews get the
+// mock (/mocks/2027, /mocks/2028, /mocks/2029) — so crawlers and link previews get the
 // new week rather than waiting on Prerender.io's own recache schedule.
 //
 // Vercel Cron runs on UTC, so it's scheduled at both 12:00 and 13:00 UTC
@@ -21,7 +21,9 @@ const crypto = require("crypto");
 const SITE = "https://we-draft.com";
 // Classes with a Weekly Mock (utils/weeklyMockNews.js WEEKLY_YEARS — the
 // first is the main class, whose team pages have no year in the path).
-const WEEKLY_YEARS = ["2027", "2028"];
+const WEEKLY_YEARS = ["2027", "2028", "2029"];
+// The classes with team pages (weeklyMockNews.js TEAM_PAGE_YEARS); 2029's is only its full mock.
+const TEAM_PAGE_YEARS = ["2027", "2028"];
 const TEAMS = [
   "ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC",
   "LV", "LAC", "LAR", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS",
@@ -31,7 +33,7 @@ const RUN_HOUR_ET = 8;
 // Every Weekly Mock page (weeklyMockHref / weeklyYearHref).
 function mockUrls() {
   const urls = WEEKLY_YEARS.map((y) => `${SITE}/mocks/${y}`);
-  WEEKLY_YEARS.forEach((y, i) => TEAMS.forEach((t) => urls.push(`${SITE}/mocks/${t.toLowerCase()}${i === 0 ? "" : `/${y}`}`)));
+  WEEKLY_YEARS.filter((y) => TEAM_PAGE_YEARS.includes(y)).forEach((y, i) => TEAMS.forEach((t) => urls.push(`${SITE}/mocks/${t.toLowerCase()}${i === 0 ? "" : `/${y}`}`)));
   return urls;
 }
 

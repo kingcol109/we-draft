@@ -19,7 +19,9 @@ const { classSvg, teamSvg } = require("../server/mockPreview");
 
 // utils/weeklyMockNews.js WEEKLY_YEARS — the first is the main class, whose
 // team pages have no year in the path.
-const WEEKLY_YEARS = ["2027", "2028"];
+const WEEKLY_YEARS = ["2027", "2028", "2029"];
+// The classes with team pages (weeklyMockNews.js TEAM_PAGE_YEARS).
+const TEAM_PAGE_YEARS = ["2027", "2028"];
 const TEAMS = new Set([
   "ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC",
   "LV", "LAC", "LAR", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS",
@@ -61,7 +63,7 @@ async function loadTeams(db, abbrs) {
 module.exports = async function handler(req, res) {
   const year = String(req.query?.year || "");
   const team = String(req.query?.team || "").toUpperCase();
-  if (!WEEKLY_YEARS.includes(year) || (team && !TEAMS.has(team))) return res.status(404).json({ error: "not found" });
+  if (!WEEKLY_YEARS.includes(year) || (team && (!TEAMS.has(team) || !TEAM_PAGE_YEARS.includes(year)))) return res.status(404).json({ error: "not found" });
 
   try {
     const { getFirestore } = require("../scripts/firebaseAdmin");

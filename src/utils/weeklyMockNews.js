@@ -18,10 +18,10 @@ import { NFL_TEAMS } from "./coachHistory";
 // The classes with a Weekly Mock, the first the main one: its team pages are
 // /mocks/{team}; the others' add the year (/mocks/{team}/2028). A class
 // outside TEAM_PAGE_YEARS is only its whole mock (/mocks/{year}): no team
-// pages, and not on NFL team pages. (2029 is ready for that — one round, a
-// random order, weeklyMock.js RANDOM_ORDER_YEARS — but off for now: add it
-// here to turn it on, and to generate-sitemap.js's WEEKLY_CLASSES.)
-export const WEEKLY_YEARS = ["2027", "2028"];
+// pages, and not on NFL team pages — 2029's: one round, a random order on
+// the current needs (weeklyMock.js RANDOM_ORDER_YEARS). A class added here
+// goes in generate-sitemap.js's WEEKLY_CLASSES and api/mock-og.js too.
+export const WEEKLY_YEARS = ["2027", "2028", "2029"];
 export const MAIN_WEEKLY_YEAR = WEEKLY_YEARS[0];
 export const TEAM_PAGE_YEARS = ["2027", "2028"];
 export const hasTeamPages = (year) => TEAM_PAGE_YEARS.includes(String(year));

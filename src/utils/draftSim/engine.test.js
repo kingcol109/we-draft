@@ -577,31 +577,36 @@ test("custom order: swapping two teams trades their whole sets of picks", () => 
   expect(twice[2].Team).toBe("AAA");
 });
 
-test("CPU trades: Off means none between CPU teams, Frequent more than Normal", () => {
+test("CPU trades: Off means none between CPU teams, Less fewer and Frequent more than Normal, and by round", () => {
   const big = buildBoard(Array.from({ length: 120 }, (_, i) => ({ id: `b${i}`, Position: POS[i % POS.length], cr: i + 1 })));
   const teams = Array.from({ length: 16 }, (_, i) => `T${i}`);
   const ord = [1, 2].flatMap((round) => teams.map((t, i) => ({ Pick: (round - 1) * 16 + i + 1, Round: round, Team: t })));
   // Every team needs something badly, so someone always wants to move up.
   const keys = ["QB", "WR", "EDGE", "OT", "CB", "RB", "LB", "IDL", "TE"];
   const tradeNeeds = Object.fromEntries(teams.map((t, i) => [t, resolveNeeds({ [keys[i % keys.length]]: { labels: ["Upgrade Needed"] } })]));
-  const count = (cpuTrades) => {
+  const count = (cpuTrades, round = null) => {
     let n = 0;
     for (let seed = 1; seed <= 25; seed++) {
       let s = initSim({ order: ord, board: big, rounds: 2, seed, cpuTrades, needs: tradeNeeds });
       while (!s.done) {
         const r = stepCpu(s);
-        n += r.events.filter((e) => e.type === "trade").length;
+        n += r.events.filter((e) => e.type === "trade" && (round == null || e.pick.round === round)).length;
         s = r.state;
       }
     }
     return n;
   };
   const off = count("off");
+  const less = count("less");
   const normal = count("normal");
   const frequent = count("frequent");
   expect(off).toBe(0);
+  expect(less).toBeLessThan(normal);
   expect(normal).toBeGreaterThan(0);
   expect(frequent).toBeGreaterThan(normal);
+  // By round: off after round 1 means no round-2 deals, round 1 as usual.
+  expect(count({ 1: "normal", late: "off" }, 2)).toBe(0);
+  expect(count({ 1: "normal", late: "off" }, 1)).toBe(count("normal", 1));
 });
 
 test("needs reach the desk: the pick event carries the need, and the lines fill in", () => {

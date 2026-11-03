@@ -118,8 +118,8 @@ export function MockHero({ eyebrow, title, actions, isMobile, watermark, childre
 
 // The Weekly Mock's header (its team pages, WeeklyTeamMock.jsx, and the
 // full mock, ViewMock.js), read like an article's: a logo (to its page,
-// when there's one) beside the date, a kicker and the title — one line,
-// shrunk to fit (FitLine) — then a summary and the byline, in the hero's
+// when there's one) beside a kicker and the title — one line, shrunk to
+// fit (FitLine) — then a summary, the date and the byline, in the hero's
 // colors with its wordmark faded behind. hero: { c1, c2 (the background),
 // ink (text), accent (date badge, kicker, bottom edge), logo, logoTitle,
 // href, wordmark }. actions sit top-right, like MockHero's — on phones, a
@@ -145,15 +145,7 @@ export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, bylin
           </Link>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {date && (
-              <span style={{
-                display: "inline-block", borderRadius: 6, padding: isMobile ? "3px 8px" : "4px 10px", background: hero.accent || hero.ink, color: hero.c1,
-                fontSize: isMobile ? 12 : 14, fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: BODY_FONT,
-              }}>{date}</span>
-            )}
-            <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", ...(hero.accent ? { color: hero.accent } : { opacity: 0.8 }) }}>{kicker}</span>
-          </div>
+          <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase", ...(hero.accent ? { color: hero.accent } : { opacity: 0.8 }) }}>{kicker}</span>
           <h1 style={{ margin: "6px 0 0", fontWeight: 900, lineHeight: 1.15, letterSpacing: "-0.01em", ...(isMobile ? { fontSize: 22, overflowWrap: "anywhere" } : {}) }}>
             {isMobile ? headline : <FitLine max={34} min={14}>{headline}</FitLine>}
           </h1>
@@ -162,6 +154,15 @@ export function ArticleHero({ hero, isMobile, kicker, headline, dek, date, bylin
       </div>
       {actions && isMobile && <div style={{ position: "relative", display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>{actions}</div>}
       {dek && <p style={{ position: "relative", margin: isMobile ? "12px 0 0" : "14px 0 0", maxWidth: 640, fontSize: isMobile ? 15 : 17, lineHeight: 1.5, fontFamily: "Georgia, 'Times New Roman', serif", opacity: 0.95 }}>{dek}</p>}
+      {/* The date: under the dek, above the byline. */}
+      {date && (
+        <div style={{ position: "relative", marginTop: 12 }}>
+          <span style={{
+            display: "inline-block", borderRadius: 6, padding: isMobile ? "3px 8px" : "4px 10px", background: hero.accent || hero.ink, color: hero.c1,
+            fontSize: isMobile ? 12 : 14, fontWeight: 900, letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: BODY_FONT,
+          }}>{date}</span>
+        </div>
+      )}
       {byline && <div style={{ position: "relative", marginTop: 10, fontSize: 12, fontWeight: 700, fontFamily: BODY_FONT, opacity: 0.9 }}>{byline}</div>}
     </header>
   );
@@ -252,7 +253,7 @@ export function WeeklyYearSwitch({ years, current, hrefOf, ink, bg, isMobile }) 
             borderRadius: 999, padding: isMobile ? "5px 12px" : "6px 16px", fontSize: isMobile ? 11 : 12, fontWeight: 900, letterSpacing: "0.06em",
             textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap", textAlign: "center", ...(isMobile ? { flex: 1 } : {}),
             background: on ? ink : "transparent", color: on ? bg : ink, opacity: on ? 1 : 0.85,
-          }}>{y} Mock</Link>
+          }}>{y}</Link>
         );
       })}
     </nav>

@@ -208,7 +208,7 @@ export default function MockDraftHub() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {filtered.map((mock, i) => (
                 <Fragment key={mock.id}>
-                  <MockCard mock={mock} author={userMap[mock.ownerId] || ""} teams={teams} isMobile={isMobile} />
+                  <MockCard mock={mock} author={mock.source === "weeklyMock" && mock.official ? "We-Draft.com" : userMap[mock.ownerId] || ""} teams={teams} isMobile={isMobile} />
                   {i === Math.min(PHONE_AD_AFTER, filtered.length) - 1 && <PhoneAd isMobile={isMobile} />}
                 </Fragment>
               ))}
@@ -322,7 +322,7 @@ function WeeklyBoard({ isMobile, teams, classes, year, onYear, summary, mock }) 
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: isMobile ? "12px 12px" : "16px 20px", borderBottom: "1px solid #edf0f5" }}>
         <div style={{ flex: "1 1 220px", minWidth: 0 }}>
           <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.16em", textTransform: "uppercase", color: "#b8740a" }}>
-            We-Draft Weekly Mock{date ? ` · ${date}` : ""}
+            We-Draft {teamPages ? "Weekly " : ""}Mock{date ? ` · ${date}` : ""}
           </div>
           <h2 style={{ margin: "3px 0 0", fontSize: isMobile ? 18 : 22, fontWeight: 900, color: INK, textTransform: "uppercase", lineHeight: 1.1 }}>
             {year} First Round

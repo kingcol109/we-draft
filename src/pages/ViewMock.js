@@ -10,7 +10,8 @@
 // weeklyMock.js) reads like its team pages instead: the article header,
 // posted by We-Draft.com (verified), the sim after the fifth pick, each
 // trade as a graphic right before the pick it's about (TradeCard), every
-// team's page in the left rail. Each class's current week lives at /mocks/{year}
+// team's page in the left rail (a class with no team pages, 2029's: the
+// main class's). Each class's current week lives at /mocks/{year}
 // (WeeklyYearPage, below — its /view URL goes there); a past week's stays
 // up at /view but is noindexed and points to the current one.
 import { Fragment, useEffect, useState } from "react";
@@ -166,8 +167,10 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   // A past week's Weekly Mock: still readable, not indexed.
   const pastWeek = weekly && !!currentWeekly && currentWeekly !== mock.id;
   const indexable = mock.visibility === "public" && !pastWeek;
+  // A class with no team pages (2029's) isn't called weekly on the page.
+  const mockLabel = hasTeamPages(year) ? "Weekly Mock Draft" : "Mock Draft";
   const crumbs = weekly ? [
-    { name: "Home", href: "/" }, { name: "Mock Drafts", href: "/mocks" }, { name: `${year} Weekly Mock Draft`, href: weeklyYearHref(year) },
+    { name: "Home", href: "/" }, { name: "Mock Drafts", href: "/mocks" }, { name: `${year} ${mockLabel}`, href: weeklyYearHref(year) },
     ...(pastWeek ? [{ name: mock.name || "Past week", href: `/mocks/${mockId}/view` }] : []),
   ] : null;
   const nick = (abbr) => teams[abbr]?.Team || (NFL_TEAMS[abbr] || abbr).split(" ").pop();
@@ -202,11 +205,14 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   };
   const sharePicks = roundPicks.map((p) => ({ pickNumber: p.pickNumber, currentTeam: p.currentTeam, tradedFrom: p.tradedFrom, player: p.selection }));
 
-  const headline = weekly ? `NFL ${rounds}-Round Mock Draft ${year}` : mock.name || "Mock Draft";
+  const headline = weekly ? `${rounds}-Round ${year} NFL Mock Draft` : mock.name || "Mock Draft";
   const title = `${headline} | We-Draft`;
   const firstPick = picksArray.find((p) => p.selection);
-  const description = weekly
-    ? `The latest We-Draft.com ${year} NFL mock draft: all ${rounds} rounds of projected picks, made by the Draft Sim from our prospect grades, team needs and each staff's draft history, and updated every week.`
+  // A class with no team pages (2029's) has its own dek.
+  const description = weekly && !teamPages
+    ? `View the future faces of the NFL early with the We-Draft.com ${year} NFL Mock Draft. Because the class is so far away, the current player pool is very thin. The draft order is randomized and this mock is meant to reflect ${year} prospects' current talent level rather than NFL team needs.`
+    : weekly
+    ? `The latest We-Draft.com ${year} NFL mock draft: ${rounds === 1 ? "the first round" : `all ${rounds} rounds`} of projected picks, made by the Draft Sim from our prospect grades, team needs and each staff's draft history, and updated every week.`
     : intro
     ? intro.slice(0, 155) + (intro.length > 155 ? "…" : "")
     : `A ${mock.draftClass || ""} NFL mock draft${ownerLabel ? ` by ${ownerLabel}` : ""}${firstPick ? `, with ${firstPick.selection.First} ${firstPick.selection.Last} at No. ${firstPick.pickNumber}` : ""}.`;
@@ -269,16 +275,16 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
 
-      <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile} leftRail={teamPages ? <TeamMocksRail year={year} teams={teams} /> : null}>
+      <MockPageShell year={mock.draftClass || "2027"} isMobile={isMobile} leftRail={weekly ? <TeamMocksRail year={teamPages ? year : MAIN_WEEKLY_YEAR} teams={teams} /> : null}>
         {weekly ? (
           <>
             <Breadcrumbs items={crumbs} />
             {pastWeek && (
               <div style={{ background: "#fff8e6", border: "1px solid #f6c56b", borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontFamily: BODY_FONT, fontSize: 14, color: "#2a313d" }}>
-                This is a past week&apos;s mock. <Link to={weeklyYearHref(year)} style={{ color: BLUE, fontWeight: 800 }}>See this week&apos;s Weekly Mock Draft →</Link>
+                This is a past week&apos;s mock. <Link to={weeklyYearHref(year)} style={{ color: BLUE, fontWeight: 800 }}>See this week&apos;s {mockLabel} →</Link>
               </div>
             )}
-            <ArticleHero hero={WEEKLY_HERO} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
+            <ArticleHero hero={WEEKLY_HERO} isMobile={isMobile} kicker={`${mockLabel} · ${year}`}
               headline={headline} dek={description} date={updated ? `Updated ${updated}` : ""} byline={<WeeklyByline />} actions={heroActions} />
           </>
         ) : (
@@ -335,7 +341,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
           ))}
         </div>
         {/* Phones have no side rail: every team's mock, at the bottom. */}
-        {teamPages && isMobile && <div style={{ marginTop: 22 }}><TeamMocksRail year={year} teams={teams} columns={8} /></div>}
+        {weekly && isMobile && <div style={{ marginTop: 22 }}><TeamMocksRail year={teamPages ? year : MAIN_WEEKLY_YEAR} teams={teams} columns={8} /></div>}
       </MockPageShell>
     </>
   );
@@ -416,7 +422,7 @@ export function PickRow({ pick, brand, isMobile, sub = null, teamPage = false, c
             const badge = badgeSrc && (
               <img src={badgeSrc} alt={teamPage ? player?.School || "" : teamName} style={{
                 position: "absolute", right: -4, bottom: -4, width: isMobile ? 30 : 40, height: isMobile ? 30 : 40, maxWidth: "none", boxSizing: "border-box",
-                objectFit: "contain", background: "#fff", borderRadius: "50%", padding: isMobile ? 3 : 4, boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
+                objectFit: "contain", background: "#fff", borderRadius: "50%", padding: isMobile ? 5 : 6, boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
               }} />
             );
             return (
@@ -518,11 +524,11 @@ export function WeeklyYearPage({ year }) {
   return (
     <div style={{ maxWidth: 600, margin: "80px auto", padding: "0 20px", textAlign: "center", fontFamily: BODY_FONT }}>
       <Helmet>
-        <title>{`${year} Weekly Mock Draft | We-Draft`}</title>
+        <title>{`${year} ${hasTeamPages(year) ? "Weekly " : ""}Mock Draft | We-Draft`}</title>
         <meta name="robots" content="noindex, follow" />
         <meta name="prerender-status-code" content="404" />
       </Helmet>
-      <div style={{ fontWeight: 900, fontSize: 18, color: BLUE, marginBottom: 16 }}>The first {year} weekly mock draft isn&apos;t out yet.</div>
+      <div style={{ fontWeight: 900, fontSize: 18, color: BLUE, marginBottom: 16 }}>The first {year} {hasTeamPages(year) ? "weekly " : ""}mock draft isn&apos;t out yet.</div>
       <Link to="/mocks" style={{ color: BLUE, fontWeight: 800 }}>← All Mocks</Link>
     </div>
   );

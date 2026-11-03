@@ -605,7 +605,8 @@ export function swapTeams(to, a, b) {
 // order: [{ Pick, Round, Team, Traded }] (fetchDraft's picks).
 // futureOrder / futureYear: next year's draft (same shape), traded as
 // capital at FUTURE_DISCOUNT.
-// cpuTrades: how often CPU teams trade with each other (CPU_TRADES key).
+// cpuTrades: how often CPU teams trade with each other (CPU_TRADES key, or
+// by round: { [round]: key, late: key }).
 // qbTeams: the only CPU teams that take a quarterback — one each, with no
 // "room is full" penalty for it (qbRoomPenalty) — the Weekly Mock's next
 // class (weeklyMock.js qbEligibleTeams). null: every team, as usual.
@@ -1223,16 +1224,21 @@ export function acceptOffer(state, offer) {
 // The setup screen's CPU Trades: a multiple of the usual chance (Frequent
 // also lets a team that only fairly wants its guy call), capped at
 // CPU_TRADE_CAP. Off: no CPU–CPU deals — the user's own offers still come.
+// Less isn't on the setup screen (hidden) — the Weekly Mock's later rounds.
+// A sim's cpuTrades is a key, or by round: { [round]: key, late: key }.
 export const CPU_TRADES = {
   off: { label: "Off", rate: 0, note: "No trades between CPU teams — offers to you still come in." },
+  less: { label: "Less", rate: 0.4, threshold: 0.9, hidden: true, note: "The odd trade — well under a real draft's." },
   normal: { label: "Normal", rate: 1, threshold: 0.9, note: "Trades about as often as a real draft." },
   frequent: { label: "Frequent", rate: 2.5, threshold: 0.75, note: "Teams are on the phones — expect a lot more movement." },
 };
 const CPU_TRADE_CAP = 0.85;
 function maybeCpuTrade(state) {
   const pick = currentPick(state);
-  const level = CPU_TRADES[state.cpuTrades] || CPU_TRADES.normal;
-  if (!pick || !level.rate) return null;
+  if (!pick) return null;
+  const key = state.cpuTrades && typeof state.cpuTrades === "object" ? state.cpuTrades[pick.round] ?? state.cpuTrades.late : state.cpuTrades;
+  const level = CPU_TRADES[key] || CPU_TRADES.normal;
+  if (!level.rate) return null;
   const work = { seed: state.seed };
   const roll = random(work);
   // A team that likes no one here shops the pick (trade back).

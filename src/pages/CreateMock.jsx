@@ -10,7 +10,9 @@
 // read-only /view page.
 // A Weekly Mock (AdminWeeklyMock.jsx) adds "Regenerate analysis" on each
 // pick: its note written again by the sim's pick notes for the mock as it
-// now stands (weeklyMock.js replayNotes) — after picks are moved around.
+// now stands (weeklyMock.js replayNotes) — after picks are moved around —
+// and "Sim pick": the player that team's sim logic takes there, with the
+// mock as it stands before it (weeklyMock.js simPickFor).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, Link, Navigate } from "react-router-dom";
 import {
@@ -146,6 +148,8 @@ export default function CreateMock() {
   const [weekly, setWeekly] = useState(false);
   const [weeklyTrades, setWeeklyTrades] = useState([]);
   const [regen, setRegen] = useState({});
+  const [weeklyId, setWeeklyId] = useState(null);
+  const [simming, setSimming] = useState({});
 
   const assignedPlayerIds = useMemo(() => new Set(Object.values(assignedPlayers).map((p) => p.id)), [assignedPlayers]);
   const isOwner = userId && mockOwnerId === userId;
@@ -228,6 +232,7 @@ export default function CreateMock() {
         setDraftClass(data.draftClass || "2026");
         setWeekly(data.source === "weeklyMock" && !!data.official);
         setWeeklyTrades(data.trades || []);
+        setWeeklyId(data.weeklyId || null);
         const picksArray = Object.values(data.picks || {}).sort((a, b) => a.pickNumber - b.pickNumber);
         setPicks(picksArray);
         const assigned = {};
@@ -321,16 +326,18 @@ export default function CreateMock() {
 
   // A Weekly Mock pick's note, written again for the mock as it stands (the
   // sim's data and the pick notes load on first use — editor-only code).
-  const regenerateNote = async (pickNumber) => {
+  // swap: { [pickNumber]: player } — a pick just changed, before its state lands.
+  const regenerateNote = async (pickNumber, swap = {}) => {
     setRegen((r) => ({ ...r, [pickNumber]: "busy" }));
     try {
       const [{ loadSimData, teamNamer }, { replayNotes }, { loadPffRanks }, { MAIN_WEEKLY_YEAR }] = await Promise.all([
         import("../utils/draftSim/data"), import("../utils/draftSim/weeklyMock"), import("../utils/draftSim/pffRanks"), import("../utils/weeklyMockNews"),
       ]);
       const data = await loadSimData(draftClass);
-      const player = assignedPlayers[pickNumber];
+      const assigned = { ...assignedPlayers, ...swap };
+      const player = assigned[pickNumber];
       const pff = player ? await loadPffRanks([player.id]).catch(() => ({})) : {};
-      const editorPicks = visiblePicks.map((p) => ({ ...p, selection: assignedPlayers[p.pickNumber] || null }));
+      const editorPicks = visiblePicks.map((p) => ({ ...p, selection: assigned[p.pickNumber] || null }));
       const ctx = { ...teamNamer(data.branding), staff: data.staff, season: data.season, year: draftClass, history: data.history, pff, rand: Math.random, light: draftClass !== MAIN_WEEKLY_YEAR };
       const note = replayNotes(data, editorPicks, [pickNumber], { trades: weeklyTrades, ctx })[pickNumber];
       if (!note) throw new Error("Not on the sim board");
@@ -339,6 +346,45 @@ export default function CreateMock() {
     } catch (err) {
       console.error("Regenerate analysis error:", err);
       setRegen((r) => ({ ...r, [pickNumber]: "error" }));
+    }
+  };
+
+  // Sim pick: the player this pick's team takes in the sim, the mock before
+  // it as it stands (Less variance, a fresh roll each click). The next
+  // class's mock is held to the same needs and position rules it was
+  // drafted with — rebuilt from the main-class week it was drafted on top
+  // of. A pick that had a note gets its note rewritten for him.
+  const simPick = async (pickNumber) => {
+    setSimming((r) => ({ ...r, [pickNumber]: "busy" }));
+    try {
+      const [{ loadSimData }, wm, { MAIN_WEEKLY_YEAR }] = await Promise.all([
+        import("../utils/draftSim/data"), import("../utils/draftSim/weeklyMock"), import("../utils/weeklyMockNews"),
+      ]);
+      let data = await loadSimData(draftClass);
+      let rules = {};
+      if (draftClass !== MAIN_WEEKLY_YEAR && !wm.RANDOM_ORDER_YEARS.includes(draftClass) && weeklyId) {
+        const week = await getDoc(doc(db, "weeklyMocks", weeklyId));
+        const baseId = week.exists() ? week.data().baseWeekId : null;
+        const base = baseId ? await getDoc(doc(db, "weeklyMocks", baseId)) : null;
+        const basePicks = base?.exists() ? base.data().picks || [] : [];
+        if (basePicks.length) {
+          const main = await loadSimData(MAIN_WEEKLY_YEAR);
+          const posRules = wm.nextYearRules(data.needs, basePicks, main.board);
+          data = { ...data, needs: wm.nextYearNeeds(data.needs, basePicks, main.board).needs };
+          rules = { posRules, qbTeams: wm.qbTeamsOf(posRules) };
+        }
+      }
+      const editorPicks = visiblePicks.map((p) => ({ ...p, selection: assignedPlayers[p.pickNumber] || null }));
+      const prospect = wm.simPickFor(data, editorPicks, pickNumber, { seed: Date.now() | 0, ...rules });
+      if (!prospect) throw new Error("No one left on the sim board");
+      const player = players.find((p) => p.id === prospect.id)
+        || { id: prospect.id, First: prospect.First, Last: prospect.Last, Position: prospect.Position, School: prospect.School || "", Slug: prospect.Slug || "" };
+      assign(pickNumber, player);
+      setSimming((r) => ({ ...r, [pickNumber]: null }));
+      if (picks.find((p) => p.pickNumber === pickNumber)?.note) regenerateNote(pickNumber, { [pickNumber]: player });
+    } catch (err) {
+      console.error("Sim pick error:", err);
+      setSimming((r) => ({ ...r, [pickNumber]: "error" }));
     }
   };
 
@@ -540,7 +586,7 @@ export default function CreateMock() {
           )}
           {isEditMode && <button onClick={() => navigate(`/mocks/${mockId}/view`)} style={button("outline", isMobile)}>Preview</button>}
           {isEditMode && isOwner && <button onClick={handleDeleteMock} disabled={deleting} style={button("danger", isMobile)}>{deleting ? "Deleting…" : "Delete"}</button>}
-          <button onClick={() => { if (window.confirm("Clear all picks? This cannot be undone.")) setAssignedPlayers({}); }} style={button("danger", isMobile)}>Clear</button>
+          <button onClick={() => { if (window.confirm("Clear all picks and their analysis? This cannot be undone.")) { setAssignedPlayers({}); setPicks((prev) => prev.map((p) => ({ ...p, note: "" }))); setOpenNotes({}); } }} style={button("danger", isMobile)}>Clear</button>
           <button onClick={handleSaveMock} disabled={saveStatus === "saving"}
             style={{ ...button("blue", isMobile), background: saveStatus === "saved" ? "#2e7d32" : saveStatus === "error" ? "#b42318" : BLUE, borderColor: "transparent", cursor: saveStatus === "saving" ? "default" : "pointer" }}>
             {saveLabel}
@@ -680,11 +726,17 @@ export default function CreateMock() {
                       {pick.note && <div style={{ textAlign: "right", fontSize: 10, color: "#98a2b3", fontFamily: BODY_FONT }}>{pick.note.length}/{NOTE_MAX}</div>}
                     </div>
                   )}
-                  {weekly && isOwner && player && (
-                    <div style={{ padding: "4px 0 0 48px", display: "flex", alignItems: "center", gap: 8 }}>
-                      <button onClick={() => regenerateNote(pick.pickNumber)} disabled={regen[pick.pickNumber] === "busy"} style={addTextBtn}>
-                        {regen[pick.pickNumber] === "busy" ? "Regenerating…" : "↻ Regenerate analysis"}
+                  {weekly && isOwner && (
+                    <div style={{ padding: "4px 0 0 48px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <button onClick={() => simPick(pick.pickNumber)} disabled={simming[pick.pickNumber] === "busy"} style={addTextBtn} title="Take the player this team's sim logic would, with the mock as it stands before this pick">
+                        {simming[pick.pickNumber] === "busy" ? "Simming…" : "⚡ Sim pick"}
                       </button>
+                      {player && (
+                        <button onClick={() => regenerateNote(pick.pickNumber)} disabled={regen[pick.pickNumber] === "busy"} style={addTextBtn}>
+                          {regen[pick.pickNumber] === "busy" ? "Regenerating…" : "↻ Regenerate analysis"}
+                        </button>
+                      )}
+                      {simming[pick.pickNumber] === "error" && <span style={{ fontSize: 11, color: "#c8102e", fontWeight: 700, fontFamily: BODY_FONT }}>Couldn&apos;t sim this pick</span>}
                       {regen[pick.pickNumber] === "error" && <span style={{ fontSize: 11, color: "#c8102e", fontWeight: 700, fontFamily: BODY_FONT }}>Couldn&apos;t regenerate — is he on the sim board?</span>}
                     </div>
                   )}
@@ -696,8 +748,10 @@ export default function CreateMock() {
 
         {/* ── PLAYER BANK ── */}
         {(!isMobile || showBank) && (
-          <div style={{ ...panel, maxHeight: isMobile ? "calc(60vh / var(--pz, 1))" : "calc(80vh / var(--pz, 1))", position: isMobile ? "static" : "sticky", top: 16 }}>
-            <div style={panelHead}>
+          // Not clipped (overflow visible), so the Position menu still opens
+          // past the bank when a filter leaves it short — or empty.
+          <div style={{ ...panel, overflow: "visible", maxHeight: isMobile ? "calc(60vh / var(--pz, 1))" : "calc(80vh / var(--pz, 1))", position: isMobile ? "static" : "sticky", top: 16 }}>
+            <div style={{ ...panelHead, borderRadius: "14px 14px 0 0" }}>
               <span style={panelTitle}>Player Bank — {draftClass}</span>
               <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 700, fontFamily: BODY_FONT }}>{sortedPlayers.length} players</span>
             </div>
@@ -732,7 +786,7 @@ export default function CreateMock() {
               </div>
             </div>
 
-            <div style={{ overflowY: "auto", flex: 1 }}>
+            <div style={{ overflowY: "auto", flex: 1, borderRadius: "0 0 14px 14px" }}>
               {bankLoading ? (
                 <LoadingSpinner label="Loading players" size={28} minHeight="120px" />
               ) : sortedPlayers.length === 0 ? (
