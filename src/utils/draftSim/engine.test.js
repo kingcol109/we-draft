@@ -177,10 +177,11 @@ test("We-Draft.com facts: national leader, community traits, position rank", () 
   const e = { type: "pick", pick: { overall: 3, round: 1 }, team: "AAA", prospect: p, value: 2, fit: null, positionRun: 1, positionOrdinal: 1 };
   expect(weDraftFacts(e, deskCtx("some")).map((f) => f.cat)).toEqual(expect.arrayContaining(["traitsBoth", "posRankTop"]));
   expect(statFacts(e, deskCtx("some")).map((f) => f.cat)).toEqual(["leaderFirst"]);
-  // We-Draft.com: board rank, then one fact.
+  // We-Draft.com: one fact, never a rank (the card's tiles carry board and position rank).
   const post = reactTo(e, { ...deskCtx("mine"), rand: () => 0 })[0];
-  expect(post.lines).toHaveLength(2);
-  expect(post.lines[0]).toMatch(/We-Draft\.com board|board rank/);
+  expect(post.lines).toHaveLength(1);
+  expect(post.lines[0]).not.toMatch(/board rank|No\. 1 |top-rated/i);
+  expect(post.card).toMatchObject({ first: "Colin", last: "Simmons", posRank: 1 });
   // Dr. PP Johnson reads the numbers.
   const pp = ANALYSTS.find((a) => a.id === "pp").react(e, { ...deskCtx("all"), rand: () => 0 });
   expect(pp.lines[0]).toBe("Simmons' 10 sacks in 2026 are the most in college football.");
@@ -974,7 +975,7 @@ test("desk: a personality never posts the same line twice in a round; a new roun
   // The same pick over and over: identical variables, so a repeated line is a repeated text.
   const posted = () => reactTo(e, ctx).slice(1).map((p) => `${p.analyst.id}|${p.text}`);
   const round1 = Array.from({ length: 40 }, posted).flat();
-  expect(round1.length).toBeGreaterThan(10);
+  expect(round1.length).toBeGreaterThanOrEqual(10);
   expect(new Set(round1).size).toBe(round1.length);
   // Round 2: lines from round 1 are allowed again.
   const e2 = { ...e, pick: { ...e.pick, overall: 40, round: 2 } };

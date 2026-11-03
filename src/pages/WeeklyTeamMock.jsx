@@ -336,7 +336,7 @@ export default function WeeklyTeamMock({ team, year = MAIN_WEEKLY_YEAR }) {
       </Helmet>
       <style>{MOCK_CARD_CSS}</style>
 
-      <MockPageShell year={year} isMobile={isMobile} videoPlayerIds={picks.map((p) => p.player?.id).filter(Boolean)} leftRail={<TeamMocksRail current={team} year={year} teams={teams || {}} full={fullMock} />}>
+      <MockPageShell year={year} isMobile={isMobile} adTeam={team} videoPlayerIds={picks.map((p) => p.player?.id).filter(Boolean)} leftRail={<TeamMocksRail current={team} year={year} teams={teams || {}} full={fullMock} />}>
         <Breadcrumbs items={crumbs} />
         <ArticleHero hero={heroTeam} isMobile={isMobile} kicker={`Weekly Mock Draft · ${year}`}
           headline={headline} dek={intro} date={updated ? <time dateTime={publishedIso}>Updated {updated}</time> : ""}

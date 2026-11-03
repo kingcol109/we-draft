@@ -11,6 +11,7 @@ import { canonicalEvalData } from "../utils/evaluationCopies";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { classSnapshotRanks, compareRanks } from "../utils/classRanks";
 import { SideRailAd } from "../components/MarginAds";
+import SimAdCard from "../components/draftSim/SimAdCard";
 import { SUB_TABS, inSubTab } from "../utils/subPositions";
 
 const BLUE = "#0055a5";
@@ -1420,6 +1421,10 @@ export default function CommunityBoard() {
         <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
       </div>
 
+      {/* Draft Sim strip — mobile only, between the class header and the
+          filters; desktop has the full card above Videos in the right rail. */}
+      {isMobile && <div style={{ marginBottom: "10px" }}><SimAdCard year={eligibleYear} compact /></div>}
+
       {/* Draft Year — desktop only up here now; on mobile the year filter
           moved down into the 2x2 filter grid (in Position's old slot, as a
           YearDropdown button) instead of getting its own row, since
@@ -1925,7 +1930,10 @@ export default function CommunityBoard() {
           {/* Left column is the ad rail; News only shows in the mobile stack. */}
           <div style={{ position: "sticky", top: "20px" }}><SideRailAd isMobile={isMobile} /></div>
           <div>{MainContent}</div>
-          <div style={{ position: "sticky", top: "20px" }}>{VideosSidebar}</div>
+          <div style={{ position: "sticky", top: "20px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            <SimAdCard year={eligibleYear} />
+            {VideosSidebar}
+          </div>
         </div>
       )}
     </>

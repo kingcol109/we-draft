@@ -37,6 +37,37 @@ test("community first round: drafted in order, no player twice", () => {
   expect(out.years["2027"].all.firstRound).toEqual([{ overall: 1, id: "a", n: 5, of: 6 }, { overall: 2, id: "c", n: 3, of: 7 }]);
 });
 
+test("community first round on the current order: each slot its team's favorite, wherever its pick used to be", () => {
+  const out = buildSimInsights({
+    years: ["2027"],
+    // Last week NYJ picked 1st and CLE 2nd; now CLE is on the clock first, and DAL holds NYJ's old spot via a trade.
+    picks: [
+      { year: "2027", team: "NYJ", day: "2026-09-01", p: { "1_a": 6, "1_b": 1 } },
+      { year: "2027", team: "CLE", day: "2026-09-01", p: { "2_c": 5, "2_a": 2, "30_d": 9 } },
+      { year: "2027", team: "MIA", day: "2026-09-01", p: { "3_e": 4 } },
+    ],
+    orders: { 2027: [{ Pick: 2, Team: "NYJ" }, { Pick: 1, Team: "CLE" }, { Pick: 3, Team: "BUF", Traded: "DAL" }, { Pick: 33, Team: "CLE" }] },
+  });
+  const r = out.years["2027"].all.firstRound;
+  // CLE at 1: c (picked near 1) over d (more picks, but at 30); NYJ keeps its a; DAL, with no picks of its own, takes No. 3's.
+  expect(r).toEqual([
+    { overall: 1, team: "CLE", id: "c", n: 5, of: 16 },
+    { overall: 2, team: "NYJ", id: "a", n: 6, of: 7 },
+    { overall: 3, team: "DAL", id: "e", n: 4, of: 4 },
+  ]);
+});
+
+test("community first round: a team with two picks takes one player a position, never a second QB", () => {
+  const out = buildSimInsights({
+    years: ["2027"],
+    picks: [{ year: "2027", team: "NYJ", day: "2026-09-01", p: { "4_qb1": 9, "10_qb2": 8, "10_wr1": 3, "6_wr2": 2, "6_ol1": 1 } }],
+    orders: { 2027: [{ Pick: 4, Team: "NYJ" }, { Pick: 6, Team: "NYJ" }, { Pick: 10, Team: "NYJ" }] },
+    positions: { 2027: { qb1: "QB", qb2: "QB", wr1: "WR", wr2: "WR", ol1: "OL" } },
+  });
+  // qb2 is their second-most-picked, but they have their QB; a second WR only after the OL.
+  expect(out.years["2027"].all.firstRound.map((p) => p.id)).toEqual(["qb1", "wr1", "ol1"]);
+});
+
 test("community favorites: the median pick furthest ahead of the board, 10 picks at least", () => {
   expect(BOARD_POSITIONS).toEqual(SIM_POSITIONS);
   const ranks = boardRanks({ QB: [{ i: "q", cr: 3 }], WR: [{ i: "w", cr: 1 }, { i: "x", cr: 50 }, { i: "y", cr: 90 }], K: [{ i: "k", cr: 2 }] });

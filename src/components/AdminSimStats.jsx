@@ -19,8 +19,9 @@ import { loadExpandedBoard, SIM_YEARS, SIM_YEAR } from "../utils/draftSim/data";
 import { statsDay, WATCH_KEY } from "../utils/draftSim/stats";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import { SIM_POSITIONS, SPECIALISTS } from "../utils/draftSim/engine";
-import { buildSimInsights, playerIds, withNames, boardRanks, BOARD_POSITIONS, INSIGHTS_DOC } from "../utils/draftSim/insights";
+import { buildSimInsights, playerIds, withNames, boardRanks, boardPositions, BOARD_POSITIONS, INSIGHTS_DOC } from "../utils/draftSim/insights";
 import { COMP_SNAPSHOT_VERSION } from "../utils/historicalStats";
+import { fetchDraft, UPCOMING_DRAFTS } from "./UpcomingPicks";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -53,12 +54,18 @@ function PublishInsights() {
     try {
       const all = async (name) => (await getDocs(collection(db, name))).docs.map((d) => ({ day: d.id, ...d.data() }));
       const [teams, picks, daily] = await Promise.all([all("draftSimTeams"), all("draftSimPicks"), all("draftSimDaily")]);
-      // Each class's board spots, for the community favorites.
-      const boards = Object.fromEntries(await Promise.all(SIM_YEARS.map(async (y) => {
+      // Each class's board snapshots -> its board spots (the community
+      // favorites) and each player's position (the first round's rule).
+      const rowsByYear = Object.fromEntries(await Promise.all(SIM_YEARS.map(async (y) => {
         const snaps = await Promise.all(BOARD_POSITIONS.map((pos) => getDoc(doc(db, "compSnapshots", `class_${y}_${pos}`))));
-        return [String(y), boardRanks(Object.fromEntries(snaps.map((d, i) => [BOARD_POSITIONS[i], d.exists() ? d.data().rows || [] : []])))];
+        return [String(y), Object.fromEntries(snaps.map((d, i) => [BOARD_POSITIONS[i], d.exists() ? d.data().rows || [] : []]))];
       })));
-      const built = buildSimInsights({ teams, picks, daily, years: SIM_YEARS, boards });
+      const boards = Object.fromEntries(Object.entries(rowsByYear).map(([y, rows]) => [y, boardRanks(rows)]));
+      const positions = Object.fromEntries(Object.entries(rowsByYear).map(([y, rows]) => [y, boardPositions(rows)]));
+      // Each class's current draft order — the community's first round is laid out on it.
+      const orders = Object.fromEntries(await Promise.all(SIM_YEARS.map((y) => fetchDraft(UPCOMING_DRAFTS.find((d) => d.year === String(y)) || { year: String(y), legacy: `draftOrder${y}` })
+        .then((d) => [String(y), d.picks || []]).catch(() => [String(y), []]))));
+      const built = buildSimInsights({ teams, picks, daily, years: SIM_YEARS, boards, orders, positions });
       const players = await Promise.all(playerIds(built).map((id) => getDoc(doc(db, "players", id)).then((s) => (s.exists() ? { id, ...s.data() } : null)).catch(() => null)));
       const insights = withNames(built, players);
       await setDoc(doc(db, "compSnapshots", INSIGHTS_DOC), { version: COMP_SNAPSHOT_VERSION, ...insights, builtAt: serverTimestamp() });

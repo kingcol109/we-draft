@@ -289,6 +289,24 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['sims', 'completed', 'picks'])
         && bumpedByOne('sims') && bumpedByOne('completed') && bumpedByOne('picks');
     }
+    // Signed-in visitors by day (src/utils/accountVisits.js): { u: { [uid]:
+    // true } }. Each user adds only their own uid; admins read.
+    match /siteDailyAccounts/{day} {
+      allow read: if isAdmin();
+      allow create: if request.auth != null && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['u'])
+        && request.resource.data.u.keys().hasOnly([request.auth.uid])
+        && request.resource.data.u[request.auth.uid] == true;
+      allow update: if request.auth != null
+        && request.resource.data.keys().hasOnly(['u'])
+        && request.resource.data.u.diff(resource.data.u).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.u[request.auth.uid] == true;
+    }
+    // Each day's new / returning visitors from GA4
+    // (scripts/syncGoogleAnalytics.js, Admin SDK); admins read.
+    match /analyticsDaily/{day} {
+      allow read: if isAdmin();
+    }
     match /draftSimPicks/{id} {
       allow read: if isAdmin();
       allow create: if request.resource.data.keys().hasOnly(['year', 'team', 'day', 'p'])
@@ -433,6 +451,22 @@ service cloud.firestore {
     // pffNflRosters — NFLTeamPage.jsx's depth chart sorts by it);
     // nflTeamNeeds the admin's need labels per position (Admin → Mock
     // Draft → Team Needs), which the Draft Sim reads.
+    // NFL player evaluations (src/utils/nflEvaluations.js) — the NFL page's
+    // player grades. Same shape and rules as players/{id}/evaluations: the
+    // public-read copy never holds an email, and a private one no written
+    // take (that lives on the owner-only users/{uid}/nflEvaluations copy).
+    match /nflPlayers/{slug} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /evaluations/{uid} {
+        allow read: if true;
+        allow create, update: if ((request.auth != null && request.auth.uid == uid) || isAdmin())
+                              && request.resource.data.get("email", "") == ""
+                              && (request.resource.data.get("visibility", "") == "public"
+                                  || request.resource.data.get("evaluation", "") == "");
+        allow delete: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+      }
+    }
     match /nflDepthOrder/{abbr} {
       allow read: if true;
       allow write: if isAdmin();
@@ -838,6 +872,14 @@ service cloud.firestore {
         allow read, delete: if (request.auth != null && request.auth.uid == uid) || isAdmin();
         allow create, update: if ((request.auth != null && request.auth.uid == uid) || isAdmin())
                               && request.resource.data.get("email", "") == "";
+      }
+      match /nflEvaluations/{slug} {
+        allow read, write: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+      }
+      // Archived NFL evaluations (src/utils/nflEvaluations.js) — one
+      // read-only snapshot per player, like archivedEvaluations below.
+      match /nflArchivedEvaluations/{slug} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
       }
       match /archivedEvaluations/{playerId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { auth, provider, db } from "../firebase";
+import { countAccountVisit } from "../utils/accountVisits";
 import {
   signInWithPopup,
   browserPopupRedirectResolver,
@@ -90,6 +91,8 @@ export function AuthProvider({ children }) {
         }
 
         setUser(u);
+        // Today's signed-in visitors (Admin → Analytics → Daily Visitors).
+        countAccountVisit(u.uid);
         try {
           const ref = doc(db, "users", u.uid);
           const snap = await getDoc(ref);

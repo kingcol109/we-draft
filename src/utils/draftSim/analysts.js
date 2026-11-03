@@ -68,7 +68,7 @@ export const VARIABLES = {
   player: "Full name", last: "Last name", lastPoss: "Last name, possessive (Simmons')", pos: "Position (EDGE)",
   posName: "Position in words (edge rusher)", aPosName: "With a/an (an edge rusher)", Strength: "Top strength, capitalized", Weakness: "Top concern, capitalized", posPlural: "Plural (edge rushers)", school: "College", team: "Team abbreviation",
   qb: "The QB this team took in round 1 (protect / weapon lines)", qbLast: "His last name",
-  star: "The team's Franchise / Difference Maker player the pick links to (star lines)", starLast: "His last name", room: "The room the pick joins (receiver room, pass rush, secondary)",
+  star: "The team's Elite / Difference Maker player the pick links to (star lines)", starLast: "His last name", room: "The room the pick joins (receiver room, pass rush, secondary)",
   teamName: "Team full name", city: "Team city (New York)", nick: "Team nickname", n: "Overall pick number", rank: "We-Draft.com board rank",
   posRank: "Position rank (5)", posRankOrd: "Position rank (5th)", spots: "Spots of value / reach", grade: "Community grade (results screen: the team's draft grade)",
   count: "Number of evaluations", strength: "Top community strength", strength2: "Second strength", weakness: "Top community concern",
@@ -181,9 +181,9 @@ export const WEDRAFT_LINES = {
   grade: {
     label: "Community grade", when: "He has a community grade.",
     lines: [
-      "{last} carries a {grade} community grade across {count} evaluations.",
-      "The community's verdict on {last}: {grade} ({count} evaluations).",
-      "{count} We-Draft.com evaluations, consensus {grade}.",
+      "{last} carries a {grade} community grade.",
+      "The community's verdict on {last}: {grade}.",
+      "We-Draft.com community consensus on {last}: {grade}.",
     ],
   },
   value: {
@@ -321,10 +321,10 @@ export const ISAAC_LINES = {
       "The {nick} keep stacking pieces around {qbLast}. {player} at {n} is a gift to their young QB.",
     ],
   },
-  // The team's stars (Franchise / Difference Maker players, stars.js):
+  // The team's stars (Elite / Difference Maker players, stars.js):
   // {star} / {starLast} the star, {room} the room the pick joins.
   starQbShade: {
-    label: "A first-round QB behind a star", when: "A first-round QB by a team whose quarterback is tagged Franchise / Difference Maker. {star} / {starLast} are that quarterback.",
+    label: "A first-round QB behind a star", when: "A first-round QB by a team whose quarterback is tagged Elite / Difference Maker. {star} / {starLast} are that quarterback.",
     lines: [
       "I wonder what {star} thinks about that pick.",
       "The {nick} take {player} in the first round. Somebody check on {starLast}.",
@@ -333,7 +333,7 @@ export const ISAAC_LINES = {
     ],
   },
   starWeapon: {
-    label: "A weapon for the star QB", when: "A WR or TE pick by a team whose quarterback is tagged Franchise / Difference Maker. {star} / {starLast} are that quarterback.",
+    label: "A weapon for the star QB", when: "A WR or TE pick by a team whose quarterback is tagged Elite / Difference Maker. {star} / {starLast} are that quarterback.",
     lines: [
       "The {nick} get {star} a weapon in {player}.",
       "{starLast} just got another target. {player} to the {nick} at {n}.",
@@ -342,7 +342,7 @@ export const ISAAC_LINES = {
     ],
   },
   starProtect: {
-    label: "Protecting the star QB", when: "An OL pick by a team whose quarterback is tagged Franchise / Difference Maker. {star} / {starLast} are that quarterback.",
+    label: "Protecting the star QB", when: "An OL pick by a team whose quarterback is tagged Elite / Difference Maker. {star} / {starLast} are that quarterback.",
     lines: [
       "The {nick} are investing in keeping {star} upright. {player} is the pick.",
       "{starLast} just got a new bodyguard. {player} to the {nick}.",
@@ -350,7 +350,7 @@ export const ISAAC_LINES = {
     ],
   },
   starLanes: {
-    label: "Blocking for the star RB", when: "An OL pick by a team whose running back is tagged Franchise / Difference Maker. {star} / {starLast} are that back.",
+    label: "Blocking for the star RB", when: "An OL pick by a team whose running back is tagged Elite / Difference Maker. {star} / {starLast} are that back.",
     lines: [
       "{star} is going to love running behind {player}.",
       "The {nick} open up some lanes for {starLast}. {player} at {n}.",
@@ -358,7 +358,7 @@ export const ISAAC_LINES = {
     ],
   },
   starRush: {
-    label: "A pass rusher with a star one", when: "An EDGE (or a DL tagged as a pass rusher) by a team with a Franchise / Difference Maker pass rusher. {star} / {starLast} are that rusher.",
+    label: "A pass rusher with a star one", when: "An EDGE (or a DL tagged as a pass rusher) by a team with a Elite / Difference Maker pass rusher. {star} / {starLast} are that rusher.",
     lines: [
       "Good luck stopping the {nick} pass rush with {star} and {player}.",
       "{starLast} and {last} coming off the edge? Quarterbacks are going to have nightmares.",
@@ -366,7 +366,7 @@ export const ISAAC_LINES = {
     ],
   },
   starPair: {
-    label: "A second star in the room", when: "A pick at a position where the team already has a Franchise / Difference Maker player. {star} / {starLast} are that player; {room} is the room (receiver room, secondary…).",
+    label: "A second star in the room", when: "A pick at a position where the team already has a Elite / Difference Maker player. {star} / {starLast} are that player; {room} is the room (receiver room, secondary…).",
     lines: [
       "{star} and {player} in the same {room} is a scary sight.",
       "The {nick} already have {star}. Adding {player} to that {room} isn't fair.",
@@ -1385,9 +1385,16 @@ function chooseFacts(facts, n, rand) {
 function weDraftPick(e, ctx) {
   const p = e.prospect;
   const title = `PICK ${e.pick.overall} · ${e.team} — ${p.First} ${p.Last}, ${p.Position}, ${p.School || "—"}`;
-  const rank = p.rank ? lineFrom(WEDRAFT_LINES, "boardRank", pickVars(e, ctx), ctx, "wedraft") : null;
-  const facts = chooseFacts(weDraftFacts(e, ctx), 1, ctx.rand).map((f) => lineFrom(WEDRAFT_LINES, f.cat, f.vars, ctx, "wedraft"));
-  return { text: title, lines: [rank, ...facts].filter(Boolean) };
+  // Board and position rank are tiles on the card, not lines.
+  const facts = chooseFacts(weDraftFacts(e, ctx).filter((f) => f.group !== "rank"), 1, ctx.rand).map((f) => lineFrom(WEDRAFT_LINES, f.cat, f.vars, ctx, "wedraft"));
+  // The profile "screenshot" the feed attaches (SimFeed ProfileShot).
+  const card = {
+    id: p.id, first: p.First, last: p.Last, pos: p.Position, school: p.School || "", logo: p.logoDark || p.logo || "",
+    year: ctx.year || "", pick: e.pick.overall, team: e.team, teamName: ctx.teamName(e.team) || e.team, rank: p.rank || null, posRank: p.positionRank || null,
+    grade: gradeLabel(p.avg) || "", height: p.height ?? null, weight: p.weight ?? null,
+    strengths: (p.strengths || []).slice(0, 3).map(traitText),
+  };
+  return { text: title, lines: facts.filter(Boolean), card };
 }
 
 function ppPick(e, ctx) {
@@ -1834,7 +1841,7 @@ export const ANALYSTS = [
     id: "isaac", name: "Walter Donaldson", handle: "@WalterDonaldson", role: "Draft Analyst", verified: true, enabled: true,
     color: "#14a3a3", initials: "WD", delay: 1300, lines: ISAAC_LINES,
     about: "Opinions — steals, reaches, quarterbacks, staff fits, the CFBD game that put a player on his radar, trades up, and your final grade.",
-    cadence: "Most likely on a shock (10+ spots off the board in round 1, 25+ on Day 2) and the other headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, a pick that links to one of the team's stars (Franchise / Difference Maker players), a team passing on a big need (more so the second time), and a team trading up — told with the pick.",
+    cadence: "Most likely on a shock (10+ spots off the board in round 1, 25+ on Day 2) and the other headline picks: No. 1, QBs, steals, reaches, big games, a blocker or target for a team's first-round QB, a pick that links to one of the team's stars (Elite / Difference Maker players), a team passing on a big need (more so the second time), and a team trading up — told with the pick.",
     weight: (e, ctx) => {
       if (e.type !== "pick") return 0;
       if (e.pick.overall === 1) return 100;

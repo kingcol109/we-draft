@@ -1,6 +1,7 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment } from "firebase/firestore";
+import AdminDailyVisitors from "../components/AdminDailyVisitors";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
@@ -28,6 +29,7 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import AdminPhotos from "../components/AdminPhotos";
+import AdminSideGraphics from "../components/AdminSideGraphics";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../utils/snapshotBuilders";
@@ -310,6 +312,7 @@ const CONTENT_SECTION_TABS = [
   { key: "branding", label: "Branding" },
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
+  { key: "sidegraphics", label: "Side Graphics" },
 ];
 
 // Old ?section= keys, now tabs: [section, tab]. YouTube Analytics' sign-in
@@ -346,6 +349,7 @@ function ContentSection({ initialTab }) {
       {tab === "branding" && <BrandingSection />}
       {tab === "calendar" && <ContentCalendarManager />}
       {tab === "photos" && <AdminPhotos />}
+      {tab === "sidegraphics" && <AdminSideGraphics />}
     </>
   );
 }
@@ -9432,6 +9436,9 @@ function AnalyticsSection() {
           ))}
         </div>
       </div>
+
+      {/* ── Daily Visitors: new / returning (GA4) and accounts ── */}
+      <AdminDailyVisitors />
 
       {/* ── Page Views (Google Analytics, via analytics/{slug}) ── */}
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>

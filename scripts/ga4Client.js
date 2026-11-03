@@ -109,4 +109,46 @@ async function fetchPageViewsByPath() {
   return perWindowRows.flat();
 }
 
-module.exports = { fetchPageViewsByPath };
+// ── Visitors by day for the last `days` days (today included, in the
+// property's timezone): each day's active users split by GA4's
+// newVsReturning — "new" (first visit on that browser) and "returning"
+// (it has been here before). → [{ day: "YYYY-MM-DD", new, returning, other }]
+// (other: GA4's "(not set)", users it couldn't place), oldest first. ──
+async function fetchDailyVisitors(days = 30) {
+  if (!GA_PROPERTY_ID) {
+    throw new Error("GA_PROPERTY_ID env var is not set.");
+  }
+  const token = await getAccessToken();
+  const response = await fetch(
+    "https://analyticsdata.googleapis.com/v1beta/properties/" + GA_PROPERTY_ID + ":runReport",
+    {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: (days - 1) + "daysAgo", endDate: "today" }],
+        dimensions: [{ name: "date" }, { name: "newVsReturning" }],
+        metrics: [{ name: "activeUsers" }],
+        limit: 10000,
+      }),
+    }
+  );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error("GA4 API error for daily visitors (" + response.status + "): " + detail);
+  }
+  const data = await response.json();
+  const byDay = {};
+  (data.rows || []).forEach((row) => {
+    const d = row.dimensionValues[0].value; // YYYYMMDD
+    const day = d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6, 8);
+    const kind = row.dimensionValues[1].value;
+    const n = Number(row.metricValues[0].value) || 0;
+    const e = (byDay[day] = byDay[day] || { day, new: 0, returning: 0, other: 0 });
+    if (kind === "new") e.new += n;
+    else if (kind === "returning") e.returning += n;
+    else e.other += n;
+  });
+  return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day));
+}
+
+module.exports = { fetchPageViewsByPath, fetchDailyVisitors };

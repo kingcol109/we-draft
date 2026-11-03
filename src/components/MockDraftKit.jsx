@@ -50,7 +50,8 @@ export function useIsMobile() {
 // room) but keeps the margin ads. leftRail: a column of the page's own in
 // place of the top prospects (the weekly mock's team pages: every team).
 // videoPlayerIds: the players the right rail's videos lead with (RecentVideosRail).
-export function MockPageShell({ width = 1000, year = "2027", rails: allowRails = true, leftRail = null, videoPlayerIds = null, isMobile, children }) {
+// adTeam: the NFL team whose ad the margin ads show first (a team's mock page).
+export function MockPageShell({ width = 1000, year = "2027", rails: allowRails = true, leftRail = null, videoPlayerIds = null, adTeam = "", isMobile, children }) {
   const fits = () => typeof window !== "undefined" && viewportCssWidth() >= width + 2 * SIDE + 32;
   const [showRails, setShowRails] = useState(fits);
   const contentRef = useRef(null);
@@ -68,7 +69,7 @@ export function MockPageShell({ width = 1000, year = "2027", rails: allowRails =
 
   return (
     <>
-      <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={rails ? 0 : 24} watch={[rails]} />
+      <MarginAds contentRef={contentRef} isMobile={isMobile} horizontalPadding={rails ? 0 : 24} preferTeam={adTeam} watch={[rails]} />
       <div ref={contentRef} style={{ position: "relative", maxWidth: rails ? width + 2 * SIDE : width, margin: "0 auto", padding: rails ? `0 ${SIDE}px` : 0, boxSizing: "border-box" }}>
         {rails && (
           <>

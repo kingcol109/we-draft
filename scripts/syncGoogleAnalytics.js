@@ -22,7 +22,7 @@
 //      job would use — no separate "manual" vs "automated" implementation
 //      to keep in sync with each other.
 
-const { fetchPageViewsByPath } = require("./ga4Client");
+const { fetchPageViewsByPath, fetchDailyVisitors } = require("./ga4Client");
 const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
 
@@ -204,6 +204,8 @@ async function writeAnalyticsDocs(db, byKey) {
   return written;
 }
 
+const DAILY_DAYS = 30;
+
 // ── The actual sync, callable from anywhere (CLI or the API route). Always
 // returns a plain summary object rather than throwing on partial failure —
 // a GA4 error should be visible to the caller (and shown in the admin
@@ -217,6 +219,17 @@ async function runSync() {
   const db = getFirestore();
   const written = await writeAnalyticsDocs(db, byKey);
 
+  // Each day's new and returning visitors, analyticsDaily/{YYYY-MM-DD}
+  // (Admin → Analytics → Daily Visitors). The last DAILY_DAYS days are
+  // written again every run, so a day synced while it was still going
+  // gets its full count the next morning.
+  const visitors = await fetchDailyVisitors(DAILY_DAYS);
+  const batch = db.batch();
+  visitors.forEach((v) => batch.set(db.collection("analyticsDaily").doc(v.day), {
+    new: v.new, returning: v.returning, other: v.other, syncedAt: FieldValue.serverTimestamp(),
+  }, { merge: true }));
+  await batch.commit();
+
   const totalPageViews = Array.from(byKey.values()).reduce((sum, v) => sum + v.pageViews.total, 0);
   const byType = {};
   for (const { type } of byKey.values()) byType[type] = (byType[type] || 0) + 1;
@@ -226,6 +239,7 @@ async function runSync() {
     slugsSynced: written,
     docsByType: byType,
     totalPageViews,
+    visitorDays: visitors.length,
     durationMs: Date.now() - startedAt,
     syncedAt: new Date().toISOString(),
   };

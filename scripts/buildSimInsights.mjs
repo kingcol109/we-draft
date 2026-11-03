@@ -9,14 +9,16 @@
 //
 // Cost: every counter doc (one per class per day, one per class/team/day,
 // one per day), each class's board snapshots (compSnapshots/class_{year}_
-// {pos} — the community favorites' board spots) plus the named players — a few thousand reads a run, every
+// {pos} — the community favorites' board spots), each class's draft order
+// (the first round's teams) plus the named players — a few thousand reads a run, every
 // 3 hours (.github/workflows/build-sim-insights.yml).
 // Usage:
 //   node --env-file=.env scripts/buildSimInsights.mjs            # write
 //   node --env-file=.env scripts/buildSimInsights.mjs --dry-run  # build + report only
 import { createRequire } from "module";
-import { buildSimInsights, playerIds, withNames, boardRanks, BOARD_POSITIONS, INSIGHTS_DOC } from "../src/utils/draftSim/insights.js";
+import { buildSimInsights, playerIds, withNames, boardRanks, boardPositions, BOARD_POSITIONS, INSIGHTS_DOC } from "../src/utils/draftSim/insights.js";
 import { SIM_YEARS } from "../src/utils/draftSim/years.js";
+import { picksFromOrder, withEffectiveOrder, followsOrder, ORDER_YEAR } from "../src/utils/draftOrder.js";
 import { COMP_SNAPSHOT_VERSION } from "../src/utils/historicalStats.js";
 
 const require = createRequire(import.meta.url);
@@ -28,11 +30,24 @@ const db = getFirestore();
 
 const all = async (name) => (await db.collection(name).get()).docs.map((d) => ({ day: d.id, ...d.data() }));
 const [teams, picks, daily] = await Promise.all([all("draftSimTeams"), all("draftSimPicks"), all("draftSimDaily")]);
-const boards = Object.fromEntries(await Promise.all(SIM_YEARS.map(async (y) => {
+// Each class's board snapshots -> its board spots (the favorites) and each
+// player's position (the first round's one-per-position rule).
+const rowsByYear = Object.fromEntries(await Promise.all(SIM_YEARS.map(async (y) => {
   const snaps = await db.getAll(...BOARD_POSITIONS.map((pos) => db.collection("compSnapshots").doc(`class_${y}_${pos}`)));
-  return [String(y), boardRanks(Object.fromEntries(snaps.map((d, i) => [BOARD_POSITIONS[i], d.exists ? d.data().rows || [] : []])))];
+  return [String(y), Object.fromEntries(snaps.map((d, i) => [BOARD_POSITIONS[i], d.exists ? d.data().rows || [] : []]))];
 })));
-const built = buildSimInsights({ teams, picks, daily, years: SIM_YEARS, boards });
+const boards = Object.fromEntries(Object.entries(rowsByYear).map(([y, rows]) => [y, boardRanks(rows)]));
+const positions = Object.fromEntries(Object.entries(rowsByYear).map(([y, rows]) => [y, boardPositions(rows)]));
+// Each class's current draft order (as components/UpcomingPicks.jsx
+// fetchDraft reads it) — the community's first round is laid out on it.
+const orderDoc = async (y) => { const s = await db.collection("draftOrders").doc(String(y)).get(); return s.exists ? s.data() : null; };
+const orders = Object.fromEntries(await Promise.all(SIM_YEARS.map(async (y) => {
+  const own = await orderDoc(y);
+  const base = followsOrder(y) ? await orderDoc(ORDER_YEAR) : own;
+  if (base?.order?.length) return [String(y), picksFromOrder(withEffectiveOrder(y, own, base))];
+  return [String(y), (await db.collection(`draftOrder${y}`).get()).docs.map((d) => d.data())];
+})));
+const built = buildSimInsights({ teams, picks, daily, years: SIM_YEARS, boards, orders, positions });
 const ids = playerIds(built);
 const docs = ids.length ? await db.getAll(...ids.map((id) => db.collection("players").doc(id))) : [];
 const insights = withNames(built, docs.filter((d) => d.exists).map((d) => ({ id: d.id, ...d.data() })));

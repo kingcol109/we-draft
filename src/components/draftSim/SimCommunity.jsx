@@ -80,8 +80,10 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
   const nameOf = (id) => (players[id] ? `${players[id].F} ${players[id].L}` : "Unknown player");
   const logo = (t) => branding[t]?.LogoDark || branding[t]?.Logo1 || "";
   const schoolLogo = (id, size) => <SchoolLogo src={schoolLogos[players[id]?.s]} school={players[id]?.s} size={size} />;
-  // Who holds each first-round slot, when it's the class on the setup screen.
+  // Who holds each first-round slot: the team the doc laid it out for, or
+  // (an older doc) the setup screen's order when it's that class.
   const slotTeam = (overall) => (String(orderYear) === String(year) ? order.find((p) => p.Pick === overall) : null);
+  const teamAt = (p) => { if (p.team) return p.team; const slot = slotTeam(p.overall); return slot ? slot.Traded || slot.Team : null; };
   const empty = !y || (!y.teams.length && !y.firstRound.length);
   // The favorites once there's a full list of them (older docs have none);
   // the most picked until then.
@@ -151,17 +153,16 @@ function Insights({ branding, names, order, orderYear, isMobile }) {
           </div>
           <div style={{ ...PANEL, padding: 14 }}>
             <div style={heading}>THE COMMUNITY&apos;S FIRST ROUND</div>
-            <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>The player users take most at each pick when it&apos;s theirs.</div>
+            <div style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY, marginBottom: 8 }}>The current order, each team taking the player users draft most for it in the first round.</div>
             {y.firstRound.map((p, i) => {
-              const slot = slotTeam(p.overall);
-              const team = slot ? slot.Traded || slot.Team : null;
+              const team = teamAt(p);
               return (
                 <div key={p.overall} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: i ? "1px solid #18233a" : "none", fontFamily: BODY }}>
                   <span style={{ color: "#6f7f99", fontWeight: 900, fontSize: 11, width: 22, textAlign: "right" }}>{p.overall}</span>
                   {team && (logo(team) ? <img src={logo(team)} alt={names(team)} title={names(team)} style={{ width: 20, height: 20, objectFit: "contain" }} /> : <span style={{ width: 20 }} />)}
                   <PlayerLink p={players[p.id]} name={nameOf(p.id)} />
                   <span style={{ color: "#8b9bb4", fontSize: 11 }}>{players[p.id]?.pos}</span>
-                  <span style={{ marginLeft: "auto", color: "#dbe4f0", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums" }} title={`${p.n} of ${p.of} picks`}>{Math.round((p.n / p.of) * 100)}%</span>
+                  <span style={{ marginLeft: "auto", color: "#dbe4f0", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums" }} title={p.team ? `${p.n} of ${names(team)}'s ${p.of} first-round picks` : `${p.n} of ${p.of} picks`}>{Math.round((p.n / p.of) * 100)}%</span>
                 </div>
               );
             })}
