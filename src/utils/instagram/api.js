@@ -22,3 +22,31 @@ export async function igApi(action, payload = {}) {
   }
   return j;
 }
+
+// A video clip from the admin's computer → { path, bytes }: the server opens
+// an upload session in the private bucket (server/instagram/videos.js) and
+// the file goes straight there, not through the API. onProgress(0–1).
+export async function uploadVideo(file, onProgress) {
+  const { path, uploadUrl } = await igApi("video-upload", { type: file.type, bytes: file.size });
+  await new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("PUT", uploadUrl);
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    x.onload = () => (x.status >= 200 && x.status < 300 ? resolve() : reject(new Error(`the upload failed (HTTP ${x.status}).`)));
+    x.onerror = () => reject(new Error("the upload failed (network)."));
+    x.send(file);
+  });
+  return igApi("video-done", { path });
+}
+
+// What a clip is, read in the browser before it's uploaded → { duration (s), w, h }.
+export function videoInfo(file) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    v.preload = "metadata";
+    v.onloadedmetadata = () => { resolve({ duration: v.duration, w: v.videoWidth, h: v.videoHeight }); URL.revokeObjectURL(url); };
+    v.onerror = () => { reject(new Error("the browser can't read that video.")); URL.revokeObjectURL(url); };
+    v.src = url;
+  });
+}

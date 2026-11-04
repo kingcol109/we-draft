@@ -20,6 +20,7 @@ function fakeBucket() {
     save: async (buf) => { files.set(name, buf); },
     exists: async () => [files.has(name)],
     delete: async () => { if (failDelete.has(name)) throw new Error("503 backend"); files.delete(name); },
+    copy: async (dest) => { files.set(dest.name, files.get(name)); },
     getSignedUrl: async ({ expires }) => [`https://storage.googleapis.com/b/${name}?X-Goog-Expires=${expires}&X-Goog-Signature=sig`],
   });
   return { files, failDelete, file, getFiles: async ({ prefix }) => [[...files.keys()].filter((k) => k.startsWith(prefix)).map(file)] };
@@ -304,6 +305,107 @@ test("deleting a post takes its staged files; not while it's publishing", async 
   assert.equal(bucket.files.size, 0);
 });
 
+// ── Scheduling ──
+const HOUR = 3600e3;
+async function schedule(ctx, at, n = 1) {
+  const { attempt } = await pub.startPublish(ctx, "admin1", { postId: "P1", slides: n, scheduledAt: at });
+  await stageAll(ctx, attempt, n);
+  await pub.confirmSchedule(ctx, "admin1", { postId: "P1", attempt });
+  return attempt;
+}
+
+test("scheduled: slides sent now, published by the cron at its time — once", async () => {
+  const meta = fakeMeta();
+  const { db, bucket, ctx } = setup(meta, { slides: 2 });
+  const at = clock + 2 * HOUR;
+  await schedule(ctx, at, 2);
+  let p = post(db);
+  assert.equal(p.status, "scheduled");
+  assert.equal(p.ig.scheduledAt, at);
+  assert.equal(p.ig.scheduleReady, true);
+  assert.equal(bucket.files.size, 2);
+  // Before its time: nothing.
+  assert.deepEqual(await pub.runDue(ctx), { due: 0, scheduled: 1 });
+  assert.equal(meta.calls.length, 0);
+  // Can't be published or scheduled again meanwhile.
+  await assert.rejects(pub.startPublish(ctx, "admin1", { postId: "P1", slides: 2 }), (e) => e.code === "scheduled");
+  clock = at + 30e3;
+  const r = await pub.runDue(ctx);
+  assert.equal(r.published, true);
+  p = post(db);
+  assert.equal(p.status, "published");
+  assert.equal(p.ig.scheduledActive, false);
+  assert.equal(bucket.files.size, 0);
+  // The next tick finds nothing.
+  assert.deepEqual(await pub.runDue(ctx), { due: 0, scheduled: 0 });
+  assert.equal(publishCalls(meta), 1);
+});
+
+test("two ticks at once take a due post once", async () => {
+  const meta = fakeMeta();
+  const { ctx } = setup(meta);
+  const at = clock + HOUR;
+  await schedule(ctx, at);
+  clock = at;
+  await Promise.all([pub.runDue(ctx), pub.runDue(ctx)]);
+  assert.equal(publishCalls(meta), 1);
+});
+
+test("reschedule and cancel; refusals for times too soon or too far", async () => {
+  const meta = fakeMeta();
+  const { db, bucket, ctx } = setup(meta);
+  await assert.rejects(pub.startPublish(ctx, "a", { postId: "P1", slides: 1, scheduledAt: clock + 60e3 }), /5 minutes ahead/);
+  await assert.rejects(pub.startPublish(ctx, "a", { postId: "P1", slides: 1, scheduledAt: clock + 61 * 86400e3 }), /60 days/);
+  const at = clock + HOUR;
+  await schedule(ctx, at);
+  const later = clock + 5 * HOUR;
+  await pub.reschedule(ctx, "a", { postId: "P1", scheduledAt: later });
+  assert.equal(post(db).ig.scheduledAt, later);
+  clock = at + 60e3;
+  assert.equal((await pub.runDue(ctx)).due, 0); // the old time no longer counts
+  const r = await pub.cancelSchedule(ctx, "a", { postId: "P1" });
+  assert.deepEqual(r, { status: "ready", filesLeft: 0 });
+  const p = post(db);
+  assert.equal(p.status, "ready");
+  assert.equal(p.ig.cancelledSchedule.was, later);
+  assert.equal(bucket.files.size, 0);
+  clock = later + 60e3;
+  assert.deepEqual(await pub.runDue(ctx), { due: 0, scheduled: 0 });
+  assert.equal(meta.calls.length, 0);
+  await assert.rejects(pub.cancelSchedule(ctx, "a", { postId: "P1" }), (e) => e.code === "not_scheduled");
+});
+
+test("its time comes before the slides were all sent: failed, nothing published", async () => {
+  const meta = fakeMeta();
+  const { db, ctx } = setup(meta, { slides: 2 });
+  const at = clock + HOUR;
+  const { attempt } = await pub.startPublish(ctx, "a", { postId: "P1", slides: 2, scheduledAt: at });
+  await pub.stageSlide(ctx, "a", { postId: "P1", attempt, index: 0, jpeg: jpeg() });
+  await assert.rejects(pub.confirmSchedule(ctx, "a", { postId: "P1", attempt }), (e) => e.code === "not_staged");
+  clock = at;
+  const r = await pub.runDue(ctx);
+  assert.equal(r.failed, "not_staged");
+  assert.equal(post(db).status, "failed");
+  assert.equal(post(db).ig.scheduledActive, false);
+  assert.equal(meta.calls.length, 0);
+});
+
+test("a scheduled post Instagram is slow on: picked up again on a later tick", async () => {
+  const meta = fakeMeta({ script: Array(400).fill("IN_PROGRESS") });
+  const { db, ctx } = setup(meta);
+  const at = clock + HOUR;
+  await schedule(ctx, at);
+  clock = at;
+  const r1 = await pub.runDue(ctx);
+  assert.equal(r1.pending, true);
+  assert.equal(post(db).status, "publishing");
+  meta.containers.C1.script = ["FINISHED"];
+  meta.containers.C1.polls = 0;
+  const r2 = await pub.runDue(ctx);
+  assert.equal(r2.published, true);
+  assert.equal(meta.calls.filter((c) => c.method === "POST" && c.path === "/IG1/media").length, 1);
+});
+
 test("the token never shows: redacted from Meta's messages; host by token type", () => {
   const tk = "EAAG" + "z".repeat(60);
   assert.equal(redact(`GET /me?access_token=${tk}&x=1 failed: ${tk}`, tk), "GET /me?access_token=[token]&x=1 failed: [token]");
@@ -311,4 +413,47 @@ test("the token never shows: redacted from Meta's messages; host by token type",
   assert.equal(tokenKind(tk), "facebook");
   assert.equal(hostFor(tk), "https://graph.facebook.com");
   assert.equal(hostFor("IGAAabc"), "https://graph.instagram.com");
+});
+
+test("a carousel with a video: the clip is copied in, not sent; a VIDEO item; the original kept", async () => {
+  const meta = fakeMeta();
+  const clip = `ig-videos/${"a".repeat(32)}.mp4`;
+  const { db, bucket, ctx } = setup(meta, { slides: 3, videoPaths: [clip] });
+  bucket.files.set(clip, Buffer.from("mp4"));
+  const { attempt } = await pub.startPublish(ctx, "admin1", { postId: "P1", slides: 3, videos: { 1: clip } });
+  assert.equal(post(db).ig.staged[1], `ig-staging/P1/${attempt}/02.mp4`);
+  assert.equal(bucket.files.has(`ig-staging/P1/${attempt}/02.mp4`), true);
+  await assert.rejects(pub.stageSlide(ctx, "admin1", { postId: "P1", attempt, index: 1, jpeg: jpeg() }), /is a video/);
+  for (const i of [0, 2]) await pub.stageSlide(ctx, "admin1", { postId: "P1", attempt, index: i, jpeg: jpeg() });
+  const r = await pub.runPublish(ctx, "admin1", { postId: "P1", attempt });
+  assert.equal(r.published, true);
+  const items = meta.calls.filter((c) => c.method === "POST" && c.path === "/IG1/media" && c.params.is_carousel_item);
+  assert.deepEqual(items.map((c) => c.params.media_type || "IMAGE"), ["IMAGE", "VIDEO", "IMAGE"]);
+  assert.match(items[1].params.video_url, /02\.mp4/);
+  // The staged copy is cleaned up; the post's own clip stays.
+  assert.deepEqual([...bucket.files.keys()], [clip]);
+});
+
+test("videos: bad paths and an all-video carousel are refused; a missing clip leaves the post as it was", async () => {
+  const meta = fakeMeta();
+  const { db, bucket, ctx } = setup(meta, { slides: 2 });
+  await assert.rejects(pub.startPublish(ctx, "admin1", { postId: "P1", slides: 2, videos: { 0: "ig-staging/x.mp4" } }), /isn't an uploaded video/);
+  const a = `ig-videos/${"b".repeat(32)}.mov`;
+  const b = `ig-videos/${"c".repeat(32)}.mp4`;
+  await assert.rejects(pub.startPublish(ctx, "admin1", { postId: "P1", slides: 2, videos: { 0: a, 1: b } }), /at least one image/);
+  await assert.rejects(pub.startPublish(ctx, "admin1", { postId: "P1", slides: 2, videos: { 1: a } }), /gone from Storage/);
+  assert.equal(post(db).status, "ready");
+  assert.equal(bucket.files.size, 0);
+});
+
+test("deleting a post deletes its clips unless another saved post uses them", async () => {
+  const meta = fakeMeta();
+  const mine = `ig-videos/${"d".repeat(32)}.mp4`;
+  const shared = `ig-videos/${"e".repeat(32)}.mp4`;
+  const { db, bucket, ctx } = setup(meta, { videoPaths: [mine, shared] });
+  await db.collection("instagramPosts").doc("P2").set({ status: "draft", videoPaths: [shared] });
+  bucket.files.set(mine, Buffer.from("1"));
+  bucket.files.set(shared, Buffer.from("2"));
+  await pub.deletePost(ctx, "admin1", { postId: "P1" });
+  assert.deepEqual([...bucket.files.keys()], [shared]);
 });

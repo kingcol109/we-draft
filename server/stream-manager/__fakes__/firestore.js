@@ -2,7 +2,7 @@
 //
 // In-memory stand-in for the slice of the Admin SDK Firestore API that
 // Stream Manager and YouTube Analytics use (tests only): doc / collection /
-// subcollections / where (== and ranges) / limit / get / set (merge) /
+// subcollections / where (==, ranges, array-contains) / limit / get / set (merge) /
 // update (dotted paths) / runTransaction / batch.
 
 const isPlain = (v) => v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
@@ -26,6 +26,7 @@ function deepMerge(a, b) {
 const cmp = (x) => (x?.toMillis ? x.toMillis() : x instanceof Date ? x.getTime() : x);
 const OPS = {
   "==": (a, b) => a === b,
+  "array-contains": (a, b) => Array.isArray(a) && a.includes(b),
   "<": (a, b) => a != null && cmp(a) < cmp(b),
   "<=": (a, b) => a != null && cmp(a) <= cmp(b),
   ">": (a, b) => a != null && cmp(a) > cmp(b),
@@ -62,7 +63,7 @@ function fakeFirestore(seed = {}) {
   function query(col, filters = [], max = Infinity) {
     return {
       where: (f, op, v) => {
-        if (!OPS[op]) throw new Error(`fake firestore: only ==, <, <=, >, >= (got ${op})`);
+        if (!OPS[op]) throw new Error(`fake firestore: only ==, <, <=, >, >=, array-contains (got ${op})`);
         return query(col, [...filters, [f, v, op]], max);
       },
       limit: (n) => query(col, filters, n),

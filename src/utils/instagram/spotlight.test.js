@@ -1,4 +1,4 @@
-import { scoutingReport, spotlightInput, spotlightSlides, heightText, measurementsOf } from "./spotlight";
+import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf } from "./spotlight";
 
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: {} };
 const player = { id: "p1", First: "Mark", Last: "Bowman", Position: "TE", School: "USC", Eligible: "2029", Height: "6'5\"", Weight: "245", Slug: "mark-bowman-2029-te" };
@@ -49,16 +49,40 @@ test("the cover photo moves and scales about his feet as the admin sets it", () 
   expect(cover({ scale: 9 })).toContain("scale(2.5)");
 });
 
-test("two slides; the ADVANCE SCOUTING badge only when asked", () => {
+test("three slides; the ADVANCE SCOUTING badge only when asked", () => {
   const report = scoutingReport({ player, evaluations: [] });
   const withBadge = spotlightSlides(spotlightInput({ player, report, advance: true }), env);
-  expect(withBadge.map((s) => s.name)).toEqual(["cover", "scouting-report"]);
+  expect(withBadge.map((s) => s.name)).toEqual(["cover", "scouting-report", "evaluate"]);
+  expect(withBadge[2].svg).toContain("MARK BOWMAN?");
+  expect(withBadge[2].svg).toContain("WE-DRAFT.COM/PLAYER/MARK-BOWMAN-2029-TE");
   expect(withBadge[0].svg).toContain("ADVANCE");
   expect(withBadge[0].svg).toContain(">2029<");
   expect(withBadge[0].svg).toContain("245 LBS");
   expect(withBadge[1].svg).toContain("COMMUNITY GRADE");
-  expect(withBadge[1].svg).toContain("WE-DRAFT.COM/PLAYER/MARK-BOWMAN-2029-TE");
   const plain = spotlightSlides(spotlightInput({ player: { ...player, Eligible: "2027" }, report }), env);
   expect(plain[0].svg).not.toContain("ADVANCE");
   expect(plain[0].svg).toContain("2027 NFL DRAFT PROSPECT");
+});
+
+test("the report shows class rank unless turned off, NFL fits only when turned on", () => {
+  const images = { "den.png": { href: "data:image/png;base64,AA", w: 1, h: 1 } };
+  const report = { ...scoutingReport({ player, evaluations: [] }), posRank: 3, posOf: 40, fits: [{ name: "Denver Broncos", logo: "den.png" }] };
+  const slide = (opts) => spotlightSlides(spotlightInput({ player, report, ...opts }), { ...env, images })[1].svg;
+  expect(slide()).toContain("CLASS RANK");
+  expect(slide()).not.toContain("NFL FITS");
+  expect(slide({ showRanks: false })).not.toContain("CLASS RANK");
+  expect(slide({ showFits: true })).toContain("NFL FITS");
+});
+
+test("the highlight frame: no backdrop of its own, the window cut out, his name and FILM", () => {
+  const svg = spotlightFrame(spotlightInput({ player, report: scoutingReport({ player, evaluations: [] }) }), env);
+  const { x, y, w, h } = FRAME_WINDOW;
+  expect(svg).toContain(`<mask id="window">`);
+  expect(svg).toContain(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="28" fill="#000000"/>`);
+  // The only full-canvas paint is inside the mask (the window stays clear).
+  const body = svg.split("</defs>")[1];
+  expect(body.startsWith('<g mask="url(#window)"><rect width="1080" height="1350"')).toBe(true);
+  expect(body.split('<rect width="1080" height="1350"').length).toBe(2);
+  expect(svg).toContain(">FILM<");
+  expect(svg).toContain(">BOWMAN<");
 });

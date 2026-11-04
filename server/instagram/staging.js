@@ -6,7 +6,8 @@
 // signed URLs, signed here with the service account key, that open one file
 // each and expire.
 //
-//   ig-staging/{postId}/{attempt}/{nn}.jpg
+//   ig-staging/{postId}/{attempt}/{nn}.jpg   (a video slide: {nn}.mp4 / .mov,
+//                                           copied from ig-videos/ — videos.js)
 //     postId   the instagramPosts doc (a random Firestore id)
 //     attempt  128 random bits, new for each publish attempt
 // Files stay put while a publish is running or after it fails (to retry or
@@ -30,7 +31,7 @@ function bucket() {
 
 const newAttempt = () => crypto.randomBytes(16).toString("hex");
 const postDir = (postId) => `${ROOT}/${postId}/`;
-const slidePath = (postId, attempt, index) => `${ROOT}/${postId}/${attempt}/${String(index + 1).padStart(2, "0")}.jpg`;
+const slidePath = (postId, attempt, index, ext = "jpg") => `${ROOT}/${postId}/${attempt}/${String(index + 1).padStart(2, "0")}.${ext}`;
 
 // A JPEG's { w, h } from its frame header, or null when it isn't a JPEG.
 function jpegInfo(buf) {

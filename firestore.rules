@@ -292,9 +292,11 @@ service cloud.firestore {
     // Instagram posts saved from Admin → Content → Instagram
     // (src/components/AdminInstagram.jsx): admins only. Publishing is the
     // server's (api/instagram.js, server/instagram/publish.js): only it
-    // writes `ig` or sets publishing / published / failed, and a post
-    // that's publishing or published can only be renamed from the page —
-    // its slides and caption are what's on Instagram.
+    // writes `ig` or sets scheduled / publishing / published / failed, and
+    // a post that's scheduled, publishing or published can only be renamed
+    // from the page — its slides and caption are what's (going) on
+    // Instagram. A scheduled one is deleted through the API (its sent
+    // slides with it).
     match /instagramPosts/{id} {
       allow read: if isAdmin();
       allow create: if isAdmin()
@@ -302,12 +304,12 @@ service cloud.firestore {
         && request.resource.data.get('status', 'draft') in ['draft', 'ready'];
       allow update: if isAdmin()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ig'])
-        && (resource.data.get('status', 'draft') in ['publishing', 'published']
+        && (resource.data.get('status', 'draft') in ['scheduled', 'publishing', 'published']
           ? request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt'])
           : request.resource.data.get('status', 'draft') in ['draft', 'ready', 'posted', 'failed']
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
               || request.resource.data.status in ['draft', 'ready', 'posted']));
-      allow delete: if isAdmin() && resource.data.get('status', 'draft') != 'publishing';
+      allow delete: if isAdmin() && !(resource.data.get('status', 'draft') in ['publishing', 'scheduled']);
     }
     // Instagram Analytics (server/instagram/sync.js, publish.js): Meta's
     // numbers for @wedraftsite and the links from its posts to We-Draft's.

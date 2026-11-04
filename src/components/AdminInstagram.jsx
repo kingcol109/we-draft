@@ -40,8 +40,8 @@ import {
   IG_W, IG_H, IG_FONT, IG_MAX_SLIDES, PHOTO_SCALE, mockSlides, mockInput, mockCaption, mockSlidePlan, playerPost, playerInput, playerCaption, imageUrls,
 } from "../utils/instagram/posts";
 import { knockOut, hasBackdrop, opaqueBounds } from "../utils/instagram/knockout";
-import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport } from "../utils/instagram/spotlight";
-import { igApi } from "../utils/instagram/api";
+import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame } from "../utils/instagram/spotlight";
+import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
 import BebasNeue from "../assets/fonts/BebasNeue-Regular.ttf";
 import WdLogo from "../assets/Logo2.png";
 
@@ -335,13 +335,28 @@ function useSvgUrls(svgs) {
 // marked published by hand (posted outside We-Draft).
 const POST_TYPES = { mock: "Weekly Mock carousel", spotlight: "Player spotlight", player: "Player post" };
 const STATUS = {
-  draft: ["Draft", "#8a97ab"], ready: ["Ready to Publish", "#b7791f"], publishing: ["Publishing", BLUE],
+  draft: ["Draft", "#8a97ab"], ready: ["Ready to Publish", "#b7791f"], scheduled: ["Scheduled", "#6d28d9"], publishing: ["Publishing", BLUE],
   published: ["Published", "#15803d"], failed: ["Failed", "#a52a1e"], posted: ["Published (by hand)", "#15803d"],
 };
+// A schedule's time, as the admin reads it (Eastern, like the site).
+const fmtET = (ms) => (ms ? `${new Date(ms).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET` : "");
+// ms ↔ a datetime-local input's value (the browser's own time zone).
+const toLocalInput = (ms) => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+const fromLocalInput = (v) => (v ? new Date(v).getTime() : NaN);
+// The default pick: the next whole hour at least an hour away.
+const nextHour = () => { const d = new Date(Date.now() + 3600e3); d.setMinutes(0, 0, 0); return d.getTime() < Date.now() + 3600e3 ? d.getTime() + 3600e3 : d.getTime(); };
+function WhenPicker({ value, onChange }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+      <input type="datetime-local" value={value} min={toLocalInput(Date.now() + 5 * 60e3)} onChange={(e) => onChange(e.target.value)} style={{ ...field, width: "auto", padding: "4px 7px", fontSize: "12px" }} />
+      {value && <span style={{ fontSize: "11px", fontWeight: 800, color: "#5b6b84" }}>{fmtET(fromLocalInput(value))}</span>}
+    </span>
+  );
+}
 // What the page can set itself (firestore.rules agrees).
 const CHOOSABLE = ["draft", "ready", "posted"];
 const THUMB_W = 216;
-const locked = (status) => status === "publishing" || status === "published";
+const locked = (status) => status === "scheduled" || status === "publishing" || status === "published";
 
 // Runs the post's publish (server) until Instagram is done with it: each
 // call goes up to ~4 minutes and returns pending if Instagram is still
@@ -376,12 +391,36 @@ async function svgThumb(svg) {
 // Firestore takes no undefined: the state as plain JSON.
 const plain = (v) => JSON.parse(JSON.stringify(v ?? null));
 
+// The clips a carousel takes (server/instagram/videos.js says the same).
+const VIDEO_TYPES = ["video/mp4", "video/quicktime"];
+const VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+
+// The carousel in order: the drawn slides ({ svg }), each video ({ video:
+// its ig-videos path }) put in at its place (at: its slide index).
+function carouselOrder(svgs, videos = []) {
+  const out = svgs.map((svg) => ({ svg }));
+  [...videos].sort((a, b) => a.at - b.at).forEach((v) => out.splice(Math.min(v.at, out.length), 0, { video: v.path }));
+  return out;
+}
+// Sends the drawn slides of a started publish (the server copies the videos itself).
+async function sendSlides(postId, attempt, order, setPhase) {
+  const drawn = order.filter((s) => s.svg).length;
+  let k = 0;
+  for (let i = 0; i < order.length; i++) {
+    if (!order[i].svg) continue;
+    setPhase(`Sending slide ${++k} of ${drawn}…`);
+    await igApi("stage", { postId, attempt, index: i, jpeg: await svgToJpegBase64(order[i].svg) });
+  }
+}
+const videoMapOf = (order) => Object.fromEntries(order.map((s, i) => (s.video ? [i, s.video] : null)).filter(Boolean));
+
 // Save, or save as a new post: the post's name, then the buttons. A post
 // opened from the list (or once saved) saves over itself. Publish to
 // Instagram saves first, then sends these slides — the preview, as is.
 // A post that's publishing or published is Instagram's now: only Save as
-// new (a fresh draft) from here.
-function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null }) {
+// new (a fresh draft) from here. videos: [{ at, path }] — uploaded clips in
+// the carousel (the Spotlight's); hold: why it can't save or publish yet.
+function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null, videos = [], hold = "" }) {
   const { user } = useAuth();
   const [name, setName] = useState(post?.name || "");
   const [busy, setBusy] = useState(false);
@@ -389,12 +428,15 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
   const shown = name || defaultName;
   const status = post?.status || "draft";
   const isLocked = locked(status);
+  const off = busy || !svgs.length || !!hold;
   // → the saved post's id (null when it couldn't save).
   const save = async (asNew, quiet = false) => {
     if (!svgs.length) return null;
     const data = {
-      type, name: shown, state: plain(stateNow()), caption, slides: svgs.length, thumb: await svgThumb(svgs[0]),
+      type, name: shown, state: plain(stateNow()), caption, slides: svgs.length + videos.length, thumb: await svgThumb(svgs[0]),
       playerIds: [...new Set(playerIds.filter(Boolean))], subject: plain(subject), updatedAt: serverTimestamp(),
+      // The clips it uses (server/instagram/videos.js keeps a clip while a saved post lists it).
+      videoPaths: videos.map((v) => v.path),
     };
     let id = asNew ? null : post?.id;
     if (id) await updateDoc(doc(db, "instagramPosts", id), data);
@@ -413,8 +455,9 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
     if (d?.exists()) setPost({ id, name: d.data().name, status: d.data().status, ig: d.data().ig || null });
   };
   const publish = async () => {
-    const n = svgs.length;
-    if (!n || busy) return;
+    const order = carouselOrder(svgs, videos);
+    const n = order.length;
+    if (!svgs.length || busy || hold) return;
     if (!window.confirm(`Publish this ${n > 1 ? `${n}-slide carousel` : "post"} to @wedraftsite now?\n\nIt goes live on Instagram right away, with the caption as written.`)) return;
     setBusy(true);
     let id = null;
@@ -422,19 +465,48 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
       setPhase("Saving…");
       id = await save(false, true);
       setPhase("Starting…");
-      const start = await igApi("publish-start", { postId: id, slides: n });
+      const start = await igApi("publish-start", { postId: id, slides: n, videos: videoMapOf(order) });
       let r = start;
       if (!start.alreadyPublished) {
-        for (let i = 0; i < n; i++) {
-          setPhase(`Sending slide ${i + 1} of ${n}…`);
-          await igApi("stage", { postId: id, attempt: start.attempt, index: i, jpeg: await svgToJpegBase64(svgs[i]) });
-        }
+        await sendSlides(id, start.attempt, order, setPhase);
         setPhase("Publishing — Instagram is processing…");
         r = await runUntilDone(id, start.attempt, setPhase);
       }
       setMsg(r.pending ? "Instagram is still processing it. Saved posts shows it as Publishing — Resume it from there." : "Published to Instagram.");
     } catch (e) {
       setMsg(`Couldn't publish: ${e.message}`);
+    } finally {
+      if (id) await reload(id);
+      setBusy(false);
+      setPhase("");
+      onSaved();
+    }
+  };
+  // Schedule: the same slides sent now (this browser won't be here at the
+  // time), and the server publishes them then. A send that fails part-way
+  // calls the schedule off, so nothing half-sent waits to fail.
+  const [when, setWhen] = useState("");
+  const scheduleIt = async () => {
+    const order = carouselOrder(svgs, videos);
+    const n = order.length;
+    const at = fromLocalInput(when);
+    if (!svgs.length || busy || hold || !Number.isFinite(at)) return;
+    if (!window.confirm(`Schedule this ${n > 1 ? `${n}-slide carousel` : "post"} for ${fmtET(at)}?\n\nIt posts to @wedraftsite then, with the slides and caption as they are now.`)) return;
+    setBusy(true);
+    let id = null;
+    let started = false;
+    try {
+      setPhase("Saving…");
+      id = await save(false, true);
+      const start = await igApi("publish-start", { postId: id, slides: n, scheduledAt: at, videos: videoMapOf(order) });
+      started = true;
+      await sendSlides(id, start.attempt, order, setPhase);
+      await igApi("schedule-confirm", { postId: id, attempt: start.attempt });
+      setWhen("");
+      setMsg(`Scheduled for ${fmtET(at)}.`);
+    } catch (e) {
+      if (started) await igApi("schedule-cancel", { postId: id }).catch(() => {});
+      setMsg(`Couldn't schedule it: ${e.message}`);
     } finally {
       if (id) await reload(id);
       setBusy(false);
@@ -450,16 +522,33 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
       </div>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} style={field} disabled={isLocked} />
       <div style={{ display: "flex", gap: "6px", marginTop: "6px", alignItems: "center", flexWrap: "wrap" }}>
-        {!isLocked && <button onClick={() => saveClick(false)} disabled={busy || !svgs.length} style={{ ...btn(true), padding: "5px 14px", opacity: busy || !svgs.length ? 0.5 : 1 }}>{post?.id ? "Save changes" : "Save"}</button>}
-        {post?.id && <button onClick={() => saveClick(true)} disabled={busy || !svgs.length} style={{ ...btn(false), padding: "5px 14px" }}>Save as new</button>}
+        {!isLocked && <button onClick={() => saveClick(false)} disabled={off} style={{ ...btn(true), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>{post?.id ? "Save changes" : "Save"}</button>}
+        {post?.id && <button onClick={() => saveClick(true)} disabled={off} style={{ ...btn(false), padding: "5px 14px" }}>Save as new</button>}
         {!isLocked && status !== "posted" && (
-          <button onClick={publish} disabled={busy || !svgs.length} title="Save, then post these slides to @wedraftsite"
-            style={{ ...btn(true), background: GOLD, color: "#1d2433", padding: "5px 14px", opacity: busy || !svgs.length ? 0.5 : 1 }}>
+          <button onClick={publish} disabled={off} title="Save, then post these slides to @wedraftsite"
+            style={{ ...btn(true), background: GOLD, color: "#1d2433", padding: "5px 14px", opacity: off ? 0.5 : 1 }}>
             {status === "failed" ? "Retry publishing" : "Publish to Instagram"}
           </button>
         )}
+        {!isLocked && status !== "posted" && !when && (
+          <button onClick={() => setWhen(toLocalInput(nextHour()))} disabled={off} title="Post these slides to @wedraftsite at a time you pick"
+            style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Schedule…</button>
+        )}
         {busy && <span style={{ fontSize: "11px", fontWeight: 800, color: BLUE }}>{phase || "Saving…"}</span>}
+        {hold && !busy && <span style={{ fontSize: "11px", fontWeight: 800, color: "#b7791f" }}>{hold}</span>}
       </div>
+      {when && !isLocked && (
+        <div style={{ display: "flex", gap: "6px", marginTop: "6px", alignItems: "center", flexWrap: "wrap" }}>
+          <WhenPicker value={when} onChange={setWhen} />
+          <button onClick={scheduleIt} disabled={busy || !!hold || !Number.isFinite(fromLocalInput(when))} style={{ ...btn(true), background: STATUS.scheduled[1], padding: "5px 14px", opacity: busy ? 0.5 : 1 }}>Schedule</button>
+          <button onClick={() => setWhen("")} disabled={busy} style={linkBtn}>Never mind</button>
+        </div>
+      )}
+      {status === "scheduled" && (
+        <div style={{ marginTop: "6px", fontSize: "11px", fontWeight: 800, color: STATUS.scheduled[1] }}>
+          Scheduled for {fmtET(post.ig?.scheduledAt)} — change the time or cancel it in Saved posts.
+        </div>
+      )}
       {status === "published" && (
         <div style={{ marginTop: "6px", fontSize: "11px", fontWeight: 800, color: "#15803d" }}>
           On Instagram{post.ig?.publishedAt ? ` since ${new Date(post.ig.publishedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}
@@ -509,6 +598,31 @@ function SavedPosts({ version, onOpen, setMsg }) {
       setMine((n) => n + 1);
     }
   };
+  // A scheduled post: a new time (the picker open on it), or called off.
+  const [changing, setChanging] = useState({ id: "", when: "" });
+  const reschedule = async (p) => {
+    const at = fromLocalInput(changing.when);
+    try {
+      await igApi("schedule-change", { postId: p.id, scheduledAt: at });
+      setMsg(`"${p.name}" now posts ${fmtET(at)}.`);
+      setChanging({ id: "", when: "" });
+    } catch (e) {
+      setMsg(`Couldn't change it: ${e.message}`);
+    } finally {
+      setMine((n) => n + 1);
+    }
+  };
+  const cancelSchedule = async (p) => {
+    if (!window.confirm(`Cancel the schedule for "${p.name}" (${fmtET(p.ig?.scheduledAt)})?\n\nIt goes back to a draft; nothing is posted.`)) return;
+    try {
+      await igApi("schedule-cancel", { postId: p.id });
+      setMsg(`Cancelled the schedule for "${p.name}".`);
+    } catch (e) {
+      setMsg(`Couldn't cancel it: ${e.message}`);
+    } finally {
+      setMine((n) => n + 1);
+    }
+  };
   const when = (ts) => ts?.toDate?.()?.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) || "";
   return (
     <div style={{ border: "1px solid #e3e8ef", borderRadius: "10px", background: "#fff" }}>
@@ -554,6 +668,27 @@ function SavedPosts({ version, onOpen, setMsg }) {
                     <div title={`${p.ig.error.message}${p.ig.error.fbtraceId ? `\nInstagram trace ${p.ig.error.fbtraceId}` : ""}`}
                       style={{ fontSize: "10px", fontWeight: 700, color: "#a52a1e", marginTop: "3px", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                       {p.ig.error.message}
+                    </div>
+                  )}
+                  {p.status === "scheduled" && (
+                    <div style={{ fontSize: "10px", fontWeight: 800, color: STATUS.scheduled[1], marginTop: "3px" }}>
+                      {fmtET(p.ig?.scheduledAt)}
+                      {p.ig?.scheduleReady === false && <div style={{ color: "#a52a1e" }}>Slides didn&apos;t all send — cancel and schedule it again.</div>}
+                      {changing.id === p.id ? (
+                        <div style={{ marginTop: "4px" }}>
+                          <input type="datetime-local" value={changing.when} min={toLocalInput(Date.now() + 5 * 60e3)} onChange={(e) => setChanging({ id: p.id, when: e.target.value })}
+                            style={{ ...field, padding: "2px 4px", fontSize: "10px" }} />
+                          <div style={{ display: "flex" }}>
+                            <button onClick={() => reschedule(p)} style={{ ...linkBtn, padding: "3px 0 0" }}>Save time</button>
+                            <button onClick={() => setChanging({ id: "", when: "" })} style={{ ...linkBtn, padding: "3px 0 0", marginLeft: "auto", color: "#8a97ab" }}>Back</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex" }}>
+                          <button onClick={() => setChanging({ id: p.id, when: toLocalInput(p.ig?.scheduledAt || nextHour()) })} style={{ ...linkBtn, padding: "3px 0 0" }}>Change time</button>
+                          <button onClick={() => cancelSchedule(p)} style={{ ...linkBtn, padding: "3px 0 0", marginLeft: "auto", color: "#a52a1e" }}>Cancel</button>
+                        </div>
+                      )}
                     </div>
                   )}
                   {p.status === "publishing" && !(p.ig?.leaseUntil > Date.now()) && resuming !== p.id && (
@@ -1096,6 +1231,16 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   // The ADVANCE SCOUTING badge's design (crest | plate).
   const [badge, setBadge] = useState("crest");
   const [accent, setAccent] = useState("");
+  // The report's class rank (in by default) and NFL fits (out by default).
+  const [showRanks, setShowRanks] = useState(true);
+  const [showFits, setShowFits] = useState(false);
+  // Highlight clips, after the cover: [{ path (ig-videos/…), name, bytes,
+  // duration, w, h }]; their preview links by path; the one uploading.
+  const [videos, setVideos] = useState([]);
+  const [videoUrls, setVideoUrls] = useState({});
+  const [uploading, setUploading] = useState(null);
+  // The frame to edit his highlight clip under (a transparent PNG to download).
+  const [frame, setFrame] = useState("");
   const [adjust, setAdjust] = useState(NO_ADJUST);
   const drag = useDragAdjust(setAdjust);
   // A new photo starts where the layout puts it.
@@ -1146,6 +1291,8 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
       setAdvance(isAdvance(p.Eligible));
       // A new player: his own school's accent.
       setAccent("");
+      // His own clips (a saved post's come back below).
+      setVideos([]);
       if (restore) {
         setPhotoUrl(restore.photoUrl ?? "");
         setFocus(restore.focus || "center");
@@ -1153,6 +1300,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
         setLook(restore.look || "wash");
         setBadge(restore.badge === "plate" ? "plate" : "crest");
         setAccent(restore.accent || "");
+        setShowRanks(restore.showRanks !== false);
+        setShowFits(!!restore.showFits);
+        setVideos(Array.isArray(restore.videos) ? restore.videos.filter((v) => v?.path) : []);
         setAdjust({ ...NO_ADJUST, ...restore.adjust });
       }
       if (!action.length && !restore?.photoUrl) setMsg("No action shots for him yet (Content → Photos) — the cover shows his school's logo, or paste an image link.");
@@ -1164,18 +1314,19 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   };
 
   const input = useMemo(() => (player && data ? {
-    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, look, accent, badge }),
+    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, look, accent, badge, showRanks, showFits, highlights: videos.length > 0 }),
     focus, adjust,
-  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge]);
+  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, videos.length]);
   const cap = useCaption(saved, useMemo(() => (input ? spotlightCaption(input) : ""), [input]));
 
   useEffect(() => {
-    if (!input) { setSlides([]); return; }
+    if (!input) { setSlides([]); setFrame(""); return; }
     let live = true;
     // His photo's plain backdrop taken out and trimmed, as the mock's feature.
     envFor(input, input.photo ? { [input.photo]: loadFeatureImage(input.photo, true) } : {}, spotlightImageUrls(input)).then((env) => {
       if (!live) return;
       setSlides(spotlightSlides(input, env));
+      setFrame(spotlightFrame(input, env));
       if (input.photo && !env.images[input.photo]) setMsg("Couldn't load that photo — it may not allow downloads (try an imgur link).");
     }).catch((e) => setMsg(`Couldn't draw: ${e.message}`));
     return () => { live = false; };
@@ -1183,6 +1334,40 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   const svgs = useMemo(() => slides.map((s) => s.svg), [slides]);
   const urls = useSvgUrls(svgs);
   const base = player ? `wedraft-spotlight-${fileName(`${player.First}-${player.Last}`)}` : "";
+
+  // A saved clip's preview: a short-lived link from the server (a new upload plays from the file itself).
+  useEffect(() => {
+    videos.filter((v) => !videoUrls[v.path]).forEach((v) => igApi("video-url", { path: v.path })
+      .then((r) => setVideoUrls((u) => ({ ...u, [v.path]: r.url })))
+      .catch((e) => setMsg(`Couldn't load a video's preview: ${e.message}`)));
+  }, [videos]); // eslint-disable-line react-hooks/exhaustive-deps
+  const videoUrlsRef = useRef(videoUrls);
+  videoUrlsRef.current = videoUrls;
+  useEffect(() => () => Object.values(videoUrlsRef.current).forEach((u) => u.startsWith("blob:") && URL.revokeObjectURL(u)), []);
+  const addVideo = async (file) => {
+    if (!file) return;
+    if (!VIDEO_TYPES.includes(file.type)) { setMsg("Instagram takes MP4 or MOV videos."); return; }
+    if (file.size > VIDEO_MAX_BYTES) { setMsg(`That clip is ${Math.round(file.size / 1048576)} MB; Instagram takes up to 100 MB.`); return; }
+    if (slides.length + videos.length >= IG_MAX_SLIDES) { setMsg(`A carousel takes ${IG_MAX_SLIDES} slides at most.`); return; }
+    let info;
+    try { info = await videoInfo(file); } catch (e) { setMsg(`Couldn't read that clip: ${e.message}`); return; }
+    if (!(info.duration >= 3)) { setMsg("A carousel video has to be at least 3 seconds long."); return; }
+    setUploading({ name: file.name, pct: 0 });
+    setMsg("");
+    try {
+      const r = await uploadVideo(file, (pct) => setUploading({ name: file.name, pct }));
+      setVideoUrls((u) => ({ ...u, [r.path]: URL.createObjectURL(file) }));
+      setVideos((vs) => [...vs, { path: r.path, name: file.name, bytes: r.bytes, duration: Math.round(info.duration * 10) / 10, w: info.w, h: info.h }]);
+    } catch (e) {
+      setMsg(`Couldn't upload the video: ${e.message}`);
+    } finally {
+      setUploading(null);
+    }
+  };
+  const frameUrl = useSvgUrls(useMemo(() => (frame ? [frame] : []), [frame]))[0];
+  const moveVideo = (k, d) => setVideos((vs) => { const n = [...vs]; [n[k], n[k + d]] = [n[k + d], n[k]]; return n; });
+  // The preview's tiles in carousel order: the cover, the clips, the rest.
+  const tiles = slides.length ? [{ slide: 0 }, ...videos.map((v) => ({ video: v })), ...slides.slice(1).map((_, k) => ({ slide: k + 1 }))] : [];
   const downloadAll = async () => {
     for (let i = 0; i < slides.length; i++) {
       setBusy(`Downloading ${i + 1} / ${slides.length}…`);
@@ -1254,17 +1439,61 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
               </div>
             </div>
             {photoUrl && <PhotoAdjust value={adjust} onChange={setAdjust} />}
+            <div>
+              <div style={label}>Scouting report shows</div>
+              <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
+                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits]].map(([t, on, set]) => (
+                  <label key={t} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
+                    <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {t}
+                  </label>
+                ))}
+              </div>
+            </div>
             <div style={{ fontSize: "12px", fontWeight: 700, color: "#5b6b84" }}>
               Report: {data.report.grade.avg == null ? "Watchlist" : data.report.grade.label} · {data.report.evals} evaluation{data.report.evals === 1 ? "" : "s"}
               {data.report.posRank ? ` · #${data.report.posRank} ${player.Position}` : ""}{data.report.fits.length ? ` · ${data.report.fits.length} NFL fit${data.report.fits.length === 1 ? "" : "s"}` : ""}
             </div>
+            <div>
+              <div style={label}>Highlight videos · after the cover</div>
+              {videos.map((v, k) => (
+                <div key={v.path} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 800, color: "#33415a", marginBottom: "4px" }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={v.name}>
+                    {k + 2} · {v.name} <span style={{ color: "#8a97ab", fontWeight: 700 }}>{v.duration ? `${v.duration}s` : ""}{v.bytes ? ` · ${Math.max(1, Math.round(v.bytes / 1048576))} MB` : ""}</span>
+                  </span>
+                  {k > 0 && <button onClick={() => moveVideo(k, -1)} style={linkBtn} title="Earlier">↑</button>}
+                  {k < videos.length - 1 && <button onClick={() => moveVideo(k, 1)} style={linkBtn} title="Later">↓</button>}
+                  <button onClick={() => setVideos((vs) => vs.filter((x) => x.path !== v.path))} style={{ ...linkBtn, color: "#a52a1e" }}>REMOVE</button>
+                </div>
+              ))}
+              {videos.some((v) => v.duration > 60) && <div style={{ fontSize: "11px", fontWeight: 700, color: "#b7791f", marginBottom: "4px" }}>A clip over 60 seconds may be refused by Instagram in a carousel.</div>}
+              {videos.some((v) => v.w && v.h && Math.abs(v.w / v.h - 0.8) > 0.03) && <div style={{ fontSize: "11px", fontWeight: 700, color: "#b7791f", marginBottom: "4px" }}>Instagram shows a carousel in the cover&apos;s 4:5 shape: a clip of another shape may be cropped.</div>}
+              {uploading
+                ? <div style={{ fontSize: "12px", fontWeight: 800, color: BLUE }}>Uploading {uploading.name}… {Math.round(uploading.pct * 100)}%</div>
+                : (
+                  <label style={{ ...btn(false), display: "inline-block", padding: "5px 12px", cursor: "pointer" }}>
+                    + Add a video
+                    <input type="file" accept="video/mp4,video/quicktime" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; addVideo(f); }} />
+                  </label>
+                )}
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", marginTop: "4px" }}>MP4 or MOV, up to 100 MB. Saved with the post; Download saves the drawn slides only.</div>
+              {frame && (
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "8px" }}>
+                  <img src={frameUrl} alt="Highlight video frame" style={{ width: "72px", aspectRatio: `${IG_W} / ${IG_H}`, borderRadius: "5px", border: "1px solid #d5dce6", background: "repeating-conic-gradient(#d5dce6 0 25%, #fff 0 50%) 0 0 / 12px 12px" }} />
+                  <div>
+                    <button onClick={() => downloadSvg(frame, `${base}-highlight-frame`).catch((e) => setMsg(`Couldn't export: ${e.message}`))} style={{ ...btn(false), padding: "5px 12px" }}>Download video frame</button>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", marginTop: "3px" }}>A {IG_W}×{IG_H} PNG with a clear window: put it on the top track in your editor and the footage under it.</div>
+                  </div>
+                </div>
+              )}
+            </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <button onClick={() => downloadAll().catch((e) => { setBusy(""); setMsg(`Couldn't export: ${e.message}`); })} disabled={!slides.length || !!busy} style={{ ...btn(true), opacity: slides.length && !busy ? 1 : 0.5 }}>Download both</button>
+              <button onClick={() => downloadAll().catch((e) => { setBusy(""); setMsg(`Couldn't export: ${e.message}`); })} disabled={!slides.length || !!busy} style={{ ...btn(true), opacity: slides.length && !busy ? 1 : 0.5 }}>{videos.length ? "Download slides" : "Download all"}</button>
               {busy && <span style={{ fontSize: "12px", fontWeight: 800, color: BLUE }}>{busy}</span>}
             </div>
             <SaveBar type="spotlight" defaultName={`Spotlight · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
-              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge })} />
+              videos={videos.map((v, k) => ({ at: 1 + k, path: v.path }))} hold={uploading ? "Wait for the video to finish uploading." : ""}
+              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, videos })} />
             <CaptionBox c={cap} />
           </>
         )}
@@ -1274,13 +1503,27 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
         <div style={label}>Preview · {IG_W}×{IG_H} · click a slide to download it</div>
         {!slides.length && <div style={{ fontSize: "13px", fontWeight: 700, color: "#8a97ab" }}>Pick a player.</div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 420px))", gap: "12px" }}>
-          {slides.map((s, i) => (
-            <button key={s.name} onClick={() => { if (!(i === 0 && photoUrl && drag.swallowClick())) downloadSvg(s.svg, `${base}-${i + 1}-${s.name}`).catch((e) => setMsg(`Couldn't export: ${e.message}`)); }}
-              title={i === 0 && photoUrl ? "Drag to move his photo · click to download" : "Download this slide"} style={{ border: "1px solid #d5dce6", borderRadius: "8px", padding: 0, background: "#fff", cursor: "pointer", overflow: "hidden", textAlign: "left" }}>
-              {urls[i] && <img src={urls[i]} alt={`Spotlight slide ${i + 1}`} {...(i === 0 && photoUrl ? drag.handlers : {})} style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, ...(i === 0 && photoUrl ? drag.handlers.style : {}) }} />}
-              <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{i + 1} · {i ? "Scouting report" : "Cover"}</div>
-            </button>
-          ))}
+          {tiles.map((t, n) => {
+            if (t.video) {
+              return (
+                <div key={t.video.path} style={{ border: "1px solid #d5dce6", borderRadius: "8px", background: "#fff", overflow: "hidden" }}>
+                  {videoUrls[t.video.path]
+                    ? <video src={videoUrls[t.video.path]} controls muted playsInline preload="metadata" style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, objectFit: "cover", background: "#000" }} />
+                    : <div style={{ aspectRatio: `${IG_W} / ${IG_H}`, background: "#0b1426" }} />}
+                  <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{n + 1} · Video · {t.video.name}</div>
+                </div>
+              );
+            }
+            const i = t.slide;
+            const s = slides[i];
+            return (
+              <button key={s.name} onClick={() => { if (!(i === 0 && photoUrl && drag.swallowClick())) downloadSvg(s.svg, `${base}-${i + 1}-${s.name}`).catch((e) => setMsg(`Couldn't export: ${e.message}`)); }}
+                title={i === 0 && photoUrl ? "Drag to move his photo · click to download" : "Download this slide"} style={{ border: "1px solid #d5dce6", borderRadius: "8px", padding: 0, background: "#fff", cursor: "pointer", overflow: "hidden", textAlign: "left" }}>
+                {urls[i] && <img src={urls[i]} alt={`Spotlight slide ${n + 1}`} {...(i === 0 && photoUrl ? drag.handlers : {})} style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, ...(i === 0 && photoUrl ? drag.handlers.style : {}) }} />}
+                <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{n + 1} · {["Cover", "Scouting report", "Evaluate him"][i]}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

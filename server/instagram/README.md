@@ -12,6 +12,7 @@ Analytics). Admin-only. Nothing here is shown on the public site.
 | API (admin actions, cron) | `api/instagram.js` |
 | Graph API client, token handling, rate-limit tracking | `graph.js` |
 | Storage staging (slides Meta fetches) | `staging.js` |
+| Uploaded video clips | `videos.js` |
 | Publishing state machine | `publish.js` |
 | Analytics syncs | `sync.js` |
 | Pure metric helpers | `metrics.js` |
@@ -91,6 +92,58 @@ prevention is on.
    - If a delete fails after publishing, `ig.cleanup` is set to `pending`,
      and the hourly cron retries it.
 
+## Videos
+
+Player Spotlight posts can carry highlight clips, which go right after the
+cover. Other post types don't take videos.
+
+1. **Upload** (`video-upload`, then `video-done`). The server opens a
+   resumable upload session at `ig-videos/{32 hex}.mp4|.mov` using the
+   page's Origin. The browser then PUTs the file straight to that session,
+   and Storage answers that origin's CORS. The bucket's own CORS and
+   `storage.rules` stay closed. `video-done` checks that the file arrived
+   and is 100 MB or less. The browser checks the type (MP4 or MOV) and
+   that the clip is at least 3 seconds long. It warns about clips over 60
+   seconds and clips that aren't 4:5.
+2. **Save.** The post keeps its clips in `state.videos` and lists their
+   paths in `videoPaths`.
+3. **Publish.** `publish-start` takes `videos: { [slide index]: path }` and
+   copies each clip into the attempt's folder (`{nn}.mp4`) before it claims
+   the post. It sets `ig.staged` and `ig.videos` for those slides, and the
+   browser sends only the drawn slides. The run creates
+   `media_type: VIDEO` carousel items for them. A lone video becomes a reel.
+   Cleanup deletes the staged copies, never the originals.
+4. **Delete.** Deleting a post deletes its clips unless another saved post
+   lists them. At :47 each hour, the cron also deletes clips older than
+   3 days that no saved post lists.
+
+## Scheduling
+
+1. **Schedule** opens a date and time picker in the browser's time zone,
+   with the time also shown in Eastern. Times must be 5 minutes to 60 days
+   ahead.
+2. `publish-start` with `scheduledAt` claims the post as `scheduled`. The
+   browser then sends every slide right away, because it draws them and
+   won't be open at posting time. `schedule-confirm` marks the slides
+   complete.
+3. If a send fails part-way, the page cancels the schedule. If a post's time
+   comes before its slides are complete, it becomes `failed` and nothing
+   is posted.
+4. `/api/instagram`'s cron runs every minute and calls `runDue`, which is
+   one Firestore query on `ig.scheduledActive`.
+   - The first due post is claimed in a transaction (scheduled →
+     publishing), then published by the same `runPublish` as a click, so
+     overlapping ticks can't post it twice.
+   - It handles one post per tick. A scheduled publish left part-way is
+     picked up again on a later tick.
+   - Cleanup retries and analytics still run once an hour, at :47.
+5. **Change time** (`schedule-change`) and **Cancel** (`schedule-cancel`)
+   work while the post waits. Cancel sets it back to draft or ready and
+   deletes its sent slides.
+   - A scheduled post is locked in `firestore.rules`, the same as a
+     publishing one.
+   - Deleting it goes through the API, which removes its slides too.
+
 ## Firestore
 
 All of these are admin-read only. See `firestore.rules`.
@@ -135,5 +188,5 @@ All of these are admin-read only. See `firestore.rules`.
 
 ## Not supported
 
-- **Reels and video:** the Post Manager only makes images.
+- **Reels:** the Post Manager doesn't make reels. Videos go only into Player Spotlight carousels (see Videos).
 - **Stories and album-child metrics:** these aren't read.

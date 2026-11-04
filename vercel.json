@@ -5,7 +5,7 @@
     { "path": "/api/youtube-analytics", "schedule": "23 * * * *" },
     { "path": "/api/recache-mocks", "schedule": "0 12,13 * * 2" },
     { "path": "/api/bot-render-clear", "schedule": "41 * * * *" },
-    { "path": "/api/instagram", "schedule": "47 * * * *" }
+    { "path": "/api/instagram", "schedule": "* * * * *" }
   ],
   "functions": {
     "api/live-ingest.js": { "maxDuration": 300, "includeFiles": "src/utils/liveStats.mjs" },

@@ -9,7 +9,8 @@
 //              marked posted by hand can't be claimed — so a second click,
 //              tab or admin gets a 409, never a second post.
 //   2. stage   one slide → Storage (staging.js), checked against Instagram's
-//              image rules first.
+//              image rules first. A video slide isn't sent: start copies the
+//              post's uploaded clip (videos.js) into the attempt's folder.
 //   3. run     signs the slides' URLs and creates Instagram's containers
 //              (one image, or a carousel's items then the carousel), waits
 //              for each to say FINISHED, then calls media_publish once and
@@ -29,11 +30,17 @@
 // Fails → status "failed", ig.error { message, code, subcode, fbtraceId,
 // step, at } as Meta said it; the staged files stay for a retry or a look.
 //
+// Scheduled: start with scheduledAt → status "scheduled"; the slides are
+// staged at once (the browser draws them, and won't be there later), then
+// confirmSchedule; at its time the cron's runDue claims it (→ publishing)
+// and runs it as above. reschedule / cancelSchedule while it waits.
+//
 // Every function takes ctx: { db, bucket, graph, userId, now, sleep,
 // pollMs } — the API builds the real one (context()); tests pass fakes.
 
 const { graph: realGraph, credentials, httpError, sleep: realSleep } = require("./graph");
 const staging = require("./staging");
+const videos = require("./videos");
 
 const POSTS = "instagramPosts";
 const MAX_SLIDES = 20;
@@ -82,10 +89,42 @@ async function containerStatus(ctx, id) {
   return { code: r.status_code, detail: r.status || "" };
 }
 
+// A schedule's time (ms) checked: at least SCHEDULE_MIN_LEAD ahead (the
+// slides are sent first), at most SCHEDULE_MAX_DAYS.
+const SCHEDULE_MIN_LEAD = 5 * 60e3;
+const SCHEDULE_MAX_DAYS = 60;
+function scheduleTime(ctx, at) {
+  const t = Number(at);
+  if (!Number.isFinite(t)) throw httpError(400, "No time to schedule it for.");
+  if (t < ctx.now() + SCHEDULE_MIN_LEAD) throw httpError(400, "Schedule it at least 5 minutes ahead.");
+  if (t > ctx.now() + SCHEDULE_MAX_DAYS * 86400e3) throw httpError(400, `Schedule it within ${SCHEDULE_MAX_DAYS} days.`);
+  return t;
+}
+
 // ── 1. start ──
-async function startPublish(ctx, uid, { postId, slides } = {}) {
+// scheduledAt (ms): claim it as "scheduled" instead — the slides are staged
+// now, confirmSchedule marks them complete, and the cron (runDue) publishes
+// it at that time through runPublish, the same as a click would.
+// videos: { [slide index]: "ig-videos/…" } — the slides that are the
+// post's uploaded clips, staged here (copied) rather than sent.
+function videoSlides(videoMap, n) {
+  const out = {};
+  for (const [k, path] of Object.entries(videoMap || {})) {
+    const i = Number(k);
+    if (!Number.isInteger(i) || i < 0 || i >= n) throw httpError(400, `No slide ${k} for a video.`);
+    if (!videos.isVideoPath(path)) throw httpError(400, "That isn't an uploaded video.");
+    out[i] = path;
+  }
+  if (Object.keys(out).length === n && n === 1) return out;
+  if (Object.keys(out).length >= n) throw httpError(400, "A carousel needs at least one image slide.");
+  return out;
+}
+
+async function startPublish(ctx, uid, { postId, slides, scheduledAt, videos: videoMap } = {}) {
   const n = Number(slides);
   if (!Number.isInteger(n) || n < 1 || n > MAX_SLIDES) throw httpError(400, `A post takes 1–${MAX_SLIDES} slides.`);
+  const vids = videoSlides(videoMap, n);
+  const at = scheduledAt != null ? scheduleTime(ctx, scheduledAt) : null;
   const ref = postRef(ctx, postId);
   const before = (await ref.get()).data();
   if (!before) throw httpError(404, "That post isn't saved (or was deleted).");
@@ -101,41 +140,142 @@ async function startPublish(ctx, uid, { postId, slides } = {}) {
   }
   const attempt = staging.newAttempt();
   const now = ctx.now();
+  // The clips, copied into this attempt's folder (before the claim: a copy
+  // that fails leaves the post as it was).
+  const staged = {};
+  for (const [i, path] of Object.entries(vids)) {
+    const dest = staging.slidePath(postId, attempt, Number(i), videos.extOf(path));
+    await videos.copyTo(ctx.bucket, path, dest);
+    staged[i] = dest;
+  }
   await ctx.db.runTransaction(async (tx) => {
     const p = (await tx.get(ref)).data();
     if (!p) throw httpError(404, "That post isn't saved (or was deleted).");
     if (p.status === "published" || p.ig?.mediaId) throw httpError(409, "This post is already published.", { code: "published", permalink: p.ig?.permalink || null });
     if (p.status === "posted") throw httpError(409, "This post is marked as posted by hand. Set it back to Draft to publish it.", { code: "posted" });
     if (p.status === "publishing") throw httpError(409, "This post is already publishing.", { code: "publishing" });
+    if (p.status === "scheduled") throw httpError(409, "This post is already scheduled. Cancel or change the schedule instead.", { code: "scheduled" });
     if (p.ig?.error?.code === "published_unconfirmed") throw httpError(409, p.ig.error.message, { code: "published_unconfirmed" });
     const problem = captionProblem(p.caption);
     if (problem) throw httpError(400, problem);
     tx.update(ref, {
-      status: "publishing",
+      status: at ? "scheduled" : "publishing",
       ig: {
-        attempt, by: uid || null, startedAt: now, slides: n, step: "staging", staged: {}, files: [], children: {}, container: null,
+        attempt, by: uid || null, startedAt: now, slides: n, step: "staging", staged, videos: Object.fromEntries(Object.keys(vids).map((i) => [i, true])), files: [], children: {}, container: null,
         leaseUntil: null, error: null, prevStatus: p.status || "draft", lastError: p.ig?.error || null,
+        ...(p.ig?.deletedPosts ? { deletedPosts: p.ig.deletedPosts } : {}),
+        // scheduledActive: the cron's one query (runDue) — on while it's waiting or publishing.
+        ...(at ? { scheduledAt: at, scheduledBy: uid || null, scheduleReady: false, scheduledActive: true } : {}),
       },
     });
   });
-  return { attempt };
+  return { attempt, ...(at ? { scheduledAt: at } : {}) };
 }
 
 // The attempt's post, or a 409 saying why it can't take this step.
 async function attemptPost(ref, attempt) {
   const p = (await ref.get()).data();
   if (!p) throw httpError(404, "That post isn't saved (or was deleted).");
-  if (p.status !== "publishing" || !attempt || p.ig?.attempt !== attempt) throw httpError(409, "This publish attempt is over — start again.", { code: "stale_attempt" });
+  if (!["publishing", "scheduled"].includes(p.status) || !attempt || p.ig?.attempt !== attempt) throw httpError(409, "This publish attempt is over — start again.", { code: "stale_attempt" });
   return p;
+}
+
+// ── Scheduling ──
+// The slides are all sent: the schedule is set. Until this, the cron won't
+// take it (and fails it if its time comes first).
+async function confirmSchedule(ctx, uid, { postId, attempt } = {}) {
+  const ref = postRef(ctx, postId);
+  const p = await attemptPost(ref, attempt);
+  if (p.status !== "scheduled") throw httpError(409, "This post isn't scheduled.", { code: "not_scheduled" });
+  const paths = Array.from({ length: p.ig.slides }, (_, i) => p.ig.staged?.[i] || p.ig.staged?.[String(i)] || null);
+  const missing = paths.filter((x) => !x).length;
+  if (missing) throw httpError(409, `${missing} of ${p.ig.slides} slides haven't arrived yet.`, { code: "not_staged" });
+  for (const f of paths) if (!(await staging.exists(ctx.bucket, f))) throw httpError(409, "A sent slide is missing from Storage — schedule it again.", { code: "not_staged" });
+  await ref.update(igFields({ scheduleReady: true, files: paths }));
+  return { scheduledAt: p.ig.scheduledAt };
+}
+
+// A new time for a scheduled post.
+async function reschedule(ctx, uid, { postId, scheduledAt } = {}) {
+  const at = scheduleTime(ctx, scheduledAt);
+  const ref = postRef(ctx, postId);
+  await ctx.db.runTransaction(async (tx) => {
+    const p = (await tx.get(ref)).data();
+    if (p?.status !== "scheduled") throw httpError(409, "This post isn't scheduled (it may be publishing already).", { code: "not_scheduled" });
+    tx.update(ref, { "ig.scheduledAt": at, "ig.rescheduledBy": uid || null });
+  });
+  return { scheduledAt: at };
+}
+
+// The schedule called off: back to what it was (draft or ready), its sent
+// slides deleted — nothing was published, so nothing to keep.
+async function cancelSchedule(ctx, uid, { postId } = {}) {
+  const ref = postRef(ctx, postId);
+  let back = "draft";
+  await ctx.db.runTransaction(async (tx) => {
+    const p = (await tx.get(ref)).data();
+    if (p?.status !== "scheduled") throw httpError(409, "This post isn't scheduled (it may be publishing already).", { code: "not_scheduled" });
+    back = ["draft", "ready"].includes(p.ig?.prevStatus) ? p.ig.prevStatus : "draft";
+    tx.update(ref, {
+      status: back,
+      ig: {
+        lastError: p.ig?.lastError || null, cancelledSchedule: { at: ctx.now(), by: uid || null, was: p.ig?.scheduledAt || null },
+        ...(p.ig?.deletedPosts ? { deletedPosts: p.ig.deletedPosts } : {}),
+      },
+    });
+  });
+  const r = await staging.deletePostFiles(ctx.bucket, postId).catch((e) => ({ failed: [e.message] }));
+  return { status: back, filesLeft: r.failed.length };
+}
+
+// The cron's step (every minute): the first scheduled post that's due —
+// claimed (scheduled → publishing) in a transaction, so a tick that
+// overlaps can't take it too — then published by runPublish. A scheduled
+// publish left part-way (Instagram slow, out of time) is picked up again
+// once its lease is free. One post a tick; the next due one goes next minute.
+async function runDue(ctx) {
+  const now = ctx.now();
+  const snap = await ctx.db.collection(POSTS).where("ig.scheduledActive", "==", true).get();
+  const posts = snap.docs.map((d) => ({ ref: d.ref, p: d.data() }));
+  for (const { ref, p } of posts) {
+    if (!["scheduled", "publishing"].includes(p.status)) await ref.update({ "ig.scheduledActive": false });
+  }
+  const resume = posts.find(({ p }) => p.status === "publishing" && !(p.ig?.leaseUntil > now));
+  const due = posts.filter(({ p }) => p.status === "scheduled" && p.ig?.scheduledAt <= now).sort((a, b) => a.p.ig.scheduledAt - b.p.ig.scheduledAt)[0];
+  const pick = resume || due;
+  if (!pick) return { due: 0, scheduled: posts.filter(({ p }) => p.status === "scheduled").length };
+  const { ref, p } = pick;
+  if (p.status === "scheduled") {
+    if (!p.ig.scheduleReady) {
+      await ref.update({ status: "failed", "ig.scheduledActive": false, "ig.error": metaError(httpError(409, "Its time came before all its slides were sent. Open the post and schedule or publish it again.", { code: "not_staged" }), "staging", now) });
+      return { postId: ref.id, failed: "not_staged" };
+    }
+    let claimed = false;
+    await ctx.db.runTransaction(async (tx) => {
+      const cur = (await tx.get(ref)).data();
+      if (cur?.status !== "scheduled" || cur.ig?.attempt !== p.ig.attempt || !(cur.ig.scheduledAt <= now)) return;
+      tx.update(ref, { status: "publishing", "ig.dueAt": now });
+      claimed = true;
+    });
+    if (!claimed) return { postId: ref.id, skipped: "changed" };
+  }
+  try {
+    const r = await runPublish(ctx, p.ig.scheduledBy || "schedule", { postId: ref.id, attempt: p.ig.attempt });
+    return { postId: ref.id, ...r };
+  } catch (e) {
+    // runPublish recorded the failure on the post (and its Meta error).
+    return { postId: ref.id, failed: e.code || e.message };
+  }
 }
 
 // ── 2. stage ──
 async function stageSlide(ctx, uid, { postId, attempt, index, jpeg } = {}) {
   const ref = postRef(ctx, postId);
   const p = await attemptPost(ref, attempt);
-  if (p.ig.step !== "staging") throw httpError(409, "The slides are already sent.", { code: "staged" });
+  if (p.ig.step !== "staging" || p.ig.scheduleReady) throw httpError(409, "The slides are already sent.", { code: "staged" });
   const i = Number(index);
   if (!Number.isInteger(i) || i < 0 || i >= p.ig.slides) throw httpError(400, `No slide ${index}.`);
+  if (p.ig.videos?.[i]) throw httpError(400, `Slide ${i + 1} is a video; it's already staged.`);
   const buf = Buffer.from(String(jpeg || ""), "base64");
   const info = staging.checkSlide(buf);
   const path = staging.slidePath(postId, attempt, i);
@@ -197,7 +337,8 @@ async function runPublish(ctx, uid, { postId, attempt } = {}) {
         const children = { ...ig.children };
         for (let i = 0; i < ig.slides; i++) {
           if (children[i]) continue;
-          const c = await ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { image_url: urls[i], is_carousel_item: "true" }, retries: 0 });
+          const item = ig.videos?.[i] ? { media_type: "VIDEO", video_url: urls[i] } : { image_url: urls[i] };
+          const c = await ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { ...item, is_carousel_item: "true" }, retries: 0 });
           children[i] = c.id;
           await set({ children: { ...children } });
         }
@@ -209,7 +350,9 @@ async function runPublish(ctx, uid, { postId, attempt } = {}) {
           await set({ container: c.id });
         }
       } else if (!ig.container) {
-        const c = await ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { image_url: urls[0], caption: p.caption || "" }, retries: 0 });
+        // A lone video goes up as a reel (Instagram's only single-video post).
+        const item = ig.videos?.[0] ? { media_type: "REELS", video_url: urls[0] } : { image_url: urls[0] };
+        const c = await ctx.graph(`/${ctx.userId}/media`, { method: "POST", params: { ...item, caption: p.caption || "" }, retries: 0 });
         await set({ container: c.id });
       }
       const st = await waitFinished(ctx, [ig.container], deadline);
@@ -235,7 +378,7 @@ async function runPublish(ctx, uid, { postId, attempt } = {}) {
     // Published is published: a failure after Instagram returned the media
     // ID is a bookkeeping problem, never a "failed" post.
     if (ig.mediaId) return await confirm(ctx, ref, { ...p, ig }).catch(() => ({ published: true, mediaId: ig.mediaId, permalink: null }));
-    await ref.update({ status: "failed", "ig.error": metaError(e, ig.step, ctx.now()), "ig.leaseUntil": null }).catch((er) => console.error("instagram publish: couldn't record the failure:", er.message));
+    await ref.update({ status: "failed", "ig.error": metaError(e, ig.step, ctx.now()), "ig.leaseUntil": null, "ig.scheduledActive": false }).catch((er) => console.error("instagram publish: couldn't record the failure:", er.message));
     throw e;
   }
 }
@@ -263,7 +406,7 @@ async function confirm(ctx, ref, p) {
     status: "published",
     ...igFields({
       step: "done", mediaId: ig.mediaId, permalink: media?.permalink || null, publishedAt: new Date(at).toISOString(), publishedAtMs: at,
-      mediaType: media?.media_type || (ig.slides > 1 ? "CAROUSEL_ALBUM" : "IMAGE"), error: null, leaseUntil: null, cleanup: "pending",
+      mediaType: media?.media_type || (ig.slides > 1 ? "CAROUSEL_ALBUM" : "IMAGE"), error: null, leaseUntil: null, cleanup: "pending", scheduledActive: false,
     }),
   });
   await ctx.db.collection("igMedia").doc(ig.mediaId).set({
@@ -310,15 +453,16 @@ async function recover(ctx, ref, p) {
   const list = (await ctx.graph(`/${ctx.userId}/media`, { params: { fields: "id,caption,timestamp", limit: 10 } })).data || [];
   const hit = list.find((m) => Date.parse(m.timestamp) >= since && String(m.caption || "").trim() === String(p.caption || "").trim());
   if (!hit) {
-    await ref.update({ status: "failed", "ig.error": metaError(httpError(409, "Instagram says this was published, but it can't be found on @wedraftsite. Check the account before publishing again.", { code: "published_unconfirmed" }), "publishing", ctx.now()), "ig.leaseUntil": null });
+    await ref.update({ status: "failed", "ig.error": metaError(httpError(409, "Instagram says this was published, but it can't be found on @wedraftsite. Check the account before publishing again.", { code: "published_unconfirmed" }), "publishing", ctx.now()), "ig.leaseUntil": null, "ig.scheduledActive": false });
     return null;
   }
   await ref.update(igFields({ mediaId: hit.id, step: "publishing" }));
   return confirm(ctx, ref, { ...p, ig: { ...p.ig, mediaId: hit.id } });
 }
 
-// A post deleted from the list, its staged files with it. Not while it's
-// publishing; a file that won't delete keeps the post (try again).
+// A post deleted from the list, its staged files with it, and its uploaded
+// clips unless another saved post uses them too. Not while it's publishing;
+// a file that won't delete keeps the post (try again).
 async function deletePost(ctx, uid, { postId } = {}) {
   const ref = postRef(ctx, postId);
   const p = (await ref.get()).data();
@@ -327,7 +471,12 @@ async function deletePost(ctx, uid, { postId } = {}) {
   const r = await staging.deletePostFiles(ctx.bucket, postId);
   if (r.failed.length) throw httpError(502, `${r.failed.length} staged file${r.failed.length === 1 ? "" : "s"} wouldn't delete, so the post was kept. Try again.`);
   await ref.delete();
+  // The clips go once the post has: a failure here leaves them to the hourly sweep.
+  await videos.deleteUnlisted(ctx, p.videoPaths, postId).catch((e) => console.error("instagram video delete failed:", e.message));
   return { deleted: true, files: r.deleted };
 }
 
-module.exports = { POSTS, MAX_SLIDES, LEASE_MS, POLL_MS, context, captionProblem, startPublish, stageSlide, runPublish, cleanupPost, cleanupPending, deletePost, recover };
+module.exports = {
+  POSTS, MAX_SLIDES, LEASE_MS, POLL_MS, SCHEDULE_MIN_LEAD, context, captionProblem, startPublish, stageSlide, runPublish, cleanupPost, cleanupPending, deletePost, recover,
+  confirmSchedule, reschedule, cancelSchedule, runDue,
+};

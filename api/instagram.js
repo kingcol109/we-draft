@@ -9,7 +9,18 @@
 // caller's users/{uid} must have role "admin" (as api/youtube-analytics.js):
 //   status          the account (username, followers, posts) and Instagram's
 //                   publishing limit — never the token
-//   publish-start   { postId, slides } claim a saved post → { attempt }
+//   publish-start   { postId, slides, scheduledAt?, videos? } claim a saved
+//                   post → { attempt } (scheduledAt, ms: "scheduled" instead;
+//                   videos { [slide index]: "ig-videos/…" }: those slides are
+//                   the post's clips, copied in rather than sent)
+//   video-upload    { type, bytes } a clip's upload session → { path,
+//                   uploadUrl } (the browser PUTs the file there —
+//                   server/instagram/videos.js)
+//   video-done      { path } the upload checked → { path, bytes }
+//   video-url       { path } a link to watch it → { url, expires }
+//   schedule-confirm { postId, attempt } every slide sent: the schedule's set
+//   schedule-change { postId, scheduledAt } a new time
+//   schedule-cancel { postId } back to draft/ready, its sent slides deleted
 //   stage           { postId, attempt, index, jpeg (base64) } one slide
 //   publish         { postId, attempt } containers → media_publish →
 //                   { published, mediaId, permalink } or { pending: true }
@@ -21,10 +32,12 @@
 // Reads (posts, igMedia, igAccountDaily, igAnalytics/*) come straight from
 // Firestore (admin read in firestore.rules); only the server writes them.
 //
-// GET with Authorization: Bearer $CRON_SECRET — Vercel Cron (vercel.json):
-// retries staged-file cleanup for published posts, then, once an admin has
-// turned the schedule on, one analytics step (account every 6h, media
-// every 6h, whichever is more overdue).
+// GET with Authorization: Bearer $CRON_SECRET — Vercel Cron (vercel.json),
+// every minute: publishes a scheduled post that's due (publish.js runDue).
+// At :47 each hour it also retries staged-file cleanup for published posts,
+// deletes uploaded clips no saved post uses (videos.js sweepOrphans),
+// then, once an admin has turned the schedule on, one analytics step
+// (account every 6h, media every 6h, whichever is more overdue).
 //
 // The token stays server-side (server/instagram/graph.js); logs carry error
 // messages only.
@@ -48,14 +61,29 @@ function cronAuthorized(header, secret) {
 
 const HOUR = 3600e3;
 
-async function cronTick(db) {
+// Every minute: a scheduled post that's due (one query when none is). Once
+// an hour (at :47, as before): cleanup retries and the analytics step.
+async function cronTick(db, tickAt = new Date()) {
   const pub = require("../server/instagram/publish");
   const out = {};
+  try {
+    out.scheduled = await pub.runDue(pub.context(db));
+  } catch (e) {
+    console.error("instagram schedule tick failed:", e.message);
+    out.scheduled = { error: String(e.message).slice(0, 200) };
+  }
+  if (tickAt.getUTCMinutes() !== 47) return out;
   try {
     out.cleanup = await pub.cleanupPending(pub.context(db));
   } catch (e) {
     console.error("instagram cleanup tick failed:", e.message);
     out.cleanup = { error: String(e.message).slice(0, 200) };
+  }
+  try {
+    out.videos = await require("../server/instagram/videos").sweepOrphans(pub.context(db));
+  } catch (e) {
+    console.error("instagram video sweep failed:", e.message);
+    out.videos = { error: String(e.message).slice(0, 200) };
   }
   const st = (await db.doc("igAnalytics/status").get()).data() || {};
   if (!st.auto?.enabled) return { ...out, skipped: "scheduled sync is off" };
@@ -118,11 +146,18 @@ module.exports = async function handler(req, res) {
 
     const body = req.body || {};
     const pub = () => require("../server/instagram/publish");
+    const vid = () => require("../server/instagram/videos");
     switch (body.action) {
       case "status": return res.status(200).json(await status());
       case "publish-start": return res.status(200).json(await pub().startPublish(pub().context(db), uid, body));
+      case "schedule-confirm": return res.status(200).json(await pub().confirmSchedule(pub().context(db), uid, body));
+      case "schedule-change": return res.status(200).json(await pub().reschedule(pub().context(db), uid, body));
+      case "schedule-cancel": return res.status(200).json(await pub().cancelSchedule(pub().context(db), uid, body));
       case "stage": return res.status(200).json(await pub().stageSlide(pub().context(db), uid, body));
       case "publish": return res.status(200).json(await pub().runPublish(pub().context(db), uid, body));
+      case "video-upload": return res.status(200).json(await vid().startUpload(pub().context(db).bucket, { type: body.type, bytes: body.bytes, origin: req.headers.origin || null }));
+      case "video-done": return res.status(200).json(await vid().finishUpload(pub().context(db).bucket, body.path));
+      case "video-url": return res.status(200).json(await vid().readUrl(pub().context(db).bucket, body.path));
       case "delete-post": return res.status(200).json(await pub().deletePost(pub().context(db), uid, body));
       case "sync": {
         const op = String(body.op || "");
