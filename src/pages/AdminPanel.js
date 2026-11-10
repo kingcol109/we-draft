@@ -7090,11 +7090,55 @@ function TrendsSection() {
     if (label) setFormState((prev) => ({ ...prev, Trend: label }));
   };
 
+  // Suggest Trends' "Apply all": each suggestion saved with its label,
+  // benched (Shown: false) after the bench's current last; the cooling ones
+  // removed when asked; and, when top is given (slugs, best first), those
+  // featured on player pages in that order and every other trend benched.
+  const applyAllSuggestions = async (add, remove, top = null) => {
+    let order = benchedTrends.reduce((m, t) => Math.max(m, typeof t.Order === "number" ? t.Order : -1), -1);
+    const saved = [];
+    for (const { p, label } of add) {
+      if (!p.Slug || !label) continue;
+      order += 1;
+      const payload = {
+        Trend: label, Notes: "", Shown: false, Order: order,
+        First: p.First || "", Last: p.Last || "", Position: p.Position || "", School: p.School || "", Eligible: p.Eligible || "",
+      };
+      await setDoc(doc(db, "trends", p.Slug), payload);
+      saved.push([p.Slug, payload]);
+    }
+    const removed = [];
+    for (const p of remove) {
+      if (!p.Slug) continue;
+      await deleteDoc(doc(db, "trends", p.Slug));
+      removed.push(p.Slug);
+    }
+    // The top 5: featured in order; every other trend benched.
+    const current = new Map(trendsMap);
+    saved.forEach(([slug, payload]) => current.set(slug, payload));
+    removed.forEach((slug) => current.delete(slug));
+    const changes = [];
+    if (top) {
+      const featured = top.filter((slug) => current.has(slug)).slice(0, TOP5_LIMIT);
+      featured.forEach((slug, i) => {
+        const t = current.get(slug);
+        if (t.Shown !== true || t.Order !== i) changes.push([slug, { Shown: true, Order: i }]);
+      });
+      current.forEach((t, slug) => { if (t.Shown && !featured.includes(slug)) changes.push([slug, { Shown: false }]); });
+      for (const [slug, u] of changes) await updateDoc(doc(db, "trends", slug), u);
+    }
+    setTrendsMap(() => {
+      const next = new Map(current);
+      changes.forEach(([slug, u]) => next.set(slug, { ...next.get(slug), ...u }));
+      return next;
+    });
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
         {showSuggest ? (
-          <TrendSuggester players={allPlayers} trendsMap={trendsMap} onPick={pickSuggestion} onClose={() => setShowSuggest(false)} />
+          <TrendSuggester players={allPlayers} trendsMap={trendsMap} onPick={pickSuggestion} onApplyAll={applyAllSuggestions} onClose={() => setShowSuggest(false)} />
         ) : (
           <button
             type="button"

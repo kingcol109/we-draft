@@ -21,7 +21,7 @@ const num = (v) => (v == null ? "—" : Math.round(v).toLocaleString());
 const fmtDay = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const dur = (sec) => (sec == null ? "—" : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`);
 const pctOf = (v) => (v == null ? "—" : `${Math.round(v)}%`);
-const TEMPLATE_NAMES = { gamereview: "Game Review", icecold: "Ice Cold" };
+const TEMPLATE_NAMES = { gamereview: "Game Review", icecold: "Ice Cold", portal: "Transfer Portal" };
 
 // A group's totals: CTR weighted by impressions, watch time by views.
 function rollup(list) {

@@ -5,7 +5,13 @@
 // current trends that are cooling off. Every row offers all three labels
 // (the suggested one highlighted); picking one opens him in the Trends edit
 // panel with that label set — the admin still saves. "Review" on a cooling
-// trend opens it as-is.
+// trend opens it as-is. "Apply all" saves every heating-up suggestion at
+// once with its suggested label (benched, like any new trend: featuring one
+// on player pages stays a deliberate pick), and can also remove the cooling
+// trends (unchecked by default — those are flagged for review, not sure),
+// and set the top 5 on player pages to what it ranks best: the new
+// suggestions and the current trends still holding up, scored together
+// (a current trend with no PFF grades can't be ranked, so it's benched).
 //
 // Score (each piece a percentile among the candidates):
 //   PFF heat  65%  his last two games' average grade (50%), how far that is
@@ -59,10 +65,38 @@ function labelFor(c) {
   return null;
 }
 
-export default function TrendSuggester({ players, trendsMap, onPick, onClose }) {
+export default function TrendSuggester({ players, trendsMap, onPick, onApplyAll, onClose }) {
   const [state, setState] = useState(null); // { hot, cooling }
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState("");
+  const [alsoCooling, setAlsoCooling] = useState(false);
+  const [setTop, setSetTop] = useState(true);
+  const applyAll = async () => {
+    if (!state || !onApplyAll) return;
+    const add = state.hot.map((c) => ({ p: c.p, label: c.label }));
+    const remove = alsoCooling ? state.cooling.map((c) => c.p) : [];
+    const top = setTop && state.top5.length ? state.top5.map((c) => c.p.Slug) : null;
+    const what = [
+      add.length && `set ${add.length} new trend${add.length === 1 ? "" : "s"}`,
+      remove.length && `remove ${remove.length} cooling trend${remove.length === 1 ? "" : "s"}`,
+      top && `feature the top ${top.length} on player pages (the rest benched)`,
+    ].filter(Boolean).join(", ");
+    if (!what || !window.confirm(`Apply all: ${what}?`)) return;
+    setApplying(true);
+    setError("");
+    try {
+      await onApplyAll(add, remove, top);
+      setApplied(`Applied: ${what}.`);
+      setState((s) => ({ ...s, hot: [], cooling: alsoCooling ? [] : s.cooling, top5: [] }));
+    } catch (e) {
+      console.error("Trend apply-all error:", e);
+      setError("Couldn't apply them all — check console. Any that saved are in Active Trends.");
+    } finally {
+      setApplying(false);
+    }
+  };
 
   const suggest = async () => {
     setRunning(true);
@@ -96,24 +130,33 @@ export default function TrendSuggester({ players, trendsMap, onPick, onClose }) 
       });
 
       const hot = all.filter((c) => !c.trend).map((c) => ({ ...c, label: labelFor(c) })).filter((c) => c.label);
+      // Already trending, but his grades have dropped off.
+      const isCooling = (c) => c.delta <= -8 || c.recentAvg < 60;
+      // The current trends still holding up, scored on the same scale as the suggestions (for the top 5).
+      const keepers = all.filter((c) => c.trend && !isCooling(c));
+      const pool = [...hot, ...keepers];
       const pct = {
-        recent: percentiles(hot.map((c) => c.recentAvg)),
-        delta: percentiles(hot.map((c) => c.delta)),
-        momentum: percentiles(hot.filter((c) => c.momentum != null).map((c) => c.momentum)),
+        recent: percentiles(pool.map((c) => c.recentAvg)),
+        delta: percentiles(pool.map((c) => c.delta)),
+        momentum: percentiles(pool.filter((c) => c.momentum != null).map((c) => c.momentum)),
       };
-      hot.forEach((c) => {
+      pool.forEach((c) => {
         const heat = pct.recent(c.recentAvg) * 0.5 + pct.delta(c.delta) * 0.3 + rankPct(c.rec) * 0.2;
         const traffic = c.momentum != null ? pct.momentum(c.momentum) : 0.5;
         c.score = Math.round((heat * 0.65 + traffic * 0.35) * 100);
       });
       hot.sort((a, b) => b.score - a.score);
 
-      // Already trending, but his grades have dropped off.
       const cooling = all
-        .filter((c) => c.trend && (c.delta <= -8 || c.recentAvg < 60))
+        .filter((c) => c.trend && isCooling(c))
         .sort((a, b) => a.delta - b.delta);
 
-      setState({ hot: hot.slice(0, RESULT_COUNT), hotTotal: hot.length, cooling, scanned: all.length });
+      const shownHot = hot.slice(0, RESULT_COUNT);
+      // What should be on player pages: the best of what's listed to apply and what's holding up.
+      const top5 = [...shownHot, ...keepers].sort((a, b) => b.score - a.score).slice(0, 5);
+      const unranked = [...trendsMap.keys()].filter((slug) => !all.some((c) => c.p.Slug === slug)).length;
+      setState({ hot: shownHot, hotTotal: hot.length, cooling, scanned: all.length, top5, unranked });
+      setApplied("");
     } catch (e) {
       console.error("Trend suggest error:", e);
       setError("Couldn't build suggestions — check console.");
@@ -142,10 +185,47 @@ export default function TrendSuggester({ players, trendsMap, onPick, onClose }) 
       {error && <div style={{ padding: "12px 14px", color: RED, fontWeight: 700, fontSize: "13px" }}>{error}</div>}
       {state && (
         <>
-          <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa" }}>
-            {state.hotTotal} heating up of {state.scanned} We-Draft players with PFF grades · top {state.hot.length}
+          <div style={{ padding: "8px 14px", fontSize: "11px", fontWeight: 700, color: "#aaa", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <span>{state.hotTotal} heating up of {state.scanned} We-Draft players with PFF grades · top {state.hot.length}</span>
+            {onApplyAll && (state.hot.length > 0 || state.cooling.length > 0) && (
+              <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+                {state.top5.length > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: "4px", color: "#7a8597", cursor: "pointer" }}>
+                    <input type="checkbox" checked={setTop} onChange={(e) => setSetTop(e.target.checked)} /> Set the top 5
+                  </label>
+                )}
+                {state.cooling.length > 0 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: "4px", color: "#7a8597", cursor: "pointer" }}>
+                    <input type="checkbox" checked={alsoCooling} onChange={(e) => setAlsoCooling(e.target.checked)} /> Also remove the {state.cooling.length} cooling
+                  </label>
+                )}
+                <button type="button" onClick={applyAll} disabled={applying || (!state.hot.length && !alsoCooling && !(setTop && state.top5.length))} data-trends-apply-all
+                  style={{ background: BLUE, color: "#fff", border: "none", borderRadius: "6px", padding: "5px 14px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: applying ? "default" : "pointer", opacity: applying || (!state.hot.length && !alsoCooling && !(setTop && state.top5.length)) ? 0.6 : 1 }}>
+                  {applying ? "Applying..." : `Apply all${state.hot.length ? ` ${state.hot.length}` : ""}`}
+                </button>
+              </span>
+            )}
           </div>
-          {state.hot.length === 0 && (
+          {applied && <div style={{ padding: "8px 14px", fontSize: "12px", fontWeight: 800, color: "#2e7d32", background: "#f1faf3" }}>{applied}</div>}
+          {state.top5.length > 0 && setTop && !applied && (
+            <div style={{ padding: "8px 14px", borderTop: "1px solid #f0f0f0", background: "#fbfcfe" }} data-trends-top5>
+              <div style={{ fontSize: "11px", fontWeight: 900, color: "#7a8597", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>
+                Top 5 on player pages after Apply all
+              </div>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {state.top5.map((c, i) => {
+                  const st = LABEL_STYLE[c.label || c.trend] || LABEL_STYLE.Up;
+                  return (
+                    <span key={c.p.id} style={{ fontSize: "11px", fontWeight: 800, borderRadius: "8px", padding: "3px 8px", background: st.bg, color: st.fg }}>
+                      {i + 1}. {c.p.First} {c.p.Last} · {st.icon} {c.label || c.trend}{c.trend ? "" : " · new"} · {c.score}
+                    </span>
+                  );
+                })}
+              </div>
+              {state.unranked > 0 && <div style={{ fontSize: "10px", fontWeight: 700, color: "#aaa", marginTop: "4px" }}>{state.unranked} current trend{state.unranked === 1 ? " has" : "s have"} no PFF grades to rank, so {state.unranked === 1 ? "it'd be" : "they'd be"} benched.</div>}
+            </div>
+          )}
+          {state.hot.length === 0 && !applied && (
             <div style={{ padding: "18px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>Nobody untrended is heating up right now.</div>
           )}
           {state.hot.map((c) => <Row key={c.p.id} c={c} onPick={(label) => onPick(c.p, label)} />)}

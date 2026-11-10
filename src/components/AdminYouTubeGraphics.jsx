@@ -4,7 +4,8 @@
 // thumbnails and outlines (the frame round a cut-up), by template — Ice Cold
 // (utils/youtube/icecold.js) and, for thumbnails, Game Review
 // (utils/youtube/gamereview.js: every element moved, sized and spaced —
-// GameReviewControls.jsx). Thumbnails can be saved with their metadata and
+// GameReviewControls.jsx) and Transfer Portal (utils/youtube/portalthumb.js —
+// PortalThumbControls.jsx). Thumbnails can be saved with their metadata and
 // put on the video they went up on (ThumbLibrary.jsx), for Thumb Analytics. Pick a player and his info fills in:
 // his name, position and size, his school's logo, his career table from ESPN
 // (the season in progress starred, with its games from his ESPN game log)
@@ -12,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
-import { field, label, btn, linkBtn, fileName, loadDataImage, loadFeatureImage, svgToBlob, downloadSvg, useSvgUrls, useDragAdjust, PhotoAdjust, NO_ADJUST } from "./SocialMakerKit";
+import { field, label, btn, linkBtn, fileName, loadDataImage, loadFeatureImage, svgToBlob, downloadSvg, useSvgUrls, useDragAdjust, PhotoAdjust, NO_ADJUST, loadFont, measure as bebasMeasure } from "./SocialMakerKit";
 import { liveSeason, outlineTable, loadCutupPlayer } from "../utils/youtube/cutupPlayer";
 import { cutupText, statLineOf, TITLE_MAX } from "../utils/youtube/videoText";
 import { ICE_W, ICE_H, SCRIPT, BOLD_WEIGHT, iceOutline, iceOutlineImageUrls, iceThumb, iceThumbImageUrls } from "../utils/youtube/icecold";
@@ -20,10 +21,12 @@ import { GR_W, GR_NAME_FONT, GR_HEAD_FONT, GR_DEFAULTS, gameReview, gameReviewIm
 import { localFontCss } from "../utils/youtube/localFonts";
 import { thumbMeta } from "../utils/youtube/thumbStore";
 import GameReviewControls, { defaultLayout } from "./GameReviewControls";
+import PortalThumbControls from "./PortalThumbControls";
+import { portalThumb, portalThumbImageUrls, portalThumbBoxes, portalDefaults } from "../utils/youtube/portalthumb";
 import ThumbLibrary from "./ThumbLibrary";
 import WdLogo from "../assets/Logo2.png";
 
-const TEMPLATES = { thumbnail: [{ id: "icecold", name: "Ice Cold" }, { id: "gamereview", name: "Game Review" }], outline: [{ id: "icecold", name: "Ice Cold" }] };
+const TEMPLATES = { thumbnail: [{ id: "icecold", name: "Ice Cold" }, { id: "gamereview", name: "Game Review" }, { id: "portal", name: "Transfer Portal" }], outline: [{ id: "icecold", name: "Ice Cold" }] };
 const hex6 = (v) => (/^#?[0-9a-f]{6}$/i.test(String(v || "").trim()) ? `#${String(v).trim().replace("#", "").toLowerCase()}` : "");
 // Game Review measures in its own fonts (localFonts.js), not cached: they load after the first draw.
 function grMeasure(text, size, which) {
@@ -103,6 +106,18 @@ export default function AdminYouTubeGraphics({ kind }) {
   const [grSel, setGrSel] = useState("headline");
   const [grFonts, setGrFonts] = useState({ css: "", missing: [] });
   useEffect(() => { if (isGr) localFontCss().then(setGrFonts).catch(() => {}); }, [isGr]);
+  // Transfer Portal: the look, the schools, the words (portalthumb.js), Bebas (bundled).
+  const isPt = kind === "thumbnail" && template === "portal";
+  const [pt, setPt] = useState(() => ({ kind: "portal", fromName: "", toName: "", ...portalDefaults("portal"), wordsTouched: false, layout: defaultLayout("ptLayoutDefault") }));
+  const [schools, setSchools] = useState(null);
+  const [bebasCss, setBebasCss] = useState("");
+  useEffect(() => {
+    if (!isPt) return;
+    if (!bebasCss) loadFont().then(setBebasCss).catch(() => {});
+    if (!schools) getDocs(collection(db, "schools")).then((snap) => setSchools(snap.docs.map((d) => d.data()).filter((x) => x.School).sort((a, b) => a.School.localeCompare(b.School)))).catch(() => setSchools([]));
+  }, [isPt]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The template with its own layout (Game Review, Transfer Portal): what's dragged on the preview.
+  const tpl = isGr ? "gr" : isPt ? "pt" : "ice";
   // The saved thumbnail that's open (ThumbLibrary.jsx), or null.
   const [savedId, setSavedId] = useState(null);
 
@@ -138,6 +153,13 @@ export default function AdminYouTubeGraphics({ kind }) {
       setCutout(true);
       setAdjust(NO_ADJUST);
       setGr((g) => ({ ...g, color: hex6(c.school.Color1) || g.color, accent: hex6(c.school.Color2) || g.accent, dotColor: "" }));
+      {
+        // A player already resolved to a new school has it as School, the old one as PriorSchool.
+        const resolved = !pl.InPortal && !!pl.PriorSchool;
+        const ptKind = resolved ? "transfer" : "portal";
+        const toName = resolved ? pl.School || "" : "";
+        setPt((x) => ({ ...x, kind: ptKind, fromName: pl.PortalOriginalSchool || (resolved ? pl.PriorSchool : pl.School) || "", toName, ...portalDefaults(ptKind, toName), wordsTouched: false }));
+      }
       if (!restore) setSavedId(null);
       setMsg(c.problem || (!c.photos.action.length && kind === "thumbnail" ? "He has no action shots in Photos, so this is his headshot. Add one in Content → Photos, or paste or upload a cutout below." : ""));
     } catch (e) {
@@ -156,14 +178,21 @@ export default function AdminYouTubeGraphics({ kind }) {
   }) : null), [kind, p, first, last, videoSeason, table, live, games]);
   const ytText = generated ? Object.fromEntries(Object.keys(generated).map((k) => [k, textEdits[k] ?? generated[k]])) : null;
   const copy = (k) => navigator.clipboard.writeText(ytText[k]).then(() => { setCopied(k); setTimeout(() => setCopied(""), 1500); }).catch(() => setMsg("Couldn't copy — select the text and copy it."));
+  const schoolBy = useMemo(() => Object.fromEntries((schools || []).map((x) => [x.School.toLowerCase(), x])), [schools]);
+  const schoolOf = (name) => {
+    const x = schoolBy[String(name || "").trim().toLowerCase()] || {};
+    return { name: x.School || name || "", color: x.Color1 || "", color2: x.Color2 || "", logo: x.LogoDark || x.Logo1 || "" };
+  };
   const input = useMemo(() => (kind === "outline"
     ? { first, last, sub, table, games: Number(games) || 0, number, logo, cta, fillWindow, seed }
-    : isGr
+    : isPt
+      ? { kind: pt.kind, first, last, kicker: pt.kicker, headline: pt.headline, from: schoolOf(pt.fromName), to: schoolOf(pt.toName), photo, adjust, brandLogo: WdLogo, layout: pt.layout }
+      : isGr
       ? { name: `${first} ${last}`.trim(), headline: gr.headline, color: gr.color, accent: gr.accent, headColor: gr.headColor, dotColor: gr.dotColor, dots: gr.dots, photo, adjust, brandLogo: WdLogo, logoWhite: gr.logoWhite, photoBehind: gr.photoBehind, layout: gr.layout }
-      : { name: `${first} ${last}`.trim(), tag, nameSize, tagSize, photo, adjust, logo, showLogo, iceEdge, seed }), [kind, isGr, gr, first, last, sub, table, games, number, logo, cta, fillWindow, tag, nameSize, tagSize, photo, adjust, showLogo, iceEdge, seed]);
+      : { name: `${first} ${last}`.trim(), tag, nameSize, tagSize, photo, adjust, logo, showLogo, iceEdge, seed }), [kind, isGr, isPt, gr, pt, schoolBy, first, last, sub, table, games, number, logo, cta, fillWindow, tag, nameSize, tagSize, photo, adjust, showLogo, iceEdge, seed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The images: the photo cut out (or as it is), the rest as they are.
-  const urls = useMemo(() => (kind === "outline" ? iceOutlineImageUrls(input) : isGr ? gameReviewImageUrls(input) : iceThumbImageUrls(input)), [kind, isGr, input]);
+  const urls = useMemo(() => (kind === "outline" ? iceOutlineImageUrls(input) : isGr ? gameReviewImageUrls(input) : isPt ? portalThumbImageUrls(input) : iceThumbImageUrls(input)), [kind, isGr, isPt, input]);
   const urlKey = urls.join("|");
   useEffect(() => {
     let live2 = true;
@@ -171,19 +200,20 @@ export default function AdminYouTubeGraphics({ kind }) {
       if (!live2) return;
       const images = {};
       urls.forEach((u, i) => { if (loaded[i]) images[u] = loaded[i]; });
-      setEnv({ measure: isGr ? grMeasure : measure, fontCss: isGr ? grFonts.css : "", images, missing: urls.filter((u, i) => !loaded[i]), gr: isGr });
+      setEnv({ measure: isGr ? grMeasure : isPt ? bebasMeasure : measure, fontCss: isGr ? grFonts.css : isPt ? bebasCss : "", images, missing: urls.filter((u, i) => !loaded[i]), tpl });
     });
     return () => { live2 = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlKey, cutout, kind, isGr, grFonts.css]);
+  }, [urlKey, cutout, kind, tpl, grFonts.css, bebasCss]);
   // Game Review: the export, and the preview with the picked element outlined.
   const svgs = useMemo(() => {
-    if (!env) return [];
-    if (isGr) return env.gr ? [gameReview(input, env), gameReview({ ...input, selected: grSel }, env)] : [];
-    return !env.gr && template === "icecold" ? [kind === "outline" ? iceOutline(input, env) : iceThumb(input, env)] : [];
-  }, [env, input, kind, template, isGr, grSel]);
+    if (!env || env.tpl !== tpl) return [];
+    if (isGr) return [gameReview(input, env), gameReview({ ...input, selected: grSel }, env)];
+    if (isPt) return [portalThumb(input, env), portalThumb({ ...input, selected: grSel }, env)];
+    return template === "icecold" ? [kind === "outline" ? iceOutline(input, env) : iceThumb(input, env)] : [];
+  }, [env, input, kind, template, tpl, isGr, isPt, grSel]);
   const svgUrls = useSvgUrls(svgs);
-  const url = svgUrls[isGr ? 1 : 0];
+  const url = svgUrls[isGr || isPt ? 1 : 0];
 
   // Game Review on the preview: click a word, the logo or him, and drag.
   const previewRef = useRef(null);
@@ -196,14 +226,16 @@ export default function AdminYouTubeGraphics({ kind }) {
   const grHandlers = {
     ref: previewRef,
     onPointerDown: (e) => {
-      if (!env?.gr) return;
+      if (!env || env.tpl !== tpl || tpl === "ice") return;
       const [x, y] = grPoint(e);
-      const boxes = gameReviewBoxes(input, env);
+      const boxes = isPt ? portalThumbBoxes(input, env) : gameReviewBoxes(input, env);
+      const order = isPt ? ["kicker", "headline", "name", "schools", "logo", "photo"] : ["name", "headline", "logo", "photo"];
       const inBox = (b) => b && b[2] > 0 && x >= b[0] - 12 && x <= b[0] + b[2] + 12 && y >= b[1] - 12 && y <= b[1] + b[3] + 12;
-      const hit = ["name", "headline", "logo", "photo"].find((k) => inBox(boxes[k]));
+      const hit = order.find((k) => inBox(boxes[k]));
       if (!hit) return;
       setGrSel(hit);
-      grDrag.current = { k: hit, x, y, start: hit === "photo" ? { ...adjust } : { ...(gr.layout?.[hit] || {}) } };
+      const lay = (isPt ? pt.layout : gr.layout) || {};
+      grDrag.current = { k: hit, x, y, start: hit === "photo" ? { ...adjust } : { ...(lay[hit] || {}) } };
       e.currentTarget.setPointerCapture?.(e.pointerId);
     },
     onPointerMove: (e) => {
@@ -213,7 +245,11 @@ export default function AdminYouTubeGraphics({ kind }) {
       const dx = Math.round(x - d.x);
       const dy = Math.round(y - d.y);
       if (d.k === "photo") setAdjust({ ...d.start, x: (Number(d.start.x) || 0) + dx, y: (Number(d.start.y) || 0) + dy });
-      else setGr((g) => ({ ...g, layout: { ...g.layout, [d.k]: { ...d.start, dx: (Number(d.start.dx) || 0) + dx, dy: (Number(d.start.dy) || 0) + dy } } }));
+      else {
+        const moved = { ...d.start, dx: (Number(d.start.dx) || 0) + dx, dy: (Number(d.start.dy) || 0) + dy };
+        if (isPt) setPt((x2) => ({ ...x2, layout: { ...x2.layout, [d.k]: moved } }));
+        else setGr((g) => ({ ...g, layout: { ...g.layout, [d.k]: moved } }));
+      }
     },
     onPointerUp: () => { grDrag.current = null; },
     onPointerCancel: () => { grDrag.current = null; },
@@ -226,12 +262,17 @@ export default function AdminYouTubeGraphics({ kind }) {
   const thumbCurrent = kind !== "thumbnail" ? null : {
     template, templateName, label: `${`${first} ${last}`.trim() || "Thumbnail"} · ${templateName}`,
     playerId: p?.player.id || "", playerName: `${first} ${last}`.trim(), school: p?.player.School || "", position: p?.player.Position || "", eligible: String(p?.player.Eligible || ""),
-    headline: isGr ? gr.headline : tag,
+    headline: isGr ? gr.headline : isPt ? `${pt.kicker}\n${pt.headline}` : tag,
     // An uploaded photo isn't kept (too big for the record): upload it again to edit.
     design: isGr
       ? { first, last, photo: photo.startsWith("data:") ? "" : photo, cutout, adjust, gr }
-      : { first, last, photo: photo.startsWith("data:") ? "" : photo, cutout, adjust, tag, nameSize, tagSize, iceEdge, showLogo, seed },
-    meta: thumbMeta({ template, headline: isGr ? gr.headline : tag, name: `${first} ${last}`, photoKind, colors: isGr ? { color: gr.color, accent: gr.accent } : {}, photoBehind: isGr && gr.photoBehind }),
+      : isPt
+        ? { first, last, photo: photo.startsWith("data:") ? "" : photo, cutout, adjust, pt }
+        : { first, last, photo: photo.startsWith("data:") ? "" : photo, cutout, adjust, tag, nameSize, tagSize, iceEdge, showLogo, seed },
+    meta: {
+      ...thumbMeta({ template, headline: isGr ? gr.headline : isPt ? `${pt.kicker}\n${pt.headline}` : tag, name: `${first} ${last}`, photoKind, colors: isGr ? { color: gr.color, accent: gr.accent } : {}, photoBehind: isGr && gr.photoBehind }),
+      ...(isPt ? { portalKind: pt.kind, fromSchool: pt.fromName || "", toSchool: pt.toName || "" } : {}),
+    },
   };
   const openSaved = async (t) => {
     const d = t.design || {};
@@ -248,6 +289,7 @@ export default function AdminYouTubeGraphics({ kind }) {
       setCutout(d.cutout !== false);
       setAdjust(d.adjust || NO_ADJUST);
       if (t.template === "gamereview" && d.gr) setGr({ ...GR_DEFAULTS, ...d.gr });
+      if (t.template === "portal" && d.pt) setPt((x) => ({ ...x, ...d.pt }));
       if (t.template === "icecold") {
         if (d.tag != null) setTag(d.tag);
         setNameSize(d.nameSize || 1);
@@ -357,8 +399,8 @@ export default function AdminYouTubeGraphics({ kind }) {
 
           {kind === "thumbnail" && (
             <>
-              {!isGr && <div><div style={label}>Tag under his name</div><input style={field} value={tag} onChange={(e) => setTag(e.target.value)} placeholder="2026 Film" /></div>}
-              {!isGr && [["Name size", nameSize, setNameSize], ["Tag size", tagSize, setTagSize]].map(([t, v, set]) => (
+              {!isGr && !isPt && <div><div style={label}>Tag under his name</div><input style={field} value={tag} onChange={(e) => setTag(e.target.value)} placeholder="2026 Film" /></div>}
+              {!isGr && !isPt && [["Name size", nameSize, setNameSize], ["Tag size", tagSize, setTagSize]].map(([t, v, set]) => (
                 <div key={t}>
                   <div style={{ ...label, display: "flex" }}>{t}<span style={{ marginLeft: "auto" }}>{Math.round(v * 100)}%</span>{v !== 1 && <button style={{ ...linkBtn, fontSize: "10px" }} onClick={() => set(1)}>RESET</button>}</div>
                   <input type="range" min={0.4} max={2} step={0.05} value={v} onChange={(e) => set(Number(e.target.value))} style={{ width: "100%" }} />
@@ -384,16 +426,17 @@ export default function AdminYouTubeGraphics({ kind }) {
                 </label>
               </div>
               {check(cutout, setCutout, "Remove the photo's backdrop")}
-              {!isGr && check(iceEdge, setIceEdge, "Ice edge round him")}
-              {!isGr && check(showLogo, setShowLogo, "His school's logo, faint behind him")}
-              {!isGr && <PhotoAdjust value={adjust} onChange={setAdjust} />}
+              {!isGr && !isPt && check(iceEdge, setIceEdge, "Ice edge round him")}
+              {!isGr && !isPt && check(showLogo, setShowLogo, "His school's logo, faint behind him")}
+              {!isGr && !isPt && <PhotoAdjust value={adjust} onChange={setAdjust} />}
+              {isPt && <PortalThumbControls pt={pt} setPt={setPt} schools={schools} selected={grSel} setSelected={setGrSel} adjust={adjust} setAdjust={setAdjust} setMsg={setMsg} />}
               {isGr && (
                 <GameReviewControls gr={gr} setGr={setGr} selected={grSel} setSelected={setGrSel} adjust={adjust} setAdjust={setAdjust}
                   school={{ color: hex6(p?.school?.Color1) || gr.color, accent: hex6(p?.school?.Color2) || gr.accent }} fonts={grFonts} setFonts={setGrFonts} setMsg={setMsg} />
               )}
             </>
           )}
-          {!isGr && <button style={{ ...linkBtn, alignSelf: "flex-start" }} onClick={() => setSeed((s) => s + 1)}>❄ Shake the snow</button>}
+          {tpl === "ice" && <button style={{ ...linkBtn, alignSelf: "flex-start" }} onClick={() => setSeed((s) => s + 1)}>❄ Shake the snow</button>}
         </div>
       </div>
 
@@ -403,13 +446,13 @@ export default function AdminYouTubeGraphics({ kind }) {
           {kind === "thumbnail" && <button style={btn(false)} disabled={!url || busy} onClick={exportJpg}>Download YouTube JPG (1280×720)</button>}
         </div>
         <div
-          {...(isGr ? grHandlers : kind === "thumbnail" ? drag.handlers : {})}
-          data-gr-preview={isGr ? "" : undefined}
-          style={{ ...(isGr ? grHandlers.style : kind === "thumbnail" ? drag.handlers.style : {}), background: "repeating-conic-gradient(#d9dee6 0% 25%, #fff 0% 50%) 50% / 24px 24px", borderRadius: "10px", border: "1px solid #e3e8ef", overflow: "hidden" }}
+          {...(isGr || isPt ? grHandlers : kind === "thumbnail" ? drag.handlers : {})}
+          data-gr-preview={isGr || isPt ? "" : undefined}
+          style={{ ...(isGr || isPt ? grHandlers.style : kind === "thumbnail" ? drag.handlers.style : {}), background: "repeating-conic-gradient(#d9dee6 0% 25%, #fff 0% 50%) 50% / 24px 24px", borderRadius: "10px", border: "1px solid #e3e8ef", overflow: "hidden" }}
         >
           {url ? <img src={url} alt="Preview" draggable={false} style={{ width: "100%", display: "block", pointerEvents: "none" }} /> : <div style={{ aspectRatio: "16 / 9" }} />}
         </div>
-        {!isGr && (!fonts.script || !fonts.bold) && (
+        {tpl === "ice" && (!fonts.script || !fonts.bold) && (
           <div style={{ fontSize: "12px", fontWeight: 800, color: "#c0392b" }}>
             {[!fonts.script && "Magneto", !fonts.bold && "Franklin Gothic Demi"].filter(Boolean).join(" and ")} isn&apos;t on this computer, so a stand-in font is used. Both ship with Microsoft Office.
           </div>
@@ -440,7 +483,7 @@ export default function AdminYouTubeGraphics({ kind }) {
         <div style={{ fontSize: "12px", color: "#7a8597", fontWeight: 700 }}>
           {kind === "outline"
             ? "The video window exports transparent: lay the PNG over the cut-up in Premiere. The starred season counts the games in his ESPN game log; change the number if it's off."
-            : isGr
+            : isGr || isPt
               ? "Click a word, the logo or him on the preview and drag to move it; size and spacing are on the left. The JPG is the size YouTube wants (under 2 MB)."
               : "Drag him on the preview to move him. The JPG is the size YouTube wants (under 2 MB)."}
         </div>

@@ -9,11 +9,11 @@ import { field, label, btn, linkBtn, PhotoAdjust, NO_ADJUST } from "./SocialMake
 import { GR_ELEMENTS, GR_LABELS } from "../utils/youtube/gamereview";
 import { LOCAL_FONTS, canQueryLocalFonts, fontsFromComputer, fontFromFile } from "../utils/youtube/localFonts";
 
-const LAYOUT_KEY = "grLayoutDefault";
-export function defaultLayout() {
-  try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {}; } catch { return {}; }
+// Each template's own default layout, kept in this browser ("Make this the default").
+export function defaultLayout(key = "grLayoutDefault") {
+  try { return JSON.parse(localStorage.getItem(key) || "{}") || {}; } catch { return {}; }
 }
-const saveDefaultLayout = (layout) => { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout || {})); } catch { /* blocked */ } };
+const saveDefaultLayout = (key, layout) => { try { localStorage.setItem(key, JSON.stringify(layout || {})); } catch { /* blocked */ } };
 
 const row = { display: "flex", gap: "8px", alignItems: "center" };
 const small = { fontSize: "11px", fontWeight: 800, color: "#5b6b84" };
@@ -32,10 +32,41 @@ function Slider({ name, value, min, max, step, fmt, onChange, reset }) {
 
 // gr: { headline, color, accent, headColor, dotColor, dots, logoWhite,
 // photoBehind, layout }; school: { color, accent } (his school's, to reset to).
+// Move, size and space a template's elements (Game Review, Transfer Portal):
+// pick one (or click it on the preview), then the sliders; the player is
+// PhotoAdjust. layout: { [element]: { dx, dy, scale, spacing, lh } };
+// setLayout(fn) gets the old layout, returns the new.
+export function LayoutEditor({ elements, labels, layout, setLayout, selected, setSelected, adjust, setAdjust, storageKey, templateName, setMsg, noSpacing = [], lineSpacing = [] }) {
+  const el = layout?.[selected] || {};
+  const setEl = (patch) => setLayout((l) => ({ ...l, [selected]: { ...(l[selected] || {}), ...patch } }));
+  return (
+    <div style={{ borderTop: "1px solid #eef1f5", paddingTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+      <div style={{ ...label, marginBottom: 0 }}>Layout · pick one, or click it on the preview and drag</div>
+      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+        {elements.map((k) => <button key={k} onClick={() => setSelected(k)} style={{ ...btn(selected === k), padding: "4px 10px" }}>{labels[k]}</button>)}
+      </div>
+      {selected === "photo" ? (
+        <PhotoAdjust value={adjust} onChange={setAdjust} />
+      ) : (
+        <>
+          <Slider name="Left / right" value={Number(el.dx) || 0} min={-960} max={960} step={2} reset={0} fmt={(v) => `${v > 0 ? "+" : ""}${v}px`} onChange={(v) => setEl({ dx: v })} />
+          <Slider name="Up / down" value={Number(el.dy) || 0} min={-540} max={540} step={2} reset={0} fmt={(v) => `${v > 0 ? "+" : ""}${v}px`} onChange={(v) => setEl({ dy: v })} />
+          <Slider name="Size" value={el.scale ?? 1} min={0.2} max={3} step={0.01} reset={1} fmt={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setEl({ scale: v })} />
+          {!noSpacing.includes(selected) && <Slider name="Letter spacing" value={Number(el.spacing) || 0} min={-20} max={80} step={1} reset={0} fmt={(v) => `${v}px`} onChange={(v) => setEl({ spacing: v })} />}
+          {lineSpacing.includes(selected) && <Slider name="Line spacing" value={el.lh ?? 1} min={0.5} max={2} step={0.01} reset={1} fmt={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setEl({ lh: v })} />}
+        </>
+      )}
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <button style={linkBtn} onClick={() => (selected === "photo" ? setAdjust(NO_ADJUST) : setLayout((l) => ({ ...l, [selected]: {} })))}>Reset {String(labels[selected] || "").toLowerCase()}</button>
+        <button style={linkBtn} onClick={() => { setLayout(() => defaultLayout(storageKey)); setAdjust(NO_ADJUST); }}>Reset all</button>
+        <button style={linkBtn} onClick={() => { saveDefaultLayout(storageKey, layout); setMsg(`This layout is now where ${templateName} starts.`); }} title={`New ${templateName} thumbnails start from this layout`}>Make this the default</button>
+      </div>
+    </div>
+  );
+}
+
 export default function GameReviewControls({ gr, setGr, selected, setSelected, adjust, setAdjust, school, fonts, setFonts, setMsg }) {
   const set = (patch) => setGr((g) => ({ ...g, ...patch }));
-  const el = gr.layout?.[selected] || {};
-  const setEl = (patch) => setGr((g) => ({ ...g, layout: { ...g.layout, [selected]: { ...(g.layout?.[selected] || {}), ...patch } } }));
   const useComputer = () => fontsFromComputer().then((f) => { setFonts(f); setMsg(f.missing.length ? `Couldn't find ${f.missing.join(" and ")} on this computer: pick its file instead.` : "Fonts loaded."); })
     .catch((e) => setMsg(`Couldn't read this computer's fonts: ${e.message}`));
   const fromFile = (family) => (e) => {
@@ -95,28 +126,9 @@ export default function GameReviewControls({ gr, setGr, selected, setSelected, a
       <label style={{ ...small, display: "flex", gap: "6px", alignItems: "center" }}><input type="checkbox" checked={gr.logoWhite !== false} onChange={(e) => set({ logoWhite: e.target.checked })} /> White We-Draft logo</label>
       <label style={{ ...small, display: "flex", gap: "6px", alignItems: "center" }}><input type="checkbox" checked={!!gr.photoBehind} onChange={(e) => set({ photoBehind: e.target.checked })} /> Player behind the words</label>
 
-      <div style={{ borderTop: "1px solid #eef1f5", paddingTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
-        <div style={{ ...label, marginBottom: 0 }}>Layout · pick one, or click it on the preview and drag</div>
-        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-          {GR_ELEMENTS.map((k) => <button key={k} onClick={() => setSelected(k)} style={{ ...btn(selected === k), padding: "4px 10px" }}>{GR_LABELS[k]}</button>)}
-        </div>
-        {selected === "photo" ? (
-          <PhotoAdjust value={adjust} onChange={setAdjust} />
-        ) : (
-          <>
-            <Slider name="Left / right" value={Number(el.dx) || 0} min={-960} max={960} step={2} reset={0} fmt={(v) => `${v > 0 ? "+" : ""}${v}px`} onChange={(v) => setEl({ dx: v })} />
-            <Slider name="Up / down" value={Number(el.dy) || 0} min={-540} max={540} step={2} reset={0} fmt={(v) => `${v > 0 ? "+" : ""}${v}px`} onChange={(v) => setEl({ dy: v })} />
-            <Slider name="Size" value={el.scale ?? 1} min={0.2} max={3} step={0.01} reset={1} fmt={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setEl({ scale: v })} />
-            {selected !== "logo" && <Slider name="Letter spacing" value={Number(el.spacing) || 0} min={-20} max={80} step={1} reset={0} fmt={(v) => `${v}px`} onChange={(v) => setEl({ spacing: v })} />}
-            {selected === "headline" && <Slider name="Line spacing" value={el.lh ?? 1} min={0.5} max={2} step={0.01} reset={1} fmt={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setEl({ lh: v })} />}
-          </>
-        )}
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button style={linkBtn} onClick={() => (selected === "photo" ? setAdjust(NO_ADJUST) : setGr((g) => ({ ...g, layout: { ...g.layout, [selected]: {} } })))}>Reset {GR_LABELS[selected].toLowerCase()}</button>
-          <button style={linkBtn} onClick={() => { setGr((g) => ({ ...g, layout: defaultLayout() })); setAdjust(NO_ADJUST); }}>Reset all</button>
-          <button style={linkBtn} onClick={() => { saveDefaultLayout(gr.layout); setMsg("This layout is now where Game Review starts."); }} title="New Game Review thumbnails start from this layout">Make this the default</button>
-        </div>
-      </div>
+      <LayoutEditor elements={GR_ELEMENTS} labels={GR_LABELS} layout={gr.layout} setLayout={(fn) => setGr((g) => ({ ...g, layout: fn(g.layout || {}) }))}
+        selected={selected} setSelected={setSelected} adjust={adjust} setAdjust={setAdjust} storageKey="grLayoutDefault" templateName="Game Review" setMsg={setMsg}
+        noSpacing={["logo"]} lineSpacing={["headline"]} />
     </>
   );
 }
