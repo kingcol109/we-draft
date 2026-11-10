@@ -1,561 +1,306 @@
 // src/pages/HomeOffSeason.js
 //
-// The Home page design shown outside the CFB season — Home.js (a thin
-// router, not this file) reads config/home.mode in Firestore (toggled in
-// AdminPanel.js's Misc Branding tab) and renders this or HomeInSeason.js
-// accordingly. This is the original/default design; HomeInSeason.js started
-// as a straight copy of this file, meant to be built out into something
-// season-specific (live scores, current Top 25, etc.) without touching this
-// one or needing a deploy to switch back and forth.
+// The Home page design shown outside the CFB season. Home.js (a thin router,
+// not this file) reads config/home.mode in Firestore (toggled in
+// AdminPanel.js's Misc Branding tab) and renders this or HomeInSeason.js.
+// Below the shared hero (HomeHero.js), three columns: recent public
+// evaluations on the left, the community big board (2027 / 2028 tabs) in
+// the middle, the latest news on the right. On a wide screen Home.js moves
+// the evaluations and the news out into the page's side margins instead
+// (rails) and the board takes the middle. Then the newest videos, @wedraftsite's Instagram (HomeInstagram.jsx) and, for visitors
+// who aren't signed in, a sign-up band. Styles: homeStyle.js (.hx-*).
 import { useEffect, useState } from "react";
-import {
-  getDoc, doc, getDocs, collection,
-  query, where, orderBy, limit,
-} from "firebase/firestore";
+import { getDoc, doc, getDocs, collection, query, where, orderBy, limit } from "firebase/firestore";
+import { Link } from "react-router-dom";
 import { db } from "../firebase";
 import verifiedBadge from "../assets/verified.png";
-import { Link } from "react-router-dom";
-import LoadingSpinner from "../components/LoadingSpinner";
-import { topProspects, gradeLabel } from "../utils/communityGrades";
+import { topProspects, gradeLabel, gradeLook } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
-import { communityAverage } from "../utils/gradeWindow";
+import { loadPhotos } from "../utils/profileHub";
+import { useAuth } from "../context/AuthContext";
+import HomeInstagram from "./HomeInstagram";
 
-const BLUE = "#0055a5";
-const GOLD = "#f6a21d";
+const BOARD_YEARS = ["2027", "2028"];
+const boardHref = (year) => (year === BOARD_YEARS[0] ? "/community" : `/community/${year}`);
+const ytId = (url = "") => (url.match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/) || [])[1] || "";
+const tsMs = (t) => (t?.toDate ? t.toDate().getTime() : t?.seconds ? t.seconds * 1000 : t ? new Date(t).getTime() : 0);
+const initials = (name = "") => name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
-const gradeScale = {
-  "Early First Round": 1, "Middle First Round": 2, "Late First Round": 3,
-  "Second Round": 4, "Third Round": 5, "Fourth Round": 6,
-  "Fifth Round": 7, "Sixth Round": 8, "Seventh Round": 9, UDFA: 10,
-};
-
-const gradeLabels = {
-  1: "Early First Round", 2: "Middle First Round", 3: "Late First Round",
-  4: "Second Round", 5: "Third Round", 6: "Fourth Round",
-  7: "Fifth Round", 8: "Sixth Round", 9: "Seventh Round", 10: "UDFA",
-};
-
-const gradeDisplay = (g) => {
-  const map = {
-    "Watchlist":          { short: "W",   bg: "#5F5E5A", border: "#444441" },
-    "Early First Round":  { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Middle First Round": { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Late First Round":   { short: "1st", bg: "#3B6D11", border: "#27500A" },
-    "Second Round":       { short: "2nd", bg: "#0F6E56", border: "#085041" },
-    "Third Round":        { short: "3rd", bg: "#185FA5", border: "#0C447C" },
-    "Fourth Round":       { short: "4th", bg: "#BA7517", border: "#854F0B" },
-    "Fifth Round":        { short: "5th", bg: "#BA7517", border: "#854F0B" },
-    "Sixth Round":        { short: "6th", bg: "#993C1D", border: "#712B13" },
-    "Seventh Round":      { short: "7th", bg: "#993C1D", border: "#712B13" },
-    "UDFA":               { short: "U",   bg: "#A32D2D", border: "#791F1F" },
-  };
-  return map[g] || null;
-};
-
-function GradeBadge({ grade }) {
-  const gd = gradeDisplay(grade);
-  if (!gd) return null;
-  const isFirstRound = ["Early First Round", "Middle First Round", "Late First Round"].includes(grade);
-  const qualifier = isFirstRound ? grade.replace(" First Round", "").toUpperCase() : null;
-  const bottomLabel = "ROUND";
+function Grade({ label }) {
+  if (!label) return null;
+  const g = gradeLook(label);
   return (
-    <div className="wdh-grade" style={{
-      display: "inline-flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "center", backgroundColor: gd.bg, border: `2px solid ${gd.border}`,
-      borderRadius: "5px", width: "52px", height: "42px", flexShrink: 0, gap: "1px",
-    }}>
-      {qualifier && <span style={{ fontSize: "7px", fontWeight: 900, color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.06em", lineHeight: 1, textAlign: "center" }}>{qualifier}</span>}
-      <span style={{ fontSize: "15px", fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.01em", textAlign: "center" }}>{gd.short}</span>
-      <span style={{ fontSize: "6.5px", fontWeight: 800, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", lineHeight: 1.1 }}>{grade === "Watchlist" ? "WATCHLIST" : bottomLabel}</span>
+    <span className="hx-grade" style={{ background: g.bg }} title={label}>
+      <small>{g.qualifier || (label === "UDFA" ? "UNDRAFTED" : "ROUND")}</small>
+      <b>{g.short}</b>
+    </span>
+  );
+}
+
+function Avatar({ src, name }) {
+  const [ok, setOk] = useState(true);
+  return (
+    <span className="hx-avatar" aria-hidden="true">
+      {src && ok ? <img src={src} alt="" loading="lazy" onError={() => setOk(false)} /> : initials(name)}
+    </span>
+  );
+}
+
+function SectionHead({ kicker, title, id, children }) {
+  return (
+    <div className="hx-sechead">
+      <div>
+        {kicker && <div className="hx-kicker">{kicker}</div>}
+        <h2 className="hx-h2" id={id}>{title}</h2>
+      </div>
+      {children}
     </div>
   );
 }
 
-function TopDraftBoard({ isMobile, year }) {
-  const [players, setPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Link targets: 2027 → /community, 2028 → /community/2028
-  const boardLink = year === "2027" ? "/community" : `/community/${year}`;
+// ── The community big board: the top 10 of a class, 1–5 down the left column, 6–10 down the right. ──
+function BigBoard() {
+  const [year, setYear] = useState(BOARD_YEARS[0]);
+  const [boards, setBoards] = useState(null);
+  const [photos, setPhotos] = useState({});
 
   useEffect(() => {
-    const fetchPlayers = async () => {
-      try {
-        // The precomputed top list (utils/communityGrades.js) — 1 read
-        // instead of every player + every player's evaluations.
-        const top = await topProspects([year]);
-        if (top) {
-          setPlayers(top.slice(0, 10).map((p) => ({
-            ...p, commGradeScore: Math.round(p.avgGrade), commGrade: gradeLabel(p.avgGrade),
-          })));
-          return;
-        }
-        const snap = await getDocs(query(collection(db, "players"), where("Eligible", "==", year)));
-        const all = await Promise.all(
-          snap.docs.map(async (docSnap) => {
-            const p = { id: docSnap.id, ...docSnap.data() };
-            if (p.Eligible?.toString() !== year) return null;
-            if (p.Live === false || p.Live === null || p.Live === 0 || p.Live === "false" || p.Live === "no") return null;
-            try {
-              const evalsSnap = await getDocs(collection(db, "players", docSnap.id, "evaluations"));
-              const avg = communityAverage(evalsSnap.docs.map((d) => d.data()), p.Eligible, gradeScale);
-              p.commGradeScore = avg != null ? Math.round(avg) : null;
-              p.commGrade = p.commGradeScore ? gradeLabels[p.commGradeScore] : null;
-            } catch {
-              p.commGradeScore = null;
-              p.commGrade = null;
-            }
-            return p;
-          })
-        );
+    let alive = true;
+    (async () => {
+      const lists = await Promise.all(BOARD_YEARS.map((y) => topProspects([y]).catch(() => null)));
+      const next = Object.fromEntries(BOARD_YEARS.map((y, i) => [y, (lists[i] || []).slice(0, 10)]));
+      if (!alive) return;
+      setBoards(next);
+      const ids = Object.values(next).flat().map((p) => p.id);
+      if (ids.length) loadPhotos(ids).then((ph) => alive && setPhotos(ph)).catch(() => {});
+    })();
+    return () => { alive = false; };
+  }, []);
 
-        const ranked = all
-          .filter((p) => p !== null && p.commGradeScore !== null)
-          .sort((a, b) => a.commGradeScore - b.commGradeScore)
-          .slice(0, 10);
-
-        setPlayers(ranked);
-      } catch (err) {
-        console.error(`Error fetching ${year} players:`, err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchPlayers();
-  }, [year]);
-
-  if (loading) return (
-    <LoadingSpinner label="Loading" size={24} minHeight="100px" />
-  );
-
-  const rankColors = [
-    { num: "#fff", bg: "linear-gradient(135deg, #c9a227 0%, #f6d675 50%, #c9a227 100%)", shadow: "0 4px 20px rgba(198,160,39,0.5)", border: "2px solid #a8841e" },
-    { num: "#fff", bg: "linear-gradient(135deg, #8a9ba8 0%, #c8d6df 50%, #8a9ba8 100%)", shadow: "0 4px 14px rgba(138,155,168,0.45)", border: "2px solid #6b7f8c" },
-    { num: "#fff", bg: "linear-gradient(135deg, #a0674a 0%, #d4956e 50%, #a0674a 100%)", shadow: "0 4px 14px rgba(160,103,74,0.45)", border: "2px solid #7a4e37" },
-  ];
-
-  if (players.length === 0) return (
-    <div style={{ borderRadius: "14px", overflow: "hidden", background: `linear-gradient(160deg, ${BLUE} 0%, #003a7a 100%)`, padding: "40px 16px", textAlign: "center" }}>
-      <div style={{ fontSize: "28px", marginBottom: "8px" }}>🏈</div>
-      <div style={{ color: GOLD, fontWeight: 900, fontSize: "15px", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "6px" }}>The {year} Class Awaits</div>
-      <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "12px", fontWeight: 700, marginBottom: "18px" }}>Be the first to evaluate the next generation of NFL talent</div>
-      <Link to={boardLink} style={{ display: "inline-block", backgroundColor: GOLD, color: BLUE, borderRadius: "8px", padding: "9px 22px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.1em", textDecoration: "none" }}>
-        Start Evaluating →
-      </Link>
-    </div>
-  );
-
+  const rows = boards?.[year] || [];
   return (
-    <>
-      <style>{`
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateX(-12px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
-        .prospect-row {
-          transition: background 0.15s, box-shadow 0.15s, transform 0.12s;
-        }
-        .prospect-row:hover {
-          background: linear-gradient(90deg, #e8f2ff 0%, #f0f6ff 100%) !important;
-          box-shadow: inset 4px 0 0 #0055a5;
-          transform: translateX(3px);
-        }
-        .prospect-row:hover .prospect-name {
-          text-decoration: underline;
-        }
-      `}</style>
-      <div className="wdh-card" style={{
-        borderRadius: "14px", overflow: "hidden",
-        boxShadow: "0 8px 40px rgba(0,85,165,0.18)",
-        border: `2px solid ${BLUE}`,
-      }}>
-      {/* Header */}
-      <div className="wdh-boardhead" style={{
-        background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
-        padding: isMobile ? "14px 14px 12px" : "16px 18px 14px",
-        position: "relative", overflow: "hidden",
-      }}>
-        <div className="wdh-pattern" style={{ position: "absolute", top: 0, right: 0, width: "150px", height: "100%", background: "repeating-linear-gradient(60deg, transparent, transparent 12px, rgba(246,162,29,0.07) 12px, rgba(246,162,29,0.07) 24px)", pointerEvents: "none" }} />
-        <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontSize: "9px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: "3px" }}>
-              🏈 Community Rankings
-            </div>
-            <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: "-0.01em" }}>
-              {year} NFL Draft
-            </div>
-            <div style={{ fontSize: isMobile ? "11px" : "13px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "2px" }}>
-              Top Prospects
-            </div>
-          </div>
-          <Link to={boardLink} className="wdh-headpill" style={{
-            background: GOLD, color: BLUE, fontWeight: 900,
-            fontSize: "10px", padding: "6px 14px",
-            borderRadius: "20px", textDecoration: "none", textTransform: "uppercase",
-            letterSpacing: "0.06em", flexShrink: 0,
-            boxShadow: "0 2px 10px rgba(246,162,29,0.4)",
-            whiteSpace: "nowrap",
-          }}>
-            Full Board →
-          </Link>
+    <section className="hx-boardcol" aria-labelledby="hx-board-title">
+      <SectionHead kicker="Community Rankings" title="The Big Board" id="hx-board-title">
+        <div className="hx-tabs" role="tablist" aria-label="Draft class">
+          {BOARD_YEARS.map((y) => (
+            <button key={y} type="button" role="tab" aria-selected={y === year} className="hx-tab" onClick={() => setYear(y)}>{y}</button>
+          ))}
         </div>
-      </div>
-      <div className="wdh-stripe" style={{ height: "4px", background: `linear-gradient(90deg, ${GOLD}, #ffd96a, ${GOLD})` }} />
-
-      {/* Rows */}
-      <div style={{ background: "#fff" }}>
-        {players.map((p, i) => {
-          const rank = rankColors[i] || null;
-          const isTop3 = i < 3;
-          return (
-            <Link
-              key={p.id}
-              to={`/player/${p.Slug}`}
-              className="prospect-row"
-              style={{
-                display: "flex", alignItems: "center",
-                padding: isMobile ? "10px 12px" : isTop3 ? "13px 16px" : "10px 16px",
-                borderBottom: i < players.length - 1 ? "1px solid #eef2f7" : "none",
-                background: isTop3 ? "linear-gradient(90deg, #f7faff 0%, #fff 100%)" : "#fff",
-                textDecoration: "none",
-                animation: `slideIn 0.3s ease both`,
-                animationDelay: `${i * 0.05}s`,
-              }}
-            >
-              {/* Rank badge */}
-              <div className={rank ? "wdh-rank wdh-medal" : "wdh-rank"} style={{
-                flexShrink: 0,
-                width: isTop3 ? "38px" : "30px",
-                height: isTop3 ? "38px" : "30px",
-                borderRadius: isTop3 ? "8px" : "6px",
-                background: rank ? rank.bg : "#f0f0f0",
-                border: rank ? rank.border : "2px solid #ddd",
-                boxShadow: rank ? rank.shadow : "none",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                marginRight: "12px",
-                flexShrink: 0,
-              }}>
-                <span style={{
-                  fontSize: isTop3 ? "17px" : "13px",
-                  fontWeight: 900, color: rank ? rank.num : "#bbb",
-                  lineHeight: 1, textShadow: isTop3 ? "0 1px 3px rgba(0,0,0,0.3)" : "none",
-                }}>
-                  {i + 1}
-                </span>
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  className="prospect-name wdh-pname"
-                  style={{
-                    color: BLUE, fontWeight: 900,
-                    fontSize: isTop3 ? "19px" : "16px",
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                  }}
-                >
-                  {`${p.First || ""} ${p.Last || ""}`}
-                </div>
-                <div style={{
-                  fontSize: "13px", fontWeight: 700,
-                  color: isTop3 ? "#444" : "#888", marginTop: "3px",
-                  display: "flex", alignItems: "center", gap: "5px",
-                }}>
-                  {p.Position && (
-                    <span className="wdh-pos" style={{
-                      background: BLUE, color: "#fff", fontSize: "10px",
-                      fontWeight: 900, padding: "2px 6px", borderRadius: "3px",
-                      textTransform: "uppercase", letterSpacing: "0.06em",
-                      flexShrink: 0,
-                    }}>
-                      {p.Position}
+      </SectionHead>
+      <div className="hx-card">
+        {!boards ? (
+          <div className="hx-board">{Array.from({ length: 10 }, (_, i) => <div key={i} className="hx-prow"><div className="hx-skel" style={{ height: 46, width: "100%" }} /></div>)}</div>
+        ) : rows.length ? (
+          <div className="hx-board" role="tabpanel" aria-label={`${year} top 10`}>
+            {rows.map((p, i) => {
+              const name = `${p.First || ""} ${p.Last || ""}`.trim();
+              return (
+                <Link key={p.id} to={`/player/${p.Slug}`} className="hx-prow">
+                  <span className={`hx-rank${i < 3 ? " top" : ""}`}>{i + 1}</span>
+                  <Avatar src={photos[p.id]?.headshot} name={name} />
+                  <span className="hx-pmain">
+                    <span className="hx-pname" style={{ display: "block" }}>{name}</span>
+                    <span className="hx-psub">
+                      {p.Position && <span className="hx-pos">{p.Position}</span>}
+                      <span className="hx-school">{p.School || "—"}</span>
                     </span>
-                  )}
-                  <span className="wdh-school" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "13px" }}>{p.School || "—"}</span>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0, marginLeft: "6px" }}>
-                {p.commGrade && <GradeBadge grade={p.commGrade} />}
-                <span style={{ color: "#ccc", fontSize: "14px", fontWeight: 900 }}>›</span>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* Footer CTA */}
-      <div className="wdh-boardfoot" style={{
-        background: `linear-gradient(135deg, ${BLUE} 0%, #003a7a 100%)`,
-        padding: isMobile ? "12px 14px" : "14px 18px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        flexWrap: "wrap", gap: "8px",
-      }}>
-        <div className="wdh-foottext" style={{ color: "rgba(255,255,255,0.75)", fontSize: "10px", fontWeight: 700 }}>
-          Community evaluations
+                  </span>
+                  <Grade label={gradeLabel(p.avgGrade)} />
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="hx-empty">The {year} class awaits. <Link to={boardHref(year)} className="hx-more">Be the first to grade it →</Link></div>
+        )}
+        <div className="hx-boardfoot">
+          <span>Ranked by the community's average grade</span>
+          <Link to={boardHref(year)} className="hx-btn hx-btn-blue hx-btn-sm">Full {year} board →</Link>
         </div>
-        <Link
-          to={boardLink}
-          className="wdh-footbtn"
-          style={{
-            background: GOLD, color: BLUE, fontWeight: 900,
-            fontSize: "11px", padding: "8px 16px",
-            borderRadius: "8px", textDecoration: "none",
-            textTransform: "uppercase", letterSpacing: "0.08em",
-            boxShadow: "0 3px 14px rgba(246,162,29,0.45)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          Full {year} Board →
-        </Link>
       </div>
-      </div>
-    </>
+    </section>
   );
 }
 
-export default function HomeOffSeason() {
-  const [recentEvals, setRecentEvals] = useState([]);
-  const [news, setNews] = useState([]);
-  const [articles, setArticles] = useState([]);
-  const [weeklyMocks, setWeeklyMocks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
-
+// ── The latest news, articles and Weekly Mocks (published date only, never last-updated). ──
+export function Latest() {
+  const [items, setItems] = useState(null);
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
+    let alive = true;
+    Promise.all([
+      getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"), limit(6)))
+        .then((s) => s.docs.map((d) => ({ id: d.id, ...d.data(), kind: "News" }))).catch(() => []),
+      getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)))
+        .then((s) => s.docs.map((d) => ({ id: d.id, ...d.data(), kind: "Article" }))).catch(() => []),
+      loadWeeklyMockNews(6).then((w) => w.map((m) => ({ ...m, kind: "Weekly Mock" }))),
+    ]).then((all) => {
+      if (!alive) return;
+      setItems(all.flat().sort((a, b) => tsMs(b.publishedAt) - tsMs(a.publishedAt)).slice(0, 6));
+    });
+    return () => { alive = false; };
   }, []);
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"), limit(6)));
-        setNews(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "news" })));
-      } catch (err) { console.error("Error fetching news:", err); }
-    };
-    fetch();
-  }, []);
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)));
-        setArticles(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })));
-      } catch (err) { console.error("Error fetching articles:", err); }
-    };
-    fetch();
-  }, []);
-
-  // The published Weekly Mocks, as news items (utils/weeklyMockNews.js).
-  useEffect(() => { loadWeeklyMockNews(6).then(setWeeklyMocks); }, []);
-
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        // Newest public evaluations — one collection-group query (see
-        // utils/recentEvaluations.js), not a scan of every player.
-        const publicEvals = await fetchRecentPublicEvals(6);
-
-        const uniqueUids = [...new Set(publicEvals.map((ev) => ev.uid))];
-        const userDocs = await Promise.all(uniqueUids.map((uid) => getDoc(doc(db, "users", uid))));
-        const userMap = {};
-        userDocs.forEach((snap) => {
-          if (snap.exists()) {
-            const u = snap.data();
-            userMap[snap.id] = { username: u.username || "Anonymous User", verified: u.verified || false };
-          }
-        });
-        setRecentEvals(publicEvals.map((ev) => ({
-          ...ev,
-          username: userMap[ev.uid]?.username || "Anonymous User",
-          verified: userMap[ev.uid]?.verified || false,
-        })));
-      } catch (err) { console.error("Error fetching evals:", err); }
-      finally { setLoading(false); }
-    };
-    fetch();
-  }, []);
-
-  // Published date only, never last-updated — an old article getting a
-  // typo fix (which bumps updatedAt) must not jump back to the top of the
-  // feed. An article with no publishedAt set sorts to the bottom (0)
-  // instead of jumping around based on unrelated edits.
-  const combinedNews = [...news, ...articles, ...weeklyMocks]
-    .sort((a, b) => ((b.publishedAt?.seconds || 0) - (a.publishedAt?.seconds || 0)))
-    .slice(0, 6);
-
-  const SectionTitle = ({ children, linkTo, linkLabel }) => (
-    <div style={{ marginBottom: "14px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "5px" }}>
-        <div className="wdh-sectitle" style={{ fontSize: isMobile ? "16px" : "22px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: BLUE }}>
-          {children}
-        </div>
-        {linkTo && (
-          <Link to={linkTo} className="wdh-seclink" style={{ color: BLUE, fontWeight: 900, fontSize: "12px", textDecoration: "underline", flexShrink: 0, marginLeft: "10px" }}>
-            {linkLabel || "See all →"}
-          </Link>
-        )}
-      </div>
-      <div className="wdh-secbar" style={{ height: "3px", background: BLUE, borderRadius: "2px", marginBottom: "3px" }} />
-      <div className="wdh-secbar" style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
-    </div>
-  );
 
   return (
-    <>
+    <section className="hx-newscol" aria-labelledby="hx-news-title">
+      <SectionHead kicker="Draft News" title="Latest" id="hx-news-title">
+        <Link to="/news" className="hx-more">All news →</Link>
+      </SectionHead>
+      <div className="hx-card hx-news">
+        {!items ? Array.from({ length: 5 }, (_, i) => <div key={i} className="hx-nrow"><div className="hx-skel" style={{ height: 44, width: "100%" }} /></div>)
+          : items.length ? items.map((n) => {
+            const d = tsMs(n.publishedAt) ? new Date(tsMs(n.publishedAt)) : null;
+            return (
+              <Link key={n.id} to={n.href || `/news/${n.slug}`} className="hx-nrow">
+                {d && (
+                  <span className="hx-ndate"><small>{d.toLocaleDateString(undefined, { month: "short" })}</small><b>{d.getDate()}</b></span>
+                )}
+                <span style={{ minWidth: 0 }}>
+                  <span className="hx-ntype">{n.kind}</span>
+                  <span className="hx-ntitle" style={{ display: "block" }}>{n.title}</span>
+                  {(n.summary || n.seoDescription) && <span className="hx-nsum">{n.summary || n.seoDescription}</span>}
+                </span>
+              </Link>
+            );
+          }) : <div className="hx-empty">No news yet</div>}
+      </div>
+    </section>
+  );
+}
 
-        {/* ===== MAIN GRID: 3-col desktop, stacked mobile (board first) ===== */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr)",
-          gap: isMobile ? "24px" : "20px",
-          marginBottom: isMobile ? "28px" : "40px",
-          alignItems: "start",
-        }}>
+// ── The newest public evaluations. ──
+export function RecentEvals({ max = 3 }) {
+  const [evals, setEvals] = useState(null);
+  const [photos, setPhotos] = useState({});
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const list = await fetchRecentPublicEvals(max);
+        const uids = [...new Set(list.map((e) => e.uid).filter(Boolean))];
+        const users = {};
+        await Promise.all(uids.map((uid) => getDoc(doc(db, "users", uid)).then((s) => {
+          if (s.exists()) users[uid] = { username: s.data().username || "Anonymous User", verified: !!s.data().verified };
+        }).catch(() => {})));
+        if (!alive) return;
+        setEvals(list.map((e) => ({ ...e, username: users[e.uid]?.username || "Anonymous User", verified: users[e.uid]?.verified || false })));
+        const ids = [...new Set(list.map((e) => e.playerId).filter(Boolean))];
+        if (ids.length) loadPhotos(ids).then((ph) => alive && setPhotos(ph)).catch(() => {});
+      } catch {
+        if (alive) setEvals([]);
+      }
+    })();
+    return () => { alive = false; };
+  }, [max]);
 
-          {/* On mobile: 2027 Board renders first via CSS order */}
-
-          {/* -- Recent Evaluations (LEFT on desktop, 2nd on mobile) -- */}
-          <div style={{ order: isMobile ? 2 : 0 }}>
-            <SectionTitle linkTo="/community" linkLabel="Community →">Recent Evals</SectionTitle>
-            <div className="wdh-card" style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <div className="wdh-cardhead" style={{ background: BLUE, padding: "8px 14px" }}>
-                <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Public</div>
-              </div>
-              <div className="wdh-stripe" style={{ height: "3px", background: GOLD }} />
-              {loading ? (
-                <LoadingSpinner label="Loading" size={24} minHeight="100px" />
-              ) : recentEvals.length > 0 ? recentEvals.map((ev, i) => (
-                <div key={i} className="wdh-row wdh-eval" style={{ padding: "12px 14px", background: "#fff", borderBottom: i < recentEvals.length - 1 ? "1px solid #f0f0f0" : "none" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "6px", flexWrap: "wrap" }}>
-                    <span className="wdh-evuser" style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ev.username}</span>
-                    {ev.verified && <img src={verifiedBadge} alt="Verified" style={{ width: "11px", height: "11px" }} />}
-                    <span style={{ color: "#ccc", fontSize: "10px" }}>on</span>
-                    <Link to={`/player/${ev.playerSlug}`} className="wdh-evplayer" style={{ fontWeight: 900, fontSize: "10px", color: BLUE, textDecoration: "underline", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                      {ev.playerName}
-                    </Link>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "6px" }}>
-                    {ev.grade && gradeDisplay(ev.grade) && <GradeBadge grade={ev.grade} />}
-                    {ev.evaluation && (
-                      <p className="wdh-evtext" style={{
-                        fontStyle: "italic", fontSize: "11px", color: "#444", lineHeight: 1.5, margin: 0,
-                        display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden",
-                      }}>
-                        "{ev.evaluation}"
-                      </p>
-                    )}
-                  </div>
-                  {(ev.strengths?.length > 0 || ev.weaknesses?.length > 0) && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px" }}>
-                      {ev.strengths?.length > 0 && (
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: "6px" }}>
-                          <span className="wdh-sw" style={{ flexShrink: 0, background: "#2e7d32", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>S</span>
-                          <span className="wdh-swtext" style={{ fontSize: "11px", fontWeight: 700, color: "#2e7d32", lineHeight: 1.4 }}>
-                            {(Array.isArray(ev.strengths) ? ev.strengths : [ev.strengths]).join(", ")}
-                          </span>
-                        </div>
-                      )}
-                      {ev.weaknesses?.length > 0 && (
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: "6px" }}>
-                          <span className="wdh-sw" style={{ flexShrink: 0, background: "#c0392b", color: "#fff", fontSize: "8px", fontWeight: 900, padding: "2px 6px", borderRadius: "3px", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: "1px" }}>W</span>
-                          <span className="wdh-swtext" style={{ fontSize: "11px", fontWeight: 700, color: "#c0392b", lineHeight: 1.4 }}>
-                            {(Array.isArray(ev.weaknesses) ? ev.weaknesses : [ev.weaknesses]).join(", ")}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+  if (evals && !evals.length) return null;
+  const list = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+  return (
+    <section className="hx-evalcol" aria-labelledby="hx-evals-title">
+      <SectionHead kicker="From the Community" title="Recent Evals" id="hx-evals-title">
+        <Link to="/community" className="hx-more">Community →</Link>
+      </SectionHead>
+      <div className="hx-evals">
+        {!evals ? Array.from({ length: 3 }, (_, i) => <div key={i} className="hx-card hx-skel" style={{ height: 220 }} />)
+          : evals.map((ev, i) => (
+            <article key={`${ev.playerId}-${ev.uid}-${i}`} className="hx-card hx-eval">
+              <div className="hx-evhead">
+                <Avatar src={photos[ev.playerId]?.headshot} name={ev.playerName} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Link to={`/player/${ev.playerSlug}`} className="hx-evplayer">{ev.playerName}</Link>
+                  <div className="hx-evby">by {ev.username}{ev.verified && <img src={verifiedBadge} alt="Verified" />}</div>
                 </div>
-              )) : (
-                <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>No recent evaluations yet</div>
+                <Grade label={ev.grade} />
+              </div>
+              {ev.evaluation && <p className="hx-evtext">“{ev.evaluation}”</p>}
+              {(list(ev.strengths).length > 0 || list(ev.weaknesses).length > 0) && (
+                <div className="hx-chips">
+                  {list(ev.strengths).slice(0, 3).map((s) => <span key={`s-${s}`} className="hx-chip s">+ {s}</span>)}
+                  {list(ev.weaknesses).slice(0, 1).map((w) => <span key={`w-${w}`} className="hx-chip w">− {w}</span>)}
+                </div>
               )}
-            </div>
-          </div>
+            </article>
+          ))}
+      </div>
+    </section>
+  );
+}
 
-          {/* -- 2027 + 2028 Boards (CENTER on desktop, 1st on mobile) -- */}
-          <div style={{ order: isMobile ? 1 : 0 }}>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
-              gap: isMobile ? "24px" : "16px",
-              alignItems: "start",
-            }}>
-              <div>
-                <SectionTitle linkTo="/community" linkLabel="Full Board →">2027 Draft Board</SectionTitle>
-                <TopDraftBoard isMobile={isMobile} year="2027" />
-              </div>
-              <div>
-                <SectionTitle linkTo="/community/2028" linkLabel="Full Board →">2028 Draft Board</SectionTitle>
-                <TopDraftBoard isMobile={isMobile} year="2028" />
-              </div>
-            </div>
-          </div>
+// ── The newest videos (not Shorts; a scheduled one stays hidden until its PublishAt). ──
+function Videos() {
+  const [videos, setVideos] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    getDocs(query(collection(db, "videos"), orderBy("Date", "desc"), limit(20))).then((snap) => {
+      const now = Date.now();
+      const vids = snap.docs.map((d) => {
+        const v = d.data();
+        const first = Array.isArray(v.items) ? v.items[0] : null;
+        const id = ytId(v.Video);
+        return {
+          id: d.id, href: v.Video || "", date: tsMs(v.Date), short: v.Short === true,
+          title: v.GenTitle || first?.title || "",
+          thumb: v.GenThumb || first?.thumb || (id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : ""),
+          publishAt: tsMs(v.PublishAt),
+        };
+      }).filter((v) => v.href && !v.short && v.title && (!v.publishAt || v.publishAt <= now)).slice(0, 4);
+      if (alive) setVideos(vids);
+    }).catch(() => alive && setVideos([]));
+    return () => { alive = false; };
+  }, []);
 
-          {/* -- News (RIGHT on desktop, 3rd on mobile) -- */}
-          <div style={{ order: isMobile ? 3 : 0 }}>
-            <SectionTitle linkTo="/news" linkLabel="All News →">News</SectionTitle>
-            <div className="wdh-card" style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
-              <div className="wdh-cardhead" style={{ background: BLUE, padding: "8px 14px" }}>
-                <div style={{ color: GOLD, fontWeight: 900, fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Latest</div>
-              </div>
-              <div className="wdh-stripe" style={{ height: "3px", background: GOLD }} />
-              {combinedNews.length > 0 ? combinedNews.map((n, i) => {
-                const ts = n.publishedAt;
-                const dateStr = ts?.toDate?.().toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                const [mon, day] = dateStr ? dateStr.split(" ") : [null, null];
-                return (
-                  <Link key={n.id} to={n.href || `/news/${n.slug}`} className="wdh-row"
-                    style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", background: "#fff", borderBottom: i < combinedNews.length - 1 ? "1px solid #f0f0f0" : "none" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-                  >
-                    {mon && day && (
-                      <div className="wdh-date" style={{ flexShrink: 0, width: "36px", background: "#fff", border: `2px solid ${BLUE}`, borderRadius: "5px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                        <div style={{ background: GOLD, lineHeight: 1, padding: "2px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <span style={{ fontSize: "9px", fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>{mon}</span>
-                        </div>
-                        <div style={{ padding: "3px 0", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <span style={{ fontSize: "16px", fontWeight: 900, color: BLUE, lineHeight: 1 }}>{day}</span>
-                        </div>
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="wdh-ntitle" style={{ fontWeight: 900, fontSize: "11px", color: "#222", letterSpacing: "0.02em", textTransform: "uppercase", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{n.title}</div>
-                    </div>
-                    <div style={{ flexShrink: 0, fontWeight: 900, fontSize: "16px", color: BLUE }}>›</div>
-                  </Link>
-                );
-              }) : (
-                <div style={{ padding: "24px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "13px" }}>No news yet</div>
-              )}
-            </div>
-          </div>
+  if (videos && !videos.length) return null;
+  return (
+    <section className="hx-section" aria-labelledby="hx-videos-title">
+      <SectionHead kicker="Film Room" title="Latest Videos" id="hx-videos-title">
+        <a href="https://www.youtube.com/@kingcoldsports" target="_blank" rel="noopener noreferrer" className="hx-more">YouTube channel →</a>
+      </SectionHead>
+      <div className="hx-videos">
+        {!videos ? Array.from({ length: 4 }, (_, i) => <div key={i} className="hx-card hx-skel" style={{ aspectRatio: "16 / 12" }} />)
+          : videos.map((v) => (
+            <a key={v.id} href={v.href} target="_blank" rel="noopener noreferrer" className="hx-card hx-video">
+              <span className="hx-vthumb">
+                {v.thumb && <img src={v.thumb} alt="" loading="lazy" />}
+                <span className="hx-play"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" /></svg></span>
+              </span>
+              <span className="hx-vbody">
+                <span className="hx-vtitle">{v.title}</span>
+                {v.date > 0 && <span className="hx-vdate" style={{ display: "block" }}>{new Date(v.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>}
+              </span>
+            </a>
+          ))}
+      </div>
+    </section>
+  );
+}
 
-        </div>
+function JoinBand() {
+  const { user, login } = useAuth();
+  if (user) return null;
+  return (
+    <section className="hx-band" aria-label="Join We-Draft">
+      <div>
+        <h3>Your board. <span>Your grades.</span></h3>
+        <p>Join free to grade the {BOARD_YEARS[0]} class, save your big boards and mock drafts, and get your evaluations in front of the community.</p>
+      </div>
+      <button type="button" onClick={login} className="hx-btn hx-btn-gold">Join free</button>
+    </section>
+  );
+}
 
-        {/* ===== SOCIAL LINKS ===== */}
-        <div className="wdh-follow" style={{ borderTop: `2px solid #eee`, paddingTop: "24px", textAlign: "center" }}>
-          <div style={{ fontSize: "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.1em", color: "#aaa", marginBottom: "12px" }}>Follow Us</div>
-          <div style={{ display: "flex", justifyContent: "center", gap: isMobile ? "20px" : "32px", flexWrap: "wrap" }}>
-            {[
-              { label: "Instagram", href: "https://www.instagram.com/wedraftsite" },
-              { label: "X (Twitter)", href: "https://twitter.com/wedraftsite" },
-              { label: "YouTube", href: "https://www.youtube.com/@kingcoldsports" },
-            ].map(({ label, href }) => (
-              <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-                style={{ color: GOLD, fontWeight: 900, fontSize: isMobile ? "13px" : "16px", textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.06em" }}
-                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}>
-                {label}
-              </a>
-            ))}
-          </div>
-        </div>
-
+// rails: Home.js has put Recent Evals and Latest in the page's side
+// margins (wide screens), so the board has the middle to itself.
+export default function HomeOffSeason({ rails = false }) {
+  return (
+    <>
+      <div className={`hx-section hx-three${rails ? " solo" : ""}`}>
+        {!rails && <RecentEvals />}
+        <BigBoard />
+        {!rails && <Latest />}
+      </div>
+      <Videos />
+      <HomeInstagram />
+      <JoinBand />
     </>
   );
 }

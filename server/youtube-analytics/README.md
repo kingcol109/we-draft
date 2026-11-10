@@ -310,3 +310,37 @@ Never prefix any of these with `REACT_APP_` or `NEXT_PUBLIC_`.
   that behavior, those videos show as "type unknown" rather than guessed.
 - **Per-video traffic sources load on demand** in the detail view, one
   query per click.
+
+## King Cold Sports edit connection (`edit.js`)
+
+This is a third YouTube authorization, separate from the other two:
+
+| Connection | Channel | Scope | Stored in |
+|---|---|---|---|
+| Stream Manager | We-Draft .com | `youtube.force-ssl` | `streamManagerPrivate/youtubeToken` |
+| YouTube Analytics | King Cold Sports | `yt-analytics.readonly` | `ytAnalyticsPrivate/token` |
+| **Edit** | King Cold Sports | `youtube.force-ssl` | `ytAnalyticsPrivate/editToken` |
+
+It lets **Admin → Videos → Graphics → Thumbnail → Set on YouTube** put a
+saved thumbnail straight onto one of the channel's videos.
+
+- **Connecting:** Connect King Cold Sports, in the saved thumbnail's box. It
+  uses the same OAuth client and redirect URI as the analytics sign-in
+  (`/api/youtube-analytics`). The sign-in state marks it as the edit one, and
+  it returns to `?section=thumbnail`.
+- **Channel check:** the sign-in is refused, and its token revoked, unless
+  the channel picked is the analytics channel (`ytAnalytics/status.channelId`).
+- **`set-thumbnail`:** `{ videoId, jpeg, thumbId }`. It checks the image is a
+  JPEG of 2 MB or less, and that the video belongs to the channel (via
+  `videos.list`). Then it calls `thumbnails.set` and writes
+  `ytThumbnails/{thumbId}`: `videoId`, `liveFrom` set to now,
+  `setOnYouTube`, and a `pushes[]` entry.
+- **Quota:** about 51 units a push.
+- **Status:** `ytAnalytics/status.edit` holds the connection state shown on
+  the page. It never holds secrets.
+
+There's no video uploading. An API project that hasn't passed YouTube's API
+audit can only upload private videos. Editing an uploaded video doesn't
+need the audit.
+
+Tests: `npm run youtube-analytics:test` (`edit.test.js`).

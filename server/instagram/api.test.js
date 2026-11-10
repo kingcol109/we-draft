@@ -27,9 +27,10 @@ function res() {
 
 test("cron tick: scheduled posts every minute; cleanup and analytics only at :47", async () => {
   db = fakeFirestore();
-  const quiet = await handler.cronTick(db, new Date("2026-11-04T12:05:00Z"));
+  const quiet = await handler.cronTick(db, new Date("2026-11-04T12:05:00Z"), { feed: async () => { throw new Error("not this minute"); } });
   assert.deepEqual(quiet, { scheduled: { due: 0, scheduled: 0 } });
-  const hourly = await handler.cronTick(db, new Date("2026-11-04T12:47:00Z"));
+  const hourly = await handler.cronTick(db, new Date("2026-11-04T12:47:00Z"), { feed: async () => ({ items: 3 }) });
+  assert.deepEqual(hourly.feed, { items: 3 });
   assert.deepEqual(hourly.scheduled, { due: 0, scheduled: 0 });
   assert.deepEqual(hourly.cleanup, { tried: 0, done: 0 });
   assert.equal(hourly.skipped, "scheduled sync is off");
@@ -47,4 +48,11 @@ test("only the cron secret runs the tick; only admins use the actions", async ()
   r = res();
   await handler({ method: "POST", headers: {}, body: { action: "status" } }, r);
   assert.equal(r.code, 401);
+});
+
+test("a failed feed refresh doesn't stop the hourly tick", async () => {
+  db = fakeFirestore();
+  const r = await handler.cronTick(db, new Date("2026-11-04T12:47:00Z"), { feed: async () => { throw new Error("Meta said no"); } });
+  assert.deepEqual(r.feed, { error: "Meta said no" });
+  assert.equal(r.skipped, "scheduled sync is off");
 });

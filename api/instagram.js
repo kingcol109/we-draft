@@ -29,6 +29,8 @@
 //   sync            { op: "account" | "media" } one analytics run; 409 if
 //                   one's running; more: true while work remains
 //   set-auto        { enabled } the scheduled analytics sync on/off
+//   feed            rewrite the Home page's feed now (config/instagramFeed —
+//                   server/instagram/feed.js) → { items }
 // Reads (posts, igMedia, igAccountDaily, igAnalytics/*) come straight from
 // Firestore (admin read in firestore.rules); only the server writes them.
 //
@@ -36,6 +38,7 @@
 // every minute: publishes a scheduled post that's due (publish.js runDue).
 // At :47 each hour it also retries staged-file cleanup for published posts,
 // deletes uploaded clips no saved post uses (videos.js sweepOrphans),
+// refreshes the Home page's public feed (feed.js — config/instagramFeed),
 // then, once an admin has turned the schedule on, one analytics step
 // (account every 6h, media every 6h, whichever is more overdue).
 //
@@ -63,7 +66,7 @@ const HOUR = 3600e3;
 
 // Every minute: a scheduled post that's due (one query when none is). Once
 // an hour (at :47, as before): cleanup retries and the analytics step.
-async function cronTick(db, tickAt = new Date()) {
+async function cronTick(db, tickAt = new Date(), { feed = refreshFeed } = {}) {
   const pub = require("../server/instagram/publish");
   const out = {};
   try {
@@ -85,6 +88,14 @@ async function cronTick(db, tickAt = new Date()) {
     console.error("instagram video sweep failed:", e.message);
     out.videos = { error: String(e.message).slice(0, 200) };
   }
+  // The Home page's feed (config/instagramFeed): every hour, whether or not
+  // the analytics schedule is on.
+  try {
+    out.feed = await feed(db);
+  } catch (e) {
+    console.error("instagram feed refresh failed:", e.message);
+    out.feed = { error: String(e.message).slice(0, 200) };
+  }
   const st = (await db.doc("igAnalytics/status").get()).data() || {};
   if (!st.auto?.enabled) return { ...out, skipped: "scheduled sync is off" };
   const last = (op) => st.sync?.[op]?.lastSuccessAt || 0;
@@ -99,6 +110,11 @@ async function cronTick(db, tickAt = new Date()) {
     if (e.code === "locked") return { ...out, skipped: e.message };
     throw e;
   }
+}
+
+function refreshFeed(db) {
+  const { graph, credentials } = require("../server/instagram/graph");
+  return require("../server/instagram/feed").refreshFeed(db, { graph, userId: credentials().userId });
 }
 
 function runSync(db, op, opts) {
@@ -164,6 +180,7 @@ module.exports = async function handler(req, res) {
         if (!["account", "media"].includes(op)) return res.status(400).json({ error: "op must be account or media" });
         return res.status(200).json(await runSync(db, op, { trigger: "manual", uid }));
       }
+      case "feed": return res.status(200).json(await refreshFeed(db));
       case "set-auto": {
         const auto = { enabled: body.enabled === true, by: uid, at: Date.now() };
         await db.doc("igAnalytics/status").set({ auto }, { merge: true });

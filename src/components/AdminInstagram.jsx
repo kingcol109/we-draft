@@ -3,6 +3,9 @@
 // Admin → Content → Instagram: 1080×1350 posts, drawn by
 // utils/instagram/posts.js (SVG — the same a server can draw; see
 // scripts/renderInstagram.mjs), rendered here to PNG for upload.
+//   Create a post  the default: a blank canvas the admin builds from players,
+//                logos, text, images and shapes (utils/instagram/custom.js;
+//                CustomPostMaker below).
 //   Weekly Mock  a class's published week as a carousel: round 1 over three
 //                slides (10, 10, 12 picks), then a slide a round; each slide
 //                one PNG, with a caption to copy.
@@ -20,176 +23,39 @@
 //   Player       one prospect over one of his action shots (Admin → Content
 //                → Photos), with a kicker and up to three chips (his class
 //                rank, his Weekly Mock pick, his grade — or typed).
+//   Portal       a player entering the transfer portal, or transferring to a
+//                new school: one image or a carousel, two different looks
+//                (utils/instagram/transfer.js; TransferMaker below).
 // Each of the carousel's round-1 slides (picks 1–16, 17–32) features one of
 // its picks over his action shot, its plain backdrop taken out
 // (utils/instagram/knockout.js) so he stands on the slide's own colors.
 // The font is the bundled Bebas Neue (assets/fonts, SIL OFL), embedded in the
 // SVG, since an SVG drawn as an image can't reach the page's fonts. Images
 // are read as data URIs for the same reason (and so the PNG exports).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { addDoc, collection, deleteDoc, doc, documentId, getDoc, getDocs, limit, orderBy, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { sanitizeImgur } from "./MarginAds";
+import { BLUE, GOLD, field, label, btn, linkBtn, fileName, fmtET, envFor, loadFeatureImage, svgToJpegBase64, downloadSvg, focusFor, FOCUS, NO_ADJUST, PhotoAdjust, useDragAdjust, useSvgUrls, toLocalInput, fromLocalInput, nextHour, WhenPicker, svgToBlob, shrinkToFit, thumbOf } from "./SocialMakerKit";
 import { headshotsFor } from "./AdminSideGraphics";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { WEEKLY_YEARS, MAIN_WEEKLY_YEAR, loadWeeklyMockSummary, weeklyMockDate } from "../utils/weeklyMockNews";
 import { NFL_TEAMS } from "../utils/coachHistory";
 import {
-  IG_W, IG_H, IG_FONT, IG_MAX_SLIDES, PHOTO_SCALE, mockSlides, mockInput, mockCaption, mockSlidePlan, playerPost, playerInput, playerCaption, imageUrls,
+  IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, playerPost, playerInput, playerCaption,
 } from "../utils/instagram/posts";
-import { knockOut, hasBackdrop, opaqueBounds } from "../utils/instagram/knockout";
 import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame } from "../utils/instagram/spotlight";
+import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
+import { transferSlides, transferInput, transferCaption, transferImageUrls } from "../utils/instagram/transfer";
 import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
-import BebasNeue from "../assets/fonts/BebasNeue-Regular.ttf";
+import { X_MAX_MEDIA, textFromCaption } from "../utils/x/posts";
+import { MEDIA_MAX_CHARS, saveXPost } from "../utils/x/store";
 import WdLogo from "../assets/Logo2.png";
 
-const BLUE = "#0055a5";
-const GOLD = "#f6a21d";
 const CLASS_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB"];
-const field = { padding: "6px 9px", border: "1px solid #d5dce6", borderRadius: "6px", fontSize: "13px", fontWeight: 700, width: "100%", boxSizing: "border-box" };
-const label = { fontSize: "10px", fontWeight: 900, color: "#7a8597", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "3px" };
-const btn = (primary) => ({
-  border: primary ? "none" : "1px solid #d5dce6", borderRadius: "999px", padding: "7px 16px", fontWeight: 900, fontSize: "12px",
-  background: primary ? BLUE : "#fff", color: primary ? "#fff" : "#33415a", cursor: "pointer",
-});
-const linkBtn = { border: "none", background: "none", color: BLUE, fontWeight: 900, fontSize: "11px", cursor: "pointer", padding: "0 4px" };
-const fileName = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-// ── The drawing environment (posts.js env) ──
-// Bebas Neue: registered for measuring, and as an @font-face for the SVG.
-let fontReady = null;
-function loadFont() {
-  if (!fontReady) {
-    fontReady = fetch(BebasNeue).then((r) => r.arrayBuffer()).then(async (buf) => {
-      const face = new FontFace(IG_FONT, buf);
-      await face.load();
-      document.fonts.add(face);
-      let bin = "";
-      const bytes = new Uint8Array(buf);
-      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      return `@font-face{font-family:"${IG_FONT}";src:url(data:font/ttf;base64,${btoa(bin)}) format("truetype");}`;
-    });
-    fontReady.catch(() => { fontReady = null; });
-  }
-  return fontReady;
-}
-const measureCtx = document.createElement("canvas").getContext("2d");
-const widths = new Map();
-function measure(text, size) {
-  const key = `${size}|${text}`;
-  if (!widths.has(key)) {
-    measureCtx.font = `${size}px "${IG_FONT}"`;
-    widths.set(key, measureCtx.measureText(String(text)).width);
-  }
-  return widths.get(key);
-}
-
-// An image as { href (data URI), w, h }, or null when it won't load (no CORS, gone).
-const imageCache = {};
-function loadDataImage(url) {
-  if (!imageCache[url]) {
-    const src = sanitizeImgur(url) || url;
-    imageCache[url] = fetch(src, { mode: "cors" }).then((r) => (r.ok ? r.blob() : null)).then(async (blob) => {
-      if (!blob || !blob.type.startsWith("image/")) return null;
-      const href = await new Promise((resolve) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = () => resolve(null); fr.readAsDataURL(blob); });
-      if (!href) return null;
-      const bmp = await createImageBitmap(blob).catch(() => null);
-      return { href, w: bmp?.width || 0, h: bmp?.height || 0 };
-    }).catch(() => null);
-  }
-  return imageCache[url];
-}
-// An action shot at most FEATURE_MAX tall (ours are up to 7680), its plain
-// backdrop taken out when it has one and cutout is on.
-const FEATURE_MAX = 1400;
-const featureCache = {};
-function loadFeatureImage(url, cutout) {
-  const key = `${cutout ? 1 : 0}|${url}`;
-  if (!featureCache[key]) {
-    featureCache[key] = fetch(sanitizeImgur(url) || url, { mode: "cors" }).then((r) => (r.ok ? r.blob() : null)).then(async (blob) => {
-      if (!blob) return null;
-      const bmp = await createImageBitmap(blob);
-      const k = Math.min(1, FEATURE_MAX / bmp.height);
-      const w = Math.round(bmp.width * k);
-      const h = Math.round(bmp.height * k);
-      const c = document.createElement("canvas");
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext("2d");
-      ctx.drawImage(bmp, 0, 0, w, h);
-      if (cutout) {
-        const data = ctx.getImageData(0, 0, w, h);
-        if (hasBackdrop(data.data, w, h)) {
-          knockOut(data.data, w, h);
-          ctx.putImageData(data, 0, 0);
-        }
-        // Trimmed to the player (a cut-out shot's empty edges too), so he fills the frame.
-        const b = opaqueBounds(data.data, w, h);
-        if (b && (b.w < w || b.h < h)) {
-          const t = document.createElement("canvas");
-          t.width = b.w;
-          t.height = b.h;
-          t.getContext("2d").drawImage(c, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
-          return { href: t.toDataURL("image/png"), w: b.w, h: b.h };
-        }
-      }
-      return { href: c.toDataURL("image/png"), w, h };
-    }).catch(() => null);
-  }
-  return featureCache[key];
-}
-
-// overrides: { [url]: a promise of its image } in place of loading it as is;
-// urls: the images the post draws (posts.js imageUrls by default).
-async function envFor(input, overrides = {}, urls = imageUrls(input)) {
-  const fontCss = await loadFont();
-  const loaded = await Promise.all(urls.map((u) => overrides[u] || loadDataImage(u)));
-  const images = {};
-  urls.forEach((u, i) => { if (loaded[i]) images[u] = loaded[i]; });
-  return { measure, fontCss, images, missing: urls.filter((u, i) => !loaded[i]) };
-}
-
-// An SVG → an image blob at full size: a PNG to download, or a JPEG (on
-// white — JPEG has no transparency) for Instagram, which takes JPEG only.
-async function svgToBlob(svg, type = "image/png", quality) {
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-  try {
-    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
-    const c = document.createElement("canvas");
-    c.width = IG_W;
-    c.height = IG_H;
-    const ctx = c.getContext("2d");
-    if (type === "image/jpeg") {
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, IG_W, IG_H);
-    }
-    ctx.drawImage(img, 0, 0, IG_W, IG_H);
-    return await new Promise((resolve) => c.toBlob(resolve, type, quality));
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-const svgToPng = (svg) => svgToBlob(svg, "image/png");
-// A slide as Instagram gets it: a JPEG, base64 (one API request a slide,
-// kept well under the request size limit).
-async function svgToJpegBase64(svg) {
-  let blob = await svgToBlob(svg, "image/jpeg", 0.92);
-  if (blob && blob.size > 3e6) blob = await svgToBlob(svg, "image/jpeg", 0.85);
-  if (!blob) throw new Error("Couldn't make the JPEG.");
-  const dataUrl = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(blob); });
-  return String(dataUrl).split(",")[1];
-}
-async function downloadSvg(svg, name) {
-  const blob = await svgToPng(svg);
-  if (!blob) throw new Error("Couldn't export the PNG.");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${name}.png`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-}
 
 // A college logo by player id ({ lg, ld }) and each player's class-board row,
 // from a class's position snapshots.
@@ -213,116 +79,9 @@ async function actionShotsFor(ids) {
   }
   return out;
 }
-// Which side of a shot to keep: a player facing left is kept to the right.
-const focusFor = (shot) => (shot?.orientation === "left" ? "right" : shot?.orientation === "right" ? "left" : "center");
-const FOCUS = [["left", "Left"], ["center", "Center"], ["right", "Right"]];
-
-// A player photo's size and place on the post: { x, y (post pixels), scale }.
-const NO_ADJUST = { x: 0, y: 0, scale: 1 };
-const NUDGE = 20;
-function PhotoAdjust({ value, onChange }) {
-  const v = { ...NO_ADJUST, ...value };
-  const set = (k, n) => onChange({ ...v, [k]: n });
-  const scaleTo = (n) => set("scale", Math.round(Math.min(PHOTO_SCALE[1], Math.max(PHOTO_SCALE[0], n)) * 100) / 100);
-  const b = { border: "1px solid #d5dce6", background: "#fff", borderRadius: "5px", width: "24px", height: "24px", padding: 0, fontSize: "14px", fontWeight: 900, color: "#33415a", cursor: "pointer" };
-  const moved = v.x || v.y || v.scale !== 1;
-  return (
-    <div>
-      <div style={{ ...label, display: "flex", alignItems: "center" }}>
-        Photo size &amp; position · or drag it on the preview
-        {moved ? <button onClick={() => onChange(NO_ADJUST)} style={{ ...linkBtn, marginLeft: "auto", fontSize: "10px" }}>RESET</button> : null}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "38px 24px 1fr 24px 44px", alignItems: "center", gap: "6px" }}>
-        <span style={{ fontSize: "12px", fontWeight: 800, color: "#33415a" }}>Size</span>
-        <button onClick={() => scaleTo(v.scale - 0.05)} style={b} aria-label="Smaller">−</button>
-        <input type="range" min={PHOTO_SCALE[0]} max={PHOTO_SCALE[1]} step={0.01} value={v.scale} onChange={(e) => scaleTo(Number(e.target.value))} />
-        <button onClick={() => scaleTo(v.scale + 0.05)} style={b} aria-label="Bigger">+</button>
-        <span style={{ fontSize: "11px", fontWeight: 800, color: "#5b6b84", textAlign: "right" }}>{Math.round(v.scale * 100)}%</span>
-      </div>
-      <div style={{ display: "flex", gap: "12px", marginTop: "6px", flexWrap: "wrap" }}>
-        {[["x", "X", "Left", "Right"], ["y", "Y", "Up", "Down"]].map(([k, t, less, more]) => (
-          <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
-            {t}
-            <button onClick={() => set(k, v[k] - NUDGE)} style={b} aria-label={less}>{k === "x" ? "←" : "↑"}</button>
-            <input type="number" value={v[k]} onChange={(e) => set(k, Number(e.target.value) || 0)} style={{ ...field, width: "64px", padding: "3px 6px", fontSize: "12px" }} />
-            <button onClick={() => set(k, v[k] + NUDGE)} style={b} aria-label={more}>{k === "x" ? "→" : "↓"}</button>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Dragging the photo on a preview: the pointer's travel in post pixels onto
-// the adjust (one update a frame). A drag isn't also a click (the previews
-// download on click): swallowClick says so and eats it.
-function useDragAdjust(setAdjust) {
-  const drag = useRef(null);
-  const dragged = useRef(false);
-  const pending = useRef({ x: 0, y: 0, frame: 0 });
-  const flush = () => {
-    const { x, y } = pending.current;
-    pending.current = { x: 0, y: 0, frame: 0 };
-    setAdjust((a) => ({ ...NO_ADJUST, ...a, x: Math.round((a?.x || 0) + x), y: Math.round((a?.y || 0) + y) }));
-  };
-  const end = () => { drag.current = null; };
-  return {
-    handlers: {
-      onPointerDown: (e) => {
-        drag.current = { x: e.clientX, y: e.clientY, k: IG_W / e.currentTarget.getBoundingClientRect().width };
-        dragged.current = false;
-        e.currentTarget.setPointerCapture?.(e.pointerId);
-      },
-      onPointerMove: (e) => {
-        const d = drag.current;
-        if (!d) return;
-        const dx = (e.clientX - d.x) * d.k;
-        const dy = (e.clientY - d.y) * d.k;
-        if (!dragged.current && Math.hypot(dx, dy) < 6) return;
-        dragged.current = true;
-        d.x = e.clientX;
-        d.y = e.clientY;
-        pending.current.x += dx;
-        pending.current.y += dy;
-        if (!pending.current.frame) pending.current.frame = requestAnimationFrame(flush);
-      },
-      onPointerUp: end,
-      onPointerCancel: end,
-      draggable: false,
-      style: { cursor: "grab", touchAction: "none" },
-    },
-    swallowClick: () => {
-      if (!dragged.current) return false;
-      dragged.current = false;
-      return true;
-    },
-  };
-}
-
-// Slide previews as object URLs (revoked when they change).
-// A slide whose SVG didn't change keeps its URL (dragging redraws one).
-function useSvgUrls(svgs) {
-  const [urls, setUrls] = useState([]);
-  const made = useRef(new Map());
-  useEffect(() => {
-    const keep = new Map();
-    const next = svgs.map((s) => {
-      const u = made.current.get(s) || URL.createObjectURL(new Blob([s], { type: "image/svg+xml" }));
-      keep.set(s, u);
-      return u;
-    });
-    // Old ones go a beat later, once their <img>s show the new ones.
-    made.current.forEach((u, s) => { if (!keep.has(s)) setTimeout(() => URL.revokeObjectURL(u), 1500); });
-    made.current = keep;
-    setUrls(next);
-  }, [svgs]);
-  useEffect(() => () => made.current.forEach((u) => URL.revokeObjectURL(u)), []);
-  return urls;
-}
-
 // ── Saved posts ──
 // instagramPosts/{id} (admin only — firestore.rules):
-//   { type: "mock" | "spotlight" | "player", name, status, state (the
+//   { type: "custom" | "mock" | "spotlight" | "player" | "portal" | "transfer", name, status, state (the
 //     maker's settings, enough to draw the post again — each maker's
 //     stateNow), caption, slides (how many), thumb (slide 1 as a small JPEG
 //     data URI, for the list), playerIds (the players it features — for
@@ -333,26 +92,11 @@ function useSvgUrls(svgs) {
 // status: draft → ready → publishing → published | failed — the last three
 // set only by the server, published only once Instagram confirms. posted:
 // marked published by hand (posted outside We-Draft).
-const POST_TYPES = { mock: "Weekly Mock carousel", spotlight: "Player spotlight", player: "Player post" };
+const POST_TYPES = { custom: "Create a post", mock: "Weekly Mock carousel", spotlight: "Player spotlight", player: "Player post", portal: "Portal: entered", transfer: "Portal: transferred" };
 const STATUS = {
   draft: ["Draft", "#8a97ab"], ready: ["Ready to Publish", "#b7791f"], scheduled: ["Scheduled", "#6d28d9"], publishing: ["Publishing", BLUE],
   published: ["Published", "#15803d"], failed: ["Failed", "#a52a1e"], posted: ["Published (by hand)", "#15803d"],
 };
-// A schedule's time, as the admin reads it (Eastern, like the site).
-const fmtET = (ms) => (ms ? `${new Date(ms).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET` : "");
-// ms ↔ a datetime-local input's value (the browser's own time zone).
-const toLocalInput = (ms) => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
-const fromLocalInput = (v) => (v ? new Date(v).getTime() : NaN);
-// The default pick: the next whole hour at least an hour away.
-const nextHour = () => { const d = new Date(Date.now() + 3600e3); d.setMinutes(0, 0, 0); return d.getTime() < Date.now() + 3600e3 ? d.getTime() + 3600e3 : d.getTime(); };
-function WhenPicker({ value, onChange }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-      <input type="datetime-local" value={value} min={toLocalInput(Date.now() + 5 * 60e3)} onChange={(e) => onChange(e.target.value)} style={{ ...field, width: "auto", padding: "4px 7px", fontSize: "12px" }} />
-      {value && <span style={{ fontSize: "11px", fontWeight: 800, color: "#5b6b84" }}>{fmtET(fromLocalInput(value))}</span>}
-    </span>
-  );
-}
 // What the page can set itself (firestore.rules agrees).
 const CHOOSABLE = ["draft", "ready", "posted"];
 const THUMB_W = 216;
@@ -414,6 +158,29 @@ async function sendSlides(postId, attempt, order, setPhase) {
 }
 const videoMapOf = (order) => Object.fromEntries(order.map((s, i) => (s.video ? [i, s.video] : null)).filter(Boolean));
 
+// Send to X: starts an X draft from this post: its slides (the first four, X's
+// most) and its caption's opening, linked back to this post. It's a separate
+// post from then on, with its own text, images and time. Nothing goes to X.
+const SendToXContext = createContext(null);
+async function makeXDraft({ svgs, caption, name, postId, playerIds, subject, uid }) {
+  const images = {};
+  const media = [];
+  for (let i = 0; i < Math.min(X_MAX_MEDIA, svgs.length); i++) {
+    const url = URL.createObjectURL(await svgToBlob(svgs[i], "image/jpeg", 0.92));
+    try {
+      const { data, w, h } = await shrinkToFit(url, MEDIA_MAX_CHARS);
+      images[`ig${i + 1}`] = data;
+      media.push({ id: `ig${i + 1}`, kind: "instagram", alt: "", w, h });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  return saveXPost(null, {
+    name: `${name} (X)`, text: textFromCaption(caption), media, card: { on: false }, thumb: await thumbOf(images.ig1 || ""),
+    playerIds: [...new Set((playerIds || []).filter(Boolean))], subject: plain(subject), linkedTo: [{ platform: "instagram", id: postId, label: name }], createdBy: uid || "",
+  }, images);
+}
+
 // Save, or save as a new post: the post's name, then the buttons. A post
 // opened from the list (or once saved) saves over itself. Publish to
 // Instagram saves first, then sends these slides — the preview, as is.
@@ -422,6 +189,7 @@ const videoMapOf = (order) => Object.fromEntries(order.map((s, i) => (s.video ? 
 // the carousel (the Spotlight's); hold: why it can't save or publish yet.
 function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null, videos = [], hold = "" }) {
   const { user } = useAuth();
+  const sendToX = useContext(SendToXContext);
   const [name, setName] = useState(post?.name || "");
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState("");
@@ -444,6 +212,23 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
     setPost({ id, name: shown, status: asNew ? "draft" : status, ig: asNew ? null : post?.ig || null });
     if (!quiet) setMsg(`Saved "${shown}".`);
     return id;
+  };
+  const xDraft = async () => {
+    setBusy(true);
+    try {
+      setPhase("Saving…");
+      // A locked post's slides are already final; anything else saves first, so the link points at this version.
+      const id = isLocked ? post.id : await save(false, true);
+      setPhase("Making the X draft…");
+      const xId = await makeXDraft({ svgs, caption, name: shown, postId: id, playerIds, subject, uid: user?.uid });
+      onSaved();
+      sendToX(xId);
+    } catch (e) {
+      setMsg(`Couldn't make the X draft: ${e.message}`);
+    } finally {
+      setBusy(false);
+      setPhase("");
+    }
   };
   const saveClick = async (asNew) => {
     setBusy(true);
@@ -534,6 +319,9 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
           <button onClick={() => setWhen(toLocalInput(nextHour()))} disabled={off} title="Post these slides to @wedraftsite at a time you pick"
             style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Schedule…</button>
         )}
+        {sendToX && (
+          <button onClick={xDraft} disabled={off} title="Start an X draft from this post: its first slides and caption, with its own text and time" style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Send to X…</button>
+        )}
         {busy && <span style={{ fontSize: "11px", fontWeight: 800, color: BLUE }}>{phase || "Saving…"}</span>}
         {hold && !busy && <span style={{ fontSize: "11px", fontWeight: 800, color: "#b7791f" }}>{hold}</span>}
       </div>
@@ -564,7 +352,6 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
 
 function SavedPosts({ version, onOpen, setMsg }) {
   const [posts, setPosts] = useState(null);
-  const [open, setOpen] = useState(true);
   const [mine, setMine] = useState(0);
   useEffect(() => {
     getDocs(query(collection(db, "instagramPosts"), orderBy("updatedAt", "desc"), limit(60)))
@@ -626,112 +413,138 @@ function SavedPosts({ version, onOpen, setMsg }) {
   const when = (ts) => ts?.toDate?.()?.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) || "";
   return (
     <div style={{ border: "1px solid #e3e8ef", borderRadius: "10px", background: "#fff" }}>
-      <button onClick={() => setOpen((o) => !o)} style={{ display: "flex", width: "100%", alignItems: "center", gap: "8px", border: "none", background: "none", padding: "8px 12px", cursor: "pointer" }}>
+      <div style={{ padding: "8px 12px" }}>
         <span style={{ ...label, marginBottom: 0 }}>Saved posts{posts ? ` · ${posts.length}` : ""}</span>
-        <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 900, color: BLUE }}>{open ? "Hide" : "Show"}</span>
-      </button>
-      {open && (
-        <div style={{ padding: "0 12px 10px" }}>
-          {!posts && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>Loading…</div>}
-          {posts && !posts.length && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>None yet. Make a post below and save it.</div>}
-          <div style={{ display: "flex", gap: "10px", overflowX: "auto", paddingBottom: "4px" }}>
-            {(posts || []).map((p) => (
-              <div key={p.id} style={{ flex: "0 0 150px", border: "1px solid #e3e8ef", borderRadius: "8px", overflow: "hidden", background: "#f8fafc" }}>
-                <button onClick={() => onOpen(p)} title="Open to edit" style={{ display: "block", width: "100%", border: "none", padding: 0, cursor: "pointer", background: "#0b1426" }}>
-                  {p.thumb ? <img src={p.thumb} alt="" style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}` }} /> : <div style={{ aspectRatio: `${IG_W} / ${IG_H}` }} />}
-                </button>
-                <div style={{ padding: "5px 7px" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 900, color: "#1d2433", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={p.name}>{p.name}</div>
-                  <div style={{ fontSize: "10px", fontWeight: 800, color: "#8a97ab" }}>{POST_TYPES[p.type] || p.type} · {p.slides || 1} slide{p.slides === 1 ? "" : "s"}</div>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#8a97ab" }}>{when(p.updatedAt)}</div>
-                  {(() => {
-                    const s = p.status || "draft";
-                    const [text, color] = STATUS[s] || [s, "#8a97ab"];
-                    if (locked(s)) {
-                      return <div style={{ fontSize: "11px", fontWeight: 900, color, marginTop: "4px" }}>{s === "publishing" && resuming === p.id ? "Publishing…" : text}</div>;
-                    }
-                    return (
-                      <select value={s} onChange={(e) => setStatus(p, e.target.value).catch((er) => setMsg(`Couldn't update it: ${er.message}`))}
-                        style={{ ...field, padding: "3px 5px", fontSize: "11px", marginTop: "4px", color }}>
-                        {s === "failed" && <option value="failed" disabled>Failed</option>}
-                        {CHOOSABLE.map((v) => <option key={v} value={v}>{STATUS[v][0]}</option>)}
-                      </select>
-                    );
-                  })()}
-                  {p.status === "published" && (
-                    <div style={{ fontSize: "10px", fontWeight: 700, color: "#5b6b84", marginTop: "3px" }}>
-                      {p.ig?.publishedAt ? new Date(p.ig.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}
-                      {p.ig?.permalink ? <> · <a href={p.ig.permalink} target="_blank" rel="noreferrer" style={igLink}>View ↗</a></> : " · link pending"}
-                    </div>
-                  )}
-                  {p.status === "failed" && p.ig?.error && (
-                    <div title={`${p.ig.error.message}${p.ig.error.fbtraceId ? `\nInstagram trace ${p.ig.error.fbtraceId}` : ""}`}
-                      style={{ fontSize: "10px", fontWeight: 700, color: "#a52a1e", marginTop: "3px", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                      {p.ig.error.message}
-                    </div>
-                  )}
-                  {p.status === "scheduled" && (
-                    <div style={{ fontSize: "10px", fontWeight: 800, color: STATUS.scheduled[1], marginTop: "3px" }}>
-                      {fmtET(p.ig?.scheduledAt)}
-                      {p.ig?.scheduleReady === false && <div style={{ color: "#a52a1e" }}>Slides didn&apos;t all send — cancel and schedule it again.</div>}
-                      {changing.id === p.id ? (
-                        <div style={{ marginTop: "4px" }}>
-                          <input type="datetime-local" value={changing.when} min={toLocalInput(Date.now() + 5 * 60e3)} onChange={(e) => setChanging({ id: p.id, when: e.target.value })}
-                            style={{ ...field, padding: "2px 4px", fontSize: "10px" }} />
-                          <div style={{ display: "flex" }}>
-                            <button onClick={() => reschedule(p)} style={{ ...linkBtn, padding: "3px 0 0" }}>Save time</button>
-                            <button onClick={() => setChanging({ id: "", when: "" })} style={{ ...linkBtn, padding: "3px 0 0", marginLeft: "auto", color: "#8a97ab" }}>Back</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex" }}>
-                          <button onClick={() => setChanging({ id: p.id, when: toLocalInput(p.ig?.scheduledAt || nextHour()) })} style={{ ...linkBtn, padding: "3px 0 0" }}>Change time</button>
-                          <button onClick={() => cancelSchedule(p)} style={{ ...linkBtn, padding: "3px 0 0", marginLeft: "auto", color: "#a52a1e" }}>Cancel</button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {p.status === "publishing" && !(p.ig?.leaseUntil > Date.now()) && resuming !== p.id && (
-                    <button onClick={() => resume(p)} style={{ ...linkBtn, padding: "3px 0 0" }} title="Pick up where this publish left off">Resume publishing</button>
-                  )}
-                  <div style={{ display: "flex", marginTop: "3px" }}>
-                    <button onClick={() => onOpen(p)} style={linkBtn}>{p.status === "failed" ? "Open to retry" : "Open"}</button>
-                    {p.status !== "publishing" && <button onClick={() => remove(p).catch((er) => setMsg(`Couldn't delete it: ${er.message}`))} style={{ ...linkBtn, marginLeft: "auto", color: "#a52a1e" }}>Delete</button>}
+      </div>
+      <div style={{ padding: "0 12px 10px" }}>
+        {!posts && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>Loading…</div>}
+        {posts && !posts.length && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>None yet. Make a post under Create and save it.</div>}
+        <div style={{ display: "flex", gap: "10px", overflowX: "auto", paddingBottom: "4px" }}>
+          {(posts || []).map((p) => (
+            <div key={p.id} style={{ flex: "0 0 150px", border: "1px solid #e3e8ef", borderRadius: "8px", overflow: "hidden", background: "#f8fafc" }}>
+              <button onClick={() => onOpen(p)} title="Open to edit" style={{ display: "block", width: "100%", border: "none", padding: 0, cursor: "pointer", background: "#0b1426" }}>
+                {p.thumb ? <img src={p.thumb} alt="" style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}` }} /> : <div style={{ aspectRatio: `${IG_W} / ${IG_H}` }} />}
+              </button>
+              <div style={{ padding: "5px 7px" }}>
+                <div style={{ fontSize: "12px", fontWeight: 900, color: "#1d2433", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={p.name}>{p.name}</div>
+                <div style={{ fontSize: "10px", fontWeight: 800, color: "#8a97ab" }}>{POST_TYPES[p.type] || p.type} · {p.slides || 1} slide{p.slides === 1 ? "" : "s"}</div>
+                <div style={{ fontSize: "10px", fontWeight: 700, color: "#8a97ab" }}>{when(p.updatedAt)}</div>
+                {(() => {
+                  const s = p.status || "draft";
+                  const [text, color] = STATUS[s] || [s, "#8a97ab"];
+                  if (locked(s)) {
+                    return <div style={{ fontSize: "11px", fontWeight: 900, color, marginTop: "4px" }}>{s === "publishing" && resuming === p.id ? "Publishing…" : text}</div>;
+                  }
+                  return (
+                    <select value={s} onChange={(e) => setStatus(p, e.target.value).catch((er) => setMsg(`Couldn't update it: ${er.message}`))}
+                      style={{ ...field, padding: "3px 5px", fontSize: "11px", marginTop: "4px", color }}>
+                      {s === "failed" && <option value="failed" disabled>Failed</option>}
+                      {CHOOSABLE.map((v) => <option key={v} value={v}>{STATUS[v][0]}</option>)}
+                    </select>
+                  );
+                })()}
+                {p.status === "published" && (
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#5b6b84", marginTop: "3px" }}>
+                    {p.ig?.publishedAt ? new Date(p.ig.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}
+                    {p.ig?.permalink ? <> · <a href={p.ig.permalink} target="_blank" rel="noreferrer" style={igLink}>View ↗</a></> : " · link pending"}
                   </div>
+                )}
+                {p.status === "failed" && p.ig?.error && (
+                  <div title={`${p.ig.error.message}${p.ig.error.fbtraceId ? `\nInstagram trace ${p.ig.error.fbtraceId}` : ""}`}
+                    style={{ fontSize: "10px", fontWeight: 700, color: "#a52a1e", marginTop: "3px", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    {p.ig.error.message}
+                  </div>
+                )}
+                {p.status === "scheduled" && (
+                  <div style={{ fontSize: "10px", fontWeight: 800, color: STATUS.scheduled[1], marginTop: "3px" }}>
+                    {fmtET(p.ig?.scheduledAt)}
+                    {p.ig?.scheduleReady === false && <div style={{ color: "#a52a1e" }}>Slides didn&apos;t all send — cancel and schedule it again.</div>}
+                    {changing.id === p.id ? (
+                      <div style={{ marginTop: "4px" }}>
+                        <input type="datetime-local" value={changing.when} min={toLocalInput(Date.now() + 5 * 60e3)} onChange={(e) => setChanging({ id: p.id, when: e.target.value })}
+                          style={{ ...field, padding: "2px 4px", fontSize: "10px" }} />
+                        <div style={{ display: "flex" }}>
+                          <button onClick={() => reschedule(p)} style={{ ...linkBtn, padding: "3px 0 0" }}>Save time</button>
+                          <button onClick={() => setChanging({ id: "", when: "" })} style={{ ...linkBtn, padding: "3px 0 0", marginLeft: "auto", color: "#8a97ab" }}>Back</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex" }}>
+                        <button onClick={() => setChanging({ id: p.id, when: toLocalInput(p.ig?.scheduledAt || nextHour()) })} style={{ ...linkBtn, padding: "3px 0 0" }}>Change time</button>
+                        <button onClick={() => cancelSchedule(p)} style={{ ...linkBtn, padding: "3px 0 0", marginLeft: "auto", color: "#a52a1e" }}>Cancel</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {p.status === "publishing" && !(p.ig?.leaseUntil > Date.now()) && resuming !== p.id && (
+                  <button onClick={() => resume(p)} style={{ ...linkBtn, padding: "3px 0 0" }} title="Pick up where this publish left off">Resume publishing</button>
+                )}
+                <div style={{ display: "flex", marginTop: "3px" }}>
+                  <button onClick={() => onOpen(p)} style={linkBtn}>{p.status === "failed" ? "Open to retry" : "Open"}</button>
+                  {p.status !== "publishing" && <button onClick={() => remove(p).catch((er) => setMsg(`Couldn't delete it: ${er.message}`))} style={{ ...linkBtn, marginLeft: "auto", color: "#a52a1e" }}>Delete</button>}
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-export default function AdminInstagram() {
-  const [kind, setKind] = useState("mock");
+export default function AdminInstagram({ openPostId = null, onOpenInX = null }) {
+  const [kind, setKind] = useState("custom");
   const [msg, setMsg] = useState("");
   // The post open in the maker (from Saved posts), and a count that starts
   // the maker over when one's opened or New is picked.
   const [opened, setOpened] = useState(null);
   const [run, setRun] = useState(0);
   const [version, setVersion] = useState(0);
-  const start = (type, post = null) => { setKind(type); setOpened(post); setRun((n) => n + 1); setMsg(""); };
+  // Create (the maker) or Saved posts. The maker stays mounted behind the
+  // other tab, so looking through saved posts doesn't lose a post in progress.
+  const [view, setView] = useState("create");
+  const start = (type, post = null) => { setKind(type); setOpened(post); setRun((n) => n + 1); setMsg(""); setView("create"); };
   const props = { setMsg, saved: opened && opened.type === kind ? opened : null, onSaved: () => setVersion((v) => v + 1) };
+  // Sent here from the Content Calendar: that post, open in its maker.
+  useEffect(() => {
+    if (!openPostId) return;
+    getDoc(doc(db, "instagramPosts", openPostId)).then((d) => {
+      if (d.exists()) start(d.data().type, { id: d.id, ...d.data() });
+      else setMsg("That post is gone.");
+    }).catch((e) => setMsg(`Couldn't open it: ${e.message}`));
+  }, [openPostId]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
+    <SendToXContext.Provider value={onOpenInX}>
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-      <SavedPosts version={version} onOpen={(p) => start(p.type, p)} setMsg={setMsg} />
-      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-        {Object.entries(POST_TYPES).map(([v, t]) => (
-          <button key={v} onClick={() => start(v)} style={{ ...btn(kind === v), padding: "6px 14px" }}>{t}</button>
+      <div style={{ display: "flex", gap: "4px", borderBottom: "2px solid #e3e8ef" }}>
+        {[["create", "Create"], ["saved", "Saved posts"]].map(([v, t]) => (
+          <button key={v} data-ig-view={v} onClick={() => { setView(v); setMsg(""); }} style={{
+            border: "none", background: "none", padding: "8px 16px", marginBottom: "-2px", cursor: "pointer", fontWeight: 900, fontSize: "13px",
+            color: view === v ? BLUE : "#7a8597", borderBottom: `3px solid ${view === v ? BLUE : "transparent"}`,
+          }}>{t}</button>
         ))}
-        {opened && <span style={{ fontSize: "12px", fontWeight: 800, color: "#5b6b84", marginLeft: "8px" }}>Editing &ldquo;{opened.name}&rdquo; · <button onClick={() => start(kind)} style={linkBtn}>New post</button></span>}
       </div>
-      {kind === "mock" && <MockCarousel key={run} {...props} />}
-      {kind === "spotlight" && <SpotlightMaker key={run} {...props} />}
-      {kind === "player" && <PlayerPostMaker key={run} {...props} />}
+      {view === "saved" && <SavedPosts version={version} onOpen={(p) => start(p.type, p)} setMsg={setMsg} />}
+      <div style={{ display: view === "create" ? "flex" : "none", flexDirection: "column", gap: "14px" }}>
+        <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ width: "280px" }}>
+            <div style={label}>Template</div>
+            <select value={kind} data-ig-template onChange={(e) => start(e.target.value)} style={field}>
+              {Object.entries(POST_TYPES).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select>
+          </div>
+          {opened && <span style={{ fontSize: "12px", fontWeight: 800, color: "#5b6b84", paddingBottom: "7px" }}>Editing &ldquo;{opened.name}&rdquo;</span>}
+          <button onClick={() => start(kind)} title="Clear the form and start this template over" style={{ ...btn(false), padding: "5px 14px", marginBottom: "1px" }}>New post</button>
+        </div>
+        {kind === "custom" && <CustomPostMaker key={run} {...props} />}
+        {kind === "mock" && <MockCarousel key={run} {...props} />}
+        {kind === "spotlight" && <SpotlightMaker key={run} {...props} />}
+        {kind === "player" && <PlayerPostMaker key={run} {...props} />}
+        {(kind === "portal" || kind === "transfer") && <TransferMaker key={run} kind={kind} {...props} />}
+      </div>
       {msg && <div style={{ fontSize: "12px", fontWeight: 800, color: /^Couldn't|^No /.test(msg) ? "#a52a1e" : "#15803d" }}>{msg}</div>}
     </div>
+    </SendToXContext.Provider>
   );
 }
 
@@ -1524,6 +1337,539 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
               </button>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Transfer Portal ──
+// One maker, two posts with their own looks (utils/instagram/transfer.js):
+// kind "portal" (he's entered it) or "transfer" (he's picked a school).
+const SCHOOLS_LIST = "transfer-schools";
+function TransferMaker({ kind, setMsg, saved, onSaved }) {
+  const isTransfer = kind === "transfer";
+  const st = saved?.state || {};
+  const [post, setPost] = useState(saved ? { id: saved.id, name: saved.name, status: saved.status, ig: saved.ig || null } : null);
+  const [players, setPlayers] = useState(null);
+  const [schools, setSchools] = useState(null);
+  const [search, setSearch] = useState("");
+  const [player, setPlayer] = useState(null);
+  const [data, setData] = useState(null);
+  const [fromName, setFromName] = useState(st.fromName || "");
+  const [toName, setToName] = useState(st.toName || "");
+  const [carousel, setCarousel] = useState(!!st.carousel);
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [focus, setFocus] = useState("center");
+  const [adjust, setAdjust] = useState(NO_ADJUST);
+  const drag = useDragAdjust(setAdjust);
+  const [kicker, setKicker] = useState(st.kicker || "");
+  const [headline, setHeadline] = useState(st.headline || "");
+  const [note, setNote] = useState(st.note || "");
+  const [slides, setSlides] = useState([]);
+  const choosePhoto = (url) => { setPhotoUrl(url); setAdjust(NO_ADJUST); };
+
+  useEffect(() => {
+    getDocs(collection(db, "players")).then((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => p.First && p.Last).sort((a, b) => a.Last.localeCompare(b.Last) || a.First.localeCompare(b.First))))
+      .catch((e) => setMsg(`Couldn't load players: ${e.message}`));
+    getDocs(collection(db, "schools")).then((snap) => setSchools(snap.docs.map((d) => d.data()).filter((s) => s.School).sort((a, b) => a.School.localeCompare(b.School))))
+      .catch((e) => setMsg(`Couldn't load schools: ${e.message}`));
+  }, [setMsg]);
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || !players) return [];
+    return players.filter((p) => `${p.First} ${p.Last}`.toLowerCase().includes(q)).slice(0, 12);
+  }, [players, search]);
+
+  const pick = async (p, restore = null) => {
+    setSearch("");
+    setMsg("");
+    try {
+      const [photoSnap, evalSnap, classSnap] = await Promise.all([
+        getDoc(doc(db, "playerPhotos", p.id)),
+        getDocs(collection(db, "players", p.id, "evaluations")),
+        getSiteSnapshot(`class_${p.Eligible}_${p.Position}`),
+      ]);
+      const ph = photoSnap.exists() ? photoSnap.data() : {};
+      const action = ph.action || [];
+      setPlayer(p);
+      setData({ action, report: scoutingReport({ player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap, teamNames: NFL_TEAMS }) });
+      if (restore) {
+        setPhotoUrl(restore.photoUrl ?? "");
+        setFocus(restore.focus || "center");
+        setAdjust({ ...NO_ADJUST, ...restore.adjust });
+      } else {
+        choosePhoto(action[0]?.url || "");
+        setFocus(focusFor(action[0]));
+        // Where his data says he's coming from and going to; both can be changed.
+        // A player already resolved to a new school has it as School, the old as PriorSchool.
+        const resolved = !p.InPortal && !!p.PriorSchool;
+        setFromName(p.PortalOriginalSchool || (isTransfer && resolved ? p.PriorSchool : p.School) || "");
+        setToName(isTransfer && resolved ? p.School || "" : "");
+        if (!action.length) setMsg("No action shots for him yet (Content → Photos) — the design works without one, or paste an image link.");
+      }
+    } catch (e) {
+      setMsg(`Couldn't load him: ${e.message}`);
+    }
+  };
+  useEffect(() => {
+    if (!st.playerId) return;
+    getDoc(doc(db, "players", st.playerId)).then((d) => { if (d.exists()) pick({ id: d.id, ...d.data() }, st); })
+      .catch((e) => setMsg(`Couldn't open it: ${e.message}`));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const schoolDoc = (name) => (schools || []).find((s) => s.School === name) || {};
+  const input = useMemo(() => (player && data && schools ? {
+    ...transferInput({ kind, player, from: schoolDoc(fromName), fromName, to: schoolDoc(toName), toName, photo: photoUrl ? { url: photoUrl } : null, report: data.report, carousel, kicker, headline, note, brandLogo: WdLogo }),
+    focus, adjust,
+  } : null), [kind, player, data, schools, fromName, toName, photoUrl, carousel, kicker, headline, note, focus, adjust]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cap = useCaption(saved, useMemo(() => (input ? transferCaption(input) : ""), [input]));
+
+  useEffect(() => {
+    if (!input) { setSlides([]); return; }
+    let live = true;
+    envFor(input, input.photo ? { [input.photo]: loadFeatureImage(input.photo, true) } : {}, transferImageUrls(input)).then((env) => {
+      if (!live) return;
+      setSlides(transferSlides(input, env));
+      if (input.photo && !env.images[input.photo]) setMsg("Couldn't load that photo — it may not allow downloads (try an imgur link).");
+    }).catch((e) => setMsg(`Couldn't draw: ${e.message}`));
+    return () => { live = false; };
+  }, [input, setMsg]);
+  const svgs = useMemo(() => slides.map((s) => s.svg), [slides]);
+  const urls = useSvgUrls(svgs);
+  const base = player ? `wedraft-${kind}-${fileName(`${player.First}-${player.Last}`)}` : "";
+  const known = (name) => !name || (schools || []).some((s) => s.School === name);
+  const hold = isTransfer && !toName.trim() ? "Pick the school he's going to." : "";
+  const slideNames = { portal: "Cover", "his-file": "His file", "where-next": "Where next?", transfer: "Cover", "what-they-get": "What they get" };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 380px) 1fr", gap: "18px", alignItems: "start" }}>
+      <datalist id={SCHOOLS_LIST}>{(schools || []).map((s) => <option key={s.School} value={s.School} />)}</datalist>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div style={{ position: "relative" }}>
+          <div style={label}>Player</div>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} data-transfer-player placeholder={players ? (player ? `${player.First} ${player.Last} — search another…` : "Search a prospect…") : "Loading players…"} style={field} />
+          {matches.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #d5dce6", borderRadius: "6px", zIndex: 5, maxHeight: "260px", overflowY: "auto" }}>
+              {matches.map((p) => (
+                <button key={p.id} onClick={() => pick(p)} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "#fff", padding: "6px 9px", fontSize: "13px", fontWeight: 800, cursor: "pointer" }}>
+                  {p.First} {p.Last} <span style={{ color: "#8a97ab", fontWeight: 700 }}>{p.Position} · {p.School} · {p.Eligible}{p.InPortal ? " · in portal" : ""}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {player && data && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: isTransfer ? "1fr 1fr" : "1fr", gap: "8px" }}>
+              <div>
+                <div style={label}>{isTransfer ? "From" : "Leaving"}</div>
+                <input list={SCHOOLS_LIST} value={fromName} onChange={(e) => setFromName(e.target.value)} data-transfer-from style={field} />
+                {!known(fromName) && <div style={{ fontSize: "11px", fontWeight: 700, color: "#b7791f", marginTop: "2px" }}>Not a We-Draft school: no logo or colors.</div>}
+              </div>
+              {isTransfer && (
+                <div>
+                  <div style={label}>Going to</div>
+                  <input list={SCHOOLS_LIST} value={toName} onChange={(e) => setToName(e.target.value)} data-transfer-to placeholder="Pick a school…" style={field} />
+                  {!known(toName) && <div style={{ fontSize: "11px", fontWeight: 700, color: "#b7791f", marginTop: "2px" }}>Not a We-Draft school: no logo or colors.</div>}
+                </div>
+              )}
+            </div>
+            <div>
+              <div style={label}>Format</div>
+              <div style={{ display: "flex", gap: "4px" }}>
+                {[[false, "Single image"], [true, `Carousel (${isTransfer ? 2 : 3} slides)`]].map(([v, t]) => <button key={t} onClick={() => setCarousel(v)} style={{ ...btn(carousel === v), padding: "5px 12px" }}>{t}</button>)}
+              </div>
+            </div>
+            <div>
+              <div style={label}>Photo · click to use</div>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {data.action.map((a, i) => (
+                  <button key={a.url} onClick={() => { choosePhoto(a.url); setFocus(focusFor(a)); }} title={`Action shot ${i + 1}${a.orientation ? ` · facing ${a.orientation}` : ""}`}
+                    style={{ border: `2px solid ${photoUrl === a.url ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", padding: "2px", cursor: "pointer", width: "60px", height: "76px" }}>
+                    <img src={sanitizeImgur(a.url) || a.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "5px" }} />
+                  </button>
+                ))}
+                <button onClick={() => choosePhoto("")} style={{ border: `2px solid ${!photoUrl ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", cursor: "pointer", width: "60px", height: "76px", fontSize: "10px", fontWeight: 900, color: "#5b6b84" }}>NO PHOTO</button>
+              </div>
+              <input value={photoUrl} onChange={(e) => choosePhoto(e.target.value)} placeholder="Or any image link…" style={{ ...field, marginTop: "6px" }} />
+            </div>
+            {photoUrl && (
+              <>
+                <div style={{ display: "flex", gap: "4px" }}>{FOCUS.map(([v, t]) => <button key={v} onClick={() => setFocus(v)} style={{ ...btn(focus === v), padding: "4px 10px" }}>{t}</button>)}</div>
+                <PhotoAdjust value={adjust} onChange={setAdjust} />
+              </>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div><div style={label}>{isTransfer ? "Banner" : "Tape"}</div><input value={kicker} onChange={(e) => setKicker(e.target.value)} placeholder={isTransfer ? "TRANSFER" : "TRANSFER PORTAL"} style={field} /></div>
+              {!isTransfer && <div><div style={label}>Headline</div><input value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="IN THE PORTAL" style={field} /></div>}
+            </div>
+            <div><div style={label}>Note under his name (optional)</div><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="2 YEARS OF ELIGIBILITY" style={field} /></div>
+            <div><button onClick={() => Promise.all(slides.map((s, i) => downloadSvg(s.svg, `${base}-${i + 1}-${s.name}`))).catch((e) => setMsg(`Couldn't export: ${e.message}`))} disabled={!slides.length} style={{ ...btn(true), opacity: slides.length ? 1 : 0.5 }}>Download {slides.length > 1 ? `all (${slides.length})` : "PNG"}</button></div>
+            <SaveBar type={kind} defaultName={`${isTransfer ? "Transfer" : "Portal"} · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
+              playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }} hold={hold}
+              stateNow={() => ({ playerId: player.id, fromName, toName, carousel, photoUrl, focus, adjust, kicker, headline, note })} />
+            <CaptionBox c={cap} />
+          </>
+        )}
+      </div>
+      <div>
+        <div style={label}>Preview · {IG_W}×{IG_H}{slides.length > 1 ? " · click a slide to download it" : ""}</div>
+        {!slides.length && <div style={{ fontSize: "13px", fontWeight: 700, color: "#8a97ab" }}>Pick a player.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 420px))", gap: "12px" }}>
+          {slides.map((s, i) => {
+            const movable = i === 0 && photoUrl;
+            return (
+              <button key={s.name} data-transfer-slide={s.name} onClick={() => { if (!(movable && drag.swallowClick())) downloadSvg(s.svg, `${base}-${i + 1}-${s.name}`).catch((e) => setMsg(`Couldn't export: ${e.message}`)); }}
+                title={movable ? "Drag to move his photo · click to download" : "Download this slide"} style={{ border: "1px solid #d5dce6", borderRadius: "8px", padding: 0, background: "#fff", cursor: "pointer", overflow: "hidden", textAlign: "left" }}>
+                {urls[i] && <img src={urls[i]} alt={`Slide ${i + 1}`} {...(movable ? drag.handlers : {})} style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, ...(movable ? drag.handlers.style : {}) }} />}
+                <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{i + 1} · {slideNames[s.name] || s.name}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Create a post ──
+// A blank canvas (utils/instagram/custom.js): add players, logos, text, images
+// and shapes; drag them on the preview, pull a corner to size them. Pictures are
+// links, as everywhere on the site (imgur), so a saved post stays small.
+const swatch = { ...field, width: "46px", height: "30px", padding: "2px" };
+function CustomPostMaker({ setMsg, saved, onSaved }) {
+  const st = saved?.state || {};
+  const [post, setPost] = useState(saved ? { id: saved.id, name: saved.name, status: saved.status, ig: saved.ig || null } : null);
+  const [slides, setSlides] = useState(() => (Array.isArray(st.slides) && st.slides.length ? st.slides : [blankSlide()]));
+  const [at, setAt] = useState(0);
+  const [selId, setSelId] = useState("");
+  const [footerOn, setFooterOn] = useState(st.footerOn !== false);
+  const [cta, setCta] = useState(st.cta || "");
+  const [adding, setAdding] = useState("");
+  const [search, setSearch] = useState("");
+  const [link, setLink] = useState("");
+  const [players, setPlayers] = useState(null);
+  const [logos, setLogos] = useState(null);
+  const [shots, setShots] = useState({});
+  const [env, setEnv] = useState(null);
+  const slide = slides[Math.min(at, slides.length - 1)];
+  const sel = slide.layers.find((l) => l.id === selId) || null;
+
+  // ── Editing ──
+  const setSlide = (fn) => setSlides((all) => all.map((s, i) => (i === Math.min(at, all.length - 1) ? fn(s) : s)));
+  const patchLayer = (id, patch) => setSlide((s) => ({ ...s, layers: s.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
+  const addLayer = (l) => { setSlide((s) => ({ ...s, layers: [...s.layers, l] })); setSelId(l.id); setAdding(""); setSearch(""); setLink(""); };
+  const removeLayer = (id) => { setSlide((s) => ({ ...s, layers: s.layers.filter((l) => l.id !== id) })); if (selId === id) setSelId(""); };
+  // d: +1 toward the front, -1 toward the back.
+  const moveLayer = (id, d) => setSlide((s) => {
+    const i = s.layers.findIndex((l) => l.id === id);
+    const j = i + d;
+    if (j < 0 || j >= s.layers.length) return s;
+    const n = [...s.layers];
+    [n[i], n[j]] = [n[j], n[i]];
+    return { ...s, layers: n };
+  });
+  const setBg = (patch) => setSlide((s) => ({ ...s, bg: { ...s.bg, ...patch } }));
+  const addSlide = (copy) => {
+    const fresh = copy ? { bg: { ...slide.bg }, layers: slide.layers.map((l) => ({ ...newLayer(l.kind), ...l, id: newLayer(l.kind).id })) } : blankSlide();
+    setSlides((all) => [...all.slice(0, at + 1), fresh, ...all.slice(at + 1)]);
+    setAt(at + 1);
+    setSelId("");
+  };
+  const removeSlide = () => {
+    if (slides.length < 2 || !window.confirm(`Delete slide ${at + 1}?`)) return;
+    setSlides((all) => all.filter((_, i) => i !== at));
+    setAt(Math.max(0, at - 1));
+    setSelId("");
+  };
+  const moveSlide = (d) => {
+    const j = at + d;
+    if (j < 0 || j >= slides.length) return;
+    setSlides((all) => { const n = [...all]; [n[at], n[j]] = [n[j], n[at]]; return n; });
+    setAt(j);
+  };
+
+  // ── What can be added ──
+  useEffect(() => {
+    if (adding === "player" && !players) {
+      getDocs(collection(db, "players")).then((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((p) => p.First && p.Last).sort((a, b) => a.Last.localeCompare(b.Last) || a.First.localeCompare(b.First))))
+        .catch((e) => setMsg(`Couldn't load players: ${e.message}`));
+    }
+    if ((adding === "logo" || adding === "colors") && !logos) {
+      Promise.all([getDocs(collection(db, "schools")), fetchNflBranding()]).then(([schools, nfl]) => {
+        const college = schools.docs.map((d) => d.data()).filter((s) => s.School).map((s) => ({ name: s.School, sub: "College", logo: s.Logo1 || "", dark: s.LogoDark || "", c1: s.Color1 || "", c2: s.Color2 || "" }));
+        const pro = Object.entries(nfl || {}).map(([abbr, t]) => ({ name: [t.City, t.Team].filter(Boolean).join(" ") || abbr, sub: "NFL", logo: t.Logo1 || "", dark: t.LogoDark || "", c1: t.Color1 || "", c2: t.Color2 || "" }));
+        setLogos([...college, ...pro].sort((a, b) => a.name.localeCompare(b.name)));
+      }).catch((e) => setMsg(`Couldn't load logos: ${e.message}`));
+    }
+  }, [adding, players, logos, setMsg]);
+  const q = search.trim().toLowerCase();
+  const playerHits = q && players ? players.filter((p) => `${p.First} ${p.Last}`.toLowerCase().includes(q)).slice(0, 10) : [];
+  const logoHits = q && logos ? logos.filter((t) => t.name.toLowerCase().includes(q)).slice(0, 10) : [];
+  const shotsFor = async (playerId) => {
+    if (shots[playerId]) return shots[playerId];
+    const d = await getDoc(doc(db, "playerPhotos", playerId));
+    const ph = d.exists() ? d.data() : {};
+    const out = { action: ph.action || [], headshot: ph.headshot?.url || "" };
+    setShots((m) => ({ ...m, [playerId]: out }));
+    return out;
+  };
+  const addPlayer = async (p) => {
+    try {
+      const ph = await shotsFor(p.id);
+      const url = ph.action[0]?.url || ph.headshot;
+      if (!url) setMsg(`No photo for ${p.First} ${p.Last} yet (Content → Photos): paste an image link on the layer.`);
+      else setMsg("");
+      addLayer(newLayer("player", { url: url || "", playerId: p.id, name: `${p.First} ${p.Last}`, cutout: !!ph.action[0] }));
+    } catch (e) {
+      setMsg(`Couldn't load him: ${e.message}`);
+    }
+  };
+  // Saved posts: a selected player's other photos.
+  useEffect(() => { if (sel?.kind === "player" && sel.playerId) shotsFor(sel.playerId).catch(() => {}); }, [sel?.playerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Drawing ──
+  const input = useMemo(() => customInput({ slides, footerOn, cta, brandLogo: WdLogo }), [slides, footerOn, cta]);
+  const urlKey = customImageUrls(input).join("|");
+  const cutKey = customCutoutUrls(input).join("|");
+  // The images only load again when the set of them changes, not on every drag.
+  useEffect(() => {
+    let live = true;
+    const cut = cutKey ? cutKey.split("|") : [];
+    envFor(input, Object.fromEntries(cut.map((u) => [u, loadFeatureImage(u, true)])), urlKey.split("|").filter(Boolean)).then((e) => {
+      if (!live) return;
+      setEnv(e);
+      if (e.missing.length) setMsg(`${e.missing.length} image${e.missing.length === 1 ? "" : "s"} couldn't load. It may not allow downloads (try an imgur link).`);
+    }).catch((e) => setMsg(`Couldn't draw: ${e.message}`));
+    return () => { live = false; };
+  }, [urlKey, cutKey, setMsg]); // eslint-disable-line react-hooks/exhaustive-deps
+  const drawn = useMemo(() => (env ? customSlides(input, env) : []), [input, env]);
+  const svgs = useMemo(() => drawn.map((s) => s.svg), [drawn]);
+  const urls = useSvgUrls(svgs);
+  const cap = useCaption(saved, useMemo(() => customCaption(input), [input]));
+  const empty = !slides.some((s) => s.layers.length || s.bg?.image);
+
+  // ── Dragging on the preview ──
+  // { id, mode: "move" | "size", x, y (where the pointer was), k (post pixels a screen pixel), layer, box }
+  const drag = useRef(null);
+  const frame = useRef(0);
+  const pending = useRef(null);
+  const startDrag = (e, l, mode) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setSelId(l.id);
+    const rect = e.currentTarget.closest("[data-custom-stage]").getBoundingClientRect();
+    drag.current = { id: l.id, mode, x: e.clientX, y: e.clientY, k: IG_W / rect.width, layer: l, box: layerBox(l, env, WdLogo) };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onDrag = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    const dx = (e.clientX - d.x) * d.k;
+    const dy = (e.clientY - d.y) * d.k;
+    let patch;
+    if (d.mode === "move") patch = { x: Math.round(d.layer.x + dx), y: Math.round(d.layer.y + dy) };
+    else if (d.layer.kind === "text") patch = { size: Math.max(16, Math.round(d.layer.size * Math.max(0.1, (d.box.w + dx) / d.box.w))) };
+    else if (d.layer.kind === "shape") patch = { w: Math.max(10, Math.round(d.layer.w + dx)), h: Math.max(10, Math.round(d.layer.h + dy)) };
+    else patch = { w: Math.max(30, Math.round(d.layer.w + dx)) };
+    pending.current = { id: d.id, patch };
+    if (!frame.current) {
+      frame.current = requestAnimationFrame(() => {
+        frame.current = 0;
+        if (pending.current) patchLayer(pending.current.id, pending.current.patch);
+      });
+    }
+  };
+  const endDrag = () => { drag.current = null; };
+
+  const pct = (v, of) => `${(v / of) * 100}%`;
+  const num = { ...field, width: "72px", padding: "3px 6px", fontSize: "12px" };
+  const pictureLabel = (l) => (l.kind === "text" ? (l.value || "Text").split("\n")[0].slice(0, 26) : l.name || LAYER_LABELS[l.kind]);
+  const stack = [...slide.layers].reverse();
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 400px) 1fr", gap: "18px", alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div>
+          <div style={label}>Add</div>
+          <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+            {[["player", "Player"], ["logo", "Logo"], ["image", "Image"]].map(([k, t]) => (
+              <button key={k} data-add={k} onClick={() => { setAdding(adding === k ? "" : k); setSearch(""); setLink(""); }} style={{ ...btn(adding === k), padding: "5px 12px" }}>+ {t}</button>
+            ))}
+            <button data-add="text" onClick={() => addLayer(newLayer("text"))} style={{ ...btn(false), padding: "5px 12px" }}>+ Text</button>
+            <button data-add="shape" onClick={() => addLayer(newLayer("shape"))} style={{ ...btn(false), padding: "5px 12px" }}>+ Shape</button>
+            <button data-add="brand" onClick={() => addLayer(newLayer("brand"))} style={{ ...btn(false), padding: "5px 12px" }}>+ We-Draft logo</button>
+          </div>
+          {(adding === "player" || adding === "logo" || adding === "colors") && (
+            <div style={{ position: "relative", marginTop: "6px" }}>
+              <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} data-add-search placeholder={adding === "player" ? (players ? "Search a prospect…" : "Loading players…") : (logos ? "Search a school or NFL team…" : "Loading…")} style={field} />
+              {(adding === "player" ? playerHits : logoHits).length > 0 && (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #d5dce6", borderRadius: "6px", zIndex: 5, maxHeight: "260px", overflowY: "auto" }}>
+                  {adding === "player" && playerHits.map((p) => (
+                    <button key={p.id} onClick={() => addPlayer(p)} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "#fff", padding: "6px 9px", fontSize: "13px", fontWeight: 800, cursor: "pointer" }}>
+                      {p.First} {p.Last} <span style={{ color: "#8a97ab", fontWeight: 700 }}>{p.Position} · {p.School} · {p.Eligible}</span>
+                    </button>
+                  ))}
+                  {adding !== "player" && logoHits.map((t) => (
+                    <button key={`${t.sub}|${t.name}`} onClick={() => {
+                      if (adding === "colors") { setBg({ color: t.c1 || slide.bg.color, color2: t.c2 || "" }); setAdding(""); setSearch(""); return; }
+                      if (!t.logo && !t.dark) { setMsg(`${t.name} has no logo yet.`); return; }
+                      setMsg("");
+                      addLayer(newLayer("logo", { url: t.dark || t.logo, name: t.name, light: t.logo, dark: t.dark }));
+                    }} style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", textAlign: "left", border: "none", background: "#fff", padding: "5px 9px", fontSize: "13px", fontWeight: 800, cursor: "pointer" }}>
+                      {(t.logo || t.dark) && <img src={sanitizeImgur(t.logo || t.dark) || t.logo || t.dark} alt="" style={{ width: "22px", height: "22px", objectFit: "contain" }} />}
+                      {t.name} <span style={{ color: "#8a97ab", fontWeight: 700 }}>{t.sub}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {adding === "image" && (
+            <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+              <input autoFocus value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://i.imgur.com/xxxx.jpg" style={field} data-add-link
+                onKeyDown={(e) => { if (e.key === "Enter" && /^https:\/\//i.test(link.trim())) addLayer(newLayer("image", { url: link.trim() })); }} />
+              <button onClick={() => addLayer(newLayer("image", { url: link.trim() }))} disabled={!/^https:\/\//i.test(link.trim())} style={{ ...btn(true), padding: "5px 12px" }}>Add</button>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div style={label}>Layers · top is in front</div>
+          {!stack.length && <div style={{ fontSize: "12px", fontWeight: 700, color: "#8a97ab" }}>Nothing on this slide yet.</div>}
+          {stack.map((l) => (
+            <div key={l.id} data-layer={l.kind} onClick={() => setSelId(l.id)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "4px 7px", marginBottom: "3px", borderRadius: "6px", cursor: "pointer", border: `1px solid ${selId === l.id ? BLUE : "#e3e8ef"}`, background: selId === l.id ? "#eef5ff" : "#fff" }}>
+              <span style={{ fontSize: "10px", fontWeight: 900, color: "#8a97ab", width: "52px", flexShrink: 0, textTransform: "uppercase" }}>{LAYER_LABELS[l.kind].replace("We-Draft logo", "Logo")}</span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: "12px", fontWeight: 800, color: "#33415a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pictureLabel(l)}</span>
+              <button onClick={(e) => { e.stopPropagation(); moveLayer(l.id, 1); }} style={linkBtn} title="Forward">↑</button>
+              <button onClick={(e) => { e.stopPropagation(); moveLayer(l.id, -1); }} style={linkBtn} title="Back">↓</button>
+              <button onClick={(e) => { e.stopPropagation(); removeLayer(l.id); }} style={{ ...linkBtn, color: "#a52a1e" }} title="Remove" data-layer-remove>✕</button>
+            </div>
+          ))}
+        </div>
+
+        {sel && (
+          <div data-layer-props style={{ border: "1px solid #e3e8ef", borderRadius: "8px", padding: "8px 10px", background: "#f8fafc", display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div style={label}>{LAYER_LABELS[sel.kind]}{sel.name ? ` · ${sel.name}` : ""}</div>
+            {sel.kind === "text" && (
+              <>
+                <textarea value={sel.value} onChange={(e) => patchLayer(sel.id, { value: e.target.value })} rows={2} style={{ ...field, fontFamily: "Arial, sans-serif", resize: "vertical" }} data-text-value />
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <input type="color" value={sel.color} onChange={(e) => patchLayer(sel.id, { color: e.target.value })} style={swatch} title="Color" />
+                  <label style={{ fontSize: "12px", fontWeight: 800, color: "#33415a" }}>Size <input type="number" value={sel.size} onChange={(e) => patchLayer(sel.id, { size: Math.max(10, Number(e.target.value) || 10) })} style={num} /></label>
+                  <div style={{ display: "flex", gap: "3px" }}>{[["left", "Left"], ["center", "Center"], ["right", "Right"]].map(([v, t]) => <button key={v} onClick={() => patchLayer(sel.id, { align: v })} style={{ ...btn(sel.align === v), padding: "3px 8px", fontSize: "11px" }}>{t}</button>)}</div>
+                </div>
+              </>
+            )}
+            {sel.kind === "player" && (
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {(shots[sel.playerId]?.action || []).map((a) => (
+                  <button key={a.url} onClick={() => patchLayer(sel.id, { url: a.url, cutout: true })} style={{ border: `2px solid ${sel.url === a.url ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", padding: "2px", cursor: "pointer", width: "50px", height: "64px" }}>
+                    <img src={sanitizeImgur(a.url) || a.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "5px" }} />
+                  </button>
+                ))}
+                {shots[sel.playerId]?.headshot && (
+                  <button onClick={() => patchLayer(sel.id, { url: shots[sel.playerId].headshot, cutout: false })} style={{ border: `2px solid ${sel.url === shots[sel.playerId].headshot ? BLUE : "#e3e8ef"}`, borderRadius: "8px", background: "#fff", padding: "2px", cursor: "pointer", width: "50px", height: "64px" }}>
+                    <img src={shots[sel.playerId].headshot} alt="Headshot" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  </button>
+                )}
+                <button data-add-name onClick={() => addLayer(newLayer("text", { value: sel.name, x: 60, y: 1040, size: 110 }))} style={{ ...btn(false), padding: "4px 10px", alignSelf: "center" }}>+ Add his name</button>
+              </div>
+            )}
+            {sel.kind === "logo" && sel.light && sel.dark && sel.light !== sel.dark && (
+              <div style={{ display: "flex", gap: "4px" }}>
+                {[["dark", "Dark version"], ["light", "Light version"]].map(([v, t]) => <button key={v} onClick={() => patchLayer(sel.id, { url: sel[v] })} style={{ ...btn(sel.url === sel[v]), padding: "3px 10px", fontSize: "11px" }}>{t}</button>)}
+              </div>
+            )}
+            {(sel.kind === "player" || sel.kind === "image") && (
+              <>
+                <input value={sel.url || ""} onChange={(e) => patchLayer(sel.id, { url: e.target.value })} placeholder="Image link…" style={field} />
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
+                  <input type="checkbox" checked={!!sel.cutout} onChange={(e) => patchLayer(sel.id, { cutout: e.target.checked })} /> Remove its backdrop
+                </label>
+              </>
+            )}
+            {sel.kind === "shape" && (
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <input type="color" value={sel.color} onChange={(e) => patchLayer(sel.id, { color: e.target.value })} style={swatch} title="Color" />
+                <label style={{ fontSize: "12px", fontWeight: 800, color: "#33415a" }}>Round <input type="number" min={0} value={sel.radius || 0} onChange={(e) => patchLayer(sel.id, { radius: Math.max(0, Number(e.target.value) || 0) })} style={num} /></label>
+              </div>
+            )}
+            {sel.kind !== "text" && (
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
+                See-through
+                <input type="range" min={0.05} max={1} step={0.05} value={sel.opacity ?? 1} onChange={(e) => patchLayer(sel.id, { opacity: Number(e.target.value) })} style={{ flex: 1 }} />
+                <span style={{ width: "34px", textAlign: "right" }}>{Math.round((sel.opacity ?? 1) * 100)}%</span>
+              </label>
+            )}
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <label style={{ fontSize: "12px", fontWeight: 800, color: "#33415a" }}>X <input type="number" value={sel.x} onChange={(e) => patchLayer(sel.id, { x: Number(e.target.value) || 0 })} style={num} data-layer-x /></label>
+              <label style={{ fontSize: "12px", fontWeight: 800, color: "#33415a" }}>Y <input type="number" value={sel.y} onChange={(e) => patchLayer(sel.id, { y: Number(e.target.value) || 0 })} style={num} /></label>
+              {sel.kind !== "text" && <label style={{ fontSize: "12px", fontWeight: 800, color: "#33415a" }}>Width <input type="number" value={sel.w} onChange={(e) => patchLayer(sel.id, { w: Math.max(10, Number(e.target.value) || 10) })} style={num} data-layer-w /></label>}
+            </div>
+          </div>
+        )}
+
+        <div style={{ border: "1px solid #e3e8ef", borderRadius: "8px", padding: "8px 10px" }}>
+          <div style={label}>Background · this slide</div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            <input type="color" value={slide.bg.color || "#070d18"} onChange={(e) => setBg({ color: e.target.value })} style={swatch} title="Color" data-bg-color />
+            {slide.bg.color2
+              ? <><input type="color" value={slide.bg.color2} onChange={(e) => setBg({ color2: e.target.value })} style={swatch} title="Fades to" /><button onClick={() => setBg({ color2: "" })} style={{ ...linkBtn, color: "#8a97ab" }}>No fade</button></>
+              : <button onClick={() => setBg({ color2: "#000000" })} style={linkBtn}>+ Fade to a second color</button>}
+            <button onClick={() => { setAdding(adding === "colors" ? "" : "colors"); setSearch(""); }} style={linkBtn}>Use a team&apos;s colors</button>
+          </div>
+          <input value={slide.bg.image || ""} onChange={(e) => setBg({ image: e.target.value })} placeholder="Or a background image link…" style={{ ...field, marginTop: "6px" }} />
+          <label style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a", marginTop: "8px" }}>
+            <input type="checkbox" checked={footerOn} onChange={(e) => setFooterOn(e.target.checked)} data-footer /> We-Draft footer (every slide)
+          </label>
+          {footerOn && <input value={cta} onChange={(e) => setCta(e.target.value)} placeholder="Footer text: WE-DRAFT.COM" style={{ ...field, marginTop: "6px" }} />}
+        </div>
+
+        <div><button onClick={() => Promise.all(drawn.map((s) => downloadSvg(s.svg, `wedraft-post-${s.name}`))).catch((e) => setMsg(`Couldn't export: ${e.message}`))} disabled={!drawn.length || empty} style={{ ...btn(true), opacity: drawn.length && !empty ? 1 : 0.5 }}>Download {drawn.length > 1 ? `all (${drawn.length})` : "PNG"}</button></div>
+        <SaveBar type="custom" defaultName={`Post · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
+          playerIds={customPlayerIds(input)} subject={customPlayerIds(input).length === 1 ? { kind: "player", playerId: customPlayerIds(input)[0] } : null} hold={empty ? "Add something to the post first." : ""}
+          stateNow={() => ({ slides, footerOn, cta })} />
+        <CaptionBox c={cap} />
+      </div>
+
+      <div>
+        <div style={{ ...label, display: "flex", alignItems: "center", gap: "8px" }}>
+          Slide {at + 1} of {slides.length} · {IG_W}×{IG_H} · drag to move, pull the corner to size
+        </div>
+        <div data-custom-stage onPointerDown={() => setSelId("")} style={{ position: "relative", width: "100%", maxWidth: "540px", aspectRatio: `${IG_W} / ${IG_H}`, borderRadius: "8px", overflow: "hidden", border: "1px solid #d5dce6", background: "#0b1426", touchAction: "none" }}>
+          {urls[at] && <img src={urls[at]} alt={`Slide ${at + 1}`} draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block", pointerEvents: "none" }} />}
+          {env && slide.layers.map((l) => {
+            const b = layerBox(l, env, WdLogo);
+            const on = l.id === selId;
+            return (
+              <div key={l.id} data-box={l.kind} onPointerDown={(e) => startDrag(e, l, "move")} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                style={{ position: "absolute", left: pct(b.x, IG_W), top: pct(b.y, IG_H), width: pct(b.w, IG_W), height: pct(b.h, IG_H), cursor: "move", outline: on ? `2px dashed ${GOLD}` : "none", boxSizing: "border-box", touchAction: "none" }}>
+                {on && <div data-handle onPointerDown={(e) => startDrag(e, l, "size")} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag} style={{ position: "absolute", right: "-7px", bottom: "-7px", width: "14px", height: "14px", background: GOLD, border: "2px solid #fff", borderRadius: "3px", cursor: "nwse-resize", touchAction: "none" }} />}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: "6px", marginTop: "10px", flexWrap: "wrap", alignItems: "flex-start" }}>
+          {slides.map((_, i) => (
+            <button key={i} data-slide-thumb={i} onClick={() => { setAt(i); setSelId(""); }} style={{ border: `2px solid ${i === at ? BLUE : "#e3e8ef"}`, borderRadius: "6px", padding: 0, width: "64px", background: "#0b1426", cursor: "pointer", overflow: "hidden" }}>
+              {urls[i] ? <img src={urls[i]} alt={`Slide ${i + 1}`} style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}` }} /> : <div style={{ aspectRatio: `${IG_W} / ${IG_H}` }} />}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+          <button data-add-slide onClick={() => addSlide(false)} disabled={slides.length >= IG_MAX_SLIDES} style={{ ...btn(false), padding: "4px 10px" }}>+ Slide</button>
+          <button data-copy-slide onClick={() => addSlide(true)} disabled={slides.length >= IG_MAX_SLIDES} style={{ ...btn(false), padding: "4px 10px" }}>Copy this slide</button>
+          {slides.length > 1 && (
+            <>
+              <button onClick={() => moveSlide(-1)} disabled={at === 0} style={{ ...btn(false), padding: "4px 10px" }}>← Move</button>
+              <button onClick={() => moveSlide(1)} disabled={at === slides.length - 1} style={{ ...btn(false), padding: "4px 10px" }}>Move →</button>
+              <button onClick={removeSlide} style={{ ...btn(false), padding: "4px 10px", color: "#a52a1e" }}>Delete slide</button>
+            </>
+          )}
         </div>
       </div>
     </div>

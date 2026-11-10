@@ -1,6 +1,6 @@
 // src/components/AdminSideGraphics.jsx
 //
-// Admin → Content → Side Graphics: the YouTube videos' side cards — a
+// Admin → Videos → Graphics → Side Graphics: the YouTube videos' side cards — a
 // 1920×1080 PNG, transparent but for one card at the frame's edge, to drop
 // onto a timeline in Premiere. Drawn in the browser on a canvas, in Eras
 // Bold ITC from this computer's own fonts (it ships with Office; never
@@ -89,7 +89,7 @@ const POS_GROUP = {
   DL: "DL", DT: "DL", NT: "DL", IDL: "DL", EDGE: "EDGE", DE: "EDGE",
   LB: "LB", ILB: "LB", MLB: "LB", OLB: "LB", DB: "DB", CB: "DB", S: "DB", FS: "DB", SS: "DB", NB: "DB",
 };
-const posGroup = (pos) => POS_GROUP[String(pos || "").toUpperCase()] || "";
+export const posGroup = (pos) => POS_GROUP[String(pos || "").toUpperCase()] || "";
 // The four a position's season card starts with (those he has).
 const POS_STATS = {
   QB: ["passing.passingYards", "passing.passingTouchdowns", "passing.interceptions", "passing.completionPct"],
@@ -124,7 +124,7 @@ const pct = (v) => (v === "" || v == null ? "" : `${Math.round(statNumber(v))}%`
 // { [name]: label }, seasons: { [year]: { team, stats: { [name]: "3,454" } } },
 // total: { [name]: value } } }, teams: { [slug]: { logo, abbr } } }.
 const statsCache = {};
-function espnStats(league, athleteId) {
+export function espnStats(league, athleteId) {
   const key = `${league}/${athleteId}`;
   if (!statsCache[key]) {
     statsCache[key] = fetch(`${ESPN}/common/v3/sports/football/${league}/athletes/${athleteId}/stats`).then((r) => r.json()).then((j) => {
@@ -178,7 +178,7 @@ function defaultStats(options, pos) {
   return picks.slice(0, STATS).map((o) => ({ ...o }));
 }
 // The groups a career table can show (those he has rows in), his position's first.
-function careerGroups(espn, pos) {
+export function careerGroups(espn, pos) {
   const own = CAREER_BY_POS[posGroup(pos)]?.[0];
   const have = Object.keys(espn?.cats || {}).filter((c) => c !== "scoring" && Object.keys(espn.cats[c].seasons).length);
   return [...new Set([own, ...have].filter((c) => c && have.includes(c)))];
@@ -191,7 +191,7 @@ function careerColumns(espn, cat, pos) {
   return Object.keys(labels).filter((n) => n !== "gamesPlayed").slice(0, 4).map((n) => [n, labels[n]]);
 }
 // The career table: { title, cols, rows: [{ year, logo, vals }], total }.
-function careerTable(espn, cat, pos) {
+export function careerTable(espn, cat, pos) {
   const c = espn?.cats?.[cat];
   if (!c) return null;
   const cols = careerColumns(espn, cat, pos);
@@ -203,7 +203,7 @@ function careerTable(espn, cat, pos) {
 // A prospect's ESPN athlete id: the one his headshot came from, else his
 // name on his school's ESPN roster (the school's CFBD id is its ESPN id).
 const nameKey = (n) => String(n || "").toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "").replace(/[^a-z]/g, "");
-async function espnIdFor(p, teamId, photo) {
+export async function espnIdFor(p, teamId, photo) {
   if (photo?.headshot?.espnId) return { id: String(photo.headshot.espnId), headshot: "" };
   if (!teamId) return null;
   const r = await fetch(`${ESPN}/site/v2/sports/football/college-football/teams/${teamId}/roster`).then((x) => x.json()).catch(() => ({}));

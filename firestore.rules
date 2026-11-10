@@ -311,6 +311,26 @@ service cloud.firestore {
               || request.resource.data.status in ['draft', 'ready', 'posted']));
       allow delete: if isAdmin() && !(resource.data.get('status', 'draft') in ['publishing', 'scheduled']);
     }
+    // X posts saved from Admin → Content → X Posts (src/components/AdminX.jsx):
+    // admins only. X isn't connected: the page sets draft / scheduled / posted
+    // itself, and a schedule is only a time on the Content Calendar. Reserved
+    // for the publisher (server/x/README.md): the `x` field and the statuses
+    // publishing, published and failed. Tighten as instagramPosts above when
+    // the API phase makes "scheduled" something the server acts on.
+    match /xPosts/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && !('x' in request.resource.data)
+        && request.resource.data.get('status', 'draft') == 'draft';
+      allow update: if isAdmin()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['x'])
+        && request.resource.data.get('status', 'draft') in ['draft', 'scheduled', 'posted'];
+      allow delete: if isAdmin() && resource.data.get('status', 'draft') != 'publishing';
+      // Its images that aren't plain links, a JPEG data URI a doc.
+      match /media/{mediaId} {
+        allow read, write: if isAdmin();
+      }
+    }
     // Instagram Analytics (server/instagram/sync.js, publish.js): Meta's
     // numbers for @wedraftsite and the links from its posts to We-Draft's.
     // Admins read; only the server writes.
@@ -595,6 +615,12 @@ service cloud.firestore {
     match /ytChannelDaily/{day} {
       allow read: if isAdmin();
       allow write: if false;
+    }
+    // Saved YouTube thumbnails, their settings and metadata, and the video
+    // each went up on (Admin → Videos → Graphics → Thumbnail; Thumb
+    // Analytics judges them by that video's impressions and CTR).
+    match /ytThumbnails/{id} {
+      allow read, write: if isAdmin();
     }
     match /ytPlayerStats/{playerId} {
       allow read: if isAdmin();

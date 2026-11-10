@@ -30,8 +30,11 @@ import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminSideGraphics from "../components/AdminSideGraphics";
+import AdminYouTubeGraphics from "../components/AdminYouTubeGraphics";
+import AdminThumbAnalytics from "../components/AdminThumbAnalytics";
 import AdminInstagram from "../components/AdminInstagram";
 import AdminInstagramAnalytics from "../components/AdminInstagramAnalytics";
+import AdminX from "../components/AdminX";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../utils/snapshotBuilders";
@@ -314,20 +317,29 @@ const CONTENT_SECTION_TABS = [
   { key: "branding", label: "Branding" },
   { key: "calendar", label: "Content Calendar" },
   { key: "photos", label: "Photos" },
-  { key: "sidegraphics", label: "Side Graphics" },
   { key: "instagram", label: "Instagram" },
   { key: "instagramAnalytics", label: "Instagram Analytics" },
+  { key: "x", label: "X Posts" },
 ];
 
 // Old ?section= keys, now tabs: [section, tab]. YouTube Analytics' sign-in
 // (api/youtube-analytics.js) still returns to ?section=youtube.
 const MOVED_SECTIONS = {
   youtube: ["videos", "youtube"],
+  // Side Graphics moved from Content to Videos → Graphics.
+  sidegraphics: ["videos", "sidegraphics"],
+  // The thumbnail editor (King Cold Sports' edit sign-in returns here).
+  thumbnail: ["videos", "thumbnail"],
   ...Object.fromEntries(CONTENT_SECTION_TABS.map((t) => [t.key, ["content", t.key]])),
 };
 
 function ContentSection({ initialTab }) {
   const [tab, setTab] = useState(initialTab || "research");
+  // A record to open in the tab it's being sent to (Content Calendar, Send to
+  // X): { tab, id } or, for a new X post, { tab, date }. Fresh each time, so
+  // opening the same one twice still opens it.
+  const [opening, setOpening] = useState(null);
+  const openIn = (target, what) => { setOpening({ tab: target, ...what, at: Date.now() }); setTab(target); };
   return (
     <>
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
@@ -351,11 +363,11 @@ function ContentSection({ initialTab }) {
       {tab === "mockdraft" && <AdminMockDraft />}
       {tab === "articles" && <ArticlesManager />}
       {tab === "branding" && <BrandingSection />}
-      {tab === "calendar" && <ContentCalendarManager />}
+      {tab === "calendar" && <ContentCalendarManager onOpenPost={(platform, what) => openIn(platform === "x" ? "x" : "instagram", what)} />}
       {tab === "photos" && <AdminPhotos />}
-      {tab === "sidegraphics" && <AdminSideGraphics />}
-      {tab === "instagram" && <AdminInstagram />}
+      {tab === "instagram" && <AdminInstagram openPostId={opening?.tab === "instagram" ? opening.id : null} onOpenInX={(id) => openIn("x", { id })} />}
       {tab === "instagramAnalytics" && <AdminInstagramAnalytics />}
+      {tab === "x" && <AdminX open={opening?.tab === "x" ? opening : null} />}
     </>
   );
 }
@@ -7607,6 +7619,15 @@ const VIDEO_GROUPS = [
       { key: "concepts", label: "Concepts" },
     ],
   },
+  {
+    // The YouTube videos' graphics: thumbnails (and how the saved ones did), outlines and the side cards.
+    key: "graphics", label: "Graphics", tabs: [
+      { key: "thumbnail", label: "Thumbnail" },
+      { key: "thumbanalytics", label: "Thumb Analytics" },
+      { key: "outline", label: "Outline" },
+      { key: "sidegraphics", label: "Side Graphics" },
+    ],
+  },
 ];
 
 function VideosSection({ initialTab }) {
@@ -8109,6 +8130,10 @@ function VideosSection({ initialTab }) {
     {videoTab === "workshop" && <VideoWorkshop players={allPlayers} focusId={workshopFocus} onCreateVideo={startSuggestedVideo} />}
     {videoTab === "concepts" && <VideoConcepts players={allPlayers} onCreateVideo={startConceptVideo} />}
     {videoTab === "youtube" && <AdminYouTubeAnalytics />}
+    {videoTab === "thumbnail" && <AdminYouTubeGraphics key="thumbnail" kind="thumbnail" />}
+    {videoTab === "outline" && <AdminYouTubeGraphics key="outline" kind="outline" />}
+    {videoTab === "sidegraphics" && <AdminSideGraphics />}
+    {videoTab === "thumbanalytics" && <AdminThumbAnalytics />}
     {videoTab === "manage" && (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "18px", alignItems: "start" }}>
       <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>

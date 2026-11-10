@@ -238,7 +238,7 @@ export default function AdminWeeklyMock() {
             a year on; and no team takes one position twice.
           </p>
         )}
-        The site&apos;s official {year} mock: the Draft Sim with every team on the CPU, <b>Less</b> board variance and {WEEKLY_TRADES_BY_YEAR[year] === "off" ? <b>no trades</b> : typeof WEEKLY_TRADES_BY_YEAR[year] === "object" ? <>normal trades in round 1 and <b>Less</b> after</> : "normal trades"},
+        The site&apos;s official {year} mock: the Draft Sim with every team on the CPU, <b>Less</b> board variance and {WEEKLY_TRADES_BY_YEAR[year] === "off" ? <b>no trades</b> : WEEKLY_TRADES_BY_YEAR[year] === "less" ? <><b>Less</b> trades</> : typeof WEEKLY_TRADES_BY_YEAR[year] === "object" ? <>normal trades in round 1 and <b>Less</b> after</> : "normal trades"},
         up to {WEEKLY_ROUNDS_BY_YEAR[year]} rounds. Run it and compare it with last week&apos;s (each pick by its original team and round, so the number
         can move); run it again if you like. <b>Publish</b> it as it is, or <b>Edit in mock editor</b> first — that saves it privately and opens it to move picks
         around (with a button on each pick to regenerate its analysis); then come back and <b>Publish</b> it from the list below. Publishing puts it on /mocks{RANDOM_ORDER_YEARS.includes(year) ? `/${year}` : <> and updates every team&apos;s page ({weeklyMockHref("nyj", year)})</>}. Uses the current draft order, team

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
-import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, GoogleAuthProvider } from "firebase/auth";
+import { initializeAuth, connectAuthEmulator, indexedDBLocalPersistence, browserLocalPersistence, GoogleAuthProvider } from "firebase/auth";
 
 // Local testing only: a build made with REACT_APP_FIRESTORE_EMULATOR_HOST
 // (e.g. "127.0.0.1:8085") reads/writes the Firestore emulator under a
@@ -32,4 +32,10 @@ if (EMULATOR_HOST) {
 export const auth = initializeAuth(app, {
   persistence: [indexedDBLocalPersistence, browserLocalPersistence],
 });
+// With the Firestore emulator (above), also sign in against the Auth emulator
+// when asked (e.g. "http://127.0.0.1:9099"), so admin-only pages can be tested
+// end to end. Unset in every real build.
+if (EMULATOR_HOST && process.env.REACT_APP_AUTH_EMULATOR_URL) {
+  connectAuthEmulator(auth, process.env.REACT_APP_AUTH_EMULATOR_URL, { disableWarnings: true });
+}
 export const provider = new GoogleAuthProvider();

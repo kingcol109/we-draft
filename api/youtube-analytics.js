@@ -21,12 +21,17 @@
 //   studio-import  { csv, fileName, from, to, preview } impressions/CTR from a
 //                  YouTube Studio export (server/youtube-analytics/studio.js);
 //                  preview: true parses and matches without saving
+//   edit-connect   → { url } Google consent URL for King Cold Sports' edit
+//                  connection (youtube.force-ssl — server/youtube-analytics/edit.js)
+//   edit-disconnect revoke + forget it
+//   set-thumbnail  { videoId, jpeg (base64), thumbId? } a thumbnail onto one of
+//                  the channel's videos; the saved thumbnail is put on it from now
 // Reads (status, videos, daily rows, rollups) come straight from Firestore
 // (admin read in firestore.rules); every write goes through here.
 //
-// GET ?code&state — Google's OAuth redirect back. The redirect URI to
-// register on the OAuth client is <site>/api/youtube-analytics
-// (production: https://we-draft.com/api/youtube-analytics).
+// GET ?code&state — Google's OAuth redirect back, for both sign-ins (the
+// state says which). The redirect URI to register on the OAuth client is
+// <site>/api/youtube-analytics (production: https://we-draft.com/api/youtube-analytics).
 //
 // GET with Authorization: Bearer $CRON_SECRET — Vercel Cron (vercel.json):
 // one scheduled step, only when an admin has turned the schedule on.
@@ -50,15 +55,26 @@ function cronAuthorized(header, secret) {
   return crypto.timingSafeEqual(h(header || ""), h(`Bearer ${secret}`));
 }
 
-function back(res, params) {
+function back(res, params, section = "youtube") {
   res.setHeader("Cache-Control", "no-store");
-  res.writeHead(302, { Location: `/admin?section=youtube&${new URLSearchParams(params)}` });
+  res.writeHead(302, { Location: `/admin?section=${section}&${new URLSearchParams(params)}` });
   res.end();
 }
 
 async function oauthCallback(req, res) {
   const { getFirestore } = require("../scripts/firebaseAdmin");
   const g = require("../server/youtube-analytics/google");
+  const ed = require("../server/youtube-analytics/edit");
+  // The edit sign-in (King Cold Sports, to set thumbnails) lands back on the Thumbnail tab.
+  if (await ed.isEditState(getFirestore(), req.query?.state).catch(() => false)) {
+    try {
+      await ed.finishEditOAuth(getFirestore(), req.query || {});
+      return back(res, { yte: "connected" }, "thumbnail");
+    } catch (e) {
+      console.error("youtube-analytics edit oauth failed:", e.message);
+      return back(res, { yte: "error", msg: String(e.message || e).slice(0, 200) }, "thumbnail");
+    }
+  }
   try {
     const conn = await g.finishOAuth(getFirestore(), req.query || {});
     return back(res, { yta: "connected", ...(conn.channelVerified === false ? { warn: "channel" } : {}) });
@@ -152,6 +168,9 @@ module.exports = async function handler(req, res) {
         if (body.preview) return res.status(200).json(await studio.importStudio({ db, uid, counts: {}, inc() {}, error() {} }, body));
         return res.status(200).json(await runOp(db, "studio", { trigger: "manual", uid, budgetMs: 60e3 }, (ctx) => studio.importStudio(ctx, body)));
       }
+      case "edit-connect": return res.status(200).json({ url: await require("../server/youtube-analytics/edit").startEditOAuth(db, req, uid) });
+      case "edit-disconnect": await require("../server/youtube-analytics/edit").disconnectEdit(db); return res.status(200).json({ ok: true });
+      case "set-thumbnail": return res.status(200).json(await require("../server/youtube-analytics/edit").setVideoThumbnail(db, uid, body));
       case "traffic": return res.status(200).json(await require("../server/youtube-analytics/analytics").videoTrafficSources(db, body.videoId));
       default: return res.status(400).json({ error: "unknown action" });
     }

@@ -2,12 +2,15 @@
 
 Publishing from the existing Post Manager (Admin → Content → **Instagram**)
 and the **Instagram Analytics** tab next to it (Admin → Content → Instagram
-Analytics). Admin-only. Nothing here is shown on the public site.
+Analytics). Admin-only, with one exception: the Home page's Instagram
+section (see **Public feed** below).
 
 | Piece | File |
 |---|---|
 | Post Manager (makes, saves, publishes) | `src/components/AdminInstagram.jsx` |
 | Analytics tab | `src/components/AdminInstagramAnalytics.jsx` |
+| The makers' shared drawing tools (also used by X Posts) | `src/components/SocialMakerKit.jsx` |
+| Transfer Portal graphics | `src/utils/instagram/transfer.js` |
 | Browser → API helper | `src/utils/instagram/api.js` |
 | API (admin actions, cron) | `api/instagram.js` |
 | Graph API client, token handling, rate-limit tracking | `graph.js` |
@@ -16,6 +19,7 @@ Analytics). Admin-only. Nothing here is shown on the public site.
 | Publishing state machine | `publish.js` |
 | Analytics syncs | `sync.js` |
 | Pure metric helpers | `metrics.js` |
+| The Home page's public feed | `feed.js` (shown by `src/pages/HomeInstagram.jsx`) |
 | Tests | `npm run instagram:test` |
 | Credential check (read-only) | `node scripts/instagramCheck.mjs` |
 
@@ -91,6 +95,31 @@ prevention is on.
      (matched by caption and time) instead of being published again.
    - If a delete fails after publishing, `ig.cleanup` is set to `pending`,
      and the hourly cron retries it.
+
+## Post types
+
+Publishing doesn't depend on a post's `type`: every type is a list of drawn
+slides and a caption. A new type only needs a drawing module and a maker.
+
+| `type` | Post | Slides |
+|---|---|---|
+| `custom` | Create a post: a blank canvas of players, logos, text, images and shapes (`src/utils/instagram/custom.js`) | as many as the admin adds, up to 20 |
+| `mock` | Weekly Mock carousel | a slide per part of the draft |
+| `spotlight` | Player spotlight | cover, scouting report, grade him |
+| `player` | Player post | one |
+| `portal` | Player entered the transfer portal | one, or carousel: cover, his file, where next? |
+| `transfer` | Player transferred to a new school | one, or carousel: cover, what the new school gets |
+
+## Calendar
+
+The Content Calendar reads `instagramPosts` directly
+(`src/utils/contentCalendar/platforms.js`, `instagramEntry`) and stores no
+copy. A post appears once it's scheduled, published or posted by hand. Change
+time, Cancel and dragging a chip go through the same `schedule-change` and
+`schedule-cancel` actions as the Post Manager.
+
+**Send to X** starts a separate X draft from a post, linked back to it
+(`server/x/README.md`). Nothing goes to X.
 
 ## Videos
 
@@ -190,3 +219,19 @@ All of these are admin-read only. See `firestore.rules`.
 
 - **Reels:** the Post Manager doesn't make reels. Videos go only into Player Spotlight carousels (see Videos).
 - **Stories and album-child metrics:** these aren't read.
+
+## Public feed
+
+The Home page shows @wedraftsite's latest posts. Each post has its image,
+link, caption and date. The section also shows the handle, profile picture
+and follower count. There are no analytics in it.
+
+- **Writing it:** `feed.js` writes `config/instagramFeed`. Like every config
+  doc, it's public read and admin write. The browser never calls Instagram.
+- **When:** the cron refreshes it every hour at :47, whether or not the
+  analytics schedule is on. Admins can also refresh it right away with the
+  API action `feed`.
+- **Image links:** Instagram's image URLs expire after about four days
+  (their `oe=` parameter), so the hourly rewrite keeps them fresh. If an
+  image still fails to load, the page drops that tile, and it hides the
+  whole section when none are left.

@@ -31,6 +31,18 @@
 //     with a date — dotted border + 💡. Draggable like manual plans (a drop
 //     rewrites that videoConcepts doc's own `date`); editing anything else
 //     about them is the Concepts tab's job.
+//
+// It's also the publishing schedule for all three platforms. Every entry has
+// a platform (utils/contentCalendar/platforms.js) — shown by the color at the
+// chip's edge, filtered by the bar above the grid:
+//   - YouTube: videos and video concepts (and plans typed Video or Short). A
+//     video with a PublishAt sits on that day, showing its time.
+//   - Instagram and X: read from instagramPosts and xPosts on load, not copied
+//     here — scheduled, published or posted, at their own time in Eastern
+//     (drafts have no time, so they aren't on it). A chip opens
+//     CalendarPostPanel, which shows the post and what it goes with, and
+//     manages it; a post still waiting can be dragged to another day.
+//   - Other: articles, and plans typed Post, which aren't tied to one of them.
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
@@ -45,6 +57,12 @@ import {
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import LoadingSpinner from "./LoadingSpinner";
+import CalendarPostPanel from "./CalendarPostPanel";
+import { igApi } from "../utils/instagram/api";
+import { scheduleXPost } from "../utils/x/store";
+import {
+  PLATFORMS, PLATFORM_FILTERS, platformOfType, matchesFilter, instagramEntry, xEntry, sortDay, linksOf, msOf, dateKeyET, timeET, moveToDay, fmtET,
+} from "../utils/contentCalendar/platforms";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -140,6 +158,9 @@ const truncateLabel = (label) => {
   return label.length > MAX_LABEL_CHARS ? `${label.slice(0, MAX_LABEL_CHARS)}...` : label;
 };
 
+// A chip's time, in as little room as it'll take: "9:30p".
+const chipTime = (ms) => timeET(ms).replace(":00", "").replace(/\s?([AP])M$/, (_, x) => x.toLowerCase());
+
 const BLANK_FORM = { date: "", type: "video", subjectType: "player", subjectId: "", subjectLabel: "", note: "" };
 
 // Search-input + dropdown-of-matches combobox for picking this entry's
@@ -215,7 +236,7 @@ function SubjectCombobox({ subjectType, subjectId, subjectLabel, players, recrui
   );
 }
 
-export default function ContentCalendarManager() {
+export default function ContentCalendarManager({ onOpenPost = null }) {
   const { user } = useAuth();
   const today = new Date();
 
@@ -229,6 +250,13 @@ export default function ContentCalendarManager() {
   const [videos, setVideos] = useState([]);
   const [articles, setArticles] = useState([]);
   const [concepts, setConcepts] = useState([]);
+  // The Instagram and X posts, as they are in their own collections.
+  const [igPosts, setIgPosts] = useState([]);
+  const [xPosts, setXPosts] = useState([]);
+  const [platformFilter, setPlatformFilter] = useState("all");
+  // The chip open in the side panel (its entry id) — anything but a manual
+  // plan, which still opens the form below.
+  const [openEntryId, setOpenEntryId] = useState("");
   const [loading, setLoading] = useState(true);
   const [dragMessage, setDragMessage] = useState("");
 
@@ -256,6 +284,15 @@ export default function ContentCalendarManager() {
   // instead of building up an entry to save later.
   const [bankAddPick, setBankAddPick] = useState({ id: "", label: "" });
 
+  // Either one failing leaves the rest of the calendar up.
+  const fetchPosts = () => Promise.all([
+    getDocs(collection(db, "instagramPosts")).catch((e) => { console.error("Calendar Instagram fetch error:", e); return { docs: [] }; }),
+    getDocs(collection(db, "xPosts")).catch((e) => { console.error("Calendar X fetch error:", e); return { docs: [] }; }),
+  ]).then(([ig, x]) => {
+    setIgPosts(ig.docs.map((d) => ({ id: d.id, ...d.data() })));
+    setXPosts(x.docs.map((d) => ({ id: d.id, ...d.data() })));
+  });
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -270,6 +307,7 @@ export default function ContentCalendarManager() {
           // Concepts are a nice-to-have here — a failed read shouldn't
           // blank the whole calendar.
           getDocs(collection(db, "videoConcepts")).catch((e) => { console.error("Calendar concepts fetch error:", e); return { docs: [] }; }),
+          fetchPosts(),
         ]);
         setPlayers(playerSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setRecruits(recruitSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -316,9 +354,15 @@ export default function ContentCalendarManager() {
         if (person) subjectLabel = `${person.First || ""} ${person.Last || ""}`.trim();
       }
       if (!subjectLabel) subjectLabel = v.GenTitle || (v.Short ? "Short" : "Video");
-      const dateKey = dateKeyFromTimestamp(v.Date);
+      // A scheduled video goes up at its PublishAt; otherwise its Date is all there is.
+      const whenMs = msOf(v.PublishAt);
+      const dateKey = whenMs != null ? dateKeyET(whenMs) : dateKeyFromTimestamp(v.Date);
       if (!dateKey) return null;
-      return { id: `video:${v.id}`, refId: v.id, source: "video", type: v.Short === true ? "short" : "video", subjectLabel, dateKey };
+      return {
+        id: `video:${v.id}`, refId: v.id, source: "video", platform: "youtube", type: v.Short === true ? "short" : "video", subjectLabel, dateKey, whenMs,
+        fullLabel: v.GenTitle || subjectLabel, kindLabel: v.Short === true ? "Short" : "Video", thumb: v.GenThumb || "",
+        statusLabel: whenMs != null && whenMs > Date.now() ? "Scheduled" : "Published", link: /^https?:\/\//.test(v.Video || "") ? v.Video : "", manageHint: "Edit it in Videos.", raw: v,
+      };
     }).filter(Boolean);
   }, [videos, playersById, recruitsById]);
 
@@ -339,7 +383,7 @@ export default function ContentCalendarManager() {
       if (!subjectLabel) subjectLabel = a.titleShort || a.title || "Article";
       const dateKey = dateKeyFromArticleTimestamp(a.publishedAt);
       if (!dateKey) return null;
-      return { id: `article:${a.id}`, refId: a.id, source: "article", type: "article", subjectLabel, dateKey };
+      return { id: `article:${a.id}`, refId: a.id, source: "article", platform: "other", type: "article", subjectLabel, dateKey, fullLabel: a.title || subjectLabel, kindLabel: "Article", statusLabel: "Published", manageHint: "Edit it in Articles.", raw: a };
     }).filter(Boolean);
   }, [articles, playersById]);
 
@@ -355,7 +399,7 @@ export default function ContentCalendarManager() {
         const person = playersById.get(c.playerIds[0]);
         if (person) subjectLabel = `${person.First || ""} ${person.Last || ""}`.trim();
       }
-      return { id: `concept:${c.id}`, refId: c.id, source: "concept", type: "video", subjectLabel: subjectLabel || "Concept", dateKey, raw: c };
+      return { id: `concept:${c.id}`, refId: c.id, source: "concept", platform: "youtube", type: "video", subjectLabel: subjectLabel || "Concept", dateKey, kindLabel: "Video concept", statusLabel: "Planned", body: c.notes || "", manageHint: "Edit it in Videos → Concepts.", raw: c };
     }).filter(Boolean);
   }, [concepts, playersById]);
 
@@ -365,22 +409,41 @@ export default function ContentCalendarManager() {
   // (manual only) is the original contentCalendar doc, for the edit form.
   const displayEntries = useMemo(() => {
     const manual = entries.map((e) => ({
-      id: `manual:${e.id}`, refId: e.id, source: "manual", type: e.type,
+      id: `manual:${e.id}`, refId: e.id, source: "manual", platform: platformOfType(e.type), type: e.type,
       subjectLabel: e.subjectLabel, dateKey: dateKeyFromTimestamp(e.date), raw: e,
     }));
-    return [...manual, ...conceptEntries, ...videoEntries, ...articleEntries];
-  }, [entries, conceptEntries, videoEntries, articleEntries]);
+    const posts = [...igPosts.map((p) => instagramEntry(p)), ...xPosts.map((p) => xEntry(p))].filter(Boolean);
+    return [...manual, ...posts, ...conceptEntries, ...videoEntries, ...articleEntries];
+  }, [entries, igPosts, xPosts, conceptEntries, videoEntries, articleEntries]);
 
   // Grouped by "YYYY-MM-DD" for O(1) lookup per grid cell, rather than
   // filtering the whole displayEntries array once per day rendered.
   const entriesByDate = useMemo(() => {
     const map = {};
     displayEntries.forEach((e) => {
-      if (!e.dateKey) return;
+      if (!e.dateKey || !matchesFilter(e, platformFilter)) return;
       (map[e.dateKey] = map[e.dateKey] || []).push(e);
     });
+    Object.keys(map).forEach((k) => { map[k] = sortDay(map[k]); });
     return map;
-  }, [displayEntries]);
+  }, [displayEntries, platformFilter]);
+  // The filter bar's counts: what's in the month on show.
+  const monthCounts = useMemo(() => {
+    const prefix = `${viewYear}-${pad2(viewMonth + 1)}-`;
+    const counts = { all: 0, youtube: 0, instagram: 0, x: 0, other: 0 };
+    displayEntries.forEach((e) => { if (e.dateKey?.startsWith(prefix)) { counts.all++; counts[e.platform]++; } });
+    return counts;
+  }, [displayEntries, viewYear, viewMonth]);
+  const openEntry = useMemo(() => displayEntries.find((e) => e.id === openEntryId) || null, [displayEntries, openEntryId]);
+  const openLinks = useMemo(() => linksOf(openEntry, displayEntries), [openEntry, displayEntries]);
+  const showEntry = (entry) => {
+    setSelectedEntry(null);
+    setFormState(null);
+    setOpenEntryId(entry.id);
+    // A linked post may be in another month.
+    const [y, m] = (entry.dateKey || "").split("-").map(Number);
+    if (y && m) { setViewYear(y); setViewMonth(m - 1); }
+  };
 
   // Drag-and-drop reschedule — manual plans only (see the header comment's
   // "read-only/not draggable" note on pulled-in videos/articles; only a
@@ -390,13 +453,26 @@ export default function ContentCalendarManager() {
   // back and rewrites that contentCalendar doc's own `date` field.
   // Concept chips drag too — same payload plus source, writing
   // videoConcepts/{id}.date instead.
-  const handleDropOnDate = async (refId, cellDate, currentKey, source) => {
+  // A scheduled Instagram or X post drags too, keeping its Eastern clock time:
+  // Instagram's goes through its API (the server owns a scheduled post), after
+  // a confirm; X's is a plain save.
+  const handleDropOnDate = async (refId, cellDate, currentKey, source, whenMs) => {
     const y = cellDate.getUTCFullYear(), m = cellDate.getUTCMonth(), d = cellDate.getUTCDate();
     const targetKey = dateKeyUTC(y, m, d);
     if (targetKey === currentKey) return; // dropped back on its own day — nothing to do
     try {
       const newDate = new Date(Date.UTC(y, m, d));
-      if (source === "concept") {
+      if (source === "instagram" || source === "x") {
+        const at = moveToDay(whenMs, targetKey);
+        if (at < Date.now() + 5 * 60e3) { setDragMessage("Failed: that time has passed."); return; }
+        if (source === "instagram") {
+          if (!window.confirm(`Move this Instagram post to ${fmtET(at)}?`)) return;
+          await igApi("schedule-change", { postId: refId, scheduledAt: at });
+        } else {
+          await scheduleXPost(refId, at);
+        }
+        await fetchPosts();
+      } else if (source === "concept") {
         await updateDoc(doc(db, "videoConcepts", refId), { date: newDate, updatedAt: serverTimestamp() });
         setConcepts((prev) => prev.map((c) => (c.id === refId ? { ...c, date: newDate } : c)));
       } else {
@@ -406,7 +482,7 @@ export default function ContentCalendarManager() {
       setDragMessage("Moved.");
     } catch (e) {
       console.error("Content calendar reschedule error:", e);
-      setDragMessage("Failed to move — check console.");
+      setDragMessage(`Failed to move${e?.message ? `: ${e.message}` : " — check console."}`);
     } finally {
       setTimeout(() => setDragMessage(""), 2500);
     }
@@ -444,6 +520,7 @@ export default function ContentCalendarManager() {
   };
 
   const startNewEntry = (cellDate) => {
+    setOpenEntryId("");
     setSelectedEntry({ id: null, isNew: true });
     setFormState({ ...BLANK_FORM, date: cellDate ? cellDate.toISOString().slice(0, 10) : "" });
     setSaveMessage("");
@@ -454,6 +531,7 @@ export default function ContentCalendarManager() {
   // own defaultType (see FLAG_GROUPS) instead of blank. Date is left empty
   // (no day was clicked) for the admin to pick.
   const startEntryForBankPlayer = (player, defaultType) => {
+    setOpenEntryId("");
     setSelectedEntry({ id: null, isNew: true });
     setFormState({
       ...BLANK_FORM,
@@ -481,6 +559,7 @@ export default function ContentCalendarManager() {
   };
 
   const selectEntry = (entry) => {
+    setOpenEntryId("");
     setSelectedEntry(entry);
     setFormState({
       date: dateKeyFromTimestamp(entry.date),
@@ -577,6 +656,24 @@ export default function ContentCalendarManager() {
           </button>
         </div>
 
+        {/* Which platforms are showing, and how many of each this month. */}
+        <div data-calendar-filter style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderBottom: "1px solid #eee", flexWrap: "wrap" }}>
+          {PLATFORM_FILTERS.map((f) => {
+            const p = PLATFORMS[f.key];
+            const on = platformFilter === f.key;
+            const color = p?.color || BLUE;
+            return (
+              <button key={f.key} type="button" data-filter={f.key} onClick={() => setPlatformFilter(f.key)} style={{
+                display: "flex", alignItems: "center", gap: "5px", padding: "4px 12px", borderRadius: "999px", cursor: "pointer",
+                border: `2px solid ${color}`, background: on ? (p?.fill || color) : "#fff", color: on ? "#fff" : color,
+                fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em",
+              }}>
+                {f.label} <span style={{ opacity: 0.75 }}>{monthCounts[f.key]}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Legend */}
         <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "8px 14px", borderBottom: "1px solid #eee", background: "#fafbfc", flexWrap: "wrap" }}>
           {CONTENT_TYPES.map((t) => (
@@ -602,7 +699,7 @@ export default function ContentCalendarManager() {
             <span style={{ fontSize: "10px", fontWeight: 700, color: "#888" }}>💡 Video concept</span>
           </div>
           <span style={{ fontSize: "10px", fontWeight: 700, color: "#bbb", fontStyle: "italic", marginLeft: "auto" }}>
-            Drag a planned entry to a different day to reschedule it
+            Drag a planned entry or waiting post to a different day to reschedule it
           </span>
           {dragMessage && (
             <span style={{ fontSize: "10px", fontWeight: 900, color: dragMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>
@@ -623,6 +720,7 @@ export default function ContentCalendarManager() {
             return (
               <div
                 key={cell.key}
+                data-day={cell.key}
                 onClick={() => startNewEntry(cell.cellDate)}
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                 onDrop={(e) => {
@@ -631,8 +729,8 @@ export default function ContentCalendarManager() {
                   const raw = e.dataTransfer.getData("text/plain");
                   if (!raw) return;
                   try {
-                    const { refId, dateKey, source } = JSON.parse(raw);
-                    handleDropOnDate(refId, cell.cellDate, dateKey, source);
+                    const { refId, dateKey, source, whenMs } = JSON.parse(raw);
+                    handleDropOnDate(refId, cell.cellDate, dateKey, source, whenMs);
                   } catch { /* malformed payload — ignore */ }
                 }}
                 style={{
@@ -683,10 +781,15 @@ export default function ContentCalendarManager() {
                     const style = CONTENT_TYPE_BY_KEY[entry.type] || CONTENT_TYPES[0];
                     const isManual = entry.source === "manual";
                     const isConcept = entry.source === "concept";
-                    const draggable = isManual || isConcept;
+                    const isSocial = entry.source === "instagram" || entry.source === "x";
+                    const platform = PLATFORMS[entry.platform] || PLATFORMS.other;
+                    const draggable = isManual || isConcept || !!entry.movable;
                     const note = isManual ? entry.raw?.note : isConcept ? entry.raw?.notes : "";
-                    const tooltip = [`${style.label} — ${entry.subjectLabel}`, isManual ? "Added manually" : isConcept ? "Video concept (edit in Videos → Concepts)" : "Pulled from its own feed"];
+                    const tooltip = isSocial
+                      ? [`${platform.label} — ${entry.subjectLabel}`, entry.statusLabel, fmtET(entry.whenMs)]
+                      : [`${style.label} — ${entry.subjectLabel}`, isManual ? "Added manually" : isConcept ? "Video concept (edit in Videos → Concepts)" : "Pulled from its own feed"];
                     if (note) tooltip.push(note);
+                    if (entry.whenMs != null && !isSocial) tooltip.push(fmtET(entry.whenMs));
                     return (
                       <div
                         key={entry.id}
@@ -694,30 +797,46 @@ export default function ContentCalendarManager() {
                         onDragStart={draggable ? (e) => {
                           e.stopPropagation();
                           e.dataTransfer.effectAllowed = "move";
-                          e.dataTransfer.setData("text/plain", JSON.stringify({ refId: entry.refId, dateKey: entry.dateKey, source: entry.source }));
+                          e.dataTransfer.setData("text/plain", JSON.stringify({ refId: entry.refId, dateKey: entry.dateKey, source: entry.source, whenMs: entry.whenMs }));
                         } : undefined}
-                        onClick={(e) => { e.stopPropagation(); if (isManual) selectEntry(entry.raw); }}
+                        data-chip={entry.id}
+                        data-platform={entry.platform}
+                        onClick={(e) => { e.stopPropagation(); if (isManual) selectEntry(entry.raw); else showEntry(entry); }}
                         title={tooltip.join(" — ")}
                         style={{
                           display: "flex", alignItems: "center", gap: "4px", flexShrink: 0,
                           width: "100%", minWidth: 0, boxSizing: "border-box",
-                          background: style.color, color: "#fff", borderRadius: "4px",
+                          background: isSocial ? (platform.fill || platform.color) : style.color, color: "#fff", borderRadius: "4px",
                           padding: "2px 6px", fontSize: "10px", fontWeight: 800,
-                          cursor: draggable ? "grab" : "default",
+                          cursor: draggable ? "grab" : "pointer",
+                          // The platform at a glance: its color down the chip's edge.
+                          borderLeft: `4px solid ${platform.color}`,
+                          // The selected chip, and one that needs someone: due or failed.
+                          outline: openEntryId === entry.id ? `2px solid ${GOLD}` : entry.due || entry.problem ? "2px solid #f59e0b" : "none",
+                          outlineOffset: "-1px",
                           // Solid border = added manually here; dashed,
                           // slightly faded = pulled in from the Videos/
                           // Articles feed on its own — see the legend above.
-                          border: isManual ? "1px solid rgba(255,255,255,0.4)" : isConcept ? "1px dotted rgba(255,255,255,0.9)" : "1px dashed rgba(255,255,255,0.55)",
-                          opacity: draggable ? 1 : 0.82,
+                          ...(isSocial
+                            ? { borderTop: "1px solid rgba(255,255,255,0.4)", borderRight: "1px solid rgba(255,255,255,0.4)", borderBottom: "1px solid rgba(255,255,255,0.4)" }
+                            : {
+                              borderTop: isManual ? "1px solid rgba(255,255,255,0.4)" : isConcept ? "1px dotted rgba(255,255,255,0.9)" : "1px dashed rgba(255,255,255,0.55)",
+                              borderRight: isManual ? "1px solid rgba(255,255,255,0.4)" : isConcept ? "1px dotted rgba(255,255,255,0.9)" : "1px dashed rgba(255,255,255,0.55)",
+                              borderBottom: isManual ? "1px solid rgba(255,255,255,0.4)" : isConcept ? "1px dotted rgba(255,255,255,0.9)" : "1px dashed rgba(255,255,255,0.55)",
+                            }),
+                          opacity: draggable || isSocial ? 1 : 0.82,
                         }}
                       >
-                        <span style={{ flexShrink: 0 }}>{style.icon}</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900 }}>{isSocial ? platform.tag : style.icon}</span>
+                        {entry.whenMs != null && <span style={{ flexShrink: 0, fontWeight: 900, opacity: 0.92 }}>{chipTime(entry.whenMs)}</span>}
                         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {truncateLabel(entry.subjectLabel)}
                         </span>
                         {note && <span style={{ flexShrink: 0 }} title="Has a note">📝</span>}
                         {isConcept && <span style={{ flexShrink: 0 }} title="Video concept">💡</span>}
-                        {!isManual && !isConcept && <span style={{ flexShrink: 0, opacity: 0.85 }} title="Pulled from its own feed">🔗</span>}
+                        {!isManual && !isConcept && !isSocial && <span style={{ flexShrink: 0, opacity: 0.85 }} title="Pulled from its own feed">🔗</span>}
+                        {entry.due && <span style={{ flexShrink: 0 }} title="Due: post by hand">⏰</span>}
+                        {entry.problem && <span style={{ flexShrink: 0 }} title={entry.problem}>⚠</span>}
                       </div>
                     );
                   })}
@@ -732,9 +851,9 @@ export default function ContentCalendarManager() {
       <div style={{ border: "2px solid " + GOLD, borderRadius: "10px", overflow: "hidden", position: "sticky", top: "20px" }}>
         <div style={{ background: GOLD, padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            {isNew ? "New Entry" : selectedEntry ? "Edit Entry" : "Content Calendar"}
+            {openEntry ? "Details" : isNew ? "New Entry" : selectedEntry ? "Edit Entry" : "Content Calendar"}
           </div>
-          {!selectedEntry && (
+          {!selectedEntry && !openEntry && (
             <button
               onClick={() => startNewEntry(null)}
               style={{
@@ -748,9 +867,25 @@ export default function ContentCalendarManager() {
           )}
         </div>
 
-        {!selectedEntry || !formState ? (
+        {openEntry ? (
+          <CalendarPostPanel
+            key={openEntry.id}
+            entry={openEntry}
+            links={openLinks}
+            onSelect={showEntry}
+            onOpen={(e) => onOpenPost?.(e.platform, { id: e.refId })}
+            onChanged={fetchPosts}
+            onClose={() => setOpenEntryId("")}
+          />
+        ) : !selectedEntry || !formState ? (
           <div style={{ padding: "24px 18px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
             Click a day on the calendar (or "+ New") to plan a video, article, or post.
+            {onOpenPost && (
+              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                <button type="button" data-new-x onClick={() => onOpenPost("x", { date: "" })} style={{ background: PLATFORMS.x.color, color: "#fff", border: "none", borderRadius: "6px", padding: "7px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}>Write an X post</button>
+                <button type="button" onClick={() => onOpenPost("instagram", {})} style={{ background: PLATFORMS.instagram.fill, color: "#fff", border: "none", borderRadius: "6px", padding: "7px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}>Make an Instagram post</button>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ padding: "16px" }}>
@@ -758,6 +893,13 @@ export default function ContentCalendarManager() {
               <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Date</div>
               <input type="date" value={formState.date} onChange={(e) => setFormState((p) => ({ ...p, date: e.target.value }))} style={inputStyle} />
             </div>
+
+            {isNew && onOpenPost && (
+              <div style={{ marginBottom: "12px", fontSize: "11px", fontWeight: 700, color: "#888" }}>
+                A real post rather than a plan?{" "}
+                <button type="button" data-new-x-day onClick={() => onOpenPost("x", { date: formState.date })} style={{ background: "none", border: "none", padding: 0, color: BLUE, fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>Write an X post for this day</button>
+              </div>
+            )}
 
             <div style={{ marginBottom: "12px" }}>
               <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Content Type</div>

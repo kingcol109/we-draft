@@ -37,9 +37,9 @@ export const WEEKLY_ROUNDS = 7;
 export const WEEKLY_ROUNDS_BY_YEAR = { 2027: 7, 2028: 3, 2029: 1 };
 export const WEEKLY_VARIANCE = "less";
 export const WEEKLY_TRADES = "normal";
-// CPU trades by class: 2027's are normal in round 1 and Less after (engine
-// CPU_TRADES, by round); the next class's mock has none ("off").
-export const WEEKLY_TRADES_BY_YEAR = { 2027: { 1: "normal", late: "less" }, 2028: "off", 2029: "off" };
+// CPU trades by class: 2027's are Less (engine CPU_TRADES — the light
+// level) in every round; the next class's mock has none ("off").
+export const WEEKLY_TRADES_BY_YEAR = { 2027: "less", 2028: "off", 2029: "off" };
 // The classes drafted on a random order (randomOrder) — no notes, no team pages.
 export const RANDOM_ORDER_YEARS = ["2029"];
 

@@ -11,6 +11,8 @@
 //     their photos' framing)
 //   node scripts/renderInstagram.mjs player <playerId> [--photo 0] [--kicker "..."] [--out dir]
 //   node scripts/renderInstagram.mjs spotlight <playerId> [--photo 0] [--look spotlight] [--accent #f6a21d] [--badge plate] [--out dir]
+//   node scripts/renderInstagram.mjs portal <playerId> [--from School] [--carousel] [--photo 0] [--out dir]
+//   node scripts/renderInstagram.mjs transfer <playerId> [--from School] [--to School] [--carousel] [--photo 0] [--out dir]
 //
 // Writes the PNGs (and the caption) into --out (default ./instagram-out).
 import fs from "fs";
@@ -22,6 +24,7 @@ import { knockOut, hasBackdrop, opaqueBounds } from "../src/utils/instagram/knoc
 import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport } from "../src/utils/instagram/spotlight.js";
 import { NFL_TEAMS } from "../src/utils/coachHistory.js";
 import { mockSlides, mockInput, mockCaption, playerPost, playerInput, playerCaption, imageUrls } from "../src/utils/instagram/posts.js";
+import { transferSlides, transferInput, transferCaption, transferImageUrls } from "../src/utils/instagram/transfer.js";
 
 const require = createRequire(import.meta.url);
 const { getFirestore } = require("./firebaseAdmin");
@@ -222,8 +225,29 @@ async function main() {
     spotlightSlides(input, env).forEach((s, i) => fs.writeFileSync(path.join(out, `spotlight-${id}-${i + 1}-${s.name}.png`), render(s.svg)));
     fs.writeFileSync(path.join(out, `spotlight-${id}-caption.txt`), spotlightCaption(input));
     console.log(`spotlight-${id} → ${out}`);
+  } else if (kind === "portal" || kind === "transfer") {
+    const p = { id, ...(await db.collection("players").doc(id).get()).data() };
+    if (!p.First) throw new Error(`No player ${id}.`);
+    const schoolDoc = async (name) => (await db.collection("schools").where("School", "==", name || "").limit(1).get()).docs[0]?.data() || {};
+    const fromName = flag("from", p.PortalOriginalSchool || p.PriorSchool || p.School);
+    const toName = flag("to", kind === "transfer" ? p.School : "");
+    const [from, to, photoSnap, evalSnap, classSnap] = await Promise.all([
+      schoolDoc(fromName), schoolDoc(toName), db.collection("playerPhotos").doc(id).get(),
+      db.collection("players").doc(id).collection("evaluations").get(),
+      db.collection("compSnapshots").doc(`class_${p.Eligible}_${p.Position}`).get(),
+    ]);
+    const report = scoutingReport({ player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap: classSnap.exists ? classSnap.data() : null, teamNames: NFL_TEAMS });
+    const input = transferInput({
+      kind, player: p, from, fromName, to, toName, photo: (photoSnap.data()?.action || [])[Number(flag("photo", 0))] || null, report,
+      carousel: args.includes("--carousel"), kicker: flag("kicker", ""), headline: flag("headline", ""), note: flag("note", ""), brandLogo: WD_LOGO,
+    });
+    const env = { measure, images: await loadImages([WD_LOGO, ...transferImageUrls(input)], new Set([input.photo].filter(Boolean))) };
+    if (env.images[input.photo]) env.images[input.photo] = cutout(env.images[input.photo]);
+    transferSlides(input, env).forEach((s, i) => fs.writeFileSync(path.join(out, `${kind}-${id}-${i + 1}-${s.name}.png`), render(s.svg)));
+    fs.writeFileSync(path.join(out, `${kind}-${id}-caption.txt`), transferCaption(input));
+    console.log(`${kind}-${id} → ${out}`);
   } else {
-    console.log("usage: node scripts/renderInstagram.mjs mock <year> | player <playerId> | spotlight <playerId>");
+    console.log("usage: node scripts/renderInstagram.mjs mock <year> | player <playerId> | spotlight <playerId> | portal <playerId> | transfer <playerId>");
   }
 }
 
