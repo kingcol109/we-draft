@@ -8646,19 +8646,43 @@ const REQUEST_TABS = [
 ];
 
 // ── Requests section — surfaces the two "Request a Player" / "Report an
-// Issue" forms on UserProfile.js, which previously wrote to Firestore
-// (playerRequests / userReports) with no admin-facing UI at all — every
-// submission landed invisibly. Read-only list + delete (once handled,
-// clear it out — there's no "resolved" status field, just presence in the
-// collection, matching how lightweight this was designed to be on the
-// submit side too). ──
+// Issue" forms on UserProfile.js (playerRequests / userReports). Each one is
+// Open until an admin resolves it: Resolve opens a reply box, and sending
+// writes a userMessages doc (utils/userMessages.js — shows in the
+// submitter's profile hub Messages tab + Navbar sticker) and stamps the
+// request with status / reply / resolvedAt so it moves to the Resolved view.
+// Delete is still there for spam. ──
+const REQUEST_REPLY_TEMPLATES = {
+  playerRequests: {
+    resolved: (r) => `Thanks for the request! ${r.playerName || "This player"}${r.school ? ` (${r.school})` : ""} is now on We-Draft.`,
+    declined: (r) => `Thanks for the request! We aren't able to add ${r.playerName || "this player"} right now, but we'll keep it in mind.`,
+  },
+  userReports: {
+    resolved: () => "Thanks for letting us know — this has been fixed.",
+    declined: () => "Thanks for the feedback! We looked into it and aren't making a change right now, but we appreciate you sending it.",
+  },
+};
+
+function requestSubject(collectionName, r) {
+  if (collectionName === "playerRequests") {
+    const extra = [r.school, r.position].filter(Boolean).join(", ");
+    return `Player request: ${r.playerName || "—"}${extra ? ` (${extra})` : ""}`;
+  }
+  return "Your issue report";
+}
+
 function RequestsSection() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("playerRequests");
+  const [view, setView] = useState("open");
   const [playerRequests, setPlayerRequests] = useState([]);
   const [issueReports, setIssueReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchErrors, setFetchErrors] = useState([]);
   const [removingId, setRemovingId] = useState(null);
+  // The row whose reply box is open: { id, outcome, message }.
+  const [replying, setReplying] = useState(null);
+  const [sendingId, setSendingId] = useState(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -8698,10 +8722,7 @@ function RequestsSection() {
       // Mark everything just shown as read — a doc with no `read` field at
       // all (every one submitted before this existed) counts as unread too.
       // This is what clears the sidebar's sticker: AdminPanel's own count
-      // effect refetches on every activeSection change, so simply writing
-      // `read: true` here is enough, no direct call back up to it needed.
-      // Fire-and-forget after the list is already showing — a failure here
-      // shouldn't block viewing/using the requests that just loaded fine.
+      // effect refetches on every activeSection change. Fire-and-forget.
       const unreadPr = prRows.filter((r) => r.read !== true);
       const unreadUr = urRows.filter((r) => r.read !== true);
       if (unreadPr.length > 0 || unreadUr.length > 0) {
@@ -8720,7 +8741,12 @@ function RequestsSection() {
     fetchAll();
   }, []);
 
-  const handleDelete = async (collectionName, id, setList, label) => {
+  const collectionName = activeTab === "playerRequests" ? "playerRequests" : "userReports";
+  const setList = activeTab === "playerRequests" ? setPlayerRequests : setIssueReports;
+  const isResolved = (r) => r.status === "resolved" || r.status === "declined";
+
+  const handleDelete = async (id) => {
+    const label = activeTab === "playerRequests" ? "player request" : "report";
     if (!window.confirm("Delete this " + label + "? This cannot be undone.")) return;
     setRemovingId(id);
     try {
@@ -8734,17 +8760,74 @@ function RequestsSection() {
     }
   };
 
-  const activeRows = activeTab === "playerRequests" ? playerRequests : issueReports;
+  const openReply = (r, outcome = "resolved") => {
+    setReplying({ id: r.id, outcome, message: REQUEST_REPLY_TEMPLATES[collectionName][outcome](r) });
+  };
+
+  // sendMessage false = close it out quietly (no userMessages doc).
+  const resolve = async (r, sendMessage) => {
+    const toUid = r.requestedBy || r.submittedBy;
+    const message = (replying?.message || "").trim();
+    const outcome = replying?.outcome || "resolved";
+    if (sendMessage && !toUid) { alert("This request has no user id on it — can't send a message. Resolve without a message instead."); return; }
+    if (sendMessage && !message) { alert("Write a message first."); return; }
+    setSendingId(r.id);
+    try {
+      if (sendMessage) {
+        await addDoc(collection(db, "userMessages"), {
+          toUid, kind: "requestReply", source: collectionName, requestId: r.id,
+          subject: requestSubject(collectionName, r),
+          original: collectionName === "playerRequests" ? "" : (r.message || ""),
+          message, outcome, read: false, createdAt: serverTimestamp(),
+        });
+      }
+      const patch = {
+        status: outcome, resolvedAt: serverTimestamp(), resolvedBy: user?.uid || null,
+        reply: sendMessage ? message : "",
+      };
+      await updateDoc(doc(db, collectionName, r.id), patch);
+      setList((prev) => prev.map((x) => (x.id === r.id ? { ...x, ...patch, resolvedAt: { seconds: Date.now() / 1000 } } : x)));
+      setReplying(null);
+    } catch (e) {
+      console.error("Admin resolve " + collectionName + " error:", e);
+      alert("Failed to resolve — check console.");
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const reopen = async (r) => {
+    setSendingId(r.id);
+    try {
+      await updateDoc(doc(db, collectionName, r.id), { status: deleteField(), resolvedAt: deleteField(), resolvedBy: deleteField() });
+      setList((prev) => prev.map((x) => (x.id === r.id ? { ...x, status: undefined, resolvedAt: undefined } : x)));
+    } catch (e) {
+      console.error("Admin reopen error:", e);
+      alert("Failed to reopen — check console.");
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const allRows = activeTab === "playerRequests" ? playerRequests : issueReports;
+  const activeRows = allRows.filter((r) => (view === "open" ? !isResolved(r) : isResolved(r)));
+  const colCount = activeTab === "playerRequests" ? 6 : 4;
+  const smallBtn = (color, filled) => ({
+    background: filled ? color : "none", border: "2px solid " + (filled ? color : "#ddd"), borderRadius: "6px",
+    color: filled ? "#fff" : color, cursor: "pointer", fontSize: "11px", fontWeight: 800, padding: "5px 10px",
+    textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap",
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-      <div style={{ display: "flex", gap: "8px" }}>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
         {REQUEST_TABS.map((t) => {
-          const count = t.key === "playerRequests" ? playerRequests.length : issueReports.length;
+          const rows = t.key === "playerRequests" ? playerRequests : issueReports;
+          const count = rows.filter((r) => !isResolved(r)).length;
           return (
             <button
               key={t.key}
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => { setActiveTab(t.key); setReplying(null); }}
               style={{
                 padding: "9px 18px", fontWeight: 900, fontSize: "13px",
                 textTransform: "uppercase", letterSpacing: "0.05em",
@@ -8757,6 +8840,15 @@ function RequestsSection() {
             </button>
           );
         })}
+        <div style={{ marginLeft: "auto", display: "flex", border: "2px solid #ddd", borderRadius: "8px", overflow: "hidden" }}>
+          {[["open", "Open"], ["resolved", "Resolved"]].map(([k, label]) => (
+            <button key={k} onClick={() => { setView(k); setReplying(null); }} style={{
+              padding: "7px 14px", border: "none", cursor: "pointer", fontSize: "11px", fontWeight: 900,
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              background: view === k ? "#333" : "#fff", color: view === k ? "#fff" : "#666",
+            }}>{label}</button>
+          ))}
+        </div>
       </div>
 
       {!loading && fetchErrors.length > 0 && (
@@ -8771,7 +8863,9 @@ function RequestsSection() {
         <LoadingSpinner label="Loading requests" size={28} minHeight="100px" />
       ) : activeRows.length === 0 ? (
         <div style={{ padding: "30px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
-          {activeTab === "playerRequests" ? "No player requests." : "No issue reports."}
+          {view === "open"
+            ? (activeTab === "playerRequests" ? "No open player requests." : "No open issue reports.")
+            : (activeTab === "playerRequests" ? "No resolved player requests yet." : "No resolved issue reports yet.")}
         </div>
       ) : (
         <div style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
@@ -8800,13 +8894,6 @@ function RequestsSection() {
               <tbody>
                 {activeRows.map((r, i) => {
                   const dateMs = toMs(r.createdAt);
-                  const collectionName = activeTab === "playerRequests" ? "playerRequests" : "userReports";
-                  const setList = activeTab === "playerRequests" ? setPlayerRequests : setIssueReports;
-                  const label = activeTab === "playerRequests" ? "player request" : "report";
-                  // Reflects local state (already flipped to true right after
-                  // fetch's mark-as-read call succeeds, see the effect above)
-                  // rather than re-checking Firestore, so this tag disappears
-                  // for the whole batch the instant that write resolves.
                   const isUnread = r.read !== true;
                   const newTag = isUnread && (
                     <span style={{
@@ -8817,38 +8904,78 @@ function RequestsSection() {
                       New
                     </span>
                   );
+                  const busy = sendingId === r.id;
+                  const isReplying = replying?.id === r.id;
+                  const bg = i % 2 === 0 ? "#fff" : "#fafbfc";
                   return (
-                    <tr key={r.id} style={{ background: i % 2 === 0 ? "#fff" : "#fafbfc", borderBottom: "1px solid #f0f0f0" }}>
-                      {activeTab === "playerRequests" ? (
-                        <>
-                          <td style={tdStyle}>{r.playerName || "—"}{newTag}</td>
-                          <td style={tdStyle}>{r.school || "—"}</td>
-                          <td style={tdStyle}>{r.position || "—"}</td>
-                          <td style={tdStyle}>{r.email || "—"}</td>
-                          <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
-                        </>
-                      ) : (
-                        <>
-                          <td style={{ ...tdStyle, maxWidth: "420px", whiteSpace: "pre-wrap" }}>{r.message || "—"}{newTag}</td>
-                          <td style={tdStyle}>{r.email || "—"}</td>
-                          <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
-                        </>
+                    <Fragment key={r.id}>
+                      <tr style={{ background: bg, borderBottom: isReplying || isResolved(r) ? "none" : "1px solid #f0f0f0" }}>
+                        {activeTab === "playerRequests" ? (
+                          <>
+                            <td style={tdStyle}>{r.playerName || "—"}{newTag}</td>
+                            <td style={tdStyle}>{r.school || "—"}</td>
+                            <td style={tdStyle}>{r.position || "—"}</td>
+                            <td style={tdStyle}>{r.email || "—"}</td>
+                            <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={{ ...tdStyle, maxWidth: "420px", whiteSpace: "pre-wrap" }}>{r.message || "—"}{newTag}</td>
+                            <td style={tdStyle}>{r.email || "—"}</td>
+                            <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{dateMs > 0 ? new Date(dateMs).toLocaleDateString() : "—"}</td>
+                          </>
+                        )}
+                        <td style={{ ...tdStyle, textAlign: "right" }}>
+                          <div style={{ display: "inline-flex", gap: "6px" }}>
+                            {isResolved(r) ? (
+                              <button onClick={() => reopen(r)} disabled={busy} style={smallBtn("#666", false)}>{busy ? "…" : "Reopen"}</button>
+                            ) : !isReplying && (
+                              <button onClick={() => openReply(r)} style={smallBtn("#2e7d32", true)}>Resolve</button>
+                            )}
+                            <button onClick={() => handleDelete(r.id)} disabled={removingId === r.id} style={smallBtn("#999", false)}>
+                              {removingId === r.id ? "…" : "Delete"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isResolved(r) && (
+                        <tr style={{ background: bg, borderBottom: "1px solid #f0f0f0" }}>
+                          <td colSpan={colCount} style={{ ...tdStyle, paddingTop: 0 }}>
+                            <span style={{ fontSize: "10px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em", color: r.status === "declined" ? "#888" : "#2e7d32" }}>
+                              {r.status === "declined" ? "Declined" : "Resolved"}{toMs(r.resolvedAt) > 0 ? " " + new Date(toMs(r.resolvedAt)).toLocaleDateString() : ""}
+                            </span>
+                            <span style={{ marginLeft: "8px", fontWeight: 600, color: "#555", whiteSpace: "pre-wrap" }}>
+                              {r.reply ? "Reply: " + r.reply : "(no message sent)"}
+                            </span>
+                          </td>
+                        </tr>
                       )}
-                      <td style={{ ...tdStyle, textAlign: "right" }}>
-                        <button
-                          onClick={() => handleDelete(collectionName, r.id, setList, label)}
-                          disabled={removingId === r.id}
-                          style={{
-                            background: "none", border: "2px solid #ddd", borderRadius: "6px",
-                            color: "#999", cursor: removingId === r.id ? "default" : "pointer",
-                            fontSize: "11px", fontWeight: 800, padding: "5px 10px",
-                            textTransform: "uppercase", letterSpacing: "0.04em",
-                          }}
-                        >
-                          {removingId === r.id ? "…" : "Delete"}
-                        </button>
-                      </td>
-                    </tr>
+                      {isReplying && (
+                        <tr style={{ background: "#f4f8fc", borderBottom: "1px solid #f0f0f0" }}>
+                          <td colSpan={colCount} style={{ padding: "12px" }}>
+                            <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                              <span style={{ fontSize: "11px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: "4px" }}>
+                                Reply to {r.email || "user"}
+                              </span>
+                              {[["resolved", "Done / added", "#2e7d32"], ["declined", "Not doing it", "#888"]].map(([k, label, c]) => (
+                                <button key={k} onClick={() => openReply(r, k)} style={smallBtn(c, replying.outcome === k)}>{label}</button>
+                              ))}
+                            </div>
+                            <textarea
+                              value={replying.message}
+                              onChange={(e) => setReplying((p) => ({ ...p, message: e.target.value }))}
+                              rows={3}
+                              style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "2px solid #cfd8e3", borderRadius: "6px", fontSize: "13px", fontFamily: "Arial, sans-serif", resize: "vertical" }}
+                            />
+                            <div style={{ display: "flex", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
+                              <button onClick={() => resolve(r, true)} disabled={busy} style={smallBtn(BLUE, true)}>{busy ? "Sending…" : "Send & resolve"}</button>
+                              <button onClick={() => resolve(r, false)} disabled={busy} style={smallBtn("#666", false)}>Resolve without message</button>
+                              <button onClick={() => setReplying(null)} disabled={busy} style={smallBtn("#999", false)}>Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

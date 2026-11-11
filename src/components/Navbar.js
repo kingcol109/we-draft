@@ -19,6 +19,7 @@ import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { fetchNflBranding } from "../utils/draftProfileData";
 import { NFL_DIVISIONS } from "./NFLTeamRail";
 import { countNewFeed } from "../utils/profileFeed";
+import { countUnreadMessages } from "../utils/userMessages";
 
 const FALLBACK_MESSAGE =
   "WELCOME TO WE-DRAFT.COM - CREATE DRAFT EVALUATIONS, VIEW COMMUNITY GRADES, DISCOVER HIDDEN GEMS, AND MORE - FOLLOW US ON INSTAGRAM AND X @WEDRAFTSITE FOR DAILY DRAFT CONTENT";
@@ -77,7 +78,15 @@ export default function Navbar() {
     countNewFeed(user.uid).then((n) => { if (live) setFeedNew(n); }).catch(() => {});
     return () => { live = false; };
   }, [user, location.pathname, location.search]);
-  const profileBadge = pendingFriendRequests + feedNew;
+  // Unread admin replies to the user's requests/reports (utils/userMessages.js).
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  useEffect(() => {
+    if (!user) { setUnreadMessages(0); return undefined; }
+    let live = true;
+    countUnreadMessages(user.uid).then((n) => { if (live) setUnreadMessages(n); }).catch(() => {});
+    return () => { live = false; };
+  }, [user, location.pathname, location.search]);
+  const profileBadge = pendingFriendRequests + feedNew + unreadMessages;
   // Games in progress right now (liveSlate/status — a tiny doc the live
   // ingester only rewrites when the count changes). >0 shows the pulsing
   // LIVE button next to the logo.

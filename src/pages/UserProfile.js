@@ -24,6 +24,8 @@ import FeedTab from "../components/profileHub/FeedTab";
 import FollowingTab from "../components/profileHub/FollowingTab";
 import BoardsTab from "../components/profileHub/BoardsTab";
 import WePickTab from "../components/profileHub/WePickTab";
+import MessagesTab from "../components/profileHub/MessagesTab";
+import { countUnreadMessages } from "../utils/userMessages";
 
 // The article editor (Tiptap, ~400 KB) loads only for writers who have the
 // My Articles section, not on every profile visit.
@@ -36,7 +38,7 @@ const MyDraftClass = lazy(() => import("./MyDraftClass"));
 // The profile hub's tabs (?tab=…, Feed by default): [key, label, phone label].
 const HUB_TABS = [
   ["feed", "Feed"], ["following", "Following"], ["boards", "Boards"], ["draftclass", "My Draft Class"],
-  ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["settings", "Settings"],
+  ["sim", "Draft Sim"], ["wepick", "We-Pick"], ["friends", "Friends"], ["messages", "Messages"], ["settings", "Settings"],
 ];
 const SIM_VIEWS = [["profile", "Profile"], ["drafts", "My Drafts"]];
 
@@ -132,6 +134,16 @@ export default function UserProfile() {
     if (!user) return undefined;
     let live = true;
     countNewFeed(user.uid).then((n) => { if (live) setFeedNew(n); }).catch(() => {});
+    return () => { live = false; };
+  }, [user]);
+
+  // Unread replies to the user's requests/reports (utils/userMessages.js) —
+  // the Messages tab's badge.
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  useEffect(() => {
+    if (!user) return undefined;
+    let live = true;
+    countUnreadMessages(user.uid).then((n) => { if (live) setUnreadMessages(n); }).catch(() => {});
     return () => { live = false; };
   }, [user]);
 
@@ -238,7 +250,7 @@ export default function UserProfile() {
         playerName: playerName.trim(), school: school.trim(), position: position.trim(),
         requestedBy: user.uid, email: user.email, createdAt: serverTimestamp(),
       });
-      setRequestMsg("Player request submitted!");
+      setRequestMsg("Player request submitted! We'll reply in your Messages tab.");
       setPlayerName(""); setSchool(""); setPosition("");
     } catch { setRequestMsg("Error submitting request. Try again."); }
   };
@@ -253,7 +265,7 @@ export default function UserProfile() {
         message: issueText.trim(), submittedBy: user.uid,
         email: user.email, createdAt: serverTimestamp(),
       });
-      setIssueMsg("Report submitted! Thank you.");
+      setIssueMsg("Report submitted! Thank you — we'll reply in your Messages tab.");
       setIssueText("");
     } catch { setIssueMsg("Error submitting report. Try again."); }
   };
@@ -305,6 +317,7 @@ export default function UserProfile() {
   else if (tab === "draftclass") body = lazyTab(<MyDraftClass embedded />);
   else if (tab === "wepick") body = <WePickTab uid={user.uid} />;
   else if (tab === "friends") body = <div style={{ ...card, padding: isMobile ? 14 : 22 }}><FriendsPanel isMobile={isMobile} /></div>;
+  else if (tab === "messages") body = <MessagesTab uid={user.uid} isMobile={isMobile} onSeen={() => setUnreadMessages(0)} />;
   else if (tab === "articles") body = lazyTab(<ArticlesManager />);
   else if (tab === "sim") {
     // The Draft Sim page's own Sim Profile and saved drafts, on its dark panel.
@@ -432,6 +445,7 @@ export default function UserProfile() {
                 {label}
                 {k === "feed" && badge(feedNew)}
                 {k === "friends" && badge(pendingFriendRequests)}
+                {k === "messages" && badge(unreadMessages)}
               </button>
             );
           })}
