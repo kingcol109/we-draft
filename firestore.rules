@@ -305,7 +305,8 @@ service cloud.firestore {
       allow update: if isAdmin()
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ig'])
         && (resource.data.get('status', 'draft') in ['scheduled', 'publishing', 'published']
-          ? request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt'])
+          // (site: where it's on the site — Post to site, utils/instagram/sitePost.js.)
+          ? request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt', 'site'])
           : request.resource.data.get('status', 'draft') in ['draft', 'ready', 'posted', 'failed']
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
               || request.resource.data.status in ['draft', 'ready', 'posted']));

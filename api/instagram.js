@@ -25,6 +25,10 @@
 //   publish         { postId, attempt } containers → media_publish →
 //                   { published, mediaId, permalink } or { pending: true }
 //                   (call again to resume)
+//   site-slide      { postId, rev, index, jpeg (base64) } a slide for the
+//                   post's site article → { url, w, h } (sitePost.js)
+//   site-video      { postId, rev, index, path } a clip for it → { url }
+//   site-clean      { postId, keep? } its site files but rev keep, deleted
 //   delete-post     { postId } a saved post and its staged files
 //   sync            { op: "account" | "media" } one analytics run; 409 if
 //                   one's running; more: true while work remains
@@ -163,6 +167,7 @@ module.exports = async function handler(req, res) {
     const body = req.body || {};
     const pub = () => require("../server/instagram/publish");
     const vid = () => require("../server/instagram/videos");
+    const site = () => require("../server/instagram/sitePost");
     switch (body.action) {
       case "status": return res.status(200).json(await status());
       case "publish-start": return res.status(200).json(await pub().startPublish(pub().context(db), uid, body));
@@ -174,6 +179,10 @@ module.exports = async function handler(req, res) {
       case "video-upload": return res.status(200).json(await vid().startUpload(pub().context(db).bucket, { type: body.type, bytes: body.bytes, origin: req.headers.origin || null }));
       case "video-done": return res.status(200).json(await vid().finishUpload(pub().context(db).bucket, body.path));
       case "video-url": return res.status(200).json(await vid().readUrl(pub().context(db).bucket, body.path));
+      // The post on the site (server/instagram/sitePost.js).
+      case "site-slide": return res.status(200).json(await site().saveSlide(require("../server/instagram/staging").bucket(), body));
+      case "site-video": return res.status(200).json(await site().saveVideo(require("../server/instagram/staging").bucket(), body));
+      case "site-clean": return res.status(200).json(await site().clean(require("../server/instagram/staging").bucket(), body));
       case "delete-post": return res.status(200).json(await pub().deletePost(pub().context(db), uid, body));
       case "sync": {
         const op = String(body.op || "");

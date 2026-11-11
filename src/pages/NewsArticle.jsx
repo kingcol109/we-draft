@@ -13,6 +13,7 @@ import EngagementSection, { useEngagement, LikeButton } from "../components/Enga
 import PlayersMentionedList from "../components/PlayersMentionedList";
 import TeamsMentionedList from "../components/TeamsMentionedList";
 import { scheduleGameHref } from "../utils/live";
+import PostGallery from "../components/PostGallery";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -231,6 +232,8 @@ export default function NewsArticle() {
   const videoLinks = !videoDisplay && article.videoUrl ? [{ href: article.videoUrl, label: "Watch Video" }] : [];
 
   const rawText = article.summary || rawHtml.replace(/<[^>]+>/g, "");
+  // A gallery post's first slide: its share image.
+  const galleryImage = (article.gallery || []).find((g) => g.type === "image")?.url || "";
   const canonicalUrl = `https://we-draft.com/news/${article.slug}`;
   const pubDate = article.publishedAt?.toDate?.();
   const dateStr = pubDate?.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
@@ -468,7 +471,9 @@ export default function NewsArticle() {
         <meta property="og:description" content={description} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:site_name" content="We-Draft" />
-        <meta name="twitter:card" content="summary" />
+        {galleryImage && <meta property="og:image" content={galleryImage} />}
+        {galleryImage && <meta name="twitter:image" content={galleryImage} />}
+        <meta name="twitter:card" content={galleryImage ? "summary_large_image" : "summary"} />
         <meta name="twitter:title" content={article.title} />
         <meta name="twitter:description" content={description} />
         {article.publishedAt?.toDate && <meta property="article:published_time" content={article.publishedAt.toDate().toISOString()} />}
@@ -621,6 +626,12 @@ export default function NewsArticle() {
 
                 {/* Divider */}
                 <div style={{ height: "2px", background: GOLD, borderRadius: "1px", marginBottom: "24px" }} />
+
+                {/* A post put on the site from Instagram (utils/instagram/sitePost.js):
+                    its slides and clips, swipeable, over its caption. */}
+                {Array.isArray(article.gallery) && article.gallery.length > 0 && (
+                  <PostGallery items={article.gallery} title={article.title} isMobile={isMobile} />
+                )}
 
                 {/* Content — video links stripped out */}
                 <div

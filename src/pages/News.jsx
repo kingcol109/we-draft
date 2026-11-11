@@ -111,8 +111,12 @@ export default function News() {
                     <div style={{ height: "5px", background: accent }} />
                   );
 
+                  // A post from Instagram (its gallery): its first slide beside the title.
+                  const thumb = (n.gallery || []).find((g) => g.type === "image")?.url;
                   const body = (
-                    <div style={{ padding: "16px 18px" }}>
+                    <div style={{ padding: "16px 18px", display: thumb ? "flex" : "block", gap: "14px", alignItems: "center" }}>
+                      {thumb && <img src={thumb} alt="" loading="lazy" style={{ width: "72px", aspectRatio: "4 / 5", objectFit: "cover", borderRadius: "8px", flexShrink: 0, border: "1px solid #eee" }} />}
+                      <div style={{ minWidth: 0 }}>
                       {dayStr && (
                         <div style={{ marginBottom: "10px" }}>
                           <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>{dayStr}</span>
@@ -129,6 +133,7 @@ export default function News() {
                           {n.summary}
                         </p>
                       )}
+                      </div>
                     </div>
                   );
 

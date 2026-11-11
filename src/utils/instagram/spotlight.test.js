@@ -1,4 +1,4 @@
-import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats } from "./spotlight";
+import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats, spotlightCaption } from "./spotlight";
 
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: {} };
 const player = { id: "p1", First: "Mark", Last: "Bowman", Position: "TE", School: "USC", Eligible: "2029", Height: "6'5\"", Weight: "245", Slug: "mark-bowman-2029-te" };
@@ -135,4 +135,15 @@ test("the stats slide: ESPN's career cut to his position, after the report", () 
   expect(slides[2].svg).not.toContain("NaN");
   // Switched off: back to three.
   expect(spotlightSlides(spotlightInput({ ...base, stats: st, showStats: false }), env)).toHaveLength(3);
+});
+
+test("the caption: headline, room for the bio, the grade block with weaknesses", () => {
+  const report = { grade: { avg: 5, label: "Fifth Round" }, strengths: [{ term: "Lateral Agility" }, { term: "Explosiveness" }], weaknesses: [{ term: "Contact Balance" }] };
+  const cap = spotlightCaption(spotlightInput({ player: { ...player, Eligible: "2027" }, report }));
+  expect(cap).toBe([
+    "Today's Player Spotlight: Mark Bowman, TE, USC",
+    "We-Draft.com Community Grade: Fifth Round.\nTop strengths: Lateral Agility, Explosiveness.\nTop weaknesses: Contact Balance.",
+    "Grade him yourself: we-draft.com/player/mark-bowman-2029-te",
+    "#NFLDraft #CollegeFootball #2027NFLDraft #USC #MarkBowman",
+  ].join("\n\n"));
 });

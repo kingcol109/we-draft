@@ -52,6 +52,7 @@ import { customInput, customSlides, customCaption, customImageUrls, customCutout
 import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
 import { shortInput, shortFrame, shortEnd, shortImageUrls, SHORT_W, SHORT_H } from "../utils/instagram/short";
 import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
+import { postToSite, siteTitle, siteShortTitle, siteSlug } from "../utils/instagram/sitePost";
 import { X_MAX_MEDIA, textFromCaption } from "../utils/x/posts";
 import { MEDIA_MAX_CHARS, saveXPost } from "../utils/x/store";
 import WdLogo from "../assets/Logo2.png";
@@ -206,6 +207,13 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
   const status = post?.status || "draft";
   const isLocked = locked(status);
   const off = busy || !svgs.length || !!hold;
+  // Where it's on the site (instagramPosts.site — Post to site below).
+  const [site, setSite] = useState(null);
+  useEffect(() => {
+    setSite(null);
+    if (!post?.id || saveOnly) return;
+    getDoc(doc(db, "instagramPosts", post.id)).then((d) => setSite(d.data()?.site || null)).catch(() => {});
+  }, [post?.id, saveOnly]);
   // → the saved post's id (null when it couldn't save).
   const save = async (asNew, quiet = false) => {
     if (!svgs.length) return null;
@@ -234,6 +242,40 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
       sendToX(xId);
     } catch (e) {
       setMsg(`Couldn't make the X draft: ${e.message}`);
+    } finally {
+      setBusy(false);
+      setPhase("");
+    }
+  };
+  // Post to site: the slides (and clips) as an article at /news/{slug}, the
+  // caption its body — utils/instagram/sitePost.js. Again: the same article updated.
+  // Its titles first, in a little form (siteForm): the long one the
+  // article's headline, the short one its cards and — for a new article — its
+  // slug with the date, as ArticlesManager.js. An article already up keeps
+  // its slug; its titles come from the article itself (it may have been
+  // edited in My Articles since).
+  const [siteForm, setSiteForm] = useState(null);
+  const openSiteForm = async () => {
+    let cur = null;
+    if (site?.articleId) cur = (await getDoc(doc(db, "articles", site.articleId)).catch(() => null))?.data() || null;
+    const title = cur?.title || site?.title || siteTitle(caption, shown);
+    setSiteForm({ title, titleShort: cur?.titleShort || site?.titleShort || siteShortTitle(title) });
+  };
+  const toSite = async () => {
+    const title = siteForm?.title.trim();
+    const titleShort = siteForm?.titleShort.trim();
+    if (!title || !titleShort) return;
+    setBusy(true);
+    try {
+      setPhase("Saving…");
+      const id = isLocked ? post.id : await save(false, true);
+      const r = await postToSite({ postId: id, order: carouselOrder(svgs, videos), caption, title, titleShort, playerIds, uid: user?.uid, onPhase: setPhase });
+      setSite({ ...r, title, titleShort });
+      setSiteForm(null);
+      setMsg(site ? "Updated on the site." : `On the site: we-draft.com/news/${r.slug}`);
+      onSaved();
+    } catch (e) {
+      setMsg(`Couldn't put it on the site: ${e.message}`);
     } finally {
       setBusy(false);
       setPhase("");
@@ -328,12 +370,36 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
           <button onClick={() => setWhen(toLocalInput(nextHour()))} disabled={off} title="Post these slides to @wedraftsite at a time you pick"
             style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Schedule…</button>
         )}
+        {!saveOnly && (
+          <button onClick={() => (siteForm ? setSiteForm(null) : openSiteForm())} disabled={busy || !svgs.length || !!hold} title={site ? "Update the article this post made on the site" : "Make an article on the site from this post: the slides as a gallery, the caption as its text"}
+            style={{ ...btn(false), padding: "5px 14px", opacity: busy || !svgs.length || hold ? 0.5 : 1 }}>{site ? "Update on site" : "Post to site"}</button>
+        )}
+        {site?.slug && !saveOnly && <a href={`/news/${site.slug}`} target="_blank" rel="noopener noreferrer" style={{ ...linkBtn, fontSize: "11px" }}>View on site ↗</a>}
         {sendToX && !saveOnly && (
           <button onClick={xDraft} disabled={off} title="Start an X draft from this post: its first slides and caption, with its own text and time" style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Send to X…</button>
         )}
         {busy && <span style={{ fontSize: "11px", fontWeight: 800, color: BLUE }}>{phase || "Saving…"}</span>}
         {hold && !busy && <span style={{ fontSize: "11px", fontWeight: 800, color: "#b7791f" }}>{hold}</span>}
       </div>
+      {siteForm && !saveOnly && (
+        <div style={{ marginTop: "8px", padding: "8px", border: "1px solid #d5dce6", borderRadius: "6px", background: "#fff", display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div>
+            <div style={label}>Title</div>
+            <input value={siteForm.title} onChange={(e) => setSiteForm((f) => ({ ...f, title: e.target.value }))} style={field} placeholder="The article's headline" />
+          </div>
+          <div>
+            <div style={label}>Short title</div>
+            <input value={siteForm.titleShort} onChange={(e) => setSiteForm((f) => ({ ...f, titleShort: e.target.value }))} style={field} placeholder="For cards and the link" />
+          </div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", wordBreak: "break-all" }}>
+            we-draft.com/news/{site?.slug || siteSlug(siteForm.titleShort, new Date())}{site?.slug ? " (stays the same)" : ""}
+          </div>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <button onClick={toSite} disabled={busy || !siteForm.title.trim() || !siteForm.titleShort.trim()} style={{ ...btn(true), padding: "5px 14px", opacity: busy || !siteForm.title.trim() || !siteForm.titleShort.trim() ? 0.5 : 1 }}>{site ? "Update on site" : "Post to site"}</button>
+            <button onClick={() => setSiteForm(null)} disabled={busy} style={linkBtn}>Never mind</button>
+          </div>
+        </div>
+      )}
       {when && !isLocked && (
         <div style={{ display: "flex", gap: "6px", marginTop: "6px", alignItems: "center", flexWrap: "wrap" }}>
           <WhenPicker value={when} onChange={setWhen} />
@@ -1173,12 +1239,21 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   const urls = useSvgUrls(svgs);
   const base = player ? `wedraft-spotlight-${fileName(`${player.First}-${player.Last}`)}` : "";
 
-  // A saved clip's preview: a short-lived link from the server (a new upload plays from the file itself).
+  // A saved clip's preview: a short-lived link from the server (a new upload
+  // plays from the file itself). The link lasts an hour; a preview that won't
+  // load (it's expired) asks for a new one, once a minute at most.
+  const previewLink = (path) => igApi("video-url", { path })
+    .then((r) => setVideoUrls((u) => ({ ...u, [path]: r.url })))
+    .catch((e) => setMsg(`Couldn't load a video's preview: ${e.message}`));
   useEffect(() => {
-    videos.filter((v) => !videoUrls[v.path]).forEach((v) => igApi("video-url", { path: v.path })
-      .then((r) => setVideoUrls((u) => ({ ...u, [v.path]: r.url })))
-      .catch((e) => setMsg(`Couldn't load a video's preview: ${e.message}`)));
+    videos.filter((v) => !videoUrls[v.path]).forEach((v) => previewLink(v.path));
   }, [videos]); // eslint-disable-line react-hooks/exhaustive-deps
+  const relinkedAt = useRef({});
+  const relink = (path) => {
+    if (String(videoUrls[path] || "").startsWith("blob:") || Date.now() - (relinkedAt.current[path] || 0) < 60e3) return;
+    relinkedAt.current[path] = Date.now();
+    previewLink(path);
+  };
   const videoUrlsRef = useRef(videoUrls);
   videoUrlsRef.current = videoUrls;
   useEffect(() => () => Object.values(videoUrlsRef.current).forEach((u) => u.startsWith("blob:") && URL.revokeObjectURL(u)), []);
@@ -1346,7 +1421,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
               return (
                 <div key={t.video.path} style={{ border: "1px solid #d5dce6", borderRadius: "8px", background: "#fff", overflow: "hidden" }}>
                   {videoUrls[t.video.path]
-                    ? <video src={videoUrls[t.video.path]} controls muted playsInline preload="metadata" style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, objectFit: "cover", background: "#000" }} />
+                    ? <video src={videoUrls[t.video.path]} onError={() => relink(t.video.path)} controls muted playsInline preload="metadata" style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, objectFit: "cover", background: "#000" }} />
                     : <div style={{ aspectRatio: `${IG_W} / ${IG_H}`, background: "#0b1426" }} />}
                   <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{n + 1} · Video · {t.video.name}</div>
                 </div>

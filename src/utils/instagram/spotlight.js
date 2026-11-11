@@ -1004,21 +1004,24 @@ export function spotlightSlides(input, env) {
   return out;
 }
 
+// The caption: the headline, then (a blank line either side) the spot for
+// the bio the admin writes, then the grade block, the link, the hashtags.
 export function spotlightCaption(input) {
   const name = `${input.first} ${input.last}`.trim();
   const tag = (s) => String(s || "").replace(/[^A-Za-z0-9]/g, "");
   const g = input.report?.grade;
-  const lines = [
-    `Player Spotlight: ${name}, ${[input.pos, input.school].filter(Boolean).join(", ")}${input.year ? ` (${input.year} class)` : ""}.`,
-    [input.height, input.weight && `${input.weight} lbs`].filter(Boolean).join(", "),
-    g?.avg != null ? `Community grade: ${g.label}.` : "",
-    input.report?.strengths?.length ? `Top strengths: ${input.report.strengths.slice(0, 3).map((s) => s.term).join(", ")}.` : "",
-    "",
+  const traits = (list) => (list || []).slice(0, 3).map((t) => t.term).join(", ");
+  const grade = [
+    g?.avg != null ? `We-Draft.com Community Grade: ${g.label}.` : "",
+    input.report?.strengths?.length ? `Top strengths: ${traits(input.report.strengths)}.` : "",
+    input.report?.weaknesses?.length ? `Top weaknesses: ${traits(input.report.weaknesses)}.` : "",
+  ].filter(Boolean).join("\n");
+  return [
+    `Today's Player Spotlight: ${name}, ${[input.pos, input.school].filter(Boolean).join(", ")}`,
+    grade,
     `Grade him yourself: ${input.address.toLowerCase()}`,
-    "",
     ["#NFLDraft", "#CollegeFootball", input.year && `#${input.year}NFLDraft`, input.school && `#${tag(input.school)}`, `#${tag(input.first)}${tag(input.last)}`].filter(Boolean).join(" "),
-  ];
-  return lines.filter((l, i) => l || (i > 0 && lines[i - 1])).join("\n").replace(/\n{3,}/g, "\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 // Every image the post draws.
