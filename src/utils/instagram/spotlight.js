@@ -1,6 +1,6 @@
 // src/utils/instagram/spotlight.js
 //
-// Player Spotlight: a three-slide Instagram post (1080×1350), drawn like
+// Player Spotlight: a three- or four-slide Instagram post (1080×1350), drawn like
 // posts.js — plain data in, SVG out — so a server can draw it too.
 //   1. The cover: the player over his action shot (backdrop taken out — see
 //      knockout.js) under a spotlight — light beams, his last name huge and
@@ -9,16 +9,19 @@
 //      "spotlight", a stage light: a hard-edged cone of his school's color
 //      from above the frame onto a pool of light at his feet, black
 //      everywhere it doesn't reach. His name,
-//      then school, position, height and weight. A prospect in a class past
-//      the next draft (2028, 2029 — the caller says: advance) carries an
-//      ADVANCE SCOUTING badge with his class, like a baseball card's rookie
-//      logo.
+//      then school, position, height and weight. Top right, his class's
+//      logo like a baseball card's rookie logo (input.classLogo: the NFL Draft
+//      shield for the next draft, ADVANCE SCOUTING for 2028 and 2029; a class
+//      with no logo falls back to the drawn ADVANCE SCOUTING badge).
 //   2. The scouting report, as his player page shows it (PlayerProfile.js's
 //      Community Scouting Report), turned into the back of the card: community
 //      grade with its scale, class ranks (input.showRanks, on by default), top
 //      strengths and weaknesses, NFL fits (input.showFits, off by default) and
 //      measurements.
-//   3. Your turn: an ad to grade him yourself on We-Draft.com, and the rest
+//   3. The stats (when ESPN has them for him): the newest season as the big
+//      part, with national ranks when they're high; under it a running back's
+//      career rushing totals, anyone else's season-by-season table (espnStats).
+//   4. Your turn: an ad to grade him yourself on We-Draft.com, and the rest
 //      of the site (big boards, mock drafts, the Draft Sim).
 // spotlightFrame: not a slide — a transparent frame to edit his highlight
 // clip under, so the video matches the carousel.
@@ -131,7 +134,7 @@ export function scoutingReport({ player, evaluations = [], classSnap = null, nfl
 // bars (show the trait bars — 5+ evaluations), fits: [{ name, logo }] };
 // advance: his class is past the next draft; showRanks / showFits: the
 // report's class rank and NFL fits.
-export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false }) {
+export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "" }) {
   return {
     first: player?.First || "", last: player?.Last || "", pos: player?.Position || "", school: player?.School || "", year: String(player?.Eligible || ""),
     height: heightText(player?.Height), weight: player?.Weight ? String(player.Weight) : "",
@@ -140,13 +143,19 @@ export function spotlightInput({ player, school = {}, photo = null, headshot = "
     // On his school's color its dark logo; on the white report its own.
     logoDark: school.LogoDark || school.Logo1 || "", logo: school.Logo1 || school.LogoDark || "",
     photo: photo?.url || "", focus: photo?.orientation === "left" ? "right" : photo?.orientation === "right" ? "left" : "center",
-    headshot, report, advance: !!advance, brandLogo,
+    headshot, report, advance: !!advance, brandLogo, badgeLogo,
+    // His class's logo for the cover's top right (the NFL Draft shield for the
+    // next draft, ADVANCE SCOUTING for later classes) — the caller picks it.
+    classLogo,
     // The cover's look ("wash" | "spotlight") and the accent (frame, bars,
     // glow, ring) — the school's second color unless the admin picks one.
     look: look === "spotlight" ? "spotlight" : "wash", accent: hex(accent) || "",
     // The ADVANCE SCOUTING badge's design: "crest" | "plate".
     badge: badge === "plate" ? "plate" : "crest",
     showRanks: showRanks !== false, showFits: !!showFits,
+    // His college stats (espnStats) — their own slide after the report when
+    // he has them and showStats isn't off.
+    stats: showStats !== false && (stats?.hero || stats?.table || stats?.career) ? stats : null,
     // Highlight videos follow the cover (the cover's swipe line says so).
     highlights: !!highlights,
     address: address || (player?.Slug ? `WE-DRAFT.COM/PLAYER/${player.Slug}` : "WE-DRAFT.COM"),
@@ -225,7 +234,7 @@ function coverSvg(env, input, total) {
       + '<radialGradient id="spot" cx="0.5" cy="0" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="0.3"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>'
     : `<linearGradient id="base" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${shade(bg, 1.08)}"/><stop offset="0.5" stop-color="${shade(bg, 0.72)}"/><stop offset="0.78" stop-color="${deep}"/><stop offset="1" stop-color="${deep}"/></linearGradient>`
       + '<radialGradient id="spot" cx="0.5" cy="0.32" r="0.5"><stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/><stop offset="0.55" stop-color="#ffffff" stop-opacity="0.08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>')
-    + `<radialGradient id="rim" cx="0.5" cy="0.62" r="0.5"><stop offset="0" stop-color="${c2}" stop-opacity="0.28"/><stop offset="1" stop-color="${c2}" stop-opacity="0"/></radialGradient>`
+    + `<radialGradient id="rim" cx="0.5" cy="0.62" r="0.5"><stop offset="0" stop-color="${c2}" stop-opacity="0.22"/><stop offset="1" stop-color="${c2}" stop-opacity="0"/></radialGradient>`
     + '<radialGradient id="vignette" cx="0.5" cy="0.42" r="0.78"><stop offset="0.55" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.62"/></radialGradient>'
     // The top corners, darker still.
     + '<radialGradient id="cornerL" cx="0" cy="0" r="1"><stop offset="0" stop-color="#000000" stop-opacity="0.78"/><stop offset="0.55" stop-color="#000000" stop-opacity="0.3"/><stop offset="1" stop-color="#000000" stop-opacity="0"/></radialGradient>'
@@ -297,12 +306,13 @@ function coverSvg(env, input, total) {
   body += text(PAD - 4, lastBase, last, lastS, ink, { spacing: 2 });
   body += fitLine(env, PAD, lastBase - lastS * 0.78 - 14, up(input.first), 86, W2, ink, { spacing: 3 }).svg;
 
-  // PLAYER SPOTLIGHT, top left; the advance badge top right.
+  // PLAYER SPOTLIGHT, top left; his class's logo top right (the drawn
+  // ADVANCE SCOUTING badge when there's no logo for his class).
   const k = "PLAYER SPOTLIGHT";
   const kw = widthOf(env, k, 36, 3) + 48;
   body += `<rect x="${PAD}" y="58" width="${r1(kw)}" height="62" rx="31" fill="${GOLD}"/>` + text(PAD + 24, 58 + 31 + 13, k, 36, NAVY, { spacing: 3 });
-  if (input.year && !input.advance) body += text(PAD + 4, 168, `${input.year} NFL DRAFT PROSPECT`, 34, ink, { spacing: 2, opacity: 0.85 });
-  if (input.advance && input.year) body += advanceBadge(W - PAD - 110, input.badge === "plate" ? 150 : 172, input.year, input.badge === "plate" ? 0.92 : 0.95, input.badge);
+  if (hasImage(env, input.classLogo)) body += `<g filter="url(#badgeShadow)">${image(env, input.classLogo, W - PAD - 189, 34, 195, 195)}</g>`;
+  else if (input.advance && input.year) body += advanceBadge(W - PAD - 110, input.badge === "plate" ? 150 : 172, input.year, input.badge === "plate" ? 0.92 : 0.95, input.badge);
 
   // The card's frame, in the school's second color.
   body += `<rect x="22" y="22" width="${W - 44}" height="${bottom - 44}" rx="30" fill="none" stroke="${c2}" stroke-width="6" stroke-opacity="0.9"/>`;
@@ -329,15 +339,20 @@ function panel(x, y, w, h, c2) {
 }
 const kicker = (x, y, label, opts = {}) => text(x, y, label, 28, opts.fill || SOFT, { spacing: 4, anchor: opts.anchor });
 
-// A trait list: a bulleted row a trait, a glowing bar under it (5+ evaluations).
-function traitList(env, x, y, w, items, bar, color, rowH) {
+// The up / down arrows strengths and weaknesses are marked with (w wide,
+// centered on cy).
+const arrowUp = (x, cy, w = 22) => `M ${r1(x)} ${r1(cy + w * 0.4)} L ${r1(x + w / 2)} ${r1(cy - w * 0.4)} L ${r1(x + w)} ${r1(cy + w * 0.4)} Z`;
+const arrowDown = (x, cy, w = 22) => `M ${r1(x)} ${r1(cy - w * 0.4)} L ${r1(x + w)} ${r1(cy - w * 0.4)} L ${r1(x + w / 2)} ${r1(cy + w * 0.4)} Z`;
+
+// A trait list: a row a trait behind its arrow, a glowing bar under it (5+ evaluations).
+function traitList(env, x, y, w, items, bar, color, rowH, arrow) {
   if (!items.length) return text(x, y + 44, "NONE YET", 30, SOFT, { spacing: 1 });
   return items.map((t, i) => {
     const ty = y + i * rowH;
     const pct = Math.max(6, Math.min(100, Math.pow((t.pct || 0) / 100, 0.3) * 100));
     // With bars, the term sits on its bar at the row's foot (the bars part the rows).
     const mid = ty + (bar ? rowH - 33 : rowH / 2 + 2);
-    return `<circle cx="${r1(x + 8)}" cy="${r1(mid)}" r="8" fill="${color}"/>`
+    return `<path d="${arrow(x, mid, 18)}" fill="${color}"/>`
       + fitLine(env, x + 30, mid + 13, up(t.term), 36, w - 30, "#ffffff", { spacing: 1, min: 18 }).svg
       + (bar ? `<rect x="${r1(x + 30)}" y="${r1(ty + rowH - 13)}" width="${r1(w - 30)}" height="8" rx="4" fill="#ffffff" fill-opacity="0.1"/>`
         + `<rect x="${r1(x + 30)}" y="${r1(ty + rowH - 13)}" width="${r1(((w - 30) * pct) / 100)}" height="8" rx="4" fill="${color}" filter="url(#barGlow)"/>` : "")
@@ -434,7 +449,7 @@ function reportSvg(env, input, i, total) {
   // Still tight (NFL fits in): the fits row slims.
   if (traitFor() < 44 && rowC) rowC = 124;
   const traitH = Math.max(42, Math.min(64, traitFor()));
-  const rowB = 90 + traitRows * traitH;
+  const rowB = 94 + traitRows * traitH;
   const rowD = measH(meas.length);
   let y = roomTop + Math.max(0, (room - (labelH + rowA + rowB + rowC + rowD + gaps())) / 2);
 
@@ -482,12 +497,13 @@ function reportSvg(env, input, i, total) {
   y += rowA + gap;
 
   // Row B: top strengths | top weaknesses.
-  const side = (sx, label, items, color, mark) => panel(sx, y, halfW, rowB, c2)
-    + `<path d="${mark(sx + 30, y + 42)}" fill="${color}"/>`
-    + text(sx + 62, y + 54, label, 34, "#ffffff", { spacing: 3 })
-    + traitList(env, sx + 30, y + 74, halfW - 60, items, r.bars, color, traitH);
-  body += side(x0, "TOP STRENGTHS", strengths, GREEN, (mx, my) => `M ${mx} ${my + 9} L ${mx + 11} ${my - 9} L ${mx + 22} ${my + 9} Z`)
-    + side(x0 + halfW + gap, "TOP WEAKNESSES", weaknesses, RED, (mx, my) => `M ${mx} ${my - 9} L ${mx + 22} ${my - 9} L ${mx + 11} ${my + 9} Z`);
+  // Each column's header bigger than its traits, in its color, so it reads as the label.
+  const side = (sx, label, items, color, arrow) => panel(sx, y, halfW, rowB, c2)
+    + `<path d="${arrow(sx + 30, y + 42, 28)}" fill="${color}"/>`
+    + fitLine(env, sx + 70, y + 58, label, 46, halfW - 100, color, { spacing: 3, min: 28 }).svg
+    + traitList(env, sx + 30, y + 78, halfW - 60, items, r.bars, color, traitH, arrow);
+  body += side(x0, "TOP STRENGTHS", strengths, GREEN, arrowUp)
+    + side(x0 + halfW + gap, "TOP WEAKNESSES", weaknesses, RED, arrowDown);
   y += rowB + gap;
 
   // Row C: NFL fits, the logos on light discs.
@@ -527,7 +543,299 @@ function reportSvg(env, input, i, total) {
   return svgDoc(env, defs, body, "#05070b");
 }
 
-// ── Slide 3: your turn ──
+// ── Slide 3: the stats ──
+// His college numbers from ESPN's career endpoint (the player page's Stats
+// tab, PlayerEspnStats.js), cut down for a slide. The newest season is the
+// slide: big numbers in a 2×2, each with his national (FBS) rank when it's
+// in the top RANK_SHOWN (cfbdPlayers.seasonRanks — scripts/syncCfbdPlayerStats.js).
+// Under it, smaller: a running back's career rushing totals, anyone else's
+// season-by-season table for his position with a career row.
+// STAT_PLAN: the ESPN category and its table columns; HERO: the newest
+// season's big numbers [category, ESPN label]; RANK_KEY: where that number's
+// rank lives in seasonRanks ([category, statType]).
+const STAT_PLAN = {
+  qb: ["passing", ["CMP", "ATT", "CMP%", "YDS", "TD", "INT", "RTG"]],
+  rb: ["rushing", ["CAR", "YDS", "AVG", "TD", "LNG"]],
+  rec: ["receiving", ["REC", "YDS", "AVG", "TD", "LNG"]],
+  k: ["kicking", ["FGM", "FGA", "FG%", "LNG", "XP", "PTS"]],
+  p: ["punting", null],
+  def: ["defensive", ["TOT", "SOLO", "SACK", "PD", "INT", "FF"]],
+};
+const HERO = {
+  qb: [["passing", "YDS"], ["passing", "TD"], ["passing", "INT"], ["passing", "CMP%"]],
+  rb: [["rushing", "YDS"], ["rushing", "TD"], ["rushing", "AVG"], ["rushing", "CAR"]],
+  rec: [["receiving", "YDS"], ["receiving", "REC"], ["receiving", "TD"], ["receiving", "AVG"]],
+  k: [["kicking", "FGM"], ["kicking", "FG%"], ["kicking", "LNG"], ["kicking", "PTS"]],
+  p: [],
+  def: [["defensive", "TOT"], ["defensive", "SACK"], ["defensive", "INT"], ["defensive", "PD"]],
+};
+const RANK_KEY = {
+  "passing:YDS": ["passing", "YDS"], "passing:TD": ["passing", "TD"],
+  "rushing:YDS": ["rushing", "YDS"], "rushing:TD": ["rushing", "TD"],
+  "receiving:REC": ["receiving", "REC"], "receiving:YDS": ["receiving", "YDS"], "receiving:TD": ["receiving", "TD"],
+  "defensive:TOT": ["defensive", "TOT"], "defensive:SACK": ["defensive", "SACKS"], "defensive:PD": ["defensive", "PD"], "defensive:INT": ["interceptions", "INT"],
+  "kicking:FGM": ["kicking", "FGM"], "kicking:LNG": ["kicking", "LONG"], "kicking:PTS": ["kicking", "PTS"],
+};
+// A rank shows when it's this high or better.
+export const RANK_SHOWN = 25;
+// What a big number is called on the slide ("category:label", then label).
+const HERO_LABEL = {
+  "rushing:AVG": "YARDS / CARRY", "receiving:AVG": "YARDS / CATCH", "passing:YDS": "PASSING YARDS", "rushing:YDS": "RUSHING YARDS", "receiving:YDS": "RECEIVING YARDS",
+  TD: "TOUCHDOWNS", INT: "INTERCEPTIONS", "CMP%": "COMPLETION %", CAR: "CARRIES", REC: "RECEPTIONS", FGM: "FIELD GOALS", "FG%": "FG %", LNG: "LONG", PTS: "POINTS", TOT: "TACKLES", SACK: "SACKS", PD: "PASSES DEFENDED",
+};
+const CAREER_LABEL = { CAR: "CARRIES", YDS: "YARDS", AVG: "YDS / CARRY", TD: "TOUCHDOWNS", LNG: "LONG" };
+const TITLES = { passing: "PASSING", rushing: "RUSHING", receiving: "RECEIVING", kicking: "KICKING", punting: "PUNTING", defensive: "DEFENSE" };
+const MAX_SEASONS = 4;
+
+export function statGroupOf(pos) {
+  const p = String(pos || "").toUpperCase();
+  if (p === "QB") return "qb";
+  if (p === "RB" || p === "FB") return "rb";
+  if (p === "WR" || p === "TE") return "rec";
+  if (p === "K" || p === "PK") return "k";
+  if (p === "P") return "p";
+  if (["OL", "OT", "OG", "C", "IOL", "LS"].includes(p)) return "";
+  return "def";
+}
+
+// "6" / "T-12" → 6 / 12.
+const rankNum = (r) => Number(String(r || "").replace(/^T-/, "")) || 0;
+
+// ESPN's career stats json + his position (+ his cfbdPlayers.seasonRanks) →
+// { hero: { year, team, tiles: [{ label, value, rank }] },
+//   table: { title, cols, rows: [{ year, team, vals }], career } (not for RBs),
+//   career: { title, seasons, tiles: [{ label, value }] } (RBs) },
+// or null when there's nothing to show (no stats, an O-lineman).
+export function espnStats(json, pos, seasonRanks = null) {
+  const group = statGroupOf(pos);
+  if (!group || !json?.categories?.length) return null;
+  const teams = json.teams || {};
+  const teamOf = (s) => {
+    const t = teams[s.teamSlug] || Object.values(teams).find((x) => String(x.id) === String(s.teamId));
+    return t?.abbreviation || "";
+  };
+  const cats = Object.fromEntries(json.categories.filter((c) => c.statistics?.length).map((c) => [c.name, c]));
+  const pick = (c, label) => (c.labels || []).findIndex((l) => String(l).trim() === label);
+  const [name, want] = STAT_PLAN[group];
+  const c = cats[name];
+  if (!c) return null;
+  const labels = (c.labels || []).map((l) => String(l).trim());
+  const idx = want ? want.map((l) => pick(c, l)).filter((i) => i >= 0) : labels.map((_, i) => i).slice(0, 6);
+  if (!idx.length) return null;
+  const all = [...c.statistics].filter((s) => s.season?.year).sort((a, b) => a.season.year - b.season.year);
+
+  // The newest season, with its ranks.
+  const newest = Math.max(...all.map((s) => Number(s.season.year)));
+  const ranks = seasonRanks?.[String(newest)] || {};
+  let team = "";
+  const tiles = HERO[group].map(([cat, label]) => {
+    const cc = cats[cat];
+    const s = cc?.statistics.find((x) => Number(x.season?.year) === newest);
+    const i = cc ? pick(cc, label) : -1;
+    if (!s || i < 0 || s.stats?.[i] == null || s.stats[i] === "") return null;
+    team = team || teamOf(s);
+    const rk = RANK_KEY[`${cat}:${label}`];
+    const r = rk ? ranks[rk[0]]?.[rk[1]] : "";
+    return { label: HERO_LABEL[`${cat}:${label}`] || HERO_LABEL[label] || label, value: String(s.stats[i]), rank: r && rankNum(r) <= RANK_SHOWN ? String(r) : "" };
+  }).filter(Boolean);
+  const out = { hero: tiles.length ? { year: String(newest), team, tiles } : null };
+
+  if (group === "rb") {
+    // Running backs: just the career rushing totals.
+    if (c.totals) {
+      out.career = {
+        title: "CAREER RUSHING", seasons: all.length,
+        tiles: ["CAR", "YDS", "AVG", "TD"].map((l) => [l, pick(c, l)]).filter(([, i]) => i >= 0).map(([l, i]) => ({ label: CAREER_LABEL[l] || l, value: String(c.totals[i] ?? "") })),
+      };
+    }
+  } else {
+    out.table = {
+      title: TITLES[name] || up(c.displayName || name), cols: idx.map((i) => labels[i]),
+      rows: all.slice(-MAX_SEASONS).map((s) => ({ year: String(s.season.year), team: teamOf(s), vals: idx.map((i) => String(s.stats?.[i] ?? "")) })),
+      career: all.length > 1 && c.totals ? idx.map((i) => String(c.totals[i] ?? "")) : null,
+    };
+  }
+  return out.hero || out.table || out.career ? out : null;
+}
+
+// A national rank as its own badge: a gold-framed navy card, NATIONAL RANK
+// across its gold header, the rank big in the middle, IN FBS under it.
+function rankBadge(env, x, y, w, h, rank) {
+  const head = Math.round(Math.min(64, h * 0.22));
+  const body = h - head;
+  const big = `#${rank}`;
+  return `<rect x="${r1(x)}" y="${r1(y + 8)}" width="${r1(w)}" height="${r1(h)}" rx="22" fill="#000000" fill-opacity="0.4"/>`
+    + `<rect x="${r1(x)}" y="${r1(y)}" width="${r1(w)}" height="${r1(h)}" rx="22" fill="${GOLD}"/>`
+    + `<rect x="${r1(x + 7)}" y="${r1(y + head)}" width="${r1(w - 14)}" height="${r1(body - 7)}" rx="16" fill="${NAVY}"/>`
+    + fitLine(env, x + w / 2, y + head / 2 + head * 0.22, "NATIONAL RANK", Math.round(head * 0.56), w - 30, NAVY, { anchor: "middle", spacing: 3, min: 16 }).svg
+    + fitLine(env, x + w / 2, y + head + body * 0.62, big, Math.round(body * 0.6), w - 44, "#ffffff", { anchor: "middle", spacing: 1, min: 40 }).svg
+    + text(x + w / 2, y + head + body * 0.86, "IN FBS", Math.round(Math.min(34, body * 0.13)), GOLD, { anchor: "middle", spacing: 4 });
+}
+
+function statsSvg(env, input, i, total) {
+  const st = input.stats;
+  const bg = hex(input.color) || NAVY;
+  const c2 = hex(input.accent) || hex(input.color2) || GOLD;
+  const bottom = H - FOOTER_H;
+  const top = shade(bg, 0.62);
+  const ink = textOn(top, c2);
+  const defs = `<linearGradient id="sbase" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="0.3" stop-color="${shade(bg, 0.3)}"/><stop offset="0.7" stop-color="#07090e"/><stop offset="1" stop-color="#05070b"/></linearGradient>`
+    + '<radialGradient id="svig" cx="0.5" cy="0.4" r="0.8"><stop offset="0.6" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.55"/></radialGradient>'
+    + `<radialGradient id="shalo" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="${c2}" stop-opacity="0.22"/><stop offset="1" stop-color="${c2}" stop-opacity="0"/></radialGradient>`
+    + `<clipPath id="scard"><rect width="${W}" height="${bottom}"/></clipPath>`;
+  const stripes = [0, 1, 2, 3, 4].map((j) => `<rect x="${640 + j * 74}" y="-60" width="${30 - j * 4}" height="520" fill="${c2}" fill-opacity="${r1(0.12 - j * 0.02)}" transform="skewX(-28)"/>`).join("");
+  let body = `<g clip-path="url(#scard)"><rect width="${W}" height="${bottom}" fill="url(#sbase)"/>${stripes}`
+    + image(env, input.logoDark, W - 470, -50, 520, 420, "xMidYMid meet", 0.12)
+    + `<rect width="${W}" height="${bottom}" fill="url(#svig)"/></g>`;
+
+  // The header: BY THE NUMBERS, his name, position · school; his headshot
+  // top right in a ring.
+  const W2 = W - PAD * 2;
+  const shot = hasImage(env, input.headshot);
+  const fr = shot ? 124 : 0;
+  const nameW = W2 - (shot ? fr * 2 + 30 : 0);
+  if (shot) {
+    const fx = W - PAD - fr + 6;
+    const fy = 186;
+    body += `<circle cx="${fx}" cy="${fy + 8}" r="${fr}" fill="#000000" fill-opacity="0.35"/>`
+      + `<circle cx="${fx}" cy="${fy}" r="${fr}" fill="${shade(bg, 0.45)}"/>`
+      + `<clipPath id="sface"><circle cx="${fx}" cy="${fy}" r="${fr}"/></clipPath>`
+      + `<g clip-path="url(#sface)">${image(env, input.headshot, fx - fr * 1.6, fy + fr - fr * 2.35, fr * 3.2, fr * 2.35, "xMidYMax meet")}</g>`
+      + `<circle cx="${fx}" cy="${fy}" r="${fr}" fill="none" stroke="${c2}" stroke-width="8"/>`
+      + `<circle cx="${fx}" cy="${fy}" r="${fr + 10}" fill="none" stroke="#ffffff" stroke-opacity="0.3" stroke-width="2"/>`;
+  }
+  const k = "BY THE NUMBERS";
+  const kw = widthOf(env, k, 32, 3) + 44;
+  body += `<rect x="${PAD}" y="58" width="${r1(kw)}" height="54" rx="27" fill="${GOLD}"/>` + text(PAD + 22, 58 + 27 + 12, k, 32, NAVY, { spacing: 3 });
+  body += fitLine(env, PAD - 3, 232, up(`${input.first} ${input.last}`), 120, nameW, ink, { spacing: 2, min: 54 }).svg;
+  const posW = widthOf(env, up(input.pos), 36, 1) + 34;
+  body += `<rect x="${PAD}" y="254" width="${r1(posW)}" height="50" rx="25" fill="${c2}"/>`
+    + text(PAD + posW / 2, 292, up(input.pos), 36, readableOn("#ffffff", c2), { anchor: "middle", spacing: 1 })
+    + fitLine(env, PAD + posW + 16, 293, up(input.school), 40, nameW - posW - 16, ink, { spacing: 1, opacity: 0.9 }).svg;
+
+  const x0 = 46;
+  const cw = W - x0 * 2;
+  const gap = 18;
+  const roomTop = 330;
+  const roomBottom = bottom - 40;
+  // The small part first (it keeps its size); the season takes the rest.
+  const t = st.table;
+  const tRows = t ? t.rows.length + (t.career ? 1 : 0) : 0;
+  const rh = 42;
+  const tableH = t ? 102 + tRows * rh : 0;
+  const careerH = st.career ? 186 : 0;
+  const lowH = tableH || careerH;
+  const heroH = st.hero ? Math.min(640, roomBottom - roomTop - (lowH ? lowH + gap : 0)) : 0;
+  let y = roomTop + Math.max(0, (roomBottom - roomTop - heroH - (lowH ? lowH + (heroH ? gap : 0) : 0)) / 2);
+
+  // The newest season: the slide's main event. A slanted SEASON tag, then his
+  // lead number huge on the page (its rank on a gold medallion beside it), then
+  // the other numbers on cards in a row.
+  if (st.hero) {
+    const h = heroH;
+    const [lead, ...rest] = st.hero.tiles;
+    const tag = `${st.hero.year} SEASON`;
+    const tagW = widthOf(env, tag, 38, 3) + 56;
+    const tagH = 58;
+    // skewX shears about the origin: shift it back under its own box.
+    const shift = r1((y + tagH / 2) * Math.tan((12 * Math.PI) / 180));
+    body += `<g transform="translate(${shift} 0)"><rect x="${x0}" y="${r1(y)}" width="${r1(tagW)}" height="${tagH}" fill="${c2}" transform="skewX(-12)"/></g>`
+      + text(x0 + 28, y + tagH / 2 + 14, tag, 38, readableOn("#ffffff", c2), { spacing: 3 })
+      + (st.hero.team ? text(x0 + tagW + 22, y + tagH / 2 + 13, st.hero.team, 34, SOFT, { spacing: 3 }) : "");
+
+    const restH = rest.length ? Math.round(Math.min(220, h * 0.36)) : 0;
+    const leadTop = y + tagH + 14;
+    const leadH = h - tagH - 14 - (restH ? restH + gap : 0);
+    // The lead: an accent rule down its left, the number and its label; its
+    // national rank, when it's high, on its own badge to the right — the
+    // row's full height, so the two sit even.
+    const badgeH = lead.rank ? Math.min(320, leadH - 12) : 0;
+    const badgeW = badgeH ? Math.round(Math.min(300, badgeH * 0.95)) : 0;
+    const numW = cw - 60 - (badgeW ? badgeW + 36 : 0);
+    // The gap under the number clears a comma's tail.
+    const numSize = Math.max(90, Math.min(260, (leadH - 44 - 24) / 0.92));
+    const gapL = Math.max(16, numSize * 0.14);
+    const base = leadTop + (leadH - (numSize * 0.78 + gapL + 44)) / 2 + numSize * 0.78;
+    body += `<ellipse cx="${r1(x0 + 260)}" cy="${r1(leadTop + leadH / 2)}" rx="380" ry="${r1(leadH * 0.6)}" fill="url(#shalo)"/>`
+      + `<rect x="${x0 + 2}" y="${r1(leadTop + 18)}" width="10" height="${r1(leadH - 36)}" rx="5" fill="${c2}"/>`
+      + fitLine(env, x0 + 40, base, lead.value, numSize, numW, "#ffffff", { spacing: 2, min: 70 }).svg
+      + fitLine(env, x0 + 44, base + gapL + 38, lead.label, 44, numW, "#ffffff", { spacing: 3, opacity: 0.92, min: 22 }).svg;
+    if (badgeW) body += rankBadge(env, x0 + cw - badgeW, leadTop + (leadH - badgeH) / 2, badgeW, badgeH, lead.rank);
+
+    // The rest: a card each.
+    if (restH) {
+      const ry = leadTop + leadH + gap;
+      const n = rest.length;
+      const tw = (cw - gap * (n - 1)) / n;
+      const anyRank = rest.some((tl) => tl.rank);
+      rest.forEach((tl, j) => {
+        const tx = x0 + j * (tw + gap);
+        const cx = tx + tw / 2;
+        const below = 12 + 28 + (anyRank ? 14 + 40 : 0);
+        const vs = Math.max(56, Math.min(110, (restH - below - 40) / 0.78));
+        const vb = ry + (restH - (vs * 0.78 + below)) / 2 + vs * 0.78;
+        body += panel(tx, ry, tw, restH, c2)
+          + fitLine(env, cx, vb, tl.value, vs, tw - 30, "#ffffff", { anchor: "middle", spacing: 1, min: 40 }).svg
+          + fitLine(env, cx, vb + 12 + 26, tl.label, 28, tw - 24, SOFT, { anchor: "middle", spacing: 2, min: 14 }).svg;
+        if (tl.rank) {
+          const rt = `#${tl.rank} IN FBS`;
+          const rw = Math.min(tw - 24, widthOf(env, rt, 26, 2) + 30);
+          const py = vb + 12 + 28 + 14;
+          body += `<rect x="${r1(cx - rw / 2)}" y="${r1(py)}" width="${r1(rw)}" height="40" rx="20" fill="${GOLD}"/>`
+            + fitLine(env, cx, py + 29, rt, 26, rw - 20, NAVY, { anchor: "middle", spacing: 2, min: 14 }).svg;
+        }
+      });
+    }
+    y += h + gap;
+  }
+
+  // Under it, smaller. A running back: his career rushing totals in a row.
+  if (st.career) {
+    const h = careerH;
+    const ct = st.career;
+    body += panel(x0, y, cw, h, c2) + kicker(x0 + 30, y + 50, `${ct.title}${ct.seasons > 1 ? `${DOT}${ct.seasons} SEASONS` : ""}`);
+    const colW = (cw - 60) / ct.tiles.length;
+    ct.tiles.forEach((tl, j) => {
+      const cx = x0 + 30 + j * colW + colW / 2;
+      if (j) body += `<rect x="${r1(x0 + 30 + j * colW - 1)}" y="${y + 74}" width="2" height="${h - 98}" fill="#ffffff" fill-opacity="0.1"/>`;
+      body += fitLine(env, cx, y + 136, tl.value, 72, colW - 24, "#ffffff", { anchor: "middle", spacing: 1, min: 30 }).svg
+        + fitLine(env, cx, y + 166, tl.label, 24, colW - 16, SOFT, { anchor: "middle", spacing: 2, min: 14 }).svg;
+    });
+  }
+  // Anyone else: the season-by-season table, a career row at its foot.
+  if (t) {
+    const h = tableH;
+    const hy = y + 82;
+    body += panel(x0, y, cw, h, c2) + text(x0 + 30, y + 46, t.title, 32, "#ffffff", { spacing: 3 });
+    const yearX = x0 + 30;
+    const teamX = x0 + 140;
+    const statL = x0 + 270;
+    const colW = (x0 + cw - 30 - statL) / t.cols.length;
+    const colR = (j) => statL + (j + 1) * colW;
+    const fs = 28;
+    body += text(yearX, hy, "YEAR", 22, SOFT, { spacing: 2 }) + text(teamX, hy, "TEAM", 22, SOFT, { spacing: 2 })
+      + t.cols.map((c, j) => text(colR(j), hy, up(c), 22, SOFT, { anchor: "end", spacing: 1.5 })).join("")
+      + `<rect x="${x0 + 30}" y="${hy + 10}" width="${cw - 60}" height="2" fill="#ffffff" fill-opacity="0.15"/>`;
+    const rowTop = hy + 14;
+    const line = (ry, a, b, vals) => text(yearX, ry, a, fs, "#ffffff", { spacing: 1 })
+      + fitLine(env, teamX, ry, b, fs, statL - teamX - 16, "#ffffff", { spacing: 1, opacity: 0.85, min: 16 }).svg
+      + vals.map((v, j) => fitLine(env, colR(j), ry, v, fs, colW - 10, "#ffffff", { anchor: "end", spacing: 1, min: 16 }).svg).join("");
+    t.rows.forEach((r, j) => { body += line(rowTop + j * rh + rh / 2 + fs * 0.36, r.year, r.team, r.vals); });
+    if (t.career) {
+      const cy = rowTop + t.rows.length * rh;
+      body += `<rect x="${x0 + 18}" y="${r1(cy + 3)}" width="${cw - 36}" height="${r1(rh - 6)}" rx="10" fill="${c2}" fill-opacity="0.22"/>`
+        + `<rect x="${x0 + 18}" y="${r1(cy + 3)}" width="6" height="${r1(rh - 6)}" rx="3" fill="${c2}"/>`
+        + line(cy + rh / 2 + fs * 0.36, "CAREER", "", t.career);
+    }
+  }
+
+  body += `<rect x="22" y="22" width="${W - 44}" height="${bottom - 44}" rx="30" fill="none" stroke="${c2}" stroke-width="6" stroke-opacity="0.9"/>`;
+  const more = i < total - 1;
+  body += footer(env, kit.themeOf("dark"), { logo: input.brandLogo, cta: more ? "SWIPE FOR MORE" : input.address, more });
+  return svgDoc(env, defs, body, "#05070b");
+}
+
+// ── The last slide: your turn ──
 // The ad: grade him yourself — a grade picker in the rounds' colors, what
 // else an evaluation takes — then the rest of the site, and his page's
 // address on a gold button.
@@ -613,9 +921,21 @@ function evaluateSvg(env, input, i, total) {
 // Not a slide: a 1080×1350 overlay to cut his highlight clip under in a
 // video editor, so the clip looks like the rest of the carousel. Everything
 // but the window is drawn — his school's color falling off to black, speed
-// stripes, FILM, his school's logo, his name bar, the footer — and
+// stripes, FILM and his school, the round WD badge top right, his name bar,
+// the footer ("GRADE HIM ON WE-DRAFT.COM") — and
 // the window is left clear (a PNG keeps it transparent), outlined in the
 // accent with viewfinder corners.
+// The round WD badge (input.badgeLogo), right-aligned at `right`, centered
+// on `cy`, with a soft shadow → { svg, w }.
+export function badgeMark(env, url, right, cy, size = 112) {
+  if (!hasImage(env, url)) return { svg: "", w: 0 };
+  return {
+    svg: `<circle cx="${r1(right - size / 2)}" cy="${r1(cy + 4)}" r="${r1(size / 2)}" fill="#000000" fill-opacity="0.35"/>`
+      + image(env, url, right - size, cy - size / 2, size, size),
+    w: size,
+  };
+}
+
 export const FRAME_WINDOW = { x: 36, y: 170, w: 1008, h: 860, r: 28 };
 
 export function spotlightFrame(input, env) {
@@ -636,16 +956,16 @@ export function spotlightFrame(input, env) {
   let body = `<g mask="url(#window)"><rect width="${W}" height="${H}" fill="url(#fbase)"/>${stripes}`
     + image(env, input.logoDark, W - 470, 900, 520, 420, "xMidYMid meet", 0.1) + "</g>";
 
-  // The top: FILM, his school and its logo.
+  // The top: FILM, his school, the WD badge.
   const k = "FILM";
   // The play mark, the word, room after it.
   const kw = 60 + widthOf(env, k, 40, 4) + 26;
   body += `<rect x="${PAD}" y="54" width="${r1(kw)}" height="66" rx="33" fill="${GOLD}"/>`
     + `<path d="M ${PAD + 26} 73 L ${PAD + 26} 101 L ${PAD + 48} 87 Z" fill="${NAVY}"/>`
     + text(PAD + 60, 54 + 33 + 14, k, 40, NAVY, { spacing: 4 });
-  const lg = hasImage(env, input.logoDark) ? 104 : 0;
-  body += fitLine(env, PAD + kw + 22, 102, up(input.school), 40, W - PAD - lg - 20 - (PAD + kw + 22), ink, { spacing: 2, opacity: 0.9 }).svg
-    + (lg ? image(env, input.logoDark, W - PAD - lg, 36, lg, lg) : "");
+  const brand = badgeMark(env, input.badgeLogo, W - PAD, 87);
+  body += fitLine(env, PAD + kw + 22, 102, up(input.school), 40, W - PAD - brand.w - (brand.w ? 26 : 0) - (PAD + kw + 22), ink, { spacing: 2, opacity: 0.9 }).svg
+    + brand.svg;
 
   // The window: the accent, a fine white line inside it, viewfinder corners.
   const cl = 74;
@@ -667,17 +987,21 @@ export function spotlightFrame(input, env) {
   right.forEach((t, j) => { body += text(W - PAD, 1160 + j * 46, t, 34, "#ffffff", { anchor: "end", spacing: 2, opacity: 0.85 }); });
   body += `<rect x="${PAD}" y="${bottom - 22}" width="${W - PAD * 2}" height="4" rx="2" fill="${c2}" fill-opacity="0.8"/>`;
 
-  body += footer(env, kit.themeOf("dark"), { logo: input.brandLogo, cta: "GRADE HIM AT WE-DRAFT.COM", more: false });
+  body += footer(env, kit.themeOf("dark"), { logo: input.brandLogo, cta: "GRADE HIM ON WE-DRAFT.COM", more: false });
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${defs}</defs>${body}</svg>`;
 }
 
-// The post → [{ name, svg }]: the cover, the scouting report, then the ad to evaluate him.
+// The post → [{ name, svg }]: the cover, the scouting report, his stats
+// (when he has them), then the ad to evaluate him.
 export function spotlightSlides(input, env) {
-  return [
-    { name: "cover", svg: coverSvg(env, input, 3) },
-    { name: "scouting-report", svg: reportSvg(env, input, 1, 3) },
-    { name: "evaluate", svg: evaluateSvg(env, input, 2, 3) },
+  const total = input.stats ? 4 : 3;
+  const out = [
+    { name: "cover", svg: coverSvg(env, input, total) },
+    { name: "scouting-report", svg: reportSvg(env, input, 1, total) },
   ];
+  if (input.stats) out.push({ name: "stats", svg: statsSvg(env, input, 2, total) });
+  out.push({ name: "evaluate", svg: evaluateSvg(env, input, total - 1, total) });
+  return out;
 }
 
 export function spotlightCaption(input) {
@@ -699,5 +1023,5 @@ export function spotlightCaption(input) {
 
 // Every image the post draws.
 export function spotlightImageUrls(input) {
-  return [...new Set([input.brandLogo, input.photo, input.logo, input.logoDark, input.headshot, ...(input.showFits ? input.report?.fits || [] : []).map((f) => f.logo)].filter(Boolean))];
+  return [...new Set([input.brandLogo, input.badgeLogo, input.classLogo, input.photo, input.logo, input.logoDark, input.headshot, ...(input.showFits ? input.report?.fits || [] : []).map((f) => f.logo)].filter(Boolean))];
 }

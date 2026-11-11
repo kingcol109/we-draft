@@ -69,7 +69,7 @@ export function moveToDay(ms, dateKey) {
   return wall - etOffset(once);
 }
 
-const IG_TYPE_LABELS = { custom: "Post", mock: "Weekly Mock", spotlight: "Spotlight", player: "Player post", portal: "Portal: entered", transfer: "Portal: transferred" };
+const IG_TYPE_LABELS = { custom: "Post", mock: "Weekly Mock", spotlight: "Spotlight", player: "Player post", portal: "Portal: entered", transfer: "Portal: transferred", short: "Short" };
 const IG_STATUS = {
   scheduled: "Scheduled", publishing: "Publishing", published: "Published", posted: "Published (by hand)", failed: "Failed",
 };

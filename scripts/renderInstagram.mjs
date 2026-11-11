@@ -10,8 +10,9 @@
 //     (a saved Weekly Mock post as saved: its week, look, featured picks and
 //     their photos' framing)
 //   node scripts/renderInstagram.mjs player <playerId> [--photo 0] [--kicker "..."] [--out dir]
-//   node scripts/renderInstagram.mjs spotlight <playerId> [--photo 0] [--look spotlight] [--accent #f6a21d] [--badge plate] [--out dir]
+//   node scripts/renderInstagram.mjs spotlight <playerId> [--photo 0] [--look spotlight] [--accent #f6a21d] [--badge plate] [--no-stats] [--out dir]
 //   node scripts/renderInstagram.mjs portal <playerId> [--from School] [--carousel] [--photo 0] [--out dir]
+//   node scripts/renderInstagram.mjs short <playerId> [--lines "9 TKL|1 SACK"] [--kicker "VS LSU"] [--out dir]
 //   node scripts/renderInstagram.mjs transfer <playerId> [--from School] [--to School] [--carousel] [--photo 0] [--out dir]
 //
 // Writes the PNGs (and the caption) into --out (default ./instagram-out).
@@ -21,10 +22,11 @@ import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import zlib from "zlib";
 import { knockOut, hasBackdrop, opaqueBounds } from "../src/utils/instagram/knockout.js";
-import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport } from "../src/utils/instagram/spotlight.js";
+import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats } from "../src/utils/instagram/spotlight.js";
 import { NFL_TEAMS } from "../src/utils/coachHistory.js";
 import { mockSlides, mockInput, mockCaption, playerPost, playerInput, playerCaption, imageUrls } from "../src/utils/instagram/posts.js";
-import { transferSlides, transferInput, transferCaption, transferImageUrls } from "../src/utils/instagram/transfer.js";
+import { shortInput, shortFrame, shortEnd, shortImageUrls } from "../src/utils/instagram/short.js";
+import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../src/utils/instagram/transfer.js";
 
 const require = createRequire(import.meta.url);
 const { getFirestore } = require("./firebaseAdmin");
@@ -34,6 +36,7 @@ const { measure, fetchLogo, pngSize } = require("../server/stream-manager/thumbn
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FONT_FILE = path.join(ROOT, "server", "stream-manager", "assets", "BebasNeue-Regular.ttf");
 const WD_LOGO = "wd-logo";
+const WD_BADGE = "wd-badge";
 const CLASS_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB"];
 // Needs GOOGLE_SERVICE_ACCOUNT_KEY (read from .env if not already set).
 if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY && fs.existsSync(path.join(ROOT, ".env"))) {
@@ -55,7 +58,13 @@ async function loadImages(urls, big = new Set()) {
   const images = {};
   const logo = fs.readFileSync(path.join(ROOT, "src", "assets", "Logo2.png"));
   images[WD_LOGO] = { href: `data:image/png;base64,${logo.toString("base64")}`, ...pngSize(logo) };
-  await Promise.all(urls.filter((u) => u !== WD_LOGO).map(async (u) => {
+  const badge = fs.readFileSync(path.join(ROOT, "src", "assets", "wd-badge.png"));
+  images[WD_BADGE] = { href: `data:image/png;base64,${badge.toString("base64")}`, ...pngSize(badge) };
+  for (const y of [2027, 2028, 2029]) {
+    const f = path.join(ROOT, "src", "assets", `class-logo-${y}.png`);
+    if (fs.existsSync(f)) { const b = fs.readFileSync(f); images[`class-logo-${y}`] = { href: `data:image/png;base64,${b.toString("base64")}`, ...pngSize(b) }; }
+  }
+  await Promise.all(urls.filter((u) => u !== WD_LOGO && u !== WD_BADGE && !u.startsWith("class-logo-")).map(async (u) => {
     // An action shot can be far bigger than fetchLogo's cap for logos.
     const r = big.has(u) ? await fetchBig(u) : await fetchLogo(u.replace(/^http:/, "https:"));
     if (!r.data) { console.warn(`  image skipped (${r.error}): ${u}`); return; }
@@ -211,18 +220,26 @@ async function main() {
       branding(db),
     ]);
     const photos = photoSnap.data() || {};
+    // His national ranks (the stats slide), from his linked CFBD player.
+    const seasonRanks = (await db.collection("cfbdPlayers").where("wedraftPlayerId", "==", id).limit(1).get()).docs[0]?.data().seasonRanks || null;
     const report = scoutingReport({
       player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap: classSnap.exists ? classSnap.data() : null,
       nflFits: fitsSnap.data()?.rows?.[id] || [], branding: teams, teamNames: NFL_TEAMS,
     });
     const input = spotlightInput({
       player: p, school: schoolSnap.docs[0]?.data() || {}, photo: (photos.action || [])[Number(flag("photo", 0))] || null,
-      headshot: photos.headshot?.url || "", report, advance: Number(p.Eligible) > 2027, brandLogo: WD_LOGO,
+      headshot: photos.headshot?.url || "", report, advance: Number(p.Eligible) > 2027, brandLogo: WD_LOGO, badgeLogo: WD_BADGE,
+      classLogo: ["2027", "2028", "2029"].includes(String(p.Eligible)) ? `class-logo-${p.Eligible}` : "",
       look: flag("look", "wash"), accent: flag("accent", ""), badge: flag("badge", "crest"),
+      // His college stats from ESPN (the stats slide), by the id his headshot was matched on.
+      stats: photos.headshot?.espnId && !args.includes("--no-stats")
+        ? espnStats(await fetch(`https://site.web.api.espn.com/apis/common/v3/sports/football/college-football/athletes/${photos.headshot.espnId}/stats`).then((r) => (r.ok ? r.json() : null)).catch(() => null), p.Position, seasonRanks)
+        : null,
     });
     const env = { measure, images: await loadImages([WD_LOGO, ...spotlightImageUrls(input)], new Set([input.photo].filter(Boolean))) };
     if (env.images[input.photo]) env.images[input.photo] = cutout(env.images[input.photo]);
     spotlightSlides(input, env).forEach((s, i) => fs.writeFileSync(path.join(out, `spotlight-${id}-${i + 1}-${s.name}.png`), render(s.svg)));
+    fs.writeFileSync(path.join(out, `spotlight-${id}-highlight-frame.png`), render(spotlightFrame(input, env)));
     fs.writeFileSync(path.join(out, `spotlight-${id}-caption.txt`), spotlightCaption(input));
     console.log(`spotlight-${id} → ${out}`);
   } else if (kind === "portal" || kind === "transfer") {
@@ -239,15 +256,26 @@ async function main() {
     const report = scoutingReport({ player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap: classSnap.exists ? classSnap.data() : null, teamNames: NFL_TEAMS });
     const input = transferInput({
       kind, player: p, from, fromName, to, toName, photo: (photoSnap.data()?.action || [])[Number(flag("photo", 0))] || null, report,
-      carousel: args.includes("--carousel"), kicker: flag("kicker", ""), headline: flag("headline", ""), note: flag("note", ""), brandLogo: WD_LOGO,
+      carousel: args.includes("--carousel"), kicker: flag("kicker", ""), headline: flag("headline", ""), note: flag("note", ""), brandLogo: WD_LOGO, badgeLogo: WD_BADGE,
     });
     const env = { measure, images: await loadImages([WD_LOGO, ...transferImageUrls(input)], new Set([input.photo].filter(Boolean))) };
     if (env.images[input.photo]) env.images[input.photo] = cutout(env.images[input.photo]);
     transferSlides(input, env).forEach((s, i) => fs.writeFileSync(path.join(out, `${kind}-${id}-${i + 1}-${s.name}.png`), render(s.svg)));
+    fs.writeFileSync(path.join(out, `${kind}-${id}-highlight-frame.png`), render(transferFrame(input, env)));
     fs.writeFileSync(path.join(out, `${kind}-${id}-caption.txt`), transferCaption(input));
     console.log(`${kind}-${id} → ${out}`);
+  } else if (kind === "short") {
+    // The Short's frame and end screen (1080×1920).
+    const p = { id, ...(await db.collection("players").doc(id).get()).data() };
+    if (!p.First) throw new Error(`No player ${id}.`);
+    const school = (await db.collection("schools").where("School", "==", p.School || "").limit(1).get()).docs[0]?.data() || {};
+    const input = shortInput({ player: p, school, lines: flag("lines", "").split("|"), kicker: flag("kicker", ""), badgeLogo: WD_BADGE });
+    const env = { measure, images: await loadImages(shortImageUrls(input)) };
+    fs.writeFileSync(path.join(out, `short-${id}-frame.png`), render(shortFrame(input, env)));
+    fs.writeFileSync(path.join(out, `short-${id}-end.png`), render(shortEnd(input, env)));
+    console.log(`short-${id} → ${out}`);
   } else {
-    console.log("usage: node scripts/renderInstagram.mjs mock <year> | player <playerId> | spotlight <playerId> | portal <playerId> | transfer <playerId>");
+    console.log("usage: node scripts/renderInstagram.mjs mock <year> | player <playerId> | spotlight <playerId> | portal <playerId> | transfer <playerId> | short <playerId> [--lines \"9 TKL|1 SACK\"] [--kicker ...]");
   }
 }
 

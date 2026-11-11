@@ -17,10 +17,11 @@
 // On both covers the words stay clear of him: above his head, below his feet.
 //
 // transferInput assembles the input from what the page reads. The report is
-// spotlight.js's scoutingReport: what his public player page shows.
+// spotlight.js's scoutingReport: what his public player page shows. The
+// graphics never show his draft class (only the caption does).
 import { kit, IG_FONT } from "./posts.js";
 import { textOn, readableOn } from "../teamColors.js";
-import { measurementsOf } from "./spotlight.js";
+import { measurementsOf, badgeMark } from "./spotlight.js";
 
 const { GOLD, BLUE, NAVY, PAD, FOOTER_H, DOT, FOCUS_X, esc, hex, up, r1, widthOf, fitSize, text, fitLine, image, hasImage, placed, svgDoc, footer, themeOf } = kit;
 const W = 1080;
@@ -44,14 +45,14 @@ const schoolOf = (s = {}, fallbackName = "") => ({
 // the schools docs (fromName: the old school when it isn't one of ours); photo:
 // { url, orientation }; report: spotlight.js scoutingReport; carousel: more
 // slides than the cover; kicker / headline / note: the admin's words.
-export function transferInput({ kind = "portal", player = {}, from = {}, fromName = "", to = {}, toName = "", photo = null, report = null, carousel = false, kicker = "", headline = "", note = "", brandLogo = "", address = "" }) {
+export function transferInput({ kind = "portal", player = {}, from = {}, fromName = "", to = {}, toName = "", photo = null, report = null, carousel = false, kicker = "", headline = "", note = "", brandLogo = "", badgeLogo = "", address = "" }) {
   return {
     kind: kind === "transfer" ? "transfer" : "portal",
     first: player.First || "", last: player.Last || "", pos: player.Position || "", year: String(player.Eligible || ""),
     measurements: measurementsOf(player),
     from: schoolOf(from, fromName), to: schoolOf(to, toName),
     photo: photo?.url || "", focus: photo?.orientation === "left" ? "right" : photo?.orientation === "right" ? "left" : "center",
-    report: report || null, carousel: !!carousel, kicker, headline, note, brandLogo,
+    report: report || null, carousel: !!carousel, kicker, headline, note, brandLogo, badgeLogo,
     address: address || (player.Slug ? `WE-DRAFT.COM/PLAYER/${player.Slug}` : "WE-DRAFT.COM"),
   };
 }
@@ -129,7 +130,7 @@ function portalCover(env, input, total) {
     ? `<g filter="url(#dropShadow)">${playerPhoto(env, input, -10, 296, W + 20, 640)}</g>`
     : image(env, input.from.logoDark, CX - 220, 400, 440, 440);
   // Below his feet: his name, then the logo driving at an empty slot.
-  const info = up([input.pos, input.year, input.note].filter(Boolean).join(DOT));
+  const info = up([input.pos, input.note].filter(Boolean).join(DOT));
   body += fitLine(env, PAD - 3, 1044, up(`${input.first} ${input.last}`), 126, W2, "#ffffff", { spacing: 2, min: 54 }).svg
     + fitLine(env, PAD, 1094, info, 38, W2, GOLD, { spacing: 2 }).svg;
   const ty = 1118;
@@ -164,8 +165,8 @@ function reportPanels(env, input, top, c) {
 
   // The grade and his ranks.
   const ranks = r ? [
-    r.posRank && { n: r.posRank, of: r.posOf, label: `${input.year} ${up(input.pos)}` },
-    r.classRank && { n: r.classRank, of: r.classOf, label: input.year },
+    r.posRank && { n: r.posRank, of: r.posOf, label: `${up(input.pos)} RANK` },
+    r.classRank && { n: r.classRank, of: r.classOf, label: "OVERALL" },
   ].filter(Boolean) : [];
   const graded = r?.grade?.avg != null;
   const tiles = (graded ? 1 : 0) + ranks.length;
@@ -254,7 +255,7 @@ function portalFile(env, input, i, total) {
     + tape(30, input.kicker || "TRANSFER PORTAL")
     + text(PAD, 192, "THE FILE ON", 48, GOLD, { spacing: 6 })
     + fitLine(env, PAD - 3, 322, up(`${input.first} ${input.last}`), 136, W2 - (hasImage(env, input.from.logoDark) ? 150 : 0), "#ffffff", { spacing: 2, min: 60 }).svg
-    + fitLine(env, PAD, 372, up([input.pos, input.from.name, input.year].filter(Boolean).join(DOT)), 42, W2, "#b9c5d8", { spacing: 1.5 }).svg
+    + fitLine(env, PAD, 372, up([input.pos, input.from.name].filter(Boolean).join(DOT)), 42, W2, "#b9c5d8", { spacing: 1.5 }).svg
     + image(env, input.from.logoDark, W - PAD - 130, 150, 130, 130);
   body += reportPanels(env, input, 402, { panel: "rgba(255,255,255,0.07)", edge: "#ffffff", ink: "#ffffff", soft: "#a9b6ca", accent: GOLD });
   body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: i < total - 1 ? "SWIPE: WHERE NEXT?" : input.address, more: i < total - 1 });
@@ -342,7 +343,7 @@ function transferCover(env, input, total) {
     body += `<g transform="skewX(-12)"><rect x="${r1(PAD + (by + bh) * 0.2126)}" y="${by}" width="${r1(ww)}" height="${bh}" fill="${banner}"/></g>`
       + text(PAD + 30, by + bh / 2 + ws * 0.35, word, ws, textOn(banner, c.deep), { spacing: 5 });
   }
-  const info = up([input.pos, input.year, input.note].filter(Boolean).join(DOT));
+  const info = up([input.pos, input.note].filter(Boolean).join(DOT));
   body += fitLine(env, PAD - 3, 1158, up(`${input.first} ${input.last}`), 170, W2, "#ffffff", { spacing: 2, min: 70 }).svg
     + fitLine(env, PAD, 1218, info, 44, W2, "#ffffff", { spacing: 2, opacity: 0.92 }).svg;
   body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: total > 1 ? `SWIPE: WHAT ${up(input.to.name)} GETS` : input.address, more: total > 1 });
@@ -363,10 +364,137 @@ function transferReport(env, input) {
     + chevrons(CX - 60, 182, c.pop, 4, 1.15, 34)
     + image(env, input.to.logoDark, b, 112, lg, lg)
     + fitLine(env, CX, 300, up(`${input.first} ${input.last}`), 74, W2, c.ink, { anchor: "middle", spacing: 2 }).svg
-    + fitLine(env, CX, 352, up([input.pos, input.year, input.note].filter(Boolean).join(DOT)), 38, W2, c.ink, { anchor: "middle", spacing: 2, opacity: 0.85 }).svg;
+    + fitLine(env, CX, 352, up([input.pos, input.note].filter(Boolean).join(DOT)), 38, W2, c.ink, { anchor: "middle", spacing: 2, opacity: 0.85 }).svg;
   body += reportPanels(env, input, header + 32, { panel: "rgba(255,255,255,0.08)", edge: "#ffffff", ink: "#ffffff", soft: "#c9d2e0", accent: readableOn(c.pop, c.deep, 2.2) === c.pop ? c.pop : GOLD });
   body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: input.address, more: false });
   return svgDoc(env, transferDefs(c), body, c.deep);
+}
+
+// ── The highlight video's frame ──
+// Not a slide: a 1080×1350 overlay to cut his highlight clip under in a video
+// editor, like spotlight.js's spotlightFrame, in the post's own look. The
+// window is left clear (a PNG keeps it transparent); everything else is drawn.
+//   portal    black, his old school's rings swirling out from behind the
+//             window; IN THE PORTAL, his school and the WD badge up top;
+//             under it his name and his school's logo driving at the empty
+//             DESTINATION slot.
+//   transfer  the new school's wash and pinstripes; up top the old school's
+//             wedge, chevrons to the new logo, the WD badge; under it the
+//             slanted TRANSFER banner, "AUBURN TO LSU", his name.
+export const TRANSFER_FRAME_WINDOWS = {
+  portal: { x: 36, y: 170, w: 1008, h: 740, r: 28 },
+  transfer: { x: 36, y: 170, w: 1008, h: 800, r: 28 },
+};
+
+function frameWindow(win, edge, corners) {
+  const { x, y, w, h, r } = win;
+  const cl = 74;
+  const ci = 26;
+  const corner = (cx, cy, dx, dy) => `<path d="M ${cx} ${cy + dy * cl} L ${cx} ${cy} L ${cx + dx * cl} ${cy}" fill="none" stroke="${corners}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>`;
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="${edge}" stroke-width="8"/>`
+    + `<rect x="${x + 10}" y="${y + 10}" width="${w - 20}" height="${h - 20}" rx="${r - 8}" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="2"/>`
+    + `<g filter="url(#fshadow)">${corner(x + ci, y + ci, 1, 1)}${corner(x + w - ci, y + ci, -1, 1)}${corner(x + ci, y + h - ci, 1, -1)}${corner(x + w - ci, y + h - ci, -1, -1)}</g>`;
+}
+const frameDefs = (win) => `<mask id="window"><rect width="${W}" height="${H}" fill="#ffffff"/><rect x="${win.x}" y="${win.y}" width="${win.w}" height="${win.h}" rx="${win.r}" fill="#000000"/></mask>`
+  + '<filter id="fshadow" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#000000" flood-opacity="0.6"/></filter>';
+const frameSvg = (env, defs, body) => `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${env.fontCss ? `<style>${env.fontCss}</style>` : ""}${defs}</defs>${body}</svg>`;
+const FRAME_CTA = "GRADE HIM ON WE-DRAFT.COM";
+
+function portalFrame(env, input) {
+  const win = TRANSFER_FRAME_WINDOWS.portal;
+  const accent = input.from.color && input.from.color !== "#000000" ? input.from.color : BLUE;
+  const lit = readableOn(accent, VOID, 1.8) === accent ? accent : shade(accent, 2.2);
+  const W2 = W - PAD * 2;
+  // Outside the window: the void, the halo and the rings around it.
+  let body = `<g mask="url(#window)"><rect width="${W}" height="${H}" fill="${VOID}"/>`
+    + `<ellipse cx="${CX}" cy="${win.y + win.h / 2}" rx="640" ry="720" fill="url(#halo)"/>`
+    + `<g transform="translate(0 ${win.y + win.h / 2 - CY})">${rings(lit)}</g>`
+    // The rings fade out under the window so his name and the slots read clean.
+    + `<rect x="0" y="${win.y + win.h - 60}" width="${W}" height="${BOTTOM - (win.y + win.h) + 62}" fill="url(#foot)"/></g>`;
+
+  // The top: IN THE PORTAL (a little portal for its mark), his school, the WD badge.
+  const k = up(input.headline || "IN THE PORTAL");
+  const kw = 64 + widthOf(env, k, 40, 3) + 26;
+  const my = 87;
+  body += `<rect x="${PAD}" y="54" width="${r1(kw)}" height="66" rx="33" fill="${GOLD}"/>`
+    + `<ellipse cx="${PAD + 36}" cy="${my}" rx="16" ry="20" fill="none" stroke="${NAVY}" stroke-width="5"/>`
+    + `<ellipse cx="${PAD + 36}" cy="${my}" rx="7" ry="10" fill="${NAVY}"/>`
+    + text(PAD + 64, my + 14, k, 40, NAVY, { spacing: 3 });
+  const brand = badgeMark(env, input.badgeLogo, W - PAD, my);
+  body += fitLine(env, PAD + kw + 22, 102, up(input.from.name), 40, W - PAD - brand.w - (brand.w ? 26 : 0) - (PAD + kw + 22), "#ffffff", { spacing: 2, opacity: 0.9 }).svg
+    + brand.svg;
+
+  body += frameWindow(win, lit, GOLD);
+
+  // Under it: his name, then his school's logo driving at the empty slot.
+  const info = up([input.pos, input.note].filter(Boolean).join(DOT));
+  body += fitLine(env, PAD - 3, 1004, up(`${input.first} ${input.last}`), 100, W2, "#ffffff", { spacing: 2, min: 50 }).svg
+    + fitLine(env, PAD, 1050, info, 34, W2, GOLD, { spacing: 2 }).svg;
+  const ty = 1074;
+  const th = 100;
+  const gap = 106;
+  const tw = (W2 - gap) / 2;
+  body += tile(env, PAD, ty, tw, th, input.from.name, input.from.logoDark, "rgba(255,255,255,0.08)")
+    + chevrons(PAD + tw + 18, ty + th / 2, GOLD, 3, 0.9, 26);
+  const dx = PAD + tw + gap;
+  body += `<rect x="${dx}" y="${ty}" width="${tw}" height="${th}" rx="16" fill="none" stroke="${GOLD}" stroke-width="4" stroke-dasharray="16 11"/>`
+    + text(dx + 50, ty + th / 2 + 32, "?", 90, GOLD, { anchor: "middle" })
+    + text(dx + 96, ty + 42, "DESTINATION", 28, GOLD, { spacing: 2 })
+    + fitLine(env, dx + 96, ty + th - 20, "TO BE DETERMINED", 42, tw - 110, "#ffffff", { spacing: 1 }).svg;
+  body += `<rect x="${PAD}" y="${BOTTOM - 22}" width="${W2}" height="4" rx="2" fill="${GOLD}" fill-opacity="0.8"/>`;
+  body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: FRAME_CTA, more: false });
+  return frameSvg(env, portalDefs(lit) + frameDefs(win), body);
+}
+
+function transferFrameSvg(env, input) {
+  const win = TRANSFER_FRAME_WINDOWS.transfer;
+  const c = newColors(input);
+  const W2 = W - PAD * 2;
+  const old = input.from.color ? shade(input.from.color, 0.62) : "#2b2f38";
+  // Outside the window: the new school's wash, the pinstripes, the ground.
+  const groundL = 1000;
+  const groundR = 986;
+  let body = `<g mask="url(#window)"><rect width="${W}" height="${H}" fill="url(#wash)"/>`
+    + Array.from({ length: 10 }, (_, k) => `<rect x="${k * 170 - 60}" y="-120" width="34" height="1800" fill="${c.ink}" fill-opacity="0.05" transform="skewX(-28)"/>`).join("")
+    + `<path d="M 0 ${groundL} L ${W} ${groundR} L ${W} ${H} L 0 ${H} Z" fill="${c.deep}"/></g>`
+    + `<path d="M 0 ${groundL} L ${W} ${groundR}" stroke="${c.pop}" stroke-width="8"/>`;
+
+  // The top: the old school's wedge, chevrons to the new logo, the WD badge.
+  const wt = 250;
+  const wf = 196;
+  body += `<path d="M 0 0 L ${wt} 0 L ${wf} ${win.y - 22} L 0 ${win.y - 22} Z" fill="${old}"/>`
+    + `<path d="M ${wt} 0 L ${wf} ${win.y - 22}" stroke="${c.pop}" stroke-width="10"/>`
+    + `<path d="M ${wt + 16} 0 L ${wf + 16} ${win.y - 22}" stroke="#ffffff" stroke-opacity="0.8" stroke-width="4"/>`
+    + image(env, input.from.logoDark, 24, 18, 160, 112);
+  const my = 80;
+  body += chevrons(wt + 34, my, c.pop, 3, 1, 30)
+    + image(env, input.to.logoDark, wt + 150, my - 60, 120, 120);
+  body += badgeMark(env, input.badgeLogo, W - PAD, my).svg;
+
+  body += frameWindow(win, c.pop, "#ffffff");
+
+  // Under it: TRANSFER on the slanted banner, FROM → TO beside it, his name.
+  const word = up(input.kicker || "TRANSFER");
+  const ws = fitSize(env, word, 46, 360, 26, 5);
+  const ww = widthOf(env, word, ws, 5) + 50;
+  const by = 1016;
+  const bh = 56;
+  body += `<g transform="skewX(-12)"><rect x="${r1(PAD + (by + bh) * 0.2126)}" y="${by}" width="${r1(ww)}" height="${bh}" fill="${c.pop}"/></g>`
+    + text(PAD + 25, by + bh / 2 + ws * 0.35, word, ws, textOn(c.pop, c.deep), { spacing: 5 });
+  // (Bebas Neue has no arrow glyph.)
+  const route = input.from.name && input.to.name ? up(`${input.from.name} TO ${input.to.name}`) : up(input.from.name || input.to.name);
+  const rx = PAD + ww + 30;
+  body += fitLine(env, rx, by + bh / 2 + 12, route, 34, W - PAD - rx, "#ffffff", { spacing: 2, opacity: 0.9 }).svg;
+  const info = up([input.pos, input.note].filter(Boolean).join(DOT));
+  body += fitLine(env, PAD - 3, 1166, up(`${input.first} ${input.last}`), 112, W2, "#ffffff", { spacing: 2, min: 56 }).svg
+    + fitLine(env, PAD, 1214, info, 36, W2, "#ffffff", { spacing: 2, opacity: 0.9 }).svg;
+  body += footer(env, themeOf("dark"), { logo: input.brandLogo, cta: FRAME_CTA, more: false });
+  return frameSvg(env, transferDefs(c) + frameDefs(win), body);
+}
+
+// The frame for the post's kind.
+export function transferFrame(input, env) {
+  return input.kind === "transfer" ? transferFrameSvg(env, input) : portalFrame(env, input);
 }
 
 // → [{ name, svg }]: the cover alone, or the carousel.

@@ -1,4 +1,4 @@
-import { transferInput, transferSlides, transferCaption, transferImageUrls } from "./transfer";
+import { transferInput, transferSlides, transferCaption, transferImageUrls, transferFrame, TRANSFER_FRAME_WINDOWS } from "./transfer";
 import { IG_W, IG_H } from "./posts";
 
 // A fixed-width font stands in for Bebas Neue.
@@ -25,8 +25,8 @@ test("entered the portal: one image or a three-slide carousel", () => {
   expect(one[0].svg).not.toContain("LEAVING");
   expect(one[0].svg).toContain("AUBURN");
   expect(one[0].svg).toContain("ATKINS");
-  // The class is just its year.
-  expect(one[0].svg).toContain("2027");
+  // No draft class on the graphics.
+  expect(one[0].svg).not.toContain("2027");
   expect(one[0].svg).not.toContain("CLASS");
   // No swipe line on a single image.
   expect(one[0].svg).not.toContain("SWIPE");
@@ -98,4 +98,21 @@ test("captions say what happened and fit Instagram's limits", () => {
 test("it asks for the logos it draws, and only those", () => {
   expect(transferImageUrls(transferInput({ kind: "portal", player, from: auburn, to: lsu, photo: { url: "shot" }, brandLogo: "wd" }))).toEqual(["wd", "shot", "auburn-dark"]);
   expect(transferImageUrls(transferInput({ kind: "transfer", player, from: auburn, to: lsu, brandLogo: "wd" }))).toEqual(["wd", "auburn-dark", "lsu-dark"]);
+});
+
+test("the highlight frames: a clear window in each post's look", () => {
+  ["portal", "transfer"].forEach((kind) => {
+    const input = transferInput({ kind, player, from: auburn, to: lsu, report });
+    const svg = transferFrame(input, env);
+    valid(svg);
+    const { x, y, w, h } = TRANSFER_FRAME_WINDOWS[kind];
+    expect(svg).toContain(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="28" fill="#000000"/>`);
+    // The only full-canvas paint is inside the mask (the window stays clear).
+    const body = svg.split("</defs>")[1];
+    expect(body.startsWith('<g mask="url(#window)"><rect width="1080" height="1350"')).toBe(true);
+    expect(svg).toContain("ATKINS");
+    expect(svg).toContain("GRADE HIM ON WE-DRAFT.COM");
+  });
+  expect(transferFrame(transferInput({ kind: "portal", player, from: auburn }), env)).toContain("DESTINATION");
+  expect(transferFrame(transferInput({ kind: "transfer", player, from: auburn, to: lsu }), env)).toContain("AUBURN TO LSU");
 });

@@ -1,4 +1,4 @@
-import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf } from "./spotlight";
+import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats } from "./spotlight";
 
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: {} };
 const player = { id: "p1", First: "Mark", Last: "Bowman", Position: "TE", School: "USC", Eligible: "2029", Height: "6'5\"", Weight: "245", Slug: "mark-bowman-2029-te" };
@@ -61,7 +61,12 @@ test("three slides; the ADVANCE SCOUTING badge only when asked", () => {
   expect(withBadge[1].svg).toContain("COMMUNITY GRADE");
   const plain = spotlightSlides(spotlightInput({ player: { ...player, Eligible: "2027" }, report }), env);
   expect(plain[0].svg).not.toContain("ADVANCE");
-  expect(plain[0].svg).toContain("2027 NFL DRAFT PROSPECT");
+  expect(plain[0].svg).not.toContain("NFL DRAFT PROSPECT");
+  // His class's logo top right, in place of the drawn badge.
+  const logoEnv = { ...env, images: { "class-2029.png": { href: "data:image/png;base64,AA", w: 1000, h: 1000 } } };
+  const withLogo = spotlightSlides(spotlightInput({ player, report, advance: true, classLogo: "class-2029.png" }), logoEnv);
+  expect(withLogo[0].svg).toContain('href="data:image/png;base64,AA"');
+  expect(withLogo[0].svg).not.toContain("ADVANCE");
 });
 
 test("the report shows class rank unless turned off, NFL fits only when turned on", () => {
@@ -85,4 +90,49 @@ test("the highlight frame: no backdrop of its own, the window cut out, his name 
   expect(body.split('<rect width="1080" height="1350"').length).toBe(2);
   expect(svg).toContain(">FILM<");
   expect(svg).toContain(">BOWMAN<");
+});
+
+test("the stats slide: ESPN's career cut to his position, after the report", () => {
+  const json = {
+    teams: { "lsu-tigers": { id: "99", abbreviation: "LSU" }, "auburn-tigers": { id: "2", abbreviation: "AUB" } },
+    categories: [
+      { name: "defensive", labels: ["TOT", "SOLO", "AST", "PD", "SACK", "FF", "INT", "YDS", "TD"], totals: ["124", "87", "37", "1", "12", "2", "2", "74", "0"],
+        statistics: [
+          { season: { year: 2025 }, teamSlug: "auburn-tigers", stats: ["84", "60", "24", "1", "9", "2", "1", "73", "0"] },
+          { season: { year: 2024 }, teamSlug: "lsu-tigers", stats: ["3", "1", "2", "0", "0", "0", "0", "0", "0"] },
+          { season: { year: 2026 }, teamId: 2, stats: ["37", "26", "11", "0", "3", "0", "1", "1", "0"] },
+        ] },
+      { name: "scoring", labels: ["TD"], statistics: [{ season: { year: 2026 }, stats: ["0"] }] },
+    ],
+  };
+  const st = espnStats(json, "LB", { 2026: { defensive: { TOT: "T-554", SACKS: "9" }, interceptions: { INT: "T-30" } } });
+  expect(st.table.cols).toEqual(["TOT", "SOLO", "SACK", "PD", "INT", "FF"]);
+  expect(st.table.rows.map((r) => `${r.year} ${r.team}`)).toEqual(["2024 LSU", "2025 AUB", "2026 AUB"]);
+  expect(st.table.career).toEqual(["124", "87", "12", "1", "2", "2"]);
+  // Ranks only when they're high (top 25).
+  expect(st.hero).toEqual({ year: "2026", team: "AUB", tiles: [
+    { label: "TACKLES", value: "37", rank: "" }, { label: "SACKS", value: "3", rank: "9" },
+    { label: "INTERCEPTIONS", value: "1", rank: "" }, { label: "PASSES DEFENDED", value: "0", rank: "" },
+  ] });
+  // A running back: no season table, just his career rushing.
+  const rbJson = { teams: json.teams, categories: [{ name: "rushing", labels: ["CAR", "YDS", "AVG", "TD", "LNG"], totals: ["300", "1800", "6.0", "20", "80"],
+    statistics: [{ season: { year: 2025 }, teamSlug: "auburn-tigers", stats: ["150", "800", "5.3", "8", "60"] }, { season: { year: 2026 }, teamSlug: "auburn-tigers", stats: ["150", "1000", "6.7", "12", "80"] }] }] };
+  const rb = espnStats(rbJson, "RB", { 2026: { rushing: { YDS: "4", TD: "T-11" } } });
+  expect(rb.table).toBeUndefined();
+  expect(rb.career).toEqual({ title: "CAREER RUSHING", seasons: 2, tiles: [{ label: "CARRIES", value: "300" }, { label: "YARDS", value: "1800" }, { label: "YDS / CARRY", value: "6.0" }, { label: "TOUCHDOWNS", value: "20" }] });
+  expect(rb.hero.tiles.map((t) => `${t.value}:${t.rank}`)).toEqual(["1000:4", "12:T-11", "6.7:", "150:"]);
+  expect(spotlightSlides(spotlightInput({ player, report: scoutingReport({ player, evaluations: [] }), stats: rb }), env)[2].svg).toContain("#T-11 IN FBS");
+  // No stats line for an O-lineman; no categories, no slide.
+  expect(espnStats(json, "OL")).toBe(null);
+  expect(espnStats({ categories: [] }, "LB")).toBe(null);
+
+  const base = { player, report: scoutingReport({ player, evaluations: [] }) };
+  expect(spotlightSlides(spotlightInput(base), env).map((s) => s.name)).toEqual(["cover", "scouting-report", "evaluate"]);
+  const slides = spotlightSlides(spotlightInput({ ...base, stats: st }), env);
+  expect(slides.map((s) => s.name)).toEqual(["cover", "scouting-report", "stats", "evaluate"]);
+  expect(slides[2].svg).toContain(">CAREER<");
+  expect(slides[2].svg).not.toContain("undefined");
+  expect(slides[2].svg).not.toContain("NaN");
+  // Switched off: back to three.
+  expect(spotlightSlides(spotlightInput({ ...base, stats: st, showStats: false }), env)).toHaveLength(3);
 });

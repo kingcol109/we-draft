@@ -46,13 +46,19 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, playerPost, playerInput, playerCaption,
 } from "../utils/instagram/posts";
-import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame } from "../utils/instagram/spotlight";
+import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats } from "../utils/instagram/spotlight";
+import { fetchEspnCareer } from "./PlayerEspnStats";
 import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
-import { transferSlides, transferInput, transferCaption, transferImageUrls } from "../utils/instagram/transfer";
+import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
+import { shortInput, shortFrame, shortEnd, shortImageUrls, SHORT_W, SHORT_H } from "../utils/instagram/short";
 import { igApi, uploadVideo, videoInfo } from "../utils/instagram/api";
 import { X_MAX_MEDIA, textFromCaption } from "../utils/x/posts";
 import { MEDIA_MAX_CHARS, saveXPost } from "../utils/x/store";
 import WdLogo from "../assets/Logo2.png";
+import WdBadge from "../assets/wd-badge.png";
+import ClassLogo2027 from "../assets/class-logo-2027.png";
+import ClassLogo2028 from "../assets/class-logo-2028.png";
+import ClassLogo2029 from "../assets/class-logo-2029.png";
 
 const CLASS_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB"];
 
@@ -81,7 +87,7 @@ async function actionShotsFor(ids) {
 }
 // ── Saved posts ──
 // instagramPosts/{id} (admin only — firestore.rules):
-//   { type: "custom" | "mock" | "spotlight" | "player" | "portal" | "transfer", name, status, state (the
+//   { type: "custom" | "mock" | "spotlight" | "player" | "portal" | "transfer" | "short", name, status, state (the
 //     maker's settings, enough to draw the post again — each maker's
 //     stateNow), caption, slides (how many), thumb (slide 1 as a small JPEG
 //     data URI, for the list), playerIds (the players it features — for
@@ -92,7 +98,7 @@ async function actionShotsFor(ids) {
 // status: draft → ready → publishing → published | failed — the last three
 // set only by the server, published only once Instagram confirms. posted:
 // marked published by hand (posted outside We-Draft).
-const POST_TYPES = { custom: "Create a post", mock: "Weekly Mock carousel", spotlight: "Player spotlight", player: "Player post", portal: "Portal: entered", transfer: "Portal: transferred" };
+const POST_TYPES = { custom: "Create a post", mock: "Weekly Mock carousel", spotlight: "Player spotlight", player: "Player post", portal: "Portal: entered", transfer: "Portal: transferred", short: "Short (video frame)" };
 const STATUS = {
   draft: ["Draft", "#8a97ab"], ready: ["Ready to Publish", "#b7791f"], scheduled: ["Scheduled", "#6d28d9"], publishing: ["Publishing", BLUE],
   published: ["Published", "#15803d"], failed: ["Failed", "#a52a1e"], posted: ["Published (by hand)", "#15803d"],
@@ -122,8 +128,10 @@ async function svgThumb(svg) {
   try {
     const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
     const c = document.createElement("canvas");
+    // The slide's own shape (a Short's is taller).
+    const [, sw, sh] = svg.match(/<svg[^>]*?width="(\d+)"[^>]*?height="(\d+)"/) || [0, IG_W, IG_H];
     c.width = THUMB_W;
-    c.height = Math.round((THUMB_W * IG_H) / IG_W);
+    c.height = Math.round((THUMB_W * Number(sh)) / Number(sw));
     c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
     return c.toDataURL("image/jpeg", 0.72);
   } catch {
@@ -186,8 +194,9 @@ async function makeXDraft({ svgs, caption, name, postId, playerIds, subject, uid
 // Instagram saves first, then sends these slides — the preview, as is.
 // A post that's publishing or published is Instagram's now: only Save as
 // new (a fresh draft) from here. videos: [{ at, path }] — uploaded clips in
-// the carousel (the Spotlight's); hold: why it can't save or publish yet.
-function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null, videos = [], hold = "" }) {
+// the carousel (the Spotlight's); hold: why it can't save or publish yet;
+// saveOnly: save it, nothing else (a Short's frame — the video's made elsewhere).
+function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, onSaved, setMsg, playerIds = [], subject = null, videos = [], hold = "", saveOnly = false }) {
   const { user } = useAuth();
   const sendToX = useContext(SendToXContext);
   const [name, setName] = useState(post?.name || "");
@@ -309,17 +318,17 @@ function SaveBar({ type, defaultName, stateNow, caption, svgs, post, setPost, on
       <div style={{ display: "flex", gap: "6px", marginTop: "6px", alignItems: "center", flexWrap: "wrap" }}>
         {!isLocked && <button onClick={() => saveClick(false)} disabled={off} style={{ ...btn(true), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>{post?.id ? "Save changes" : "Save"}</button>}
         {post?.id && <button onClick={() => saveClick(true)} disabled={off} style={{ ...btn(false), padding: "5px 14px" }}>Save as new</button>}
-        {!isLocked && status !== "posted" && (
+        {!isLocked && status !== "posted" && !saveOnly && (
           <button onClick={publish} disabled={off} title="Save, then post these slides to @wedraftsite"
             style={{ ...btn(true), background: GOLD, color: "#1d2433", padding: "5px 14px", opacity: off ? 0.5 : 1 }}>
             {status === "failed" ? "Retry publishing" : "Publish to Instagram"}
           </button>
         )}
-        {!isLocked && status !== "posted" && !when && (
+        {!isLocked && status !== "posted" && !when && !saveOnly && (
           <button onClick={() => setWhen(toLocalInput(nextHour()))} disabled={off} title="Post these slides to @wedraftsite at a time you pick"
             style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Schedule…</button>
         )}
-        {sendToX && (
+        {sendToX && !saveOnly && (
           <button onClick={xDraft} disabled={off} title="Start an X draft from this post: its first slides and caption, with its own text and time" style={{ ...btn(false), padding: "5px 14px", opacity: off ? 0.5 : 1 }}>Send to X…</button>
         )}
         {busy && <span style={{ fontSize: "11px", fontWeight: 800, color: BLUE }}>{phase || "Saving…"}</span>}
@@ -541,6 +550,7 @@ export default function AdminInstagram({ openPostId = null, onOpenInX = null }) 
         {kind === "spotlight" && <SpotlightMaker key={run} {...props} />}
         {kind === "player" && <PlayerPostMaker key={run} {...props} />}
         {(kind === "portal" || kind === "transfer") && <TransferMaker key={run} kind={kind} {...props} />}
+        {kind === "short" && <ShortMaker key={run} {...props} />}
       </div>
       {msg && <div style={{ fontSize: "12px", fontWeight: 800, color: /^Couldn't|^No /.test(msg) ? "#a52a1e" : "#15803d" }}>{msg}</div>}
     </div>
@@ -1028,6 +1038,10 @@ function PlayerPostMaker({ setMsg, saved, onSaved }) {
 // ── Player spotlight ──
 // A class past the next draft gets the ADVANCE SCOUTING badge to start.
 const isAdvance = (year) => Number(year) > Number(MAIN_WEEKLY_YEAR);
+// The cover's top-right logo by class: the NFL Draft shield for the next
+// draft, ADVANCE SCOUTING for the classes after (a class without one falls
+// back to the drawn badge).
+const CLASS_LOGOS = { 2027: ClassLogo2027, 2028: ClassLogo2028, 2029: ClassLogo2029 };
 
 function SpotlightMaker({ setMsg, saved, onSaved }) {
   const [post, setPost] = useState(saved ? { id: saved.id, name: saved.name, status: saved.status, ig: saved.ig || null } : null);
@@ -1047,6 +1061,8 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   // The report's class rank (in by default) and NFL fits (out by default).
   const [showRanks, setShowRanks] = useState(true);
   const [showFits, setShowFits] = useState(false);
+  // The stats slide (his ESPN college stats), in when he has them.
+  const [showStats, setShowStats] = useState(true);
   // Highlight clips, after the cover: [{ path (ig-videos/…), name, bytes,
   // duration, w, h }]; their preview links by path; the one uploading.
   const [videos, setVideos] = useState([]);
@@ -1096,12 +1112,20 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
       const report = scoutingReport({
         player: p, evaluations: evalSnap.docs.map((d) => d.data()), classSnap, nflFits: fits?.rows?.[p.id] || [], branding, teamNames: NFL_TEAMS,
       });
+      // His college stats, from ESPN by the id his headshot was matched on,
+      // with his national ranks from his linked CFBD player.
+      const espnId = ph.headshot?.espnId;
+      const [career, cfbd] = espnId ? await Promise.all([
+        fetchEspnCareer(espnId),
+        getDocs(query(collection(db, "cfbdPlayers"), where("wedraftPlayerId", "==", p.id), limit(1))).catch(() => null),
+      ]) : [null, null];
+      const stats = career ? espnStats(career, p.Position, cfbd?.docs[0]?.data().seasonRanks || null) : null;
       const action = ph.action || [];
       setPlayer(p);
-      setData({ school: schoolSnap.docs[0]?.data() || {}, action, headshot: ph.headshot?.url || "", report });
+      setData({ school: schoolSnap.docs[0]?.data() || {}, action, headshot: ph.headshot?.url || "", report, stats });
       choosePhoto(action[0]?.url || "");
       setFocus(focusFor(action[0]));
-      setAdvance(isAdvance(p.Eligible));
+      setAdvance(!!CLASS_LOGOS[p.Eligible] || isAdvance(p.Eligible));
       // A new player: his own school's accent.
       setAccent("");
       // His own clips (a saved post's come back below).
@@ -1115,6 +1139,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
         setAccent(restore.accent || "");
         setShowRanks(restore.showRanks !== false);
         setShowFits(!!restore.showFits);
+        setShowStats(restore.showStats !== false);
         setVideos(Array.isArray(restore.videos) ? restore.videos.filter((v) => v?.path) : []);
         setAdjust({ ...NO_ADJUST, ...restore.adjust });
       }
@@ -1127,9 +1152,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   };
 
   const input = useMemo(() => (player && data ? {
-    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, look, accent, badge, showRanks, showFits, highlights: videos.length > 0 }),
+    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: data.stats, showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "" }),
     focus, adjust,
-  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, videos.length]);
+  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, videos.length]);
   const cap = useCaption(saved, useMemo(() => (input ? spotlightCaption(input) : ""), [input]));
 
   useEffect(() => {
@@ -1226,9 +1251,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
                 {FOCUS.map(([v, t]) => <button key={v} onClick={() => setFocus(v)} style={{ ...btn(focus === v), padding: "4px 10px" }}>{t}</button>)}
               </div>
               <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
-                <input type="checkbox" checked={advance} onChange={(e) => setAdvance(e.target.checked)} /> Advance Scouting badge
+                <input type="checkbox" checked={advance} onChange={(e) => setAdvance(e.target.checked)} /> {CLASS_LOGOS[player.Eligible] ? `${player.Eligible} class logo` : "Advance Scouting badge"}
               </label>
-              {advance && (
+              {advance && !CLASS_LOGOS[player.Eligible] && (
                 <div style={{ display: "flex", gap: "4px" }}>
                   {[["crest", "Crest"], ["plate", "Plate"]].map(([v, t]) => <button key={v} onClick={() => setBadge(v)} style={{ ...btn(badge === v), padding: "4px 10px" }}>{t}</button>)}
                 </div>
@@ -1253,9 +1278,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             </div>
             {photoUrl && <PhotoAdjust value={adjust} onChange={setAdjust} />}
             <div>
-              <div style={label}>Scouting report shows</div>
+              <div style={label}>Slides show</div>
               <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
-                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits]].map(([t, on, set]) => (
+                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits], ...(data.stats ? [["Stats slide", showStats, setShowStats]] : [])].map(([t, on, set]) => (
                   <label key={t} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
                     <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {t}
                   </label>
@@ -1306,7 +1331,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             <SaveBar type="spotlight" defaultName={`Spotlight · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
               videos={videos.map((v, k) => ({ at: 1 + k, path: v.path }))} hold={uploading ? "Wait for the video to finish uploading." : ""}
-              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, videos })} />
+              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, showStats, videos })} />
             <CaptionBox c={cap} />
           </>
         )}
@@ -1333,10 +1358,118 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
               <button key={s.name} onClick={() => { if (!(i === 0 && photoUrl && drag.swallowClick())) downloadSvg(s.svg, `${base}-${i + 1}-${s.name}`).catch((e) => setMsg(`Couldn't export: ${e.message}`)); }}
                 title={i === 0 && photoUrl ? "Drag to move his photo · click to download" : "Download this slide"} style={{ border: "1px solid #d5dce6", borderRadius: "8px", padding: 0, background: "#fff", cursor: "pointer", overflow: "hidden", textAlign: "left" }}>
                 {urls[i] && <img src={urls[i]} alt={`Spotlight slide ${n + 1}`} {...(i === 0 && photoUrl ? drag.handlers : {})} style={{ width: "100%", display: "block", aspectRatio: `${IG_W} / ${IG_H}`, ...(i === 0 && photoUrl ? drag.handlers.style : {}) }} />}
-                <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{n + 1} · {["Cover", "Scouting report", "Evaluate him"][i]}</div>
+                <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{n + 1} · {{ cover: "Cover", "scouting-report": "Scouting report", stats: "Stats", evaluate: "Evaluate him" }[s.name] || s.name}</div>
               </button>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Short ──
+// A vertical frame to cut a highlight clip under and an end screen to close
+// on (utils/instagram/short.js): two 1080×1920 PNGs to download. Saved like
+// any post, but not published from here — the video is edited elsewhere.
+function ShortMaker({ setMsg, saved, onSaved }) {
+  const st = saved?.state || {};
+  const [post, setPost] = useState(saved ? { id: saved.id, name: saved.name, status: saved.status, ig: saved.ig || null } : null);
+  const [players, setPlayers] = useState(null);
+  const [search, setSearch] = useState("");
+  const [player, setPlayer] = useState(null);
+  const [school, setSchool] = useState(null);
+  const [lines, setLines] = useState(st.lines || "");
+  const [kicker, setKicker] = useState(st.kicker || "");
+  const [svgs, setSvgs] = useState([]);
+
+  useEffect(() => {
+    getDocs(collection(db, "players")).then((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => p.First && p.Last).sort((a, b) => a.Last.localeCompare(b.Last) || a.First.localeCompare(b.First))))
+      .catch((e) => setMsg(`Couldn't load players: ${e.message}`));
+  }, [setMsg]);
+  const matches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || !players) return [];
+    return players.filter((p) => `${p.First} ${p.Last}`.toLowerCase().includes(q)).slice(0, 12);
+  }, [players, search]);
+
+  const pick = async (p) => {
+    setSearch("");
+    setMsg("");
+    try {
+      const snap = await getDocs(query(collection(db, "schools"), where("School", "==", p.School || ""), limit(1)));
+      setPlayer(p);
+      setSchool(snap.docs[0]?.data() || {});
+    } catch (e) {
+      setMsg(`Couldn't load him: ${e.message}`);
+    }
+  };
+  // A saved Short: its player.
+  useEffect(() => {
+    if (!st.playerId) return;
+    getDoc(doc(db, "players", st.playerId)).then((d) => { if (d.exists()) pick({ id: d.id, ...d.data() }); })
+      .catch((e) => setMsg(`Couldn't open it: ${e.message}`));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const input = useMemo(() => (player && school ? shortInput({ player, school, lines, kicker, badgeLogo: WdBadge }) : null), [player, school, lines, kicker]);
+  useEffect(() => {
+    if (!input) { setSvgs([]); return undefined; }
+    let live = true;
+    envFor(input, {}, shortImageUrls(input)).then((env) => { if (live) setSvgs([shortFrame(input, env), shortEnd(input, env)]); })
+      .catch((e) => setMsg(`Couldn't draw: ${e.message}`));
+    return () => { live = false; };
+  }, [input, setMsg]);
+  const urls = useSvgUrls(svgs);
+  const base = player ? `wedraft-short-${fileName(`${player.First}-${player.Last}`)}` : "";
+  const parts = [["frame", "Frame", "Clear window — put it on the top track, the clip under it."], ["end", "End screen", "The last few seconds."]];
+  const download = (i) => downloadSvg(svgs[i], `${base}-${parts[i][0]}`, SHORT_W, SHORT_H).catch((e) => setMsg(`Couldn't export: ${e.message}`));
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 360px) 1fr", gap: "18px", alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div style={{ position: "relative" }}>
+          <div style={label}>Player</div>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={players ? (player ? `${player.First} ${player.Last} — search another…` : "Search a prospect…") : "Loading players…"} style={field} />
+          {matches.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #d5dce6", borderRadius: "6px", zIndex: 5, maxHeight: "260px", overflowY: "auto" }}>
+              {matches.map((p) => (
+                <button key={p.id} onClick={() => pick(p)} style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "#fff", padding: "6px 9px", fontSize: "13px", fontWeight: 800, cursor: "pointer" }}>
+                  {p.First} {p.Last} <span style={{ color: "#8a97ab", fontWeight: 700 }}>{p.Position} · {p.School} · {p.Eligible}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {player && (
+          <>
+            <div>
+              <div style={label}>Stat lines · one a line, up to 3</div>
+              <textarea value={lines} onChange={(e) => setLines(e.target.value)} rows={3} placeholder={"9 TKL\n1 SACK"} style={{ ...field, resize: "vertical", fontFamily: "inherit" }} />
+            </div>
+            <div>
+              <div style={label}>Over the stats (optional)</div>
+              <input value={kicker} onChange={(e) => setKicker(e.target.value)} placeholder="VS LSU · WEEK 11" style={field} />
+            </div>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button onClick={async () => { await download(0); await new Promise((r) => setTimeout(r, 350)); await download(1); }} disabled={!svgs.length} style={{ ...btn(true), opacity: svgs.length ? 1 : 0.5 }}>Download both</button>
+            </div>
+            <SaveBar type="short" saveOnly defaultName={`Short · ${player.First} ${player.Last}`} caption="" svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
+              playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
+              stateNow={() => ({ playerId: player.id, lines, kicker })} />
+          </>
+        )}
+      </div>
+      <div>
+        <div style={label}>Preview · {SHORT_W}×{SHORT_H} · click one to download it</div>
+        {!svgs.length && <div style={{ fontSize: "13px", fontWeight: 700, color: "#8a97ab" }}>Pick a player.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 300px))", gap: "12px" }}>
+          {svgs.map((_, i) => (
+            <button key={parts[i][0]} onClick={() => download(i)} title={`Download the ${parts[i][1].toLowerCase()}`} style={{ border: "1px solid #d5dce6", borderRadius: "8px", padding: 0, background: "#fff", cursor: "pointer", overflow: "hidden", textAlign: "left" }}>
+              {urls[i] && <img src={urls[i]} alt={parts[i][1]} style={{ width: "100%", display: "block", aspectRatio: `${SHORT_W} / ${SHORT_H}`, background: "repeating-conic-gradient(#d5dce6 0 25%, #fff 0 50%) 0 0 / 14px 14px" }} />}
+              <div style={{ fontSize: "11px", fontWeight: 900, color: "#5b6b84", padding: "5px 8px" }}>{parts[i][1]}<div style={{ fontWeight: 700, color: "#8a97ab" }}>{parts[i][2]}</div></div>
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -1367,6 +1500,8 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
   const [headline, setHeadline] = useState(st.headline || "");
   const [note, setNote] = useState(st.note || "");
   const [slides, setSlides] = useState([]);
+  // The frame to edit his highlight clip under (a transparent PNG to download).
+  const [frame, setFrame] = useState("");
   const choosePhoto = (url) => { setPhotoUrl(url); setAdjust(NO_ADJUST); };
 
   useEffect(() => {
@@ -1421,17 +1556,18 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
 
   const schoolDoc = (name) => (schools || []).find((s) => s.School === name) || {};
   const input = useMemo(() => (player && data && schools ? {
-    ...transferInput({ kind, player, from: schoolDoc(fromName), fromName, to: schoolDoc(toName), toName, photo: photoUrl ? { url: photoUrl } : null, report: data.report, carousel, kicker, headline, note, brandLogo: WdLogo }),
+    ...transferInput({ kind, player, from: schoolDoc(fromName), fromName, to: schoolDoc(toName), toName, photo: photoUrl ? { url: photoUrl } : null, report: data.report, carousel, kicker, headline, note, brandLogo: WdLogo, badgeLogo: WdBadge }),
     focus, adjust,
   } : null), [kind, player, data, schools, fromName, toName, photoUrl, carousel, kicker, headline, note, focus, adjust]); // eslint-disable-line react-hooks/exhaustive-deps
   const cap = useCaption(saved, useMemo(() => (input ? transferCaption(input) : ""), [input]));
 
   useEffect(() => {
-    if (!input) { setSlides([]); return; }
+    if (!input) { setSlides([]); setFrame(""); return; }
     let live = true;
     envFor(input, input.photo ? { [input.photo]: loadFeatureImage(input.photo, true) } : {}, transferImageUrls(input)).then((env) => {
       if (!live) return;
       setSlides(transferSlides(input, env));
+      setFrame(transferFrame(input, env));
       if (input.photo && !env.images[input.photo]) setMsg("Couldn't load that photo — it may not allow downloads (try an imgur link).");
     }).catch((e) => setMsg(`Couldn't draw: ${e.message}`));
     return () => { live = false; };
@@ -1439,6 +1575,7 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
   const svgs = useMemo(() => slides.map((s) => s.svg), [slides]);
   const urls = useSvgUrls(svgs);
   const base = player ? `wedraft-${kind}-${fileName(`${player.First}-${player.Last}`)}` : "";
+  const frameUrl = useSvgUrls(useMemo(() => (frame ? [frame] : []), [frame]))[0];
   const known = (name) => !name || (schools || []).some((s) => s.School === name);
   const hold = isTransfer && !toName.trim() ? "Pick the school he's going to." : "";
   const slideNames = { portal: "Cover", "his-file": "His file", "where-next": "Where next?", transfer: "Cover", "what-they-get": "What they get" };
@@ -1507,6 +1644,15 @@ function TransferMaker({ kind, setMsg, saved, onSaved }) {
             </div>
             <div><div style={label}>Note under his name (optional)</div><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="2 YEARS OF ELIGIBILITY" style={field} /></div>
             <div><button onClick={() => Promise.all(slides.map((s, i) => downloadSvg(s.svg, `${base}-${i + 1}-${s.name}`))).catch((e) => setMsg(`Couldn't export: ${e.message}`))} disabled={!slides.length} style={{ ...btn(true), opacity: slides.length ? 1 : 0.5 }}>Download {slides.length > 1 ? `all (${slides.length})` : "PNG"}</button></div>
+            {frame && (
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <img src={frameUrl} alt="Highlight video frame" style={{ width: "72px", aspectRatio: `${IG_W} / ${IG_H}`, borderRadius: "5px", border: "1px solid #d5dce6", background: "repeating-conic-gradient(#d5dce6 0 25%, #fff 0 50%) 0 0 / 12px 12px" }} />
+                <div>
+                  <button onClick={() => downloadSvg(frame, `${base}-highlight-frame`).catch((e) => setMsg(`Couldn't export: ${e.message}`))} style={{ ...btn(false), padding: "5px 12px" }}>Download video frame</button>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab", marginTop: "3px" }}>A {IG_W}×{IG_H} PNG with a clear window for his highlight clip, in this post's {isTransfer ? "transfer" : "portal"} look.</div>
+                </div>
+              </div>
+            )}
             <SaveBar type={kind} defaultName={`${isTransfer ? "Transfer" : "Portal"} · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }} hold={hold}
               stateNow={() => ({ playerId: player.id, fromName, toName, carousel, photoUrl, focus, adjust, kicker, headline, note })} />
