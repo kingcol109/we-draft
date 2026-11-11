@@ -59,6 +59,35 @@ export function cutupText(input) {
   return { title, description, comment };
 }
 
+// A Film Breakdown Live stream's YouTube text: same input as cutupText.
+export function filmLiveText(input) {
+  const name = `${input.first || ""} ${input.last || ""}`.trim() || "Player";
+  const pos = String(input.position || "").toUpperCase();
+  const posName = POS_NAMES[pos] || pos.toLowerCase();
+  const school = input.school || "";
+  const season = input.season || String(new Date().getFullYear());
+  const cls = input.eligible ? String(input.eligible) : "";
+  const schoolPos = [school, pos].filter(Boolean).join(" ");
+  const title = `${name} Film Breakdown LIVE${schoolPos ? ` | ${schoolPos}` : ""}`;
+  const games = input.games ? ` through ${input.games} game${Number(input.games) === 1 ? "" : "s"}` : "";
+  const lead = `We're live breaking down ${name}'s film${schoolPos ? `, the ${schoolPos}` : ""}: the ${season} tape${input.statLine ? `${games} (${input.statLine})` : ""}, rep by rep. `
+    + `What he wins with, what shows up on every snap, and where he fits ${cls ? `in the ${cls} NFL Draft` : "in the NFL Draft"}.`;
+  const who = `${name} is a${cls ? ` ${cls} NFL Draft prospect` : "n NFL Draft prospect"}${posName ? ` at ${posName}` : ""}${school ? ` for ${school}` : ""}. `
+    + "Drop your questions and your grade in the chat.";
+  const url = input.slug ? `https://we-draft.com/player/${input.slug}` : "https://we-draft.com";
+  const plug = [
+    `📋 Evaluate ${name} and create your own draft board at We-Draft.com:`,
+    url,
+    "",
+    "🏈 We-Draft.com is where fans scout college prospects: grade players, build big boards, run mock drafts and see how the community ranks every class.",
+  ].join("\n");
+  const more = "Live film breakdowns of the top NFL Draft prospects every week. Subscribe and turn on notifications so you catch the next one.";
+  const tags = [schoolTag(school), "#NFLDraft", "#FilmBreakdown"].filter(Boolean).join(" ");
+  const description = [lead, who, plug, more, tags].join("\n\n");
+  const comment = `What's your grade on ${name}? Evaluate him and create your own draft board at We-Draft.com`;
+  return { title, description, comment };
+}
+
 // A season's row of a table ({ cols, rows: [{ year, vals }] }) as "37 REC, 447 YDS, 6 TD".
 export function statLineOf(table, season) {
   const row = table?.rows?.find((r) => r.year === season);

@@ -6,7 +6,7 @@
 // layout: pick an element (or click it on the preview) and move, size and
 // space it. The player's photo is moved and sized with PhotoAdjust.
 import { field, label, btn, linkBtn, PhotoAdjust, NO_ADJUST } from "./SocialMakerKit";
-import { GR_ELEMENTS, GR_LABELS } from "../utils/youtube/gamereview";
+import { GR_ELEMENTS, GR_LABELS, SITE_COLORS } from "../utils/youtube/gamereview";
 import { LOCAL_FONTS, canQueryLocalFonts, fontsFromComputer, fontFromFile } from "../utils/youtube/localFonts";
 
 // Each template's own default layout, kept in this browser ("Make this the default").
@@ -65,8 +65,8 @@ export function LayoutEditor({ elements, labels, layout, setLayout, selected, se
   );
 }
 
-export default function GameReviewControls({ gr, setGr, selected, setSelected, adjust, setAdjust, school, fonts, setFonts, setMsg }) {
-  const set = (patch) => setGr((g) => ({ ...g, ...patch }));
+// Black Lives and Milker (localFonts.js) not loaded yet: load them from this computer or their files.
+export function LocalFontsNotice({ fonts, setFonts, setMsg }) {
   const useComputer = () => fontsFromComputer().then((f) => { setFonts(f); setMsg(f.missing.length ? `Couldn't find ${f.missing.join(" and ")} on this computer: pick its file instead.` : "Fonts loaded."); })
     .catch((e) => setMsg(`Couldn't read this computer's fonts: ${e.message}`));
   const fromFile = (family) => (e) => {
@@ -74,6 +74,41 @@ export default function GameReviewControls({ gr, setGr, selected, setSelected, a
     e.target.value = "";
     if (file) fontFromFile(family, file).then(setFonts).catch((er) => setMsg(`Couldn't use that font file: ${er.message}`));
   };
+  if (!fonts.missing.length) return null;
+  return (
+    <div style={{ border: "1px solid #f3d9a4", background: "#fff8ea", borderRadius: "8px", padding: "8px 10px", display: "flex", flexDirection: "column", gap: "6px" }}>
+      <div style={{ fontSize: "12px", fontWeight: 800, color: "#8a5a00" }}>
+        {fonts.missing.join(" and ")} {fonts.missing.length === 1 ? "isn't" : "aren't"} loaded yet, so a stand-in font shows. Load {fonts.missing.length === 1 ? "it" : "them"} once and this browser keeps {fonts.missing.length === 1 ? "it" : "them"}.
+      </div>
+      {canQueryLocalFonts() && <button style={{ ...btn(true), alignSelf: "flex-start", padding: "5px 12px" }} onClick={useComputer}>Use this computer&apos;s fonts</button>}
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        {LOCAL_FONTS.filter((f) => fonts.missing.includes(f.label)).map((f) => (
+          <label key={f.family} style={{ ...linkBtn, cursor: "pointer" }}>
+            {f.label} file…<input type="file" accept=".otf,.ttf,.woff,.woff2" onChange={fromFile(f.family)} style={{ display: "none" }} />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Film Breakdown Live's colors: the site's (the default) or his school's.
+// g: { palette, color, accent }; school: { color, accent } (his, "" if none picked).
+export function PaletteToggle({ g, setG, school }) {
+  const pick = (palette) => setG((x) => ({ ...x, palette, ...(palette === "site" ? SITE_COLORS : { color: school.color || x.color, accent: school.accent || x.accent }) }));
+  return (
+    <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
+      <button style={{ ...btn(g.palette !== "school"), padding: "4px 10px" }} onClick={() => pick("site")}>Site colors</button>
+      <button style={{ ...btn(g.palette === "school"), padding: "4px 10px" }} onClick={() => pick("school")}>His school&apos;s colors</button>
+    </div>
+  );
+}
+
+// gr: the template's settings (Game Review's, or Film Breakdown Live's —
+// texture "mesh"); storageKey / templateName: its default layout's.
+export default function GameReviewControls({ gr, setGr, selected, setSelected, adjust, setAdjust, school, fonts, setFonts, setMsg, storageKey = "grLayoutDefault", templateName = "Game Review" }) {
+  const set = (patch) => setGr((g) => ({ ...g, ...patch }));
+  const isMesh = gr.texture === "mesh";
   const color = (k, t) => (
     <label style={{ ...small, display: "flex", flexDirection: "column", gap: "3px", flex: 1 }}>
       {t}
@@ -83,21 +118,7 @@ export default function GameReviewControls({ gr, setGr, selected, setSelected, a
 
   return (
     <>
-      {fonts.missing.length > 0 && (
-        <div style={{ border: "1px solid #f3d9a4", background: "#fff8ea", borderRadius: "8px", padding: "8px 10px", display: "flex", flexDirection: "column", gap: "6px" }}>
-          <div style={{ fontSize: "12px", fontWeight: 800, color: "#8a5a00" }}>
-            {fonts.missing.join(" and ")} {fonts.missing.length === 1 ? "isn't" : "aren't"} loaded yet, so a stand-in font shows. Load {fonts.missing.length === 1 ? "it" : "them"} once and this browser keeps {fonts.missing.length === 1 ? "it" : "them"}.
-          </div>
-          {canQueryLocalFonts() && <button style={{ ...btn(true), alignSelf: "flex-start", padding: "5px 12px" }} onClick={useComputer}>Use this computer&apos;s fonts</button>}
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            {LOCAL_FONTS.filter((f) => fonts.missing.includes(f.label)).map((f) => (
-              <label key={f.family} style={{ ...linkBtn, cursor: "pointer" }}>
-                {f.label} file…<input type="file" accept=".otf,.ttf,.woff,.woff2" onChange={fromFile(f.family)} style={{ display: "none" }} />
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
+      <LocalFontsNotice fonts={fonts} setFonts={setFonts} setMsg={setMsg} />
 
       <div>
         <div style={label}>Headline (a line a line)</div>
@@ -105,30 +126,34 @@ export default function GameReviewControls({ gr, setGr, selected, setSelected, a
       </div>
 
       <div>
-        <div style={{ ...label, display: "flex" }}>
+        {gr.featureName && <><div style={label}>Colors</div><PaletteToggle g={gr} setG={setGr} school={school} /></>}
+        <div style={{ ...label, display: gr.featureName ? "none" : "flex" }}>
           Colors
           {(gr.color !== school.color || gr.accent !== school.accent) && <button style={{ ...linkBtn, marginLeft: "auto", fontSize: "10px" }} onClick={() => set({ color: school.color, accent: school.accent, dotColor: "" })}>HIS SCHOOL&apos;S</button>}
         </div>
         <div style={row}>
           {color("color", "Ground")}
-          {color("accent", "Name")}
+          {gr.featureName && color("nameColor", "Name")}
+          {color("accent", gr.featureName ? "Stroke" : "Name")}
           {color("headColor", "Headline")}
-          <label style={{ ...small, display: "flex", flexDirection: "column", gap: "3px", flex: 1 }}>
+          {!isMesh && <label style={{ ...small, display: "flex", flexDirection: "column", gap: "3px", flex: 1 }}>
             Dots
             <span style={{ display: "flex", gap: "3px", alignItems: "center" }}>
               <input type="color" value={gr.dotColor || gr.accent || "#f6a21d"} onChange={(e) => set({ dotColor: e.target.value })} style={{ width: "100%", height: "30px", border: "1px solid #d5dce6", borderRadius: "6px", padding: 0 }} />
               {gr.dotColor && <button style={{ ...linkBtn, padding: 0 }} title="Back to his school's second color" onClick={() => set({ dotColor: "" })}>↺</button>}
             </span>
-          </label>
+          </label>}
         </div>
       </div>
-      <Slider name="Dots" value={gr.dots} min={0} max={1.5} step={0.05} reset={1} fmt={(v) => (v ? `${Math.round(v * 100)}%` : "Off")} onChange={(v) => set({ dots: v })} />
+      {isMesh
+        ? <Slider name="Mesh holes" value={gr.mesh ?? 1} min={0} max={1.5} step={0.05} reset={1} fmt={(v) => (v ? `${Math.round(v * 100)}%` : "Off")} onChange={(v) => set({ mesh: v })} />
+        : <Slider name="Dots" value={gr.dots} min={0} max={1.5} step={0.05} reset={1} fmt={(v) => (v ? `${Math.round(v * 100)}%` : "Off")} onChange={(v) => set({ dots: v })} />}
       <label style={{ ...small, display: "flex", gap: "6px", alignItems: "center" }}><input type="checkbox" checked={gr.logoWhite !== false} onChange={(e) => set({ logoWhite: e.target.checked })} /> White We-Draft logo</label>
       <label style={{ ...small, display: "flex", gap: "6px", alignItems: "center" }}><input type="checkbox" checked={!!gr.photoBehind} onChange={(e) => set({ photoBehind: e.target.checked })} /> Player behind the words</label>
 
       <LayoutEditor elements={GR_ELEMENTS} labels={GR_LABELS} layout={gr.layout} setLayout={(fn) => setGr((g) => ({ ...g, layout: fn(g.layout || {}) }))}
-        selected={selected} setSelected={setSelected} adjust={adjust} setAdjust={setAdjust} storageKey="grLayoutDefault" templateName="Game Review" setMsg={setMsg}
-        noSpacing={["logo"]} lineSpacing={["headline"]} />
+        selected={selected} setSelected={setSelected} adjust={adjust} setAdjust={setAdjust} storageKey={storageKey} templateName={templateName} setMsg={setMsg}
+        noSpacing={["logo"]} lineSpacing={gr.featureName ? ["name", "headline"] : ["headline"]} />
     </>
   );
 }

@@ -21,7 +21,7 @@ const num = (v) => (v == null ? "—" : Math.round(v).toLocaleString());
 const fmtDay = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const dur = (sec) => (sec == null ? "—" : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`);
 const pctOf = (v) => (v == null ? "—" : `${Math.round(v)}%`);
-const TEMPLATE_NAMES = { gamereview: "Game Review", icecold: "Ice Cold", portal: "Transfer Portal" };
+const TEMPLATE_NAMES = { gamereview: "Game Review", icecold: "Ice Cold", portal: "Transfer Portal", filmlive: "Film Breakdown Live" };
 
 // A group's totals: CTR weighted by impressions, watch time by views.
 function rollup(list) {
@@ -43,7 +43,7 @@ const GROUPS = [
   ["Headline", (r) => (r.thumb.meta?.question ? "Asks a question" : "No question")],
   ["Headline length", (r) => { const w = r.thumb.meta?.headlineWords || 0; return w <= 3 ? "1–3 words" : w <= 5 ? "4–5 words" : "6+ words"; }],
   ["Photo", (r) => ({ action: "Action shot", headshot: "Headshot", upload: "Uploaded", link: "Linked image", none: "No photo" }[r.thumb.meta?.photoKind] || "—")],
-  ["Player", (r) => (r.thumb.template !== "gamereview" ? "—" : r.thumb.meta?.photoBehind ? "Behind the words" : "In front of the words")],
+  ["Player", (r) => (r.thumb.template !== "gamereview" && r.thumb.template !== "filmlive" ? "—" : r.thumb.meta?.photoBehind ? "Behind the words" : "In front of the words")],
 ];
 
 export default function AdminThumbAnalytics() {
