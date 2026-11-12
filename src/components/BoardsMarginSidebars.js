@@ -1,19 +1,17 @@
 // src/components/BoardsMarginSidebars.js
 //
-// UserBoards.js's ("My Draft Board") margin sidebars — a fourth pairing
-// alongside MarginAds.js (player/article pages), MarginSidebars.js (the
-// News hub), and GameMarginSidebars.js (individual game pages). Left: a
-// compact preview of the signed-in user's My Feed (see MyFeed.js and the
-// users/{uid}/follows subcollection the Follow button on PlayerProfile.js
-// writes to). Right: the same "follow us" social card MarginSidebars.js
-// shows, with no feed underneath it since there's no second content stream
-// to plug in here.
-import { useEffect, useRef, useState } from "react";
+// UserBoards.js's ("My Boards") right-rail cards, laid out the way the
+// Community Board lays out its rails (a grid column, not floating in the
+// page margins), and styled by boardKit's wdb-side / wdb-sidehead:
+//   BoardsFeedCard   — a compact preview of the signed-in user's My Feed
+//                      (MyFeed.js; users/{uid}/follows, written by the
+//                      Follow button on PlayerProfile.js).
+//   BoardsFollowCard — the "follow us" social links.
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
-import { cssRect, viewportCssWidth } from "../utils/pageZoom";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -28,226 +26,111 @@ const SOCIAL_LINKS = [
 const toMs = (ts) => {
   if (!ts) return 0;
   if (ts?.toDate) return ts.toDate().getTime();
-  if (ts instanceof Date) return ts.getTime();
-  const parsed = Date.parse(ts);
-  return isNaN(parsed) ? 0 : parsed;
+  if (typeof ts === "number") return ts;
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
 };
 
 const cardShell = {
   width: "100%", borderRadius: "10px", overflow: "hidden",
-  border: `2px solid ${BLUE}`, background: "#fff",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+  border: `2px solid ${BLUE}`, background: "#fff", fontFamily: "'Arial Black', Arial, sans-serif",
 };
 
-/**
- * @param {React.RefObject} contentRef - ref on the page's main content
- *   container, used to measure the left/right gutters.
- * @param {boolean} isMobile - hidden entirely on mobile (no gutter room).
- * @param {number} horizontalPadding - contentRef's own left/right padding.
- */
-export default function BoardsMarginSidebars({ contentRef, isMobile, horizontalPadding = 20 }) {
+function CardHead({ children }) {
+  return (
+    <>
+      <div className="wdb-sidehead" style={{ background: BLUE, padding: "10px 12px", textAlign: "center" }}>
+        <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.06em", textTransform: "uppercase" }}>{children}</div>
+      </div>
+      <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
+    </>
+  );
+}
+
+export function BoardsFeedCard() {
   const { user } = useAuth();
-  const [layout, setLayout] = useState({ width: 200, leftGutter: 0, rightGutter: 0, topOffset: 40, show: false });
-  const [visible, setVisible] = useState(false);
   const [follows, setFollows] = useState([]);
   const [feedItems, setFeedItems] = useState([]);
-  const anchorRef = useRef(null);
-
-  const recompute = useRef(() => {});
-  recompute.current = () => {
-    if (isMobile || !contentRef.current || !anchorRef.current) { setLayout((p) => ({ ...p, show: false })); return; }
-    const rect = cssRect(contentRef.current);
-    const anchorRect = cssRect(anchorRef.current);
-    const visibleLeftEdge = rect.left + horizontalPadding;
-    const visibleRightEdge = rect.right - horizontalPadding;
-    const leftGutter = Math.max(0, visibleLeftEdge);
-    const rightGutter = Math.max(0, viewportCssWidth() - visibleRightEdge);
-    const minGutter = Math.min(leftGutter, rightGutter);
-    const MIN_USABLE_GUTTER = 170;
-    if (minGutter < MIN_USABLE_GUTTER) { setLayout((p) => ({ ...p, show: false })); return; }
-    const width = Math.max(190, Math.min(300, minGutter - 16));
-    const topOffset = (rect.top - anchorRect.top) + 40;
-    setLayout({ width, leftGutter, rightGutter, topOffset, show: true });
-  };
-
-  useEffect(() => {
-    const handler = () => recompute.current();
-    window.addEventListener("resize", handler);
-    recompute.current();
-    const t1 = setTimeout(() => recompute.current(), 200);
-    const t2 = setTimeout(() => recompute.current(), 800);
-    return () => { window.removeEventListener("resize", handler); clearTimeout(t1); clearTimeout(t2); };
-  }, [isMobile]);
-
-  // Re-anchor whenever the page's own content height changes (year switch,
-  // filter toggle, data finishing a fetch) — not just on window resize. See
-  // the identical fix in MarginSidebars.js/GameMarginSidebars.js.
-  useEffect(() => {
-    if (!contentRef.current || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => recompute.current());
-    ro.observe(contentRef.current);
-    return () => ro.disconnect();
-  }, [contentRef]);
-
-  useEffect(() => {
-    if (!layout.show) return;
-    const t = setTimeout(() => setVisible(true), 20);
-    return () => clearTimeout(t);
-  }, [layout.show]);
 
   // Follows — same subcollection MyFeed.js reads.
   useEffect(() => {
-    if (isMobile || !user) { setFollows([]); return; }
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(collection(db, "users", user.uid, "follows"));
-        setFollows(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      } catch (e) { setFollows([]); }
-    };
-    fetch();
-  }, [isMobile, user]);
+    if (!user) { setFollows([]); return; }
+    getDocs(collection(db, "users", user.uid, "follows"))
+      .then((snap) => setFollows(snap.docs.map((d) => ({ id: d.id, ...d.data() }))))
+      .catch(() => setFollows([]));
+  }, [user]);
 
-  // Feed preview — same fetch-whole-published-set-and-filter-client-side
-  // idiom as MyFeed.js, capped to the newest 6 for this compact card. Only
-  // `articles` carry a playerIds array — plain `news` items don't tag
-  // specific players, so they're left out here too (see MyFeed.js's own
-  // comment on that).
+  // Feed preview — same fetch-the-published-set-and-filter idiom as
+  // MyFeed.js, the newest 6. Only `articles` carry playerIds, so plain
+  // `news` items are left out here too. publishedAt only, never updatedAt:
+  // an old article's small edit mustn't jump it back to the top.
   useEffect(() => {
-    if (isMobile || follows.length === 0) { setFeedItems([]); return; }
+    if (follows.length === 0) { setFeedItems([]); return; }
     const followedIds = new Set(follows.map((f) => f.id));
-    const fetch = async () => {
-      try {
-        const articleSnap = await getDocs(query(collection(db, "articles"), where("status", "==", "published")));
-        const articleItems = articleSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)))
-          // publishedAt only, never last-updated — an old article getting a
-          // small edit (which bumps updatedAt) must not jump back to the
-          // top of this feed.
-          .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt))
-          .slice(0, 6);
-        setFeedItems(articleItems);
-      } catch (e) { setFeedItems([]); }
-    };
-    fetch();
-  }, [isMobile, follows]);
-
-  const positionStyle = (side) => {
-    const gutter = side === "left" ? layout.leftGutter : layout.rightGutter;
-    const offset = Math.max(8, (gutter - layout.width) / 2);
-    return {
-      position: "absolute", top: `${layout.topOffset}px`, [side]: `${offset}px`,
-      width: `${layout.width}px`,
-      display: "flex", flexDirection: "column", gap: "16px",
-      zIndex: 5, opacity: visible ? 1 : 0, transition: "opacity 0.7s ease",
-    };
-  };
+    getDocs(query(collection(db, "articles"), where("status", "==", "published")))
+      .then((snap) => setFeedItems(snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)))
+        .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt))
+        .slice(0, 6)))
+      .catch(() => setFeedItems([]));
+  }, [follows]);
 
   return (
-    <div ref={anchorRef} style={{ position: "relative", height: 0 }}>
-      {(!layout.show || isMobile) ? null : (
-      <>
-      <style>{`
-        .wd-margin-social-link:hover { filter: brightness(1.12); }
-        .wd-margin-feed-item:hover { background: #f0f5ff; }
-      `}</style>
-
-      {/* ===== Left: Following feed preview — never just empty, even with
-          zero follows or zero matching activity yet. ===== */}
-      <div style={positionStyle("left")}>
-        <div style={cardShell}>
-          <div style={{ background: BLUE, padding: "10px 12px", textAlign: "center" }}>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.06em", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-              🔔 Following Feed
-            </div>
+    <div className="wdb-side" style={cardShell}>
+      <style>{".wd-margin-feed-item:hover { background: #f0f5ff; }"}</style>
+      <CardHead>🔔 Following Feed</CardHead>
+      {follows.length === 0 ? (
+        <div style={{ padding: "16px 14px", textAlign: "center" }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", lineHeight: 1.5, marginBottom: "10px", fontFamily: "Arial, sans-serif" }}>
+            Follow players from their profile page to see their news here.
           </div>
-          <div style={{ height: "3px", background: GOLD }} />
-          {follows.length === 0 ? (
-            <div style={{ padding: "16px 14px", textAlign: "center" }}>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", lineHeight: 1.5, marginBottom: "10px" }}>
-                Follow players from their profile page to see their news here.
-              </div>
-              <Link to="/community" style={{ display: "inline-block", fontSize: "11px", fontWeight: 900, color: "#fff", background: GOLD, border: `2px solid ${BLUE}`, borderRadius: "6px", padding: "7px 12px", textDecoration: "none" }}>
-                Find Players →
-              </Link>
-            </div>
-          ) : feedItems.length === 0 ? (
-            <div style={{ padding: "16px 14px", textAlign: "center", fontSize: "12px", fontWeight: 700, color: "#888", lineHeight: 1.5 }}>
-              No recent activity from your {follows.length} followed player{follows.length !== 1 ? "s" : ""} yet.
-            </div>
-          ) : (
-            feedItems.map((item, i) => (
-              <Link
-                key={item.id}
-                to={`/news/${item.slug}`}
-                className="wd-margin-feed-item"
-                style={{
-                  display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", textDecoration: "none",
-                  borderBottom: i < feedItems.length - 1 ? "1px solid #f0f0f0" : "none",
-                }}
-              >
-                <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px" }}>📰</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: "11px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {item.title}
-                  </div>
-                </div>
-              </Link>
-            ))
-          )}
-          {follows.length > 0 && (
-            <Link
-              to="/boards/feed"
-              style={{
-                display: "block", textAlign: "center", background: BLUE, color: "#fff",
-                fontWeight: 900, fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.05em",
-                padding: "9px", textDecoration: "none",
-              }}
-            >
-              View My Feed →
-            </Link>
-          )}
+          <Link to="/community" className="wdb-pill on" style={{ display: "inline-block", fontSize: "11px", fontWeight: 900, color: "#fff", background: BLUE, border: `2px solid ${BLUE}`, borderRadius: "999px", padding: "7px 14px", textDecoration: "none" }}>
+            Find Players →
+          </Link>
         </div>
-      </div>
-
-      {/* ===== Right: Follow-us social card — no feed underneath, unlike
-          MarginSidebars.js, since there's no second content stream here. ===== */}
-      <div style={positionStyle("right")}>
-        <div style={cardShell}>
-          <div style={{ background: BLUE, padding: "10px 12px", textAlign: "center" }}>
-            <div style={{ color: "#fff", fontWeight: 900, fontSize: "13px", letterSpacing: "0.06em", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-              📣 Follow We-Draft
-            </div>
-          </div>
-          <div style={{ height: "3px", background: GOLD }} />
-          <div style={{ padding: "10px 14px 12px" }}>
-            <p style={{ fontSize: "11px", fontWeight: 600, color: "#666", lineHeight: 1.4, textAlign: "center", margin: "0 0 10px" }}>
-              Get live updates on draft prospects and college football players!
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
-              {SOCIAL_LINKS.map((s) => (
-                <a
-                  key={s.label}
-                  href={s.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="wd-margin-social-link"
-                  style={{
-                    display: "flex", alignItems: "center", gap: "8px",
-                    background: s.bg, borderRadius: "8px", padding: "7px 10px",
-                    textDecoration: "none", color: "#fff", fontWeight: 900, fontSize: "11px",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)", transition: "filter 0.15s ease",
-                  }}
-                >
-                  <span style={{ fontSize: "13px" }}>{s.icon}</span> {s.label}
-                </a>
-              ))}
-            </div>
-          </div>
+      ) : feedItems.length === 0 ? (
+        <div style={{ padding: "16px 14px", textAlign: "center", fontSize: "12px", fontWeight: 700, color: "#888", lineHeight: 1.5, fontFamily: "Arial, sans-serif" }}>
+          No recent activity from your {follows.length} followed player{follows.length !== 1 ? "s" : ""} yet.
         </div>
-      </div>
-      </>
+      ) : (
+        feedItems.map((item, i) => (
+          <Link key={item.id} to={`/news/${item.slug}`} className="wd-margin-feed-item"
+            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", borderBottom: i < feedItems.length - 1 ? "1px solid #eef1f5" : "none" }}>
+            <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px" }}>📰</span>
+            <div className="wdb-ntitle" style={{ flex: 1, minWidth: 0, fontSize: "12px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {item.title}
+            </div>
+          </Link>
+        ))
       )}
+      {follows.length > 0 && (
+        <Link to="/boards/feed" style={{ display: "block", textAlign: "center", background: BLUE, color: "#fff", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "9px", textDecoration: "none" }}>
+          View My Feed →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+export function BoardsFollowCard() {
+  return (
+    <div className="wdb-side" style={cardShell}>
+      <style>{".wd-margin-social-link:hover { filter: brightness(1.12); }"}</style>
+      <CardHead>📣 Follow We-Draft</CardHead>
+      <div style={{ padding: "12px 14px 14px" }}>
+        <p style={{ fontSize: "12px", fontWeight: 600, color: "#666", lineHeight: 1.4, textAlign: "center", margin: "0 0 10px", fontFamily: "Arial, sans-serif" }}>
+          Get live updates on draft prospects and college football players!
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+          {SOCIAL_LINKS.map((s) => (
+            <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" className="wd-margin-social-link"
+              style={{ display: "flex", alignItems: "center", gap: "8px", background: s.bg, borderRadius: "8px", padding: "8px 12px", textDecoration: "none", color: "#fff", fontWeight: 900, fontSize: "12px", transition: "filter 0.15s ease" }}>
+              <span style={{ fontSize: "13px" }}>{s.icon}</span> {s.label}
+            </a>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

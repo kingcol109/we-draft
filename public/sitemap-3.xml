@@ -2,6 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
   <url>
+    <loc>https://we-draft.com/player/nico-brown-2027-wr</loc>
+    <lastmod>2026-08-26</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/nico-gramatica-2027-k</loc>
     <lastmod>2026-09-02</lastmod>
     <priority>0.7</priority>
@@ -2154,6 +2159,11 @@
   <url>
     <loc>https://we-draft.com/comparison/aydan-west-2028-db</loc>
     <lastmod>2026-10-25</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/comparison/aydin-breland-2027-dl</loc>
+    <lastmod>2026-11-11</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -4989,16 +4999,6 @@
   <url>
     <loc>https://we-draft.com/comparison/jamel-johnson-2027-db</loc>
     <lastmod>2026-08-09</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/james-brockermeyer-2026-ol</loc>
-    <lastmod>2026-11-11</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/james-jackson-2026-lb</loc>
-    <lastmod>2026-11-11</lastmod>
     <priority>0.6</priority>
   </url>
 </urlset>

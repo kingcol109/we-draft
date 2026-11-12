@@ -71,7 +71,8 @@ async function jpegBase64(svg) {
 // { video: path }] in carousel order. → { articleId, slug }.
 export async function postToSite({ postId, order, caption, title, titleShort, playerIds = [], uid = "", onPhase = () => {} }) {
   const postRef = doc(db, "instagramPosts", postId);
-  const prev = (await getDoc(postRef)).data()?.site || null;
+  const postData = (await getDoc(postRef)).data() || {};
+  const prev = postData.site || null;
   const prevArticle = prev?.articleId ? await getDoc(doc(db, "articles", prev.articleId)) : null;
   const rev = newRev();
   const gallery = [];
@@ -89,6 +90,8 @@ export async function postToSite({ postId, order, caption, title, titleShort, pl
   const fields = {
     title, titleShort: titleShort || title, content: captionHtml(caption), gallery, playerIds: [...new Set(playerIds.filter(Boolean))],
     seoDescription: summaryOf(caption), igPostId: postId, status: "published",
+    // The post on Instagram, once it's there (publish.js adds it if that's later).
+    igPermalink: postData.ig?.permalink || "",
   };
   let articleId;
   let slug;

@@ -414,6 +414,11 @@ async function confirm(ctx, ref, p) {
     subject: p.subject || null, publishedVia: "we-draft", linkedAt: ctx.now(),
     ...(media?.permalink ? { permalink: media.permalink } : {}),
   }, { merge: true });
+  // Already on the site (Post to site — sitePost.js): its article links here too.
+  if (media?.permalink && p.site?.articleId) {
+    await ctx.db.collection("articles").doc(p.site.articleId).update({ igPermalink: media.permalink })
+      .catch((e) => console.error("instagram publish: couldn't link the site article:", e.message));
+  }
   const cleanup = await cleanupPost(ctx, ref);
   return { published: true, mediaId: ig.mediaId, permalink: media?.permalink || null, publishedAt: new Date(at).toISOString(), cleanup };
 }

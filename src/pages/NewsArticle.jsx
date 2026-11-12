@@ -641,8 +641,18 @@ export default function NewsArticle() {
 
                 {/* Footer */}
                 <div style={{ marginTop: "32px", paddingTop: "16px", borderTop: `2px solid #eee`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
-                  {dateStr && (
-                    <span style={{ fontSize: "12px", fontWeight: 700, color: "#aaa" }}>Published {dateStr}</span>
+                  {(dateStr || article.igPermalink) && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                      {dateStr && <span style={{ fontSize: "12px", fontWeight: 700, color: "#aaa" }}>Published {dateStr}</span>}
+                      {/* A post from Instagram (utils/instagram/sitePost.js): the original. */}
+                      {article.igPermalink && (
+                        <a href={article.igPermalink} target="_blank" rel="noopener noreferrer"
+                          style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 900, color: BLUE, textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                          <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" strokeWidth="2.2" /><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="2.2" /><circle cx="17.3" cy="6.7" r="1.3" fill="currentColor" /></svg>
+                          View on Instagram
+                        </a>
+                      )}
+                    </span>
                   )}
                   <Link to="/news" style={{ background: BLUE, color: "#fff", border: `2px solid ${GOLD}`, borderRadius: "6px", padding: "7px 18px", fontWeight: 900, fontSize: "12px", textDecoration: "none", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     ← All News

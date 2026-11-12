@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment, Timestamp } from "firebase/firestore";
 import AdminDailyVisitors from "../components/AdminDailyVisitors";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
@@ -38,6 +38,7 @@ import AdminX from "../components/AdminX";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
 import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../utils/snapshotBuilders";
+import { planEspnHeadshots, headshotPhotoDoc, imageSizeInBrowser, knownEspnPlayers } from "../utils/espnHeadshots";
 import verifiedBadge from "../assets/verified.png";
 import { unzoomTransform } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
@@ -3606,7 +3607,12 @@ const TRAIT_SOURCE_OPTIONS = [
 // and ads — ~4-5k reads per click. Each doc is size-checked (Firestore's
 // 1 MiB cap) before anything is written. The writes go in several
 // commits, so one failing partway leaves some docs new and the rest from
-// the last build — rebuilding again sets them all. ──
+// the last build — rebuilding again sets them all.
+//
+// Then it fills any missing player headshots from ESPN's college rosters
+// (utils/espnHeadshots.js — same matching as scripts/importEspnHeadshots.js
+// and the weekly job), so a player added since the last import gets his
+// photo. That step failing doesn't undo the snapshots. ──
 const COMP_SNAPSHOT_MAX_BYTES = 900 * 1024;
 const EVAL_READ_CHUNK = 50;
 // The browser's commits are smaller than the weekly job's: the web SDK sends
@@ -3615,6 +3621,37 @@ const EVAL_READ_CHUNK = 50;
 // retried it forever. 1 MB raw keeps each commit around 3 MiB on the wire.
 const SNAPSHOT_COMMIT_BYTES_WEB = 1024 * 1024;
 const SNAPSHOT_COMMIT_TIMEOUT_MS = 90 * 1000;
+
+// Saves ESPN headshots for players who have none; returns a short summary.
+async function importHeadshots(players, schools, setMessage) {
+  setMessage("Checking headshots…");
+  const [photoSnap, reviewSnap] = await Promise.all([
+    getDocs(collection(db, "playerPhotos")),
+    getDoc(doc(db, "config", "headshotReview")),
+  ]);
+  const dismissed = new Set(reviewSnap.exists() ? reviewSnap.data().dismissed || [] : []);
+  const { matches, review, jerseyUpdates, stats } = await planEspnHeadshots({
+    players, schools, dismissed,
+    known: knownEspnPlayers(photoSnap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+    hasHeadshot: new Set(photoSnap.docs.filter((d) => d.data().headshot?.url).map((d) => d.id)),
+    imageSize: imageSizeInBrowser,
+    onProgress: setMessage,
+  });
+  const addedAt = Timestamp.now();
+  for (let i = 0; i < matches.length; i += 400) {
+    const batch = writeBatch(db);
+    matches.slice(i, i + 400).forEach((mt) => batch.set(doc(db, "playerPhotos", mt.player.id), { ...headshotPhotoDoc(mt, addedAt), updatedAt: serverTimestamp() }, { merge: true }));
+    await batch.commit();
+  }
+  for (let i = 0; i < jerseyUpdates.length; i += 400) {
+    const batch = writeBatch(db);
+    jerseyUpdates.slice(i, i + 400).forEach((j) => batch.set(doc(db, "playerPhotos", j.id), { jersey: j.jersey, jerseyEspnId: j.espnId, updatedAt: serverTimestamp() }, { merge: true }));
+    await batch.commit();
+  }
+  // The review list is this run's; dismissals carry over.
+  await setDoc(doc(db, "config", "headshotReview"), { items: review, dismissed: [...dismissed], updatedAt: serverTimestamp() });
+  return `${stats.matched} new headshot${stats.matched === 1 ? "" : "s"}${stats.review ? ` (${stats.review} to review in Photos)` : ""}${jerseyUpdates.length ? ` · ${jerseyUpdates.length} jersey number${jerseyUpdates.length === 1 ? "" : "s"}` : ""}`;
+}
 
 function CompSnapshotRebuild({ records }) {
   const [meta, setMeta] = useState(null);
@@ -3684,7 +3721,15 @@ function CompSnapshotRebuild({ records }) {
 
       const m = built.find((d) => d.id === "_meta").data;
       setMeta({ ...m, builtAt: new Date(), builtBy: "admin" });
-      setMessage(`Rebuilt ${built.length} snapshots · ${m.gradedComps} graded comps · ${m.classLists} class lists · ${m.searchRows} searchable prospects.`);
+      const done = `Rebuilt ${built.length} snapshots · ${m.gradedComps} graded comps · ${m.classLists} class lists · ${m.searchRows} searchable prospects`;
+      let photos;
+      try {
+        photos = await importHeadshots(players, schoolSnap.docs.map((d) => d.data()), setMessage);
+      } catch (e) {
+        console.error("ESPN headshot import error:", e);
+        photos = `headshots failed: ${e.message}`;
+      }
+      setMessage(`${done} · ${photos}.`);
     } catch (e) {
       console.error("Site snapshot rebuild error:", e);
       setMessage(`Failed: ${e.message}`);

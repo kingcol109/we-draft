@@ -404,10 +404,11 @@ function playerShare({ player, gradeLabel, gradeTitle, ranks = [], strengths = [
 }
 
 // The share dialog's picture of the message: a header in the team's colors
-// (logo, name, position · school · class, height and weight), the grade and
+// (logo, name, position · school · class, height and weight — and his
+// headshot cutout standing on the header's right edge), the grade and
 // class ranks, strengths and weaknesses as tags, the evaluation's excerpt,
 // and the link along the bottom.
-function PlayerShareCard({ card, color1, color2, logo }) {
+function PlayerShareCard({ card, color1, color2, logo, headshot }) {
   const { player, ht, wt, gradeLabel, gradeTitle, ranks, strengths, weaknesses, excerpt, url } = card;
   const ink = textOn(color1, color2);
   const grade = gradeLabel ? gradeDisplay(gradeLabel) : null;
@@ -416,7 +417,8 @@ function PlayerShareCard({ card, color1, color2, logo }) {
   const facts = [[player.Position, player.School].filter(Boolean).join(" · "), formatEligible(player.Eligible)].filter(Boolean).join(" · ");
   return (
     <div style={{ borderRadius: 14, overflow: "hidden", border: "1px solid #e3e7ee", background: "#fff", textAlign: "left", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: `linear-gradient(135deg, ${color1} 0%, ${color1} 60%, ${color2} 140%)`, color: ink, borderBottom: `4px solid ${color2}` }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: headshot ? "14px 112px 14px 16px" : "14px 16px", minHeight: headshot ? 88 : undefined, overflow: "hidden", background: `linear-gradient(135deg, ${color1} 0%, ${color1} 60%, ${color2} 140%)`, color: ink, borderBottom: `4px solid ${color2}` }}>
+        {headshot && <img src={headshot} alt="" style={{ position: "absolute", right: 4, bottom: 0, height: "calc(100% - 6px)", maxHeight: 104, width: "auto", objectFit: "contain", objectPosition: "bottom", filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.35))", pointerEvents: "none" }} />}
         {logo && <img src={logo} alt="" style={{ width: 52, height: 52, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.25))" }} />}
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.05, textTransform: "uppercase", overflowWrap: "anywhere" }}>{player.First} {player.Last}</div>
@@ -2313,6 +2315,9 @@ export default function PlayerProfile() {
   // The player's headshot (playerPhotos, Admin → Content → Photos) — the
   // hero's left side when there is one, with the team logo moved right.
   const [headshot, setHeadshot] = useState("");
+  // His jersey number (playerPhotos/{id}.jersey, from ESPN's roster — see
+  // utils/espnHeadshots.js); the hero shows it in front of the team logo.
+  const [jersey, setJersey] = useState("");
   // The ESPN athlete id his headshot was matched on — turns on the Stats
   // tab (PlayerEspnStats); the sidebar's PlayerStatsCard then shows just
   // the season totals, ESPN's numbers with CFBD's ranks.
@@ -2507,12 +2512,13 @@ export default function PlayerProfile() {
   useEffect(() => {
     if (!player?.id) return undefined;
     let live = true;
-    setHeadshot(""); setHeadshotReady(false); setEspnId(""); setEspnEmpty(false);
+    setHeadshot(""); setJersey(""); setHeadshotReady(false); setEspnId(""); setEspnEmpty(false);
     getDoc(doc(db, "playerPhotos", player.id))
       .then((snap) => {
         if (!live) return;
         const hs = snap.exists() ? snap.data().headshot : null;
         setHeadshot(hs?.url || "");
+        setJersey(snap.exists() && snap.data().jersey != null ? String(snap.data().jersey).trim() : "");
         setEspnId(hs?.espnId ? String(hs.espnId) : "");
       })
       .catch(() => {})
@@ -4354,6 +4360,10 @@ useEffect(() => {
   // school-fetch effect above). Not shown with a headshot, when the NFL
   // logo takes the right side.
   const heroCollegeLogo = draftedBy ? (branding?.cfbLogo || "") : "";
+  // His jersey number in front, when we have it (not for drafted players —
+  // that's his college number). The team logo then becomes the big faded
+  // background mark in the wordmark's place.
+  const heroNumber = !draftedBy && jersey ? jersey.replace(/^#/, "") : "";
 
   // Find Comparison — a compact pill beside the Community Scouting Report
   // heading (null when the feature is off or the player has no slug).
@@ -4450,7 +4460,7 @@ useEffect(() => {
   const evalShare = playerShare({
     player, url: playerUrl, gradeTitle: "My Grade", gradeLabel: grade, strengths, weaknesses, evaluation,
   });
-  const shareCard = (s) => <PlayerShareCard card={s.card} color1={color1 || SITE_BLUE} color2={color2 || SITE_GOLD} logo={heroLogo} />;
+  const shareCard = (s) => <PlayerShareCard card={s.card} color1={color1 || SITE_BLUE} color2={color2 || SITE_GOLD} logo={heroLogo} headshot={headshot ? sanitizeUrl(headshot) : ""} />;
   const wdFitsShown = wdFits.slice(0, community.topFits.length >= 2 ? 1 : community.topFits.length === 1 ? 2 : 3);
   const renderWdFits = (size, row) => wdFitsShown.length > 0 && (
     <div style={{ width: "100%" }}>
@@ -4712,6 +4722,13 @@ useEffect(() => {
         <meta property="og:description" content={metaDescription} />
         <meta property="og:url" content={`https://we-draft.com/player/${slug}`} />
         <meta property="og:site_name" content="We-Draft.com" />
+        {/* The link preview (a text, a post) shows his headshot instead of
+            App.js's site-icon default. Bots get this page through
+            api/bot-render.js, which waits on prerenderReady — and that waits
+            on headshotReady, so the tag is in place when it's captured. */}
+        {headshot && <meta property="og:image" content={sanitizeUrl(headshot)} />}
+        {headshot && <meta property="og:image:alt" content={`${player.First||""} ${player.Last||""}`.trim()} />}
+        {headshot && <meta name="twitter:image" content={sanitizeUrl(headshot)} />}
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content={`${player.First||""} ${player.Last||""} NFL Draft Scouting Report and Projection`} />
         <meta name="twitter:description" content={metaDescription} />
@@ -5210,7 +5227,23 @@ useEffect(() => {
               background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.16), transparent 55%)",
               animation: "wdPlayerHeroSpotlight 5s ease-in-out infinite",
             }} />
-            {heroWatermark && !isMobile && (
+            {heroNumber && heroLogo ? (
+              <img
+                src={sanitizeUrl(heroLogo)} alt="" aria-hidden="true"
+                style={headshot ? {
+                  // Centered behind the headshot (which stands over it at
+                  // zIndex 1); with no headshot, it sits on the number's side.
+                  position: "absolute", top: "50%", left: isMobile ? "calc(1% + 68px)" : "calc(2% + 125px)", transform: "translate(-50%, -50%)",
+                  height: isMobile ? "135%" : "150%", width: "auto", maxWidth: isMobile ? "60%" : "40%", objectFit: "contain",
+                  opacity: 0.13, zIndex: 0, pointerEvents: "none",
+                } : {
+                  position: "absolute", top: "50%", right: isMobile ? "-14%" : "-6%", transform: "translateY(-50%)",
+                  height: isMobile ? "135%" : "150%", width: "auto", maxWidth: isMobile ? "80%" : "62%", objectFit: "contain",
+                  opacity: 0.13, zIndex: 0, pointerEvents: "none",
+                }}
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            ) : heroWatermark && !isMobile && (
               <img
                 src={sanitizeUrl(heroWatermark)} alt="" aria-hidden="true"
                 style={{
@@ -5241,7 +5274,38 @@ useEffect(() => {
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
             )}
-            {heroLogo && (
+            {heroNumber ? (
+              // The number centered in its side of the hero (the right with a
+              // headshot, else the left); the "#" hangs off its top-left
+              // corner, outside the centering, so the digits sit dead center.
+              <Link
+                to={`/team/${teamSlug}`}
+                aria-label={`Number ${heroNumber}, ${player.School}`}
+                className="wd-hero-logo-link"
+                style={{
+                  position: "absolute", top: 0, bottom: 0, [headshot ? "right" : "left"]: 0,
+                  // Room on the left for the hanging "#", so the digits center
+                  // in what's left and the mark never clips at the hero's edge.
+                  width: isMobile ? (headshot ? "27%" : "30%") : "32%", paddingLeft: isMobile ? "14px" : "36px", boxSizing: "border-box", zIndex: 2,
+                  display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none",
+                  fontFamily: "'Arial Black', 'Helvetica Neue', Arial, sans-serif", fontWeight: 900, color: "#fff",
+                  textShadow: `0 4px 18px rgba(0,0,0,0.45), 3px 3px 0 ${color2}`,
+                }}
+              >
+                <span className="wd-hero-logo-img" style={{
+                  position: "relative", display: "block", lineHeight: 0.82, letterSpacing: "-0.04em",
+                  fontSize: isMobile
+                    ? (headshot ? (heroNumber.length > 1 ? "46px" : "56px") : (heroNumber.length > 1 ? "60px" : "72px"))
+                    : (heroNumber.length > 1 ? "120px" : "160px"),
+                }}>
+                  <span aria-hidden="true" style={{
+                    position: "absolute", right: "100%", top: isMobile ? "2px" : "6px", marginRight: isMobile ? "2px" : "4px",
+                    fontSize: isMobile ? "20px" : "44px", lineHeight: 1, letterSpacing: 0, opacity: 0.85,
+                  }}>#</span>
+                  {heroNumber}
+                </span>
+              </Link>
+            ) : heroLogo && (
               <Link
                 to={draftedBy ? `/nfl/${draftedBy.toLowerCase()}` : `/team/${teamSlug}`}
                 aria-label={draftedBy ? teamNameFromAbbr(draftedBy) : player.School}
@@ -5308,7 +5372,12 @@ useEffect(() => {
                 it and the logo (wrapping, a hyphenated name at the hyphen)
                 rather than running under the logo. containerType lets the
                 name's size follow this column's width (nameFit below). */}
-            <div className="flex-1 text-center" style={{ containerType: "inline-size", ...(headshot ? { paddingLeft: isMobile ? 64 : 150, paddingRight: isMobile ? 76 : 170 } : {}) }}>
+            {/* With a jersey number, equal padding on both sides (wide enough
+                to clear the number's side) keeps the block on the hero's
+                exact middle whichever side the number is on. */}
+            <div className="flex-1 text-center" style={{ containerType: "inline-size", ...(heroNumber
+              ? { paddingLeft: isMobile ? "27%" : "31%", paddingRight: isMobile ? "27%" : "31%" }
+              : headshot ? { paddingLeft: isMobile ? 64 : 150, paddingRight: isMobile ? 76 : 170 } : {}) }}>
               {/* Transfer Portal banner — the one thing on this page that
                   reacts to AdminPanel.js's "Move to Transfer Portal"
                   action (see PlayerDataSection there); everything else

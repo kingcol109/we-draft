@@ -37,6 +37,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/aydin-breland-2027-dl</loc>
+    <lastmod>2026-11-11</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/barion-brown-2026-wr</loc>
     <lastmod>2026-11-11</lastmod>
     <priority>0.7</priority>
@@ -4994,11 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/nick-marsh-2027-wr</loc>
     <lastmod>2026-10-10</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/nico-brown-2027-wr</loc>
-    <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>

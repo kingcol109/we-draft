@@ -17,6 +17,11 @@
 // 22+ (the builder's .js files use ESM syntax in a package without
 // "type": "module", which Node 22 detects automatically).
 //
+// After the snapshots, fills any missing player headshots from ESPN's
+// college rosters (scripts/importEspnHeadshots.js) — a player added since
+// the last run gets his photo without a separate import. A failure there is
+// logged and doesn't fail the snapshot build.
+//
 // Usage:
 //   node --env-file=.env scripts/buildSiteSnapshots.mjs            # write
 //   node --env-file=.env scripts/buildSiteSnapshots.mjs --dry-run  # build + report only
@@ -26,6 +31,7 @@ import { buildSiteSnapshotDocs, snapshotCommitChunks } from "../src/utils/snapsh
 const require = createRequire(import.meta.url);
 const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
+const { run: importEspnHeadshots } = require("./importEspnHeadshots");
 
 // Keep in sync with Comparison.js / AdminPanel.js (LATEST_DRAFT_YEAR,
 // ACTIVE_YEARS) — the class that's drafted but not yet migrated into
@@ -85,6 +91,7 @@ async function main() {
 
   if (DRY_RUN) {
     console.log("Dry run — nothing written.");
+    await headshots();
     return;
   }
   // Several MB in all — committed in chunks under Firestore's per-commit cap.
@@ -96,6 +103,15 @@ async function main() {
     await batch.commit();
   }
   console.log(`Wrote ${docs.length} compSnapshots docs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  await headshots();
+}
+
+async function headshots() {
+  try {
+    await importEspnHeadshots({ write: !DRY_RUN });
+  } catch (e) {
+    console.warn(`ESPN headshot import failed (snapshots still written): ${e.message}`);
+  }
 }
 
 main().then(() => process.exit(0)).catch((e) => {
