@@ -56,6 +56,7 @@ import TeamRoster from "../components/TeamRoster";
 import { briefPlay } from "../utils/briefPlay";
 import HeaderTakeover, { TAKEOVER_STYLE, TAKEOVER_POINTS } from "../components/HeaderTakeover";
 import ScoresWidget, { SCORES_WIDGET_STYLE, openPipWindow } from "../components/ScoresWidget";
+import { ShareIcon } from "../components/ShareSheet";
 import {
   statusLabel, teamShort, teamName, timeoutSide, slatePhase, kickoffLabel, myFeedWindow, clutchHeat, clockSecs, dedupeFeed, darkLogo,
   FOLLOW_TEAMS_KEY, FOLLOW_PLAYERS_KEY, loadFollows,
@@ -276,7 +277,7 @@ html:has(.wdl) { scrollbar-color: #2e3d5c #0a0f1a; }
 .wdl-share-btn svg { width: 14px; height: 14px; }
 .wdl-share-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 160px; display: flex; flex-direction: column; padding: 6px;
   background: #0c1220; border: 1px solid #3a4a6a; border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); }
-.wdl-share-menu a, .wdl-share-menu button { display: block; text-align: left; padding: 9px 12px; border-radius: 8px; color: #eef2f8; font: inherit; font-weight: 800; font-size: 14px;
+.wdl-share-menu a, .wdl-share-menu button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 8px; color: #eef2f8; font: inherit; font-weight: 800; font-size: 14px;
   text-decoration: none; background: none; border: 0; cursor: pointer; }
 .wdl-share-menu a:hover, .wdl-share-menu button:hover { background: #1d2840; }
 /* Upcoming games: Preview (tale of the tape, prospects) + We-Pick card. */
@@ -2263,9 +2264,9 @@ function ShareGame({ game }) {
       </button>
       {open && (
         <div className="wdl-share-menu" role="menu">
-          <a role="menuitem" href={`sms:?&body=${encodeURIComponent(body)}`} onClick={() => setOpen(false)}>💬 Text</a>
-          <a role="menuitem" href={`mailto:?subject=${encodeURIComponent(`${a} vs ${h} | We-Draft Live`)}&body=${encodeURIComponent(body)}`} onClick={() => setOpen(false)}>✉️ Email</a>
-          <button type="button" role="menuitem" onClick={copy}>{copied ? "✓ Copied" : "🔗 Copy link"}</button>
+          <a role="menuitem" href={`sms:?&body=${encodeURIComponent(body)}`} onClick={() => setOpen(false)}><ShareIcon name="message" size={17} />Messages</a>
+          <a role="menuitem" href={`mailto:?subject=${encodeURIComponent(`${a} vs ${h} | We-Draft Live`)}&body=${encodeURIComponent(body)}`} onClick={() => setOpen(false)}><ShareIcon name="mail" size={17} />Email</a>
+          <button type="button" role="menuitem" onClick={copy}><ShareIcon name={copied ? "check" : "link"} size={17} />{copied ? "Copied" : "Copy link"}</button>
         </div>
       )}
     </div>

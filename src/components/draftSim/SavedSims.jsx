@@ -16,6 +16,7 @@ import { simShareText } from "../../utils/draftSim/share";
 import { deleteSim, setSimVisibility, listable } from "../../utils/draftSim/publicSims";
 import { textOn } from "../../utils/teamColors";
 import LoadingSpinner from "../LoadingSpinner";
+import { ShareIcon } from "../ShareSheet";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -148,8 +149,8 @@ export default function SavedSims({ branding = {}, isMobile }) {
                   {busy === s.id ? "…" : isPublic ? "🌐 PUBLIC" : "🔒 PRIVATE"}
                 </button>
               )}
-              <a href={`sms:?&body=${encodeURIComponent(text)}`} style={action}>💬 TEXT</a>
-              <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={action}>𝕏 POST</a>
+              <a href={`sms:?&body=${encodeURIComponent(text)}`} style={{ ...action, display: "inline-flex", alignItems: "center", gap: 6 }}><ShareIcon name="message" size={14} />TEXT</a>
+              <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer" style={{ ...action, display: "inline-flex", alignItems: "center", gap: 6 }}><ShareIcon name="x" size={13} />POST</a>
               <button onClick={() => remove(s.id)} style={{ ...action, color: "#f85149", marginLeft: "auto" }}>DELETE</button>
             </div>
           </div>

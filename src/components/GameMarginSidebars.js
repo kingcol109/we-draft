@@ -16,6 +16,7 @@ import { useLiveSlate, scheduleScore } from "../hooks/useLiveSlate";
 import { useCurrentRankMap, ranksForGame } from "../utils/rankings";
 import { scheduleGameHref } from "../utils/live";
 import { cssRect, viewportCssWidth } from "../utils/pageZoom";
+import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -350,7 +351,8 @@ export default function GameMarginSidebars({ contentRef, isMobile, horizontalPad
         const newsList = newsSnap.docs.map((d) => ({ id: d.id, ...d.data(), _kind: "news" }));
         const articleList = articleSnap.docs
           .map((d) => ({ id: d.id, ...d.data(), _kind: "article" }))
-          .filter((a) => [1, 2].includes(a.priority));
+          // Site updates (utils/siteUpdates.js) stay out of this list.
+          .filter((a) => [1, 2].includes(a.priority) && !isSiteUpdate(a));
         // Published date only, never last-updated — an old article getting
         // a small edit (which bumps updatedAt) must not jump back to the
         // top of this feed.

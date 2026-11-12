@@ -24,6 +24,7 @@ import { PROFILE_PATH } from "../../utils/draftSim/simProfile";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { textOn } from "../../utils/teamColors";
 import { renderShareImage } from "../../utils/exportImages";
+import ShareSheet, { ShareIcon, ShareImagePreview, ShareToggle, shareActions } from "../ShareSheet";
 import { Avatar, Verified } from "./SimFeed";
 import { saveSim, setSimVisibility, listable, RECENT_PATH } from "../../utils/draftSim/publicSims";
 import { SimSnapshot } from "./SimProfile";
@@ -335,30 +336,38 @@ function SaveButton({ sim, data, hauls, speed, full }) {
 // capture (utils/exportImages.js) — an external logo can taint the canvas
 // and blank the export. ──
 // size: "big" (Mock Draft mode, beside FULL DRAFT) or "card" (on the
-// report card, beside the grade).
-function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, showText = true }) {
+// report card, beside the grade). toggle: an optional switch under the
+// image ({ label, on, set }) that changes the card — each version is built
+// once and kept.
+function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, showText = true, toggle = null }) {
   const cardRef = useRef(null);
-  const building = useRef(false);
-  const [image, setImage] = useState(null); // { url }
+  const building = useRef("");
+  const [images, setImages] = useState({}); // version → { url }
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
+  const version = toggle ? String(!!toggle.on) : "one";
+  const image = images[version] || null;
 
   const build = async () => {
-    if (image || building.current || !cardRef.current) return;
-    building.current = true;
+    if (images[version] || building.current === version || !cardRef.current) return;
+    building.current = version;
     setFailed(false);
     try {
       const url = await renderShareImage(cardRef.current, {
-        pixelRatio: 1.5, backgroundColor: "#06162c", // 720 × 1280 → 1080 × 1920
+        pixelRatio: 1.5, backgroundColor: "#06162c", // 720 × 900 → 1080 × 1350, an Instagram post
       });
-      setImage({ url });
+      setImages((m) => ({ ...m, [version]: { url } }));
     } catch (e) {
       setFailed(true);
     } finally {
-      building.current = false;
+      if (building.current === version) building.current = "";
     }
   };
   const openShare = () => { setOpen(true); build(); };
+  // The toggle flipped with the dialog open: build that version (the card
+  // has re-rendered by now).
+  useEffect(() => { if (open) build(); }, [version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleRow = toggle && <ShareToggle label={toggle.label} on={toggle.on} onChange={toggle.set} />;
 
   // 𝕏 Post opens X itself with the post written, phone or not — no share
   // sheet in between (Save Image is there to attach the picture).
@@ -374,37 +383,21 @@ function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, 
   const trigger = size === "big"
     ? { ...btn, background: GOLD, color: "#fff", padding: isMobile ? "10px 22px" : "12px 30px", fontSize: isMobile ? 14 : 16, letterSpacing: "0.08em", boxShadow: "0 4px 14px rgba(246,162,29,0.35)" }
     : { ...btn, background: "rgba(0,0,0,0.3)", color: "#fff", border: "2px solid rgba(255,255,255,0.55)", padding: isMobile ? "8px 12px" : "12px 22px", fontSize: isMobile ? 12 : 15 };
-  const preview = image
-    ? <img src={image.url} alt="Your draft, ready to share" style={{ display: "block", margin: "0 auto", maxWidth: "100%", maxHeight: isMobile ? "52vh" : "calc(62vh / var(--pz, 1))", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.3)" }} />
-    : <div style={{ padding: "90px 12px", textAlign: "center", color: "#8b9bb4", fontFamily: BODY, fontSize: 13, background: "#070d18", borderRadius: 10 }}>{failed ? "Couldn't build the image — 𝕏 and Message still work." : "Building your image…"}</div>;
-
   return (
     <>
-      <button onClick={openShare} style={trigger}>↗ SHARE</button>
+      <button onClick={openShare} style={trigger}><span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><ShareIcon name="share" size={isMobile ? 15 : 17} />SHARE</span></button>
 
       {/* The share image, drawn off screen — at the page root, so it
           inherits nothing from wherever the button sits. */}
       {createPortal(<div style={{ position: "absolute", left: -9999, top: 0 }} aria-hidden="true">{card(cardRef)}</div>, document.body)}
 
-      {open && isMobile && (
-        <MobileShareSheet title={title} text={text} showText={showText} preview={preview} intent={intent} onSave={image ? saveImage : null} onClose={() => setOpen(false)} />
-      )}
-      {open && !isMobile && (
-        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `2px solid ${BLUE}`, borderRadius: 16, maxWidth: 440, width: "100%", maxHeight: "calc(94vh / var(--pz, 1))", overflowY: "auto", padding: 20, boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ color: BLUE, fontWeight: 900, fontSize: 14, letterSpacing: "0.06em" }}>{title}</div>
-              <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: "none", border: "none", color: "#999", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
-            </div>
-            <div style={{ marginBottom: 16 }}>{preview}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-              <button onClick={saveImage} disabled={!image} style={{ ...shareLink, background: BLUE, color: "#fff", opacity: image ? 1 : 0.5 }}>💾 Save</button>
-              <a href={intent} target="_blank" rel="noopener noreferrer" style={shareLink}>𝕏 Post</a>
-              <a href={`sms:?&body=${encodeURIComponent(text)}`} style={shareLink}>💬 Message</a>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The site's share dialog (ShareSheet.jsx) — a sheet from the bottom
+          on a phone, with the message as it'll be sent. */}
+      <ShareSheet dark open={open} onClose={() => setOpen(false)} title={title}
+        preview={<ShareImagePreview src={image?.url} alt="Your draft, ready to share" failed={failed} />}
+        below={<>{toggleRow}{isMobile && showText && <div className="wdss-text">{text}</div>}</>}
+        primary={[{ label: "Save image", icon: "download", onClick: saveImage, disabled: !image }]}
+        actions={[shareActions.x(intent), shareActions.text(text), shareActions.copy(text)]} />
     </>
   );
 }
@@ -419,7 +412,6 @@ function fitPost(title, lines, cta) {
   }
   return [...out, "", cta].join("\n");
 }
-const shareLink = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#fff", border: `2px solid ${BLUE}`, borderRadius: 8, padding: 10, color: BLUE, fontWeight: 800, fontSize: 13, textDecoration: "none", cursor: "pointer", fontFamily: "inherit" };
 
 // Mock Draft mode: round one as a board (every pick, team colors and
 // logos); the text is every pick (utils/draftSim/share.js mockShareText).
@@ -435,7 +427,7 @@ function MockShare({ sim, data, isMobile }) {
     roundOne.map((p) => { const pl = sim.byId[p.selection]; return `${p.overall}. ${p.owner} ${pl.First} ${pl.Last}`; }),
     simCallToAction(data.year));
   return (
-    <ShareFlow size="big" isMobile={isMobile} title="SHARE YOUR MOCK" showText={false}
+    <ShareFlow size="big" isMobile={isMobile} title="Share your mock" showText={false}
       fileName={`WeDraft_MockDraft_${data.year}.png`}
       text={mockShareText({ year: data.year, sim, teamName: name })} xText={xText}
       card={(ref) => <BoardStory ref={ref} eyebrow={eyebrow} title={`My ${data.year} Mock Draft`} site={simUrl(data.year).toUpperCase()} rows={rows} />} />
@@ -445,6 +437,8 @@ function MockShare({ sim, data, isMobile }) {
 // The Draft Sim: the user's teams' report cards, or round one when they
 // only watched.
 function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
+  // Grades are off the image and the message unless they turn them on.
+  const [grades, setGrades] = useState(false);
   const name = (t) => { const b = data.branding[t] || {}; return b.Team ? `${b.City || ""} ${b.Team}`.trim() : t; };
   const mine = hauls.filter((h) => h.rows.length);
   // No teams of their own: share the first round.
@@ -453,7 +447,7 @@ function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
   // Each pick, the grade, then the link (utils/draftSim/share.js); a
   // watch-only sim shares the top of round one.
   const text = mine.length
-    ? simShareText({ year: data.year, teams: haulRecords(mine), teamName: name })
+    ? simShareText({ year: data.year, teams: haulRecords(mine), teamName: name, grades })
     : [
       `My ${data.year} NFL Draft Sim`,
       ...roundOne.slice(0, 10).map((p) => { const pl = sim.byId[p.selection]; return `${p.overall}. ${name(p.owner)} — ${pl.First} ${pl.Last}`; }),
@@ -465,39 +459,11 @@ function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
   const teams = mine.map((h) => ({ haul: h, brand: data.branding[h.team] || {}, name: name(h.team) }));
   const rows = roundOne.map((p) => ({ ...shareRow(data.branding, { pickNumber: p.overall, team: p.owner, player: sim.byId[p.selection], via: p.via }), logo: teamLogo(data.branding[p.owner] || {}) }));
   return (
-    <ShareFlow size={size} isMobile={isMobile} title="SHARE YOUR DRAFT" text={text} fileName={`WeDraft_DraftSim_${data.year}.png`}
+    <ShareFlow size={size} isMobile={isMobile} title="Share your draft" text={text} fileName={`WeDraft_DraftSim_${data.year}.png`}
+      toggle={mine.length ? { label: "Include grades", on: grades, set: setGrades } : null}
       card={(ref) => mine.length
-        ? <SimReportStory ref={ref} year={data.year} site={site} teams={teams} />
+        ? <SimReportStory ref={ref} year={data.year} site={site} teams={teams} grades={grades} />
         : <BoardStory ref={ref} eyebrow={`${data.year} NFL DRAFT SIM`} title={`My ${data.year} Draft Sim`} site={site} rows={rows} />} />
   );
 }
 
-// The phone's share sheet: up from the bottom in the sim's colors, the
-// image, the message as it'll be sent, and three big buttons — Save, X (X
-// itself, the post written) and Messages.
-function MobileShareSheet({ title, text, showText, preview, intent, onSave, onClose }) {
-  const big = { display: "flex", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 14, padding: "15px 8px", fontWeight: 900, fontSize: 14, whiteSpace: "nowrap", letterSpacing: "0.04em", textDecoration: "none", fontFamily: "inherit", border: "none", cursor: "pointer" };
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10002, display: "flex", alignItems: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} className="wd-sim-in" style={{
-        width: "100%", maxHeight: "92vh", overflowY: "auto", background: "#0e1626", borderTop: `3px solid ${GOLD}`, borderRadius: "20px 20px 0 0",
-        padding: "10px 16px calc(18px + env(safe-area-inset-bottom))", boxSizing: "border-box", boxShadow: "0 -16px 40px rgba(0,0,0,0.5)",
-      }}>
-        <div aria-hidden="true" style={{ width: 42, height: 5, borderRadius: 999, background: "#2a3753", margin: "0 auto 12px" }} />
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ color: "#fff", fontWeight: 900, fontSize: 18, letterSpacing: "0.04em" }}>{title}</div>
-          <button onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "#1a2438", border: "none", color: "#9fb0c8", width: 32, height: 32, borderRadius: "50%", fontSize: 18, lineHeight: 1, cursor: "pointer" }}>×</button>
-        </div>
-        <div style={{ marginBottom: 12 }}>{preview}</div>
-        {showText && <div className="wd-sim-scroll" style={{ background: "#070d18", border: "1px solid #1f2b42", borderRadius: 12, padding: "12px 14px", maxHeight: "18vh", overflowY: "auto", color: "#dbe4f0", fontFamily: BODY, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-line", marginBottom: 14 }}>
-          {text}
-        </div>}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-          <button onClick={onSave || undefined} disabled={!onSave} style={{ ...big, background: BLUE, color: "#fff", opacity: onSave ? 1 : 0.5 }}>💾 Save</button>
-          <a href={intent} target="_blank" rel="noopener noreferrer" style={{ ...big, background: "#000", color: "#fff", border: "1px solid #2f3336" }}>𝕏 Post</a>
-          <a href={`sms:?&body=${encodeURIComponent(text)}`} style={{ ...big, background: "#2ea043", color: "#fff" }}>💬 Message</a>
-        </div>
-      </div>
-    </div>
-  );
-}

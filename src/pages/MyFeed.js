@@ -6,6 +6,8 @@
 // the "My Boards" navbar dropdown and from a button on UserBoards.js (the
 // "My Draft Board" landing page), which also shows a compact preview of this
 // same feed in its left margin sidebar — see BoardsMarginSidebars.js.
+// Site updates (utils/siteUpdates.js) come in too, followed or not, unless
+// the user turned them off in Settings.
 import React, { useEffect, useState } from "react";
 import { collection, getDocs, doc, deleteDoc, query, where } from "firebase/firestore";
 import { db } from "../firebase";
@@ -14,17 +16,11 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { feedFrom, isSiteUpdate, siteUpdatesInFeed } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
-const toMs = (ts) => {
-  if (!ts) return 0;
-  if (ts?.toDate) return ts.toDate().getTime();
-  if (ts instanceof Date) return ts.getTime();
-  const parsed = Date.parse(ts);
-  return isNaN(parsed) ? 0 : parsed;
-};
 
 export default function MyFeed() {
   const { user, login, profile } = useAuth();
@@ -66,24 +62,15 @@ export default function MyFeed() {
   // from in-body player links) — plain `news` items don't tag specific
   // players, so they can't be attributed to anyone's follow list and are
   // left out.
+  const withSiteUpdates = siteUpdatesInFeed(profile);
   useEffect(() => {
-    if (follows.length === 0) { setFeedItems([]); return; }
+    if (!user) { setFeedItems([]); return; }
     const followedIds = new Set(follows.map((f) => f.id));
-    const fetch = async () => {
-      try {
-        const articleSnap = await getDocs(query(collection(db, "articles"), where("status", "==", "published")));
-        const articleItems = articleSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)))
-          // publishedAt only, never last-updated — an old article getting a
-          // small edit (which bumps updatedAt) must not jump back to the
-          // top of this feed.
-          .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt));
-        setFeedItems(articleItems);
-      } catch (e) { console.error(e); setFeedItems([]); }
-    };
-    fetch();
-  }, [follows]);
+    if (followedIds.size === 0 && !withSiteUpdates) { setFeedItems([]); return; }
+    getDocs(query(collection(db, "articles"), where("status", "==", "published")))
+      .then((snap) => setFeedItems(feedFrom(snap.docs.map((d) => ({ id: d.id, ...d.data() })), followedIds, withSiteUpdates)))
+      .catch((e) => { console.error(e); setFeedItems([]); });
+  }, [user, follows, withSiteUpdates]);
 
   const handleUnfollow = async (playerId) => {
     if (!user) return;
@@ -102,7 +89,8 @@ export default function MyFeed() {
     (yearFilter === "All" ? follows : follows.filter((f) => f.playerEligible === yearFilter)).map((f) => f.id)
   );
 
-  const filteredFeed = feedItems.filter((item) => item.playerIds.some((pid) => yearFollowedIds.has(pid)));
+  // Site updates aren't about any class — the year filter leaves them in.
+  const filteredFeed = feedItems.filter((item) => isSiteUpdate(item) || (item.playerIds || []).some((pid) => yearFollowedIds.has(pid)));
 
   if (!user) return (
     <div style={{ minHeight: "calc(70vh / var(--pz, 1))", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
@@ -177,8 +165,8 @@ export default function MyFeed() {
           <div style={{ height: "3px", background: GOLD, borderRadius: "2px" }} />
         </div>
 
-        {follows.length === 0 ? (
-          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
+        {follows.length === 0 && (
+          <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden", marginBottom: "16px" }}>
             <div style={{ background: BLUE, padding: "8px 16px" }}>
               <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Following</div>
             </div>
@@ -196,7 +184,8 @@ export default function MyFeed() {
               </Link>
             </div>
           </div>
-        ) : (
+        )}
+        {follows.length > 0 && (
           <>
             {/* Following pills */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
@@ -227,8 +216,11 @@ export default function MyFeed() {
                 </button>
               ))}
             </div>
+          </>
+        )}
 
             {/* Feed */}
+            {(follows.length > 0 || filteredFeed.length > 0) && (
             <div style={{ border: `2px solid ${BLUE}`, borderRadius: "10px", overflow: "hidden" }}>
               <div style={{ background: BLUE, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Feed</div>
@@ -253,6 +245,7 @@ export default function MyFeed() {
                 >
                   <span style={{ width: "34px", height: "34px", flexShrink: 0, borderRadius: "6px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px" }}>📰</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
+                    {isSiteUpdate(item) && <div style={{ fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "3px" }}>Site update</div>}
                     <div style={{ fontSize: "15px", fontWeight: 900, color: "#222", lineHeight: 1.3 }}>
                       {item.title}
                     </div>
@@ -263,8 +256,7 @@ export default function MyFeed() {
                 </Link>
               ))}
             </div>
-          </>
-        )}
+            )}
       </div>
     </>
   );

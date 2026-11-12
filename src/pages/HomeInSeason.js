@@ -22,6 +22,7 @@ import { topProspects, gradeLabel } from "../utils/communityGrades";
 import { fetchRecentPublicEvals } from "../utils/recentEvaluations";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 import { communityAverage } from "../utils/gradeWindow";
+import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -386,8 +387,9 @@ export default function HomeInSeason() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)));
-        setArticles(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })));
+        // Site updates (utils/siteUpdates.js) stay out — feeds and /news's filter only.
+        const snap = await getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(10)));
+        setArticles(snap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })).filter((a) => !isSiteUpdate(a)).slice(0, 6));
       } catch (err) { console.error("Error fetching articles:", err); }
     };
     fetch();

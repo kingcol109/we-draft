@@ -29,6 +29,7 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import VerifiedNameBadge from "../components/VerifiedNameBadge";
 import { useAuth } from "../context/AuthContext";
 import { fetchAllRankMaps, ranksForGame, currentRankMap } from "../utils/rankings";
+import ShareSheet, { ShareIcon, ShareImagePreview, shareActions } from "../components/ShareSheet";
 
 // One doc per leaderboard: "season" for the 2026 season-long standings, or
 // a week label ("Week 1") for that week alone. See firestore.rules for why
@@ -1483,7 +1484,7 @@ function MyPicksSection() {
                     onClick={handleShareReportCard}
                     style={{ background: GOLD, color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer" }}
                   >
-                    🔗 Share
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><ShareIcon name="share" size={14} />Share</span>
                   </button>
                 </div>
               </>
@@ -1545,7 +1546,7 @@ function MyPicksSection() {
                           background: "rgba(246,162,29,0.12)", color: GOLD, cursor: "pointer",
                         }}
                       >
-                        🔗 Share Picks
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><ShareIcon name="share" size={14} />Share Picks</span>
                       </button>
                     </div>
                   )}
@@ -1741,66 +1742,16 @@ function MyPicksSection() {
         </div>
       )}
 
-      {/* ===== Share Modal ===== */}
-      {shareModal && (
-        <div
-          onClick={() => setShareModal(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ background: PANEL, border: "1px solid #2a3753", borderRadius: "14px", maxWidth: "420px", width: "100%", maxHeight: "calc(90vh / var(--pz, 1))", overflowY: "auto", padding: "20px", boxShadow: "0 20px 50px rgba(0,0,0,0.5)" }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <div style={{ color: "#fff", fontWeight: 900, fontSize: "14px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Share</div>
-              <button
-                onClick={() => setShareModal(null)}
-                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", fontSize: "22px", cursor: "pointer", lineHeight: 1, padding: 0 }}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ borderRadius: "10px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.15)", marginBottom: "16px", background: "#06162c", minHeight: "160px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {shareImageUrl ? (
-                <img src={shareImageUrl} alt="Share preview" style={{ width: "100%", display: "block" }} />
-              ) : (
-                <div style={{ padding: "50px 0", color: "#999", fontSize: "13px", fontWeight: 700 }}>Building image…</div>
-              )}
-            </div>
-            <div style={{ fontSize: "11px", fontWeight: 800, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>
-              Share to
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-              <a
-                href={`mailto:?subject=${encodeURIComponent(`${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`)}&body=${encodeURIComponent(shareText)}`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
-              >
-                📧 Email
-              </a>
-              <a
-                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(smsShareText)}`}
-                target="_blank" rel="noopener noreferrer"
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
-              >
-                𝕏 X
-              </a>
-              <a
-                href={`sms:?&body=${encodeURIComponent(smsShareText)}`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: "rgba(255,255,255,0.08)", border: "2px solid rgba(255,255,255,0.25)", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", textDecoration: "none" }}
-              >
-                💬 Text
-              </a>
-              <button
-                onClick={handleSaveShareImage}
-                disabled={!shareImageUrl}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", background: GOLD, border: "none", borderRadius: "8px", padding: "10px", color: "#fff", fontWeight: 800, fontSize: "13px", cursor: shareImageUrl ? "pointer" : "default", opacity: shareImageUrl ? 1 : 0.6 }}
-              >
-                💾 Save Image
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ===== Share Modal ===== (ShareSheet.jsx, the site's share dialog) */}
+      <ShareSheet dark open={!!shareModal} onClose={() => setShareModal(null)} title="Share"
+        subtitle={shareModal ? `${shareModal.heading} — ${shareModal.weekLabel}` : undefined}
+        preview={<ShareImagePreview src={shareImageUrl} alt="Share preview" aspect={1} />}
+        primary={[{ label: "Save image", icon: "download", onClick: handleSaveShareImage, disabled: !shareImageUrl }]}
+        actions={shareModal ? [
+          shareActions.text(smsShareText),
+          shareActions.email(`${shareModal.icon} ${shareModal.heading} — ${shareModal.weekLabel}`, shareText),
+          shareActions.x(`https://twitter.com/intent/tweet?text=${encodeURIComponent(smsShareText)}`),
+        ] : []} />
     </>
   );
 }

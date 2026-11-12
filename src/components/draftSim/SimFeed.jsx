@@ -3,11 +3,12 @@
 // Draft Sim's live feed — the analyst desk's posts (utils/draftSim/
 // analysts.js) as a social timeline, newest on top, plus the desk lineup
 // with anyone not live yet marked "coming soon". We-Draft.com's pick posts
-// carry a player-profile graphic (ProfileShot) instead of a headline.
+// carry the pick as a graphic in the picking team's colors (ProfileShot).
 import { useState } from "react";
 import { ANALYSTS } from "../../utils/draftSim/analysts";
 import { gradeLook } from "../../utils/communityGrades";
 import { useHeadshot } from "./simHeadshots";
+import { isReadable, textOn } from "../../utils/teamColors";
 
 const FILTERS = [["all", "All"], ["mine", "My Picks"], ["trade", "Trades"]];
 
@@ -36,70 +37,91 @@ const inchesText = (h) => (typeof h === "number" ? `${Math.floor(h / 12)}'${h % 
 const LABEL = { fontSize: 8, fontWeight: 900, letterSpacing: "0.12em", color: SITE_BLUE, textTransform: "uppercase" };
 const CHIP = { border: "1.5px solid #c8102e", borderRadius: 999, padding: "1px 7px", fontSize: 10, fontWeight: 900, color: "#c8102e" };
 
-// A rank as a small tile under the grade: label left, big number right.
-function RankTile({ label, value }) {
+// A rank as a small tile under the grade: label left, big number right, in
+// the picking team's colors.
+function RankTile({ label, value, edge }) {
   return (
-    <span style={{ width: "100%", boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, borderRadius: 6, padding: "3px 7px", background: "#0a2a55", borderBottom: `2px solid ${GOLD}` }}>
+    <span style={{ width: "100%", boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, borderRadius: 6, padding: "3px 7px", background: "rgba(0,0,0,0.32)", borderBottom: `2px solid ${edge}` }}>
       <span style={{ fontSize: 7.5, fontWeight: 900, letterSpacing: "0.1em", color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>{label}</span>
       <span style={{ fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: 14, lineHeight: 1, color: "#fff" }}>
-        <span style={{ fontSize: 9, color: GOLD, marginRight: 1 }}>#</span>{value}
+        <span style={{ fontSize: 9, color: edge, marginRight: 1 }}>#</span>{value}
       </span>
     </span>
   );
 }
 
-// The pick's player page as a graphic: its hero (headshot, name, position ·
-// school · class, college logo) and scouting-report row (community grade
-// with board and position rank tiles under it, top strengths, measurements).
-function ProfileShot({ card }) {
+// The pick as the team's own "the pick is in" graphic, in its colors: a
+// strip in its second color (round · pick, "{Nickname} select"), then the
+// hero on its primary — the team's logo big behind, the player's headshot,
+// name, position, college logo and school — and the scouting
+// report under it (community grade, board and position rank tiles, top
+// strengths, measurements) on the team's color, darkened. brand: the
+// team's (data.branding[team]); without one, the site's colors.
+function ProfileShot({ card, brand = {} }) {
   const headshot = useHeadshot(card.id);
   const look = card.grade ? gradeLook(card.grade) : null;
+  const c1 = brand.Color1 || SITE_BLUE;
+  const c2 = brand.Color2 || GOLD;
+  const teamLogo = brand.LogoDark || brand.Logo1 || "";
+  // The strip: the second color when it shows against the first, else white.
+  const strip = isReadable(c2, c1, 1.6) ? c2 : "#ffffff";
+  const stripInk = textOn(strip, c1);
+  // Accents on the dark panel: whichever team color reads there.
+  const edge = [c2, c1].find((c) => isReadable(c, "#0b1220", 3)) || "#ffffff";
+  const label = { ...LABEL, color: "rgba(255,255,255,0.7)" };
   return (
-    <div style={{ marginTop: 8, borderRadius: 12, overflow: "hidden", border: "1px solid #2a3854", background: "#fff", fontFamily: "Arial, sans-serif" }}>
-      <div style={{ position: "relative", height: 96, overflow: "hidden", background: `linear-gradient(110deg, #0a2a55 0%, ${SITE_BLUE} 55%, #0a2a55 100%)` }}>
-        {card.logo && <img src={card.logo} alt="" aria-hidden="true" style={{ position: "absolute", right: -14, top: "50%", transform: "translateY(-50%)", height: 120, opacity: 0.16, pointerEvents: "none" }} />}
-        {headshot && <img src={headshot} alt="" style={{ position: "absolute", left: -6, bottom: 0, height: 92, maxWidth: "none" }} />}
+    <div style={{ marginTop: 8, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: `linear-gradient(180deg, ${c1}, ${c1})`, fontFamily: "Arial, sans-serif", boxShadow: "0 6px 18px rgba(0,0,0,0.35)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px", background: strip, color: stripInk, fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+        <span style={{ whiteSpace: "nowrap", flexShrink: 0 }}>{card.round ? `Rd ${card.round} · ` : ""}Pick {card.pick}{card.via ? ` · via ${card.via}` : ""}</span>
+        <span style={{ marginLeft: "auto", minWidth: 0, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{card.nick ? `${card.nick} select` : "The pick is in"}</span>
+      </div>
+
+      <div style={{ position: "relative", height: 104, overflow: "hidden", background: `radial-gradient(160px 120px at 85% 40%, ${c2}55, transparent 70%), linear-gradient(115deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.38) 100%)` }}>
+        <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: `repeating-linear-gradient(115deg, transparent 0 22px, ${edge} 22px 28px)`, opacity: 0.1, WebkitMaskImage: "linear-gradient(90deg, transparent 35%, #000)", maskImage: "linear-gradient(90deg, transparent 35%, #000)" }} />
+        {teamLogo && <img src={teamLogo} alt="" aria-hidden="true" style={{ position: "absolute", right: -10, top: "50%", transform: "translateY(-50%)", height: 128, maxWidth: 170, objectFit: "contain", opacity: 0.28, pointerEvents: "none" }} />}
+        {headshot && <img src={headshot} alt="" style={{ position: "absolute", left: -6, bottom: 0, height: 98, maxWidth: "none", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.4))" }} />}
         <div style={{ position: "absolute", top: 0, bottom: 0, left: headshot ? 112 : 12, right: 10, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: headshot ? "flex-start" : "center", gap: 5 }}>
-          <div style={{ color: "#fff", fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: 19, lineHeight: 0.98, textTransform: "uppercase", textShadow: "0 2px 6px rgba(0,0,0,0.35)" }}>
+          <div style={{ color: "#fff", fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: 19, lineHeight: 0.98, textTransform: "uppercase", textShadow: "2px 2px 0 rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.35)" }}>
             {card.first}<br />{card.last}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", color: "#fff", fontSize: 10, fontWeight: 800 }}>
-            <span style={{ border: "1.5px solid #fff", borderRadius: 999, padding: "0 6px", fontWeight: 900 }}>{card.pos}</span>
-            {card.school && <span>{card.school}</span>}
-            {card.year && <span style={{ opacity: 0.75 }}>· {card.year}</span>}
-            {card.logo && <img src={card.logo} alt="" style={{ width: 16, height: 16, objectFit: "contain" }} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 5, maxWidth: "100%", color: "#fff", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>
+            <span style={{ background: strip, color: stripInk, borderRadius: 999, padding: "0 6px", fontWeight: 900, flexShrink: 0 }}>{card.pos}</span>
+            {card.logo && <img src={card.logo} alt="" style={{ width: 16, height: 16, objectFit: "contain", flexShrink: 0 }} />}
+            {/* The whole school name, smaller when it's long (the class is
+                implied — it's this draft). */}
+            {card.school && <span style={{ fontSize: card.school.length > 18 ? 8.5 : card.school.length > 14 ? 9.5 : 10 }}>{card.school}</span>}
           </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, padding: "8px 10px", alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, padding: "8px 10px 10px", alignItems: "start", background: "rgba(5,10,20,0.62)", borderTop: `3px solid ${strip}` }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 66 }}>
-          <span style={LABEL}>Comm Grade</span>
+          <span style={label}>Comm Grade</span>
           {look ? (
             <span style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: 48, height: 40, borderRadius: 6, background: look.bg, border: `2px solid ${look.border}`, color: "#fff", lineHeight: 1 }}>
               <b style={{ fontSize: 16, fontFamily: "'Arial Black', Arial, sans-serif" }}>{look.short}</b>
               {look.qualifier && <span style={{ fontSize: 6.5, fontWeight: 900, marginTop: 2 }}>{look.qualifier}</span>}
             </span>
-          ) : <span style={{ fontSize: 10, color: "#98a3b3", fontStyle: "italic", height: 40, display: "flex", alignItems: "center" }}>No grades</span>}
-          {card.rank && <RankTile label="Board" value={card.rank} />}
-          {card.posRank && <RankTile label={card.pos} value={card.posRank} />}
+          ) : <span style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", fontStyle: "italic", height: 40, display: "flex", alignItems: "center" }}>No grades</span>}
+          {card.rank && <RankTile label="Board" value={card.rank} edge={edge} />}
+          {card.posRank && <RankTile label={card.pos} value={card.posRank} edge={edge} />}
         </div>
         <div style={{ minWidth: 0 }}>
-          <span style={LABEL}>Top Strengths</span>
+          <span style={label}>Top Strengths</span>
           {card.strengths?.length ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
               {card.strengths.map((t) => (
                 <div key={t}>
-                  <div style={{ fontSize: 10, fontWeight: 900, color: "#1d2433", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t}</div>
-                  <div style={{ height: 2, marginTop: 2, borderRadius: 2, background: "#e6eaf0" }}><div style={{ width: "82%", height: "100%", borderRadius: 2, background: "#1f9d55" }} /></div>
+                  <div style={{ fontSize: 10, fontWeight: 900, color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t}</div>
+                  <div style={{ height: 2, marginTop: 2, borderRadius: 2, background: "rgba(255,255,255,0.15)" }}><div style={{ width: "82%", height: "100%", borderRadius: 2, background: edge }} /></div>
                 </div>
               ))}
             </div>
-          ) : <div style={{ fontSize: 10, color: "#98a3b3", fontStyle: "italic", marginTop: 4 }}>No strengths yet</div>}
+          ) : <div style={{ fontSize: 10, color: "rgba(255,255,255,0.55)", fontStyle: "italic", marginTop: 4 }}>No strengths yet</div>}
           {(card.height || card.weight) && (
             <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-              {card.height && <span style={CHIP}>{inchesText(card.height)}</span>}
-              {card.weight && <span style={CHIP}>{card.weight} lbs</span>}
+              {card.height && <span style={{ ...CHIP, borderColor: edge, color: "#fff" }}>{inchesText(card.height)}</span>}
+              {card.weight && <span style={{ ...CHIP, borderColor: edge, color: "#fff" }}>{card.weight} lbs</span>}
             </div>
           )}
         </div>
@@ -108,7 +130,8 @@ function ProfileShot({ card }) {
   );
 }
 
-export default function SimFeed({ feed, height, isMobile }) {
+// branding: the teams' (data.branding) — each pick card is in its team's colors.
+export default function SimFeed({ feed, height, isMobile, branding = {} }) {
   const [filter, setFilter] = useState("all");
   const shown = feed.filter((p) => filter === "all" || (filter === "mine" ? p.userInvolved : p.kind === "trade"));
 
@@ -167,7 +190,7 @@ export default function SimFeed({ feed, height, isMobile }) {
                       {p.lines.join(" ")}
                     </div>
                   )}
-                  <ProfileShot card={p.card} />
+                  <ProfileShot card={p.card} brand={branding[p.card.team]} />
                 </>
               ) : (
                 <div style={{ marginTop: 4, color: p.lines ? "#fff" : "#dbe4f0", fontSize: 13.5, fontWeight: p.lines ? 800 : 400, lineHeight: 1.5, fontFamily: "Arial, sans-serif", whiteSpace: "pre-line", overflowWrap: "anywhere" }}>

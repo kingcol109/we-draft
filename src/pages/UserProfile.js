@@ -26,6 +26,7 @@ import BoardsTab from "../components/profileHub/BoardsTab";
 import WePickTab from "../components/profileHub/WePickTab";
 import MessagesTab from "../components/profileHub/MessagesTab";
 import { countUnreadMessages } from "../utils/userMessages";
+import SiteUpdatesToggle from "../components/SiteUpdatesToggle";
 
 // The article editor (Tiptap, ~400 KB) loads only for writers who have the
 // My Articles section, not on every profile visit.
@@ -350,6 +351,9 @@ export default function UserProfile() {
             {error && <p style={{ color: "red", fontSize: "12px", fontWeight: 700, marginBottom: "8px", marginTop: "-6px" }}>{error}</p>}
             <button onClick={saveProfile} style={btnStyle("primary")}>Save Display Name</button>
           </div>
+
+          {/* My Feed — site updates on or off (utils/siteUpdates.js). */}
+          <SiteUpdatesToggle />
 
           {/* Social Links — verified users only. Shown anywhere this
               person's name appears (We-Pick, evaluations, comments/picks)

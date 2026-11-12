@@ -103,7 +103,7 @@ export async function postToSite({ postId, order, caption, title, titleShort, pl
     const now = new Date();
     slug = siteSlug(titleShort || title, now);
     articleId = (await addDoc(collection(db, "articles"), {
-      ...fields, slug, priority: 2, author: "We-Draft", publishedAt: now,
+      ...fields, slug, priority: 2, author: "We-Draft.com", publishedAt: now,
       teamSlugs: [], schools: [], gameIds: [], videoId: "", authorId: uid, createdAt: serverTimestamp(),
     })).id;
   }

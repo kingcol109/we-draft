@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { auth, provider, db } from "../firebase";
 import { countAccountVisit } from "../utils/accountVisits";
+import { countVisitorVisit, linkVisitor } from "../utils/visitorVisits";
 import {
   signInWithPopup,
   browserPopupRedirectResolver,
@@ -93,6 +94,10 @@ export function AuthProvider({ children }) {
         setUser(u);
         // Today's signed-in visitors (Admin → Analytics → Daily Visitors).
         countAccountVisit(u.uid);
+        // This browser's visitor id (if it had one signed out) is this
+        // account's — so Admin → Users doesn't list it as a visitor
+        // without one (utils/visitorVisits.js).
+        linkVisitor(u.uid);
         try {
           const ref = doc(db, "users", u.uid);
           const snap = await getDoc(ref);
@@ -126,6 +131,8 @@ export function AuthProvider({ children }) {
       } else {
         setUser(null);
         setProfile(null);
+        // Today's visitors without an account (Admin → Users).
+        countVisitorVisit();
       }
       setAuthReady(true); // fires after first resolution, signed in or not
     });
@@ -148,10 +155,14 @@ export function AuthProvider({ children }) {
     }, { merge: true });
     setProfile((prev) => ({ ...prev, uid: user.uid, email: user.email, username }));
   };
+  // Fields just written to users/{uid} elsewhere (a Settings toggle —
+  // utils/siteUpdates.js), folded into the loaded profile so the rest of
+  // the site sees them without a reload.
+  const patchProfile = (fields) => setProfile((prev) => (prev ? { ...prev, ...fields } : prev));
 
   return (
     <AuthContext.Provider value={{
-      user, profile, authReady, login, logout, saveProfile,
+      user, profile, authReady, login, logout, saveProfile, patchProfile,
       authModalOpen, authModalMode, openAuthModal, closeAuthModal, signup,
       loginWithGoogle, signInWithEmail, signUpWithEmail, resetPassword,
     }}>

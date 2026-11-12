@@ -12,6 +12,7 @@ import { Link } from "react-router-dom";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
+import { feedFrom, isSiteUpdate, siteUpdatesInFeed } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -22,14 +23,6 @@ const SOCIAL_LINKS = [
   { label: "Instagram", icon: "📸", href: "https://www.instagram.com/wedraftsite", bg: "linear-gradient(135deg, #f58529, #dd2a7b 45%, #8134af)" },
   { label: "YouTube", icon: "▶", href: "https://www.youtube.com/@kingcoldsports", bg: "#ff0000" },
 ];
-
-const toMs = (ts) => {
-  if (!ts) return 0;
-  if (ts?.toDate) return ts.toDate().getTime();
-  if (typeof ts === "number") return ts;
-  const d = new Date(ts);
-  return isNaN(d.getTime()) ? 0 : d.getTime();
-};
 
 const cardShell = {
   width: "100%", borderRadius: "10px", overflow: "hidden",
@@ -48,7 +41,8 @@ function CardHead({ children }) {
 }
 
 export function BoardsFeedCard() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const withSiteUpdates = siteUpdatesInFeed(profile);
   const [follows, setFollows] = useState([]);
   const [feedItems, setFeedItems] = useState([]);
 
@@ -64,23 +58,21 @@ export function BoardsFeedCard() {
   // MyFeed.js, the newest 6. Only `articles` carry playerIds, so plain
   // `news` items are left out here too. publishedAt only, never updatedAt:
   // an old article's small edit mustn't jump it back to the top.
+  // Site updates come in too (utils/siteUpdates.js), unless turned off.
   useEffect(() => {
-    if (follows.length === 0) { setFeedItems([]); return; }
+    if (!user) { setFeedItems([]); return; }
     const followedIds = new Set(follows.map((f) => f.id));
+    if (followedIds.size === 0 && !withSiteUpdates) { setFeedItems([]); return; }
     getDocs(query(collection(db, "articles"), where("status", "==", "published")))
-      .then((snap) => setFeedItems(snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((a) => Array.isArray(a.playerIds) && a.playerIds.some((pid) => followedIds.has(pid)))
-        .sort((a, b) => toMs(b.publishedAt) - toMs(a.publishedAt))
-        .slice(0, 6)))
+      .then((snap) => setFeedItems(feedFrom(snap.docs.map((d) => ({ id: d.id, ...d.data() })), followedIds, withSiteUpdates).slice(0, 6)))
       .catch(() => setFeedItems([]));
-  }, [follows]);
+  }, [user, follows, withSiteUpdates]);
 
   return (
     <div className="wdb-side" style={cardShell}>
       <style>{".wd-margin-feed-item:hover { background: #f0f5ff; }"}</style>
       <CardHead>🔔 Following Feed</CardHead>
-      {follows.length === 0 ? (
+      {follows.length === 0 && feedItems.length === 0 ? (
         <div style={{ padding: "16px 14px", textAlign: "center" }}>
           <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", lineHeight: 1.5, marginBottom: "10px", fontFamily: "Arial, sans-serif" }}>
             Follow players from their profile page to see their news here.
@@ -99,12 +91,13 @@ export function BoardsFeedCard() {
             style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", borderBottom: i < feedItems.length - 1 ? "1px solid #eef1f5" : "none" }}>
             <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px" }}>📰</span>
             <div className="wdb-ntitle" style={{ flex: 1, minWidth: 0, fontSize: "12px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {isSiteUpdate(item) && <span style={{ color: GOLD, fontSize: "9px", letterSpacing: "0.08em", marginRight: "5px" }}>SITE UPDATE</span>}
               {item.title}
             </div>
           </Link>
         ))
       )}
-      {follows.length > 0 && (
+      {(follows.length > 0 || feedItems.length > 0) && (
         <Link to="/boards/feed" style={{ display: "block", textAlign: "center", background: BLUE, color: "#fff", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.05em", padding: "9px", textDecoration: "none" }}>
           View My Feed →
         </Link>

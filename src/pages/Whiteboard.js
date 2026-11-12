@@ -45,6 +45,8 @@ import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { getPageScale, unzoomTransform, cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
 import { GRAPHIC_MODES, drawWhiteboardGraphic, canvasToBlob } from "../utils/whiteboardGraphic";
+import ShareSheet, { ShareChips, ShareImagePreview } from "../components/ShareSheet";
+import { claimSharePrompt } from "../utils/sharePrompt";
 import { GRADE_SCALE, gradeLook } from "../utils/gradeScale";
 
 const SITE_BLUE = "#0055a5";
@@ -190,6 +192,8 @@ export default function Whiteboard() {
   const boardScrollRef = useRef(null);
   // The share dialog's position group, or null when it's closed.
   const [sharePos, setSharePos] = useState(null);
+  // The dialog was opened by the "share it?" after Save, not a click.
+  const [sharePrompted, setSharePrompted] = useState(false);
   // A small move before a drag starts, so a tap on the handle isn't a drag.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -554,6 +558,12 @@ export default function Whiteboard() {
         updatedAt: serverTimestamp()
       }));
       setIsDirty(false);
+      // Offer to share it — once a day (utils/sharePrompt.js) — when
+      // there's anything on the board to show.
+      if (assignedIds.length && claimSharePrompt(user.uid, profile)) {
+        setSharePrompted(true);
+        setSharePos(POSITIONS.includes(focus) && placedByPos[focus] ? focus : "ALL");
+      }
     } catch (err) {
       console.error("Failed to save whiteboard:", err);
       alert("We couldn't save your board. Please try again in a moment.");
@@ -896,30 +906,6 @@ export default function Whiteboard() {
     }
     .wb-bottom-bar .wb-btn { flex: 0 0 auto; padding: 8px 16px; font-size: 13px; }
     .wb-bottom-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-
-    /* ── Share dialog ── */
-    .wb-share-back { position: fixed; inset: 0; z-index: 10050; background: rgba(4,12,26,0.78); display: flex; align-items: center; justify-content: center; padding: 16px; }
-    .wb-share {
-      background: #fff; border-radius: 18px; width: 100%; max-width: 860px; max-height: calc(92vh / var(--pz, 1)); overflow-y: auto;
-      box-shadow: 0 24px 60px rgba(0,0,0,0.5); display: grid; grid-template-columns: minmax(0, 1fr) 300px;
-    }
-    @media (max-width: 760px) { .wb-share { grid-template-columns: 1fr; max-height: calc(94vh / var(--pz, 1)); } }
-    .wb-share-preview { background: ${SITE_INK}; display: flex; align-items: center; justify-content: center; padding: 16px; min-height: 280px; }
-    .wb-share-preview img { width: 100%; max-width: 420px; height: auto; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); display: block; transition: opacity 0.15s ease; }
-    @media (max-width: 760px) { .wb-share-preview img { max-width: 260px; } }
-    .wb-share-side { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-    .wb-share-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 18px; font-weight: 900; color: ${SITE_INK}; }
-    .wb-share-x { border: 0; background: ${SITE_BG}; width: 34px; height: 34px; border-radius: 50%; font-size: 16px; cursor: pointer; color: ${SITE_INK}; flex-shrink: 0; }
-    .wb-share-label { font-size: 10px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; color: #8a93a3; margin-bottom: 6px; }
-    .wb-share-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .wb-share-chip { border: 1.5px solid ${SITE_BORDER}; background: #fff; border-radius: 999px; padding: 7px 12px; font-weight: 800; font-size: 12px; cursor: pointer; font-family: inherit; color: ${SITE_INK}; }
-    .wb-share-chip.on { color: #fff; border-color: transparent; }
-    .wb-share-chip:disabled { opacity: 0.35; cursor: default; }
-    .wb-share-actions { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
-    .wb-share-btn { border: 2px solid ${SITE_BLUE}; background: #fff; color: ${SITE_BLUE}; border-radius: 10px; padding: 11px; font-weight: 900; font-size: 14px; cursor: pointer; font-family: inherit; }
-    .wb-share-btn.primary { background: ${SITE_BLUE}; color: #fff; }
-    .wb-share-btn:disabled { opacity: 0.5; cursor: default; }
-    .wb-share-note { font-size: 12px; font-weight: 700; color: #8a93a3; text-align: center; min-height: 16px; }
 
     .wb-state-page { padding: 100px 24px; text-align: center; }
     .wb-state-card { max-width: 420px; margin: 0 auto; background: #fff; border-radius: 16px; border: 1px solid ${SITE_BORDER}; padding: 36px 28px; box-shadow: 0 1px 3px rgba(11,18,32,0.06); }
@@ -1265,7 +1251,8 @@ export default function Whiteboard() {
         <ShareGraphicDialog
           pos={sharePos}
           onPos={setSharePos}
-          onClose={() => setSharePos(null)}
+          onClose={() => { setSharePos(null); setSharePrompted(false); }}
+          prompted={sharePrompted}
           board={board}
           markers={markers}
           playerById={playerById}
@@ -1473,7 +1460,8 @@ const canShareFiles = () => {
   } catch { return false; }
 };
 
-function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, placedByPos, bigLists, shortOf, classYear, owner }) {
+// prompted: opened by the once-a-day "share it?" after Save (utils/sharePrompt.js).
+function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, placedByPos, bigLists, shortOf, classYear, owner, prompted = false }) {
   const [mode, setMode] = useState("top5");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(true);
@@ -1513,11 +1501,6 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
 
   // Each new image's object URL is let go once the next replaces it.
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const fileName = `we-draft-${classYear}-${pos.toLowerCase()}-${mode}.png`;
   const share = async () => {
@@ -1538,44 +1521,23 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
   const fileShare = canShareFiles();
   const canCopy = typeof window !== "undefined" && !!window.ClipboardItem && !!navigator.clipboard?.write;
 
+  // The site's share dialog (components/ShareSheet.jsx), the position and
+  // graphic as chips under the preview.
   return (
-    <div className="wb-share-back" onClick={onClose}>
-      <div className="wb-share" role="dialog" aria-label={`Share your ${pos} board`} onClick={(e) => e.stopPropagation()}>
-        <div className="wb-share-preview">
-          {url ? <img src={url} alt={`Your ${pos} board graphic`} style={{ opacity: busy ? 0.5 : 1 }} /> : <LoadingSpinner label="Drawing" size={36} minHeight="240px" />}
-        </div>
-        <div className="wb-share-side">
-          <div className="wb-share-h">
-            <span>Share a graphic</span>
-            <button className="wb-share-x" onClick={onClose} aria-label="Close">✕</button>
-          </div>
-          <div>
-            <div className="wb-share-label">Position</div>
-            <div className="wb-share-chips">
-              {["ALL", ...POSITIONS].map((p) => (
-                <button key={p} className={`wb-share-chip${p === pos ? " on" : ""}`} style={p === pos ? { background: p === "ALL" ? SITE_BLUE : POS_COLORS[p] } : undefined}
-                  disabled={p === "ALL" ? !Object.values(placedByPos).some(Boolean) : !placedByPos[p]} onClick={() => onPos(p)}>{p === "ALL" ? "All positions" : p}</button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="wb-share-label">Graphic</div>
-            <div className="wb-share-chips">
-              {GRAPHIC_MODES.map((m) => (
-                <button key={m.id} className={`wb-share-chip${m.id === mode ? " on" : ""}`} style={m.id === mode ? { background: SITE_INK } : undefined} onClick={() => setMode(m.id)}>
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="wb-share-actions">
-            {fileShare && <button className="wb-share-btn primary" onClick={share} disabled={busy || !url}>Share…</button>}
-            <button className={`wb-share-btn${fileShare ? "" : " primary"}`} onClick={download} disabled={busy || !url}>Download image</button>
-            {canCopy && !fileShare && <button className="wb-share-btn" onClick={copy} disabled={busy || !url}>Copy image</button>}
-            <div className="wb-share-note">{note}</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ShareSheet open onClose={onClose} title={prompted ? "Board saved — share it?" : "Share a graphic"}
+      subtitle={prompted ? "Pick a position and a graphic, then post or save it." : undefined}
+      preview={<div style={{ opacity: busy && url ? 0.5 : 1, transition: "opacity .15s" }}><ShareImagePreview src={url} alt={`Your ${pos} board graphic`} failed={!url && !busy && !!note} failedText={note} /></div>}
+      below={<>
+        <ShareChips label="Position" value={pos} onChange={onPos}
+          options={["ALL", ...POSITIONS].map((p) => ({ id: p, label: p === "ALL" ? "All positions" : p, color: p === "ALL" ? SITE_BLUE : POS_COLORS[p],
+            disabled: p === "ALL" ? !Object.values(placedByPos).some(Boolean) : !placedByPos[p] }))} />
+        <ShareChips label="Graphic" value={mode} onChange={setMode} options={GRAPHIC_MODES.map((m) => ({ id: m.id, label: m.label }))} />
+      </>}
+      primary={[
+        { label: "Save image", icon: "download", onClick: download, disabled: busy || !url },
+        ...(fileShare ? [{ label: "Share image", icon: "share", onClick: share, disabled: busy || !url, alt: true }] : []),
+      ]}
+      actions={canCopy && !fileShare ? [{ key: "copyimg", label: "Copy image", icon: "copy", onClick: copy }] : []}
+      note={url ? note : ""} />
   );
 }

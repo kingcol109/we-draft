@@ -14,6 +14,7 @@ import { SideRailAd } from "../components/MarginAds";
 import SimAdCard from "../components/draftSim/SimAdCard";
 import { BOARD_MODERN_STYLE, RANK_CHIP, rankSlotWidth, POS_COL_W, LOGO_COL_W, RankChips, DropdownChecklist, ArchiveDropdown as KitArchiveDropdown } from "../components/boardKit";
 import { SUB_TABS, inSubTab } from "../utils/subPositions";
+import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -714,7 +715,8 @@ export default function CommunityBoard() {
         let articleItems = [];
         try {
           const articleSnap = await getDocs(query(collection(db, "articles"), where("status", "==", "published")));
-          articleItems = articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() }));
+          // Site updates (utils/siteUpdates.js) stay out of this list.
+          articleItems = articleSnap.docs.map((d) => ({ id: d.id, type: "article", ...d.data() })).filter((a) => !isSiteUpdate(a));
         } catch (articleErr) {
           console.warn("Articles index missing, skipping:", articleErr);
         }

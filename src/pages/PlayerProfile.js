@@ -41,6 +41,8 @@ import PlayerLiveCard, { LivePill, usePlayerLiveGame } from "../components/Playe
 import SimAdCard from "../components/draftSim/SimAdCard";
 import { Helmet } from "react-helmet-async";
 import ShareTextButton from "../components/ShareTextButton";
+import PlayerEvalGraphic from "../components/PlayerEvalGraphic";
+import { claimSharePrompt } from "../utils/sharePrompt";
 import confetti from "canvas-confetti";
 
 
@@ -2254,7 +2256,7 @@ export default function PlayerProfile() {
   const modern = new URLSearchParams(window.location.search).get("modern") !== "0";
   const navigate = useNavigate();
   const [player, setPlayer] = useState(null);
-  const { user, login } = useAuth();
+  const { user, login, profile } = useAuth();
   const evaluationFormRef = useRef(null);
   // Scouting tabs under the hero — "community" (Scouting Report,
   // the default on every player) or "mine" (My Evaluation).
@@ -2337,6 +2339,8 @@ export default function PlayerProfile() {
   const [weaknesses, setWeaknesses] = useState([]);
   const [nflFit, setNflFit] = useState("");
   const [evaluation, setEvaluation] = useState("");
+  // Goes up to open Share Evaluation after a save (the once-a-day prompt).
+  const [evalSharePrompt, setEvalSharePrompt] = useState(0);
   const [visibility, setVisibility] = useState("public");
   // Per-game notes on this player's evaluation — one tag(grade)+note per
   // final game they played in (see the "Game Notes" panel below the
@@ -3563,6 +3567,9 @@ useEffect(() => {
       await setDoc(doc(db,"users",user.uid,"evaluations",player.id), evalData);
       confetti({ particleCount:140, spread:75, origin:{y:0.65}, colors:[color1,color2,"#ffffff"] });
       setLastUpdated(Date.now());
+      // Save Evaluation itself (not a game note's auto-save): offer to share
+      // it — once a day (utils/sharePrompt.js).
+      if (overrideGameNotes === undefined && grade && claimSharePrompt(user.uid, profile)) setEvalSharePrompt((n) => n + 1);
     } catch(e) { alert("❌ Failed to save evaluation. Try again."); }
     finally { setSaving(false); }
   };
@@ -4460,6 +4467,42 @@ useEffect(() => {
   const evalShare = playerShare({
     player, url: playerUrl, gradeTitle: "My Grade", gradeLabel: grade, strengths, weaknesses, evaluation,
   });
+  // Share Evaluation's graphic (components/PlayerEvalGraphic.jsx) — an
+  // Instagram post of the report, in the school's colors.
+  // The page's Share (pageShare) gets the community's version: the
+  // community grade, how many evaluations, the class ranks where the quote
+  // would be.
+  const graphicBase = {
+    player,
+    facts: [player.Position, player.School, classYear].filter(Boolean).join(" · "),
+    size: [evalShare.card.ht, evalShare.card.wt].filter(Boolean).join(" · "),
+    color1: color1 || SITE_BLUE, color2: color2 || SITE_GOLD,
+    logo: sanitizeUrl(branding?.logoDark || branding?.logo1 || ""), headshot: headshot ? sanitizeUrl(headshot) : "",
+    site: `we-draft.com/player/${slug}`.toUpperCase(),
+  };
+  const graphicName = (kind) => `WeDraft_${player.First || ""}${player.Last || ""}_${kind}.png`.replace(/[^\w.-]/g, "");
+  const evalGraphic = {
+    fileName: graphicName("ScoutingReport"),
+    render: (ref) => (
+      <PlayerEvalGraphic ref={ref} {...graphicBase}
+        grade={grade ? gradeDisplay(grade) : null} gradeLabel={grade} by={profile?.username || ""}
+        strengths={strengths} weaknesses={weaknesses} evaluation={evaluation} />
+    ),
+  };
+  const communityGrade = pageShare.card.gradeLabel;
+  const pageGraphic = {
+    fileName: graphicName("CommunityReport"),
+    render: (ref) => (
+      <PlayerEvalGraphic ref={ref} {...graphicBase} badge="COMMUNITY SCOUTING REPORT"
+        grade={communityGrade ? gradeDisplay(communityGrade) : null} gradeTitle="COMMUNITY GRADE" gradeLabel={communityGrade}
+        byTitle="EVALUATIONS" by={evalCount ? String(evalCount) : ""}
+        strengths={pageShare.card.strengths} weaknesses={pageShare.card.weaknesses}
+        ranks={[
+          selfIndex >= 0 && { rank: positionRank ?? selfIndex + 1, of: draftClassPlayers.length, label: `${classYear} ${pluralPos(player.Position)}` },
+          classRank && { rank: classRank, of: classSize, label: `${classYear} Prospects` },
+        ].filter(Boolean)} />
+    ),
+  };
   const shareCard = (s) => <PlayerShareCard card={s.card} color1={color1 || SITE_BLUE} color2={color2 || SITE_GOLD} logo={heroLogo} headshot={headshot ? sanitizeUrl(headshot) : ""} />;
   const wdFitsShown = wdFits.slice(0, community.topFits.length >= 2 ? 1 : community.topFits.length === 1 ? 2 : 3);
   const renderWdFits = (size, row) => wdFitsShown.length > 0 && (
@@ -5115,7 +5158,7 @@ useEffect(() => {
               {/* Share (where Like was) — sends the player as a message
                   (pageShare). Same pill as Follow/Evaluate beside it. */}
               <ShareTextButton
-                text={pageShare.text} preview={shareCard(pageShare)}
+                text={pageShare.text} preview={shareCard(pageShare)} graphic={pageGraphic}
                 subject={`${player.First} ${player.Last} — We-Draft.com`}
                 color={siteC1}
                 title="Share this player"
@@ -5868,7 +5911,7 @@ useEffect(() => {
                   <button onClick={() => handleSaveEvaluation()} disabled={saving} className="wdm-btn-primary w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:siteC1, border:`2px solid ${siteC2}`, color:"#fff", letterSpacing:"0.08em" }}>
                     {saving?"Saving...":"Save Evaluation"}
                   </button>
-                  <ShareTextButton text={evalShare.text} preview={shareCard(evalShare)} subject={`My scouting report: ${player.First} ${player.Last}`} color={siteC1}
+                  <ShareTextButton text={evalShare.text} preview={shareCard(evalShare)} graphic={evalGraphic} openSignal={evalSharePrompt} promptTitle="Evaluation saved — share it?" subject={`My scouting report: ${player.First} ${player.Last}`} color={siteC1}
                     className="wdm-btn-ghost w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${siteC1}`, color:siteC1, letterSpacing:"0.08em" }}>
                     Share Evaluation
                   </ShareTextButton>

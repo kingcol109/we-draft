@@ -1992,7 +1992,7 @@ function Console({ s, data, isMobile, fill = false }) {
     )
     : null;
   const body = {
-    desk: <SimFeed feed={s.feed} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} />,
+    desk: <SimFeed feed={s.feed} branding={data.branding} height={isMobile ? "auto" : consoleHeight(isMobile)} isMobile={isMobile} />,
     draft: <DraftTab s={s} data={data} isMobile={isMobile} onTradePick={s.quick ? null : tradePick} fit={fill && !isMobile} />,
     board: <DraftBoardTab s={s} data={data} isMobile={isMobile} />,
     warroom: <WarRoomTab s={s} data={data} isMobile={isMobile} onTrade={() => { setTradeSeed(null); setTab("trades"); }} />,
@@ -2070,7 +2070,7 @@ export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam
             </div>
             <Console s={s} data={data} isMobile={false} fill />
           </div>
-          <SimFeed feed={s.feed} height="100%" isMobile={false} />
+          <SimFeed feed={s.feed} branding={data.branding} height="100%" isMobile={false} />
         </div>
       </div>
     );
@@ -2085,7 +2085,7 @@ export default function SimBroadcast({ s, data, isMobile, onSettings, onPickTeam
         </div>
         {!isMobile && (
           <div style={{ position: "sticky", top: 12 }}>
-            <SimFeed feed={s.feed} height="calc(100vh / var(--pz, 1) - 120px)" isMobile={false} />
+            <SimFeed feed={s.feed} branding={data.branding} height="calc(100vh / var(--pz, 1) - 120px)" isMobile={false} />
           </div>
         )}
       </div>

@@ -1390,7 +1390,8 @@ function weDraftPick(e, ctx) {
   // The profile "screenshot" the feed attaches (SimFeed ProfileShot).
   const card = {
     id: p.id, first: p.First, last: p.Last, pos: p.Position, school: p.School || "", logo: p.logoDark || p.logo || "",
-    year: ctx.year || "", pick: e.pick.overall, team: e.team, teamName: ctx.teamName(e.team) || e.team, rank: p.rank || null, posRank: p.positionRank || null,
+    year: ctx.year || "", pick: e.pick.overall, round: e.pick.round || null, via: e.pick.via || null,
+    team: e.team, teamName: ctx.teamName(e.team) || e.team, nick: ctx.nickname(e.team) || "", rank: p.rank || null, posRank: p.positionRank || null,
     grade: gradeLabel(p.avg) || "", height: p.height ?? null, weight: p.weight ?? null,
     strengths: (p.strengths || []).slice(0, 3).map(traitText),
   };

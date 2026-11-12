@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment, Timestamp } from "firebase/firestore";
 import AdminDailyVisitors from "../components/AdminDailyVisitors";
+import AdminUserTiers from "../components/AdminUserTiers";
 import { db } from "../firebase";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
@@ -9084,6 +9085,9 @@ function UsersSection() {
   // filtered to that parent gives an exact per-user count in one query
   // instead of iterating every user's own subcollection individually.
   const [evalCounts, setEvalCounts] = useState({});
+  // uid -> evaluations saved in the last 30 days (updatedAt) — for the
+  // tiers above the table (components/AdminUserTiers.jsx).
+  const [evals30, setEvals30] = useState({});
   // Social links (youtube/x/instagram) — verified-only, same three fields
   // UserProfile.js's own Social Links section writes and
   // VerifiedNameBadge.js's hover card reads everywhere a verified name
@@ -9120,12 +9124,16 @@ function UsersSection() {
 
         if (evalsRes.status === "fulfilled") {
           const counts = {};
+          const recent = {};
+          const since = Date.now() - 30 * 864e5;
           evalsRes.value.docs.forEach((d) => {
             if (d.ref.parent?.parent?.parent?.id !== "users") return;
             const uid = d.ref.parent.parent.id;
             counts[uid] = (counts[uid] || 0) + 1;
+            if (toMs(d.data().updatedAt) >= since) recent[uid] = (recent[uid] || 0) + 1;
           });
           setEvalCounts(counts);
+          setEvals30(recent);
         } else {
           console.error("Admin users evaluations fetch error:", evalsRes.reason);
           setEvalCounts({});
@@ -9236,6 +9244,9 @@ function UsersSection() {
           {loading ? "Loading…" : `${users.length} user${users.length === 1 ? "" : "s"} · ${verifiedCount} verified · ${simBetaCount} sim beta`}
         </div>
       </div>
+
+      {/* Stars / Active / Inactive / Dogs, and regulars without an account. */}
+      {!loading && users.length > 0 && <AdminUserTiers users={users} evals30={evals30} />}
 
       {fetchError && (
         <div style={{ padding: "10px 16px", background: "#fff3f0", border: "2px solid #c0392b", borderRadius: "8px" }}>

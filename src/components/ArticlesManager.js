@@ -101,9 +101,12 @@ const parsePublishedAt = (dateStr) => {
 // identically wherever it's tagged.
 const gameLabel = (g) => `${g.away} vs ${g.home}${g.dateMs ? ` (${new Date(g.dateMs).toLocaleDateString("en-US", { timeZone: "UTC" })})` : ""}`;
 
+// category: "" (an article) or "siteUpdate" — news about the site itself
+// (utils/siteUpdates.js): pushed to users' feeds (they can turn that off
+// in Settings) and hidden from /news until its Site Updates filter is on.
 const BLANK_FORM = {
   title: "", titleShort: "", author: "", publishedAt: "",
-  status: "draft", priority: 2, videoId: "", seoDescription: "",
+  status: "draft", priority: 2, videoId: "", seoDescription: "", category: "",
 };
 
 const inputStyle = {
@@ -454,6 +457,7 @@ export default function ArticlesManager() {
       priority: a.priority || 2,
       videoId: a.videoId || "",
       seoDescription: a.seoDescription || "",
+      category: a.category || "",
     });
     editor?.commands.setContent(a.content || "");
     resetPickers();
@@ -599,6 +603,7 @@ export default function ArticlesManager() {
           playerIds, teamSlugs, schools, gameIds,
           videoId: formState.videoId || "",
           seoDescription: formState.seoDescription.trim(),
+          category: formState.category || "",
           authorId: user.uid,
           createdAt: serverTimestamp(),
         };
@@ -624,6 +629,7 @@ export default function ArticlesManager() {
           playerIds, teamSlugs, schools, gameIds,
           videoId: formState.videoId || "",
           seoDescription: formState.seoDescription.trim(),
+          category: formState.category || "",
           updatedAt: serverTimestamp(),
         };
         if (regeneratedSlug) payload.slug = regeneratedSlug;
@@ -905,6 +911,13 @@ export default function ArticlesManager() {
                   <option value={1}>Priority 1</option>
                   <option value={2}>Priority 2</option>
                   <option value={3}>Priority 3</option>
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Type</div>
+                <select value={formState.category} onChange={(e) => setFormState((p) => ({ ...p, category: e.target.value }))} style={inputStyle}>
+                  <option value="">Article</option>
+                  <option value="siteUpdate">Site update</option>
                 </select>
               </div>
             </div>

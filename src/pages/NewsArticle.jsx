@@ -14,6 +14,7 @@ import PlayersMentionedList from "../components/PlayersMentionedList";
 import TeamsMentionedList from "../components/TeamsMentionedList";
 import { scheduleGameHref } from "../utils/live";
 import PostGallery from "../components/PostGallery";
+import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -184,7 +185,8 @@ export default function NewsArticle() {
           ...newsSnap.docs.map((d) => ({ id: d.id, ...d.data(), type: "news" })),
           ...articleSnap.docs.map((d) => ({ id: d.id, ...d.data(), type: "article" })),
         ]
-          .filter((item) => item.slug !== id)
+          // Site updates (utils/siteUpdates.js) stay out of this list.
+          .filter((item) => item.slug !== id && !isSiteUpdate(item))
           // Published date only, never last-updated — see Home.js's own
           // combinedNews sort for why.
           .sort((a, b) => ((b.publishedAt?.seconds || 0) - (a.publishedAt?.seconds || 0)))

@@ -41,12 +41,12 @@ export const simUrl = (year) => `We-Draft.com/draftsim${String(year) === SIM_YEA
 export const simCallToAction = (year) => `Create Your Own On ${simUrl(year)}`;
 
 // teams: haulRecords' shape; teamName(abbr) → "New York Jets".
-export function simShareText({ year, teams, teamName }) {
+export function simShareText({ year, teams, teamName, grades = true }) {
   return [
     ...teams.flatMap((t, i) => [
       ...(i ? [""] : []),
       `My ${year} ${teamName(t.team)} Draft Sim`,
-      `Grade: ${t.grade}`,
+      ...(grades ? [`Grade: ${t.grade}`] : []),
       ...(t.picks || []).map((p) => `${p.overall}. ${p.first} ${p.last}, ${p.pos}${p.school ? `, ${p.school}` : ""}`),
     ]),
     "",

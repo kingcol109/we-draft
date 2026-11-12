@@ -7,6 +7,7 @@ import Logo1 from "../assets/Logo1.png";
 import LoadingSpinner from "../components/LoadingSpinner";
 import MarginSidebars from "../components/MarginSidebars";
 import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
+import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -14,6 +15,9 @@ const GOLD = "#f6a21d";
 export default function News() {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Site updates (utils/siteUpdates.js) are in the list but hidden until
+  // this filter's turned on.
+  const [showSiteUpdates, setShowSiteUpdates] = useState(false);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   const contentRef = useRef(null);
 
@@ -47,8 +51,11 @@ export default function News() {
     fetch();
   }, []);
 
+  const siteUpdateCount = news.filter(isSiteUpdate).length;
+  const shown = showSiteUpdates ? news : news.filter((n) => !isSiteUpdate(n));
+
   // Group by month
-  const grouped = news.reduce((acc, item) => {
+  const grouped = shown.reduce((acc, item) => {
     const date = item.publishedAt?.toDate?.();
     const key = date ? date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "Other";
     if (!acc[key]) acc[key] = [];
@@ -80,10 +87,21 @@ export default function News() {
           <div style={{ height: "3px", width: "160px", background: GOLD, borderRadius: "2px" }} />
         </div>
 
+        {/* ===== Filter: site updates, off to start ===== */}
+        {siteUpdateCount > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "-10px", marginBottom: "20px" }}>
+            <button type="button" role="switch" aria-checked={showSiteUpdates} onClick={() => setShowSiteUpdates((v) => !v)}
+              style={{ display: "inline-flex", alignItems: "center", gap: "8px", border: `2px solid ${showSiteUpdates ? BLUE : "#dde3ec"}`, background: showSiteUpdates ? BLUE : "#fff", color: showSiteUpdates ? "#fff" : BLUE, borderRadius: "999px", padding: "6px 14px", fontFamily: "inherit", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer" }}>
+              <span aria-hidden="true" style={{ width: "14px", height: "14px", borderRadius: "4px", border: `2px solid ${showSiteUpdates ? "#fff" : "#b6c2d3"}`, background: showSiteUpdates ? GOLD : "transparent", boxSizing: "border-box" }} />
+              Site Updates ({siteUpdateCount})
+            </button>
+          </div>
+        )}
+
         {/* ===== Content ===== */}
         {loading ? (
           <LoadingSpinner label="Loading" size={28} minHeight="200px" />
-        ) : news.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div style={{ padding: "60px", textAlign: "center", color: "#bbb", fontStyle: "italic", fontSize: "14px" }}>
             No news available.
           </div>
@@ -121,6 +139,7 @@ export default function News() {
                         <div style={{ marginBottom: "10px" }}>
                           <span style={{ fontSize: "11px", fontWeight: 700, color: "#aaa" }}>{dayStr}</span>
                           {n.type === "weeklyMock" && <span style={{ marginLeft: "8px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Weekly Mock</span>}
+                          {isSiteUpdate(n) && <span style={{ marginLeft: "8px", fontSize: "10px", fontWeight: 900, color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>Site Update</span>}
                         </div>
                       )}
 

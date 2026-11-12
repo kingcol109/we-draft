@@ -20,6 +20,7 @@ import { loadWeeklyMockNews } from "../utils/weeklyMockNews";
 import { loadPhotos } from "../utils/profileHub";
 import { useAuth } from "../context/AuthContext";
 import HomeInstagram from "./HomeInstagram";
+import { isSiteUpdate } from "../utils/siteUpdates";
 
 const BOARD_YEARS = ["2027", "2028"];
 const boardHref = (year) => (year === BOARD_YEARS[0] ? "/community" : `/community/${year}`);
@@ -131,8 +132,9 @@ export function Latest() {
     Promise.all([
       getDocs(query(collection(db, "news"), where("active", "==", true), orderBy("publishedAt", "desc"), limit(6)))
         .then((s) => s.docs.map((d) => ({ id: d.id, ...d.data(), kind: "News" }))).catch(() => []),
-      getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(6)))
-        .then((s) => s.docs.map((d) => ({ id: d.id, ...d.data(), kind: "Article" }))).catch(() => []),
+      // Site updates (utils/siteUpdates.js) stay out — feeds and /news's filter only.
+      getDocs(query(collection(db, "articles"), where("status", "==", "published"), orderBy("publishedAt", "desc"), limit(10)))
+        .then((s) => s.docs.map((d) => ({ id: d.id, ...d.data(), kind: "Article" })).filter((a) => !isSiteUpdate(a))).catch(() => []),
       loadWeeklyMockNews(6).then((w) => w.map((m) => ({ ...m, kind: "Weekly Mock" }))),
     ]).then((all) => {
       if (!alive) return;
