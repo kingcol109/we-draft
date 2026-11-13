@@ -8,7 +8,11 @@
 //   list  — the whole group by round, two columns past 18 rows, the rest
 //           as "+ N more".
 // The order is the board's own: Round 1's column top to bottom, then
-// Round 2's, … then UDFA. Drawn on a canvas in the browser; images load
+// Round 2's, … then UDFA.
+// Themed lists (utils/whiteboardLists.js — Risers, Fallers, Late Round
+// Gems, Sleepers, Safe Picks, Busts) take the top5 / top10 rows with their
+// own colors, a motif in the header (arrows, a gem, a moon, a shield,
+// caution tape) and each row's pills in place of the round. Drawn on a canvas in the browser; images load
 // with CORS (ESPN's CDN allows it; imgur goes through i.imgur.com), and one
 // that won't is just left out rather than tainting the canvas.
 import siteLogo from "../assets/Logo2.png";
@@ -99,11 +103,21 @@ function marks(ctx, p, rightX, cy, size) {
   return rightX - x;
 }
 
-function background(ctx, color) {
+// Each themed list's look: accent, background stops, header motif.
+export const THEMES = {
+  risers: { accent: "#22c55e", bg: ["#0b5a33", "#053321", "#03140c"], motif: "up" },
+  fallers: { accent: "#ef4444", bg: ["#6b1018", "#3a0a0e", "#160406"], motif: "down" },
+  gems: { accent: "#2dd4bf", bg: ["#0d5952", "#063431", "#031514"], motif: "gem" },
+  sleepers: { accent: "#a78bfa", bg: ["#2f1d69", "#170d3c", "#070418"], motif: "moon" },
+  safe: { accent: "#60a5fa", bg: ["#124179", "#0a2649", "#04101f"], motif: "shield" },
+  busts: { accent: "#f97316", bg: ["#4a1707", "#220b04", "#0a0402"], motif: "hazard" },
+};
+
+function background(ctx, color, stops = ["#0a3a6e", NAVY, INK]) {
   const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, "#0a3a6e");
-  g.addColorStop(0.55, NAVY);
-  g.addColorStop(1, INK);
+  g.addColorStop(0, stops[0]);
+  g.addColorStop(0.55, stops[1]);
+  g.addColorStop(1, stops[2]);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   // The position's color, glowing from the top right.
   const r = ctx.createRadialGradient(W, 0, 40, W, 0, 900);
@@ -120,7 +134,7 @@ function background(ctx, color) {
 // or "BIG") in the position's color behind it; a gold "2027 NFL DRAFT" pill;
 // the owner in gold ("TESTER'S", or "MY" with no username); then the
 // headline, huge, with a hard drop shadow in the position's color.
-function header(ctx, { owner, pos, color, classYear, mode, total }) {
+function header(ctx, { owner, pos, color, classYear, mode, total, date }) {
   const pad = 64;
   const accent = pos === "ALL" ? GOLD : color;
 
@@ -155,7 +169,7 @@ function header(ctx, { owner, pos, color, classYear, mode, total }) {
   ctx.fillStyle = INK; ctx.textBaseline = "middle";
   ctx.fillText(pillText, pad + 18, 81);
   ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.fillText("MY WHITEBOARD", pad + pw + 18, 81);
+  ctx.fillText(date ? `MY WHITEBOARD · ${date}` : "MY WHITEBOARD", pad + pw + 18, 81);
 
   // Owner line, then the headline. All caps, but a plural keeps its small
   // "s" (QBs, not QBS). pos "ALL" is the Big Board.
@@ -183,15 +197,122 @@ function header(ctx, { owner, pos, color, classYear, mode, total }) {
   return lineY + 38;
 }
 
-function footer(ctx, logo) {
+// The motif behind a themed header, in the accent, on the right.
+function motif(ctx, kind, accent) {
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, 340); ctx.clip();
+  ctx.strokeStyle = accent; ctx.fillStyle = accent; ctx.lineJoin = "round"; ctx.lineCap = "round";
+  if (kind === "up" || kind === "down") {
+    // Three stacked chevrons, brightest at the leading end.
+    const dir = kind === "up" ? -1 : 1;
+    for (let i = 0; i < 3; i++) {
+      const cx = 880;
+      const cy = 170 + (i - 1) * 95 * dir;
+      ctx.globalAlpha = 0.12 + i * 0.1;
+      ctx.lineWidth = 34;
+      ctx.beginPath(); ctx.moveTo(cx - 150, cy - dir * 70); ctx.lineTo(cx, cy + dir * 70); ctx.lineTo(cx + 150, cy - dir * 70); ctx.stroke();
+    }
+  } else if (kind === "gem") {
+    ctx.translate(870, 175); ctx.rotate(-0.12);
+    const w = 330; const top = -125; const mid = -45; const bot = 175; const t = w / 2 - 60;
+    ctx.globalAlpha = 0.1;
+    ctx.beginPath(); ctx.moveTo(-t, top); ctx.lineTo(t, top); ctx.lineTo(w / 2, mid); ctx.lineTo(0, bot); ctx.lineTo(-w / 2, mid); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 0.45; ctx.lineWidth = 5; ctx.stroke();
+    ctx.globalAlpha = 0.28; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, mid); ctx.lineTo(w / 2, mid);
+    ctx.moveTo(-t, top); ctx.lineTo(-t * 0.45, mid); ctx.lineTo(0, top); ctx.lineTo(t * 0.45, mid); ctx.lineTo(t, top);
+    ctx.moveTo(-t * 0.45, mid); ctx.lineTo(0, bot); ctx.lineTo(t * 0.45, mid);
+    ctx.stroke();
+    // A glint.
+    ctx.globalAlpha = 0.7; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(170, 60); ctx.lineTo(170, 110); ctx.moveTo(145, 85); ctx.lineTo(195, 85); ctx.stroke();
+  } else if (kind === "moon") {
+    // A crescent (a disc with a disc cut out), stars and Zs.
+    const c = document.createElement("canvas");
+    c.width = 300; c.height = 300;
+    const m = c.getContext("2d");
+    m.fillStyle = accent; m.beginPath(); m.arc(150, 150, 130, 0, Math.PI * 2); m.fill();
+    m.globalCompositeOperation = "destination-out";
+    m.beginPath(); m.arc(210, 100, 118, 0, Math.PI * 2); m.fill();
+    ctx.globalAlpha = 0.3; ctx.drawImage(c, 730, 20);
+    ctx.globalAlpha = 0.55;
+    [[640, 70, 4], [700, 250, 3], [1010, 290, 4], [790, 30, 3], [1050, 50, 3], [600, 190, 3]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.globalAlpha = 0.4; ctx.textBaseline = "alphabetic";
+    font(ctx, 64); ctx.fillText("Z", 960, 250);
+    font(ctx, 44); ctx.fillText("Z", 1012, 200);
+    font(ctx, 30); ctx.fillText("Z", 1046, 162);
+  } else if (kind === "shield") {
+    ctx.translate(880, 36);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.bezierCurveTo(70, 30, 130, 30, 150, 25); ctx.lineTo(150, 130);
+    ctx.bezierCurveTo(150, 210, 70, 260, 0, 290); ctx.bezierCurveTo(-70, 260, -150, 210, -150, 130);
+    ctx.lineTo(-150, 25); ctx.bezierCurveTo(-130, 30, -70, 30, 0, 0); ctx.closePath();
+    ctx.globalAlpha = 0.1; ctx.fill(); ctx.globalAlpha = 0.45; ctx.lineWidth = 8; ctx.stroke();
+    ctx.globalAlpha = 0.55; ctx.lineWidth = 26;
+    ctx.beginPath(); ctx.moveTo(-62, 140); ctx.lineTo(-14, 190); ctx.lineTo(72, 92); ctx.stroke();
+  } else if (kind === "hazard") {
+    // Caution tape across the top-right corner, clear of the text.
+    ctx.translate(935, 105); ctx.rotate(0.62);
+    const bw = 760; const bh = 76;
+    ctx.globalAlpha = 0.8; ctx.fillStyle = "#facc15"; ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
+    ctx.save(); ctx.beginPath(); ctx.rect(-bw / 2, -bh / 2, bw, bh); ctx.clip();
+    ctx.fillStyle = "#111";
+    for (let x = -bw / 2 - bh; x < bw / 2; x += 80) { ctx.beginPath(); ctx.moveTo(x, bh / 2); ctx.lineTo(x + 40, bh / 2); ctx.lineTo(x + 40 + bh, -bh / 2); ctx.lineTo(x + bh, -bh / 2); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+    ctx.globalAlpha = 1; font(ctx, 40); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const tw = ctx.measureText("CAUTION").width + 36;
+    ctx.fillStyle = "#facc15"; ctx.fillRect(-tw / 2, -28, tw, 56);
+    ctx.fillStyle = "#111"; ctx.fillText("CAUTION", 0, 2);
+    ctx.textAlign = "left";
+  }
+  ctx.restore();
+}
+
+// A themed list's header: the motif, a pill (the class, in the accent),
+// "MY WHITEBOARD", the owner, the list's headline and its subtitle.
+function themedHeader(ctx, { owner, classYear, theme, headline, sub, date }) {
+  const pad = 64;
+  const accent = theme.accent;
+  motif(ctx, theme.motif, accent);
+
+  font(ctx, 22);
+  const pillText = `${classYear} NFL DRAFT`;
+  const pw = ctx.measureText(pillText).width + 36;
+  roundRect(ctx, pad, 58, pw, 44, 22);
+  ctx.fillStyle = accent; ctx.fill();
+  ctx.fillStyle = INK; ctx.textBaseline = "middle";
+  ctx.fillText(pillText, pad + 18, 81);
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.fillText(date ? `MY WHITEBOARD · ${date}` : "MY WHITEBOARD", pad + pw + 18, 81);
+
+  ctx.textBaseline = "alphabetic";
+  const who = owner ? possessive(owner).toUpperCase() : "MY";
+  const w1 = fitText(ctx, who, W - pad * 2, 48, 30);
+  ctx.fillStyle = accent;
+  ctx.fillText(w1.text, pad, 164);
+  const t = fitText(ctx, headline, W - pad * 2 - 10, 112, 56);
+  const baseY = 164 + 14 + t.size * 0.86;
+  ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillText(t.text, pad + 6, baseY + 6);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 18;
+  ctx.fillStyle = "#fff"; ctx.fillText(t.text, pad, baseY);
+  ctx.restore();
+
+  // The subtitle, then the list.
+  const s = fitText(ctx, sub || "", W - pad * 2, 28, 18);
+  ctx.fillStyle = accent; ctx.fillText(s.text, pad, baseY + 54);
+  return baseY + 92;
+}
+
+function footer(ctx, logo, accent = GOLD) {
   const top = H - 110;
   ctx.fillStyle = "rgba(4,12,26,0.92)"; ctx.fillRect(0, top, W, 110);
-  ctx.fillStyle = GOLD; ctx.fillRect(0, top, W, 5);
+  ctx.fillStyle = accent; ctx.fillRect(0, top, W, 5);
   if (logo) drawContained(ctx, logo, 56, top + 26, 300, 62, "center");
   font(ctx, 28);
   ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.textAlign = "right";
   ctx.fillText("BUILD YOURS:", W - 56, top + 40);
-  ctx.fillStyle = GOLD;
+  ctx.fillStyle = accent;
   ctx.fillText("WE-DRAFT.COM/WHITEBOARD", W - 56, top + 76);
   ctx.textAlign = "left";
 }
@@ -230,7 +351,7 @@ function rankedRows(ctx, players, top, bottom, color, big) {
     ctx.save(); roundRect(ctx, pad, y, W - pad * 2, rowH, big ? 22 : 14); ctx.clip();
     // Rank block.
     const rankW = big ? 118 : 78;
-    ctx.fillStyle = p.color || color; ctx.fillRect(pad, y, rankW, rowH);
+    ctx.fillStyle = p.pills ? color : p.color || color; ctx.fillRect(pad, y, rankW, rowH);
     font(ctx, big ? 78 : 42);
     ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(String(i + 1), pad + rankW / 2, y + rowH / 2 + 3);
@@ -240,9 +361,22 @@ function rankedRows(ctx, players, top, bottom, color, big) {
     const avX = pad + rankW + (big ? 12 : 8);
     avatar(ctx, p, avX, y + (big ? 10 : 6), avW, rowH - (big ? 10 : 6), color);
     ctx.restore();
-    // Round pill + marks on the right.
+    // Round pill (a themed list: its pills, right to left) + marks.
     const cy = y + rowH / 2;
-    const pillW = pill(ctx, ROUND_SHORT[p.round] || "", W - pad - 22, cy, big ? {} : { size: 22, h: 38, padX: 13 });
+    const look = big ? {} : { size: 22, h: 38, padX: 13 };
+    let pillW = 0;
+    const pillLook = (pl) => (pl.tone === "accent" ? { ...look, bg: color, fg: "#fff" } : look);
+    if (p.pills && big) {
+      // Top 5: stacked, right-aligned, so the name keeps its room.
+      const h = 44; const gapY = 10;
+      const y0 = cy - ((p.pills.length * h + (p.pills.length - 1) * gapY) / 2) + h / 2;
+      p.pills.forEach((pl, k) => { pillW = Math.max(pillW, pill(ctx, pl.text, W - pad - 22, y0 + k * (h + gapY), pillLook(pl))); });
+    } else if (p.pills) {
+      [...p.pills].reverse().forEach((pl, k) => {
+        if (k) pillW += 10;
+        pillW += pill(ctx, pl.text, W - pad - 22 - pillW, cy, pillLook(pl));
+      });
+    } else pillW = pill(ctx, ROUND_SHORT[p.round] || "", W - pad - 22, cy, look);
     const markW = marks(ctx, p, W - pad - 22 - pillW - 14, cy, big ? 34 : 26);
     // Name and school.
     const textX = avX + avW + (big ? 22 : 16);
@@ -329,21 +463,32 @@ function listRows(ctx, players, top, bottom, color) {
 
 // players: the group in board order, each { First, Last, School, round,
 // starred, flagged, headshot, logo } (headshot / logo: URLs or "").
-export async function drawWhiteboardGraphic({ owner, pos, color, classYear, mode, players }) {
+// list: a themed list's id (THEMES) — then headline / sub are its titles
+// (utils/whiteboardLists.js listTitles) and each player carries pills.
+export async function drawWhiteboardGraphic({ owner, pos, color, classYear, mode, players, list, headline, sub, date }) {
+  const theme = THEMES[list];
+  if (theme && mode === "list") mode = "top10";
   const count = (GRAPHIC_MODES.find((m) => m.id === mode) || GRAPHIC_MODES[0]).count;
-  const list = players.slice(0, count);
+  const shown = players.slice(0, count);
   const withImages = mode !== "list";
   const [logo, ...imgs] = await Promise.all([
     loadImage(siteLogo),
-    ...(withImages ? list.flatMap((p) => [loadImage(p.headshot), p.headshot ? Promise.resolve(null) : loadImage(p.logo)]) : []),
+    ...(withImages ? shown.flatMap((p) => [loadImage(p.headshot), p.headshot ? Promise.resolve(null) : loadImage(p.logo)]) : []),
   ]);
-  const rows = list.map((p, i) => ({ ...p, headshotImg: withImages ? imgs[i * 2] : null, logoImg: withImages ? imgs[i * 2 + 1] : null }));
+  const rows = shown.map((p, i) => ({ ...p, headshotImg: withImages ? imgs[i * 2] : null, logoImg: withImages ? imgs[i * 2 + 1] : null }));
 
   const canvas = document.createElement("canvas");
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d");
+  if (theme) {
+    background(ctx, theme.accent, theme.bg);
+    const top = themedHeader(ctx, { owner, classYear, theme, headline, sub, date });
+    rankedRows(ctx, rows, top, H - 110 - 40, theme.accent, mode === "top5");
+    footer(ctx, logo, theme.accent);
+    return canvas;
+  }
   background(ctx, color);
-  const top = header(ctx, { owner, pos, color, classYear, mode, total: list.length });
+  const top = header(ctx, { owner, pos, color, classYear, mode, total: rows.length, date });
   const bottom = H - 110 - 40;
   if (mode === "list") listRows(ctx, rows, top, bottom, color);
   else rankedRows(ctx, rows, top, bottom, color, mode === "top5");

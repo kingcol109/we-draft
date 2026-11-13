@@ -7,10 +7,7 @@
 //              weeks), not a star;
 //   Inactive — visited in the last 30 days, but less than weekly;
 //   Dogs     — has an account, no visit in the last 30 days.
-// The same weekly test sorts visitors without accounts
-// (utils/visitorVisits.js): "regulars" visit at least weekly.
-// Visit days come from siteDailyAccounts (accounts) and siteVisitors
-// (no account), plus an account's lastActiveAt. Visit-day tracking started
+// Visit days come from siteDailyAccounts plus an account's lastActiveAt. Visit-day tracking started
 // recently, so "at least weekly" asks for a visit in every week there's
 // data for, up to 3 of 4 — it tightens on its own as history builds up.
 // The rules are TIER_RULES; change them there.

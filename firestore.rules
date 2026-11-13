@@ -368,35 +368,6 @@ service cloud.firestore {
         && request.resource.data.u.diff(resource.data.u).affectedKeys().hasOnly([request.auth.uid])
         && request.resource.data.u[request.auth.uid] == true;
     }
-    // Visitors without an account (src/utils/visitorVisits.js): one doc per
-    // random per-browser id (nothing about the person) — { first, last,
-    // days: { [YYYY-MM-DD]: true } }. Anyone may start one with today, or
-    // add one day to one; never remove or change days, never move `first`.
-    // Admins read. siteVisitorAccounts/{visitorId} ties an id to the
-    // account that signed in on that browser — created once by that
-    // account, never changed.
-    match /siteVisitors/{visitorId} {
-      allow read: if isAdmin();
-      allow create: if visitorId.matches('^[a-z0-9]{16}$')
-        && request.resource.data.keys().hasOnly(['first', 'last', 'days'])
-        && request.resource.data.last is string && request.resource.data.last.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && request.resource.data.first == request.resource.data.last
-        && request.resource.data.days.keys().hasOnly([request.resource.data.last])
-        && request.resource.data.days[request.resource.data.last] == true;
-      allow update: if request.resource.data.keys().hasOnly(['first', 'last', 'days'])
-        && request.resource.data.first == resource.data.first
-        && request.resource.data.last is string && request.resource.data.last.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && request.resource.data.days.diff(resource.data.days).changedKeys().size() == 0
-        && request.resource.data.days.diff(resource.data.days).removedKeys().size() == 0
-        && request.resource.data.days.diff(resource.data.days).addedKeys().hasOnly([request.resource.data.last])
-        && request.resource.data.days[request.resource.data.last] == true;
-    }
-    match /siteVisitorAccounts/{visitorId} {
-      allow read: if isAdmin();
-      allow create: if request.auth != null && visitorId.matches('^[a-z0-9]{16}$')
-        && request.resource.data.keys().hasOnly(['uid', 'at'])
-        && request.resource.data.uid == request.auth.uid;
-    }
     // Each day's new / returning visitors from GA4
     // (scripts/syncGoogleAnalytics.js, Admin SDK); admins read.
     match /analyticsDaily/{day} {
@@ -999,6 +970,11 @@ service cloud.firestore {
       // Draft Sim results saved from the end screen (SimResults.jsx) —
       // only the user's own teams' picks. Listed on their profile.
       match /draftSims/{simId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+      // Whiteboard graphics saved to the account from the share dialog
+      // (src/utils/savedGraphics.js) — listed on their profile's Boards tab.
+      match /savedGraphics/{graphicId} {
         allow read, write: if request.auth != null && request.auth.uid == uid;
       }
       // The user's Sim Profile — running totals over every sim they

@@ -45,7 +45,7 @@ const CSS = `
 .wdss-label{font-size:11.5px;font-weight:700;color:var(--mut);margin-bottom:7px}
 .wdss-chips{display:flex;flex-wrap:wrap;gap:6px}
 .wdss-chip{border:none;background:var(--soft);color:var(--fg);border-radius:999px;padding:7px 13px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
-.wdss-chip:hover:not(:disabled){background:var(--soft2)}
+.wdss-chip:not(.on):hover:not(:disabled){background:var(--soft2)}
 .wdss-chip.on{background:var(--pri);color:var(--pri-fg)}
 .wdss-chip:disabled{opacity:.35;cursor:default}
 .wdss-text{background:var(--soft);border-radius:12px;padding:11px 13px;max-height:18vh;overflow-y:auto;font-size:13px;line-height:1.5;white-space:pre-line;color:var(--mut);margin-bottom:14px}
@@ -61,7 +61,8 @@ const CSS = `
 .wdss-acts{display:flex;justify-content:space-around;gap:6px;flex-wrap:wrap}
 .wdss-act{flex:1 1 0;min-width:62px;max-width:92px;display:flex;flex-direction:column;align-items:center;gap:7px;background:none;border:none;padding:4px 0;font:inherit;color:var(--fg);text-decoration:none;cursor:pointer}
 .wdss-act i{width:50px;height:50px;border-radius:50%;background:var(--soft);display:flex;align-items:center;justify-content:center;transition:background .15s,transform .12s}
-.wdss-act:hover i{background:var(--soft2);transform:translateY(-1px)}
+.wdss-act:hover:not(:disabled) i{background:var(--soft2);transform:translateY(-1px)}
+.wdss-act:disabled{opacity:.5;cursor:default}
 .wdss-act i.x{background:#000;color:#fff}.wdss.dark .wdss-act i.x{background:#fff;color:#000}
 .wdss-act i.fb{background:#1877f2;color:#fff}
 .wdss-act b{font-size:12px;font-weight:600;color:var(--mut)}
@@ -84,6 +85,7 @@ const PATHS = {
   message: <path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.3A7.9 7.9 0 0 1 3 11.5 8.4 8.4 0 0 1 12 3.2a8.4 8.4 0 0 1 9 8.3z" />,
   mail: <><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M3.5 6.5l8.5 6 8.5-6" /></>,
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
+  bookmark: <path d="M6 3h12v18l-6-4.5L6 21z" />,
   close: <><path d="M6 6l12 12" /><path d="M18 6L6 18" /></>,
 };
 const FILLED = {
@@ -210,7 +212,7 @@ export default function ShareSheet({ open, onClose, title, subtitle, preview, be
               const done = copied === a.key;
               const inner = <><i className={a.icon === "x" ? "x" : a.icon === "facebook" ? "fb" : ""}><ShareIcon name={done ? "check" : a.icon} /></i><b>{done ? "Copied" : a.label}</b></>;
               if (a.href) return <a key={a.key} className="wdss-act" href={a.href} {...(a.external ? { target: "_blank", rel: "noopener noreferrer" } : {})} onClick={a.onClick}>{inner}</a>;
-              return <button key={a.key} className="wdss-act" onClick={a.copy != null ? () => copy(a.key, a.copy) : a.onClick}>{inner}</button>;
+              return <button key={a.key} className="wdss-act" disabled={a.disabled} onClick={a.copy != null ? () => copy(a.key, a.copy) : a.onClick}>{inner}</button>;
             })}
           </div>
         )}

@@ -33,7 +33,13 @@
 //
 // Sharing: "Share graphic" (the hero) and "Share {POS}" (a group's head)
 // open ShareGraphicDialog: a group's Top 5, Top 10 or full list as a PNG
-// (utils/whiteboardGraphic.js), from the board as it stands, saved or not.
+// (utils/whiteboardGraphic.js), from the board as it stands, saved or not —
+// or a themed list (utils/whiteboardLists.js: Risers, Fallers, Late Round
+// Gems, Sleepers, Safe Picks, Busts) of players the user picks, starting
+// from suggestions; no grades on those. "Save to account" keeps one in
+// users/{uid}/savedGraphics (utils/savedGraphics.js; the profile's Boards
+// tab lists them). Each Save also records the board's order for the day
+// in `history`, which Risers / Fallers compare with.
 // Phones get the share sheet with the image; elsewhere Download and Copy.
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DndContext, closestCenter, pointerWithin, DragOverlay, useDroppable, useSensor, useSensors, PointerSensor } from "@dnd-kit/core";
@@ -44,7 +50,11 @@ import { collection, getDocs, getDoc, doc, setDoc, serverTimestamp, query, where
 import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { getPageScale, unzoomTransform, cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
-import { GRAPHIC_MODES, drawWhiteboardGraphic, canvasToBlob } from "../utils/whiteboardGraphic";
+import { GRAPHIC_MODES } from "../utils/whiteboardGraphic";
+import { WB_LISTS, listInfo, listTitles, EMPTY_TEXT, buildList, listPills, movesFrom, nextHistory, pickBaseline } from "../utils/whiteboardLists";
+import { renderGraphic, saveGraphic } from "../utils/savedGraphics";
+import { averageGradesFor } from "../utils/communityGrades";
+import { statsDay } from "../utils/draftSim/stats";
 import ShareSheet, { ShareChips, ShareImagePreview } from "../components/ShareSheet";
 import { claimSharePrompt } from "../utils/sharePrompt";
 import { GRADE_SCALE, gradeLook } from "../utils/gradeScale";
@@ -171,6 +181,10 @@ export default function Whiteboard() {
   const [view, setView] = useState("ALL");
   // The Big Board's cross-position order: { round: [playerIds] }.
   const [bigOrder, setBigOrder] = useState({});
+  // Board history for risers / fallers (utils/whiteboardLists.js): the saved
+  // history ({ day: "id,id,…" }) and the board as it loaded ({ day, order }).
+  const [history, setHistory] = useState({});
+  const [loadedSnap, setLoadedSnap] = useState(null);
   // The user's own grades: { playerId: grade label }.
   const [grades, setGrades] = useState({});
   // The Big Board bank's position filter.
@@ -239,13 +253,19 @@ export default function Whiteboard() {
         const boardRef = doc(db, "whiteboards", `${user.uid}_${selectedClass}`);
         const snap = await withAuthRetry(() => getDoc(boardRef), 5, 600);
         if (snap.exists()) {
-          setBoard({ ...emptyBoard(), ...snap.data().board });
-          setMarkers(snap.data().markers || {});
-          setBigOrder(snap.data().bigBoard || {});
+          const d = snap.data();
+          setBoard({ ...emptyBoard(), ...d.board });
+          setMarkers(d.markers || {});
+          setBigOrder(d.bigBoard || {});
+          setHistory(d.history || {});
+          const order = ROUNDS.flatMap((r) => (d.bigBoard?.[r]?.length ? d.bigBoard[r] : POSITIONS.flatMap((pos) => d.board?.[r]?.[pos] || [])));
+          setLoadedSnap(d.updatedAt?.toDate ? { day: statsDay(d.updatedAt.toDate()), order } : null);
         } else {
           setBoard(emptyBoard());
           setMarkers({});
           setBigOrder({});
+          setHistory({});
+          setLoadedSnap(null);
         }
         setIsDirty(false);
         setUndo(null);
@@ -549,14 +569,17 @@ export default function Whiteboard() {
     if (!user) { alert("You must be logged in to save your board."); return; }
     setSaving(true);
     try {
+      const nextHist = nextHistory(history, { loadedDay: loadedSnap?.day, loadedOrder: loadedSnap?.order, today: statsDay(), order: ROUNDS.flatMap((r) => bigLists[r] || []) });
       await withAuthRetry(() => setDoc(doc(db, "whiteboards", `${user.uid}_${selectedClass}`), {
         uid: user.uid,
         draftClass: selectedClass,
         board,
         markers,
         bigBoard: bigLists,
+        history: nextHist,
         updatedAt: serverTimestamp()
       }));
+      setHistory(nextHist);
       setIsDirty(false);
       // Offer to share it — once a day (utils/sharePrompt.js) — when
       // there's anything on the board to show.
@@ -636,6 +659,14 @@ export default function Whiteboard() {
       ),
     }));
   }, [board]);
+
+  // The earlier save risers / fallers compare with: the history, plus the
+  // board as it loaded when that was saved on an earlier day.
+  const baseline = useMemo(() => {
+    const h = { ...history };
+    if (loadedSnap?.day && loadedSnap.order.length && !h[loadedSnap.day]) h[loadedSnap.day] = loadedSnap.order.join(",");
+    return pickBaseline(h, statsDay());
+  }, [history, loadedSnap]);
 
   const roundOf = useMemo(() => {
     const m = {};
@@ -1261,6 +1292,8 @@ export default function Whiteboard() {
           shortOf={shortOf}
           classYear={selectedClass}
           owner={username}
+          uid={user?.uid}
+          baseline={baseline}
         />
       )}
 
@@ -1432,26 +1465,81 @@ function DraggablePlayer({ id, player, markers, onToggleMarker, grades, shortOf,
   );
 }
 
-// Headshots (playerPhotos) and school logos for the graphic, cached across
-// opens of the dialog.
-const headshotCache = new Map();
-const logoCache = new Map();
-async function loadHeadshots(ids) {
-  const need = ids.filter((id) => !headshotCache.has(id));
-  await Promise.all(need.map((id) => getDoc(doc(db, "playerPhotos", id))
-    .then((s) => headshotCache.set(id, s.exists() ? s.data().headshot?.url || "" : ""))
-    .catch(() => headshotCache.set(id, ""))));
+// A dropdown in the share dialog (List, Position): label, options
+// [{ id, label, disabled }], and an optional colored dot for the choice.
+function WbSelect({ id, label, value, onChange, options, dot }) {
+  return (
+    <div className="wdss-opt">
+      <label className="wdss-label" htmlFor={id}>{label}</label>
+      <div style={{ position: "relative" }}>
+        {dot && <span aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", width: 10, height: 10, marginTop: -5, borderRadius: "50%", background: dot }} />}
+        <select id={id} value={value} onChange={(e) => onChange(e.target.value)}
+          style={{ width: "100%", boxSizing: "border-box", appearance: "none", WebkitAppearance: "none", border: "1px solid var(--line)", background: "var(--soft)", color: "var(--fg)", borderRadius: 10, padding: `9px 34px 9px ${dot ? 30 : 12}px`, font: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          {options.map((o) => <option key={o.id} value={o.id} disabled={o.disabled}>{o.label}</option>)}
+        </select>
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", right: 12, top: "50%", marginTop: -6, pointerEvents: "none", color: "var(--mut)" }}><path d="M6 9l6 6 6-6" /></svg>
+      </div>
+    </div>
+  );
 }
-async function loadLogos(schools) {
-  const need = [...new Set(schools.filter((s) => s && !logoCache.has(s)))];
-  for (let i = 0; i < need.length; i += 30) {
-    const chunk = need.slice(i, i + 30);
-    const snap = await getDocs(query(collection(db, "schools"), where("School", "in", chunk))).catch(() => null);
-    chunk.forEach((s) => logoCache.set(s, ""));
-    // The graphic's background is dark: a school's dark-background logo first.
-    (snap?.docs || []).forEach((d) => { const x = d.data(); logoCache.set(x.School, x.LogoDark || x.Logo1 || x.Logo2 || ""); });
-  }
+
+// A themed list's players: the picks in order (tap one to take it off),
+// then a search of the board — matches show as you type; tap one to add
+// it, up to max.
+function ListPicker({ accent, players, chosen, max, search, onSearch, onToggle, onSuggest, onClear, custom }) {
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const q = search.trim().toLowerCase();
+  const full = chosen.length >= max;
+  const results = q ? players.filter((p) => !chosen.includes(p.id) && `${p.First} ${p.Last} ${p.School}`.toLowerCase().includes(q)).slice(0, 8) : [];
+  const link = { background: "none", border: "none", padding: 0, font: "inherit", fontSize: 12, fontWeight: 800, color: "var(--mut)", cursor: "pointer", textDecoration: "underline" };
+  const add = (id) => { onToggle(id); onSearch(""); };
+  return (
+    <div className="wdss-opt">
+      <div className="wdss-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span>Players · {chosen.length}/{max}</span>
+        <span style={{ display: "flex", gap: 12, textTransform: "none", letterSpacing: 0 }}>
+          {custom && <button type="button" style={link} onClick={onSuggest}>Use suggestions</button>}
+          {chosen.length > 0 && <button type="button" style={link} onClick={onClear}>Clear</button>}
+        </span>
+      </div>
+      {chosen.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {chosen.map((id, i) => {
+            const p = byId.get(id);
+            return (
+              <button key={id} type="button" onClick={() => onToggle(id)} title="Take off the list"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", borderRadius: 999, padding: "5px 10px", background: accent, color: "#fff", font: "inherit", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+                <b>{i + 1}</b>{p.First} {p.Last}<span aria-hidden="true" style={{ opacity: 0.8 }}>×</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ position: "relative" }}>
+        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ position: "absolute", left: 11, top: 11, color: "var(--mut)" }}><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
+        <input type="search" value={search} onChange={(e) => onSearch(e.target.value)} disabled={full}
+          placeholder={full ? `List is full (${max}). Take one off to add another.` : "Search your board to add a player"}
+          style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--line)", background: "var(--soft)", color: "var(--fg)", borderRadius: 10, padding: "9px 12px 9px 34px", font: "inherit", fontSize: 13 }} />
+      </div>
+      {q && !full && (
+        <div style={{ marginTop: 6, border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
+          {results.map((p) => (
+            <button key={p.id} type="button" onClick={() => add(p.id)}
+              style={{ display: "flex", width: "100%", alignItems: "center", gap: 10, padding: "8px 12px", border: "none", borderBottom: "1px solid var(--line)", background: "none", color: "var(--fg)", font: "inherit", fontSize: 13, textAlign: "left", cursor: "pointer" }}>
+              <span style={{ color: accent, fontWeight: 900, fontSize: 16, lineHeight: 1 }}>+</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <b>{p.First} {p.Last}</b> <span style={{ color: "var(--mut)" }}>{[p.posLabel, p.School].filter(Boolean).join(" · ")}</span>
+              </span>
+              <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: "var(--mut)" }}>{ROUND_TAG[p.round] || ""}</span>
+            </button>
+          ))}
+          {!results.length && <div style={{ padding: 12, fontSize: 12, color: "var(--mut)" }}>No one on your board matches.</div>}
+        </div>
+      )}
+    </div>
+  );
 }
+const ROUND_TAG = { "ROUND 1": "R1", "ROUND 2": "R2", "ROUND 3": "R3", "ROUND 4": "R4", "ROUND 5": "R5", "ROUND 6": "R6", "ROUND 7": "R7", UDFA: "UDFA" };
 
 const canShareFiles = () => {
   try {
@@ -1461,12 +1549,29 @@ const canShareFiles = () => {
 };
 
 // prompted: opened by the once-a-day "share it?" after Save (utils/sharePrompt.js).
-function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, placedByPos, bigLists, shortOf, classYear, owner, prompted = false }) {
+// baseline: { day, ids } — the earlier save risers / fallers compare with
+// (utils/whiteboardLists.js pickBaseline), or null.
+function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, placedByPos, bigLists, shortOf, classYear, owner, uid, baseline, prompted = false }) {
+  const [listId, setListId] = useState("board");
   const [mode, setMode] = useState("top5");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(true);
   const [note, setNote] = useState("");
+  const [empty, setEmpty] = useState("");
+  const [community, setCommunity] = useState(null);
+  const [saved, setSaved] = useState(""); // the settings key last saved
+  const [savingGraphic, setSavingGraphic] = useState(false);
+  // The user's picks for each list: { "list|pos": [ids] } — kept in this
+  // browser per account and class. A list without picks starts from its
+  // suggestions (utils/whiteboardLists.js buildList).
+  const picksKey = `wb-lists-${uid || "anon"}-${classYear}`;
+  const [picks, setPicks] = useState(() => { try { return JSON.parse(localStorage.getItem(picksKey) || "{}"); } catch { return {}; } });
+  const [search, setSearch] = useState("");
   const blobRef = useRef(null);
+  const info = listInfo(listId);
+  const themed = listId !== "board";
+  const modes = themed ? GRAPHIC_MODES.filter((m) => m.id !== "list") : GRAPHIC_MODES;
+  const shownMode = themed && mode === "list" ? "top10" : mode;
 
   // The group in board order: Round 1 top to bottom, then Round 2, …
   // "ALL" is the Big Board's order, each row tagged with its position.
@@ -1481,28 +1586,82 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
     };
   }).filter(Boolean)), [board, bigLists, markers, playerById, pos, shortOf]);
 
+  // Community grades (one snapshot read), the first time a list needs them.
+  const needCommunity = !!info.community && !community;
   useEffect(() => {
+    if (!needCommunity) return undefined;
+    let live = true;
+    const ids = ROUNDS.flatMap((r) => bigLists[r] || []);
+    averageGradesFor(ids).then((g) => { if (live) setCommunity(g); }).catch(() => { if (live) setCommunity({}); });
+    return () => { live = false; };
+  }, [needCommunity, bigLists]);
+
+  const titles = listTitles(listId, pos);
+  // The day it was made, on the graphic (a saved one keeps it).
+  const date = useMemo(() => new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase(), []);
+  const max = shownMode === "top5" ? 5 : 10;
+  const pickId = `${listId}|${pos}`;
+  const base = useMemo(() => (baseline ? baseline.ids.filter((id) => pos === "ALL" || groupOf(playerById.get(id)) === pos) : null), [baseline, pos, playerById]);
+  const moves = useMemo(() => movesFrom(players, base), [players, base]);
+  const suggested = useMemo(() => {
+    if (!themed || (info.community && !community)) return null;
+    return buildList(listId, players, { community: community || {}, baseline: base }).map((p) => p.id);
+  }, [themed, info.community, community, players, listId, base]);
+  const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
+  // This list's players: the user's picks, else the suggestions.
+  const chosen = useMemo(() => {
+    if (!themed) return [];
+    const ids = picks[pickId] || suggested;
+    return ids ? ids.filter((id) => byId.has(id)).slice(0, max) : null;
+  }, [themed, picks, pickId, suggested, byId, max]);
+  const setChosen = (ids) => {
+    setPicks((prev) => {
+      const next = { ...prev };
+      if (ids == null) delete next[pickId]; else next[pickId] = ids;
+      try { localStorage.setItem(picksKey, JSON.stringify(next)); } catch { /* private mode */ }
+      return next;
+    });
+  };
+  const toggle = (id) => {
+    const cur = chosen || [];
+    if (cur.includes(id)) setChosen(cur.filter((x) => x !== id));
+    else if (cur.length < max) setChosen([...cur, id]);
+  };
+
+  const rows = useMemo(() => {
+    if (!themed) return players;
+    if (!chosen) return null;
+    return chosen.map((id) => ({ ...byId.get(id), pills: listPills(listId, moves, id) }));
+  }, [themed, players, chosen, byId, listId, moves]);
+
+  const spec = useMemo(() => rows && ({
+    owner, pos, color: POS_COLORS[pos] || SITE_BLUE, classYear, mode: shownMode, players: rows, date,
+    ...(themed ? { list: listId, headline: titles.headline, sub: titles.sub } : {}),
+  }), [rows, owner, pos, classYear, shownMode, themed, listId, titles.headline, titles.sub, date]);
+  const specKey = `${classYear}|${pos}|${listId}|${shownMode}`;
+
+  useEffect(() => {
+    if (!spec) { setBusy(true); return undefined; }
     let live = true;
     setBusy(true); setNote("");
-    (async () => {
-      const count = (GRAPHIC_MODES.find((m) => m.id === mode) || {}).count || 5;
-      const top = mode === "list" ? [] : players.slice(0, count);
-      await Promise.all([loadHeadshots(top.map((p) => p.id)), loadLogos(top.map((p) => p.School))]);
-      const rows = players.map((p) => ({ ...p, headshot: headshotCache.get(p.id) || "", logo: logoCache.get(p.School) || "" }));
-      const canvas = await drawWhiteboardGraphic({ owner, pos, color: POS_COLORS[pos] || SITE_BLUE, classYear, mode, players: rows });
-      const blob = await canvasToBlob(canvas);
+    if (!spec.players.length) {
+      setEmpty(EMPTY_TEXT); setUrl(""); setBusy(false);
+      return undefined;
+    }
+    setEmpty("");
+    renderGraphic(spec).then((blob) => {
       if (!live) return;
       blobRef.current = blob;
       setUrl(URL.createObjectURL(blob));
-    })().catch((e) => { console.error("Whiteboard graphic:", e); if (live) setNote("Couldn't draw the graphic. Try again."); })
+    }).catch((e) => { console.error("Whiteboard graphic:", e); if (live) setNote("Couldn't draw the graphic. Try again."); })
       .finally(() => { if (live) setBusy(false); });
     return () => { live = false; };
-  }, [players, mode, pos, owner, classYear]);
+  }, [spec]);
 
   // Each new image's object URL is let go once the next replaces it.
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
 
-  const fileName = `we-draft-${classYear}-${pos.toLowerCase()}-${mode}.png`;
+  const fileName = `we-draft-${classYear}-${pos.toLowerCase()}-${themed ? listId : mode}.png`;
   const share = async () => {
     const file = new File([blobRef.current], fileName, { type: "image/png" });
     try { await navigator.share({ files: [file] }); }
@@ -1518,26 +1677,55 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
       setNote("Copied. Paste it into a text or a post.");
     } catch { setNote("This browser can't copy images. Use Download."); }
   };
+  // Save to the account (utils/savedGraphics.js): the profile's Boards tab.
+  const keep = async () => {
+    if (!uid || !spec) return;
+    setSavingGraphic(true);
+    try {
+      const name = themed ? info.label : (GRAPHIC_MODES.find((m) => m.id === mode) || {}).label;
+      await saveGraphic(uid, spec, `${pos === "ALL" ? "All positions" : pos} · ${name}`);
+      setSaved(specKey);
+      setNote("Saved to your account. Find it in Profile → Boards.");
+    } catch (e) {
+      console.error("Save graphic:", e);
+      setNote("Couldn't save it. Try again.");
+    } finally { setSavingGraphic(false); }
+  };
   const fileShare = canShareFiles();
   const canCopy = typeof window !== "undefined" && !!window.ClipboardItem && !!navigator.clipboard?.write;
+  const ready = !busy && !!url;
+  const isSaved = saved === specKey;
 
-  // The site's share dialog (components/ShareSheet.jsx), the position and
-  // graphic as chips under the preview.
+  // The site's share dialog (components/ShareSheet.jsx); the list, position
+  // and size as chips under the preview.
   return (
     <ShareSheet open onClose={onClose} title={prompted ? "Board saved — share it?" : "Share a graphic"}
-      subtitle={prompted ? "Pick a position and a graphic, then post or save it." : undefined}
-      preview={<div style={{ opacity: busy && url ? 0.5 : 1, transition: "opacity .15s" }}><ShareImagePreview src={url} alt={`Your ${pos} board graphic`} failed={!url && !busy && !!note} failedText={note} /></div>}
+      subtitle={prompted ? "Pick a list and a position, then post or save it." : undefined}
+      preview={empty
+        ? <div style={{ aspectRatio: "4 / 5", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 24, borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px dashed rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.75)", font: "700 14px/1.5 Arial, sans-serif" }}>{empty}</div>
+        : <div style={{ opacity: busy && url ? 0.5 : 1, transition: "opacity .15s" }}><ShareImagePreview src={url} alt={`Your ${pos} ${themed ? info.label : "board"} graphic`} failed={!url && !busy && !!note} failedText={note} /></div>}
       below={<>
-        <ShareChips label="Position" value={pos} onChange={onPos}
-          options={["ALL", ...POSITIONS].map((p) => ({ id: p, label: p === "ALL" ? "All positions" : p, color: p === "ALL" ? SITE_BLUE : POS_COLORS[p],
+        <WbSelect id="wb-list-type" label="List" value={listId} dot={themed ? info.color : null}
+          onChange={(v) => { setListId(v); setSearch(""); setNote(""); }}
+          options={WB_LISTS.map((l) => ({ id: l.id, label: l.label }))} />
+        <WbSelect id="wb-position" label="Position" value={pos} dot={POS_COLORS[pos] || null}
+          onChange={(v) => { onPos(v); setSearch(""); }}
+          options={["ALL", ...POSITIONS].map((p) => ({ id: p, label: p === "ALL" ? "All positions" : p,
             disabled: p === "ALL" ? !Object.values(placedByPos).some(Boolean) : !placedByPos[p] }))} />
-        <ShareChips label="Graphic" value={mode} onChange={setMode} options={GRAPHIC_MODES.map((m) => ({ id: m.id, label: m.label }))} />
+        <ShareChips label="Graphic" value={shownMode} onChange={setMode} options={modes.map((m) => ({ id: m.id, label: m.label }))} />
+        {themed && chosen && (
+          <ListPicker accent={info.color} players={players} chosen={chosen} max={max} search={search} onSearch={setSearch}
+            onToggle={toggle} onSuggest={() => setChosen(null)} onClear={() => setChosen([])} custom={!!picks[pickId]} />
+        )}
       </>}
       primary={[
-        { label: "Save image", icon: "download", onClick: download, disabled: busy || !url },
-        ...(fileShare ? [{ label: "Share image", icon: "share", onClick: share, disabled: busy || !url, alt: true }] : []),
+        { label: "Save image", icon: "download", onClick: download, disabled: !ready },
+        ...(fileShare ? [{ label: "Share image", icon: "share", onClick: share, disabled: !ready, alt: true }] : []),
       ]}
-      actions={canCopy && !fileShare ? [{ key: "copyimg", label: "Copy image", icon: "copy", onClick: copy }] : []}
-      note={url ? note : ""} />
+      actions={[
+        ...(uid ? [{ key: "keep", label: isSaved ? "Saved to account" : savingGraphic ? "Saving…" : "Save to account", icon: isSaved ? "check" : "bookmark", onClick: keep, disabled: !ready || isSaved || savingGraphic }] : []),
+        ...(canCopy && !fileShare ? [{ key: "copyimg", label: "Copy image", icon: "copy", onClick: copy, disabled: !ready }] : []),
+      ]}
+      note={url || isSaved ? note : ""} />
   );
 }

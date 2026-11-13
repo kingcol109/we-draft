@@ -4,7 +4,8 @@
 // user's highest-graded players (users/{uid}/evaluations, players for name
 // and class, playerPhotos for headshots) — and their Whiteboard as a mini
 // grid: how many players they've placed at each position on Day 1 / 2 / 3
-// and UDFA (whiteboards/{uid}_{class}, pages/Whiteboard.js).
+// and UDFA (whiteboards/{uid}_{class}, pages/Whiteboard.js). Below them,
+// the Whiteboard graphics they saved to their account (SavedGraphics.jsx).
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { collection, doc, documentId, getDoc, getDocs, query, where } from "firebase/firestore";
@@ -13,6 +14,7 @@ import LoadingSpinner from "../LoadingSpinner";
 import { GRADE_SCALE, gradeLook } from "../../utils/communityGrades";
 import { loadPhotos } from "../../utils/profileHub";
 import { SIM_YEAR, SIM_YEARS } from "../../utils/draftSim/years";
+import SavedGraphics from "./SavedGraphics";
 
 const BLUE = "#0055a5";
 const MUTED = "#5b6b84";
@@ -142,6 +144,7 @@ export default function BoardsTab({ uid, isMobile }) {
           {foot(wb ? `${placed} placed${wb.unranked ? ` · ${wb.unranked} unranked` : ""}` : "Not started yet", "/whiteboard", "Open whiteboard")}
         </div>
       </div>
+      <SavedGraphics uid={uid} year={year} isMobile={isMobile} />
     </div>
   );
 }

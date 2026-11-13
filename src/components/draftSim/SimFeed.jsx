@@ -69,6 +69,12 @@ function ProfileShot({ card, brand = {} }) {
   // Accents on the dark panel: whichever team color reads there.
   const edge = [c2, c1].find((c) => isReadable(c, "#0b1220", 3)) || "#ffffff";
   const label = { ...LABEL, color: "rgba(255,255,255,0.7)" };
+  // The name, first over last — a hyphenated last name breaks after its
+  // hyphen ("COLEMAN-" / "WILLIAMS") — as big as its longest line allows, up
+  // to 32px, running over the team's logo behind it (Arial Black capitals
+  // run ~0.86em; ~210px beside the headshot).
+  const nameLines = [String(card.first || ""), ...String(card.last || "").split(/(?<=-)/)].filter(Boolean);
+  const nameSize = Math.max(12, Math.min(32, Math.floor((headshot ? 210 : 290) / (Math.max(...nameLines.map((l) => l.length), 4) * 0.86))));
   return (
     <div style={{ marginTop: 8, borderRadius: 12, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: `linear-gradient(180deg, ${c1}, ${c1})`, fontFamily: "Arial, sans-serif", boxShadow: "0 6px 18px rgba(0,0,0,0.35)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px", background: strip, color: stripInk, fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase" }}>
@@ -76,13 +82,13 @@ function ProfileShot({ card, brand = {} }) {
         <span style={{ marginLeft: "auto", minWidth: 0, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{card.nick ? `${card.nick} select` : "The pick is in"}</span>
       </div>
 
-      <div style={{ position: "relative", height: 104, overflow: "hidden", background: `radial-gradient(160px 120px at 85% 40%, ${c2}55, transparent 70%), linear-gradient(115deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.38) 100%)` }}>
+      <div style={{ position: "relative", height: 122, overflow: "hidden", background: `radial-gradient(160px 120px at 85% 40%, ${c2}55, transparent 70%), linear-gradient(115deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.38) 100%)` }}>
         <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: `repeating-linear-gradient(115deg, transparent 0 22px, ${edge} 22px 28px)`, opacity: 0.1, WebkitMaskImage: "linear-gradient(90deg, transparent 35%, #000)", maskImage: "linear-gradient(90deg, transparent 35%, #000)" }} />
         {teamLogo && <img src={teamLogo} alt="" aria-hidden="true" style={{ position: "absolute", right: -10, top: "50%", transform: "translateY(-50%)", height: 128, maxWidth: 170, objectFit: "contain", opacity: 0.28, pointerEvents: "none" }} />}
-        {headshot && <img src={headshot} alt="" style={{ position: "absolute", left: -6, bottom: 0, height: 98, maxWidth: "none", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.4))" }} />}
+        {headshot && <img src={headshot} alt="" style={{ position: "absolute", left: -6, bottom: 0, height: 116, maxWidth: "none", filter: "drop-shadow(0 4px 10px rgba(0,0,0,0.4))" }} />}
         <div style={{ position: "absolute", top: 0, bottom: 0, left: headshot ? 112 : 12, right: 10, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: headshot ? "flex-start" : "center", gap: 5 }}>
-          <div style={{ color: "#fff", fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: 19, lineHeight: 0.98, textTransform: "uppercase", textShadow: "2px 2px 0 rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.35)" }}>
-            {card.first}<br />{card.last}
+          <div style={{ position: "relative", zIndex: 1, color: "#fff", fontFamily: "'Arial Black', Arial, sans-serif", fontWeight: 900, fontSize: nameSize, lineHeight: 0.95, letterSpacing: "-0.01em", whiteSpace: "nowrap", textTransform: "uppercase", textShadow: "2px 2px 0 rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.35)" }}>
+            {nameLines.map((l, i) => <div key={i}>{l}</div>)}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 5, maxWidth: "100%", color: "#fff", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>
             <span style={{ background: strip, color: stripInk, borderRadius: 999, padding: "0 6px", fontWeight: 900, flexShrink: 0 }}>{card.pos}</span>
