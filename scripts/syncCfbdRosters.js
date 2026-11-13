@@ -27,6 +27,10 @@
 // the 2029 class, 2025's are 2028, everyone else 2027 (also the floor: a
 // stale pre-2027 Eligible counts as 2027).
 //
+// Afterwards rebuilds offseason/cfbd (server/offseason/cfbdIndex.js) — the
+// Offseason Manager's recruit years and roster schools, from what was just
+// written. Nothing here touches players docs.
+//
 // Run with:
 //   node --env-file=.env scripts/syncCfbdRosters.js
 //   add --dry to report without writing
@@ -34,6 +38,7 @@
 const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
 const { cfbd, getCallCount } = require("../server/live/cfbdClient");
+const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");
 
 const SEASON = 2026;
 const DRY = process.argv.includes("--dry");
@@ -259,6 +264,7 @@ async function run() {
   console.log(`  table rows by draft class: ${JSON.stringify(dcCount)}`);
   leaders.forEach((c) => console.log(`  ${c.title}: ${c.rows[0] ? `${c.rows[0].first} ${c.rows[0].last} (${c.rows[0].school}) ${c.rows[0].v}` : "—"}`));
   console.log(`CFBD calls: ${getCallCount()}`);
+  if (!DRY) console.log(`Offseason index: ${JSON.stringify(await buildCfbdIndex(db))}`);
 }
 
 run().catch((e) => { console.error(e.message || e); process.exit(1); });

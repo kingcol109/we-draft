@@ -20,6 +20,8 @@ import VideoConcepts from "../components/VideoConcepts";
 import DraftOrderEditor from "../components/DraftOrderEditor";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
+import AdminEligibility, { classChange } from "../components/AdminEligibility";
+import { activePortalSeason, currentDraftClass } from "../utils/eligibility";
 import AdminSubPositions from "../components/AdminSubPositions";
 import AdminProspectRoles from "../components/AdminProspectRoles";
 import AdminStreamManager from "../components/AdminStreamManager";
@@ -259,17 +261,6 @@ function generateSlug(first, last, position, eligible) {
   return s;
 }
 
-// \u2500\u2500 Next Feb 1 (UTC) from right now \u2014 used by handleResolvePortal to defer
-// a Transfer Portal player's slug change for SEO continuity (see that
-// function's own comment and scripts/applyPendingSlugChanges.js, the daily
-// script that actually applies it once this date arrives). If it's already
-// past Feb 1 this year, rolls to next year rather than a date in the past.
-function nextFebFirstUTC(from = new Date()) {
-  const y = from.getUTCFullYear();
-  const thisYear = new Date(Date.UTC(y, 1, 1));
-  return from < thisYear ? thisYear : new Date(Date.UTC(y + 1, 1, 1));
-}
-
 // Players section: two groups, each with its own sub-tabs. A group's tab
 // reopens its last-used sub-tab.
 const PLAYER_GROUPS = [
@@ -278,10 +269,17 @@ const PLAYER_GROUPS = [
       { key: "players", label: "Player Data" },
       { key: "universe", label: "CFB Universe" },
       { key: "suggestAdds", label: "Suggested Adds" },
-      { key: "portal", label: "Transfer Portal" },
       { key: "recruits", label: "Recruits" },
       { key: "subpositions", label: "Sub-positions" },
       { key: "roles", label: "Roles" },
+    ],
+  },
+  {
+    // Class changes and transfers (components/AdminEligibility.jsx,
+    // AdminTransferPortal.js) — every change waits on an admin click.
+    key: "offseason", label: "Offseason Manager", tabs: [
+      { key: "eligibility", label: "Eligibility Manager" },
+      { key: "portal", label: "Transfer Portal" },
     ],
   },
   {
@@ -652,7 +650,7 @@ function PlayerDataSection() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [playerDataTab, setPlayerDataTab] = useState("players");
   // Each PLAYER_GROUPS group's last-used sub-tab.
-  const [groupTab, setGroupTab] = useState({ data: "players", content: "historical" });
+  const [groupTab, setGroupTab] = useState({ data: "players", offseason: "eligibility", content: "historical" });
   // Transfer Portal — "committed to" school typed while resolving a
   // player's portal status (see handleResolvePortal). Its own piece of
   // state rather than part of formState since it isn't a normal editable
@@ -1195,7 +1193,10 @@ function PlayerDataSection() {
         // to School while a player sits in the portal can't corrupt which
         // school Resolve later credits as where they transferred from.
         PortalOriginalSchool: selectedPlayer.School || formState.School || "",
-        PortalSeasonYear: String(new Date().getFullYear()),
+        // The last season played there — the season before the portal's
+        // (utils/eligibility.js activePortalSeason: Jan 2027 is the 2027
+        // portal, so 2026).
+        PortalSeasonYear: String(activePortalSeason() - 1),
       };
       await updateDoc(doc(db, "players", selectedPlayer.id), fields);
       setAllPlayers((prev) => prev.map((p) => (p.id === selectedPlayer.id ? { ...p, ...fields } : p)));
@@ -1311,41 +1312,44 @@ function PlayerDataSection() {
     setSaving(true);
     setSaveMessage("");
     try {
-      const bumpToNextClass = selectedPlayer.Eligible === "2027";
+      const bumpToNextClass = selectedPlayer.Eligible === currentDraftClass();
+      const move = bumpToNextClass ? classChange(selectedPlayer, String(+selectedPlayer.Eligible + 1), "transfer") : null;
       const fields = {
         School: newSchool,
         PriorSchool: selectedPlayer.PortalOriginalSchool || selectedPlayer.School || "",
-        PriorSchoolYear: selectedPlayer.PortalSeasonYear || String(new Date().getFullYear()),
+        PriorSchoolYear: selectedPlayer.PortalSeasonYear || String(activePortalSeason() - 1),
         InPortal: false,
         PortalEnteredAt: deleteField(),
         PortalOriginalSchool: deleteField(),
         PortalSeasonYear: deleteField(),
         updatedAt: serverTimestamp(),
-        ...(bumpToNextClass ? { Eligible: "2028", PendingSlugChangeAt: nextFebFirstUTC() } : {}),
+        ...(move ? move.fields : {}),
       };
       await updateDoc(doc(db, "players", selectedPlayer.id), fields);
       const localFields = {
         School: fields.School, PriorSchool: fields.PriorSchool, PriorSchoolYear: fields.PriorSchoolYear, InPortal: false,
-        ...(bumpToNextClass ? { Eligible: fields.Eligible, PendingSlugChangeAt: fields.PendingSlugChangeAt } : {}),
+        ...(move ? move.local : {}),
       };
       setAllPlayers((prev) => prev.map((p) => {
         if (p.id !== selectedPlayer.id) return p;
         const next = { ...p, ...localFields };
         delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        (move?.removed || []).forEach((k) => delete next[k]);
         return next;
       }));
       setSelectedPlayer((prev) => {
         const next = { ...prev, ...localFields };
         delete next.PortalEnteredAt; delete next.PortalOriginalSchool; delete next.PortalSeasonYear;
+        (move?.removed || []).forEach((k) => delete next[k]);
         return next;
       });
       // Keeps the general form's own School/Eligible fields (and anything
       // relying on formState, like the slug regenerate check) in sync too.
-      setFormState((prev) => (prev ? { ...prev, School: newSchool, ...(bumpToNextClass ? { Eligible: "2028" } : {}) } : prev));
+      setFormState((prev) => (prev ? { ...prev, School: newSchool, ...(move ? { Eligible: move.local.Eligible } : {}) } : prev));
       setPortalNewSchool("");
       setSaveMessage(
         bumpToNextClass
-          ? `Committed to ${newSchool} — bumped to the 2028 class. Slug updates automatically Feb 1.`
+          ? `Committed to ${newSchool} — moved to the ${move.local.Eligible} class. Slug updates automatically Feb 1.`
           : `Committed to ${newSchool}.`
       );
     } catch (e) {
@@ -1437,7 +1441,9 @@ function PlayerDataSection() {
           onAdded={(newPlayer) => setAllPlayers((prev) => [...prev, newPlayer].sort((a, b) => (a.Last || "").localeCompare(b.Last || "")))}
         />
       ) : playerDataTab === "portal" ? (
-        <AdminTransferPortal allPlayers={allPlayers} setAllPlayers={setAllPlayers} nextFebFirstUTC={nextFebFirstUTC} />
+        <AdminTransferPortal allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
+      ) : playerDataTab === "eligibility" ? (
+        <AdminEligibility allPlayers={allPlayers} setAllPlayers={setAllPlayers} />
       ) : playerDataTab === "recruits" ? (
         <RecruitsSection />
       ) : playerDataTab === "subpositions" ? (
@@ -1810,8 +1816,8 @@ function PlayerDataSection() {
                       </div>
                       <div style={{ fontSize: "11px", color: "#888", marginBottom: "8px" }}>
                         Enter their new school once a decision is made — School above updates to it, and {selectedPlayer.PortalOriginalSchool || "their old school"} is saved as their {selectedPlayer.PortalSeasonYear || ""} team.
-                        {selectedPlayer.Eligible === "2027" && (
-                          <> Since they're 2027, this also bumps them to the 2028 class — their slug stays put until Feb 1 for SEO, then updates automatically.</>
+                        {selectedPlayer.Eligible === currentDraftClass() && (
+                          <> Since they're {selectedPlayer.Eligible}, this also moves them to the {+selectedPlayer.Eligible + 1} class — their slug stays put until Feb 1 for SEO, then updates automatically.</>
                         )}
                       </div>
                       <SchoolCombobox

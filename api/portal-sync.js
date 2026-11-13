@@ -1,8 +1,13 @@
 // api/portal-sync.js
 //
-// The admin panel's Transfer Portal "Run sync" button (Player Data →
-// Transfer Portal, components/AdminTransferPortal.js). POST { year }.
-// Runs server/portal/sync.js — one CFBD call.
+// The admin panel's Offseason Manager (Players → Offseason Manager):
+//   POST { year }                 Transfer Portal "Run sync"
+//                                 (components/AdminTransferPortal.js) —
+//                                 server/portal/sync.js, one CFBD call.
+//   POST { action: "cfbdIndex" }  Eligibility Manager "Refresh CFBD data"
+//                                 (components/AdminEligibility.jsx) —
+//                                 server/offseason/cfbdIndex.js, no CFBD calls.
+// Neither writes to players; the admin applies every change.
 //
 // Auth: the caller's Firebase ID token (Authorization: Bearer <token>),
 // checked with Firebase Auth's own REST lookup (Google validates it — the
@@ -35,6 +40,10 @@ module.exports = async function handler(req, res) {
     const user = (await db.collection("users").doc(uid).get()).data();
     if (user?.role !== "admin") return res.status(403).json({ error: "admins only" });
 
+    if (req.body?.action === "cfbdIndex") {
+      const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");
+      return res.status(200).json(await buildCfbdIndex(db));
+    }
     const year = Number(req.body?.year) || new Date().getFullYear() + 1;
     if (year < 2021 || year > new Date().getFullYear() + 2) return res.status(400).json({ error: "bad year" });
     const { runPortalSync } = require("../server/portal/sync");

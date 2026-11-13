@@ -1,6 +1,6 @@
 // src/components/AdminTransferPortal.js
 //
-// Admin → Player Data → Transfer Portal. "Run sync" pulls CFBD's portal for
+// Admin → Players → Offseason Manager → Transfer Portal. "Run sync" pulls CFBD's portal for
 // the chosen season (api/portal-sync.js → server/portal/sync.js, one CFBD
 // call — on demand only, never scheduled) into transferPortal/{year}.
 //
@@ -8,17 +8,27 @@
 // the recommended update, applied with one click — the same writes as the
 // player editor's own portal buttons (AdminPanel.js handleEnterPortal /
 // handleResolvePortal): entered → Move to Transfer Portal; committed →
-// Resolve to the new school, which bumps a 2027 to the 2028 class (slug
-// follows Feb 1, see scripts/applyPendingSlugChanges.js); every other class
-// stays. Dismiss hides a recommendation (transferPortal/{year}.dismissed).
+// Resolve to the new school, which moves a current-class player (2027 now)
+// to the next class through AdminEligibility.jsx's classChange — a +1, a
+// ClassHistory "transfer" entry, slug follows Feb 1 (see
+// scripts/applyPendingSlugChanges.js); every other class stays. Dismiss
+// hides a recommendation (transferPortal/{year}.dismissed). Nothing changes
+// a player without an admin click.
+//
+// The default season is the portal that's open or next to open
+// (utils/eligibility.js activePortalSeason) — CFBD files the Dec–spring
+// windows under the season the player transfers for, so January 2027 is
+// still the 2027 portal.
 // All Activity: every entry in the season, searchable.
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, documentId, FieldPath, getDoc, getDocs, query, serverTimestamp, deleteField, updateDoc, where } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { activePortalSeason, currentDraftClass } from "../utils/eligibility";
+import { classChange } from "./AdminEligibility";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
-const NEXT_SEASON = new Date().getFullYear() + 1;
+const NEXT_SEASON = activePortalSeason();
 const YEARS = [NEXT_SEASON, NEXT_SEASON - 1];
 const PAGE = 100;
 
@@ -40,14 +50,14 @@ function recommend(entry, p, year) {
   }
   const newSchool = entry.destSchool || entry.dest;
   if (p.School === newSchool && !p.InPortal) return { done: true, text: `At ${newSchool} — up to date` };
-  const bump = p.Eligible === "2027";
+  const bump = p.Eligible === currentDraftClass();
   return {
     action: "resolve", newSchool,
-    text: `Resolve → ${newSchool}${entry.destSchool ? "" : " (not a We-Draft school)"} · ${bump ? "class 2027 → 2028 (slug updates Feb 1)" : `class stays ${p.Eligible || "—"}`}`,
+    text: `Resolve → ${newSchool}${entry.destSchool ? "" : " (not a We-Draft school)"} · ${bump ? `class ${p.Eligible} → ${+p.Eligible + 1} (slug updates Feb 1)` : `class stays ${p.Eligible || "—"}`}`,
   };
 }
 
-export default function AdminTransferPortal({ allPlayers, setAllPlayers, nextFebFirstUTC }) {
+export default function AdminTransferPortal({ allPlayers, setAllPlayers }) {
   const [year, setYear] = useState(NEXT_SEASON);
   const [tab, setTab] = useState("wd");
   const [meta, setMeta] = useState(null);
@@ -130,7 +140,8 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers, nextFeb
         patchPlayer(p.id, { ...fields, PortalEnteredAt: new Date() });
         setMessage(`${p.First} ${p.Last} moved into the Transfer Portal.`);
       } else if (rec.action === "resolve") {
-        const bump = p.Eligible === "2027";
+        const bump = p.Eligible === currentDraftClass();
+        const move = bump ? classChange(p, String(+p.Eligible + 1), "transfer") : null;
         const fields = {
           School: rec.newSchool,
           PriorSchool: p.PortalOriginalSchool || p.School || r.entry.originSchool || "",
@@ -139,14 +150,14 @@ export default function AdminTransferPortal({ allPlayers, setAllPlayers, nextFeb
           InPortal: false,
           PortalEnteredAt: deleteField(), PortalOriginalSchool: deleteField(), PortalSeasonYear: deleteField(),
           updatedAt: serverTimestamp(),
-          ...(bump ? { Eligible: "2028", PendingSlugChangeAt: nextFebFirstUTC() } : {}),
+          ...(move ? move.fields : {}),
         };
         await updateDoc(doc(db, "players", p.id), fields);
         patchPlayer(p.id, {
           School: fields.School, PriorSchool: fields.PriorSchool, PriorSchoolYear: fields.PriorSchoolYear, InPortal: false,
-          ...(bump ? { Eligible: "2028", PendingSlugChangeAt: fields.PendingSlugChangeAt } : {}),
-        }, ["PortalEnteredAt", "PortalOriginalSchool", "PortalSeasonYear"]);
-        setMessage(`${p.First} ${p.Last} → ${rec.newSchool}${bump ? " · bumped to the 2028 class (slug updates Feb 1)" : ""}.`);
+          ...(move ? move.local : {}),
+        }, ["PortalEnteredAt", "PortalOriginalSchool", "PortalSeasonYear", ...(move ? move.removed : [])]);
+        setMessage(`${p.First} ${p.Last} → ${rec.newSchool}${move ? ` · moved to the ${move.local.Eligible} class (slug updates Feb 1)` : ""}.`);
       }
     } catch (e) {
       console.error("Transfer portal apply error:", e);
