@@ -43,7 +43,7 @@
 import { useMemo, useRef, useState } from "react";
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
-import { POS_MAP, eligibleFor, addRosterPlayer } from "./CfbUniverseSearch";
+import { POS_MAP, eligibleFor, addRosterPlayer, recruitYearFor } from "./CfbUniverseSearch";
 import { groupOf, production, statLine } from "./seasonStats";
 
 const BLUE = "#0055a5";
@@ -565,10 +565,20 @@ export default function VideoSuggester({ players, videos, generateSlug, stateNam
     const pos = POS_MAP[(c.rp.pos || "").toUpperCase()];
     if (!pos) { alert(`No We-Draft position for "${c.rp.pos || "?"}" — add ${c.first} ${c.last} from Players → CFB Universe instead.`); return null; }
     const eligible = eligibleFor(c.rp);
-    if (!window.confirm(`Add ${c.first} ${c.last} (${pos}, ${c.school}, ${eligible} class) to We-Draft? This creates a live player page.`)) return null;
+    let recruitYear = recruitYearFor(c.rp);
+    if (recruitYear) {
+      if (!window.confirm(`Add ${c.first} ${c.last} (${pos}, ${c.school}, ${eligible} class, recruit year ${recruitYear}) to We-Draft? This creates a live player page.`)) return null;
+    } else {
+      // Every new player needs a recruit year; CFBD has none for this one.
+      recruitYear = (window.prompt(`Add ${c.first} ${c.last} (${pos}, ${c.school}, ${eligible} class) to We-Draft? This creates a live player page.
+
+CFBD has no recruit year — enter their first college season:`, String(Number(eligible) - 3)) || "").trim();
+      if (!recruitYear) return null;
+      if (!/^\d{4}$/.test(recruitYear)) { alert("Recruit year must be a 4-digit year."); return null; }
+    }
     try {
       const p = { ...c.rp, school: c.roster.school, team: c.roster.team, teamId: c.roster.teamId };
-      const { player, rosterPlayers } = await addRosterPlayer(p, c.roster, { pos, eligible, live: true }, { allPlayers: players, generateSlug, stateNames });
+      const { player, rosterPlayers } = await addRosterPlayer(p, c.roster, { pos, eligible, live: true, recruitYear }, { allPlayers: players, generateSlug, stateNames });
       if (rosterPlayers) c.roster.players = rosterPlayers;
       cache.current.base?.wdByCfbd.set(String(c.rp.id), player.id);
       onPlayerAdded(player);

@@ -12,7 +12,13 @@
 // Adding a player:
 //   - players doc from the roster row: name, school, position (CFBD →
 //     We-Draft, editable per row), draft class (recruiting-class rule,
-//     editable), height/weight, home state. Live per row (checked by
+//     editable), recruit year (required — CFBD's recruiting class, else a
+//     freshman's class year, else typed in; the Offseason Manager's
+//     True / +1 / +2 tags run on it), height/weight, home state, and high
+//     school — CFBD's (roster row hs/hss), saved under our matching
+//     highSchools doc's Name so it links to that school's branding and page
+//     (utils/highSchoolMatch.js); CFBD's spelling goes on the doc as an
+//     alias, and a school we don't have gets a new doc. Live per row (checked by
 //     default, same as a new player made by hand). Slug via the panel's own generateSlug, de-duped
 //     (-1, -2, ...) like a manual create.
 //   - cfbdPlayers/{id} linked to it (mappingStatus "verified", source
@@ -35,10 +41,11 @@
 // displayed on the public site.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { addDoc, collection, doc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { loadPffByCfbdId, PFF_TO_WD, rankPct } from "./pffData";
 import { groupOf, production, statLine } from "./seasonStats";
+import { matchHighSchool, stateName, hsKey, NATIONAL_SCHOOLS } from "../utils/highSchoolMatch";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -67,6 +74,9 @@ export const POS_MAP = {
 // a newly added freshman's CFBD "year" is their class too. Adjust per row.
 const BY_SIGNING = { [SEASON]: SEASON + 3, [SEASON - 1]: SEASON + 2 };
 export const eligibleFor = (p) => String(BY_SIGNING[p.rc] || BY_SIGNING[p.yr] || SEASON + 1);
+// A roster row's recruit year (first college season): CFBD's recruiting
+// class, or a newly added freshman's class year; null when CFBD has neither.
+export const recruitYearFor = (p) => (p.rc ? String(p.rc) : p.yr > 1000 ? String(p.yr) : null);
 const ELIGIBLE_CHOICES = [SEASON + 1, SEASON + 2, SEASON + 3, SEASON + 4].map(String);
 const CLASS = (yr) => (yr == null ? "" : yr > 1000 ? "FR" : ["", "FR", "SO", "JR", "SR"][yr] || "GR");
 const heightOf = (ht) => (ht ? `${Math.floor(ht / 12)}'${ht % 12}"` : "");
@@ -100,16 +110,41 @@ export async function linkRosterPlayer(p, roster, wdId, slug) {
   return players;
 }
 
+// CFBD's high school for a roster row → { HighSchool, State } under our
+// highSchools doc (adding CFBD's spelling to it, or creating it), or null.
+async function linkHighSchool(p) {
+  if (!p.hs) return null;
+  // A national school (IMG) is in its own state, not the player's hometown's.
+  const home = NATIONAL_SCHOOLS[hsKey(p.hs)];
+  const state = home || stateName(p.hss);
+  const snap = await getDocs(query(collection(db, "highSchools"), where("State", "==", state)));
+  const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // A loose ("close") match is a different school until an admin confirms it
+  // (Eligibility Manager) — never linked silently here.
+  const found = matchHighSchool(p.hs, state, docs);
+  const m = found && found.how !== "close" ? found : null;
+  if (m) {
+    if (p.hs !== m.doc.Name && !(m.doc.CFBDNames || []).includes(p.hs)) await updateDoc(doc(db, "highSchools", m.doc.id), { CFBDNames: arrayUnion(p.hs) });
+    return { HighSchool: m.doc.Name, State: m.doc.State };
+  }
+  await addDoc(collection(db, "highSchools"), { Name: p.hs, State: state, City: home ? "" : p.hsc || "", CFBDNames: [p.hs], createdAt: serverTimestamp() });
+  return { HighSchool: p.hs, State: state };
+}
+
 // New players doc from the roster row, then linked. Returns { player, rosterPlayers }.
-export async function addRosterPlayer(p, roster, { pos, eligible, live }, { allPlayers, generateSlug, stateNames }) {
+export async function addRosterPlayer(p, roster, { pos, eligible, live, recruitYear }, { allPlayers, generateSlug, stateNames }) {
+  if (!/^\d{4}$/.test(String(recruitYear || ""))) throw new Error("recruit year required");
   const base = generateSlug(p.first, p.last, pos, eligible);
   const taken = new Set(allPlayers.map((x) => x.Slug).filter(Boolean));
   let slug = base;
   for (let n = 1; taken.has(slug); n += 1) slug = `${base}-${n}`;
   const stateAbbr = (p.home || "").split(",").pop().trim();
+  const hs = await linkHighSchool(p).catch((e) => { console.error("High school link error:", e); return null; });
   const payload = {
-    First: p.first, Last: p.last, HighSchool: "", State: stateNames[stateAbbr] || "",
-    School: p.school || "", Position: pos, Eligible: eligible,
+    First: p.first, Last: p.last, HighSchool: hs?.HighSchool || "", State: hs?.State || stateNames[stateAbbr] || "",
+    // Recruiting stars / national rank out of high school (roster row).
+    ...(p.stars ? { RecruitStars: p.stars } : {}), ...(p.rank ? { RecruitRank: p.rank } : {}),
+    School: p.school || "", Position: pos, Eligible: eligible, RecruitYear: String(recruitYear),
     Height: heightOf(p.ht), Weight: p.wt ? String(p.wt) : "",
     Bio: "", Flair: "", Live: live, AdminNotes: "", Flag: "",
     Slug: slug, updatedAt: serverTimestamp(),
@@ -209,7 +244,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
       .slice(0, MAX_RESULTS);
   }, [universe, q, schoolFilter]);
 
-  const editOf = (p) => ({ pos: PFF_TO_WD[p.pff?.pos] || POS_MAP[p.pos] || "", eligible: eligibleFor(p), live: true, ...edits[p.id] });
+  const editOf = (p) => ({ pos: PFF_TO_WD[p.pff?.pos] || POS_MAP[p.pos] || "", eligible: eligibleFor(p), recruitYear: recruitYearFor(p) || "", live: true, ...edits[p.id] });
   const setEdit = (p, field, value) => setEdits((prev) => ({ ...prev, [p.id]: { ...editOf(p), ...prev[p.id], [field]: value } }));
 
   const applyRoster = (p, players) => {
@@ -223,11 +258,12 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
   };
 
   const add = async (p) => {
-    const { pos, eligible, live } = editOf(p);
+    const { pos, eligible, live, recruitYear } = editOf(p);
     if (!pos || !eligible) { alert("Pick a position and draft class first."); return; }
+    if (!/^\d{4}$/.test(recruitYear)) { alert("Enter a recruit year (their first college season) — CFBD doesn't have one for this player."); return; }
     setBusy(p.id);
     try {
-      const { player, rosterPlayers } = await addRosterPlayer(p, rosters.find((r) => r.id === p.rosterId), { pos, eligible, live }, { allPlayers, generateSlug, stateNames });
+      const { player, rosterPlayers } = await addRosterPlayer(p, rosters.find((r) => r.id === p.rosterId), { pos, eligible, live, recruitYear }, { allPlayers, generateSlug, stateNames });
       applyRoster(p, rosterPlayers);
       setDone((prev) => ({ ...prev, [p.id]: player.Slug }));
       onAdded(player);
@@ -298,7 +334,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
               <tr>
                 {suggestMode && <th style={th}>Score</th>}
                 <th style={th}>Player</th><th style={th}>School</th><th style={th}>CFBD</th><th style={th}>PFF</th><th style={th}>Class</th>
-                <th style={th}>Ht / Wt</th><th style={th}>Position</th><th style={th}>Draft class</th><th style={th}>Live</th><th style={th} />
+                <th style={th}>Ht / Wt</th><th style={th}>Position</th><th style={th}>Draft class</th><th style={th} title="First college season — required">Recruit yr</th><th style={th}>Live</th><th style={th} />
               </tr>
             </thead>
             <tbody>
@@ -312,7 +348,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                     <td style={{ ...td, fontWeight: 900, color: "#1d2733" }}>
                       {p.first} {p.last}
                       {p.no != null && <span style={{ color: "#9aa5b4", fontWeight: 700, marginLeft: "6px" }}>#{p.no}</span>}
-                      {p.home && <div style={{ fontSize: "11px", fontWeight: 600, color: "#7a8597" }}>{p.home}</div>}
+                      {(p.home || p.hs) && <div style={{ fontSize: "11px", fontWeight: 600, color: "#7a8597" }}>{[p.home, p.hs && `HS: ${p.hs}`].filter(Boolean).join(" · ")}</div>}
                     </td>
                     <td style={td}>{p.school}</td>
                     <td style={td}>{p.pos || "—"}</td>
@@ -330,7 +366,7 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                     <td style={td}>{CLASS(p.yr)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{[heightOf(p.ht), p.wt].filter(Boolean).join(" / ") || "—"}</td>
                     {slug ? (
-                      <td colSpan={4} style={{ ...td, textAlign: "right" }}>
+                      <td colSpan={5} style={{ ...td, textAlign: "right" }}>
                         <Link to={`/player/${slug}`} target="_blank" style={{ color: "#1f8a4c", fontWeight: 900, fontSize: "12px" }}>✓ On We-Draft ↗</Link>
                       </td>
                     ) : (
@@ -345,6 +381,12 @@ export default function CfbUniverseSearch({ allPlayers, generateSlug, stateNames
                           <select value={e.eligible} onChange={(ev) => setEdit(p, "eligible", ev.target.value)} style={sel}>
                             {ELIGIBLE_CHOICES.map((x) => <option key={x} value={x}>{x}</option>)}
                           </select>
+                        </td>
+                        <td style={td}>
+                          <input value={e.recruitYear} inputMode="numeric" placeholder="req."
+                            title={recruitYearFor(p) ? "From CFBD" : "CFBD has no recruit year — type their first college season"}
+                            onChange={(ev) => setEdit(p, "recruitYear", ev.target.value.replace(/\D/g, "").slice(0, 4))}
+                            style={{ ...sel, width: "58px", borderColor: /^\d{4}$/.test(e.recruitYear) ? undefined : "#c0392b" }} />
                         </td>
                         <td style={{ ...td, textAlign: "center" }}>
                           <input type="checkbox" checked={e.live} onChange={(ev) => setEdit(p, "live", ev.target.checked)} title="Live — shown on the site" />

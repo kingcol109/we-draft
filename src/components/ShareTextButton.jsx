@@ -84,8 +84,7 @@ export default function ShareTextButton({ text, preview, subject, style, classNa
     a.href = image;
     a.click();
   };
-  // The share sheet with the picture (and the message, where the app takes
-  // both); without file sharing, Save Image is the way.
+  // The share sheet with the picture and the page's link; without file sharing, Save Image is the way.
   const [canShareFile, setCanShareFile] = useState(false);
   useEffect(() => {
     if (!image || !graphic || !navigator.canShare) return undefined;
@@ -99,7 +98,10 @@ export default function ShareTextButton({ text, preview, subject, style, classNa
     if (!image) return;
     try {
       const f = await imageFile(image, graphic.fileName);
-      await navigator.share({ files: [f], text });
+      // Just the picture and the page's link — not the message's lines
+      // (grades etc.), which the picture already shows.
+      const link = (text || "").match(/https?:\/\/\S+/g)?.pop();
+      await navigator.share(link ? { files: [f], text: link } : { files: [f] });
     } catch (e) { /* cancelled, or the app refused it */ }
   };
 

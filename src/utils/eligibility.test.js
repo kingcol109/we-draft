@@ -1,5 +1,5 @@
 import {
-  currentDraftClass, activePortalSeason, nextFebFirstUTC, firstClassFor, lastClassFor, classTag, inFinalYear, movedInto,
+  currentDraftClass, activePortalSeason, nextFebFirstUTC, firstClassFor, lastClassFor, classTag, inFinalYear, movedInto, eligibilityInfo,
 } from "./eligibility";
 
 const at = (iso) => new Date(iso);
@@ -51,4 +51,42 @@ test("movedInto", () => {
   const p = { Eligible: "2028", ClassHistory: [{ from: "2027", to: "2028", reason: "returning" }] };
   expect(movedInto(p)).toBe(true);
   expect(movedInto({ Eligible: "2028" })).toBe(false);
+});
+
+describe("eligibilityInfo (Nov 2026)", () => {
+  const now = at("2026-11-13T12:00:00Z");
+  const js = (extra) => ({ First: "Jeremiah", Last: "Smith", ...extra });
+  test("eligibility left", () => {
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2024" }), now))
+      .toBe("Jeremiah Smith has 2 seasons of college eligibility left after this season. This means he can declare for the NFL Draft as early as 2027, and as late as 2029.");
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2023" }), now))
+      .toBe("Jeremiah Smith has 1 season of college eligibility left after this season. This means he can declare for the NFL Draft as early as 2027, and as late as 2028.");
+    expect(eligibilityInfo(js({ Eligible: "2029", RecruitYear: "2026" }), now))
+      .toBe("Jeremiah Smith has 4 seasons of college eligibility left after this season. This means he can declare for the NFL Draft as early as 2029, and as late as 2031.");
+  });
+  test("no eligibility left", () => {
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2022" }), now))
+      .toBe("Jeremiah Smith will have no college eligibility remaining after 2026 and will be in the 2027 draft class.");
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2020" }), now)).toMatch(/no college eligibility remaining after 2026/);
+  });
+  test("declared", () => {
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2024", Declared: true }), now))
+      .toBe("Jeremiah Smith has forgone 2 years of college eligibility and has declared for the 2027 NFL Draft.");
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2023", Declared: true }), now))
+      .toBe("Jeremiah Smith has forgone 1 year of college eligibility and has declared for the 2027 NFL Draft.");
+    expect(eligibilityInfo(js({ Eligible: "2027", RecruitYear: "2022", Declared: true }), now))
+      .toBe("Jeremiah Smith has declared for the 2027 NFL Draft.");
+  });
+  test("passed on the draft", () => {
+    const back = (reason) => js({ Eligible: "2028", RecruitYear: "2024", ClassHistory: [{ from: "2027", to: "2028", reason }] });
+    expect(eligibilityInfo(back("returning"), now))
+      .toBe("Jeremiah Smith did not declare for the NFL Draft in 2027. He will return to college with 2 more years of eligibility.");
+    expect(eligibilityInfo(back("transfer"), now)).toMatch(/did not declare/);
+    // an admin correction isn't a decision to return
+    expect(eligibilityInfo(back("fix"), now)).toMatch(/^Jeremiah Smith has 2 seasons/);
+  });
+  test("nothing to say", () => {
+    expect(eligibilityInfo(js({ Eligible: "2027" }), now)).toBe(null);
+    expect(eligibilityInfo(js({ Eligible: "2026", RecruitYear: "2022" }), now)).toBe(null);
+  });
 });

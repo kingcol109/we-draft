@@ -116,6 +116,8 @@ const cfbd = {
   portal: (params) => get("/player/portal", params),
   // Recruits for one class: [{ id, athleteId, year, ranking, name, position, stars, rating, committedTo, ... }]
   recruits: (params) => get("/recruiting/players", params),
+  // NFL draft picks for a year — collegeAthleteId, collegeTeam, hometownInfo (all tiers).
+  draftPicks: (params) => get("/draft/picks", params),
   // Live — Patreon Tier 1+ (scoreboard) / Tier 2+ (live plays).
   scoreboard: (params) => get("/scoreboard", params),
   livePlays: (gameId) => get("/live/plays", { gameId }),

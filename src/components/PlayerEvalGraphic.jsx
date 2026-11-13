@@ -107,7 +107,7 @@ const PlayerEvalGraphic = forwardRef(function PlayerEvalGraphic({
           </div>
           <div style={{ fontSize: 34, lineHeight: 1, marginTop: 14, ...clip }}>{first}</div>
           <div style={{ fontSize: lastSize, lineHeight: 1, marginTop: 4, textShadow: `5px 5px 0 ${theme.shadow}`, ...clip, paddingBottom: 6 }}>{last}</div>
-          {size && <div style={{ fontFamily: BODY, fontWeight: 800, fontSize: 18, color: "rgba(255,255,255,0.8)", marginTop: 6 }}>{size}</div>}
+          {size && <div style={{ fontFamily: BODY, fontWeight: 900, fontSize: 26, color: "rgba(255,255,255,0.9)", marginTop: 4 }}>{size}</div>}
         </div>
       </div>
 

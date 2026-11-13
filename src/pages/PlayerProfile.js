@@ -56,6 +56,8 @@ import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 import { classSnapshotRanks } from "../utils/classRanks";
 import { readableOn, textOn } from "../utils/teamColors";
 import { communityAverage, gradeCounts } from "../utils/gradeWindow";
+import { eligibilityInfo } from "../utils/eligibility";
+import PlayerEligibilityInfo from "../components/PlayerEligibilityInfo";
 
 // ── Grade lock: 2026 prospects only, locked at 8PM ET April 23rd 2026 ────────
 const GRADE_LOCK_DATE = new Date("2026-04-23T20:00:00-04:00");
@@ -4459,13 +4461,18 @@ useEffect(() => {
   // The tab row: both tabs where the section heading used to be, Find
   // Comparison still on the right.
   const showStatsTab = !!espnId && !espnEmpty;
+  // Info tab: the player's college eligibility (utils/eligibility.js) —
+  // when there's something to say (a recruit year, an undrafted class)…
+  const eligibilityText = eligibilityInfo(player);
+  // …and career stops / high school: the tab shows when either has something.
+  const showInfoTab = !!eligibilityText || !!player?.CareerStops?.length || !!player?.HighSchool || !!espnId; // espnId: hometown
   const scoutTabs = (
     <>
       {/* One row, never wrapping — on phones the labels and the Find
           Comparison pill shorten to fit. */}
       <div className="flex items-center justify-between mb-2" style={{ gap: "10px", flexWrap: "nowrap" }}>
         <div role="tablist" style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? "10px" : "24px", minWidth: 0 }}>
-          {[["community", isMobile ? "Scouting" : "Scouting Report"], ["mine", isMobile && showStatsTab ? "My Eval" : "My Evaluation"], ...(showStatsTab ? [["stats", "Stats"]] : [])].map(([key, label]) => {
+          {[["community", isMobile ? "Scouting" : "Scouting Report"], ["mine", isMobile && showStatsTab ? "My Eval" : "My Evaluation"], ...(showStatsTab ? [["stats", "Stats"]] : []), ...(showInfoTab ? [["info", "Info"]] : [])].map(([key, label]) => {
             const on = scoutTab === key;
             return (
               <button
@@ -5535,7 +5542,9 @@ useEffect(() => {
               below the ad. */}
           <div ref={evaluationFormRef} className="bg-white" style={{ padding: isMobile ? "10px 10px 8px" : "16px 24px 10px", scrollMarginTop: "80px" }}>
             {scoutTabs}
-            {scoutTab === "stats" && showStatsTab ? (
+            {scoutTab === "info" && showInfoTab ? (
+              <PlayerEligibilityInfo player={player} text={eligibilityText} espnId={espnId} draft={draftedBy ? { team: draftedBy, round: draftInfo?.round, pick: draftInfo?.pick } : null} color1={siteC1} isMobile={isMobile} />
+            ) : scoutTab === "stats" && showStatsTab ? (
               <PlayerEspnStats espnId={espnId} color1={siteC1} color2={siteC2} isMobile={isMobile} onEmpty={() => { setEspnEmpty(true); setScoutTab("community"); }} />
             ) : scoutTab === "mine" ? (
           <div className="bg-white rounded-lg overflow-hidden wdm-card wdm-form" style={{ border:`2px solid ${siteC1}` }}>

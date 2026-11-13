@@ -15,13 +15,15 @@
 // since none of this is meant to be discoverable yet either way.
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { Helmet } from "react-helmet-async";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { useCurrentRankMap } from "../utils/rankings";
+import { useSchools } from "../components/DraftArchiveList";
+import { currentDraftClass } from "../utils/eligibility";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -79,8 +81,9 @@ function sanitizeUrl(url) {
   return u;
 }
 
-const ACTIVE_YEARS = ["2027", "2028", "2029"];
 const NEWS_LIMIT = 8;
+// Players tab order: graded We-Draft players first, best grade first.
+const GRADE_ORDER = ["Early First Round", "Middle First Round", "Late First Round", "Second Round", "Third Round", "Fourth Round", "Fifth Round", "Sixth Round", "Seventh Round", "UDFA"];
 
 // Same grade scale/labels/display map TeamPage.js's own Prospects list
 // uses — duplicated here per this codebase's per-file convention.
@@ -135,19 +138,22 @@ function SidebarCard({ title, color1, color2, children }) {
 
 // News isn't a tab — it's its own right-column sidebar (NewsSidebar below),
 // same as TeamPage.js's own layout.
+// Players: every current college player from the school (CFBD rosters,
+// hsAlumni — server/highSchools/alumniIndex.js) plus any We-Draft player not
+// on one; only We-Draft players link. Archive: alumni drafted into the NFL.
 const TABS = [
-  { key: "prospects", label: "Prospects" },
+  { key: "players", label: "Players" },
   { key: "archive", label: "Archive" },
 ];
 
 export default function HighSchoolTeamPage() {
   const { slug } = useParams();
   const [school, setSchool] = useState(null); // null = loading, false = not available
-  const [prospects, setProspects] = useState([]);
+  const [players, setPlayers] = useState([]);
   const [archive, setArchive] = useState([]);
   const [news, setNews] = useState([]);
   const [contentLoading, setContentLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("prospects");
+  const [activeTab, setActiveTab] = useState("players");
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < 768);
   // Mobile "stuck loading forever" watchdog — see the hook's own comment.
   // school === null is specifically "still loading" here (false is a
@@ -185,34 +191,47 @@ export default function HighSchoolTeamPage() {
     return () => { cancelled = true; };
   }, [slug]);
 
-  // Prospects (players still 2027-2029 eligible), Archive (historical
-  // picks), and the alumni pool the News feed is built from — all keyed by
-  // this school's exact Name, same denormalized-string matching every
-  // other HighSchool reference in the app uses.
+  // Players (CFBD's rosters + We-Draft), Archive (historical picks + this
+  // year's class), and the We-Draft alumni the News feed is built from —
+  // matched on the school's Name AND State (two states can share a name:
+  // Mater Dei in Santa Ana vs. Freehold, NJ).
   useEffect(() => {
     if (!school) { setContentLoading(false); return; }
     let cancelled = false;
     const loadContent = async () => {
       setContentLoading(true);
       try {
-        const [allPlayersSnap, historicalSnap] = await Promise.all([
+        const sameState = (x) => !x.State || x.State === school.State;
+        const [allPlayersSnap, historicalSnap, alumniSnap] = await Promise.all([
           getDocs(query(collection(db, "players"), where("HighSchool", "==", school.Name))),
           getDocs(query(collection(db, "historical"), where("HighSchool", "==", school.Name))),
+          getDoc(doc(db, "hsAlumni", school.id)).catch(() => null),
         ]);
-        const allAlumni = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const allAlumni = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(sameState);
         if (cancelled) return;
 
-        const activeProspects = allAlumni
-          .filter((p) => ACTIVE_YEARS.includes(p.Eligible))
-          .sort((a, b) => (a.Eligible || "").localeCompare(b.Eligible || "") || (a.Last || "").localeCompare(b.Last || ""));
-
-        // Community grade per prospect — same average-and-round-to-nearest-
-        // label math as TeamPage.js's own Prospects list.
-        // One snapshot read (utils/communityGrades.js), not a query per player.
-        const avgs = await averageGradesFor(activeProspects.map((p) => p.id));
-        activeProspects.forEach((p) => { p.commGrade = gradeLabel(avgs[p.id]); });
+        // Everyone in college now: CFBD's rows (a We-Draft link when there
+        // is one), then We-Draft players still in school that CFBD lacks.
+        const byId = Object.fromEntries(allAlumni.map((p) => [p.id, p]));
+        const cfbd = alumniSnap?.data()?.players || [];
+        const C = Number(currentDraftClass());
+        const rows = cfbd.map((r) => {
+          const wd = r.id ? byId[r.id] : null;
+          return { key: `c${r.c}`, name: r.n, pos: wd?.Position || r.pos, college: wd?.School || r.s, hsClass: r.rc || Number(wd?.RecruitYear) || null, stars: r.st, id: wd?.id || null, slug: wd?.Slug || r.slug || null };
+        });
+        const inList = new Set(rows.map((r) => r.id).filter(Boolean));
+        allAlumni.filter((p) => !inList.has(p.id) && Number(p.Eligible) >= C).forEach((p) => rows.push({
+          key: p.id, name: `${p.First || ""} ${p.Last || ""}`.trim(), pos: p.Position, college: p.School,
+          hsClass: Number(p.RecruitYear) || null, stars: p.RecruitStars || null, id: p.id, slug: p.Slug,
+        }));
+        // Community grade per We-Draft player — one snapshot read
+        // (utils/communityGrades.js), not a query per player.
+        const avgs = await averageGradesFor(rows.map((r) => r.id).filter(Boolean));
+        rows.forEach((r) => { r.grade = r.id ? gradeLabel(avgs[r.id]) : null; });
+        const gi = (g) => (g ? GRADE_ORDER.indexOf(g) : 99);
+        rows.sort((a, b) => gi(a.grade) - gi(b.grade) || (a.hsClass || 9999) - (b.hsClass || 9999) || a.name.localeCompare(b.name));
         if (cancelled) return;
-        setProspects(activeProspects);
+        setPlayers(rows);
 
         // Archive = the older historical collection PLUS the just-completed
         // 2026 class — same two-source combo TeamPage.js's own Archive tab
@@ -233,14 +252,14 @@ export default function HighSchoolTeamPage() {
           .filter((p) => draftBySlug[p.Slug])
           .map((p) => ({
             id: p.id, Year: "2026", Slug: p.Slug,
-            Round: draftBySlug[p.Slug].Round, Pick: draftBySlug[p.Slug].Pick,
+            Round: draftBySlug[p.Slug].Round, Pick: draftBySlug[p.Slug].Pick, PickInRound: true,
             Player: `${p.First || ""} ${p.Last || ""}`.trim(), School: p.School,
-            "NFL Team": draftBySlug[p.Slug].Team,
+            nflAbbr: draftBySlug[p.Slug].Team,
           }));
 
-        const historicalRows = historicalSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const historicalRows = historicalSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(sameState);
         const combinedArchive = [...archived2026Rows, ...historicalRows]
-          .sort((a, b) => (Number(b.Year) || 0) - (Number(a.Year) || 0) || (Number(a.Pick) || 9999) - (Number(b.Pick) || 9999));
+          .sort((a, b) => (Number(b.Year) || 0) - (Number(a.Year) || 0) || (Number(a.Round) || 99) - (Number(b.Round) || 99) || (Number(a.Pick) || 9999) - (Number(b.Pick) || 9999));
         setArchive(combinedArchive);
 
         // "All alumni" — every player (any Eligible year, not just active
@@ -270,7 +289,7 @@ export default function HighSchoolTeamPage() {
         if (!cancelled) setNews(feed.slice(0, 20));
       } catch (e) {
         console.error("High school team page content error:", e);
-        if (!cancelled) { setProspects([]); setArchive([]); setNews([]); }
+        if (!cancelled) { setPlayers([]); setArchive([]); setNews([]); }
       } finally {
         if (!cancelled) setContentLoading(false);
       }
@@ -354,26 +373,26 @@ export default function HighSchoolTeamPage() {
         {isMobile ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} />
-            <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} prospects={prospects} archive={archive} color1={color1} color2={color2} />
+            <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} schoolName={school.Name} color1={color1} color2={color2} isMobile={isMobile} />
             <details>
               <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: "13px", color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>
                 🏆 Current Top 25
               </summary>
-              <Top25Sidebar schools={top25Schools} />
+              <Top25Sidebar schools={top25Schools} color1={color1} color2={color2} />
             </details>
-            <NewsSidebar news={news} />
+            <NewsSidebar news={news} color1={color1} color2={color2} />
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "240px minmax(0, 1fr) 240px", gap: "20px", alignItems: "start" }}>
             <div style={{ position: "sticky", top: "20px" }}>
-              <Top25Sidebar schools={top25Schools} />
+              <Top25Sidebar schools={top25Schools} color1={color1} color2={color2} />
             </div>
             <div>
               <HeroCard school={school} color1={color1} color2={color2} isMobile={isMobile} heroLogo={heroLogo} cityState={cityState} />
-              <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} prospects={prospects} archive={archive} color1={color1} color2={color2} />
+              <TabbedContent activeTab={activeTab} setActiveTab={setActiveTab} contentLoading={contentLoading} players={players} archive={archive} schoolName={school.Name} color1={color1} color2={color2} isMobile={isMobile} />
             </div>
             <div style={{ position: "sticky", top: "20px" }}>
-              <NewsSidebar news={news} />
+              <NewsSidebar news={news} color1={color1} color2={color2} />
             </div>
           </div>
         )}
@@ -480,9 +499,9 @@ function HeroCard({ school, color1, color2, isMobile, heroLogo, cityState }) {
   );
 }
 
-function Top25Sidebar({ schools }) {
+function Top25Sidebar({ schools, color1, color2 }) {
   return (
-    <SidebarCard title="🏆 Current Top 25" color1={BLUE} color2={GOLD}>
+    <SidebarCard title="🏆 Current Top 25" color1={color1} color2={color2}>
       {schools.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "12px" }}>No poll published yet.</div>
       ) : (
@@ -510,130 +529,177 @@ function Top25Sidebar({ schools }) {
   );
 }
 
-function TabbedContent({ activeTab, setActiveTab, contentLoading, prospects, archive, color1, color2 }) {
+function TabbedContent({ activeTab, setActiveTab, contentLoading, players, archive, schoolName, color1, color2, isMobile }) {
+  const counts = { players: players.length, archive: archive.length };
   return (
     <div>
-      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", borderBottom: "2px solid #eee" }}>
+      {/* Same pill tabs as TeamPage.js, counts and all. */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
             style={{
-              padding: "10px 18px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.05em",
-              background: "none", border: "none", cursor: "pointer",
-              color: activeTab === t.key ? color1 : "#999",
-              borderBottom: activeTab === t.key ? `3px solid ${color2}` : "3px solid transparent",
-              marginBottom: "-2px",
+              padding: isMobile ? "7px 18px" : "8px 24px", fontWeight: 900,
+              fontSize: isMobile ? "13px" : "14px", textTransform: "uppercase", letterSpacing: "0.06em",
+              border: `2px solid ${color2}`, borderRadius: "8px", cursor: "pointer",
+              background: activeTab === t.key ? color1 : "#fff",
+              color: activeTab === t.key ? "#fff" : color1,
             }}
           >
-            {t.label}
+            {t.label}{contentLoading ? "" : ` (${counts[t.key]})`}
           </button>
         ))}
       </div>
 
       {contentLoading ? (
         <LoadingSpinner label="Loading" size={32} minHeight="200px" />
-      ) : activeTab === "prospects" ? (
-        <ProspectsTab prospects={prospects} color1={color1} color2={color2} />
+      ) : activeTab === "players" ? (
+        <PlayersTab players={players} schoolName={schoolName} color1={color1} color2={color2} isMobile={isMobile} />
       ) : (
-        <ArchiveTab archive={archive} />
+        <ArchiveTab archive={archive} schoolName={schoolName} color1={color1} color2={color2} isMobile={isMobile} />
       )}
     </div>
   );
 }
 
-// Same row-list format as TeamPage.js's own Prospects tab (PlayerRow) —
-// class year, position badge, name, community grade badge — instead of a
-// card grid, plus the same sticky column header above the rows.
-const HS_COL = { year: "52px", pos: "52px", grade: "58px" };
-
-function ProspectsTab({ prospects, color1, color2 }) {
-  if (prospects.length === 0) {
-    return <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>No current 2027–2029 prospects on file yet.</div>;
-  }
+// The team-color card every list sits in — TeamPage.js's titled bar + stripe.
+function ListCard({ title, color1, color2, isMobile, children }) {
   return (
-    <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 18px", background: `${color1}f5` }}>
-        <div style={{ flexShrink: 0, width: HS_COL.year, fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center" }}>Class</div>
-        <div style={{ flexShrink: 0, width: HS_COL.pos, fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center" }}>Pos</div>
-        <div style={{ flex: 1, fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Player</div>
-        <div style={{ flexShrink: 0, width: HS_COL.grade, fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.8)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center" }}>Grade</div>
+    <div style={{ border: `2px solid ${color1}`, borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+      <div style={{ background: color1, padding: "10px 16px" }}>
+        <div style={{ color: "#fff", fontWeight: 900, fontSize: isMobile ? "13px" : "15px", letterSpacing: "0.08em", textTransform: "uppercase" }}>{title}</div>
       </div>
       <div style={{ height: "3px", background: color2 }} />
-      {prospects.map((p, i) => (
-        <Link
-          key={p.id}
-          to={p.Slug ? `/player/${p.Slug}` : "#"}
-          style={{
-            display: "flex", alignItems: "center", gap: "10px", padding: "12px 18px", textDecoration: "none",
-            background: "#fff", borderBottom: i < prospects.length - 1 ? "1px solid #f0f0f0" : "none",
-            pointerEvents: p.Slug ? "auto" : "none",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
-        >
-          <div style={{ flexShrink: 0, width: HS_COL.year, textAlign: "center", fontSize: "15px", fontWeight: 900, color: "#444" }}>
-            {p.Eligible || "—"}
-          </div>
-          <div style={{ flexShrink: 0, width: HS_COL.pos, textAlign: "center" }}>
-            {p.Position ? (
-              <span style={{ display: "block", background: color1, color: "#fff", fontSize: "11px", fontWeight: 900, padding: "4px 6px", borderRadius: "4px", textTransform: "uppercase" }}>
-                {p.Position}
-              </span>
-            ) : <span style={{ color: "#ddd", fontSize: "12px" }}>—</span>}
-          </div>
-          <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: "18px", color: color1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {p.First} {p.Last}
-          </div>
-          <div style={{ flexShrink: 0, width: HS_COL.grade, display: "flex", justifyContent: "center" }}>
-            {p.commGrade ? <GradeBadge grade={p.commGrade} /> : null}
-          </div>
-        </Link>
+      {children}
+    </div>
+  );
+}
+
+function ColHead({ cols, color1 }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 16px", background: `${color1}f0` }}>
+      {cols.map(([label, style]) => (
+        <div key={label} style={{ fontSize: "10px", fontWeight: 900, color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: "0.06em", ...style }}>{label}</div>
       ))}
     </div>
   );
 }
 
-function ArchiveTab({ archive }) {
-  if (archive.length === 0) {
-    return <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>No draft history on file for this school yet.</div>;
-  }
+function Empty({ children }) {
+  return <div style={{ padding: "40px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "14px" }}>{children}</div>;
+}
+
+// A college (or NFL team) with its logo; linked to its team page.
+function TeamCell({ name, logo, to, color }) {
+  const inner = (
+    <>
+      {logo ? <img src={logo} alt="" style={{ width: "22px", height: "22px", objectFit: "contain", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : <span style={{ width: "22px", flexShrink: 0 }} />}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name || ""}</span>
+    </>
+  );
+  const style = { display: "flex", alignItems: "center", gap: "8px", minWidth: 0, fontSize: "13px", fontWeight: 800, color: color || "#444", textDecoration: "none" };
+  return to ? <Link to={to} style={style}>{inner}</Link> : <div style={style}>{inner}</div>;
+}
+
+const collegeSlug = (school) => String(school || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
+const COL_D = { cls: "52px", pos: "52px", grade: "58px" };
+
+// Everyone from the school in college now (CFBD + We-Draft). Only We-Draft
+// players link (and carry a community grade).
+function PlayersTab({ players, schoolName, color1, color2, isMobile }) {
+  const colleges = useSchools(players.map((p) => p.college));
+  if (players.length === 0) return <Empty>No college players from {schoolName} on file yet.</Empty>;
+  const collegeW = isMobile ? "24px" : "200px";
+  const COL = isMobile ? { cls: "38px", pos: "42px", grade: "46px" } : COL_D;
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-        <thead>
-          <tr style={{ textAlign: "left", color: "#999", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            <th style={{ padding: "8px" }}>Year</th>
-            <th style={{ padding: "8px" }}>Rd / Pick</th>
-            <th style={{ padding: "8px" }}>Player</th>
-            <th style={{ padding: "8px" }}>College</th>
-            <th style={{ padding: "8px" }}>NFL Team</th>
-          </tr>
-        </thead>
-        <tbody>
-          {archive.map((r) => (
-            <tr key={r.id} style={{ borderTop: "1px solid #f0f0f0" }}>
-              <td style={{ padding: "8px", fontWeight: 900 }}>{r.Year || "—"}</td>
-              <td style={{ padding: "8px", color: "#888" }}>{[r.Round, r.Pick].filter(Boolean).join(" / ") || "—"}</td>
-              <td style={{ padding: "8px", fontWeight: 800 }}>
-                {r.Slug ? (
-                  <Link to={`/player/${r.Slug}`} style={{ color: "inherit", textDecoration: "none" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-                  >
-                    {r.Player || [r.First, r.Last].filter(Boolean).join(" ") || "—"}
-                  </Link>
-                ) : (
-                  r.Player || [r.First, r.Last].filter(Boolean).join(" ") || "—"
-                )}
-              </td>
-              <td style={{ padding: "8px", color: "#888" }}>{r.School || "—"}</td>
-              <td style={{ padding: "8px", color: "#888" }}>{r["NFL Team"] || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <ListCard title={`${schoolName} in College (${players.length})`} color1={color1} color2={color2} isMobile={isMobile}>
+      <ColHead color1={color1} cols={[
+        ["Class", { width: COL.cls, flexShrink: 0, textAlign: "center" }], ["Pos", { width: COL.pos, flexShrink: 0, textAlign: "center" }],
+        ["Player", { flex: 1 }], [isMobile ? "" : "College", { width: collegeW, flexShrink: 0 }], ["Grade", { width: COL.grade, flexShrink: 0, textAlign: "center" }],
+      ]} />
+      {players.map((p, i) => {
+        const c = colleges[p.college];
+        const row = (
+          <>
+            <div style={{ flexShrink: 0, width: COL.cls, textAlign: "center", fontSize: isMobile ? "13px" : "15px", fontWeight: 900, color: "#444" }}>{p.hsClass || "—"}</div>
+            <div style={{ flexShrink: 0, width: COL.pos, textAlign: "center" }}>
+              {p.pos ? <span style={{ display: "block", background: color1, color: "#fff", fontSize: isMobile ? "10px" : "11px", fontWeight: 900, padding: isMobile ? "3px 2px" : "4px 6px", borderRadius: "4px", textTransform: "uppercase" }}>{p.pos}</span> : <span style={{ color: "#ddd" }}>—</span>}
+            </div>
+            <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: isMobile ? "15px" : "18px", color: p.slug ? color1 : "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {p.name}
+            </div>
+            <div style={{ flexShrink: 0, width: collegeW, minWidth: 0 }}>
+              <TeamCell name={isMobile ? "" : p.college} logo={c?.Logo1} />
+            </div>
+            <div style={{ flexShrink: 0, width: COL.grade, display: "flex", justifyContent: "center" }}>{p.grade ? <GradeBadge grade={p.grade} /> : null}</div>
+          </>
+        );
+        const style = { display: "flex", alignItems: "center", gap: isMobile ? "8px" : "10px", padding: isMobile ? "10px 8px" : "12px 16px", background: "#fff", textDecoration: "none", borderBottom: i < players.length - 1 ? "1px solid #f0f0f0" : "none" };
+        return p.slug ? (
+          <Link key={p.key} to={`/player/${p.slug}`} style={style}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f0f5ff"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; }}
+          >{row}</Link>
+        ) : <div key={p.key} style={style}>{row}</div>;
+      })}
+    </ListCard>
+  );
+}
+
+// NFL teams, for the Archive's logos: by abbreviation and by full name
+// ("Detroit Lions" — how `historical` stores them).
+function useNflTeams() {
+  const [teams, setTeams] = useState({ byAbbr: {}, byName: {} });
+  useEffect(() => {
+    let cancelled = false;
+    getDocs(collection(db, "nfl")).then((snap) => {
+      const byAbbr = {}; const byName = {};
+      snap.docs.forEach((d) => { const t = { abbr: d.id, ...d.data() }; byAbbr[d.id] = t; byName[`${t.City || ""} ${t.Team || ""}`.trim()] = t; });
+      if (!cancelled) setTeams({ byAbbr, byName });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  return teams;
+}
+
+// Alumni drafted into the NFL: year, round and pick, college, NFL team.
+// Only this year's class (still We-Draft players) links to a player page.
+function ArchiveTab({ archive, schoolName, color1, color2, isMobile }) {
+  const colleges = useSchools(archive.map((r) => r.School));
+  const nfl = useNflTeams();
+  if (archive.length === 0) return <Empty>No draft history on file for {schoolName} yet.</Empty>;
+  const w = isMobile ? { yr: "40px", pick: "58px", team: "28px" } : { yr: "52px", pick: "110px", team: "190px" };
+  return (
+    <ListCard title={`${schoolName} in the NFL Draft (${archive.length})`} color1={color1} color2={color2} isMobile={isMobile}>
+      <ColHead color1={color1} cols={[
+        ["Year", { width: w.yr, flexShrink: 0, textAlign: "center" }], ["Pick", { width: w.pick, flexShrink: 0 }],
+        ["Player", { flex: 1 }], [isMobile ? "" : "College", { width: w.team, flexShrink: 0 }], [isMobile ? "" : "NFL Team", { width: w.team, flexShrink: 0 }],
+      ]} />
+      {archive.map((r, i) => {
+        const team = r.nflAbbr ? nfl.byAbbr[r.nflAbbr] : nfl.byName[r["NFL Team"]];
+        const teamName = team ? `${team.City} ${team.Team}` : r["NFL Team"] || r.nflAbbr;
+        const c = colleges[r.School];
+        const name = r.Player || [r.First, r.Last].filter(Boolean).join(" ") || "—";
+        const pick = r.Round ? (isMobile ? `R${r.Round} · ${r.Pick}` : `Rd ${r.Round} · Pick ${r.Pick}`) : "—";
+        return (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: isMobile ? "10px 12px" : "12px 16px", borderBottom: i < archive.length - 1 ? "1px solid #f0f0f0" : "none" }}>
+            <div style={{ flexShrink: 0, width: w.yr, textAlign: "center", fontSize: "15px", fontWeight: 900, color: "#444" }}>{r.Year || "—"}</div>
+            <div style={{ flexShrink: 0, width: w.pick, fontSize: "12px", fontWeight: 900, color: "#666", whiteSpace: "nowrap" }}>{pick}</div>
+            <div style={{ flex: 1, minWidth: 0, fontWeight: 900, fontSize: isMobile ? "15px" : "17px", color: r.Slug ? color1 : "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {r.Slug ? <Link to={`/player/${r.Slug}`} style={{ color: "inherit", textDecoration: "none" }}>{name}</Link> : name}
+              {r.Position ? <span style={{ marginLeft: "8px", fontSize: "11px", fontWeight: 900, color: "#999" }}>{r.Position}</span> : null}
+            </div>
+            <div style={{ flexShrink: 0, width: w.team, minWidth: 0 }}>
+              <TeamCell name={isMobile ? "" : r.School} logo={c?.Logo1} to={c ? `/team/${c.Slug || collegeSlug(r.School)}` : null} />
+            </div>
+            <div style={{ flexShrink: 0, width: w.team, minWidth: 0 }}>
+              <TeamCell name={isMobile ? "" : teamName} logo={team?.Logo1} to={team ? `/nfl/${team.abbr.toLowerCase()}` : null} />
+            </div>
+          </div>
+        );
+      })}
+    </ListCard>
   );
 }
 
@@ -641,11 +707,11 @@ function ArchiveTab({ archive }) {
 // small date chip (month/day) per row instead of a thumbnail, capped at
 // NEWS_LIMIT with a "Show More" button, hardcoded site blue/gold rather
 // than the school's own colors (matching TeamPage.js's own choice there).
-function NewsSidebar({ news }) {
+function NewsSidebar({ news, color1 = BLUE, color2 = GOLD }) {
   const [visibleCount, setVisibleCount] = useState(3);
   const shown = news.slice(0, Math.min(news.length, NEWS_LIMIT));
   return (
-    <SidebarCard title="In The News" color1={BLUE} color2={GOLD}>
+    <SidebarCard title="In The News" color1={color1} color2={color2}>
       {shown.length === 0 ? (
         <div style={{ padding: "16px", textAlign: "center", color: "#999", fontStyle: "italic", fontSize: "12px" }}>No recent news.</div>
       ) : (

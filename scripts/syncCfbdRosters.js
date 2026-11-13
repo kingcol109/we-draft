@@ -27,7 +27,8 @@
 // the 2029 class, 2025's are 2028, everyone else 2027 (also the floor: a
 // stale pre-2027 Eligible counts as 2027).
 //
-// Afterwards rebuilds offseason/cfbd (server/offseason/cfbdIndex.js) — the
+// Afterwards rebuilds offseason/cfbd (server/offseason/cfbdIndex.js) and the
+// high school pages' hsAlumni docs (server/highSchools/alumniIndex.js) — the
 // Offseason Manager's recruit years and roster schools, from what was just
 // written. Nothing here touches players docs.
 //
@@ -39,6 +40,8 @@ const { getFirestore } = require("./firebaseAdmin");
 const { FieldValue } = require("firebase-admin/firestore");
 const { cfbd, getCallCount } = require("../server/live/cfbdClient");
 const { buildCfbdIndex } = require("../server/offseason/cfbdIndex");
+const { normName } = require("../server/live/store");
+const { buildHsAlumni, buildHsCfbCounts } = require("../server/highSchools/alumniIndex");
 
 const SEASON = 2026;
 const DRY = process.argv.includes("--dry");
@@ -107,8 +110,30 @@ async function run() {
   for (const year of RECRUIT_CLASSES) {
     for (const r of await cfbd.recruits({ year })) recruitById.set(String(r.id), r);
   }
-  const recruitOf = (r) => (r.recruitIds || []).map((id) => recruitById.get(String(id))).filter(Boolean)
-    .sort((a, b) => (b.stars || 0) - (a.stars || 0) || (b.rating || 0) - (a.rating || 0))[0] || null;
+  // A roster row's recruit records: its recruitIds; else the recruit CFBD
+  // linked to this athlete (athleteId); else the same name committed to this
+  // team, or from his home state — only when exactly one.
+  const recruitByAthlete = new Map();
+  const recruitsByName = new Map();
+  recruitById.forEach((r) => {
+    if (r.athleteId) recruitByAthlete.set(String(r.athleteId), [...(recruitByAthlete.get(String(r.athleteId)) || []), r]);
+    const k = normName(r.name);
+    recruitsByName.set(k, [...(recruitsByName.get(k) || []), r]);
+  });
+  const recruitsOf = (r) => {
+    const byId = (r.recruitIds || []).map((id) => recruitById.get(String(id))).filter(Boolean);
+    if (byId.length) return byId;
+    if (recruitByAthlete.has(String(r.id))) return recruitByAthlete.get(String(r.id));
+    const named = recruitsByName.get(normName(`${r.firstName} ${r.lastName}`)) || [];
+    const toTeam = named.filter((x) => x.committedTo === r.team);
+    if (toTeam.length) return toTeam;
+    const fromHome = named.filter((x) => x.recruitType === "HighSchool" && r.homeState && x.stateProvince === r.homeState);
+    return fromHome.length === 1 ? fromHome : [];
+  };
+  // The best record (stars / rating) for the recruiting profile…
+  const recruitOf = (r) => [...recruitsOf(r)].sort((a, b) => (b.stars || 0) - (a.stars || 0) || (b.rating || 0) - (a.rating || 0))[0] || null;
+  // …and the high school one for hs / hsc / hss (a JUCO record's school is the JUCO).
+  const hsRecruitOf = (r) => recruitsOf(r).filter((x) => x.recruitType === "HighSchool").sort((a, b) => a.year - b.year)[0] || null;
 
   // CFBD player id → { category: { statType: value } }.
   const statsOf = new Map();
@@ -216,9 +241,12 @@ async function run() {
       // Compact keys — a roster is ~100-130 of these in one doc.
       // yr: CFBD's class year (1-4; a recruiting-class year like 2026 for
       // newly added freshmen). ht in inches, wt in lbs. stars / rating /
-      // rank / rc (class year): recruiting profile. s: season stats by category.
+      // rank / rc (class year): recruiting profile. hs / hsc / hss: high
+      // school name, city, state (from the same recruiting record — CFB
+      // Universe links it to our highSchools on add). s: season stats by category.
       players: list.map((r) => {
         const rec = recruitOf(r);
+        const hsRec = hsRecruitOf(r);
         const home = [r.homeCity, r.homeState || (r.homeCountry && r.homeCountry !== "USA" ? r.homeCountry : "")].filter(Boolean).join(", ");
         return JSON.parse(JSON.stringify({
           id: String(r.id),
@@ -235,6 +263,9 @@ async function run() {
           rating: rec?.rating ?? undefined,
           rank: rec?.ranking ?? undefined,
           rc: rec?.year ?? undefined, // recruiting class — the CFB Universe draft-class rule
+          hs: hsRec?.school || undefined,
+          hsc: hsRec?.school ? hsRec.city || undefined : undefined,
+          hss: hsRec?.school ? hsRec.stateProvince || undefined : undefined,
           s: statsOf.get(String(r.id)) || undefined,
         }));
       }),
@@ -263,8 +294,13 @@ async function run() {
   Object.values(tables).flat().forEach((r) => { dcCount[r.dc] = (dcCount[r.dc] || 0) + 1; });
   console.log(`  table rows by draft class: ${JSON.stringify(dcCount)}`);
   leaders.forEach((c) => console.log(`  ${c.title}: ${c.rows[0] ? `${c.rows[0].first} ${c.rows[0].last} (${c.rows[0].school}) ${c.rows[0].v}` : "—"}`));
+  const withHs = rows.filter((r) => hsRecruitOf(r)).length;
+  console.log(`  high school known for ${withHs} of ${rows.length} roster players`);
   console.log(`CFBD calls: ${getCallCount()}`);
   if (!DRY) console.log(`Offseason index: ${JSON.stringify(await buildCfbdIndex(db))}`);
+  // High school team pages: each school's current college players (hsAlumni).
+  if (!DRY) console.log(`High school alumni: ${JSON.stringify(await buildHsAlumni(db))}`);
+  if (!DRY) console.log(`HS Research college counts: ${JSON.stringify(await buildHsCfbCounts(db))}`);
 }
 
 run().catch((e) => { console.error(e.message || e); process.exit(1); });

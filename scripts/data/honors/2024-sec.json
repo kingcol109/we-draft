@@ -1,0 +1,86 @@
+{
+  "season": 2024,
+  "conference": "SEC",
+  "source": "2024 All-SEC football team (AP + coaches); team = the better of the two",
+  "selections": [
+    ["QB", "Jaxson Dart", "Ole Miss", 1, "AP1 C1"],
+    ["QB", "Quinn Ewers", "Texas", 2, "C2"],
+    ["QB", "Diego Pavia", "Vanderbilt", 2, "AP2"],
+    ["QB", "LaNorris Sellers", "South Carolina", 3, "C3"],
+
+    ["RB", "Dylan Sampson", "Tennessee", 1, "AP1 C1"],
+    ["RB", "Jarquez Hunter", "Auburn", 1, "AP1 C1"],
+    ["RB", "Raheim Sanders", "South Carolina", 2, "AP2 C2"],
+    ["RB", "Ja'Quinden Jackson", "Arkansas", 2, "C2"],
+    ["RB", "Le'Veon Moss", "Texas A&M", 2, "AP2"],
+
+    ["WR", "Andrew Armstrong", "Arkansas", 1, "AP1 C2"],
+    ["WR", "Tre Harris", "Ole Miss", 1, "AP1"],
+    ["WR", "Ryan Coleman-Williams", "Alabama", 1, "AP2 C1"],
+    ["WR", "Luther Burden III", "Missouri", 1, "C1"],
+    ["WR", "Kyren Lacy", "LSU", 2, "AP2"],
+    ["WR", "KeAndre Lambert-Smith", "Auburn", 2, "AP2 C2"],
+
+    ["C", "Cooper Mays", "Tennessee", 1, "AP2 C1"],
+    ["C", "Jake Slaughter", "Florida", 1, "AP1"],
+    ["C", "Jared Wilson", "Georgia", 2, "C2"],
+
+    ["OL", "Kelvin Banks Jr.", "Texas", 1, "AP1 C1"],
+    ["OL", "Will Campbell", "LSU", 1, "AP1 C1"],
+    ["OL", "Tyler Booker", "Alabama", 1, "AP1 C1"],
+    ["OL", "Tate Ratledge", "Georgia", 1, "AP1 C1"],
+    ["OL", "Emery Jones", "LSU", 2, "AP2 C2"],
+    ["OL", "Armand Membou", "Missouri", 2, "AP2 C2"],
+    ["OL", "Dylan Fairchild", "Georgia", 2, "AP2 C2"],
+    ["OL", "Cam'Ron Johnson", "Missouri", 2, "AP2"],
+    ["OL", "Kadyn Proctor", "Alabama", 2, "C2"],
+
+    ["TE", "Gunnar Helm", "Texas", 1, "AP1 C2"],
+    ["TE", "Eli Stowers", "Vanderbilt", 1, "AP2 C1"],
+
+    ["DE", "Kyle Kennard", "South Carolina", 1, "AP1 C1"],
+    ["DE", "Princely Umanmielen", "Ole Miss", 1, "AP1 C1"],
+    ["DE", "James Pearce Jr.", "Tennessee", 1, "AP2 C1"],
+    ["DE", "Nic Scourton", "Texas A&M", 1, "AP2 C1"],
+    ["DE", "Landon Jackson", "Arkansas", 2, "AP2 C2"],
+    ["DE", "Bradyn Swinson", "LSU", 2, "C2"],
+    ["DE", "R Mason Thomas", "Oklahoma", 2, "C2"],
+    ["DE", "Johnny Walker Jr.", "Missouri", 2, "C2"],
+    ["DE", "Mykel Williams", "Georgia", 2, "C2"],
+
+    ["DT", "Walter Nolen", "Ole Miss", 1, "AP1 C1"],
+    ["DT", "Alfred Collins", "Texas", 1, "AP1"],
+    ["DT", "T. J. Sanders", "South Carolina", 2, "AP2"],
+    ["DT", "Deone Walker", "Kentucky", 2, "AP2"],
+
+    ["LB", "Danny Stutsman", "Oklahoma", 1, "AP1 C1"],
+    ["LB", "Whit Weeks", "LSU", 1, "AP1 C1"],
+    ["LB", "Anthony Hill Jr.", "Texas", 1, "AP1 C2"],
+    ["LB", "Jihaad Campbell", "Alabama", 1, "AP2 C1"],
+    ["LB", "Chris Paul Jr.", "Ole Miss", 2, "AP2 C2"],
+    ["LB", "Jalon Walker", "Georgia", 2, "AP2 C2"],
+
+    ["DB", "Nick Emmanwori", "South Carolina", 1, "AP1 C1"],
+    ["DB", "Jahdae Barron", "Texas", 1, "AP1 C1"],
+    ["DB", "Malaki Starks", "Georgia", 1, "AP1 C2"],
+    ["DB", "Jermod McCoy", "Tennessee", 1, "AP1 C2"],
+    ["DB", "Trey Amos", "Ole Miss", 1, "AP2 C1"],
+    ["DB", "Malachi Moore", "Alabama", 1, "AP2 C1"],
+    ["DB", "Maxwell Hairston", "Kentucky", 2, "AP2"],
+    ["DB", "Andrew Mukuba", "Texas", 2, "AP2"],
+    ["DB", "Will Lee III", "Texas A&M", 2, "C2"],
+    ["DB", "Isaac Smith", "Mississippi State", 2, "C2"],
+
+    ["K", "Alex Raynor", "Kentucky", 1, "AP1 C2"],
+    ["K", "Peyton Woodring", "Georgia", 2, "AP2 C2"],
+
+    ["P", "Jesse Mirco", "Vanderbilt", 1, "AP1 C2"],
+    ["P", "Kai Kroeger", "South Carolina", 1, "C1"],
+    ["P", "Brett Thorson", "Georgia", 2, "AP2"],
+
+    ["RS", "Barion Brown", "Kentucky", 1, "AP1 C1"],
+    ["RS", "Dylan Sampson", "Tennessee", 1, "C1"],
+    ["RS", "Davon Booth", "Mississippi State", 2, "AP2"],
+    ["RS", "Martel Hight", "Vanderbilt", 2, "C2"]
+  ]
+}

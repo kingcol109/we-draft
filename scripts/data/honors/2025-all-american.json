@@ -1,0 +1,546 @@
+{
+ "season": 2025,
+ "conference": "American",
+ "source": "2025 Consensus All-Americans — labeled First-Team All-American (team 1). Players on other All-America teams but not this list go in as team 0, plain \"All-American\". Miami (FL) → Miami",
+ "selections": [
+  [
+   "QB",
+   "Fernando Mendoza",
+   "Indiana",
+   1,
+   "consensus"
+  ],
+  [
+   "RB",
+   "Ahmad Hardy",
+   "Missouri",
+   1,
+   "consensus"
+  ],
+  [
+   "RB",
+   "Jeremiyah Love",
+   "Notre Dame",
+   1,
+   "consensus"
+  ],
+  [
+   "WR",
+   "Skyler Bell",
+   "UConn",
+   1,
+   "consensus"
+  ],
+  [
+   "WR",
+   "Makai Lemon",
+   "USC",
+   1,
+   "consensus"
+  ],
+  [
+   "WR",
+   "Jeremiah Smith",
+   "Ohio State",
+   1,
+   "consensus"
+  ],
+  [
+   "TE",
+   "Eli Stowers",
+   "Vanderbilt",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Spencer Fano",
+   "Utah",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Logan Jones",
+   "Iowa",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Francis Mauigoa",
+   "Miami",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Kadyn Proctor",
+   "Alabama",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Carter Smith",
+   "Indiana",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "David Bailey",
+   "Texas Tech",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Rueben Bain Jr.",
+   "Miami",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Cashius Howell",
+   "Texas A&M",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Kayden McDonald",
+   "Ohio State",
+   1,
+   "consensus"
+  ],
+  [
+   "LB",
+   "CJ Allen",
+   "Georgia",
+   1,
+   "consensus"
+  ],
+  [
+   "LB",
+   "Arvell Reese",
+   "Ohio State",
+   1,
+   "consensus"
+  ],
+  [
+   "LB",
+   "Jacob Rodriguez",
+   "Texas Tech",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Mansoor Delane",
+   "LSU",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Caleb Downs",
+   "Ohio State",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Bishop Fitzgerald",
+   "USC",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Leonard Moore",
+   "Notre Dame",
+   1,
+   "consensus"
+  ],
+  [
+   "K",
+   "Kansei Matsuzawa",
+   "Hawaii",
+   1,
+   "consensus"
+  ],
+  [
+   "P",
+   "Cole Maynard",
+   "Western Kentucky",
+   1,
+   "consensus"
+  ],
+  [
+   "RS",
+   "KC Concepcion",
+   "Texas A&M",
+   1,
+   "consensus"
+  ],
+  [
+   "RS",
+   "Kaden Wetjen",
+   "Iowa",
+   1,
+   "consensus"
+  ],
+  [
+   "QB",
+   "Diego Pavia",
+   "Vanderbilt",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RB",
+   "Kewan Lacy",
+   "Ole Miss",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RB",
+   "Emmett Johnson",
+   "Nebraska",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "WR",
+   "Malachi Toney",
+   "Miami",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "WR",
+   "Danny Scudero",
+   "San Jose State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "WR",
+   "Carnell Tate",
+   "Ohio State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "TE",
+   "Kenyon Sadiq",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Emmanuel Pregnon",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Beau Stephens",
+   "Iowa",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Carson Hinzman",
+   "Ohio State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Iapani Laloulu",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Keylan Rutledge",
+   "Georgia Tech",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Olaivavega Ioane",
+   "Penn State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Febechi Nwaiwu",
+   "Oklahoma",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Kade Pieper",
+   "Iowa",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Keagen Trost",
+   "Missouri",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Ar'maj Reed-Adams",
+   "Texas A&M",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "C",
+   "James Brockermeyer",
+   "Miami",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "C",
+   "Jake Slaughter",
+   "Florida",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "Landon Robinson",
+   "Navy",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "John Henry Daley",
+   "Utah",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "A.J. Holmes Jr.",
+   "Texas Tech",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "Lee Hunter",
+   "Texas Tech",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "A'Mauri Washington",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "Peter Woods",
+   "Clemson",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Aiden Fisher",
+   "Indiana",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Sonny Styles",
+   "Ohio State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Bryce Boettcher",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Anthony Hill Jr.",
+   "Texas",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Red Murdock",
+   "Buffalo",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Jakari Foster",
+   "Louisiana Tech",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "A. J. Haulcy",
+   "LSU",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "D'Angelo Ponds",
+   "Indiana",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Michael Taaffe",
+   "Texas",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Louis Moore",
+   "Indiana",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Chris Johnson",
+   "San Diego State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Dillon Thieneman",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Emmanuel McNeil-Warren",
+   "Toledo",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Hezekiah Masses",
+   "California",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "K",
+   "Tate Sandell",
+   "Oklahoma",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "P",
+   "Evan Crenshaw",
+   "Troy",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "P",
+   "Brett Thorson",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "P",
+   "Billy Gowers",
+   "Hawaii",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Emmett Johnson",
+   "Nebraska",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Ryan Niblett",
+   "Texas",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Jadarian Price",
+   "Notre Dame",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Micah Gifford",
+   "Baylor",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Wayne Knight",
+   "James Madison",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LS",
+   "Beau Gardner",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LS",
+   "Jovoni Borbon",
+   "UMass",
+   0,
+   "other All-America teams"
+  ]
+ ]
+}

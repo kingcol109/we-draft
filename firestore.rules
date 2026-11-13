@@ -251,6 +251,18 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+    // Conference logos / award icons for the player page's Career Path
+    // accolades — AdminPanel.js Branding → Misc (utils/accoladeIcons.js).
+    match /accoladeIcons/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // High school team pages' current college players, one doc per school
+    // (server/highSchools/alumniIndex.js — built by scripts, Admin SDK).
+    match /hsAlumni/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
     // State silhouette images — AdminPanel.js's Branding → Teams → High
     // School → States tab. Doc id is the state's own name (fixed 50-state
     // list, nothing to create/delete, just set per state). Same public-
@@ -647,6 +659,20 @@ service cloud.firestore {
     // Admin only both ways.
     match /offseason/{docId} {
       allow read, write: if isAdmin();
+    }
+    // College football national award winners (server/awards/
+    // nationalAwards.js, admin SDK) — awards/{season} and awards/_byAthlete,
+    // read by the player page's Career Path. Public read-only.
+    match /awards/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // All-conference teams (scripts/importHonors.js, admin SDK, from the
+    // hand-entered scripts/data/honors/*.json) — honors/{season}-{conf} and
+    // honors/_byPlayer, read by the player page's Career Path. Public read-only.
+    match /honors/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
     // Page-view counters — written server-side only, by
     // scripts/syncGoogleAnalytics.js (via the admin SDK, which isn't

@@ -14,18 +14,27 @@
 // Return moves a current-class player to the next class as a +1/+2, the
 // class menu moves them anywhere.
 //
+// Career stops and high schools (offseason/careers, built from CFBD by
+// server/offseason/careerIndex.js) come in as issues too: Fix saves the
+// stops (players.CareerStops, utils/careerStops.js), or the high school —
+// always under OUR highSchools doc's Name (utils/highSchoolMatch.js), so the
+// player links to its branding and team page; CFBD's spelling is added to
+// that doc's CFBDNames, and a school we don't have yet gets a new doc.
+//
 // Every class change goes through classChange(): Eligible, a ClassHistory
 // entry ({ from, to, reason, at }), Declared cleared, and the slug deferred
 // to the next Feb 1 (PendingSlugChangeAt, scripts/applyPendingSlugChanges.js)
 // — the same path as a Transfer Portal resolve.
 import { useEffect, useMemo, useState } from "react";
-import { arrayUnion, deleteField, doc, FieldPath, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteField, doc, FieldPath, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { averageGradesFor } from "../utils/communityGrades";
 import { gradeLabel } from "../utils/gradeScale";
 import {
   currentDraftClass, firstClassFor, lastClassFor, classTag, inFinalYear, classHistoryEntry, movedInto, nextFebFirstUTC,
 } from "../utils/eligibility";
+import { careerStopsFrom, sameStops, stopsText } from "../utils/careerStops";
+import { matchHighSchool, hsKey, stateName, NATIONAL_SCHOOLS } from "../utils/highSchoolMatch";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -55,8 +64,41 @@ export function classChange(p, to, reason) {
   };
 }
 
-// The write each Fix makes.
-function fixWrite(p, fix, season) {
+// A CFBD high school ({ n, c, s }) → our highSchools doc, resolved against
+// the working list `hs` (grown as new schools are created, so two players
+// from one new school share a doc). → { name, state, ops }.
+function resolveHighSchool(cfbd, hs) {
+  const m = matchHighSchool(cfbd.n, cfbd.s, hs);
+  if (m) {
+    const ops = [];
+    if (cfbd.n !== m.doc.Name && !(m.doc.CFBDNames || []).includes(cfbd.n)) {
+      ops.push((b) => b.update(doc(db, "highSchools", m.doc.id), { CFBDNames: arrayUnion(cfbd.n) }));
+      m.doc.CFBDNames = [...(m.doc.CFBDNames || []), cfbd.n];
+    }
+    return { name: m.doc.Name, state: m.doc.State, ops };
+  }
+  const ref = doc(collection(db, "highSchools"));
+  // A national school (IMG) goes in its own state, not the player's hometown's.
+  const home = NATIONAL_SCHOOLS[hsKey(cfbd.n)];
+  const data = { Name: cfbd.n, State: home || stateName(cfbd.s), City: home ? "" : cfbd.c || "", CFBDNames: [cfbd.n] };
+  hs.push({ id: ref.id, ...data });
+  return { name: data.Name, state: data.State, ops: [(b) => b.set(ref, { ...data, createdAt: serverTimestamp() })] };
+}
+
+// The write each Fix makes. hs: the working highSchools list (see above).
+function fixWrite(p, fix, season, hs) {
+  // No updatedAt on these data fills (it drives the sitemap's lastmod).
+  if (fix.kind === "stops") return { fields: { CareerStops: fix.value }, local: { CareerStops: fix.value }, removed: [] };
+  if (fix.kind === "stars") {
+    const local = { RecruitStars: fix.stars, ...(fix.rank ? { RecruitRank: fix.rank } : {}) };
+    return { fields: { ...local, ...(fix.rank ? {} : { RecruitRank: deleteField() }) }, local, removed: fix.rank ? [] : ["RecruitRank"] };
+  }
+  if (fix.kind === "hs") {
+    const r = resolveHighSchool(fix.cfbd, hs);
+    const local = { HighSchool: r.name, State: r.state };
+    return { fields: local, local, removed: [], ops: r.ops };
+  }
+  if (fix.kind === "hsLink") return { fields: null, local: {}, removed: [], ops: resolveHighSchool(fix.cfbd, hs).ops };
   if (fix.kind === "class") return classChange(p, fix.to, fix.reason || "fix");
   // No updatedAt (it drives the sitemap's lastmod) — nothing public changes.
   if (fix.kind === "recruit") return { fields: { RecruitYear: String(fix.value) }, local: { RecruitYear: String(fix.value) }, removed: [] };
@@ -76,12 +118,19 @@ const GROUPS = [
   { code: "beyondTrue", title: "Listed past their true class with no recorded return", color: ORANGE },
   { code: "school", title: "School doesn't match CFBD's roster", color: ORANGE },
   { code: "finalYear", title: "Final year of eligibility — not declared", color: ORANGE },
+  { code: "hsDiff", title: "High school differs from CFBD", color: ORANGE },
   { code: "recruitDiff", title: "Saved recruit year differs from CFBD", color: BLUE },
   { code: "recruit", title: "Recruit year from CFBD — not saved yet", color: BLUE },
   { code: "recruitNone", title: "No recruit year anywhere", color: "#777" },
+  { code: "stops", title: "Career path from CFBD — not saved or changed", color: BLUE },
+  { code: "stars", title: "Recruiting stars from CFBD — not saved or changed", color: BLUE },
+  { code: "hsClose", title: "High school from CFBD — close match to one of ours (check)", color: BLUE },
+  { code: "hsMatch", title: "High school from CFBD — matches one of ours", color: BLUE },
+  { code: "hsNew", title: "High school from CFBD — new school (adds it to High Schools)", color: BLUE },
+  { code: "hsLink", title: "Same high school — link CFBD's spelling to ours", color: "#777" },
 ];
 
-function issuesFor(p, row, current, season) {
+function issuesFor(p, row, current, season, career, hsDocs) {
   const out = [];
   const E = Number(p.Eligible);
   const saved = p.RecruitYear ? Number(p.RecruitYear) : null;
@@ -105,6 +154,38 @@ function issuesFor(p, row, current, season) {
   }
   if (row?.s && p.School && row.s !== p.School && !p.InPortal) {
     add("school", row.s, `CFBD's ${season || ""} roster has them at ${row.s}`, { kind: "school", to: row.s, label: `Move to ${row.s}` });
+  }
+
+  // Career stops.
+  const stops = careerStopsFrom(career, p.RecruitYear || ry);
+  if (stops.length && !sameStops(stops, p.CareerStops)) {
+    add("stops", stops.map((x) => `${x.School}${x.From}${x.To}`).join(","), `${p.CareerStops?.length ? `Saved: ${stopsText(p.CareerStops)} · ` : ""}CFBD: ${stopsText(stops)}`, { kind: "stops", value: stops, label: p.CareerStops?.length ? "Use CFBD's" : "Save stops" });
+  }
+
+  // Recruiting stars / national rank (shown under the high school).
+  const rec = career?.hs;
+  if (rec?.st && (Number(p.RecruitStars) !== rec.st || Number(p.RecruitRank || 0) !== (rec.rk || 0))) {
+    add("stars", `${rec.st}|${rec.rk || ""}`, `CFBD: ${rec.st}-star${rec.rk ? `, No. ${rec.rk} nationally` : ""}${p.RecruitStars ? ` · saved: ${p.RecruitStars}-star${p.RecruitRank ? `, No. ${p.RecruitRank}` : ""}` : ""}`,
+      { kind: "stars", stars: rec.st, rank: rec.rk || null, label: `Save ${rec.st}★` });
+  }
+
+  // High school.
+  const c = career?.hs;
+  if (c && hsDocs) {
+    const ours = (p.HighSchool || "").trim();
+    const m = matchHighSchool(c.n, c.s, hsDocs);
+    const where = `${c.n}${c.c ? ` (${c.c}, ${c.s})` : c.s ? ` (${c.s})` : ""}`;
+    const fix = { kind: "hs", cfbd: c };
+    if (!ours) {
+      if (!m) add("hsNew", c.n, `CFBD: ${where}`, { ...fix, label: `Add ${c.n}` });
+      else if (m.how === "close") add("hsClose", m.doc.id, `CFBD: ${where} ≈ ours: ${m.doc.Name}`, { ...fix, label: `Save ${m.doc.Name}` });
+      else add("hsMatch", m.doc.id, `CFBD: ${where} = ours: ${m.doc.Name}${m.doc.Logo1 ? " (branded)" : ""}`, { ...fix, label: `Save ${m.doc.Name}` });
+    } else if (m && m.doc.Name === ours && (p.State || m.doc.State) === m.doc.State) {
+      if (c.n !== m.doc.Name && !(m.doc.CFBDNames || []).includes(c.n)) add("hsLink", m.doc.id, `Ours: ${ours} · CFBD: ${c.n}`, { kind: "hsLink", cfbd: c, label: "Link" });
+    } else {
+      const stateNote = hsKey(ours) === hsKey(c.n) ? ` — our state is ${p.State || "blank"}, CFBD's is ${stateName(c.s)}` : "";
+      add("hsDiff", `${c.n}|${c.s}`, `Ours: ${ours}${p.State ? ` (${p.State})` : ""} · CFBD: ${where}${stateNote}`, { ...fix, label: `Use ${m ? m.doc.Name : c.n}` });
+    }
   }
   return out;
 }
@@ -145,6 +226,8 @@ export default function AdminEligibility({ allPlayers, setAllPlayers }) {
   const current = currentDraftClass();
   const classes = [current, String(+current + 1), String(+current + 2)];
   const [cfbd, setCfbd] = useState(null);
+  const [careers, setCareers] = useState({});
+  const [hsDocs, setHsDocs] = useState(null);
   const [ignored, setIgnored] = useState({});
   const [grades, setGrades] = useState({});
   const [view, setView] = useState("issues");
@@ -160,9 +243,14 @@ export default function AdminEligibility({ allPlayers, setAllPlayers }) {
 
   const load = async () => {
     try {
-      const [c, e] = await Promise.all([getDoc(doc(db, "offseason", "cfbd")), getDoc(doc(db, "offseason", "eligibility"))]);
+      const [c, e, k, h] = await Promise.all([
+        getDoc(doc(db, "offseason", "cfbd")), getDoc(doc(db, "offseason", "eligibility")),
+        getDoc(doc(db, "offseason", "careers")), getDocs(collection(db, "highSchools")),
+      ]);
       setCfbd(c.data() || { rows: {}, missing: true });
       setIgnored(e.data()?.ignored || {});
+      setCareers(k.data()?.rows || {});
+      setHsDocs(h.docs.map((d) => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error("Eligibility load error:", err);
       setCfbd({ rows: {}, error: true });
@@ -183,8 +271,8 @@ export default function AdminEligibility({ allPlayers, setAllPlayers }) {
 
   const issues = useMemo(() => {
     if (!cfbd) return [];
-    return active.flatMap((p) => issuesFor(p, rows[p.id], current, season).map((i) => ({ ...i, p, key: issueKey(p, i), ignored: !!ignored[issueKey(p, i)] })));
-  }, [active, cfbd, ignored, current]); // eslint-disable-line react-hooks/exhaustive-deps
+    return active.flatMap((p) => issuesFor(p, rows[p.id], current, season, careers[p.id], hsDocs).map((i) => ({ ...i, p, key: issueKey(p, i), ignored: !!ignored[issueKey(p, i)] })));
+  }, [active, cfbd, ignored, current, careers, hsDocs]); // eslint-disable-line react-hooks/exhaustive-deps
   const openIssues = issues.filter((i) => !i.ignored);
 
   const patch = (id, local, removed) => setAllPlayers((prev) => prev.map((p) => {
@@ -198,13 +286,20 @@ export default function AdminEligibility({ allPlayers, setAllPlayers }) {
   const applyAll = async (items, doneText, busyKey) => {
     setBusy(busyKey); setMessage("");
     try {
-      const writes = items.map(({ p, fix }) => ({ p, w: fixWrite(p, fix, season) }));
-      for (let i = 0; i < writes.length; i += 400) {
+      // A working copy of highSchools: new schools and aliases land in it as
+      // they're resolved, so later players match them.
+      const hs = (hsDocs || []).map((d) => ({ ...d }));
+      const writes = items.map(({ p, fix }) => ({ p, w: fixWrite(p, fix, season, hs) }));
+      for (let i = 0; i < writes.length; i += 200) {
         const batch = writeBatch(db);
-        writes.slice(i, i + 400).forEach(({ p, w }) => batch.update(doc(db, "players", p.id), w.fields));
+        writes.slice(i, i + 200).forEach(({ p, w }) => {
+          if (w.fields) batch.update(doc(db, "players", p.id), w.fields);
+          (w.ops || []).forEach((op) => op(batch));
+        });
         await batch.commit();
-        writes.slice(i, i + 400).forEach(({ p, w }) => patch(p.id, w.local, w.removed));
+        writes.slice(i, i + 200).forEach(({ p, w }) => patch(p.id, w.local, w.removed));
       }
+      setHsDocs(hs);
       setMessage(doneText);
     } catch (e) {
       console.error("Eligibility update error:", e);

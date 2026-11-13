@@ -37,3 +37,12 @@ jobs:
         run: node scripts/buildSiteSnapshots.mjs
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+
+      # ESPN's college football national award winners (Heisman, Doak
+      # Walker, …) for the player page's Career Path — server/awards/
+      # nationalAwards.js. No API key; a few dozen ESPN calls. Weekly so the
+      # December–January winners land on their own.
+      - name: Sync national awards
+        run: node scripts/syncNationalAwards.js
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

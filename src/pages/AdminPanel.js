@@ -21,7 +21,7 @@ import DraftOrderEditor from "../components/DraftOrderEditor";
 import CfbUniverseSearch from "../components/CfbUniverseSearch";
 import AdminTransferPortal from "../components/AdminTransferPortal";
 import AdminEligibility, { classChange } from "../components/AdminEligibility";
-import { activePortalSeason, currentDraftClass } from "../utils/eligibility";
+import { activePortalSeason, currentDraftClass, classTag, firstClassFor } from "../utils/eligibility";
 import AdminSubPositions from "../components/AdminSubPositions";
 import AdminProspectRoles from "../components/AdminProspectRoles";
 import AdminStreamManager from "../components/AdminStreamManager";
@@ -29,8 +29,10 @@ import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
 import AdminCoachHistory from "../components/AdminCoachHistory";
 import { NFL_TEAMS } from "../utils/coachHistory";
+import { accoladeSlug } from "../utils/accoladeIcons";
 import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
+import AdminProspectResearch from "../components/AdminProspectResearch";
 import AdminPhotos from "../components/AdminPhotos";
 import AdminSideGraphics from "../components/AdminSideGraphics";
 import AdminYouTubeGraphics from "../components/AdminYouTubeGraphics";
@@ -104,7 +106,7 @@ const gradeDisplayMap = {
 const gradeBadgeInfo = (g) => gradeDisplayMap[g] || { short: g, bg: "#5F5E5A", border: "#444441" };
 
 const BLANK_PLAYER_FORM = {
-  First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Eligible: "",
+  First: "", Last: "", HighSchool: "", State: "", School: "", Position: "", Eligible: "", RecruitYear: "",
   Height: "", Weight: "", Bio: "", Flair: "", Live: true, AdminNotes: "", Flag: "",
 };
 
@@ -311,6 +313,10 @@ const SECTIONS = [
 
 // Content section: its tabs, each the section it used to be on its own.
 const CONTENT_SECTION_TABS = [
+  // NFL: the NFL rosters / team research (components/AdminResearch.js, once
+  // called Research). Research: prospect research — HS Research first
+  // (components/AdminProspectResearch.jsx).
+  { key: "nfl", label: "NFL" },
   { key: "research", label: "Research" },
   { key: "mockdraft", label: "Mock Draft" },
   { key: "articles", label: "Articles" },
@@ -334,7 +340,7 @@ const MOVED_SECTIONS = {
 };
 
 function ContentSection({ initialTab }) {
-  const [tab, setTab] = useState(initialTab || "research");
+  const [tab, setTab] = useState(initialTab || "nfl");
   // A record to open in the tab it's being sent to (Content Calendar, Send to
   // X): { tab, id } or, for a new X post, { tab, date }. Fresh each time, so
   // opening the same one twice still opens it.
@@ -359,7 +365,8 @@ function ContentSection({ initialTab }) {
           </button>
         ))}
       </div>
-      {tab === "research" && <AdminResearch />}
+      {tab === "nfl" && <AdminResearch />}
+      {tab === "research" && <AdminProspectResearch />}
       {tab === "mockdraft" && <AdminMockDraft />}
       {tab === "articles" && <ArticlesManager />}
       {tab === "branding" && <BrandingSection />}
@@ -838,6 +845,7 @@ function PlayerDataSection() {
       School: p.School || "",
       Position: p.Position || "",
       Eligible: p.Eligible || "",
+      RecruitYear: p.RecruitYear || "",
       Height: p.Height || "",
       Weight: p.Weight || "",
       Bio: p.Bio || "",
@@ -1021,6 +1029,12 @@ function PlayerDataSection() {
         setSaveMessage("First, Last, School, Position, and Eligible are required.");
         return;
       }
+      // Every new player gets a recruit year — the Offseason Manager's
+      // eligibility tags (True / +1 / +2) run on it.
+      if (!/^\d{4}$/.test(formState.RecruitYear || "")) {
+        setSaveMessage("Recruit year is required (their first college season, e.g. 2024).");
+        return;
+      }
       const baseSlug = generateSlug(formState.First, formState.Last, formState.Position, formState.Eligible);
       if (!baseSlug || baseSlug === "-") {
         setSaveMessage("Couldn't generate a valid slug from these fields.");
@@ -1105,6 +1119,8 @@ function PlayerDataSection() {
     try {
       await seedHighSchoolIfNew();
       const fields = { ...formState };
+      // A player saved before recruit years existed: don't write an empty one.
+      if (!/^\d{4}$/.test(fields.RecruitYear || "")) delete fields.RecruitYear;
       if (skipSlugUpdate) {
         // Admin chose to keep the old slug — leave Slug itself untouched,
         // just flag that it no longer matches this player's current info
@@ -1938,6 +1954,15 @@ function PlayerDataSection() {
                   <option value="">—</option>
                   {ELIGIBLE_YEARS.map((yr) => <option key={yr} value={yr}>{yr}</option>)}
                 </select>
+              </FieldRow>
+              <FieldRow label={isNew ? "Recruit Year (required)" : "Recruit Year"}>
+                <input value={formState.RecruitYear || ""} inputMode="numeric" placeholder="First college season, e.g. 2024"
+                  onChange={(e) => handleFieldChange("RecruitYear", e.target.value.replace(/\D/g, "").slice(0, 4))} style={inputStyle} />
+                {/^\d{4}$/.test(formState.RecruitYear || "") && formState.Eligible && (
+                  <div style={{ fontSize: "11px", fontWeight: 800, color: "#888", marginTop: "3px" }}>
+                    {classTag(formState.Eligible, formState.RecruitYear)} {formState.Eligible} · first eligible {firstClassFor(formState.RecruitYear)}
+                  </div>
+                )}
               </FieldRow>
               <FieldRow label="Height">
                 <input value={formState.Height} onChange={(e) => handleFieldChange("Height", e.target.value)} placeholder="e.g. 6'2&quot;" style={inputStyle} />
@@ -6069,6 +6094,7 @@ function RecruitsSection() {
         School: formState.Commitment,
         Position: formState.Position,
         Eligible: draftClass,
+        RecruitYear: String(formState.RecruitClass),
         Height: formState.Height,
         Weight: formState.Weight,
         Bio: "",
@@ -13718,6 +13744,8 @@ function MiscBrandingSection() {
       <WePickCurrentWeekControl />
       <WePickEndWeekControl />
       <TvChannelsManager />
+      <AccoladeIconsManager kind="conference" />
+      <AccoladeIconsManager kind="award" />
     </div>
   );
 }
@@ -14590,6 +14618,233 @@ function TvChannelsManager() {
                           Cancel
                         </button>
                       </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Conference logos / award icons for the player page's Career Path
+// accolades (utils/accoladeIcons.js): accoladeIcons/{kind}-{slug}. A
+// conference's Name is how its all-conference lines spell it ("SEC" in
+// "First-Team All-SEC"); an award's is the national award's name as ESPN
+// lists it ("Heisman Trophy"), "All-American" (every All-America line) or
+// "National Champion". Aliases catch other spellings. The list starts with
+// the names in use (honors conferences / synced award names), so most rows
+// just need an icon pasted in.
+const ACCOLADE_CONFERENCES = ["AAC", "ACC", "Big 12", "Big Ten", "C-USA", "MAC", "Mountain West", "Pac-12", "SEC", "Sun Belt"];
+const ACCOLADE_KINDS = {
+  conference: { title: "🏟️ Conference Logos", noun: "Conference", blurb: "Shown next to a player's all-conference honors on their Career Path. The name must match the honor (\"SEC\" for \"First-Team All-SEC\").", placeholder: "e.g. Big Ten" },
+  award: { title: "🏆 Award Icons", noun: "Award", blurb: "Shown next to national awards, All-America honors (\"All-American\") national titles (\"National Champion\") and the high school recruiting line (\"5-Star Recruit\", \"4-Star Recruit\", \"3-Star Recruit\") on a player's Career Path. \"Fallback\" is used for any line with no icon of its own.", placeholder: "e.g. Heisman Trophy" },
+};
+function AccoladeIconsManager({ kind }) {
+  const cfg = ACCOLADE_KINDS[kind];
+  const [saved, setSaved] = useState([]);
+  const [known, setKnown] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selected, setSelected] = useState(null); // a row: { id, Name, …, isNew }
+  const [formState, setFormState] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [logoCopyStatus, setLogoCopyStatus] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const snap = await getDocs(query(collection(db, "accoladeIcons"), where("Kind", "==", kind)));
+        let names = ACCOLADE_CONFERENCES;
+        if (kind === "award") {
+          // Season docs only (awards/_byAthlete has no season field).
+          const aw = await getDocs(query(collection(db, "awards"), where("season", ">", 0))).catch(() => null);
+          const set = new Set(["All-American", "National Champion", "5-Star Recruit", "4-Star Recruit", "3-Star Recruit", "Fallback"]);
+          // Coach / contribution awards — no prospect wins them (also left
+          // out of scripts/seedAccoladeIcons.js, which preloads the rest).
+          const skip = /Teevens|Eddie Robinson|Broyles|Contributions/i;
+          aw?.docs.forEach((d) => (d.data().awards || []).forEach((a) => { if (a.name && a.winners?.length && !skip.test(a.name)) set.add(a.name); }));
+          names = [...set];
+        }
+        if (cancelled) return;
+        setSaved(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setKnown(names);
+      } catch (e) {
+        console.error(`Admin accolade icons (${kind}) fetch error:`, e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kind]);
+
+  // Saved rows plus every in-use name without one yet; iconless rows first.
+  const rows = useMemo(() => {
+    const have = new Set(saved.map((r) => accoladeSlug(r.Name)));
+    const all = [...saved, ...known.filter((n) => !have.has(accoladeSlug(n))).map((n) => ({ id: null, Name: n, isNew: true }))];
+    const q = searchQuery.trim().toLowerCase();
+    const hasIcon = (r) => (r.Logo || r.LogoDark ? 1 : 0);
+    return all
+      .filter((r) => !q || (r.Name || "").toLowerCase().includes(q))
+      .sort((a, b) => hasIcon(a) - hasIcon(b) || (a.Name || "").localeCompare(b.Name || ""));
+  }, [saved, known, searchQuery]);
+
+  const openRow = (r) => {
+    setSelected(r);
+    setFormState({ Name: r.Name || "", Aliases: (r.Aliases || []).join(", "), Logo: r.Logo || "", LogoDark: r.LogoDark || "" });
+    setSaveMessage("");
+    setLogoCopyStatus({});
+    setConfirmDelete(false);
+  };
+
+  // Same clipboard-image-copy as TvChannelsManager's.
+  const handleCopyImage = (field, url) => {
+    if (!url) return;
+    setLogoCopyStatus((prev) => ({ ...prev, [field]: "copying" }));
+    let clipboardPromise;
+    try {
+      clipboardPromise = navigator.clipboard.write([new window.ClipboardItem({ "image/png": loadImageAsPngBlob(url) })]);
+    } catch (e) {
+      clipboardPromise = Promise.reject(e);
+    }
+    clipboardPromise
+      .then(() => setLogoCopyStatus((prev) => ({ ...prev, [field]: "copied" })))
+      .catch((e) => { console.error("Copy image to clipboard failed:", e); setLogoCopyStatus((prev) => ({ ...prev, [field]: "failed" })); })
+      .finally(() => setTimeout(() => setLogoCopyStatus((prev) => (prev[field] === "copying" ? prev : { ...prev, [field]: "idle" })), 2400));
+  };
+
+  const handleSave = async () => {
+    if (!selected || !formState) return;
+    const name = formState.Name.trim();
+    if (!name) { setSaveMessage(`Failed: ${cfg.noun} name is required.`); return; }
+    const id = selected.id || `${kind}-${accoladeSlug(name)}`;
+    if (!selected.id && saved.some((r) => r.id === id)) { setSaveMessage(`Failed: ${name} already exists.`); return; }
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      const payload = {
+        Kind: kind, Name: name,
+        Aliases: formState.Aliases.split(",").map((a) => a.trim()).filter(Boolean),
+        Logo: formState.Logo.trim(), LogoDark: formState.LogoDark.trim(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(doc(db, "accoladeIcons", id), payload, { merge: true });
+      const row = { id, ...payload };
+      setSaved((prev) => [...prev.filter((r) => r.id !== id), row]);
+      setSelected(row);
+      setSaveMessage("Saved.");
+    } catch (e) {
+      console.error("Admin accolade icon save error:", e);
+      setSaveMessage("Failed to save — check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selected?.id) return;
+    try {
+      await deleteDoc(doc(db, "accoladeIcons", selected.id));
+      setSaved((prev) => prev.filter((r) => r.id !== selected.id));
+      setSelected(null);
+      setFormState(null);
+    } catch (e) {
+      console.error("Admin accolade icon delete error:", e);
+      setSaveMessage("Failed to delete — check console.");
+    }
+  };
+
+  const isSelected = (r) => !!selected && (r.id ? selected.id === r.id : !selected.id && selected.Name === r.Name);
+
+  return (
+    <div>
+      <div style={{ fontSize: "20px", fontWeight: 900, color: BLUE, marginBottom: "4px" }}>{cfg.title}</div>
+      <div style={{ fontSize: "12px", fontWeight: 700, color: "#888", marginBottom: "14px" }}>{cfg.blurb}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "16px" }}>
+        <div style={{ border: "2px solid #eee", borderRadius: "10px", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "10px", borderBottom: "1px solid #eee" }}>
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={`Search ${cfg.noun.toLowerCase()}s...`} style={inputStyle} />
+          </div>
+          <div style={{ maxHeight: "460px", overflowY: "auto", flex: 1 }}>
+            {loading ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#999", fontSize: "13px" }}>Loading…</div>
+            ) : rows.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#999", fontSize: "13px", fontStyle: "italic" }}>Nothing found.</div>
+            ) : rows.map((r) => {
+              const img = r.Logo || r.LogoDark;
+              return (
+                <div
+                  key={r.id || `new-${r.Name}`}
+                  onClick={() => openRow(r)}
+                  style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", cursor: "pointer", background: isSelected(r) ? "#eaf1ff" : "#fff", borderBottom: "1px solid #f5f5f5" }}
+                >
+                  <div style={{ width: "28px", height: "28px", borderRadius: "4px", ...CHECKER_BG, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                    {img ? <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}
+                  </div>
+                  <span style={{ fontWeight: 800, fontSize: "13px", color: img ? BLUE : "#999" }}>{r.Name}</span>
+                  {!img && <span style={{ marginLeft: "auto", fontSize: "9px", fontWeight: 900, color: "#bbb", textTransform: "uppercase", whiteSpace: "nowrap" }}>No icon</span>}
+                </div>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => openRow({ id: null, Name: "", isNew: true, blank: true })}
+            style={{ width: "100%", padding: "12px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.04em", background: GOLD, color: "#fff", border: "none", cursor: "pointer" }}
+          >
+            + New {cfg.noun}
+          </button>
+        </div>
+
+        <div style={{ border: "2px solid #eee", borderRadius: "10px", padding: "16px" }}>
+          {!selected || !formState ? (
+            <div style={{ padding: "30px 20px", textAlign: "center", color: "#999", fontWeight: 700, fontSize: "13px" }}>
+              Click a {cfg.noun.toLowerCase()} to set its icon, or "+ New {cfg.noun}" to add one.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontWeight: 900, fontSize: "16px", color: BLUE, marginBottom: "14px" }}>
+                {formState.Name || `New ${cfg.noun}`}
+              </div>
+              <FieldGroup>
+                {/* Name is fixed once saved (it's the doc id and the match key). */}
+                {selected.blank && (
+                  <FieldRow label={`${cfg.noun} Name`}>
+                    <input value={formState.Name} onChange={(e) => setFormState((p) => ({ ...p, Name: e.target.value }))} placeholder={cfg.placeholder} style={inputStyle} />
+                  </FieldRow>
+                )}
+                <FieldRow label="Other spellings (comma-separated)">
+                  <input value={formState.Aliases} onChange={(e) => setFormState((p) => ({ ...p, Aliases: e.target.value }))} placeholder={kind === "conference" ? "e.g. American Athletic" : "e.g. Heisman"} style={inputStyle} />
+                </FieldRow>
+                <LogoUrlField label="Icon" value={formState.Logo} onChange={(v) => setFormState((p) => ({ ...p, Logo: v }))} onCopy={() => handleCopyImage("Logo", formState.Logo)} copyStatus={logoCopyStatus.Logo || "idle"} />
+                <LogoUrlField label="Icon (Dark)" value={formState.LogoDark} onChange={(v) => setFormState((p) => ({ ...p, LogoDark: v }))} onCopy={() => handleCopyImage("LogoDark", formState.LogoDark)} copyStatus={logoCopyStatus.LogoDark || "idle"} />
+              </FieldGroup>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                style={{ width: "100%", marginTop: "18px", background: BLUE, color: "#fff", border: "none", borderRadius: "8px", padding: "12px", fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+              {saveMessage && (
+                <div style={{ marginTop: "10px", fontSize: "12px", fontWeight: 800, color: saveMessage.startsWith("Failed") ? "#c0392b" : "#2e7d32" }}>{saveMessage}</div>
+              )}
+              {selected.id && (
+                <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #eee" }}>
+                  {!confirmDelete ? (
+                    <button onClick={() => setConfirmDelete(true)} style={{ width: "100%", background: "#fff", color: "#c0392b", border: "2px solid #c0392b", borderRadius: "8px", padding: "10px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.06em", cursor: "pointer" }}>
+                      Delete {cfg.noun}
+                    </button>
+                  ) : (
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button onClick={handleDelete} style={{ flex: 1, background: "#c0392b", color: "#fff", border: "none", borderRadius: "6px", padding: "9px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer" }}>Yes, Delete</button>
+                      <button onClick={() => setConfirmDelete(false)} style={{ flex: 1, background: "#fff", color: "#666", border: "2px solid #ddd", borderRadius: "6px", padding: "9px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
                     </div>
                   )}
                 </div>

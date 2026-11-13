@@ -1,0 +1,88 @@
+{
+  "season": 2024,
+  "conference": "Big 12",
+  "source": "2024 All-Big 12 football team (coaches + media); team = the better of the two",
+  "selections": [
+    ["QB", "Shedeur Sanders", "Colorado", 1, "C1 M1"],
+    ["QB", "Sam Leavitt", "Arizona State", 2, "C2 M2"],
+
+    ["RB", "RJ Harvey", "UCF", 1, "C1 M1"],
+    ["RB", "Cam Skattebo", "Arizona State", 1, "C1 M1"],
+    ["RB", "Tahj Brooks", "Texas Tech", 2, "C2 M2"],
+    ["RB", "DJ Giddens", "Kansas State", 2, "C2"],
+    ["RB", "Devin Neal", "Kansas", 2, "C2"],
+
+    ["FB", "Jared Casey", "Kansas", 1, "C1"],
+    ["FB", "Stevo Klotz", "Iowa State", 2, "C2"],
+
+    ["C", "Leif Fautanu", "Arizona State", 1, "M1"],
+    ["C", "Bryce Foster", "Kansas", 2, "M2"],
+
+    ["G", "Luke Kandra", "Cincinnati", 1, "C1 M1"],
+    ["G", "Wyatt Milum", "West Virginia", 1, "C1 M1"],
+    ["G", "Michael Ford Jr.", "Kansas", 1, "C2 M1"],
+    ["G", "Omar Aigbedion", "Baylor", 2, "M2"],
+    ["G", "Sam Hecht", "Kansas State", 2, "C2"],
+    ["G", "Caleb Rogers", "Texas Tech", 2, "M2"],
+
+    ["T", "Spencer Fano", "Utah", 1, "C1 M1"],
+    ["T", "Caleb Etienne", "BYU", 1, "C1 M2"],
+    ["T", "Logan Brown", "Kansas", 2, "C2 M2"],
+    ["T", "Easton Kilty", "Kansas State", 2, "C2"],
+
+    ["TE", "Brant Kuithe", "Utah", 1, "C1 M1"],
+    ["TE", "Joe Royer", "Cincinnati", 1, "C1 M2"],
+    ["TE", "Jalin Conyers", "Texas Tech", 2, "C2"],
+    ["TE", "Garrett Oakley", "Kansas State", 2, "C2"],
+    ["TE", "Chamon Metayer", "Arizona State", 2, "C2"],
+    ["TE", "Michael Trigg", "Baylor", 2, "C2"],
+
+    ["WR", "Tetairoa McMillan", "Arizona", 1, "C1 M1"],
+    ["WR", "Travis Hunter", "Colorado", 1, "C1 M1"],
+    ["WR", "Jordyn Tyson", "Arizona State", 1, "C1 M2"],
+    ["WR", "Jayden Higgins", "Iowa State", 2, "C2 M2"],
+    ["WR", "Jack Bech", "TCU", 2, "C2"],
+    ["WR", "Josh Kelly", "Texas Tech", 2, "C2"],
+
+    ["DL", "Dontay Corleone", "Cincinnati", 1, "C1 M1"],
+    ["DL", "BJ Green II", "Colorado", 1, "C1 M1"],
+    ["DL", "Brendan Mott", "Kansas State", 1, "C1 M1"],
+    ["DL", "TJ Jackson II", "West Virginia", 1, "C1 M1"],
+    ["DL", "Tyler Batty", "BYU", 1, "C1 M2"],
+    ["DL", "C.J. Fite", "Arizona State", 2, "C2 M2"],
+    ["DL", "Lee Hunter", "UCF", 2, "C2 M2"],
+    ["DL", "Van Fillinger", "Utah", 2, "C2 M2"],
+    ["DL", "Keith Cooper Jr.", "Houston", 2, "C2"],
+    ["DL", "Dean Miller", "Kansas", 2, "C2"],
+
+    ["LB", "Matt Jones", "Baylor", 1, "C1 M1"],
+    ["LB", "Keaton Thomas", "Baylor", 1, "C1 M1"],
+    ["LB", "Jacob Rodriguez", "Texas Tech", 1, "C1 M1"],
+    ["LB", "Nikhai Hill-Green", "Colorado", 2, "C2 M2"],
+    ["LB", "Austin Romaine", "Kansas State", 2, "C2 M2"],
+    ["LB", "Jared Bartlett", "Cincinnati", 2, "C2"],
+    ["LB", "Keyshaun Elliott", "Arizona State", 2, "C2"],
+
+    ["DB", "Xavion Alford", "Arizona State", 1, "C1 M1"],
+    ["DB", "Travis Hunter", "Colorado", 1, "C1 M1"],
+    ["DB", "A.J. Haulcy", "Houston", 1, "C1 M1"],
+    ["DB", "Mello Dotson", "Kansas", 1, "C1 M1"],
+    ["DB", "Cobee Bryant", "Kansas", 1, "C1 M2"],
+    ["DB", "Bud Clark", "TCU", 2, "C2 M2"],
+    ["DB", "Jontez Williams", "Iowa State", 2, "C2 M2"],
+    ["DB", "Tacario Davis", "Arizona", 2, "C2"],
+    ["DB", "Jakob Robinson", "BYU", 2, "C2"],
+    ["DB", "Cam'ron Silmon-Craig", "Colorado", 2, "M2"],
+    ["DB", "Malik Verdon", "Iowa State", 2, "C2"],
+
+    ["K", "Will Ferrin", "BYU", 1, "C1 M1"],
+    ["K", "Gino Garcia", "Texas Tech", 2, "C2 M2"],
+
+    ["P", "Palmer Williams", "Baylor", 1, "C1 M1"],
+    ["P", "Jack Bouwmeester", "Utah", 2, "C2 M2"],
+
+    ["RS", "Jaylin Noel", "Iowa State", 1, "C1 M1"],
+    ["RS", "Josh Cameron", "Baylor", 1, "C1"],
+    ["RS", "Keelan Marion", "BYU", 2, "C2 M2"]
+  ]
+}

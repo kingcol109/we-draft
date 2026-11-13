@@ -1,0 +1,483 @@
+{
+ "season": 2024,
+ "conference": "American",
+ "source": "2024 Consensus All-Americans — labeled First-Team All-American (team 1). Players on other All-America teams but not this list go in as team 0, plain \"All-American\". Miami (FL) → Miami. Travis Hunter's all-purpose/return spot saved as AP",
+ "selections": [
+  [
+   "QB",
+   "Cam Ward",
+   "Miami",
+   1,
+   "consensus"
+  ],
+  [
+   "RB",
+   "Ashton Jeanty",
+   "Boise State",
+   1,
+   "consensus"
+  ],
+  [
+   "RB",
+   "Kaleb Johnson",
+   "Iowa",
+   1,
+   "consensus"
+  ],
+  [
+   "WR",
+   "Tetairoa McMillan",
+   "Arizona",
+   1,
+   "consensus"
+  ],
+  [
+   "WR",
+   "Nick Nash",
+   "San Jose State",
+   1,
+   "consensus"
+  ],
+  [
+   "WR",
+   "Xavier Restrepo",
+   "Miami",
+   1,
+   "consensus"
+  ],
+  [
+   "TE",
+   "Harold Fannin Jr.",
+   "Bowling Green",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Kelvin Banks Jr.",
+   "Texas",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Will Campbell",
+   "LSU",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Seth McLaughlin",
+   "Ohio State",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Wyatt Milum",
+   "West Virginia",
+   1,
+   "consensus"
+  ],
+  [
+   "OL",
+   "Addison West",
+   "Western Michigan",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Donovan Ezeiruaku",
+   "Boston College",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Kyle Kennard",
+   "South Carolina",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Abdul Carter",
+   "Penn State",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Mason Graham",
+   "Michigan",
+   1,
+   "consensus"
+  ],
+  [
+   "DL",
+   "Walter Nolen",
+   "Ole Miss",
+   1,
+   "consensus"
+  ],
+  [
+   "LB",
+   "Shaun Dolac",
+   "Buffalo",
+   1,
+   "consensus"
+  ],
+  [
+   "LB",
+   "Jay Higgins",
+   "Iowa",
+   1,
+   "consensus"
+  ],
+  [
+   "LB",
+   "Danny Stutsman",
+   "Oklahoma",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Jahdae Barron",
+   "Texas",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Xavier Watts",
+   "Notre Dame",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Nohl Williams",
+   "California",
+   1,
+   "consensus"
+  ],
+  [
+   "DB",
+   "Caleb Downs",
+   "Ohio State",
+   1,
+   "consensus"
+  ],
+  [
+   "K",
+   "Kenneth Almendares",
+   "Louisiana",
+   1,
+   "consensus"
+  ],
+  [
+   "P",
+   "Alex Mastromanno",
+   "Florida State",
+   1,
+   "consensus"
+  ],
+  [
+   "AP",
+   "Travis Hunter",
+   "Colorado",
+   1,
+   "consensus"
+  ],
+  [
+   "QB",
+   "Dillon Gabriel",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RB",
+   "Cam Skattebo",
+   "Arizona State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RB",
+   "Omarion Hampton",
+   "North Carolina",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "WR",
+   "Jeremiah Smith",
+   "Ohio State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "TE",
+   "Tyler Warren",
+   "Penn State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Willie Lampkin",
+   "North Carolina",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Donovan Jackson",
+   "Ohio State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Tate Ratledge",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Tyler Booker",
+   "Alabama",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Josh Conerly Jr.",
+   "Oregon",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Dylan Fairchild",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Spencer Fano",
+   "Utah",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "OL",
+   "Bill Katsigiannis",
+   "Army",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "C",
+   "Jake Slaughter",
+   "Florida",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "C",
+   "Cooper Mays",
+   "Tennessee",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DL",
+   "Mike Green",
+   "Marshall",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Jalon Walker",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Carson Schwesinger",
+   "UCLA",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Aiden Fisher",
+   "Indiana",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Kyle Louis",
+   "Pittsburgh",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Anthony Hill Jr.",
+   "Texas",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LB",
+   "Chris Paul Jr.",
+   "Ole Miss",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Malaki Starks",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Nick Emmanwori",
+   "South Carolina",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Michael Taaffe",
+   "Texas",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "DB",
+   "Malachi Moore",
+   "Alabama",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "K",
+   "Dominic Zvada",
+   "Michigan",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "K",
+   "Ryan Fitzgerald",
+   "Florida State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "K",
+   "Collin Rogers",
+   "SMU",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "K",
+   "Ben Sauls",
+   "Pittsburgh",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "P",
+   "Eddie Czaplicki",
+   "USC",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "P",
+   "Brett Thorson",
+   "Georgia",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Keelan Marion",
+   "BYU",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Kam Shanks",
+   "UAB",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Cam Skattebo",
+   "Arizona State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Kaden Wetjen",
+   "Iowa",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Rayshawn Pleasant",
+   "Tulane",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Tyler Warren",
+   "Penn State",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "RS",
+   "Dalen Cambre",
+   "Louisiana",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LS",
+   "Luke Elkin",
+   "Iowa",
+   0,
+   "other All-America teams"
+  ],
+  [
+   "LS",
+   "Bryce Robinson",
+   "Kennesaw State",
+   0,
+   "other All-America teams"
+  ]
+ ]
+}
