@@ -4727,6 +4727,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/player/alex-mclaughlin-2027-db</loc>
+    <lastmod>2026-11-13</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/alex-mcpherson-2027-k</loc>
     <lastmod>2026-09-02</lastmod>
     <priority>0.7</priority>
@@ -4994,11 +4999,6 @@
   <url>
     <loc>https://we-draft.com/player/austin-brown-2026-db</loc>
     <lastmod>2026-11-13</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/austin-mack-2027-qb</loc>
-    <lastmod>2026-08-26</lastmod>
     <priority>0.7</priority>
   </url>
 </urlset>
