@@ -2,6 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
   <url>
+    <loc>https://we-draft.com/comparison/jam-miller-2026-rb</loc>
+    <lastmod>2026-11-13</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/comparison/jamal-haynes-2026-rb</loc>
     <lastmod>2026-11-13</lastmod>
     <priority>0.6</priority>
@@ -169,6 +174,11 @@
   <url>
     <loc>https://we-draft.com/comparison/jayden-maiava-2027-qb</loc>
     <lastmod>2026-08-26</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/comparison/jayden-sanders-2028-db</loc>
+    <lastmod>2026-11-13</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -3922,6 +3932,11 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://we-draft.com/news/collin-dixon-player-spotlight-2026-11-13</loc>
+    <lastmod>2026-11-13</lastmod>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/news/zxavian-harris-commits-to-lsu-2026-08-24</loc>
     <lastmod>2026-08-24</lastmod>
     <priority>0.8</priority>
@@ -4983,21 +4998,6 @@
   </url>
   <url>
     <loc>https://we-draft.com/live/wake-forest-vs-louisville-9-26-2026</loc>
-    <lastmod>2026-09-27</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/live/ucla-vs-maryland-9-26-2026</loc>
-    <lastmod>2026-09-27</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/live/iowa-vs-michigan-9-26-2026</loc>
-    <lastmod>2026-09-27</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/live/nebraska-vs-michigan-state-9-26-2026</loc>
     <lastmod>2026-09-27</lastmod>
     <priority>0.6</priority>
   </url>
