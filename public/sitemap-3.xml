@@ -2,6 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
   <url>
+    <loc>https://we-draft.com/player/nicholas-singleton-2026-rb</loc>
+    <lastmod>2026-11-13</lastmod>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://we-draft.com/player/nick-barrett-2026-dl</loc>
     <lastmod>2026-11-13</lastmod>
     <priority>0.7</priority>
@@ -843,11 +848,6 @@
   </url>
   <url>
     <loc>https://we-draft.com/player/tae-harris-2028-db</loc>
-    <lastmod>2026-11-13</lastmod>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/player/tae-johnson-2027-db</loc>
     <lastmod>2026-11-13</lastmod>
     <priority>0.7</priority>
   </url>
@@ -2379,6 +2379,11 @@
   <url>
     <loc>https://we-draft.com/comparison/brandyn-hillman-2027-db</loc>
     <lastmod>2026-08-29</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://we-draft.com/comparison/brauntae-johnson-2027-db</loc>
+    <lastmod>2026-11-13</lastmod>
     <priority>0.6</priority>
   </url>
   <url>
@@ -4993,11 +4998,6 @@
   </url>
   <url>
     <loc>https://we-draft.com/comparison/jam-miller-2026-rb</loc>
-    <lastmod>2026-11-13</lastmod>
-    <priority>0.6</priority>
-  </url>
-  <url>
-    <loc>https://we-draft.com/comparison/jamal-haynes-2026-rb</loc>
     <lastmod>2026-11-13</lastmod>
     <priority>0.6</priority>
   </url>
