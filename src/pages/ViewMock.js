@@ -212,7 +212,7 @@ export default function ViewMock({ mockId: shownId = "", yearPage = "" }) {
   const description = weekly && !teamPages
     ? `View the future faces of the NFL early with the We-Draft.com ${year} NFL Mock Draft. Because the class is so far away, the current player pool is very thin. The draft order is randomized and this mock is meant to reflect ${year} prospects' current talent level rather than NFL team needs.`
     : weekly
-    ? `The latest We-Draft.com ${year} NFL mock draft: ${rounds === 1 ? "the first round" : `all ${rounds} rounds`} of projected picks, made by the Draft Sim from our prospect grades, team needs and each staff's draft history, and updated every week.`
+    ? `The latest We-Draft.com ${year} NFL mock draft: ${rounds === 1 ? "the first round" : `all ${rounds} rounds`} of projected picks, made by the Draft Sim from community player grades, team needs and each staff's draft history, and updated every week.`
     : intro
     ? intro.slice(0, 155) + (intro.length > 155 ? "…" : "")
     : `A ${mock.draftClass || ""} NFL mock draft${ownerLabel ? ` by ${ownerLabel}` : ""}${firstPick ? `, with ${firstPick.selection.First} ${firstPick.selection.Last} at No. ${firstPick.pickNumber}` : ""}.`;

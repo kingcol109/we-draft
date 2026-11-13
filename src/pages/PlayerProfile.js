@@ -51,7 +51,6 @@ import confetti from "canvas-confetti";
 import BreakoutIcon from "../assets/breakout1.png";
 import OnFireIcon from "../assets/onfire.png";
 import { fetchTeammateVideos } from "../components/PlayerSidebars";
-import { cssRect } from "../utils/pageZoom";
 import { canonicalEvalData } from "../utils/evaluationCopies";
 import { buildPlayerMetaDescription } from "../utils/playerMetaDescription";
 import { classSnapshotRanks } from "../utils/classRanks";
@@ -536,47 +535,12 @@ function RankStat({ rank, of, label, color }) {
   );
 }
 
-// ── Trend pill (Trending Up / Breakout / On Fire) + its hover/click
-// tooltip — shared by all three since they're identical except for
-// color/icon/copy. The tooltip is portaled to document.body instead of
-// rendering inline: the hero card it lives in has overflow:hidden (twice
-// over, actually — the card itself and the gradient background layer
-// inside it both clip), needed so the hero's rounded corners and drifting
-// background texture don't bleed past their own edges. A tooltip that pops
-// open *below* a tag sitting near the bottom of that hero was getting
-// silently clipped by that same overflow:hidden no matter how high its own
-// z-index went — z-index can't escape an ancestor's clipping box, only a
-// portal can. Position is computed from the trigger's own
-// getBoundingClientRect() on open (not tracked on scroll — same "good
-// enough for a transient hover tooltip" tradeoff the rest of this codebase
-// already makes for similar popups). ──
-function TrendTag({
-  icon, iconImg, iconClassName, label, tagClassName, tagGradient, tagBorder, tagColor,
-  tooltipGradient, tooltipBorder, tooltipGlow, tooltipDivider, tooltipTextColor,
-  headerIcon, headerIconImg, headerText, notes, notesColor, isMobile,
-}) {
-  const [show, setShow] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef(null);
-
-  const updatePos = () => {
-    const rect = triggerRef.current && cssRect(triggerRef.current);
-    if (!rect) return;
-    setPos({ top: rect.bottom + 14, left: rect.left + rect.width / 2 });
-  };
-
-  const open = () => { updatePos(); setShow(true); };
-  const close = () => setShow(false);
-  const toggle = () => { if (show) { close(); } else { open(); } };
-
+// ── Trend pill (Up / Breakout / On Fire) — shared by all three since
+// they're identical except for color/icon/copy. Just the pill: no hover or
+// click tooltip anymore (the tooltip props are still passed but unused). ──
+function TrendTag({ icon, iconImg, iconClassName, label, tagClassName, tagGradient, tagBorder, tagColor, isMobile }) {
   return (
-    <div
-      ref={triggerRef}
-      style={{ position: "relative", display: "inline-block", pointerEvents: "auto" }}
-      onMouseEnter={open}
-      onMouseLeave={close}
-      onClick={toggle}
-    >
+    <div style={{ position: "relative", display: "inline-block" }}>
       <span
         className={`font-extrabold rounded-full ${tagClassName}`}
         style={{
@@ -588,7 +552,6 @@ function TrendTag({
           fontSize: isMobile ? "11px" : "16px",
           padding: isMobile ? "2px 10px" : "3px 15px",
           textTransform: "uppercase",
-          cursor: "pointer",
         }}
       >
         <span className={iconClassName}>
@@ -597,44 +560,6 @@ function TrendTag({
           ) : icon}
         </span> {label}
       </span>
-      {show && ReactDOM.createPortal(
-        <div
-          style={{
-            position: "fixed", top: pos.top + "px", left: pos.left + "px", transform: "translateX(-50%)",
-            width: isMobile ? "220px" : "264px",
-            backgroundImage: tooltipGradient,
-            border: `1px solid ${tooltipBorder}`,
-            borderRadius: "14px",
-            padding: "14px 16px",
-            boxShadow: `0 16px 36px rgba(0,0,0,0.4), 0 0 0 1px ${tooltipGlow}`,
-            zIndex: 9999,
-            textAlign: "left",
-            pointerEvents: "none",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "7px" }}>
-            {headerIconImg ? (
-              <img src={headerIconImg} alt="" style={{ width: "14px", height: "14px", objectFit: "contain" }} />
-            ) : (
-              <span style={{ fontSize: "12px" }}>{headerIcon}</span>
-            )}
-            <div style={{ fontSize: isMobile ? "11px" : "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: tooltipTextColor }}>
-              {headerText}
-            </div>
-          </div>
-          <div style={{ height: "1px", background: `linear-gradient(90deg, ${tooltipDivider}, transparent)`, marginBottom: "8px" }} />
-          {notes.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-              {notes.map((s, i) => (
-                <div key={i} style={{ fontSize: isMobile ? "11px" : "12px", fontWeight: 600, color: notesColor, lineHeight: 1.4 }}>
-                  {s}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>,
-        document.body
-      )}
     </div>
   );
 }
@@ -2249,6 +2174,18 @@ const gradeDisplay = (g) => {
 // "Ellis Robinson IV" → "Robinson": a full name's last name, without a suffix.
 const lastNameOf = (name) => String(name || "").replace(/\s+(Jr\.?|Sr\.?|II|III|IV|V)$/i, "").split(" ").pop();
 
+// An In The News item's date as ms: a Firestore Timestamp, a Date, ms, an
+// ISO string or { seconds }; 0 when there's none.
+function newsMs(ts) {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === "function") return ts.toMillis();
+  if (ts instanceof Date) return ts.getTime();
+  if (typeof ts === "number") return ts;
+  if (typeof ts === "object" && ts.seconds != null) return ts.seconds * 1000;
+  const n = Date.parse(ts);
+  return Number.isNaN(n) ? 0 : n;
+}
+
 export default function PlayerProfile() {
   const { slug } = useParams();
   // Modern look (MODERN_STYLE) — on for every player; ?modern=0 shows the
@@ -2732,13 +2669,8 @@ export default function PlayerProfile() {
         const existingIds = new Set([...playerNewsItems, ...playerArticleItems].map((n) => n.id));
         const schoolItems = schoolItemsRaw.filter((n) => !existingIds.has(n.id));
 
-        // Sort: player content first, school content second, each sorted by date within group
-        const combined = [...playerArticleItems, ...playerNewsItems, ...schoolItems].sort((a, b) => {
-          if (a._priority !== b._priority) return a._priority - b._priority;
-          return (b.publishedAt?.toMillis?.() || 0) - (a.publishedAt?.toMillis?.() || 0);
-        });
-
-        setPlayerNews(combined);
+        // Ordered with the weekly mocks below (newsItems): newest first.
+        setPlayerNews([...playerArticleItems, ...playerNewsItems, ...schoolItems]);
       } catch(e) { setPlayerNews([]); }
     };
     fetch();
@@ -2769,7 +2701,10 @@ export default function PlayerProfile() {
     });
     return () => { live = false; };
   }, [draftedBy, player?.id, player?.Last]);
-  const newsItems = weeklyMockItems.length ? [...weeklyMockItems, ...playerNews] : playerNews;
+  // In The News: everything about him (articles, news, the weekly mocks)
+  // newest first, then his school's, newest first.
+  const newsItems = [...weeklyMockItems, ...playerNews].sort((a, b) =>
+    ((a._priority || 1) - (b._priority || 1)) || (newsMs(b.publishedAt) - newsMs(a.publishedAt)));
 
   // ── Videos attached to this player's ID (Google Sheet "Videos" tab synced
   // to the `videos` collection, migrated from slug- to playerId-keyed items —
@@ -5442,16 +5377,23 @@ useEffect(() => {
                 <div>{player.First}</div>
                 <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
               </h1>
-              <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:isMobile?"6px":"10px" }}>
+              <div className="flex items-center justify-center flex-nowrap mt-2" style={{ whiteSpace:"nowrap", gap:isMobile?"6px":"10px" }}>
+                {/* Position · school · class stay on one row (never wrap) —
+                    a long one spills past the padded column evenly on both
+                    sides (justify-center), over the headshot if need be.
+                    Desktop trend tags can still wrap to the next line. */}
+                <span style={{ display:"inline-flex", alignItems:"center", flexShrink:0, whiteSpace:"nowrap", gap:isMobile?"6px":"10px" }}>
                 <span className="font-extrabold rounded-full wdm-pospill" style={{ background:headshot?"rgba(0,0,0,0.45)":"rgba(255,255,255,0.14)", backdropFilter:headshot?"blur(4px)":undefined, border:"2px solid #fff", color:"#fff", letterSpacing:"0.05em", fontSize:isMobile?"11px":"17px", padding:isMobile?"2px 8px":"3px 16px" }}>
                   {player.Position}
                 </span>
                 <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
-                <span onClick={()=>navigate(`/team/${teamSlug}`)} className="font-extrabold hover:underline cursor-pointer" style={{ color:"#fff", fontSize:isMobile?"12px":"19px", textShadow:"0 1px 4px rgba(0,0,0,0.4)", pointerEvents:"auto" }}>
+                {/* A real link opening the team page in a new tab. */}
+                <a href={`/team/${teamSlug}`} target="_blank" rel="noopener noreferrer" onClick={(e)=>e.stopPropagation()} className="font-extrabold hover:underline cursor-pointer" style={{ color:"#fff", textDecoration:"none", fontSize:isMobile?"12px":"19px", textShadow:"0 1px 4px rgba(0,0,0,0.4)", pointerEvents:"auto", position:"relative", zIndex:2 }}>
                   {player.School}
-                </span>
+                </a>
                 <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                 <span className="font-bold" style={{ color:"rgba(255,255,255,0.8)", fontSize:isMobile?"12px":"19px" }}>{formatEligible(player.Eligible)}</span>
+                </span>
                 {/* Desktop keeps the trend tag inline with position/school/
                     year (room enough on that wide a row); mobile moves it to
                     its own row below instead — see the block right after
@@ -5462,7 +5404,7 @@ useEffect(() => {
                   <>
                     <span style={{ color:"rgba(255,255,255,0.4)" }}>·</span>
                     <TrendTag
-                      icon="▲" iconClassName="wd-trendup-icon" label="Trending Up"
+                      icon="▲" iconClassName="wd-trendup-icon" label="Up"
                       tagClassName="wd-trendup-tag"
                       tagGradient="linear-gradient(135deg, #14532d, #16a34a)" tagBorder="#4ade80" tagColor="#eafff0"
                       tooltipGradient="linear-gradient(135deg, #0f2b1a, #1e4028)" tooltipBorder="rgba(74,222,128,0.55)"
@@ -5511,7 +5453,7 @@ useEffect(() => {
                 <div className="flex items-center justify-center flex-wrap mt-2" style={{ gap:"6px" }}>
                   {isTrendingUp && (
                     <TrendTag
-                      icon="▲" iconClassName="wd-trendup-icon" label="Trending Up"
+                      icon="▲" iconClassName="wd-trendup-icon" label="Up"
                       tagClassName="wd-trendup-tag"
                       tagGradient="linear-gradient(135deg, #14532d, #16a34a)" tagBorder="#4ade80" tagColor="#eafff0"
                       tooltipGradient="linear-gradient(135deg, #0f2b1a, #1e4028)" tooltipBorder="rgba(74,222,128,0.55)"

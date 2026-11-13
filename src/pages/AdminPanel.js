@@ -374,55 +374,60 @@ function ContentSection({ initialTab }) {
   );
 }
 
-function SidebarNav({ active, setActive, badgeCounts }) {
+// The sections as tabs along the bottom of the header, as /profile's hub
+// tabs (UserProfile.js): an underline on the open one, scrolling sideways
+// when they don't fit. Layout only — same sections, same setActive.
+function AdminTabs({ active, setActive, badgeCounts }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-      {SECTIONS.map((s) => {
-        const isActive = active === s.key;
-        const badge = badgeCounts?.[s.key] || 0;
-        return (
-          <button
-            key={s.key}
-            onClick={() => setActive(s.key)}
-            style={{
-              display: "flex", alignItems: "center", gap: "10px",
-              padding: "12px 16px", borderRadius: "8px",
-              border: "2px solid " + (isActive ? BLUE : "transparent"),
-              background: isActive ? "#eaf1ff" : "#fff",
-              color: isActive ? BLUE : "#555",
-              fontWeight: 900, fontSize: "14px", textAlign: "left",
-              cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em",
-            }}
-          >
-            <span style={{ fontSize: "16px" }}>{s.icon}</span>
-            <span style={{ flex: 1 }}>{s.label}</span>
-            {/* Unread-count sticker — currently only wired up for
-                "requests" (see AdminPanel's unreadRequestCount), but keyed
-                generically off badgeCounts so any other section could grow
-                one later without touching this component. */}
-            {badge > 0 && (
-              <span style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
-                background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900,
-                flexShrink: 0,
-              }}>
-                {badge > 99 ? "99+" : badge}
-              </span>
-            )}
-            {!s.ready && (
-              <span style={{
-                fontSize: "8px", fontWeight: 900, color: "#aaa",
-                border: "1px solid #ddd", borderRadius: "10px",
-                padding: "2px 6px", textTransform: "uppercase", letterSpacing: "0.04em",
-              }}>
-                Soon
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div role="tablist" className="wd-admin-tabs" style={{ position: "relative", display: "flex", gap: "24px", marginTop: "18px", overflowX: "auto", scrollbarWidth: "none" }}>
+        {SECTIONS.map((s) => {
+          const isActive = active === s.key;
+          const badge = badgeCounts?.[s.key] || 0;
+          return (
+            <button
+              key={s.key}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActive(s.key)}
+              style={{
+                flexShrink: 0, display: "inline-flex", alignItems: "center", gap: "6px",
+                background: "none", border: "none", borderBottom: `3px solid ${isActive ? "#f6a21d" : "transparent"}`,
+                padding: "10px 0 9px", color: isActive ? "#fff" : "rgba(255,255,255,.65)",
+                fontSize: "13px", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase",
+                cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit",
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: "14px" }}>{s.icon}</span>
+              {s.label}
+              {/* Unread-count sticker — currently only wired up for
+                  "requests" (see AdminPanel's unreadRequestCount), but keyed
+                  generically off badgeCounts so any other section could grow
+                  one later without touching this component. */}
+              {badge > 0 && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  minWidth: "18px", height: "18px", borderRadius: "9px", padding: "0 5px",
+                  background: "#c0392b", color: "#fff", fontSize: "10px", fontWeight: 900, letterSpacing: 0,
+                }}>
+                  {badge > 99 ? "99+" : badge}
+                </span>
+              )}
+              {!s.ready && (
+                <span style={{
+                  fontSize: "8px", fontWeight: 900, color: "rgba(255,255,255,.7)",
+                  border: "1px solid rgba(255,255,255,.35)", borderRadius: "10px",
+                  padding: "2px 6px", letterSpacing: "0.04em",
+                }}>
+                  Soon
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <style>{".wd-admin-tabs::-webkit-scrollbar { display: none; }"}</style>
+    </>
   );
 }
 
@@ -14634,20 +14639,22 @@ export default function AdminPanel() {
       </Helmet>
 
       <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "24px 24px 80px", fontFamily: "'Arial Black', Arial, sans-serif" }}>
-        <div style={{ marginBottom: "20px" }}>
-          <div style={{ fontSize: "28px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Admin Panel
+        {/* Header, as /profile's: the title, who's signed in, then the
+            sections as tabs — the whole width below is the section's. */}
+        <div style={{ position: "relative", overflow: "hidden", borderRadius: "18px", background: "linear-gradient(120deg, #062a55 0%, #0055a5 70%, #1f74c8 100%)", color: "#fff", padding: "22px 26px 0", boxShadow: "0 10px 30px rgba(0,40,90,.18)" }}>
+          <span aria-hidden="true" style={{ position: "absolute", right: "-10px", top: "6px", font: "italic 900 92px/1 Arial, sans-serif", color: "rgba(255,255,255,.06)", pointerEvents: "none", whiteSpace: "nowrap" }}>We-Draft.com</span>
+          <div style={{ position: "relative" }}>
+            <div style={{ fontSize: "26px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.1 }}>
+              Admin Panel
+            </div>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "rgba(255,255,255,.75)", marginTop: "4px", fontFamily: "Arial, sans-serif" }}>
+              Signed in as {user?.email || "—"}
+            </div>
           </div>
-          <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "2px" }}>
-            Signed in as {user?.email || "—"}
-          </div>
+          <AdminTabs active={activeSection} setActive={setActiveSection} badgeCounts={{ requests: unreadRequestCount }} />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: "20px", alignItems: "start" }}>
-          <div style={{ position: "sticky", top: "20px" }}>
-            <SidebarNav active={activeSection} setActive={setActiveSection} badgeCounts={{ requests: unreadRequestCount }} />
-          </div>
-
+        <div style={{ marginTop: "22px" }}>
           <div>
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "videos" && <VideosSection initialTab={opened.section === "videos" ? opened.tab : null} />}

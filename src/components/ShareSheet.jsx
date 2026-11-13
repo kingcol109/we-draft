@@ -19,7 +19,7 @@ import { createPortal } from "react-dom";
 const CSS = `
 .wdss-back{position:fixed;inset:0;z-index:10002;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(6,10,18,.62);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:wdss-fade .16s ease-out}
 .wdss{--bg:#fff;--fg:#0f172a;--mut:#64748b;--line:#e2e8f0;--soft:#f1f5f9;--soft2:#e2e8f0;--pri:#0f172a;--pri-fg:#fff;
-  position:relative;width:100%;max-width:440px;max-height:calc(92vh / var(--pz, 1));overflow-y:auto;background:var(--bg);color:var(--fg);border-radius:22px;padding:18px 20px 20px;box-sizing:border-box;
+  position:relative;width:100%;max-width:440px;max-height:calc(92vh / var(--pz, 1));max-height:calc(92dvh / var(--pz, 1));overflow-y:auto;background:var(--bg);color:var(--fg);border-radius:22px;padding:18px 20px 20px;box-sizing:border-box;
   box-shadow:0 30px 80px rgba(0,0,0,.35),0 0 0 1px rgba(15,23,42,.06);font-family:Inter,"Segoe UI",system-ui,-apple-system,Arial,sans-serif;text-align:left;animation:wdss-pop .2s cubic-bezier(.2,.9,.3,1.15)}
 .wdss.dark{--bg:#0f1729;--fg:#f1f5f9;--mut:#94a3b8;--line:#1e293b;--soft:#1b2438;--soft2:#25314a;--pri:#f1f5f9;--pri-fg:#0f1729;box-shadow:0 30px 80px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06)}
 .wdss-grab{display:none;width:40px;height:5px;border-radius:999px;background:var(--soft2);margin:0 auto 12px}
@@ -29,8 +29,8 @@ const CSS = `
 .wdss-x{flex-shrink:0;width:34px;height:34px;border-radius:50%;border:none;background:var(--soft);color:var(--fg);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s}
 .wdss-x:hover{background:var(--soft2)}
 .wdss-prev{margin-bottom:14px}
-.wdss-img{display:block;margin:0 auto;max-width:100%;max-height:calc(54vh / var(--pz, 1));border-radius:14px;box-shadow:0 10px 30px rgba(15,23,42,.18)}
-.wdss-ph{position:relative;overflow:hidden;max-height:calc(54vh / var(--pz, 1));max-width:100%;margin:0 auto;border-radius:14px;background:var(--soft);display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;box-sizing:border-box}
+.wdss-img{display:block;margin:0 auto;max-width:100%;max-height:calc(54vh / var(--pz, 1));max-height:calc(50dvh / var(--pz, 1));border-radius:14px;box-shadow:0 10px 30px rgba(15,23,42,.18)}
+.wdss-ph{position:relative;overflow:hidden;max-height:calc(54vh / var(--pz, 1));max-height:calc(50dvh / var(--pz, 1));max-width:100%;margin:0 auto;border-radius:14px;background:var(--soft);display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;box-sizing:border-box}
 .wdss-ph span{position:relative;font-size:13px;font-weight:600;color:var(--mut)}
 .wdss-ph:not(.failed)::before{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.55) 50%,transparent 70%);animation:wdss-shim 1.3s linear infinite}
 .wdss.dark .wdss-ph:not(.failed)::before{background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.07) 50%,transparent 70%)}
@@ -72,7 +72,7 @@ const CSS = `
 @keyframes wdss-up{from{transform:translateY(100%)}}
 @media (max-width:640px){
   .wdss-back{align-items:flex-end;padding:0}
-  .wdss{max-width:none;border-radius:22px 22px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom));max-height:94vh;animation:wdss-up .24s cubic-bezier(.2,.9,.3,1)}
+  .wdss{max-width:none;border-radius:22px 22px 0 0;padding:10px 16px calc(18px + env(safe-area-inset-bottom));max-height:94vh;max-height:calc(100dvh - 12px);animation:wdss-up .24s cubic-bezier(.2,.9,.3,1)}
   .wdss-grab{display:block}
 }`;
 

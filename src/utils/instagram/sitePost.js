@@ -13,7 +13,7 @@
 // site-clean deletes the post's older revs. The instagramPosts doc keeps
 // { site: { articleId, slug, title, titleShort, rev, at } }, so posting again updates the same
 // article (its slug and date stay put).
-import { addDoc, collection, doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { db } from "../../firebase";
 import { igApi } from "./api";
 import { svgToBlob } from "../../components/SocialMakerKit";
@@ -38,9 +38,14 @@ export function siteTitle(caption, fallback = "") {
   return first.replace(/[.:]+$/, "").slice(0, 140);
 }
 
-// The short title to start from: the long one up to its first comma
-// ("Today's Player Spotlight: Aiden Flora, RB, Iowa State" → "…: Aiden Flora").
-export const siteShortTitle = (title) => String(title || "").split(",")[0].trim();
+// The short title to start from: the long one up to its first comma; a
+// player spotlight's reads "{Name} Player Spotlight" ("Today's Player
+// Spotlight: Collin Dixon, WR, Ohio State" → "Collin Dixon Player Spotlight").
+export function siteShortTitle(title) {
+  const head = String(title || "").split(",")[0].trim();
+  const spot = head.match(/^(?:today['’]s\s+)?player spotlight:\s*(.+)$/i);
+  return spot ? `${spot[1].trim()} Player Spotlight` : head;
+}
 
 // As ArticlesManager.js's slugFor: the short title's words, then the date
 // (its publish day, as that page builds it — local midnight, in ISO).
@@ -67,6 +72,25 @@ async function jpegBase64(svg) {
   return String(url).split(",")[1];
 }
 
+// The tagged players' schools → { schools: [names], teamSlugs: [slugs] }, as
+// ArticlesManager.js tags teams — schools is what puts the article on each
+// team's page (TeamPage.js). prev: the article's own, kept (a player who
+// transfers later leaves it on his old team's page).
+async function schoolTags(playerIds, prev = {}) {
+  const schools = [...(prev.schools || [])];
+  const teamSlugs = [...(prev.teamSlugs || [])];
+  const players = await Promise.all(playerIds.map((id) => getDoc(doc(db, "players", id)).catch(() => null)));
+  for (const snap of players) {
+    const name = snap?.exists() ? String(snap.data().School || "").trim() : "";
+    if (!name || schools.includes(name)) continue;
+    const school = (await getDocs(query(collection(db, "schools"), where("School", "==", name), limit(1))).catch(() => null))?.docs[0]?.data();
+    schools.push(name);
+    const slug = school?.Slug || name.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9\s]/g, "").trim().replace(/\s+/g, "-");
+    if (!teamSlugs.includes(slug)) teamSlugs.push(slug);
+  }
+  return { schools, teamSlugs };
+}
+
 // The post's site article, made or brought up to date. order: [{ svg } |
 // { video: path }] in carousel order. → { articleId, slug }.
 export async function postToSite({ postId, order, caption, title, titleShort, playerIds = [], uid = "", onPhase = () => {} }) {
@@ -87,8 +111,10 @@ export async function postToSite({ postId, order, caption, title, titleShort, pl
     }
   }
   onPhase("Saving the article…");
+  const ids = [...new Set(playerIds.filter(Boolean))];
+  const tags = await schoolTags(ids, prevArticle?.exists() ? prevArticle.data() : {});
   const fields = {
-    title, titleShort: titleShort || title, content: captionHtml(caption), gallery, playerIds: [...new Set(playerIds.filter(Boolean))],
+    title, titleShort: titleShort || title, content: captionHtml(caption), gallery, playerIds: ids, ...tags,
     seoDescription: summaryOf(caption), igPostId: postId, status: "published",
     // The post on Instagram, once it's there (publish.js adds it if that's later).
     igPermalink: postData.ig?.permalink || "",
@@ -104,7 +130,7 @@ export async function postToSite({ postId, order, caption, title, titleShort, pl
     slug = siteSlug(titleShort || title, now);
     articleId = (await addDoc(collection(db, "articles"), {
       ...fields, slug, priority: 2, author: "We-Draft.com", publishedAt: now,
-      teamSlugs: [], schools: [], gameIds: [], videoId: "", authorId: uid, createdAt: serverTimestamp(),
+      gameIds: [], videoId: "", authorId: uid, createdAt: serverTimestamp(),
     })).id;
   }
   await updateDoc(postRef, { site: { articleId, slug, title, titleShort: titleShort || title, rev, at: Date.now() } });

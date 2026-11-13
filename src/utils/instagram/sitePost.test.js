@@ -12,7 +12,8 @@ test("caption → body: paragraphs, line breaks, we-draft.com links kept on the 
 test("title and slug", () => {
   expect(siteTitle("\nToday's Player Spotlight: Aiden Flora, RB, Iowa State.\n\nmore")).toBe("Today's Player Spotlight: Aiden Flora, RB, Iowa State");
   expect(siteTitle("", "Spotlight · X")).toBe("Spotlight · X");
-  expect(siteShortTitle("Today's Player Spotlight: Aiden Flora, RB, Iowa State")).toBe("Today's Player Spotlight: Aiden Flora");
+  expect(siteShortTitle("Today's Player Spotlight: Collin Dixon, WR, Ohio State")).toBe("Collin Dixon Player Spotlight");
+  expect(siteShortTitle("Five risers, this week")).toBe("Five risers");
   // The short title's words and the day, as ArticlesManager.js builds them.
   const at = new Date(2026, 10, 11, 15);
   expect(siteSlug(" Today's Player Spotlight: Aiden Flora ", at)).toBe(`todays-player-spotlight-aiden-flora-${new Date(2026, 10, 11).toISOString().slice(0, 10)}`);

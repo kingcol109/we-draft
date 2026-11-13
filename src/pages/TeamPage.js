@@ -14,19 +14,6 @@ import TeamInsights from "../components/TeamInsights";
 import MarginAds from "../components/MarginAds";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 import { Helmet } from "react-helmet-async";
-import EliteFlair from "../assets/elite.png";
-import StarFlair from "../assets/star.png";
-import DiamondFlair from "../assets/dir.png";
-import RadarFlair from "../assets/radar.png";
-import SecondFlair from "../assets/second.png";
-import AlienFlair from "../assets/alien.png";
-import FutureStarFlair from "../assets/futurestar.png";
-import CurveFlair from "../assets/curve.png";
-import EarlyImpactFlair from "../assets/early impact.png";
-import EarlyContributorFlair from "../assets/early contributor.png";
-import Year2ContributorFlair from "../assets/y2contributor.png";
-import DevelopmentalFlair from "../assets/developmental.png";
-import ProvenFlair from "../assets/proven.png";
 import { fetchAllRankMaps, ranksForGame, currentRankMap, RANKINGS_LIMIT } from "../utils/rankings";
 import { scheduleGameHref } from "../utils/live";
 import { cssRect } from "../utils/pageZoom";
@@ -42,23 +29,6 @@ const SIDE_LINE_2 = "#eef1f5";
 const SIDE_SOFT = "#f7f9fc";
 const SIDE_INK = "#0f1b2d";
 
-// ── Flair -> { image, stroke color, description } — mirrors the map on
-// PlayerProfile.js so a flair means the same thing everywhere it shows up. ──
-const FLAIR_CONFIG = {
-  "Elite":               { img: EliteFlair,      stroke: "#ff0000",  desc: "Player is one of the best in the country." },
-  "Star":                { img: StarFlair,        stroke: "#ebac02", desc: "Player is one of the best at his position." },
-  "Diamond in the Rough": { img: DiamondFlair,   stroke: "#00d2ff", desc: "Player has shown flashes of talent and can take the next step with a little more polish." },
-  "Under the Radar":     { img: RadarFlair,       stroke: "#79f146", desc: "Player has outperformed his level of hype." },
-  "Future Star":         { img: FutureStarFlair,  stroke: "#0055a5", desc: "Player has shown flashes of elite talent." },
-  "Alien":               { img: AlienFlair,       stroke: "#5c04c9", desc: "Player has a rare trait." },
-  "Second Chance":       { img: SecondFlair,      stroke: "#ff6600", desc: "Player's production or performance may have slipped some but they have a chance to bounce back." },
-  "Ahead of the Curve":  { img: CurveFlair,       stroke: "#008aff", desc: "Player has produced early in his CFB career." },
-  "Early Impact":        { img: EarlyImpactFlair, stroke: "#009295", desc: "Player has the traits to make an impact early in his college football career. \"High 5-Star\".", tag: "Recruit Grade" },
-  "Early Contributor":   { img: EarlyContributorFlair, stroke: "#ff00f0", desc: "Player has a trait or two that will allow him to see the field early in his college football career. \"Low 5-Star/High 4-Star\".", tag: "Recruit Grade" },
-  "Year 2 Contributor":  { img: Year2ContributorFlair, stroke: "#3b6b03", desc: "Player is close to CFB ready but needs a little more development before he is ready to contribute. \"4-Star\".", tag: "Recruit Grade" },
-  "Developmental":       { img: DevelopmentalFlair, stroke: "#fff600", desc: "Player needs development before he is ready to see the field. \"3-Star\".", tag: "Recruit Grade" },
-  "Proven":              { img: ProvenFlair,      stroke: "#00124b", desc: "Player has proven to be an effective college football player." },
-};
 
 const PROSPECT_YEARS = ["2027", "2028", "2029"];
 const ARCHIVE_YEAR = "2026";
@@ -307,8 +277,6 @@ function TableHeader({ color1, color2, isMobile, showDraftPick, showGrade, showN
 function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, color2, showDraftPick = false, showNfl = true }) {
   const draft = draftInfo;
   const teamData = draft ? nflTeams[draft.team] : null;
-  const [showFlairTip, setShowFlairTip] = useState(false);
-  const flairInfo = player.Flair ? FLAIR_CONFIG[player.Flair] : null;
 
   return (
     <Link
@@ -389,54 +357,6 @@ function PlayerRow({ player, commGrade, draftInfo, nflTeams, isMobile, color1, c
         }}>
           {`${player.First || ""} ${player.Last || ""}`}
         </div>
-        {flairInfo && (
-          <span
-            style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}
-            onMouseEnter={() => setShowFlairTip(true)}
-            onMouseLeave={() => setShowFlairTip(false)}
-          >
-            <img
-              src={flairInfo.img}
-              alt={player.Flair}
-              loading="lazy"
-              style={{
-                width: isMobile ? "26px" : "32px", height: isMobile ? "26px" : "32px",
-                objectFit: "contain", borderRadius: "6px", padding: "2px",
-                border: `1.5px solid ${flairInfo.stroke}`,
-              }}
-            />
-            {showFlairTip && (
-              <div
-                style={{
-                  position: "absolute", top: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)",
-                  width: isMobile ? "200px" : "230px", background: "#fff", border: `1.5px solid ${flairInfo.stroke}`,
-                  borderRadius: "12px", padding: "12px 14px", boxShadow: "0 14px 32px rgba(0,0,0,0.16)",
-                  zIndex: 60, textAlign: "left", pointerEvents: "none",
-                }}
-              >
-                <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%) rotate(45deg)", width: "11px", height: "11px", background: "#fff", border: `1.5px solid ${flairInfo.stroke}`, borderRadius: "2px" }} />
-                <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "7px" }}>
-                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: flairInfo.stroke, flexShrink: 0 }} />
-                  <div style={{ fontSize: "12px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em", color: flairInfo.stroke }}>
-                    {player.Flair}
-                  </div>
-                  {flairInfo.tag && (
-                    <span style={{
-                      fontSize: "8px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.05em",
-                      color: "#fff", background: flairInfo.stroke, padding: "2px 6px", borderRadius: "20px",
-                    }}>
-                      {flairInfo.tag}
-                    </span>
-                  )}
-                </div>
-                <div style={{ height: "1px", background: `linear-gradient(90deg, ${flairInfo.stroke}66, transparent)`, marginBottom: "8px" }} />
-                <div style={{ fontSize: "12px", fontWeight: 600, color: "#555", lineHeight: 1.5 }}>
-                  {flairInfo.desc}
-                </div>
-              </div>
-            )}
-          </span>
-        )}
       </div>
 
       <div style={{ flexShrink: 0, width: isMobile ? "52px" : "80px", height: "42px", display: "flex", alignItems: "center", justifyContent: "center" }}>

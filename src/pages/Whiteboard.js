@@ -175,7 +175,7 @@ export default function Whiteboard() {
   const [saving, setSaving] = useState(false);
   const [activeId, setActiveId] = useState(null);
   const [loadError, setLoadError] = useState(null);
-  // "ALL" (the Whiteboard grid, desktop), "BIG" (the Big Board) or one
+  // "ALL" (the Whiteboard grid — phones too), "BIG" (the Big Board) or one
   // position group.
   const [view, setView] = useState("ALL");
   // The Big Board's cross-position order: { round: [playerIds] }.
@@ -210,8 +210,8 @@ export default function Whiteboard() {
   // A small move before a drag starts, so a tap on the handle isn't a drag.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  // Phones only get the single-group view.
-  const focus = isMobile && view === "ALL" ? "QB" : view;
+  // Phones open on the Whiteboard grid too, as on a computer.
+  const focus = view;
 
   const scrollToPlayers = () => {
     playerBankRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -890,6 +890,21 @@ export default function Whiteboard() {
     .wb-grade-sm b { font-size: 10px; }
     .wb-grade-none { background: transparent; border: 1.5px dashed ${SITE_BORDER}; color: #c3c9d3; font-size: 13px; font-weight: 800; }
 
+    /* Phones: only the name itself opens his page (not the space around
+       it); the wide chips drop the school line (the logo says it) for a
+       bigger name; and more room around and between chips, so a thumb
+       scrolling the page lands off the drag handles. */
+    @media (max-width: 760px) {
+      .wb-player-link { display: inline-flex; max-width: 100%; vertical-align: top; }
+      .wb-drop .wb-player-sub { display: none; }
+      .wb-drop .wb-player-first { font-size: 13px; }
+      .wb-drop .wb-player-last { font-size: 18px; }
+      .wb-drop { padding: 12px 18px; gap: 10px; }
+      .wb-col { padding: 10px; }
+      .wb-col .wb-player-card { margin-bottom: 10px; }
+    }
+    @media (max-width: 420px) { .wb-page { padding-left: 14px; padding-right: 14px; } }
+
     .wb-player-actions { display: flex; flex-direction: column; align-items: center; gap: 0; flex-shrink: 0; }
     .wb-icon-btn {
       display: flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0; border: none; border-radius: 6px;
@@ -994,7 +1009,7 @@ export default function Whiteboard() {
     </div>
   );
   const orderNote = bankOrder === "alpha" ? "A–Z" : "by your grade, then A–Z";
-  const tabs = isMobile ? [...POSITIONS, "BIG"] : ["ALL", ...POSITIONS, "BIG"];
+  const tabs = ["ALL", ...POSITIONS, "BIG"];
   const TAB_LABEL = { ALL: "Whiteboard", BIG: "Big Board" };
 
   return (

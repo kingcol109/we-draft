@@ -3,7 +3,8 @@
 // An article's gallery (articles.gallery — a post put on the site from Admin
 // → Content → Instagram, utils/instagram/sitePost.js): its slides and clips
 // in order, as a carousel. Swipe or scroll it sideways (it snaps a slide at
-// a time); the arrows and dots do the same with a click. A clip plays in
+// a time) — on a phone that's the only way, plus the dots; on a computer a
+// blue chevron outside the post on either side does it with a click. A clip plays in
 // place with its own controls, and pauses when it's swiped away.
 import { useEffect, useRef, useState } from "react";
 
@@ -38,24 +39,28 @@ export default function PostGallery({ items = [], title = "", isMobile = false }
   };
 
   if (!n) return null;
+  // A plain blue chevron just outside the post, hidden at either end.
   const arrow = (dir) => {
     const off = dir < 0 ? at === 0 : at === n - 1;
     return (
-      <button aria-label={dir < 0 ? "Previous slide" : "Next slide"} onClick={() => go(at + dir)} disabled={off}
+      <button aria-label={dir < 0 ? "Previous slide" : "Next slide"} onClick={() => go(at + dir)} disabled={off} className="wd-gallery-arrow"
         style={{
-          position: "absolute", top: "50%", [dir < 0 ? "left" : "right"]: "10px", transform: "translateY(-50%)", zIndex: 2,
-          width: "40px", height: "40px", borderRadius: "50%", border: `2px solid ${GOLD}`, background: "rgba(0,85,165,0.92)",
-          color: "#fff", fontSize: "22px", fontWeight: 900, lineHeight: 1, cursor: off ? "default" : "pointer",
-          opacity: off ? 0 : 1, transition: "opacity 0.2s", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+          position: "absolute", top: "50%", [dir < 0 ? "right" : "left"]: "calc(100% + 6px)", transform: "translateY(-50%)",
+          width: "40px", height: "64px", border: "none", background: "transparent", padding: 0, color: BLUE,
+          cursor: off ? "default" : "pointer", visibility: off ? "hidden" : "visible", display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-        {dir < 0 ? "‹" : "›"}
+        <svg width="26" height="44" viewBox="0 0 26 44" fill="none" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d={dir < 0 ? "M20 4 L6 22 L20 40" : "M6 4 L20 22 L6 40"} />
+        </svg>
       </button>
     );
   };
 
   return (
-    <div style={{ maxWidth: `${maxW}px`, margin: "0 auto 24px" }}>
-      <style>{".wd-gallery-track::-webkit-scrollbar { display: none; }"}</style>
+    // A computer: room either side for the chevrons.
+    <div style={{ maxWidth: isMobile || n < 2 ? `${maxW}px` : `min(${maxW}px, calc(100% - 100px))`, margin: "0 auto 24px" }}>
+      <style>{".wd-gallery-track::-webkit-scrollbar { display: none; } .wd-gallery-arrow { opacity: 0.75; transition: opacity 0.15s; } .wd-gallery-arrow:hover { opacity: 1; }"}</style>
+      <div style={{ position: "relative" }}>
       <div style={{ position: "relative", borderRadius: "12px", overflow: "hidden", border: `2px solid ${BLUE}`, background: "#05070b" }}>
         <div ref={track} className="wd-gallery-track"
           style={{ display: "flex", overflowX: "auto", scrollSnapType: "x mandatory", scrollbarWidth: "none", WebkitOverflowScrolling: "touch" }}>
@@ -70,13 +75,14 @@ export default function PostGallery({ items = [], title = "", isMobile = false }
             </div>
           ))}
         </div>
-        {n > 1 && !isMobile && arrow(-1)}
-        {n > 1 && !isMobile && arrow(1)}
         {n > 1 && (
           <div style={{ position: "absolute", top: "10px", right: "10px", zIndex: 2, background: "rgba(0,0,0,0.6)", color: "#fff", borderRadius: "12px", padding: "3px 10px", fontSize: "12px", fontWeight: 800 }}>
             {at + 1} / {n}
           </div>
         )}
+      </div>
+      {n > 1 && !isMobile && arrow(-1)}
+      {n > 1 && !isMobile && arrow(1)}
       </div>
       {n > 1 && (
         <div style={{ display: "flex", justifyContent: "center", gap: "7px", marginTop: "10px" }}>
