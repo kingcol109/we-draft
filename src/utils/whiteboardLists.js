@@ -3,7 +3,8 @@
 // The Whiteboard share dialog's themed lists (pages/Whiteboard.js
 // ShareGraphicDialog → utils/whiteboardGraphic.js draws them). The user
 // picks each list's players off their board (one position group, or every
-// position); buildList suggests a starting set, by:
+// position); every list starts empty. buildList (not used by the dialog
+// now — lists no longer auto-fill) would suggest a set, by:
 //   risers   — moved up the board since an earlier save (board history,
 //              below), most places first.
 //   fallers  — moved down since then, most places first.
@@ -47,9 +48,6 @@ export function listTitles(id, pos) {
     default: return { headline: "", sub: "" };
   }
 }
-
-// The dialog's text while a list has nobody on it.
-export const EMPTY_TEXT = "Pick players below to build this list.";
 
 // Each player's move since the earlier save: id -> { now, move } (move > 0:
 // up that many places). players: in board order; baseline: earlier ids.

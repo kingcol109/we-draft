@@ -130,8 +130,26 @@ function background(ctx, color, stops = ["#0a3a6e", NAVY, INK]) {
   for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); ctx.stroke(); }
 }
 
+// The draft class, big, top left — "2027" in the accent with "NFL DRAFT"
+// beside it — so the year can't be missed. The made-on date sits under
+// "NFL DRAFT" without its year (a "2026" there read as the class).
+const OWNER_Y = 196;
+function yearBlock(ctx, classYear, accent, date) {
+  const pad = 64;
+  ctx.textBaseline = "alphabetic";
+  font(ctx, 92);
+  const yw = ctx.measureText(String(classYear)).width;
+  ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillText(String(classYear), pad + 5, 138 + 5);
+  ctx.fillStyle = accent; ctx.fillText(String(classYear), pad, 138);
+  const x = pad + yw + 22;
+  font(ctx, 38); ctx.fillStyle = "#fff"; ctx.fillText("NFL DRAFT", x, 98);
+  const d = date ? String(date).replace(/,?\s*\d{4}$/, "") : "";
+  font(ctx, 20); ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.fillText(d ? `MY WHITEBOARD · ${d}` : "MY WHITEBOARD", x + 2, 134);
+}
+
 // The header: angled speed stripes and a giant outlined mark (the position,
-// or "BIG") in the position's color behind it; a gold "2027 NFL DRAFT" pill;
+// or "BIG") in the position's color behind it; the class year (yearBlock);
 // the owner in gold ("TESTER'S", or "MY" with no username); then the
 // headline, huge, with a hard drop shadow in the position's color.
 function header(ctx, { owner, pos, color, classYear, mode, total, date }) {
@@ -160,16 +178,7 @@ function header(ctx, { owner, pos, color, classYear, mode, total, date }) {
   ctx.fillText(pos === "ALL" ? "BIG" : pos, 0, 0);
   ctx.restore();
 
-  // "2027 NFL DRAFT" pill, then "MY WHITEBOARD".
-  font(ctx, 22);
-  const pillText = `${classYear} NFL DRAFT`;
-  const pw = ctx.measureText(pillText).width + 36;
-  roundRect(ctx, pad, 58, pw, 44, 22);
-  ctx.fillStyle = GOLD; ctx.fill();
-  ctx.fillStyle = INK; ctx.textBaseline = "middle";
-  ctx.fillText(pillText, pad + 18, 81);
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.fillText(date ? `MY WHITEBOARD · ${date}` : "MY WHITEBOARD", pad + pw + 18, 81);
+  yearBlock(ctx, classYear, GOLD, date);
 
   // Owner line, then the headline. All caps, but a plural keeps its small
   // "s" (QBs, not QBS). pos "ALL" is the Big Board.
@@ -181,20 +190,16 @@ function header(ctx, { owner, pos, color, classYear, mode, total, date }) {
     : `TOP ${n} ${pos === "ALL" ? "PROSPECTS" : plural(pos)}`;
   const w1 = fitText(ctx, who, W - pad * 2, 48, 30);
   ctx.fillStyle = GOLD;
-  ctx.fillText(w1.text, pad, 164);
+  ctx.fillText(w1.text, pad, OWNER_Y);
   const t = fitText(ctx, headline, W - pad * 2 - 10, 112, 56);
-  const baseY = 164 + 14 + t.size * 0.86;
+  const baseY = OWNER_Y + 14 + t.size * 0.86;
   ctx.fillStyle = accent; ctx.fillText(t.text, pad + 7, baseY + 7);
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 18;
   ctx.fillStyle = "#fff"; ctx.fillText(t.text, pad, baseY);
   ctx.restore();
 
-  const lineY = baseY + 26;
-  ctx.fillStyle = accent; ctx.fillRect(pad, lineY, 180, 10);
-  ctx.fillStyle = GOLD; ctx.fillRect(pad + 180, lineY, 48, 10);
-  ctx.fillStyle = "#fff"; ctx.fillRect(pad + 228, lineY, 14, 10);
-  return lineY + 38;
+  return baseY + 44;
 }
 
 // The motif behind a themed header, in the accent, on the right.
@@ -237,7 +242,7 @@ function motif(ctx, kind, accent) {
     m.beginPath(); m.arc(210, 100, 118, 0, Math.PI * 2); m.fill();
     ctx.globalAlpha = 0.3; ctx.drawImage(c, 730, 20);
     ctx.globalAlpha = 0.55;
-    [[640, 70, 4], [700, 250, 3], [1010, 290, 4], [790, 30, 3], [1050, 50, 3], [600, 190, 3]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
+    [[640, 70, 4], [700, 250, 3], [1010, 290, 4], [790, 30, 3], [1050, 50, 3], [690, 330, 3]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
     ctx.globalAlpha = 0.4; ctx.textBaseline = "alphabetic";
     font(ctx, 64); ctx.fillText("Z", 960, 250);
     font(ctx, 44); ctx.fillText("Z", 1012, 200);
@@ -275,23 +280,15 @@ function themedHeader(ctx, { owner, classYear, theme, headline, sub, date }) {
   const accent = theme.accent;
   motif(ctx, theme.motif, accent);
 
-  font(ctx, 22);
-  const pillText = `${classYear} NFL DRAFT`;
-  const pw = ctx.measureText(pillText).width + 36;
-  roundRect(ctx, pad, 58, pw, 44, 22);
-  ctx.fillStyle = accent; ctx.fill();
-  ctx.fillStyle = INK; ctx.textBaseline = "middle";
-  ctx.fillText(pillText, pad + 18, 81);
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.fillText(date ? `MY WHITEBOARD · ${date}` : "MY WHITEBOARD", pad + pw + 18, 81);
+  yearBlock(ctx, classYear, accent, date);
 
   ctx.textBaseline = "alphabetic";
   const who = owner ? possessive(owner).toUpperCase() : "MY";
   const w1 = fitText(ctx, who, W - pad * 2, 48, 30);
   ctx.fillStyle = accent;
-  ctx.fillText(w1.text, pad, 164);
+  ctx.fillText(w1.text, pad, OWNER_Y);
   const t = fitText(ctx, headline, W - pad * 2 - 10, 112, 56);
-  const baseY = 164 + 14 + t.size * 0.86;
+  const baseY = OWNER_Y + 14 + t.size * 0.86;
   ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillText(t.text, pad + 6, baseY + 6);
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 18;
@@ -461,6 +458,36 @@ function listRows(ctx, players, top, bottom, color) {
   }
 }
 
+// A themed list with nobody on it yet: its numbered slots, dashed, and
+// "ADD PLAYERS BELOW" across them (the dialog's picker is under the preview).
+function emptySlots(ctx, top, bottom, accent, n) {
+  const pad = 56;
+  const big = n <= 5;
+  const gap = big ? 16 : 10;
+  const rowH = Math.min(big ? 170 : 86, Math.floor((bottom - top - gap * (n - 1)) / n));
+  ctx.save();
+  ctx.setLineDash([14, 10]); ctx.lineWidth = 3;
+  for (let i = 0; i < n; i++) {
+    const y = top + i * (rowH + gap);
+    roundRect(ctx, pad, y, W - pad * 2, rowH, big ? 22 : 14);
+    ctx.fillStyle = "rgba(255,255,255,0.04)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.stroke();
+    font(ctx, big ? 64 : 36); ctx.fillStyle = `${accent}88`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(String(i + 1), pad + (big ? 59 : 44), y + rowH / 2 + 3);
+  }
+  ctx.restore();
+  const mid = top + (n * rowH + gap * (n - 1)) / 2;
+  const label = "ADD PLAYERS BELOW";
+  font(ctx, 54);
+  const lw = ctx.measureText(label).width + 80;
+  roundRect(ctx, (W - lw) / 2, mid - 50, lw, 100, 50);
+  ctx.fillStyle = accent; ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(label, W / 2, mid + 3);
+  ctx.textAlign = "left";
+}
+
 // players: the group in board order, each { First, Last, School, round,
 // starred, flagged, headshot, logo } (headshot / logo: URLs or "").
 // list: a themed list's id (THEMES) — then headline / sub are its titles
@@ -483,7 +510,8 @@ export async function drawWhiteboardGraphic({ owner, pos, color, classYear, mode
   if (theme) {
     background(ctx, theme.accent, theme.bg);
     const top = themedHeader(ctx, { owner, classYear, theme, headline, sub, date });
-    rankedRows(ctx, rows, top, H - 110 - 40, theme.accent, mode === "top5");
+    if (rows.length) rankedRows(ctx, rows, top, H - 110 - 40, theme.accent, mode === "top5");
+    else emptySlots(ctx, top, H - 110 - 40, theme.accent, count);
     footer(ctx, logo, theme.accent);
     return canvas;
   }

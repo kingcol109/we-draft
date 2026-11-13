@@ -102,6 +102,31 @@ function TeamLogo({ brand, team, size, dark = true }) {
     : <span style={{ width: size, height: size, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 900, color: "#fff", fontSize: size * 0.3, flexShrink: 0 }}>{team}</span>;
 }
 
+// "Leave the draft?" before Settings — fixed over the page (and over the
+// sim when it's fullscreen, since it renders inside it).
+function LeaveSimConfirm({ onStay, onLeave }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onStay(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onStay]);
+  return (
+    <div role="presentation" onClick={onStay} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(3,8,18,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="wd-leave-sim-title" onClick={(e) => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 380, background: "#0e1626", border: "1px solid #24324d", borderRadius: 16, padding: "22px 22px 18px", boxShadow: "0 18px 50px rgba(0,0,0,0.55)", color: "#fff", textAlign: "center", whiteSpace: "normal" }}>
+        <div id="wd-leave-sim-title" style={{ fontSize: 18, fontWeight: 900, letterSpacing: "0.02em" }}>Leave this draft?</div>
+        <p style={{ margin: "10px 0 18px", color: "#c9d4e5", fontFamily: "Arial, sans-serif", fontSize: 14, lineHeight: 1.5 }}>
+          Going to Settings leaves the draft. Your sim will reset and its picks won&apos;t be saved.
+        </p>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button onClick={onStay} autoFocus style={{ ...barBtn, padding: "10px 18px", fontSize: 13 }}>Keep drafting</button>
+          <button onClick={onLeave} style={{ ...barBtn, padding: "10px 18px", fontSize: 13, background: "#c8102e" }}>Leave &amp; reset</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Top bar ──
 const BROADCAST_SKIPPABLE = ["clock", "trade", "pickIn", "reveal"];
 function BroadcastBar({ s, data, isMobile, onSettings }) {
@@ -166,6 +191,12 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
       ))}
     </div>
   );
+  // Settings leaves the draft and starts it over — ask first, with the
+  // draft paused behind the question (Cancel picks it back up).
+  const [leaving, setLeaving] = useState(null); // null, or { wasPaused }
+  const askSettings = () => { setLeaving({ wasPaused: !!s.paused }); if (!s.paused) s.setPaused(true); };
+  const stay = () => { if (leaving && !leaving.wasPaused) s.setPaused(false); setLeaving(null); };
+  const leaveConfirm = leaving && <LeaveSimConfirm onStay={stay} onLeave={() => { setLeaving(null); onSettings(); }} />;
   // Mock Draft mode has no speeds — CPU picks are instant.
   const controls = live && (
     <>
@@ -183,7 +214,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
       {(canSkip || s.paused) && <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>}
       {skipMenu}
       {mockSims}
-      {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
+      {onSettings && <button onClick={askSettings} style={barBtn}>Settings</button>}{leaveConfirm}
     </>
   );
   // Mobile: just the controls, one row right above the console's tabs (the
@@ -228,7 +259,7 @@ function BroadcastBar({ s, data, isMobile, onSettings }) {
           {(canSkip || s.paused) && <button onClick={() => s.setPaused(!s.paused)} style={barBtn}>{s.paused ? "▶ Resume" : "❚❚ Pause"}</button>}
           {skipMenu}
           {mockSims}
-          {onSettings && <button onClick={onSettings} style={barBtn}>Settings</button>}
+          {onSettings && <button onClick={askSettings} style={barBtn}>Settings</button>}{leaveConfirm}
           <FullscreenButton />
         </div>
       )}

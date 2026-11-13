@@ -228,7 +228,7 @@ async function main() {
     });
     const input = spotlightInput({
       player: p, school: schoolSnap.docs[0]?.data() || {}, photo: (photos.action || [])[Number(flag("photo", 0))] || null,
-      headshot: photos.headshot?.url || "", report, advance: Number(p.Eligible) > 2027, brandLogo: WD_LOGO, badgeLogo: WD_BADGE,
+      headshot: photos.headshot?.url || "", jersey: photos.jersey || "", report, advance: Number(p.Eligible) > 2027, brandLogo: WD_LOGO, badgeLogo: WD_BADGE,
       classLogo: ["2027", "2028", "2029"].includes(String(p.Eligible)) ? `class-logo-${p.Eligible}` : "",
       look: flag("look", "wash"), accent: flag("accent", ""), badge: flag("badge", "crest"),
       // His college stats from ESPN (the stats slide), by the id his headshot was matched on.

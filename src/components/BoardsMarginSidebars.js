@@ -40,6 +40,13 @@ function CardHead({ children }) {
   );
 }
 
+// "Nov 12" — an article's publishedAt (Timestamp, Date or string), or "".
+function feedDate(ts) {
+  const d = ts?.toDate ? ts.toDate() : ts ? new Date(ts) : null;
+  if (!d || isNaN(d)) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export function BoardsFeedCard() {
   const { user, profile } = useAuth();
   const withSiteUpdates = siteUpdatesInFeed(profile);
@@ -88,11 +95,15 @@ export function BoardsFeedCard() {
       ) : (
         feedItems.map((item, i) => (
           <Link key={item.id} to={`/news/${item.slug}`} className="wd-margin-feed-item"
-            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", textDecoration: "none", borderBottom: i < feedItems.length - 1 ? "1px solid #eef1f5" : "none" }}>
-            <span style={{ width: "20px", height: "20px", flexShrink: 0, borderRadius: "4px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px" }}>📰</span>
-            <div className="wdb-ntitle" style={{ flex: 1, minWidth: 0, fontSize: "12px", fontWeight: 900, color: "#222", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {isSiteUpdate(item) && <span style={{ color: GOLD, fontSize: "9px", letterSpacing: "0.08em", marginRight: "5px" }}>SITE UPDATE</span>}
-              {item.title}
+            style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "12px 14px", textDecoration: "none", borderBottom: i < feedItems.length - 1 ? "1px solid #eef1f5" : "none" }}>
+            <span style={{ width: "22px", height: "22px", marginTop: "2px", flexShrink: 0, borderRadius: "5px", background: BLUE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px" }}>📰</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {isSiteUpdate(item) && <div style={{ color: GOLD, fontSize: "10px", fontWeight: 900, letterSpacing: "0.08em", marginBottom: "3px" }}>SITE UPDATE</div>}
+              {/* The whole headline, up to three lines (one cut-off line was unreadable). */}
+              <div className="wdb-ntitle" style={{ color: "#222", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", fontFamily: "Arial, sans-serif" }}>
+                {item.title}
+              </div>
+              {feedDate(item.publishedAt) && <div style={{ marginTop: "4px", fontSize: "11px", fontWeight: 700, color: "#8a94a3", fontFamily: "Arial, sans-serif" }}>{feedDate(item.publishedAt)}</div>}
             </div>
           </Link>
         ))

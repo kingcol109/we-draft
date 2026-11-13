@@ -2,14 +2,12 @@
 //
 // /draftsim/recent — Recent Drafts: the newest public one-team sims users
 // saved (publicDraftSims, utils/draftSim/publicSims.js), every team or one
-// (the team picker), either class. Up top, a few numbers over the drafts
-// listed — the start of the sim's public statistics.
+// (the team picker), either class — just the drafts, no stats over them.
 import { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { NFL_TEAM_ABBRS } from "../../utils/coachHistory";
 import { SIM_YEARS } from "../../utils/draftSim/data";
 import { loadRecentSims } from "../../utils/draftSim/publicSims";
-import { averageGrade } from "../../utils/draftSim/simProfile";
 import { SavedTeamCard, PANEL } from "./SavedSims";
 import LoadingSpinner from "../LoadingSpinner";
 
@@ -63,7 +61,6 @@ export default function RecentSims({ branding = {}, names, isMobile }) {
 
       {!sims ? <LoadingSpinner label="Loading drafts" size={32} minHeight="30vh" /> : (
         <>
-          <Snapshot sims={shown} team={team} names={names} isMobile={isMobile} />
           {shown.length === 0 ? (
             <div style={{ ...PANEL, padding: 28, textAlign: "center", color: "#c9d4e5", fontFamily: BODY, fontSize: 14, lineHeight: 1.6 }}>
               {error ? "Couldn't load drafts — try again." : `No public drafts${team ? ` for the ${names(team)}` : ""} yet. Finish a one-team sim and save it to your profile — it shows up here.`}
@@ -86,45 +83,6 @@ export default function RecentSims({ branding = {}, names, isMobile }) {
           )}
         </>
       )}
-    </div>
-  );
-}
-
-// Over the drafts listed: how many, the average grade, the players taken
-// most and — for one team — the first pick users make most.
-function Snapshot({ sims, team, names, isMobile }) {
-  const stats = useMemo(() => {
-    const players = {};
-    const firsts = {};
-    const grades = {};
-    sims.forEach((s) => {
-      grades[s.grade] = (grades[s.grade] || 0) + 1;
-      (s.picks || []).forEach((p, i) => {
-        const k = `${p.first} ${p.last}`;
-        players[k] = (players[k] || 0) + 1;
-        if (i === 0) firsts[k] = (firsts[k] || 0) + 1;
-      });
-    });
-    const top = (m, n) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, n);
-    return { avg: averageGrade(grades), players: top(players, 3), first: top(firsts, 1)[0] };
-  }, [sims]);
-  if (sims.length < 2) return null;
-  const tile = { ...PANEL, padding: "10px 14px", minWidth: 0 };
-  const label = { color: "#8b9bb4", fontSize: 10, fontWeight: 900, letterSpacing: "0.14em" };
-  const value = { color: "#fff", fontSize: 15, fontWeight: 900, marginTop: 2 };
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
-      <div style={tile}><div style={label}>DRAFTS</div><div style={value}>{sims.length}</div></div>
-      {stats.avg && <div style={tile}><div style={label}>AVERAGE GRADE</div><div style={value}>{stats.avg}</div></div>}
-      {team && stats.first && (
-        <div style={tile}><div style={label}>{names(team).toUpperCase()}&apos; TOP FIRST PICK</div><div style={value}>{stats.first[0]} <span style={{ color: "#8b9bb4", fontSize: 12, fontFamily: BODY }}>({stats.first[1]}×)</span></div></div>
-      )}
-      <div style={{ ...tile, gridColumn: isMobile ? "1 / -1" : "auto" }}>
-        <div style={label}>MOST DRAFTED</div>
-        <div style={{ color: "#dbe4f0", fontSize: 12, fontFamily: BODY, marginTop: 4, lineHeight: 1.5 }}>
-          {stats.players.map(([n, c]) => <div key={n}><strong style={{ color: "#fff" }}>{n}</strong> · {c}×</div>)}
-        </div>
-      </div>
     </div>
   );
 }

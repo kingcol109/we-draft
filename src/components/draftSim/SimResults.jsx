@@ -16,6 +16,7 @@ import { Link } from "react-router-dom";
 import { haulRecords, simShareText, simCallToAction, mockShareText, simUrl } from "../../utils/draftSim/share";
 import { shareRow } from "../MockShareCard";
 import { SimReportStory, BoardStory } from "./SimShareCards";
+import { loadHeadshot } from "./simHeadshots";
 import { useAuth } from "../../context/AuthContext";
 import { teamHaul, needName, groupedNeeds, pickName } from "../../utils/draftSim/engine";
 import { gradeTake } from "../../utils/draftSim/analysts";
@@ -336,20 +337,21 @@ function SaveButton({ sim, data, hauls, speed, full }) {
 // capture (utils/exportImages.js) — an external logo can taint the canvas
 // and blank the export. ──
 // size: "big" (Mock Draft mode, beside FULL DRAFT) or "card" (on the
-// report card, beside the grade). toggle: an optional switch under the
-// image ({ label, on, set }) that changes the card — each version is built
-// once and kept.
-function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, showText = true, toggle = null }) {
+// report card, beside the grade). toggles: optional switches under the
+// image ([{ label, on, set }]) that change the card — each combination is
+// built once and kept. ready: false while the card is still getting what it
+// shows (the headshots) — the capture waits for it.
+function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, showText = true, toggles = [], ready = true }) {
   const cardRef = useRef(null);
   const building = useRef("");
   const [images, setImages] = useState({}); // version → { url }
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
-  const version = toggle ? String(!!toggle.on) : "one";
+  const version = toggles.length ? toggles.map((t) => (t.on ? 1 : 0)).join("") : "one";
   const image = images[version] || null;
 
   const build = async () => {
-    if (images[version] || building.current === version || !cardRef.current) return;
+    if (!ready || images[version] || building.current === version || !cardRef.current) return;
     building.current = version;
     setFailed(false);
     try {
@@ -366,8 +368,8 @@ function ShareFlow({ card, text, xText = text, fileName, title, isMobile, size, 
   const openShare = () => { setOpen(true); build(); };
   // The toggle flipped with the dialog open: build that version (the card
   // has re-rendered by now).
-  useEffect(() => { if (open) build(); }, [version]); // eslint-disable-line react-hooks/exhaustive-deps
-  const toggleRow = toggle && <ShareToggle label={toggle.label} on={toggle.on} onChange={toggle.set} />;
+  useEffect(() => { if (open) build(); }, [version, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleRow = toggles.map((t) => <ShareToggle key={t.label} label={t.label} on={t.on} onChange={t.set} />);
 
   // 𝕏 Post opens X itself with the post written, phone or not — no share
   // sheet in between (Save Image is there to attach the picture).
@@ -439,8 +441,20 @@ function MockShare({ sim, data, isMobile }) {
 function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
   // Grades are off the image and the message unless they turn them on.
   const [grades, setGrades] = useState(false);
+  // Headshots in place of the school logos (simHeadshots.js), loaded the
+  // first time they're turned on.
+  const [photos, setPhotos] = useState(false);
+  const [headshots, setHeadshots] = useState(null);
   const name = (t) => { const b = data.branding[t] || {}; return b.Team ? `${b.City || ""} ${b.Team}`.trim() : t; };
   const mine = hauls.filter((h) => h.rows.length);
+  const pickIds = mine.flatMap((h) => h.rows.map((r) => r.prospect?.id).filter(Boolean)).join(",");
+  useEffect(() => {
+    if (!photos || headshots) return undefined;
+    let live = true;
+    const ids = pickIds.split(",").filter(Boolean);
+    Promise.all(ids.map(loadHeadshot)).then((urls) => { if (live) setHeadshots(Object.fromEntries(ids.map((id, i) => [id, urls[i]]))); });
+    return () => { live = false; };
+  }, [photos, headshots, pickIds]);
   // No teams of their own: share the first round.
   const roundOne = sim.picks.filter((p) => p.round === 1 && p.selection);
 
@@ -460,9 +474,10 @@ function SimShare({ sim, data, hauls, isMobile, size = "card" }) {
   const rows = roundOne.map((p) => ({ ...shareRow(data.branding, { pickNumber: p.overall, team: p.owner, player: sim.byId[p.selection], via: p.via }), logo: teamLogo(data.branding[p.owner] || {}) }));
   return (
     <ShareFlow size={size} isMobile={isMobile} title="Share your draft" text={text} fileName={`WeDraft_DraftSim_${data.year}.png`}
-      toggle={mine.length ? { label: "Include grades", on: grades, set: setGrades } : null}
+      toggles={mine.length ? [{ label: "Include grades", on: grades, set: setGrades }, { label: "Headshots", on: photos, set: setPhotos }] : []}
+      ready={!photos || !!headshots}
       card={(ref) => mine.length
-        ? <SimReportStory ref={ref} year={data.year} site={site} teams={teams} grades={grades} />
+        ? <SimReportStory ref={ref} year={data.year} site={site} teams={teams} grades={grades} headshots={photos ? headshots : null} />
         : <BoardStory ref={ref} eyebrow={`${data.year} NFL DRAFT SIM`} title={`My ${data.year} Draft Sim`} site={site} rows={rows} />} />
   );
 }

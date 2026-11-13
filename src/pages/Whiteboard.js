@@ -51,9 +51,8 @@ import { db } from "../firebase";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { getPageScale, unzoomTransform, cssRect, viewportCssWidth, viewportCssHeight } from "../utils/pageZoom";
 import { GRAPHIC_MODES } from "../utils/whiteboardGraphic";
-import { WB_LISTS, listInfo, listTitles, EMPTY_TEXT, buildList, listPills, movesFrom, nextHistory, pickBaseline } from "../utils/whiteboardLists";
+import { WB_LISTS, listInfo, listTitles, listPills, movesFrom, nextHistory, pickBaseline } from "../utils/whiteboardLists";
 import { renderGraphic, saveGraphic } from "../utils/savedGraphics";
-import { averageGradesFor } from "../utils/communityGrades";
 import { statsDay } from "../utils/draftSim/stats";
 import ShareSheet, { ShareChips, ShareImagePreview } from "../components/ShareSheet";
 import { claimSharePrompt } from "../utils/sharePrompt";
@@ -1486,7 +1485,7 @@ function WbSelect({ id, label, value, onChange, options, dot }) {
 // A themed list's players: the picks in order (tap one to take it off),
 // then a search of the board — matches show as you type; tap one to add
 // it, up to max.
-function ListPicker({ accent, players, chosen, max, search, onSearch, onToggle, onSuggest, onClear, custom }) {
+function ListPicker({ accent, players, chosen, max, search, onSearch, onToggle, onClear }) {
   const byId = new Map(players.map((p) => [p.id, p]));
   const q = search.trim().toLowerCase();
   const full = chosen.length >= max;
@@ -1498,7 +1497,6 @@ function ListPicker({ accent, players, chosen, max, search, onSearch, onToggle, 
       <div className="wdss-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span>Players · {chosen.length}/{max}</span>
         <span style={{ display: "flex", gap: 12, textTransform: "none", letterSpacing: 0 }}>
-          {custom && <button type="button" style={link} onClick={onSuggest}>Use suggestions</button>}
           {chosen.length > 0 && <button type="button" style={link} onClick={onClear}>Clear</button>}
         </span>
       </div>
@@ -1557,13 +1555,12 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(true);
   const [note, setNote] = useState("");
-  const [empty, setEmpty] = useState("");
-  const [community, setCommunity] = useState(null);
   const [saved, setSaved] = useState(""); // the settings key last saved
   const [savingGraphic, setSavingGraphic] = useState(false);
   // The user's picks for each list: { "list|pos": [ids] } — kept in this
-  // browser per account and class. A list without picks starts from its
-  // suggestions (utils/whiteboardLists.js buildList).
+  // browser per account and class. A list starts empty — the user adds
+  // every player (no suggestions); the graphic shows "ADD PLAYERS BELOW"
+  // until they do.
   const picksKey = `wb-lists-${uid || "anon"}-${classYear}`;
   const [picks, setPicks] = useState(() => { try { return JSON.parse(localStorage.getItem(picksKey) || "{}"); } catch { return {}; } });
   const [search, setSearch] = useState("");
@@ -1586,16 +1583,6 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
     };
   }).filter(Boolean)), [board, bigLists, markers, playerById, pos, shortOf]);
 
-  // Community grades (one snapshot read), the first time a list needs them.
-  const needCommunity = !!info.community && !community;
-  useEffect(() => {
-    if (!needCommunity) return undefined;
-    let live = true;
-    const ids = ROUNDS.flatMap((r) => bigLists[r] || []);
-    averageGradesFor(ids).then((g) => { if (live) setCommunity(g); }).catch(() => { if (live) setCommunity({}); });
-    return () => { live = false; };
-  }, [needCommunity, bigLists]);
-
   const titles = listTitles(listId, pos);
   // The day it was made, on the graphic (a saved one keeps it).
   const date = useMemo(() => new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase(), []);
@@ -1603,17 +1590,12 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
   const pickId = `${listId}|${pos}`;
   const base = useMemo(() => (baseline ? baseline.ids.filter((id) => pos === "ALL" || groupOf(playerById.get(id)) === pos) : null), [baseline, pos, playerById]);
   const moves = useMemo(() => movesFrom(players, base), [players, base]);
-  const suggested = useMemo(() => {
-    if (!themed || (info.community && !community)) return null;
-    return buildList(listId, players, { community: community || {}, baseline: base }).map((p) => p.id);
-  }, [themed, info.community, community, players, listId, base]);
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
-  // This list's players: the user's picks, else the suggestions.
+  // This list's players: the user's picks (none to start).
   const chosen = useMemo(() => {
     if (!themed) return [];
-    const ids = picks[pickId] || suggested;
-    return ids ? ids.filter((id) => byId.has(id)).slice(0, max) : null;
-  }, [themed, picks, pickId, suggested, byId, max]);
+    return (picks[pickId] || []).filter((id) => byId.has(id)).slice(0, max);
+  }, [themed, picks, pickId, byId, max]);
   const setChosen = (ids) => {
     setPicks((prev) => {
       const next = { ...prev };
@@ -1623,14 +1605,12 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
     });
   };
   const toggle = (id) => {
-    const cur = chosen || [];
-    if (cur.includes(id)) setChosen(cur.filter((x) => x !== id));
-    else if (cur.length < max) setChosen([...cur, id]);
+    if (chosen.includes(id)) setChosen(chosen.filter((x) => x !== id));
+    else if (chosen.length < max) setChosen([...chosen, id]);
   };
 
   const rows = useMemo(() => {
     if (!themed) return players;
-    if (!chosen) return null;
     return chosen.map((id) => ({ ...byId.get(id), pills: listPills(listId, moves, id) }));
   }, [themed, players, chosen, byId, listId, moves]);
 
@@ -1644,11 +1624,6 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
     if (!spec) { setBusy(true); return undefined; }
     let live = true;
     setBusy(true); setNote("");
-    if (!spec.players.length) {
-      setEmpty(EMPTY_TEXT); setUrl(""); setBusy(false);
-      return undefined;
-    }
-    setEmpty("");
     renderGraphic(spec).then((blob) => {
       if (!live) return;
       blobRef.current = blob;
@@ -1693,7 +1668,8 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
   };
   const fileShare = canShareFiles();
   const canCopy = typeof window !== "undefined" && !!window.ClipboardItem && !!navigator.clipboard?.write;
-  const ready = !busy && !!url;
+  // A themed list with nobody on it is only a preview — nothing to share yet.
+  const ready = !busy && !!url && (!themed || chosen.length > 0);
   const isSaved = saved === specKey;
 
   // The site's share dialog (components/ShareSheet.jsx); the list, position
@@ -1701,9 +1677,7 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
   return (
     <ShareSheet open onClose={onClose} title={prompted ? "Board saved — share it?" : "Share a graphic"}
       subtitle={prompted ? "Pick a list and a position, then post or save it." : undefined}
-      preview={empty
-        ? <div style={{ aspectRatio: "4 / 5", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 24, borderRadius: 12, background: "rgba(255,255,255,0.05)", border: "1px dashed rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.75)", font: "700 14px/1.5 Arial, sans-serif" }}>{empty}</div>
-        : <div style={{ opacity: busy && url ? 0.5 : 1, transition: "opacity .15s" }}><ShareImagePreview src={url} alt={`Your ${pos} ${themed ? info.label : "board"} graphic`} failed={!url && !busy && !!note} failedText={note} /></div>}
+      preview={<div style={{ opacity: busy && url ? 0.5 : 1, transition: "opacity .15s" }}><ShareImagePreview src={url} alt={`Your ${pos} ${themed ? info.label : "board"} graphic`} failed={!url && !busy && !!note} failedText={note} /></div>}
       below={<>
         <WbSelect id="wb-list-type" label="List" value={listId} dot={themed ? info.color : null}
           onChange={(v) => { setListId(v); setSearch(""); setNote(""); }}
@@ -1713,9 +1687,9 @@ function ShareGraphicDialog({ pos, onPos, onClose, board, markers, playerById, p
           options={["ALL", ...POSITIONS].map((p) => ({ id: p, label: p === "ALL" ? "All positions" : p,
             disabled: p === "ALL" ? !Object.values(placedByPos).some(Boolean) : !placedByPos[p] }))} />
         <ShareChips label="Graphic" value={shownMode} onChange={setMode} options={modes.map((m) => ({ id: m.id, label: m.label }))} />
-        {themed && chosen && (
+        {themed && (
           <ListPicker accent={info.color} players={players} chosen={chosen} max={max} search={search} onSearch={setSearch}
-            onToggle={toggle} onSuggest={() => setChosen(null)} onClear={() => setChosen([])} custom={!!picks[pickId]} />
+            onToggle={toggle} onClear={() => setChosen([])} />
         )}
       </>}
       primary={[

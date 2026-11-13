@@ -5911,7 +5911,7 @@ useEffect(() => {
                   <button onClick={() => handleSaveEvaluation()} disabled={saving} className="wdm-btn-primary w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:siteC1, border:`2px solid ${siteC2}`, color:"#fff", letterSpacing:"0.08em" }}>
                     {saving?"Saving...":"Save Evaluation"}
                   </button>
-                  <ShareTextButton text={evalShare.text} preview={shareCard(evalShare)} graphic={evalGraphic} openSignal={evalSharePrompt} promptTitle="Evaluation saved — share it?" subject={`My scouting report: ${player.First} ${player.Last}`} color={siteC1}
+                  <ShareTextButton text={evalShare.text} preview={shareCard(evalShare)} graphic={evalGraphic} openSignal={evalSharePrompt} promptTitle="Evaluation saved, do you want to share it?" subject={`My scouting report: ${player.First} ${player.Last}`} color={siteC1}
                     className="wdm-btn-ghost w-full font-black uppercase py-3 rounded transition hover:opacity-90" style={{ backgroundColor:"#fff", border:`2px solid ${siteC1}`, color:siteC1, letterSpacing:"0.08em" }}>
                     Share Evaluation
                   </ShareTextButton>

@@ -1,4 +1,4 @@
-import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats, spotlightCaption } from "./spotlight";
+import { scoutingReport, spotlightInput, spotlightSlides, spotlightFrame, FRAME_WINDOW, heightText, measurementsOf, espnStats, spotlightCaption, editedStats, statsSeed } from "./spotlight";
 
 const env = { measure: (t, size) => String(t).length * size * 0.45, images: {} };
 const player = { id: "p1", First: "Mark", Last: "Bowman", Position: "TE", School: "USC", Eligible: "2029", Height: "6'5\"", Weight: "245", Slug: "mark-bowman-2029-te" };
@@ -146,4 +146,17 @@ test("the caption: headline, room for the bio, the grade block with weaknesses",
     "Grade him yourself: we-draft.com/player/mark-bowman-2029-te",
     "#NFLDraft #CollegeFootball #2027NFLDraft #USC #MarkBowman",
   ].join("\n\n"));
+});
+
+test("editedStats: ESPN as is, the admin's own numbers, and the highlighted one first", () => {
+  const espn = { hero: { year: "2025", team: "ND", tiles: [{ label: "YDS", value: "900", rank: "" }, { label: "TD", value: "9", rank: "12" }] }, table: { title: "T", cols: [], rows: [] } };
+  expect(editedStats(espn, null)).toBe(espn);
+  const seed = statsSeed(espn);
+  const lead = editedStats(espn, { ...seed, lead: 1 });
+  expect(lead.hero.tiles.map((t) => t.label)).toEqual(["TD", "YDS"]);
+  expect(lead.table).toBe(espn.table);
+  expect(editedStats(espn, { ...seed, table: false }).table).toBeUndefined();
+  const own = editedStats(null, { year: "", team: "", tiles: [{ label: "int", value: "6", rank: "#3" }, { label: "", value: "" }], lead: 0 });
+  expect(own.hero).toEqual({ year: "", team: "", tiles: [{ label: "INT", value: "6", rank: "3" }] });
+  expect(editedStats(null, { tiles: [], lead: 0 })).toBeNull();
 });

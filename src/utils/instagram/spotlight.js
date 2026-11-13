@@ -134,7 +134,7 @@ export function scoutingReport({ player, evaluations = [], classSnap = null, nfl
 // bars (show the trait bars — 5+ evaluations), fits: [{ name, logo }] };
 // advance: his class is past the next draft; showRanks / showFits: the
 // report's class rank and NFL fits.
-export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "" }) {
+export function spotlightInput({ player, school = {}, photo = null, headshot = "", report = {}, advance = false, brandLogo = "", badgeLogo = "", address = "", look = "wash", accent = "", badge = "crest", showRanks = true, showFits = false, highlights = false, stats = null, showStats = true, classLogo = "", jersey = "" }) {
   return {
     first: player?.First || "", last: player?.Last || "", pos: player?.Position || "", school: player?.School || "", year: String(player?.Eligible || ""),
     height: heightText(player?.Height), weight: player?.Weight ? String(player.Weight) : "",
@@ -147,6 +147,9 @@ export function spotlightInput({ player, school = {}, photo = null, headshot = "
     // His class's logo for the cover's top right (the NFL Draft shield for the
     // next draft, ADVANCE SCOUTING for later classes) — the caller picks it.
     classLogo,
+    // His jersey number (playerPhotos.jersey, from ESPN's roster) — the
+    // highlight frame's top right beside his position ("WR #17").
+    jersey: String(jersey ?? "").replace(/[^0-9]/g, "").slice(0, 2),
     // The cover's look ("wash" | "spotlight") and the accent (frame, bars,
     // glow, ring) — the school's second color unless the admin picks one.
     look: look === "spotlight" ? "spotlight" : "wash", accent: hex(accent) || "",
@@ -658,6 +661,29 @@ export function espnStats(json, pos, seasonRanks = null) {
   return out.hero || out.table || out.career ? out : null;
 }
 
+// The admin's stats (Instagram → Spotlight's Stats editor), over or instead
+// of ESPN's. espn: espnStats' result or null. edit: null (ESPN's as they
+// are) or { year, team, tiles: [{ label, value, rank }], lead (the tile
+// drawn huge), table (keep ESPN's season table / career row) }. → the
+// stats the slide draws, or null.
+export const MAX_STAT_TILES = 5; // the lead and four cards
+export function statsSeed(espn) {
+  const h = espn?.hero;
+  return { year: h?.year || "", team: h?.team || "", tiles: (h?.tiles || []).map((t) => ({ label: t.label, value: t.value, rank: t.rank || "" })), lead: 0, table: true };
+}
+export function editedStats(espn, edit) {
+  if (!edit) return espn || null;
+  const clean = (v) => String(v ?? "").trim();
+  const tiles = (edit.tiles || []).map((t, k) => ({ k, label: clean(t.label).toUpperCase(), value: clean(t.value), rank: clean(t.rank).replace(/^#/, "") }))
+    .filter((t) => t.value || t.label);
+  const lead = tiles.findIndex((t) => t.k === edit.lead);
+  if (lead > 0) tiles.unshift(...tiles.splice(lead, 1));
+  const hero = tiles.length ? { year: clean(edit.year), team: clean(edit.team).toUpperCase(), tiles: tiles.slice(0, MAX_STAT_TILES).map(({ label, value, rank }) => ({ label, value, rank })) } : null;
+  const keep = edit.table !== false && espn ? { table: espn.table || undefined, career: espn.career || undefined } : {};
+  const out = { hero, ...keep };
+  return out.hero || out.table || out.career ? out : null;
+}
+
 // A national rank as its own badge: a gold-framed navy card, NATIONAL RANK
 // across its gold header, the rank big in the middle, IN FBS under it.
 function rankBadge(env, x, y, w, h, rank) {
@@ -734,7 +760,7 @@ function statsSvg(env, input, i, total) {
   if (st.hero) {
     const h = heroH;
     const [lead, ...rest] = st.hero.tiles;
-    const tag = `${st.hero.year} SEASON`;
+    const tag = st.hero.year ? `${st.hero.year} SEASON` : "SEASON";
     const tagW = widthOf(env, tag, 38, 3) + 56;
     const tagH = 58;
     // skewX shears about the origin: shift it back under its own box.
@@ -921,7 +947,8 @@ function evaluateSvg(env, input, i, total) {
 // Not a slide: a 1080×1350 overlay to cut his highlight clip under in a
 // video editor, so the clip looks like the rest of the carousel. Everything
 // but the window is drawn — his school's color falling off to black, speed
-// stripes, FILM and his school, the round WD badge top right, his name bar,
+// stripes, FILM and his school, his position and number top right
+// ("WR #17"), his name bar,
 // the footer ("GRADE HIM ON WE-DRAFT.COM") — and
 // the window is left clear (a PNG keeps it transparent), outlined in the
 // accent with viewfinder corners.
@@ -933,6 +960,25 @@ export function badgeMark(env, url, right, cy, size = 112) {
     svg: `<circle cx="${r1(right - size / 2)}" cy="${r1(cy + 4)}" r="${r1(size / 2)}" fill="#000000" fill-opacity="0.35"/>`
       + image(env, url, right - size, cy - size / 2, size, size),
     w: size,
+  };
+}
+
+// His position and number, top right ("WR #17", or just "WR" with no number
+// on file): a big pill centered on the FILM pill's line, in the accent →
+// { svg, w }.
+function idTag(env, pos, number, right, color) {
+  const label = [up(pos), number ? `#${number}` : ""].filter(Boolean).join(" ");
+  if (!label) return { svg: "", w: 0 };
+  const h = 100;
+  const fs = 68;
+  const y = 87 - h / 2;
+  const w = r1(widthOf(env, label, fs, 3) + 64);
+  return {
+    svg: `<rect x="${r1(right - w)}" y="${y + 5}" width="${w}" height="${h}" rx="${h / 2}" fill="#000000" fill-opacity="0.35"/>`
+      + `<rect x="${r1(right - w)}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${color}"/>`
+      + `<rect x="${r1(right - w + 5)}" y="${y + 5}" width="${r1(w - 10)}" height="${h - 10}" rx="${h / 2 - 5}" fill="none" stroke="#ffffff" stroke-opacity="0.6" stroke-width="2.5"/>`
+      + text(r1(right - w / 2), r1(87 + fs * 0.35), label, fs, readableOn("#ffffff", color), { anchor: "middle", spacing: 3 }),
+    w,
   };
 }
 
@@ -963,7 +1009,7 @@ export function spotlightFrame(input, env) {
   body += `<rect x="${PAD}" y="54" width="${r1(kw)}" height="66" rx="33" fill="${GOLD}"/>`
     + `<path d="M ${PAD + 26} 73 L ${PAD + 26} 101 L ${PAD + 48} 87 Z" fill="${NAVY}"/>`
     + text(PAD + 60, 54 + 33 + 14, k, 40, NAVY, { spacing: 4 });
-  const brand = badgeMark(env, input.badgeLogo, W - PAD, 87);
+  const brand = idTag(env, input.pos, input.jersey, W - PAD, c2);
   body += fitLine(env, PAD + kw + 22, 102, up(input.school), 40, W - PAD - brand.w - (brand.w ? 26 : 0) - (PAD + kw + 22), ink, { spacing: 2, opacity: 0.9 }).svg
     + brand.svg;
 
@@ -975,16 +1021,17 @@ export function spotlightFrame(input, env) {
     + `<rect x="${wx + 10}" y="${wy + 10}" width="${ww - 20}" height="${wh - 20}" rx="${wr - 8}" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="2"/>`
     + `<g filter="url(#fshadow)">${corner(wx + ci, wy + ci, 1, 1)}${corner(wx + ww - ci, wy + ci, -1, 1)}${corner(wx + ci, wy + wh - ci, 1, -1)}${corner(wx + ww - ci, wy + wh - ci, -1, -1)}</g>`;
 
-  // The name bar: his name on the left, position and class on the right.
+  // The name bar: his name on the left, class and size on the right (his
+  // position is up top with his number).
   const right = [input.year && `${input.year} CLASS`, input.height && input.weight ? `${input.height}${DOT}${input.weight} LBS` : input.height].filter(Boolean);
-  const rw = Math.max(0, ...right.map((t) => widthOf(env, t, 34, 2)), widthOf(env, up(input.pos), 34, 1) + 34);
+  // Big now that the position's moved up top: 50px, two lines.
+  const RS = 50;
+  const rw = Math.max(0, ...right.map((t) => widthOf(env, t, RS, 2)));
   const nw = W - PAD * 2 - rw - 30;
   body += fitLine(env, PAD, 1094, up(input.first), 56, nw, "#ffffff", { spacing: 3, opacity: 0.9 }).svg
     + fitLine(env, PAD - 3, 1212, up(input.last), 128, nw, "#ffffff", { spacing: 2, min: 50 }).svg;
-  const posW = widthOf(env, up(input.pos), 34, 1) + 34;
-  body += `<rect x="${r1(W - PAD - posW)}" y="1064" width="${r1(posW)}" height="48" rx="24" fill="${c2}"/>`
-    + text(W - PAD - posW / 2, 1100, up(input.pos), 34, readableOn("#ffffff", c2), { anchor: "middle", spacing: 1 });
-  right.forEach((t, j) => { body += text(W - PAD, 1160 + j * 46, t, 34, "#ffffff", { anchor: "end", spacing: 2, opacity: 0.85 }); });
+  // Bottom-aligned with his last name.
+  right.forEach((t, j) => { body += text(W - PAD, 1208 - (right.length - 1 - j) * 62, t, RS, "#ffffff", { anchor: "end", spacing: 2, opacity: 0.9 }); });
   body += `<rect x="${PAD}" y="${bottom - 22}" width="${W - PAD * 2}" height="4" rx="2" fill="${c2}" fill-opacity="0.8"/>`;
 
   body += footer(env, kit.themeOf("dark"), { logo: input.brandLogo, cta: "GRADE HIM ON WE-DRAFT.COM", more: false });

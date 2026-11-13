@@ -32,7 +32,7 @@
 // The font is the bundled Bebas Neue (assets/fonts, SIL OFL), embedded in the
 // SVG, since an SVG drawn as an image can't reach the page's fonts. Images
 // are read as data URIs for the same reason (and so the PNG exports).
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { addDoc, collection, deleteDoc, doc, documentId, getDoc, getDocs, limit, orderBy, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
@@ -46,7 +46,7 @@ import { NFL_TEAMS } from "../utils/coachHistory";
 import {
   IG_W, IG_H, IG_MAX_SLIDES, mockSlides, mockInput, mockCaption, mockSlidePlan, playerPost, playerInput, playerCaption,
 } from "../utils/instagram/posts";
-import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats } from "../utils/instagram/spotlight";
+import { spotlightSlides, spotlightInput, spotlightCaption, spotlightImageUrls, scoutingReport, spotlightFrame, espnStats, editedStats, statsSeed, MAX_STAT_TILES } from "../utils/instagram/spotlight";
 import { fetchEspnCareer } from "./PlayerEspnStats";
 import { customInput, customSlides, customCaption, customImageUrls, customCutoutUrls, customPlayerIds, layerBox, newLayer, blankSlide, LAYER_LABELS } from "../utils/instagram/custom";
 import { transferSlides, transferInput, transferCaption, transferImageUrls, transferFrame } from "../utils/instagram/transfer";
@@ -1129,6 +1129,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   const [showFits, setShowFits] = useState(false);
   // The stats slide (his ESPN college stats), in when he has them.
   const [showStats, setShowStats] = useState(true);
+  // The admin's own stats (utils/instagram/spotlight.js editedStats): null =
+  // ESPN's as they are; else { year, team, tiles, lead, table }.
+  const [statEdit, setStatEdit] = useState(null);
   // Highlight clips, after the cover: [{ path (ig-videos/…), name, bytes,
   // duration, w, h }]; their preview links by path; the one uploading.
   const [videos, setVideos] = useState([]);
@@ -1188,7 +1191,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
       const stats = career ? espnStats(career, p.Position, cfbd?.docs[0]?.data().seasonRanks || null) : null;
       const action = ph.action || [];
       setPlayer(p);
-      setData({ school: schoolSnap.docs[0]?.data() || {}, action, headshot: ph.headshot?.url || "", report, stats });
+      setData({ school: schoolSnap.docs[0]?.data() || {}, action, headshot: ph.headshot?.url || "", jersey: ph.jersey || "", report, stats });
       choosePhoto(action[0]?.url || "");
       setFocus(focusFor(action[0]));
       setAdvance(!!CLASS_LOGOS[p.Eligible] || isAdvance(p.Eligible));
@@ -1196,6 +1199,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
       setAccent("");
       // His own clips (a saved post's come back below).
       setVideos([]);
+      setStatEdit(null);
       if (restore) {
         setPhotoUrl(restore.photoUrl ?? "");
         setFocus(restore.focus || "center");
@@ -1206,6 +1210,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
         setShowRanks(restore.showRanks !== false);
         setShowFits(!!restore.showFits);
         setShowStats(restore.showStats !== false);
+        setStatEdit(restore.statEdit && Array.isArray(restore.statEdit.tiles) ? restore.statEdit : null);
         setVideos(Array.isArray(restore.videos) ? restore.videos.filter((v) => v?.path) : []);
         setAdjust({ ...NO_ADJUST, ...restore.adjust });
       }
@@ -1218,9 +1223,9 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
   };
 
   const input = useMemo(() => (player && data ? {
-    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: data.stats, showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "" }),
+    ...spotlightInput({ player, school: data.school, photo: photoUrl ? { url: photoUrl } : null, headshot: data.headshot, report: data.report, advance, brandLogo: WdLogo, badgeLogo: WdBadge, look, accent, badge, showRanks, showFits, highlights: videos.length > 0, stats: editedStats(data.stats, statEdit), showStats, classLogo: advance ? CLASS_LOGOS[player.Eligible] || "" : "", jersey: data.jersey }),
     focus, adjust,
-  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, videos.length]);
+  } : null), [player, data, photoUrl, advance, focus, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos.length]);
   const cap = useCaption(saved, useMemo(() => (input ? spotlightCaption(input) : ""), [input]));
 
   useEffect(() => {
@@ -1355,13 +1360,14 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             <div>
               <div style={label}>Slides show</div>
               <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
-                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits], ...(data.stats ? [["Stats slide", showStats, setShowStats]] : [])].map(([t, on, set]) => (
+                {[["Class rank", showRanks, setShowRanks], ["NFL fits", showFits, setShowFits], ...(data.stats || statEdit ? [["Stats slide", showStats, setShowStats]] : [])].map(([t, on, set]) => (
                   <label key={t} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
                     <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> {t}
                   </label>
                 ))}
               </div>
             </div>
+            <StatsEditor espn={data.stats} edit={statEdit} onChange={setStatEdit} />
             <div style={{ fontSize: "12px", fontWeight: 700, color: "#5b6b84" }}>
               Report: {data.report.grade.avg == null ? "Watchlist" : data.report.grade.label} · {data.report.evals} evaluation{data.report.evals === 1 ? "" : "s"}
               {data.report.posRank ? ` · #${data.report.posRank} ${player.Position}` : ""}{data.report.fits.length ? ` · ${data.report.fits.length} NFL fit${data.report.fits.length === 1 ? "" : "s"}` : ""}
@@ -1406,7 +1412,7 @@ function SpotlightMaker({ setMsg, saved, onSaved }) {
             <SaveBar type="spotlight" defaultName={`Spotlight · ${player.First} ${player.Last}`} caption={cap.caption} svgs={svgs} post={post} setPost={setPost} onSaved={onSaved} setMsg={setMsg}
               playerIds={[player.id]} subject={{ kind: "player", playerId: player.id }}
               videos={videos.map((v, k) => ({ at: 1 + k, path: v.path }))} hold={uploading ? "Wait for the video to finish uploading." : ""}
-              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, showStats, videos })} />
+              stateNow={() => ({ playerId: player.id, photoUrl, focus, advance, adjust, look, accent, badge, showRanks, showFits, showStats, statEdit, videos })} />
             <CaptionBox c={cap} />
           </>
         )}
@@ -2092,6 +2098,61 @@ function CustomPostMaker({ setMsg, saved, onSaved }) {
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// The stats slide's numbers: ESPN's to start (edit any of them), or the
+// admin's own when ESPN has none. Highlight picks the one drawn huge; the
+// rest go on cards under it. edit: null = ESPN's untouched.
+function StatsEditor({ espn, edit, onChange }) {
+  const cur = edit || statsSeed(espn);
+  const custom = !!edit;
+  const set = (patch) => onChange({ ...cur, ...patch });
+  const setTile = (k, patch) => set({ tiles: cur.tiles.map((t, j) => (j === k ? { ...t, ...patch } : t)) });
+  const remove = (k) => set({ tiles: cur.tiles.filter((_, j) => j !== k), lead: cur.lead === k ? 0 : cur.lead > k ? cur.lead - 1 : cur.lead });
+  const add = () => set({ tiles: [...cur.tiles, { label: "", value: "", rank: "" }] });
+  const hasTable = !!(espn?.table || espn?.career);
+  const box = { border: "1px solid #c9d3e0", borderRadius: "6px", padding: "5px 7px", fontSize: "12px", fontWeight: 700, color: "#0b1220", minWidth: 0, boxSizing: "border-box" };
+  const small = { fontSize: "10px", fontWeight: 900, letterSpacing: "0.06em", color: "#8a97ab", textTransform: "uppercase" };
+  const link = { background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: "11px", fontWeight: 900, color: BLUE };
+  return (
+    <div style={{ border: "1px solid #dfe5ee", borderRadius: "10px", padding: "10px 12px", background: "#f8fafc" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "8px" }}>
+        <span style={{ fontSize: "12px", fontWeight: 900, color: "#0b1220" }}>Stats slide</span>
+        <span style={{ fontSize: "11px", fontWeight: 700, color: "#8a97ab" }}>
+          {custom ? "Your numbers" : espn?.hero ? "ESPN's numbers — edit any to make them yours" : espn ? "ESPN has a table but no season numbers — add your own" : "No ESPN stats — add your own"}
+        </span>
+        {custom && espn && <button onClick={() => onChange(null)} style={{ ...link, marginLeft: "auto" }}>RESET TO ESPN</button>}
+      </div>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+        <label style={{ display: "grid", gap: "2px", width: "90px" }}><span style={small}>Season</span>
+          <input value={cur.year} onChange={(e) => set({ year: e.target.value })} placeholder="2025" style={box} /></label>
+        <label style={{ display: "grid", gap: "2px", width: "110px" }}><span style={small}>Team</span>
+          <input value={cur.team} onChange={(e) => set({ team: e.target.value })} placeholder="ND" style={box} /></label>
+      </div>
+      {cur.tiles.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "54px minmax(0,1.6fr) minmax(0,1fr) 64px 20px", gap: "5px 6px", alignItems: "center" }}>
+          <span style={small}>Highlight</span><span style={small}>Stat</span><span style={small}>Number</span><span style={small} title="National rank, shown as #N IN FBS">FBS rank</span><span />
+          {cur.tiles.map((t, k) => (
+            <Fragment key={k}>
+              <input type="radio" name="wd-stat-lead" checked={cur.lead === k} onChange={() => set({ lead: k })} title="Draw this one huge" style={{ justifySelf: "center" }} />
+              <input value={t.label} onChange={(e) => setTile(k, { label: e.target.value })} placeholder="RECEIVING YARDS" style={box} />
+              <input value={t.value} onChange={(e) => setTile(k, { value: e.target.value })} placeholder="1,204" style={box} />
+              <input value={t.rank} onChange={(e) => setTile(k, { rank: e.target.value })} placeholder="—" style={box} />
+              <button onClick={() => remove(k)} title="Remove" style={{ ...link, color: "#a52a1e", fontSize: "14px" }}>×</button>
+            </Fragment>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", marginTop: "8px", flexWrap: "wrap" }}>
+        {cur.tiles.length < MAX_STAT_TILES && <button onClick={add} style={link}>+ ADD A STAT</button>}
+        {hasTable && (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", fontWeight: 800, color: "#33415a" }}>
+            <input type="checkbox" checked={cur.table !== false} onChange={(e) => set({ table: e.target.checked })} /> ESPN&apos;s {espn.table ? "season table" : "career totals"} under them
+          </label>
+        )}
       </div>
     </div>
   );

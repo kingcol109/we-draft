@@ -166,14 +166,16 @@ function splitEyebrow(eyebrow, year) {
 
 // ── The user's draft. teams: [{ haul, brand, name }]; site: the sim's
 // address, along the bottom; grades: show the team's and each pick's. ──
-export const SimReportStory = forwardRef(function SimReportStory({ year, teams, site, grades = false }, ref) {
+// headshots: { [prospectId]: url } — shown in place of the school logos
+// (the dialog's Headshots switch); a player without one keeps his logo.
+export const SimReportStory = forwardRef(function SimReportStory({ year, teams, site, grades = false, headshots = null }, ref) {
   const shown = teams.slice(0, 3);
   const extra = teams.length - shown.length;
   if (shown.length === 1) {
     const theme = teamTheme(shown[0].brand);
     return (
       <Frame ref={ref} bg={theme.bg}>
-        <SoloReport {...shown[0]} year={year} theme={theme} grades={grades} />
+        <SoloReport {...shown[0]} year={year} theme={theme} grades={grades} headshots={headshots} />
         <Footer site={site} theme={theme} />
       </Frame>
     );
@@ -190,7 +192,7 @@ export const SimReportStory = forwardRef(function SimReportStory({ year, teams, 
     <Frame ref={ref} bg={MULTI_THEME.bg}>
       <Header badge={{ top: `MY ${year}`, bottom: "MOCK DRAFT" }} title={`${shown.length} Team Draft`} theme={MULTI_THEME} mark="SIM" />
       <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: 14, padding: "6px 28px 20px", overflow: "hidden" }}>
-        {shown.map((t) => <CompactReport key={t.haul.team} {...t} maxRows={maxRows} rowH={rowH} grades={grades} />)}
+        {shown.map((t) => <CompactReport key={t.haul.team} {...t} maxRows={maxRows} rowH={rowH} grades={grades} headshots={headshots} />)}
         {extra > 0 && <div style={{ textAlign: "center", fontFamily: BODY, fontWeight: 700, fontSize: 16, color: "rgba(255,255,255,0.6)" }}>+ {extra} more team{extra > 1 ? "s" : ""}</div>}
       </div>
       <Footer site={site} theme={MULTI_THEME} />
@@ -223,7 +225,8 @@ const TWO_COLUMNS_FROM = 5;
 const SOLO_ROOM = STORY_H - 130 - 80 - 26;
 const SOLO_W = STORY_W - 56;
 const COL_GAP = 12;
-function SoloReport({ haul, brand, name, year, theme, grades }) {
+function SoloReport({ haul, brand, name, year, theme, grades, headshots }) {
+  const photoOf = (p) => (headshots && p?.id ? headshots[p.id] || "" : "");
   const blockBg = isReadable(theme.c2, theme.c1, 1.6) ? theme.c2 : "rgba(0,0,0,0.4)";
   const blockInk = blockBg === theme.c2 ? textOn(theme.c2, theme.c1) : "#fff";
   const rows = haul.rows.slice(0, MAX_SOLO_PICKS);
@@ -243,10 +246,14 @@ function SoloReport({ haul, brand, name, year, theme, grades }) {
   const logoSize = Math.round(two ? Math.max(28, Math.min(64, rowH * 0.5)) : Math.max(30, Math.min(120, rowH * 0.7)));
   const blockW = two ? 64 : rowH >= 250 ? 120 : 84;
   const logoSlot = logoSize + (two ? 16 : 24);
+  // A headshot (ESPN's 600×436 cutouts) stands the row's height; with any
+  // on the card, every row's slot is that wide so the names line up.
+  const photoSlot = Math.round(Math.min(two ? 120 : 220, rowH * 1.3));
+  const anyPhoto = rows.some((r) => photoOf(r.prospect));
   // The name gets the row less the block, the logo slot and the grade —
   // in two columns the grade sits on the last name's line, so only that
   // line gives it room.
-  const textRoom = colW - blockW - logoSlot - (two ? 12 : 26);
+  const textRoom = colW - blockW - (anyPhoto ? photoSlot : logoSlot) - (two ? 12 : 26);
   const nameRoom = textRoom - (grades && !two ? 64 : 0);
   // Two columns: the grade beside the last name, and the room it takes.
   const gradeSize = Math.round(nameSize * 0.95);
@@ -265,10 +272,17 @@ function SoloReport({ haul, brand, name, year, theme, grades }) {
                 <div style={{ fontSize: rowH < 56 ? 10 : 12, letterSpacing: "0.14em", opacity: 0.8 }}>RD {pick.round}</div>
                 {/* Up to three digits fit the block. */}
                 <div style={{ fontSize: Math.min(Math.round(two ? rowH * 0.3 : nameSize * 1.15), Math.floor((blockW - 12) / (String(pick.overall).length * 0.78))) }}>{pick.overall}</div>
+                {pick.via && <div style={{ fontSize: rowH < 56 ? 9 : two ? 10 : 12, letterSpacing: "0.06em", opacity: 0.85, marginTop: 1, whiteSpace: "nowrap" }}>VIA {pick.via}</div>}
               </div>
-              <div style={{ width: logoSlot, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {schoolLogo(prospect) && <img src={schoolLogo(prospect)} alt="" style={{ width: logoSize, height: logoSize, objectFit: "contain" }} />}
-              </div>
+              {photoOf(prospect) ? (
+                <div style={{ width: photoSlot, flexShrink: 0, display: "flex", alignItems: "flex-end", justifyContent: "center", overflow: "hidden" }}>
+                  <img src={photoOf(prospect)} alt="" style={{ width: "100%", height: "94%", objectFit: "contain", objectPosition: "center bottom" }} />
+                </div>
+              ) : (
+                <div style={{ width: anyPhoto ? photoSlot : logoSlot, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {schoolLogo(prospect) && <img src={schoolLogo(prospect)} alt="" style={{ width: logoSize, height: logoSize, objectFit: "contain" }} />}
+                </div>
+              )}
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center", paddingRight: two ? 12 : grades ? 4 : 20 }}>
                 {two ? (
                   <>
@@ -281,7 +295,7 @@ function SoloReport({ haul, brand, name, year, theme, grades }) {
                 ) : (
                   <div style={{ fontSize: fitSize(`${up(prospect.First)} ${up(prospect.Last)}`, nameSize, nameRoom), lineHeight: 1.08, ...clip }}>{up(prospect.First)} {up(prospect.Last)}</div>
                 )}
-                <div style={{ fontFamily: BODY, fontWeight: 700, fontSize: subSize, color: "rgba(255,255,255,0.72)", marginTop: rowH < 56 ? 2 : 4, ...clip }}>{prospect.Position} · {prospect.School}{pick.via ? ` · via ${pick.via}` : ""}</div>
+                <div style={{ fontFamily: BODY, fontWeight: 700, fontSize: subSize, color: "rgba(255,255,255,0.72)", marginTop: rowH < 56 ? 2 : 4, ...clip }}>{prospect.Position} · {prospect.School}</div>
               </div>
               {grades && !two && <div style={{ flexShrink: 0, minWidth: 64, paddingRight: 18, display: "flex", alignItems: "center", justifyContent: "flex-end", fontSize: Math.round(nameSize * 1.3), color: gradeColor(letter) }}>{letter}</div>}
             </div>
@@ -293,7 +307,8 @@ function SoloReport({ haul, brand, name, year, theme, grades }) {
   );
 }
 
-function CompactReport({ haul, brand, name, maxRows, rowH, grades }) {
+function CompactReport({ haul, brand, name, maxRows, rowH, grades, headshots }) {
+  const photoOf = (p) => (headshots && p?.id ? headshots[p.id] || "" : "");
   const c1 = brand.Color1 || BLUE;
   const c2 = brand.Color2 || "#ffffff";
   // The pick numbers in whichever team color reads on the navy.
@@ -312,15 +327,18 @@ function CompactReport({ haul, brand, name, maxRows, rowH, grades }) {
       </div>
       <div style={{ display: "flex", flexDirection: "column", padding: "4px 0 6px" }}>
         {rows.map(({ pick, prospect, letter }) => (
-          <div key={pick.overall} style={{ height: rowH, display: "flex", alignItems: "center", gap: 14, padding: "0 16px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <div key={pick.overall} style={{ height: rowH, display: "flex", alignItems: "center", gap: 14, padding: "0 16px", borderTop: "1px solid rgba(255,255,255,0.06)", overflow: "hidden" }}>
             <div style={{ width: 56, flexShrink: 0, lineHeight: 1.05, textAlign: "center" }}>
               <div style={{ fontSize: 11, letterSpacing: "0.14em", color: "rgba(255,255,255,0.55)" }}>RD {pick.round}</div>
               <div style={{ fontSize: big ? 22 : 17, color: accent }}>{pick.overall}</div>
+              {pick.via && <div style={{ fontSize: 9, letterSpacing: "0.06em", color: "rgba(255,255,255,0.6)", whiteSpace: "nowrap" }}>VIA {pick.via}</div>}
             </div>
-            {schoolLogo(prospect) ? <img src={schoolLogo(prospect)} alt="" style={{ width: logo, height: logo, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: logo, flexShrink: 0 }} />}
+            {photoOf(prospect)
+              ? <img src={photoOf(prospect)} alt="" style={{ width: Math.round((rowH - 2) * 1.3), height: rowH - 2, alignSelf: "flex-end", objectFit: "contain", objectPosition: "center bottom", flexShrink: 0 }} />
+              : schoolLogo(prospect) ? <img src={schoolLogo(prospect)} alt="" style={{ width: logo, height: logo, objectFit: "contain", flexShrink: 0 }} /> : <span style={{ width: headshots ? Math.round((rowH - 2) * 1.3) : logo, flexShrink: 0 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: nameSize, lineHeight: 1.1, textTransform: "uppercase", ...clip }}>{prospect.First} {prospect.Last}</div>
-              {big && <div style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14, color: "rgba(255,255,255,0.7)", marginTop: 3, ...clip }}>{prospect.Position} · {prospect.School}{pick.via ? ` · via ${pick.via}` : ""}</div>}
+              {big && <div style={{ fontFamily: BODY, fontWeight: 700, fontSize: 14, color: "rgba(255,255,255,0.7)", marginTop: 3, ...clip }}>{prospect.Position} · {prospect.School}</div>}
             </div>
             {!big && <span style={{ fontFamily: BODY, fontWeight: 700, fontSize: 13, color: "rgba(255,255,255,0.7)", flexShrink: 0 }}>{prospect.Position}</span>}
             {grades && <span style={{ minWidth: 38, textAlign: "right", fontSize: big ? 28 : 20, color: gradeColor(letter), flexShrink: 0 }}>{letter}</span>}
@@ -352,7 +370,10 @@ export const BoardStory = forwardRef(function BoardStory({ eyebrow, title, rows,
           const c2 = r.color2 || GOLD;
           return (
             <div key={r.pickNumber} style={{ display: "flex", alignItems: "stretch", minWidth: 0, minHeight: 0, background: "rgba(255,255,255,0.07)", borderRadius: 10, overflow: "hidden" }}>
-              <div style={{ width: 40, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, color: textOn(c1, c2), background: c1 }}>{r.pickNumber}</div>
+              <div style={{ width: 44, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.05, fontSize: 19, color: textOn(c1, c2), background: c1 }}>
+                {r.pickNumber}
+                {r.via && <span style={{ fontSize: 8, letterSpacing: "0.04em", opacity: 0.85, whiteSpace: "nowrap" }}>VIA {r.via}</span>}
+              </div>
               <div style={{ width: 48, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.22)", borderRight: `3px solid ${c2}`, fontSize: 12 }}>
                 {r.logo ? <img src={r.logo} alt={r.team} style={{ width: 34, height: 34, objectFit: "contain" }} /> : r.team}
               </div>
@@ -361,7 +382,7 @@ export const BoardStory = forwardRef(function BoardStory({ eyebrow, title, rows,
                   <>
                     <div style={{ fontSize: 16, lineHeight: 1.1, textTransform: "uppercase", ...clip }}>{r.player.First} {r.player.Last}</div>
                     <div style={{ fontFamily: BODY, fontWeight: 700, fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2, ...clip }}>
-                      {r.player.Position}{r.player.School ? ` · ${r.player.School}` : ""}{r.via ? ` · via ${r.via}` : ""}
+                      {r.player.Position}{r.player.School ? ` · ${r.player.School}` : ""}
                     </div>
                   </>
                 ) : <div style={{ fontFamily: BODY, fontWeight: 700, fontStyle: "italic", fontSize: 14, color: "rgba(255,255,255,0.4)" }}>TBD</div>}
