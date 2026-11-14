@@ -16,6 +16,7 @@
 // (The NFL research tab is components/AdminResearch.js.)
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { loadHighSchools } from "../utils/adminHighSchools";
 import { db } from "../firebase";
 import { currentDraftClass } from "../utils/eligibility";
 import { stateName } from "../utils/highSchoolMatch";
@@ -59,7 +60,7 @@ function HsResearch() {
 
   useEffect(() => {
     Promise.all([
-      getDocs(collection(db, "players")), getDocs(collection(db, "highSchools")), getDocs(collection(db, "stateSilhouettes")),
+      getDocs(collection(db, "players")), loadHighSchools(), getDocs(collection(db, "stateSilhouettes")),
       getDocs(collection(db, "historical")), getDocs(collection(db, "draftOrder")), getDoc(doc(db, "offseason", "hsCfb")).catch(() => null),
     ])
       .then(([p, h, s, hist, order, cfbSnap]) => {
@@ -73,7 +74,7 @@ function HsResearch() {
         ]);
         const c = cfbSnap?.data();
         if (c) setCfb({ rows: c.rows || {}, players: c.players || 0, season: c.season });
-        setHsDocs(h.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setHsDocs(h);
         setSilhouettes(Object.fromEntries(s.docs.map((d) => [d.id, d.data().Silhouette])));
       })
       .catch((e) => { console.error("HS research load error:", e); setError("Couldn't load players / high schools — check console."); });

@@ -5,7 +5,9 @@
 // in or not), read by admins (firestore.rules):
 //   draftSimDaily/{YYYY-MM-DD}   { sims, completed, picks } — sims started,
 //                                sims finished, picks users made, by day
-//                                (Eastern time).
+//                                (Eastern time); combos / combosDone —
+//                                combo drafts (2027 + 2028, back to back)
+//                                whose second year started / finished.
 //   draftSimPicks/{year}_{team}_{YYYY-MM-DD}
 //                                { year, team, day, p: { "{overall}_{playerId}": n } }
 //                                — who users took for that team at each pick,
@@ -30,7 +32,8 @@ export const statsDay = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { t
 
 const quietly = (p) => p.catch((e) => console.warn("Draft sim stats:", e?.code || e));
 
-// field: "sims" (a sim started), "completed" (one finished) or "picks".
+// field: "sims" (a sim started), "completed" (one finished), "picks", or
+// "combos" / "combosDone" (a combo draft's second year started / finished).
 export function countSim(uid, field) {
   if (!counted(uid)) return;
   quietly(setDoc(doc(db, "draftSimDaily", statsDay()), { [field]: increment(1) }, { merge: true }));

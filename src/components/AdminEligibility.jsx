@@ -26,8 +26,9 @@
 // to the next Feb 1 (PendingSlugChangeAt, scripts/applyPendingSlugChanges.js)
 // — the same path as a Transfer Portal resolve.
 import { useEffect, useMemo, useState } from "react";
-import { arrayUnion, collection, deleteField, doc, FieldPath, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteField, doc, FieldPath, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { loadHighSchools, replaceHighSchools } from "../utils/adminHighSchools";
 import { averageGradesFor } from "../utils/communityGrades";
 import { gradeLabel } from "../utils/gradeScale";
 import {
@@ -245,12 +246,12 @@ export default function AdminEligibility({ allPlayers, setAllPlayers }) {
     try {
       const [c, e, k, h] = await Promise.all([
         getDoc(doc(db, "offseason", "cfbd")), getDoc(doc(db, "offseason", "eligibility")),
-        getDoc(doc(db, "offseason", "careers")), getDocs(collection(db, "highSchools")),
+        getDoc(doc(db, "offseason", "careers")), loadHighSchools(),
       ]);
       setCfbd(c.data() || { rows: {}, missing: true });
       setIgnored(e.data()?.ignored || {});
       setCareers(k.data()?.rows || {});
-      setHsDocs(h.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setHsDocs(h);
     } catch (err) {
       console.error("Eligibility load error:", err);
       setCfbd({ rows: {}, error: true });
@@ -300,6 +301,7 @@ export default function AdminEligibility({ allPlayers, setAllPlayers }) {
         writes.slice(i, i + 200).forEach(({ p, w }) => patch(p.id, w.local, w.removed));
       }
       setHsDocs(hs);
+      replaceHighSchools(hs); // new schools / aliases for the other admin screens
       setMessage(doneText);
     } catch (e) {
       console.error("Eligibility update error:", e);

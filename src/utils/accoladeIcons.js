@@ -10,9 +10,22 @@
 // national title lines ("National Champion"), and the high school's
 // recruiting line ("5-Star Recruit" / "4-Star Recruit" / "3-Star Recruit").
 // The "Fallback" award row's icon marks any line with no icon of its own.
+//
+// accoladeIcons/_index  { rows: { [doc id]: { Kind, Name, Aliases, Logo,
+//                         LogoDark } } } — every icon in one doc, so the
+//                         Info tab costs 1 read, not one per icon. Admin
+//                         save / delete update its row (indexIconRow /
+//                         unindexIconRow); scripts/buildAccoladeIconIndex.js
+//                         rebuilds it from the collection.
 import { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, deleteField, doc, FieldPath, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
+
+export const ICON_INDEX_ID = "_index";
+const indexRef = () => doc(db, "accoladeIcons", ICON_INDEX_ID);
+const indexRow = ({ Kind, Name, Aliases, Logo, LogoDark }) => ({ Kind, Name, Aliases: Aliases || [], Logo: Logo || "", LogoDark: LogoDark || "" });
+export const indexIconRow = (id, payload) => setDoc(indexRef(), { rows: { [id]: indexRow(payload) } }, { merge: true });
+export const unindexIconRow = (id) => updateDoc(indexRef(), new FieldPath("rows", id), deleteField());
 
 export const accoladeSlug = (s) => String(s || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const norm = (s) => String(s || "").trim().toLowerCase();
@@ -23,11 +36,13 @@ export function useAccoladeIcons() {
   const [icons, setIcons] = useState(null);
   useEffect(() => {
     let cancelled = false;
-    iconsPromise = iconsPromise || getDocs(collection(db, "accoladeIcons"))
-      .then((snap) => {
+    // The index doc; the whole collection only if it hasn't been built.
+    iconsPromise = iconsPromise || getDoc(indexRef())
+      .then((s) => (s.exists() ? Object.values(s.data().rows || {})
+        : getDocs(collection(db, "accoladeIcons")).then((snap) => snap.docs.map((d) => d.data()))))
+      .then((rows) => {
         const out = { conference: {}, award: {} };
-        snap.docs.forEach((d) => {
-          const x = d.data();
+        rows.forEach((x) => {
           const src = x.Logo || x.LogoDark;
           if (!src || !out[x.Kind]) return;
           [x.Name, ...(x.Aliases || [])].map(norm).filter(Boolean).forEach((k) => { out[x.Kind][k] ||= src; });

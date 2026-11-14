@@ -449,18 +449,21 @@ function LiveSim({ data: communityData, config, myGrades, isMobile, contentRef, 
   // Usage counts (Admin → Mock Draft → Statistics): this run once START THE
   // DRAFT takes it past the intro (not just opening it — /draftsim/{team}
   // lands on the intro) and the teams it's drafting as, its finish, and
-  // every pick the user makes.
+  // every pick the user makes. A combo draft (2027 + 2028 — config.carry is
+  // its second year, planned on the setup screen or carried over from a
+  // 2027 run's results) also counts as a combo when its second year starts
+  // and finishes; each year still counts as a sim of its own.
   const { user, profile } = useAuth();
   const uid = user?.uid || null;
   const onUserPick = useCallback((event) => countUserPick(uid, data.year, event), [uid, data.year]);
   const s = useDraftSim(data, { userTeams: config.teams, rounds, speed: config.speed, chatter: config.chatter, seed: config.seed, cpuTrades: config.cpuTrades, variance: config.variance, quick: mock, onUserPick });
   const started = s.phase !== "intro";
-  useEffect(() => { if (started) { countSim(uid, "sims"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (started) { countSim(uid, "sims"); if (config.carry) countSim(uid, "combos"); countTeams(uid, data.year, config.teams); } }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const finished = s.phase === "done";
   // A 2027-only run the user chose to carry over from its results: the
   // screen in between, as a "2027 + 2028" run gets on its own.
   const [rolling, setRolling] = useState(false);
-  useEffect(() => { if (finished) { countSim(uid, "completed"); onDone?.(); } }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (finished) { countSim(uid, "completed"); if (config.carry) countSim(uid, "combosDone"); onDone?.(); } }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   // The signed-in user's Sim Profile (utils/draftSim/simProfile.js), once
   // the draft's finished: any sim keeps their streak going; only a
   // single-team sim on the default settings (speed and chatter aside)

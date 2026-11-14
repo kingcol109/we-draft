@@ -33,7 +33,8 @@ import AdminYouTubeAnalytics from "../components/AdminYouTubeAnalytics";
 import AdminAdsManager from "../components/AdminAdsManager";
 import AdminCoachHistory from "../components/AdminCoachHistory";
 import { NFL_TEAMS } from "../utils/coachHistory";
-import { accoladeSlug } from "../utils/accoladeIcons";
+import { accoladeSlug, indexIconRow, unindexIconRow } from "../utils/accoladeIcons";
+import { loadHighSchools, cacheHighSchool, uncacheHighSchool } from "../utils/adminHighSchools";
 import AdminMockDraft from "../components/AdminMockDraft";
 import AdminResearch from "../components/AdminResearch";
 import AdminProspectResearch from "../components/AdminProspectResearch";
@@ -742,9 +743,7 @@ function PlayerDataSection() {
   useEffect(() => {
     const fetchHighSchools = async () => {
       try {
-        const snap = await getDocs(collection(db, "highSchools"));
-        const data = snap.docs
-          .map((d) => d.data())
+        const data = (await loadHighSchools())
           .filter((h) => h.Name)
           .sort((a, b) => a.Name.localeCompare(b.Name));
         setHighSchoolOptions(data);
@@ -1060,7 +1059,8 @@ function PlayerDataSection() {
     );
     if (hsName && !hsExists) {
       const newHighSchool = { Name: hsName, State: hsState, createdAt: serverTimestamp() };
-      await addDoc(collection(db, "highSchools"), newHighSchool);
+      const hsRef = await addDoc(collection(db, "highSchools"), newHighSchool);
+      cacheHighSchool({ id: hsRef.id, Name: hsName, State: hsState });
       setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
     }
   };
@@ -2594,9 +2594,7 @@ function HistoricalSection() {
   useEffect(() => {
     const fetchHighSchools = async () => {
       try {
-        const snap = await getDocs(collection(db, "highSchools"));
-        const data = snap.docs
-          .map((d) => d.data())
+        const data = (await loadHighSchools())
           .filter((h) => h.Name)
           .sort((a, b) => a.Name.localeCompare(b.Name));
         setHighSchoolOptions(data);
@@ -2841,7 +2839,8 @@ function HistoricalSection() {
       );
       if (hsName && !hsExists) {
         const newHighSchool = { Name: hsName, State: hsState, createdAt: serverTimestamp() };
-        await addDoc(collection(db, "highSchools"), newHighSchool);
+        const hsRef = await addDoc(collection(db, "highSchools"), newHighSchool);
+        cacheHighSchool({ id: hsRef.id, Name: hsName, State: hsState });
         setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
       }
 
@@ -5763,9 +5762,7 @@ function RecruitsSection() {
   useEffect(() => {
     const fetchHighSchools = async () => {
       try {
-        const snap = await getDocs(collection(db, "highSchools"));
-        const data = snap.docs
-          .map((d) => d.data())
+        const data = (await loadHighSchools())
           .filter((h) => h.Name)
           .sort((a, b) => a.Name.localeCompare(b.Name));
         setHighSchoolOptions(data);
@@ -6089,7 +6086,8 @@ function RecruitsSection() {
       );
       if (hsName && !hsExists) {
         const newHighSchool = { Name: hsName, State: hsState, createdAt: serverTimestamp() };
-        await addDoc(collection(db, "highSchools"), newHighSchool);
+        const hsRef = await addDoc(collection(db, "highSchools"), newHighSchool);
+        cacheHighSchool({ id: hsRef.id, Name: hsName, State: hsState });
         setHighSchoolOptions((prev) => [...prev, newHighSchool].sort((a, b) => a.Name.localeCompare(b.Name)));
       }
 
@@ -13214,8 +13212,7 @@ function HighSchoolSchoolsPane() {
     const fetchSchools = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(collection(db, "highSchools"));
-        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const data = [...(await loadHighSchools())];
         data.sort((a, b) => (a.Name || "").localeCompare(b.Name || ""));
         setSchools(data);
       } catch (e) {
@@ -13391,6 +13388,7 @@ function HighSchoolSchoolsPane() {
       if (isNewSchool) {
         const ref = await addDoc(collection(db, "highSchools"), { ...payload, createdAt: serverTimestamp() });
         const newSchool = { id: ref.id, ...payload };
+        cacheHighSchool(newSchool);
         setSchools((prev) => [...prev, newSchool].sort((a, b) => (a.Name || "").localeCompare(b.Name || "")));
         setSelectedSchool(newSchool);
         setSaveMessage("High school created.");
@@ -13398,6 +13396,7 @@ function HighSchoolSchoolsPane() {
         let renamedCount = 0;
         if (renaming) renamedCount = await cascadeRenameHighSchool(selectedSchool.Name, trimmedName);
         await updateDoc(doc(db, "highSchools", selectedSchool.id), payload);
+        cacheHighSchool({ id: selectedSchool.id, ...payload });
         setSchools((prev) => prev.map((h) => (h.id === selectedSchool.id ? { ...h, ...payload } : h)).sort((a, b) => (a.Name || "").localeCompare(b.Name || "")));
         setSelectedSchool((prev) => (prev ? { ...prev, ...payload } : prev));
         setSaveMessage(renaming ? `Saved — renamed on ${renamedCount} record${renamedCount !== 1 ? "s" : ""}.` : "Saved.");
@@ -13419,6 +13418,7 @@ function HighSchoolSchoolsPane() {
     setSaveMessage("");
     try {
       await deleteDoc(doc(db, "highSchools", selectedSchool.id));
+      uncacheHighSchool(selectedSchool.id);
       setSchools((prev) => prev.filter((h) => h.id !== selectedSchool.id));
       setSelectedSchool(null);
       setFormState(null);
@@ -15006,6 +15006,7 @@ function AccoladeIconsManager({ kind }) {
         updatedAt: serverTimestamp(),
       };
       await setDoc(doc(db, "accoladeIcons", id), payload, { merge: true });
+      await indexIconRow(id, payload); // the player page reads this one doc
       const row = { id, ...payload };
       setSaved((prev) => [...prev.filter((r) => r.id !== id), row]);
       setSelected(row);
@@ -15022,6 +15023,7 @@ function AccoladeIconsManager({ kind }) {
     if (!selected?.id) return;
     try {
       await deleteDoc(doc(db, "accoladeIcons", selected.id));
+      await unindexIconRow(selected.id).catch(() => {}); // no index yet: nothing to drop
       setSaved((prev) => prev.filter((r) => r.id !== selected.id));
       setSelected(null);
       setFormState(null);

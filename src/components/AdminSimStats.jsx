@@ -2,7 +2,8 @@
 //
 // Admin → Mock Draft → Statistics: Draft Sim usage from the counters
 // utils/draftSim/stats.js keeps (King Cold Sports not counted).
-//   Sims by day     draftSimDaily — sims started, finished and user picks
+//   Sims by day     draftSimDaily — sims started, finished and user picks,
+//                   and combo drafts (2027 + 2028) started and finished,
 //                   for the last 30 days (Eastern time), with totals.
 //   Teams           draftSimTeams — which teams users draft as (every
 //                   team of a multi-team sim, plus watching the CPU), by
@@ -94,14 +95,14 @@ function Daily() {
     // need its own index), shown newest first.
     const from = statsDay(new Date(Date.now() - (DAYS - 1) * 86400000));
     getDocs(query(collection(db, "draftSimDaily"), where(documentId(), ">=", from), orderBy(documentId())))
-      .then((snap) => setDays(snap.docs.map((d) => ({ day: d.id, sims: 0, completed: 0, picks: 0, ...d.data() })).reverse()))
+      .then((snap) => setDays(snap.docs.map((d) => ({ day: d.id, sims: 0, completed: 0, picks: 0, combos: 0, combosDone: 0, ...d.data() })).reverse()))
       .catch((e) => { console.error("Sim stats load error:", e); setError("Couldn't load — check you're signed in as an admin."); });
   }, []);
 
   const totals = useMemo(() => {
     if (!days) return null;
     const since = (n) => statsDay(new Date(Date.now() - (n - 1) * 86400000));
-    const sum = (n) => days.filter((d) => d.day >= since(n)).reduce((t, d) => ({ sims: t.sims + d.sims, completed: t.completed + d.completed, picks: t.picks + d.picks }), { sims: 0, completed: 0, picks: 0 });
+    const sum = (n) => days.filter((d) => d.day >= since(n)).reduce((t, d) => ({ sims: t.sims + d.sims, completed: t.completed + d.completed, picks: t.picks + d.picks, combos: t.combos + d.combos, combosDone: t.combosDone + d.combosDone }), { sims: 0, completed: 0, picks: 0, combos: 0, combosDone: 0 });
     return [["Today", sum(1)], ["Last 7 days", sum(7)], [`Last ${DAYS} days`, sum(DAYS)]];
   }, [days]);
   const max = Math.max(1, ...(days || []).map((d) => d.sims));
@@ -109,7 +110,7 @@ function Daily() {
   return (
     <div style={card}>
       <div style={{ fontWeight: 900, color: BLUE, fontSize: "16px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Sims by day</div>
-      <div style={{ fontSize: "12px", color: "#777", marginTop: "4px" }}>Every Draft Sim run, signed in or not, except King Cold Sports&apos;. Days are Eastern time. History was reset on Oct. 24, 2026.</div>
+      <div style={{ fontSize: "12px", color: "#777", marginTop: "4px" }}>Every Draft Sim run, signed in or not, except King Cold Sports&apos;. Days are Eastern time. History was reset on Oct. 24, 2026. A combo draft (2027 + 2028) counts once as a combo, and each of its years as a sim; combos are counted from Nov. 14, 2026.</div>
       {error && <div style={{ color: "#b42318", fontSize: "13px", marginTop: "10px" }}>{error}</div>}
       {!days && !error && <div style={{ fontSize: "13px", color: "#888", marginTop: "10px" }}>Loading…</div>}
       {totals && (
@@ -119,13 +120,14 @@ function Daily() {
               <div style={{ fontSize: "11px", fontWeight: 900, color: "#777", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
               <div style={{ fontSize: "26px", fontWeight: 900, color: "#1a1f2b", lineHeight: 1.2 }}>{t.sims.toLocaleString()} <span style={{ fontSize: "12px", color: "#777" }}>sims</span></div>
               <div style={{ fontSize: "12px", color: "#555" }}>{t.completed.toLocaleString()} finished · {t.picks.toLocaleString()} user picks</div>
+              <div style={{ fontSize: "12px", color: "#555" }}>{t.combos.toLocaleString()} combo drafts · {t.combosDone.toLocaleString()} finished</div>
             </div>
           ))}
         </div>
       )}
       {days && days.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "12px" }}>
-          <thead><tr><th style={th}>Day</th><th style={th}>Sims</th><th style={{ ...th, width: "40%" }} /><th style={th}>Finished</th><th style={th}>User picks</th></tr></thead>
+          <thead><tr><th style={th}>Day</th><th style={th}>Sims</th><th style={{ ...th, width: "40%" }} /><th style={th}>Finished</th><th style={th}>User picks</th><th style={th}>Combos</th><th style={th}>Combos finished</th></tr></thead>
           <tbody>
             {days.map((d) => (
               <tr key={d.day}>
@@ -134,6 +136,8 @@ function Daily() {
                 <td style={td}><div style={{ height: "10px", width: `${(d.sims / max) * 100}%`, minWidth: d.sims ? "3px" : 0, background: GOLD, borderRadius: "5px" }} /></td>
                 <td style={td}>{d.completed}</td>
                 <td style={td}>{d.picks}</td>
+                <td style={td}>{d.combos}</td>
+                <td style={td}>{d.combosDone}</td>
               </tr>
             ))}
           </tbody>

@@ -14,6 +14,7 @@
 
 const { FieldValue } = require("firebase-admin/firestore");
 const { getFirestore } = require("./firebaseAdmin");
+const { buildAccoladeIconIndex } = require("./buildAccoladeIconIndex");
 
 const WRITE = process.argv.includes("--write");
 const slug = (s) => String(s || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -87,7 +88,10 @@ async function run() {
     batch.set(refs[i], { ...rows[i], Logo: "", LogoDark: "", updatedAt: FieldValue.serverTimestamp() });
   });
   console.log(`${created} new, ${rows.length - created} already there.${WRITE ? "" : " Dry run — pass --write to save."}`);
-  if (WRITE && created) await batch.commit();
+  if (WRITE && created) {
+    await batch.commit();
+    console.log(`Index: ${JSON.stringify(await buildAccoladeIconIndex(db))}`);
+  }
 }
 
 run().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

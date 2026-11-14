@@ -42,6 +42,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { addDoc, arrayUnion, collection, doc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { cacheHighSchool } from "../utils/adminHighSchools";
 import { db } from "../firebase";
 import { loadPffByCfbdId, PFF_TO_WD, rankPct } from "./pffData";
 import { groupOf, production, statLine } from "./seasonStats";
@@ -124,10 +125,15 @@ async function linkHighSchool(p) {
   const found = matchHighSchool(p.hs, state, docs);
   const m = found && found.how !== "close" ? found : null;
   if (m) {
-    if (p.hs !== m.doc.Name && !(m.doc.CFBDNames || []).includes(p.hs)) await updateDoc(doc(db, "highSchools", m.doc.id), { CFBDNames: arrayUnion(p.hs) });
+    if (p.hs !== m.doc.Name && !(m.doc.CFBDNames || []).includes(p.hs)) {
+      await updateDoc(doc(db, "highSchools", m.doc.id), { CFBDNames: arrayUnion(p.hs) });
+      cacheHighSchool({ id: m.doc.id, CFBDNames: [...(m.doc.CFBDNames || []), p.hs] });
+    }
     return { HighSchool: m.doc.Name, State: m.doc.State };
   }
-  await addDoc(collection(db, "highSchools"), { Name: p.hs, State: state, City: home ? "" : p.hsc || "", CFBDNames: [p.hs], createdAt: serverTimestamp() });
+  const row = { Name: p.hs, State: state, City: home ? "" : p.hsc || "", CFBDNames: [p.hs] };
+  const ref = await addDoc(collection(db, "highSchools"), { ...row, createdAt: serverTimestamp() });
+  cacheHighSchool({ id: ref.id, ...row });
   return { HighSchool: p.hs, State: state };
 }
 

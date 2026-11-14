@@ -166,9 +166,25 @@ function Accolade({ children, title, icon, isMobile }) {
   );
 }
 
-// The player's high school doc (for its branding), matched on name + state,
-// and that state's silhouette (stateSilhouettes/{state name}) for a school
-// without a logo. → { hs, silhouette }
+// The player's high school doc (for its branding), matched on name + state
+// (one read — six schools share "Liberty"), else the one school by that
+// name in any state (IMG and other national schools, or no state on file);
+// and that state's silhouette (stateSilhouettes/{state name}, cached per
+// state) for a school without a logo. → { hs, silhouette }
+const silhouetteCache = new Map();
+const silhouetteOf = (st) => {
+  if (!silhouetteCache.has(st)) silhouetteCache.set(st, getDoc(doc(db, "stateSilhouettes", st)).then((s) => s.data()?.Silhouette || null).catch(() => null));
+  return silhouetteCache.get(st);
+};
+async function findHighSchool(name, st) {
+  const byName = (...w) => getDocs(query(collection(db, "highSchools"), where("Name", "==", name), ...w)).then((s) => s.docs.map((d) => d.data()));
+  if (st) {
+    const [hit] = await byName(where("State", "==", st));
+    if (hit) return hit;
+  }
+  const docs = await byName();
+  return docs.length === 1 ? docs[0] : null;
+}
 function useHighSchool(name, state) {
   const [found, setFound] = useState({ hs: null, silhouette: null });
   useEffect(() => {
@@ -177,12 +193,10 @@ function useHighSchool(name, state) {
     let cancelled = false;
     const st = stateName(state);
     Promise.all([
-      getDocs(query(collection(db, "highSchools"), where("Name", "==", name))).catch(() => null),
-      st ? getDoc(doc(db, "stateSilhouettes", st)).catch(() => null) : null,
-    ]).then(([snap, sil]) => {
-      const docs = snap ? snap.docs.map((d) => d.data()) : [];
-      const hs = docs.find((d) => d.State === st) || (docs.length === 1 ? docs[0] : null);
-      if (!cancelled) setFound({ hs, silhouette: sil?.data()?.Silhouette || null });
+      findHighSchool(name, st).catch(() => null),
+      st ? silhouetteOf(st) : null,
+    ]).then(([hs, silhouette]) => {
+      if (!cancelled) setFound({ hs, silhouette });
     });
     return () => { cancelled = true; };
   }, [name, state]);
@@ -216,16 +230,19 @@ function Stop({ name, sub, span, current, brand, label, to, accolades, fallback,
           (none under the last stop, however many lines it has). */}
       {!last && <div aria-hidden="true" style={{ position: "absolute", left: size / 2 - 1.5, top: size / 2, bottom: -(GAP + size / 2), width: 3, borderRadius: 2, background: "#e6ebf2" }} />}
       {to ? <Link to={to} style={{ display: "flex", flexShrink: 0, borderRadius: "50%", position: "relative", zIndex: 1 }}>{marker}</Link> : marker}
-      <div style={{ flex: 1, minWidth: 0, paddingTop: (size - nameLine) / 2, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <span style={{ fontSize: isMobile ? 14 : 16, lineHeight: `${nameLine}px`, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* The name line is as tall as the logo, so the name sits at the
+            logo's vertical middle; the years follow the name on mobile and
+            sit at the right edge on desktop. */}
+        <div style={{ minHeight: size, display: "flex", alignItems: "center", flexWrap: "wrap", gap: isMobile ? "0 8px" : "0 10px" }}>
+          <span style={{ minWidth: 0, fontSize: isMobile ? 14 : 16, lineHeight: `${nameLine}px`, fontWeight: 900, color: "#1a1f2b", textTransform: "uppercase", letterSpacing: "0.02em" }}>
             {to ? <Link to={to} style={{ color: "inherit" }}>{name}</Link> : name}
           </span>
-          {label && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 900, color: "#6b7685", background: "#eef1f5", borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em", verticalAlign: "2px" }}>{label}</span>}
-          {sub && <div style={{ fontSize: 12, fontWeight: 600, color: "#7a8594" }}>{sub}</div>}
-          {(accolades || []).map((a) => <Accolade key={a.key} title={a.title} icon={a.icon} isMobile={isMobile}>{a.text}</Accolade>)}
+          {label && <span style={{ fontSize: 9, fontWeight: 900, color: "#6b7685", background: "#eef1f5", borderRadius: 4, padding: "2px 6px", letterSpacing: "0.06em" }}>{label}</span>}
+          {span && <span style={{ marginLeft: isMobile ? 0 : "auto", fontSize: isMobile ? 14 : 17, lineHeight: `${nameLine}px`, fontWeight: 900, color: current ? c1 : "#4a5466", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", letterSpacing: "0.01em" }}>{span}</span>}
         </div>
-        {span && <span style={{ fontSize: isMobile ? 15 : 17, lineHeight: `${nameLine}px`, fontWeight: 900, color: current ? c1 : "#4a5466", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", letterSpacing: "0.01em" }}>{span}</span>}
+        {sub && <div style={{ marginTop: -4, fontSize: 12, fontWeight: 600, color: "#7a8594" }}>{sub}</div>}
+        {(accolades || []).map((a) => <Accolade key={a.key} title={a.title} icon={a.icon} isMobile={isMobile}>{a.text}</Accolade>)}
       </div>
     </div>
   );
@@ -345,10 +362,13 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
     || birthday(estimatedBirthday(player?.RecruitYear), player?.Eligible, true);
   const age = born?.age ?? (bio?.age || null);
   const hometown = player?.Hometown || bio?.hometown || "";
-  // Hometown on its own line; birthday and age on the line under it.
+  // Hometown on its own line; birthday and ages on the line under it — on
+  // mobile the birthday gets its own line and the two ages share the next.
+  const bornFact = !preview && born?.text && ["Born", born.text];
+  const ageFacts = [!preview && age && ["Current Age", String(age)], !preview && born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]];
   const factRows = [
     [hometown && ["Hometown", hometown]],
-    [!preview && born?.text && ["Born", born.text], !preview && age && ["Current Age", String(age)], !preview && born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]],
+    ...(isMobile ? [[bornFact], ageFacts] : [[bornFact, ...ageFacts]]),
   ].map((r) => r.filter(Boolean)).filter((r) => r.length);
   const facts = factRows.flat();
   const heading = (label) => (
@@ -433,9 +453,9 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
       {facts.length > 0 && (
         <div style={{ marginTop: text ? (isMobile ? 18 : 22) : 0, display: "flex", flexDirection: "column", gap: isMobile ? 12 : 14 }}>
           {factRows.map((r) => (
-            <div key={r[0][0]} style={{ display: "flex", flexWrap: "wrap", gap: isMobile ? "10px 22px" : "10px 36px" }}>
+            <div key={r[0][0]} style={{ display: "flex", flexWrap: isMobile ? "nowrap" : "wrap", gap: isMobile ? "10px 22px" : "10px 36px" }}>
               {r.map(([label, value, note]) => (
-                <div key={label} style={{ minWidth: 0 }}>
+                <div key={label} style={{ minWidth: 0, flexShrink: note ? 1 : 0 }}>
                   {heading(label)}
                   <div style={{ marginTop: 2, fontSize: isMobile ? "15px" : "17px", fontWeight: 700, color: "#1f2937" }}>{value}</div>
                   {note && <div style={{ marginTop: 1, fontSize: isMobile ? "11px" : "12px", fontWeight: 600, color: "#7a8594" }}>{note}</div>}
