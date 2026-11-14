@@ -4350,7 +4350,8 @@ useEffect(() => {
   // His jersey number in front, when we have it (not for drafted players —
   // that's his college number). The team logo then becomes the big faded
   // background mark in the wordmark's place.
-  const heroNumber = !draftedBy && jersey ? jersey.replace(/^#/, "") : "";
+  // A preview link carries the number typed for its pitch graphic.
+  const heroNumber = preview?.number ? preview.number : !draftedBy && jersey ? jersey.replace(/^#/, "") : "";
 
   // Find Comparison — a compact pill beside the Community Scouting Report
   // heading (null when the feature is off or the player has no slug).

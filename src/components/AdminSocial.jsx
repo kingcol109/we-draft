@@ -729,7 +729,7 @@ function PreviewLinks({ person, preview, label }) {
     setBusy(true); setMsg("");
     try {
       const image = await preview.makeImage();
-      const token = await createPreviewLink({ player: person, fits: preview.fits, posOf: preview.posOf, classOf: preview.classOf, image });
+      const token = await createPreviewLink({ player: person, fits: preview.fits, posOf: preview.posOf, classOf: preview.classOf, number: preview.number, image });
       await copy(previewUrl(person.Slug, token));
       await load();
     } catch (e) {
@@ -981,6 +981,7 @@ function PitchTab({ players, contactByPlayer }) {
               preview={{
                 fits,
                 // #1 of everyone in their class / at their position.
+                number,
                 posOf: players.filter((p) => String(p.Eligible) === String(person.Eligible) && p.Position === person.Position).length,
                 classOf: players.filter((p) => String(p.Eligible) === String(person.Eligible)).length,
                 // 1200px, a little more compressed: it's stored in Firestore.

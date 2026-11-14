@@ -6,7 +6,7 @@
 //   we-draft.com/player/<slug>?preview=<token>
 //
 // previewLinks/{token}  { playerId, slug, name, fits: [{ abbr, logo }],
-//                         posOf, classOf, active, createdAt, imageWidth,
+//                         posOf, classOf, number, active, createdAt, imageWidth,
 //                         imageHeight } — anyone can get() one by its token,
 //                         nobody but an admin can list them (firestore.rules),
 //                         so only the link's holder can open it.
@@ -72,7 +72,7 @@ const newToken = () => {
 
 // Admin: a new link for this player with the graphic as its preview image.
 // image: { dataUrl (image/jpeg), width, height }. → the token.
-export async function createPreviewLink({ player, fits, posOf, classOf, image }) {
+export async function createPreviewLink({ player, fits, posOf, classOf, number, image }) {
   const token = newToken();
   const jpeg = String(image.dataUrl).split(",")[1] || "";
   await setDoc(doc(db, "previewImages", token), { jpeg, createdAt: serverTimestamp() });
@@ -80,6 +80,8 @@ export async function createPreviewLink({ player, fits, posOf, classOf, image })
     playerId: player.id, slug: player.Slug, name: `${player.First || ""} ${player.Last || ""}`.trim(),
     fits: fits.map((f) => ({ abbr: f.abbr, logo: f.logo || "" })),
     posOf: posOf || 1, classOf: classOf || 1,
+    // The jersey number typed for the graphic — the page's hero shows it.
+    number: String(number || "").replace(/[^0-9]/g, "").slice(0, 2),
     imageWidth: image.width, imageHeight: image.height,
     active: true, createdAt: serverTimestamp(),
   });
