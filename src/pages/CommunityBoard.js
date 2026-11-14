@@ -15,12 +15,14 @@ import SimAdCard from "../components/draftSim/SimAdCard";
 import { BOARD_MODERN_STYLE, RANK_CHIP, rankSlotWidth, POS_COL_W, LOGO_COL_W, RankChips, DropdownChecklist, ArchiveDropdown as KitArchiveDropdown } from "../components/boardKit";
 import { SUB_TABS, inSubTab } from "../utils/subPositions";
 import { isSiteUpdate } from "../utils/siteUpdates";
+import { PROSPECT_YEARS, useVisibleProspectYears } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
 const ARCHIVE_YEARS = ["2026"];
-const ACTIVE_YEARS = ["2027", "2028", "2029"];
+// utils/prospectYears.js: 2027–2030. The 2030 tab shows once it has players.
+const ACTIVE_YEARS = PROSPECT_YEARS;
 
 const SIDEBAR_NEWS_LIMIT = 8;
 const SIDEBAR_VIDEO_LIMIT = 10;
@@ -343,7 +345,8 @@ function SubPositionBar({ position, selected, setSelected, isMobile }) {
 function YearDropdown({ eligibleYear, onSelect }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
-  const years = [...ACTIVE_YEARS, ...ARCHIVE_YEARS];
+  const visibleYears = useVisibleProspectYears();
+  const years = [...ACTIVE_YEARS.filter((y) => visibleYears.includes(y) || y === eligibleYear), ...ARCHIVE_YEARS];
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -493,6 +496,9 @@ export default function CommunityBoard() {
   const { year, position } = useParams();
 
   const eligibleYear = year || "2027";
+  // Year tabs: a new class appears once it has players (or when it's the one open).
+  const visibleYears = useVisibleProspectYears();
+  const yearTabs = ACTIVE_YEARS.filter((y) => visibleYears.includes(y) || y === eligibleYear);
 
   // ── yearPath is needed for the URL/canonical below, so it's defined up
   // here rather than further down with the rest of the nav helpers. ──
@@ -938,7 +944,9 @@ export default function CommunityBoard() {
   // with no class snapshot has none — no point reserving empty slots).
   const showRanks = players.some((p) => p.ClassRank || p.PositionRank);
   const activeFilterCount = selectedSchools.length + selectedMyGrades.length + selectedCommGrades.length + (showAvailableOnly ? 1 : 0);
-  const is2029Empty = eligibleYear === "2029" && !loading && players.length === 0;
+  // A newer class with no players yet (2030 until the 2027 recruits are
+  // promoted): a coming-soon card instead of an empty board.
+  const is2029Empty = ["2029", "2030"].includes(eligibleYear) && !loading && players.length === 0;
 
   // Every filter except the live/inactive one, applied first — this is what
   // "View All" needs to count against (how many *additional* players, given
@@ -1214,7 +1222,7 @@ export default function CommunityBoard() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
             <KitArchiveDropdown archiveYears={ARCHIVE_YEARS} eligibleYear={eligibleYear} onSelect={(yr) => navigate(yearPath(yr))} />
-            {ACTIVE_YEARS.map((yr) => (
+            {yearTabs.map((yr) => (
               <Link
                 key={yr}
                 to={yearPath(yr)}
@@ -1251,16 +1259,18 @@ export default function CommunityBoard() {
       {is2029Empty ? (
         <div className="wdb-card" style={{ border: "2px solid " + BLUE, borderRadius: "10px", overflow: "hidden" }}>
           <div className="wdb-cardhead" style={{ background: BLUE, padding: "8px 16px" }}>
-            <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>2029 Draft Class</div>
+            <div style={{ color: GOLD, fontWeight: 900, fontSize: "12px", letterSpacing: "0.1em", textTransform: "uppercase" }}>{eligibleYear} Draft Class</div>
           </div>
           <div className="wdb-stripe" style={{ height: "3px", background: GOLD }} />
           <div style={{ padding: isMobile ? "40px 20px" : "60px 40px", textAlign: "center", background: "#fff" }}>
             <div style={{ fontSize: "40px", marginBottom: "16px" }}>🏈</div>
             <div style={{ fontSize: isMobile ? "18px" : "22px", fontWeight: 900, color: BLUE, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "10px" }}>
-              2029 Players Coming Soon
+              {eligibleYear} Players Coming Soon
             </div>
             <div style={{ fontSize: isMobile ? "13px" : "15px", fontWeight: 700, color: "#888", maxWidth: "480px", margin: "0 auto", lineHeight: 1.6 }}>
-              The 2029 draft class will be added once the 2026 college football season kicks off. Check back then to start evaluating the next wave of prospects.
+              {eligibleYear === "2030"
+                ? "The 2030 draft class (the high school class of 2027) is coming soon. Check back to start evaluating the next wave of prospects."
+                : "The 2029 draft class will be added once the 2026 college football season kicks off. Check back then to start evaluating the next wave of prospects."}
             </div>
           </div>
         </div>

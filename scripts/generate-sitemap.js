@@ -331,7 +331,10 @@ for (const doc of allTeams) {
      script isn't set up to run).
   ========================= */
   const COMMUNITY_ARCHIVE_YEARS = ["2026"];
-  const COMMUNITY_ACTIVE_YEARS = ["2027", "2028", "2029"];
+  // 2030 (src/utils/prospectYears.js) is listed only once it has players,
+  // the same rule the board's year tabs follow.
+  const COMMUNITY_ACTIVE_YEARS = ["2027", "2028", "2029", "2030"]
+    .filter((y) => y <= "2029" || allPlayers.some((d) => String(d.data()?.Eligible) === y));
   const COMMUNITY_POSITIONS = [
     "QB", "RB", "WR", "TE", "OL", "OT", "OG", "C",
     "EDGE", "DL", "DT", "DE", "LB", "DB", "CB", "S", "K", "P", "LS",

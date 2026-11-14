@@ -4287,14 +4287,6 @@ useEffect(() => {
   // The main team/NFL logo, now rendered as a full-opacity background layer
   // (no white card behind it) instead of a small foreground box — same
   // dark-background-variant preference as heroWatermark above.
-  // The hero name's size cap: its longest unbreakable piece (a word, or
-  // each part of a hyphenated one) fits the name column's width — about
-  // 0.75em a letter in this font. Only ever shrinks a long name.
-  const nameFit = (() => {
-    const pieces = `${player.First || ""} ${player.Last || ""}`.split(/\s+/).flatMap((w) => w.split("-").map((x, i, all) => x + (i < all.length - 1 ? "-" : "")));
-    const longest = Math.max(4, ...pieces.map((x) => x.length));
-    return `calc(100cqw / ${(longest * 0.75).toFixed(2)})`;
-  })();
   const heroLogo = draftedBy
     ? (branding?.nflLogoDark || branding?.nflLogo || "")
     : (branding?.logoDark || branding?.logo1 || "");
@@ -5350,7 +5342,13 @@ useEffect(() => {
               interactive element inside (the school-name link, the
               trending-tag popovers, "Selected by" team link) opts back in
               with its own pointerEvents:"auto". */}
-          <div className="flex items-center" style={{ position:"relative", padding:isMobile?"12px 10px 8px":"20px 24px 10px", pointerEvents:"none" }}>
+          {/* minHeight: every hero band the size it first loads at — a long
+              name's font shrinks to fit once the jersey number takes its
+              side room, and that used to shrink the whole band with it.
+              Desktop: two lines of the full-size name (the h1's own clamp)
+              plus the pills and padding, so it scales with the screen the
+              same way the name does (Darian Mensah's band is the standard). */}
+          <div className="flex items-center" style={{ position:"relative", padding:isMobile?"12px 10px 8px":"20px 24px 10px", minHeight:isMobile?134:"calc(2 * clamp(36px, 5vw, 58px) + 76px)", boxSizing:"border-box", pointerEvents:"none", ...(isMobile ? { alignItems:"flex-start" } : {}) }}>
             {/* The sole flex child, so text-center here centers the
                 name/tags on the row's true middle. */}
             {/* With a headshot, the name and pills keep to the space between
@@ -5361,7 +5359,7 @@ useEffect(() => {
                 to clear the number's side) keeps the block on the hero's
                 exact middle whichever side the number is on. */}
             <div className="flex-1 text-center" style={{ containerType: "inline-size", ...(heroNumber
-              ? { paddingLeft: isMobile ? "27%" : "31%", paddingRight: isMobile ? "27%" : "31%" }
+              ? { paddingLeft: isMobile ? "27%" : "28%", paddingRight: isMobile ? "27%" : "28%" }
               : headshot ? { paddingLeft: isMobile ? 64 : 150, paddingRight: isMobile ? 76 : 170 } : {}) }}>
               {/* Transfer Portal banner — the one thing on this page that
                   reacts to AdminPanel.js's "Move to Transfer Portal"
@@ -5380,11 +5378,10 @@ useEffect(() => {
                   🔄 In the Transfer Portal
                 </div>
               )}
-              <h1 className="font-black uppercase leading-none" style={{ fontSize:`min(${isMobile?"clamp(20px,6vw,30px)":"clamp(36px,5vw,58px)"}, ${nameFit})`, color:"#fff", letterSpacing:"0.02em", textShadow:"0 2px 8px rgba(0,0,0,0.4)" }}>
-                <div>{player.First}</div>
-                <div style={{ marginTop:isMobile?"2px":"4px" }}>{player.Last}</div>
-              </h1>
-              <div className="flex items-center justify-center flex-nowrap mt-2" style={{ whiteSpace:"nowrap", gap:isMobile?"6px":"10px" }}>
+              <HeroName first={player.First} last={player.Last} isMobile={isMobile} />
+              {/* A fixed-height row, so the labels sit in the same spot with
+                  or without a trend pill. */}
+              <div className="flex items-center justify-center flex-nowrap mt-2" style={{ whiteSpace:"nowrap", gap:isMobile?"6px":"10px", minHeight:isMobile?24:36 }}>
                 {/* Position · school · class stay on one row (never wrap) —
                     a long one spills past the padded column evenly on both
                     sides (justify-center), over the headshot if need be.
@@ -6169,5 +6166,54 @@ useEffect(() => {
         </>
       )}
     </>
+  );
+}
+
+// The hero's name: two lines (first / last) in a fixed-height box sized for
+// the full-size name, so everything under it (position · school · class)
+// sits in the same spot for every player. A long name is measured and scaled
+// down to exactly fit the space it has (never above full size) — a word
+// never breaks; only a name too long even at 60% wraps (at a hyphen).
+function HeroName({ first, last, isMobile }) {
+  const full = isMobile ? "clamp(20px,6vw,30px)" : "clamp(36px,5vw,58px)";
+  const gap = isMobile ? 2 : 4;
+  const boxRef = useRef(null);
+  const lineRefs = useRef([]);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return undefined;
+    let raf = 0;
+    const fit = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const avail = box.clientWidth;
+        const widths = lineRefs.current.filter(Boolean).map((el) => el.offsetWidth);
+        if (!avail || !widths.length) return;
+        // Widths were measured at the current scale; back out to full size.
+        setScale((cur) => {
+          const natural = Math.max(...widths) / cur;
+          const next = Math.min(1, (avail * 0.98) / natural);
+          return Math.abs(next - cur) < 0.01 ? cur : next;
+        });
+      });
+    };
+    fit();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    ro?.observe(box);
+    document.fonts?.ready?.then(fit);
+    return () => { cancelAnimationFrame(raf); ro?.disconnect(); };
+  }, [first, last, isMobile]);
+  const wrap = scale < 0.6;
+  return (
+    <div ref={boxRef} style={{ height: `calc(2 * ${full} + ${gap}px)`, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      <h1 className="font-black uppercase leading-none" style={{ fontSize: `calc(${full} * ${wrap ? 0.6 : scale})`, color: "#fff", letterSpacing: "0.02em", textShadow: "0 2px 8px rgba(0,0,0,0.4)", margin: 0 }}>
+        {[first, last].map((part, i) => (
+          <div key={i} style={{ marginTop: i ? gap : 0 }}>
+            <span ref={(el) => { lineRefs.current[i] = el; }} style={{ display: "inline-block", whiteSpace: wrap ? "normal" : "nowrap" }}>{part}</span>
+          </div>
+        ))}
+      </h1>
+    </div>
   );
 }

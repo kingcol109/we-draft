@@ -44,6 +44,7 @@ import {
   decodeCompSnapshotRows, COMP_SNAPSHOT_VERSION, recommendedCompWindow, inRecommendedWindow, doubleExtendedFor,
 } from "../utils/historicalStats";
 import { cssRect } from "../utils/pageZoom";
+import { PROSPECT_YEARS } from "../utils/prospectYears";
 import NflFitView from "../components/NflFitView";
 import { communityAverage } from "../utils/gradeWindow";
 
@@ -51,7 +52,7 @@ const BLUE = "#0055a5";
 const NAVY = "#00305c";
 const GOLD = "#f6a21d";
 const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
-const ACTIVE_YEARS = ["2027", "2028", "2029"];
+const ACTIVE_YEARS = PROSPECT_YEARS; // utils/prospectYears.js: 2027–2030
 // The most recently drafted class isn't migrated into `historical` yet —
 // same LATEST_DRAFT_YEAR idea as AdminPanel.js's Comp Calculator, pulled
 // from players + draftOrder and merged in so this year's picks are

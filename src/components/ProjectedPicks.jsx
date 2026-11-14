@@ -29,6 +29,7 @@ import {
   STAFF_WEIGHTS, FIT_TIERS, STAFF_SLOTS as SLOT_DEFS, fitTier,
 } from "../utils/draftProfiles";
 import { fetchTeamTargets, PROSPECT_YEARS, PROFILE_POSITIONS as POSITIONS } from "../utils/draftProfileData";
+import { useVisibleProspectYears } from "../utils/prospectYears";
 
 // draftOrder holds this draft; "historical" everything before it.
 const ALL = "ALL";
@@ -94,6 +95,7 @@ function comparisonSentence(prospect, m, tier) {
 
 export default function ProjectedPicks({ staff, staffLoading, teamKey, color1, color2, isMobile }) {
   const [years, setYears] = useState(["2027"]);
+  const visibleYears = useVisibleProspectYears(); // 2030 once it has players
   const [position, setPosition] = useState(ALL);
   // At least one class stays on.
   const toggleYear = (y) => setYears((prev) => (prev.includes(y) ? (prev.length > 1 ? prev.filter((x) => x !== y) : prev) : [...prev, y].sort()));
@@ -205,7 +207,7 @@ export default function ProjectedPicks({ staff, staffLoading, teamKey, color1, c
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 22 }}>
         <span style={{ fontSize: 11, fontWeight: 900, color: "#6b7685", letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 4 }}>Classes</span>
-        {PROSPECT_YEARS.map((y) => (
+        {PROSPECT_YEARS.filter((y) => visibleYears.includes(y)).map((y) => (
           <button key={y} onClick={() => toggleYear(y)} aria-pressed={years.includes(y)} style={chip(years.includes(y))}>
             {years.includes(y) ? "✓ " : "+ "}{y}
           </button>

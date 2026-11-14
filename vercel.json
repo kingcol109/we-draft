@@ -19,6 +19,7 @@
     "api/bot-render-clear.js": { "maxDuration": 15 },
     "api/recache-mocks.js": { "maxDuration": 30 },
     "api/mock-og.js": { "maxDuration": 20, "includeFiles": "{server/stream-manager/assets/BebasNeue-Regular.ttf,src/assets/Logo2.png}" },
-    "api/instagram.js": { "maxDuration": 300 }
+    "api/instagram.js": { "maxDuration": 300 },
+    "api/instagram-webhook.js": { "maxDuration": 30 }
   }
 }

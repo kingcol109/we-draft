@@ -35,6 +35,19 @@
 //   set-auto        { enabled } the scheduled analytics sync on/off
 //   feed            rewrite the Home page's feed now (config/instagramFeed —
 //                   server/instagram/feed.js) → { items }
+// Admin → Social (player ↔ Instagram accounts, server/instagram/contacts.js;
+// the inbound messages arrive at api/instagram-webhook.js):
+//   contact-save       { playerId, username, verificationMethod?, notes? }
+//                      a new association (replacing the player's active
+//                      one), or { contactId, username, … } an edit
+//   contact-disconnect { contactId, reason? } inactive, kept for history
+//   contact-verify     { contactId } needs an Instagram-scoped ID on it
+//   contact-refresh    { contactId } re-read its username from Instagram
+//   sender-link        { igsid, contactId | playerId } confirm who messaged us
+//   sender-dismiss     { igsid } not a player
+//   senders-sync       { after? } everyone already in @wedraftsite's DMs →
+//                      instagramSenders (IGSID + username); call again with
+//                      `after` while `more`
 // Reads (posts, igMedia, igAccountDaily, igAnalytics/*) come straight from
 // Firestore (admin read in firestore.rules); only the server writes them.
 //
@@ -190,6 +203,22 @@ module.exports = async function handler(req, res) {
         return res.status(200).json(await runSync(db, op, { trigger: "manual", uid }));
       }
       case "feed": return res.status(200).json(await refreshFeed(db));
+      case "contact-save":
+      case "contact-disconnect":
+      case "contact-verify":
+      case "contact-refresh":
+      case "sender-link":
+      case "sender-dismiss":
+      case "senders-sync": {
+        const c = require("../server/instagram/contacts");
+        const fn = {
+          "contact-save": c.saveContact, "contact-disconnect": c.disconnectContact, "contact-verify": c.verifyContact,
+          "contact-refresh": c.refreshContact, "sender-link": c.linkSender, "sender-dismiss": c.dismissSender,
+          "senders-sync": (ctx, b) => c.syncConversations(ctx, { after: b.after || null, budgetMs: 120e3 }),
+        }[body.action];
+        const graph = ["contact-refresh", "senders-sync"].includes(body.action) ? require("../server/instagram/graph").graph : null;
+        return res.status(200).json(await fn(c.context(db, { uid, graph }), body));
+      }
       case "set-auto": {
         const auto = { enabled: body.enabled === true, by: uid, at: Date.now() };
         await db.doc("igAnalytics/status").set({ auto }, { merge: true });

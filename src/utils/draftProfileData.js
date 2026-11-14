@@ -15,6 +15,7 @@ import {
   matchProspectToPicks, fitScore, NFL_FIT_MIN, PROFILE_SKIP,
 } from "./draftProfiles";
 import { getSiteSnapshot } from "./siteSnapshots";
+import { PROSPECT_YEARS } from "./prospectYears";
 import { communityFor } from "./communityGrades";
 
 const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
@@ -25,7 +26,7 @@ const once = (cache, key, load) => {
 
 export const LATEST_DRAFT_YEAR = 2026;
 export const FIRST_DRAFT_YEAR = 2000;
-export const PROSPECT_YEARS = ["2027", "2028", "2029"];
+export { PROSPECT_YEARS };
 export const PROFILE_POSITIONS = ["QB", "RB", "WR", "TE", "OL", "DL", "EDGE", "LB", "DB"];
 
 // ── Pick history ──

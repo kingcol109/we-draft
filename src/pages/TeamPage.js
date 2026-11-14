@@ -19,6 +19,7 @@ import { scheduleGameHref } from "../utils/live";
 import { cssRect } from "../utils/pageZoom";
 import { textOn } from "../utils/teamColors";
 import FitText from "../components/FitLine";
+import { PROSPECT_YEARS } from "../utils/prospectYears";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
@@ -30,7 +31,7 @@ const SIDE_SOFT = "#f7f9fc";
 const SIDE_INK = "#0f1b2d";
 
 
-const PROSPECT_YEARS = ["2027", "2028", "2029"];
+// PROSPECT_YEARS: utils/prospectYears.js (2027–2030).
 const ARCHIVE_YEAR = "2026";
 const NEWS_LIMIT = 8;
 // Starting visible count for the News sidebar's "3 most recent, then
@@ -854,7 +855,7 @@ function MainContent({
               <div style={{ padding: "40px 24px", textAlign: "center", background: "#fff" }}>
                 <div style={{ fontSize: "32px", marginBottom: "10px" }}>🏈</div>
                 <div style={{ fontSize: "16px", fontWeight: 900, color: color1, textTransform: "uppercase", letterSpacing: "0.06em" }}>No We-Draft prospects yet</div>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "6px" }}>No 2027–2029 players from {canonicalSchool} in the We-Draft database yet.</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#888", marginTop: "6px" }}>No current prospects from {canonicalSchool} in the We-Draft database yet.</div>
               </div>
             ) : (
               <>

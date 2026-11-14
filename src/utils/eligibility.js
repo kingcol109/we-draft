@@ -88,6 +88,14 @@ export const movedInto = (p, eligible = p?.Eligible) => (p?.ClassHistory || []).
 //   otherwise                                "N seasons left… as early as
 //                                            X, and as late as Y"
 // Five seasons of eligibility: RecruitYear through RecruitYear + 4.
+// Still a high schooler: their recruiting class hasn't reached college yet
+// (a 2027 recruit until the draft class rolls over in May 2027) — a
+// promoted recruit, committed but not enrolled.
+export function inHighSchool(p, now = new Date()) {
+  const ry = yr(p?.RecruitYear);
+  return !!ry && ry >= Number(currentDraftClass(now));
+}
+
 export function eligibilityInfo(p, now = new Date()) {
   const ry = yr(p?.RecruitYear);
   const E = yr(p?.Eligible);
@@ -96,6 +104,10 @@ export function eligibilityInfo(p, now = new Date()) {
   const name = `${p.First || ""} ${p.Last || ""}`.trim();
   const lastSeason = ry + 4;
   const n = (k, word) => `${k} ${word}${k === 1 ? "" : "s"}`;
+
+  if (inHighSchool(p, now)) {
+    return `${name} is a high school senior in the class of ${ry}${p.School ? ` and is committed to ${p.School}` : ""}. He can declare for the NFL Draft as early as ${ry + 3}, and as late as ${ry + 5}.`;
+  }
 
   if (p.Declared) {
     const forgone = lastSeason - (E - 1);

@@ -18,6 +18,7 @@ import { textOn } from "../utils/teamColors";
 import DraftOrderRail from "../components/DraftOrderRail";
 import DraftNowButton from "../components/DraftNowButton";
 import FitText from "../components/FitLine";
+import { PROSPECT_YEARS, useVisibleProspectYears } from "../utils/prospectYears";
 
 // ── /staff/{slug} — a current head coach's or GM's draft history ──
 // Every pick their team made while they held a creditable job there (see
@@ -701,7 +702,7 @@ function DraftRecord({ picks, teams, defaults, logos, color1, color2, isMobile, 
 // the picks' average measurements (hover/tap for the percentile among every
 // drafted player at the position, compSnapshots/pct_{Position}), the picks
 // themselves, and on request the prospects who best fit the profile. ──
-const PROSPECT_YEARS = ["2027", "2028", "2029"];
+// utils/prospectYears.js (2027–2030; a newer class's chip shows once it has players).
 const PHYSICAL_KEYS = ["height", "weight", "arm", "hand"];
 const ATHLETIC_KEYS = ["forty", "vertical", "broad", "threeCone", "shuttle", "bench"];
 const SHORT_LABEL = { height: "Height", weight: "Weight", arm: "Arm", hand: "Hand", forty: "40 Yd", vertical: "Vert", broad: "Broad", threeCone: "3-Cone", shuttle: "Shuttle", bench: "Bench" };
@@ -899,6 +900,7 @@ function AverageMeasurements({ averages, pctTables, total, pos, color1, isMobile
 // tab; other classes join when toggled on.
 function ProspectMatches({ position, profile, pctTables, color1, color2, isMobile }) {
   const [years, setYears] = useState(["2027"]);
+  const visibleYears = useVisibleProspectYears();
   const [loaded, setLoaded] = useState({ status: "loading", prospects: [] });
   // At least one class stays on.
   const toggleYear = (y) => setYears((prev) => (prev.includes(y) ? (prev.length > 1 ? prev.filter((x) => x !== y) : prev) : [...prev, y].sort()));
@@ -933,7 +935,7 @@ function ProspectMatches({ position, profile, pctTables, color1, color2, isMobil
       <div style={{ ...card, overflow: "hidden" }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: isMobile ? "12px 14px" : "14px 20px", borderBottom: "1px solid #eef1f5" }}>
           <span style={{ fontSize: 11, fontWeight: 900, color: "#6b7685", letterSpacing: "0.08em", textTransform: "uppercase", marginRight: 4 }}>Classes</span>
-          {PROSPECT_YEARS.map((y) => (
+          {PROSPECT_YEARS.filter((y) => visibleYears.includes(y)).map((y) => (
             <button key={y} onClick={() => toggleYear(y)} aria-pressed={years.includes(y)} style={chip(years.includes(y))}>
               {years.includes(y) ? "✓ " : "+ "}{y}
             </button>

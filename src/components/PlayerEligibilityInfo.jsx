@@ -30,7 +30,7 @@ import { Link } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useSchools } from "./DraftArchiveList";
-import { ELIGIBILITY_DISCLAIMER, currentDraftClass } from "../utils/eligibility";
+import { ELIGIBILITY_DISCLAIMER, currentDraftClass, inHighSchool } from "../utils/eligibility";
 import { stopSpan, championSeasons } from "../utils/careerStops";
 import { stateName, STATE_ABBR } from "../utils/highSchoolMatch";
 import { useAccoladeIcons, accoladeIcon } from "../utils/accoladeIcons";
@@ -111,16 +111,34 @@ function useEspnBio(espnId) {
 }
 
 // A birthday ("2004-03-09" or an ISO timestamp) → "March 9, 2004" and the
-// age today, or null if it doesn't parse.
-function birthday(value) {
+// age today and on Sept. 1 of their draft class (week 1 of their rookie
+// season), each to the tenth of a year, rounded down ("24.2" — the draft
+// analyst's age), or null if it doesn't parse ("U" = admin couldn't find it).
+// estimated: the date is a stand-in (estimatedBirthday below) — never shown,
+// and ages are whole years with a "~" ("~21").
+function birthday(value, draftClass, estimated = false) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
   if (!m) return null;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const date = new Date(Date.UTC(y, mo - 1, d));
   if (Number.isNaN(date.getTime())) return null;
+  const ageAt = (ms) => {
+    const years = (ms - date.getTime()) / (365.25 * 86400000);
+    return estimated ? `~${Math.floor(years)}` : (Math.floor(years * 10) / 10).toFixed(1);
+  };
   const now = new Date();
-  const age = now.getFullYear() - y - (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d) ? 1 : 0);
-  return { text: date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }), age };
+  const age = ageAt(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const cls = Number(draftClass);
+  const rookieAge = cls > 1900 ? ageAt(Date.UTC(cls, 8, 1)) : null;
+  const text = estimated ? null : date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return { text, age, rookieAge };
+}
+
+// No known birthday: assume they turned 18 on Jan. 1 of their recruiting
+// class year (players.RecruitYear) — "2005-01-01" for a 2023 recruit.
+function estimatedBirthday(recruitYear) {
+  const y = Number(recruitYear);
+  return y > 1900 ? `${y - 18}-01-01` : null;
 }
 
 // A gold accolade line: "2025 · Lou Groza Award", "4-Star Recruit · No. 45 Nationally".
@@ -228,6 +246,9 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
   const brands = useSchools(stops.filter((s) => s.Level !== "JUCO").map((s) => s.School));
   const { hs, silhouette } = useHighSchool(player?.HighSchool, player?.State);
   const stillInSchool = Number(player?.Eligible) >= Number(currentDraftClass());
+  // A promoted recruit still in high school: the college is where they're
+  // committed (not current), and the high school is the current stop.
+  const hsSenior = inHighSchool(player);
   // Each award goes under the college stop whose seasons include it — the
   // newest stop when none does (no saved stops yet, a CFBD gap).
   // All-conference honors carry their school: the stop at that school that
@@ -262,14 +283,18 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
   // the high school's city — prep-school players (IMG etc.) aren't from
   // there. Only what we have is shown.
   const bio = useEspnBio(espnId);
-  const born = birthday(player?.Birthday || bio?.dob);
+  // Saved birthday, else ESPN's, else an estimate from the recruiting class
+  // (ages only, "~21" — the made-up date is never shown).
+  const born = birthday(player?.Birthday, player?.Eligible) || birthday(bio?.dob, player?.Eligible)
+    || birthday(estimatedBirthday(player?.RecruitYear), player?.Eligible, true);
   const age = born?.age ?? (bio?.age || null);
   const hometown = player?.Hometown || bio?.hometown || "";
-  const facts = [
-    hometown && ["Hometown", hometown],
-    born && ["Born", born.text],
-    age && ["Age", String(age)],
-  ].filter(Boolean);
+  // Hometown on its own line; birthday and age on the line under it.
+  const factRows = [
+    [hometown && ["Hometown", hometown]],
+    [born?.text && ["Born", born.text], age && ["Current Age", String(age)], born?.rookieAge && ["Rookie Age", born.rookieAge, `Age at Week 1 of the ${player.Eligible} NFL season (Sept. 1)`]],
+  ].map((r) => r.filter(Boolean)).filter((r) => r.length);
+  const facts = factRows.flat();
   const heading = (label) => (
     <div className="font-black uppercase" style={{ color: color1, fontSize: isMobile ? "12px" : "14px", letterSpacing: "0.08em" }}>{label}</div>
   );
@@ -295,8 +320,9 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
     ...(player?.InPortal ? [{ key: "portal", name: "Transfer Portal", brand: { Logo1: PORTAL_LOGO }, span: "Entered", accolades: [] }] : []),
     ...stops.map((s, i) => ({
       key: `${s.School}-${s.From}`, name: s.School, label: s.Level === "JUCO" ? "JUCO" : null, brand: s.Level === "JUCO" ? null : brands[s.School],
-      current: !draft && i === 0 && stillInSchool && s.School === player.School,
-      span: s.From ? stopSpan(s, { current: !draft && i === 0 && stillInSchool && s.School === player.School }) : !draft && i === 0 && stillInSchool && s.School === player.School ? "Present" : null,
+      current: !draft && !hsSenior && i === 0 && stillInSchool && s.School === player.School,
+      span: hsSenior && !s.From && s.School === player.School ? "Committed"
+        : s.From ? stopSpan(s, { current: !draft && i === 0 && stillInSchool && s.School === player.School }) : !draft && i === 0 && stillInSchool && s.School === player.School ? "Present" : null,
       to: s.Level !== "JUCO" && brands[s.School] ? `/team/${brands[s.School].slug || teamSlug(s.School)}` : null,
       accolades: s.Level === "JUCO" ? [] : awardsAt(i, s),
     })),
@@ -306,7 +332,8 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
       // No school logo or state silhouette: the state's shorthand ("TX").
       fallback: STATE_ABBR[stateName(player.State)] || null,
       sub: [hs?.City, stateName(player.State)].filter(Boolean).join(", "),
-      span: player.RecruitYear ? `Graduated ${player.RecruitYear}` : null,
+      current: hsSenior,
+      span: player.RecruitYear ? `${hsSenior ? "Class of" : "Graduated"} ${player.RecruitYear}` : null,
       accolades: recruitLine,
       to: hs?.Ranking === 3 ? `/hs/${hsSlug(hs.Name, hs.State)}` : null,
     }] : []),
@@ -339,11 +366,16 @@ export default function PlayerEligibilityInfo({ player, text, espnId, draft, col
         </>
       )}
       {facts.length > 0 && (
-        <div style={{ marginTop: text ? (isMobile ? 18 : 22) : 0, display: "flex", flexWrap: "wrap", gap: isMobile ? "10px 22px" : "10px 36px" }}>
-          {facts.map(([label, value]) => (
-            <div key={label} style={{ minWidth: 0 }}>
-              {heading(label)}
-              <div style={{ marginTop: 2, fontSize: isMobile ? "15px" : "17px", fontWeight: 700, color: "#1f2937" }}>{value}</div>
+        <div style={{ marginTop: text ? (isMobile ? 18 : 22) : 0, display: "flex", flexDirection: "column", gap: isMobile ? 12 : 14 }}>
+          {factRows.map((r) => (
+            <div key={r[0][0]} style={{ display: "flex", flexWrap: "wrap", gap: isMobile ? "10px 22px" : "10px 36px" }}>
+              {r.map(([label, value, note]) => (
+                <div key={label} style={{ minWidth: 0 }}>
+                  {heading(label)}
+                  <div style={{ marginTop: 2, fontSize: isMobile ? "15px" : "17px", fontWeight: 700, color: "#1f2937" }}>{value}</div>
+                  {note && <div style={{ marginTop: 1, fontSize: isMobile ? "11px" : "12px", fontWeight: 600, color: "#7a8594" }}>{note}</div>}
+                </div>
+              ))}
             </div>
           ))}
         </div>

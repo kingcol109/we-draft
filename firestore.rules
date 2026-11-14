@@ -367,6 +367,28 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
+    // Admin → Social (src/components/AdminSocial.jsx): player ↔ Instagram
+    // account associations, the people who've messaged @wedraftsite and
+    // their messages. Admins read; only the server writes
+    // (server/instagram/contacts.js through api/instagram.js's admin
+    // actions and api/instagram-webhook.js), which is where the one-active-
+    // account-per-player / per-username / per-IGSID rules are enforced.
+    match /instagramContacts/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+      match /history/{eventId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+    match /instagramSenders/{igsid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /instagramMessages/{mid} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
     // Signed-in visitors by day (src/utils/accountVisits.js): { u: { [uid]:
     // true } }. Each user adds only their own uid; admins read.
     match /siteDailyAccounts/{day} {

@@ -11,13 +11,15 @@ import { BOARD_MODERN_STYLE, RANK_CHIP, rankSlotWidth, POS_COL_W, LOGO_COL_W, Ra
 import { averageGradesFor, gradeLabel } from "../utils/communityGrades";
 import { getSiteSnapshot } from "../utils/siteSnapshots";
 import { classSnapshotRanks } from "../utils/classRanks";
+import { PROSPECT_YEARS, useVisibleProspectYears } from "../utils/prospectYears";
 import { useMobileStuckPageWatchdog } from "../hooks/useMobileStuckPageWatchdog";
 
 const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
 const ARCHIVE_YEARS = ["2026"];
-const ACTIVE_YEARS = ["2027", "2028", "2029"];
+// utils/prospectYears.js: 2027–2030. The 2030 tab shows once it has players.
+const ACTIVE_YEARS = PROSPECT_YEARS;
 
 const gradeOrder = [
   "Watchlist",
@@ -152,6 +154,7 @@ export default function UserBoards() {
   const [selectedMyGrades, setSelectedMyGrades] = useState([]);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
   const [eligibleYear, setEligibleYear] = useState("2027");
+  const visibleYears = useVisibleProspectYears();
   const [showWhiteboardTip, setShowWhiteboardTip] = useState(false);
   // Same extras the Community Board rows show: class / position rank chips
   // and school logos (the class snapshots), and each board player's
@@ -510,7 +513,7 @@ export default function UserBoards() {
       {/* Draft class */}
       <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "6px" : "8px", flexWrap: "wrap", justifyContent: "center", marginBottom: isMobile ? "8px" : "10px" }}>
         <ArchiveDropdown eligibleYear={eligibleYear} onSelect={handleYearSelect} archiveYears={ARCHIVE_YEARS} />
-        {ACTIVE_YEARS.map((yr) => (
+        {ACTIVE_YEARS.filter((y) => visibleYears.includes(y) || y === eligibleYear).map((yr) => (
           <button key={yr} onClick={() => handleYearSelect(yr)} aria-pressed={eligibleYear === yr}
             className={"wdb-pill wdb-sel" + (eligibleYear === yr ? " on" : "")}
             style={{ border: "2px solid " + GOLD, borderRadius: "20px", padding: isMobile ? "6px 18px" : "7px 24px", fontWeight: 900, fontSize: isMobile ? "14px" : "16px", cursor: "pointer", background: eligibleYear === yr ? BLUE : "#fff", color: eligibleYear === yr ? "#fff" : BLUE, fontFamily: "inherit" }}>

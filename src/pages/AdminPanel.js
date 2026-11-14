@@ -1,5 +1,7 @@
 // src/pages/AdminPanel.js
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { matchHighSchool } from "../utils/highSchoolMatch";
+import { igApi } from "../utils/instagram/api";
 import { collection, collectionGroup, getDocs, getDoc, addDoc, doc, updateDoc, setDoc, deleteDoc, deleteField, query, where, serverTimestamp, arrayUnion, arrayRemove, writeBatch, increment, Timestamp } from "firebase/firestore";
 import AdminDailyVisitors from "../components/AdminDailyVisitors";
 import AdminUserTiers from "../components/AdminUserTiers";
@@ -39,6 +41,7 @@ import AdminYouTubeGraphics from "../components/AdminYouTubeGraphics";
 import AdminThumbAnalytics from "../components/AdminThumbAnalytics";
 import AdminInstagram from "../components/AdminInstagram";
 import AdminInstagramAnalytics from "../components/AdminInstagramAnalytics";
+import AdminSocial from "../components/AdminSocial";
 import AdminX from "../components/AdminX";
 import { RANKINGS_LIMIT, rankingsWeekKey, fetchWeekRankMap } from "../utils/rankings";
 import { STAT_METRICS, computePositionStats, draftedPlayersAsHistorical, findComps, toNumber, isGraded, communityTraits, readMetric } from "../utils/historicalStats";
@@ -54,7 +57,8 @@ const BLUE = "#0055a5";
 const GOLD = "#f6a21d";
 
 const ARCHIVE_YEARS = ["2026"];
-const ACTIVE_YEARS = ["2027", "2028", "2029"];
+// 2030 = the 2027 recruiting class, promoted from Recruits (Dec 2026).
+const ACTIVE_YEARS = ["2027", "2028", "2029", "2030"];
 const ELIGIBLE_YEARS = [...ARCHIVE_YEARS, ...ACTIVE_YEARS];
 
 const POSITION_ORDER = ["QB", "RB", "WR", "TE", "OL", "EDGE", "DL", "LB", "DB"];
@@ -113,11 +117,11 @@ const BLANK_PLAYER_FORM = {
 // ── Recruits (high school players, no public page yet) ──
 // Recruit Class is the class the player is committed as a high schooler;
 // Draft Class = Recruit Class + 3, mirroring the real 3-years-removed-from-
-// high-school NFL draft eligibility rule. Only 2026 recruits currently have
-// a Draft Class (2029) inside the site's supported ACTIVE_YEARS, so only
-// they can be promoted to a real player page for now.
+// high-school NFL draft eligibility rule. A recruit can be promoted to a
+// real player page once their Draft Class is one of the site's
+// ACTIVE_YEARS: 2026 recruits (2029) and 2027 recruits (2030).
 const RECRUIT_CLASSES = ["2026", "2027", "2028", "2029"];
-const PROMOTABLE_RECRUIT_CLASS = "2026";
+const PROMOTABLE_RECRUIT_CLASSES = RECRUIT_CLASSES.filter((rc) => ACTIVE_YEARS.includes(draftClassForRecruitClass(rc)));
 // Best to worst — doubles as both the select's option order and the sort
 // rank for the recruit list (see recruitFlairRank below), so "descending"
 // visually means best grade first.
@@ -138,7 +142,7 @@ function recruitFlairRank(flair) {
 
 const BLANK_RECRUIT_FORM = {
   First: "", Last: "", HighSchool: "", State: "", Commitment: "", Position: "", RecruitClass: "",
-  Height: "", Weight: "", Flair: "", Film: "", AdminNotes: "", Flag: "", Grades: {},
+  Height: "", Weight: "", Flair: "", Film: "", InstagramHandle: "", AdminNotes: "", Flag: "", Grades: {},
   Strengths: [], Weaknesses: [],
 };
 
@@ -263,6 +267,43 @@ function generateSlug(first, last, position, eligible) {
   return s;
 }
 
+// A recruit \u2192 the player doc that becomes their page (one Promote click, or
+// a whole class at once). The high school is stored under OUR highSchools
+// doc's Name + State (utils/highSchoolMatch.js), so the player links to its
+// branding, team page and alumni list; no match keeps what the recruit has.
+// Film, Grades and Strengths/Weaknesses stay on the recruit doc (players
+// have no fields for them); the recruit points at the player afterwards
+// (promotedPlayerId). takenSlugs is updated so a batch never reuses one.
+// \u2192 { payload, slug, hs: { how, name, state } | null, warnings: [] }
+function recruitToPlayer(r, { highSchools, takenSlugs, players = [] }) {
+  const draftClass = draftClassForRecruitClass(r.RecruitClass);
+  const base = generateSlug(r.First, r.Last, r.Position, draftClass);
+  let slug = base;
+  for (let n = 1; takenSlugs.has(slug); n++) slug = `${base}-${n}`;
+  takenSlugs.add(slug);
+  const m = r.HighSchool ? matchHighSchool(r.HighSchool, r.State, highSchools) : null;
+  const warnings = [];
+  if (!r.Commitment) warnings.push("No commitment (School will be empty)");
+  if (r.HighSchool && !m) warnings.push(`High school "${r.HighSchool}" (${r.State || "no state"}) isn't in High Schools`);
+  if (!r.HighSchool) warnings.push("No high school");
+  const sameName = players.filter((p) => personKey(`${p.First} ${p.Last}`) === personKey(`${r.First} ${r.Last}`));
+  if (sameName.length) warnings.push(`Same name as ${sameName.map((p) => `${p.Position} ${p.School} ${p.Eligible}`).join(", ")}`);
+  if (slug !== base) warnings.push(`Slug taken; using "${slug}"`);
+  return {
+    slug, warnings,
+    hs: m ? { how: m.how, name: m.doc.Name, state: m.doc.State } : null,
+    payload: {
+      First: r.First || "", Last: r.Last || "", School: r.Commitment || "", Position: r.Position || "",
+      Eligible: draftClass, RecruitYear: String(r.RecruitClass),
+      HighSchool: m ? m.doc.Name : r.HighSchool || "", State: m ? m.doc.State : r.State || "",
+      Height: r.Height || "", Weight: r.Weight || "", Bio: "", Flair: r.Flair || "",
+      Live: true, AdminNotes: r.AdminNotes || "", Flag: r.Flag || "", Slug: slug,
+      promotedFromRecruitId: r.id,
+    },
+  };
+}
+const personKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 // Players section: two groups, each with its own sub-tabs. A group's tab
 // reopens its last-used sub-tab.
 const PLAYER_GROUPS = [
@@ -300,6 +341,8 @@ const SECTIONS = [
   { key: "players", label: "Players", icon: "🏈", ready: true },
   { key: "videos", label: "Videos", icon: "🎬", ready: true },
   { key: "content", label: "Content", icon: "📝", ready: true },
+  // Player ↔ Instagram accounts (components/AdminSocial.jsx).
+  { key: "social", label: "Social", icon: "💬", ready: true },
   { key: "analytics", label: "Analytics", icon: "📊", ready: true },
   { key: "coaches", label: "Coach History", icon: "📋", ready: true },
   { key: "cfbschedule", label: "CFB Schedule", icon: "📅", ready: true },
@@ -385,7 +428,9 @@ function ContentSection({ initialTab }) {
 function AdminTabs({ active, setActive, badgeCounts }) {
   return (
     <>
-      <div role="tablist" className="wd-admin-tabs" style={{ position: "relative", display: "flex", gap: "24px", marginTop: "18px", overflowX: "auto", scrollbarWidth: "none" }}>
+      {/* Every section visible: wraps to a second row on wide screens
+          (13 sections don't fit one); phones scroll sideways instead. */}
+      <div role="tablist" className="wd-admin-tabs" style={{ position: "relative", display: "flex", columnGap: "24px", rowGap: "2px", marginTop: "18px", scrollbarWidth: "none" }}>
         {SECTIONS.map((s) => {
           const isActive = active === s.key;
           const badge = badgeCounts?.[s.key] || 0;
@@ -431,7 +476,7 @@ function AdminTabs({ active, setActive, badgeCounts }) {
           );
         })}
       </div>
-      <style>{".wd-admin-tabs::-webkit-scrollbar { display: none; }"}</style>
+      <style>{".wd-admin-tabs { flex-wrap: wrap; } .wd-admin-tabs::-webkit-scrollbar { display: none; } @media (max-width: 767px) { .wd-admin-tabs { flex-wrap: nowrap; overflow-x: auto; } }"}</style>
     </>
   );
 }
@@ -6071,41 +6116,16 @@ function RecruitsSection() {
 
   const handlePromote = async () => {
     if (!selectedRecruit || isNew || !formState) return;
-    if (formState.RecruitClass !== PROMOTABLE_RECRUIT_CLASS) return;
+    if (!PROMOTABLE_RECRUIT_CLASSES.includes(formState.RecruitClass)) return;
     if (selectedRecruit.promotedPlayerId) return;
     setPromoting(true);
     setSaveMessage("");
     try {
-      const draftClass = draftClassForRecruitClass(formState.RecruitClass);
-      const baseSlug = generateSlug(formState.First, formState.Last, formState.Position, draftClass);
-
+      // Fresh slugs (not the list loaded with the page), so two admins can't collide.
       const playersSnap = await getDocs(collection(db, "players"));
       const existingSlugs = new Set(playersSnap.docs.map((d) => d.data().Slug).filter(Boolean));
-      let slug = baseSlug;
-      let n = 1;
-      while (existingSlugs.has(slug)) {
-        slug = baseSlug + "-" + n;
-        n += 1;
-      }
-
-      const playerPayload = {
-        First: formState.First,
-        Last: formState.Last,
-        School: formState.Commitment,
-        Position: formState.Position,
-        Eligible: draftClass,
-        RecruitYear: String(formState.RecruitClass),
-        Height: formState.Height,
-        Weight: formState.Weight,
-        Bio: "",
-        Flair: formState.Flair,
-        Live: true, // recruits no longer track Live themselves — a promoted player goes public immediately
-        AdminNotes: formState.AdminNotes,
-        Flag: formState.Flag,
-        Slug: slug,
-        updatedAt: serverTimestamp(),
-      };
-      const newPlayerRef = await addDoc(collection(db, "players"), playerPayload);
+      const { payload, slug } = recruitToPlayer({ ...selectedRecruit, ...formState }, { highSchools: highSchoolOptions, takenSlugs: existingSlugs });
+      const newPlayerRef = await addDoc(collection(db, "players"), { ...payload, updatedAt: serverTimestamp() });
 
       const promotionFields = { promotedPlayerId: newPlayerRef.id, promotedSlug: slug, promotedAt: serverTimestamp() };
       await updateDoc(doc(db, "recruits", selectedRecruit.id), promotionFields);
@@ -6114,7 +6134,10 @@ function RecruitsSection() {
       setAllRecruits((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
       setSelectedRecruit(updated);
       setFormState(updated);
-      setSaveMessage("Added to We-Draft — slug \"" + slug + "\".");
+      const ig = formState.InstagramHandle
+        ? await carryInstagram([{ playerId: newPlayerRef.id, handle: formState.InstagramHandle, name: `${formState.First} ${formState.Last}` }])
+        : { added: 0, failed: [] };
+      setSaveMessage("Added to We-Draft — slug \"" + slug + "\"." + igSummary(ig));
     } catch (e) {
       console.error("Admin recruit promote error:", e);
       setSaveMessage("Failed to add to We-Draft — check console.");
@@ -6123,7 +6146,77 @@ function RecruitsSection() {
     }
   };
 
-  const canPromote = formState && formState.RecruitClass === PROMOTABLE_RECRUIT_CLASS;
+  const canPromote = formState && PROMOTABLE_RECRUIT_CLASSES.includes(formState.RecruitClass);
+
+  // ── Promote a whole recruiting class (Dec 2026: the 2027 class → 2030) ──
+  // Plan first: every unpromoted recruit in the class, their slug, high
+  // school match and anything worth a look. Nothing is written until
+  // "Promote N" is clicked; then players are created in batches (each with
+  // its recruit's promotedPlayerId in the same batch, so a failure never
+  // leaves one without the other).
+  const [classPlan, setClassPlan] = useState(null); // { cls, rows }
+  const [classPromoting, setClassPromoting] = useState(false);
+  const [classMessage, setClassMessage] = useState(""); // shown in the list, not the editor
+  // Recruits' saved Instagram handles → Pending accounts in Admin → Social,
+  // once their player exists (instagramContacts is server-written:
+  // api/instagram.js contact-save, which also refuses a handle already on
+  // another player). A failure leaves the handle on the recruit; it can be
+  // added in Social by hand. → { added, failed: ["@x (Name): why"] }
+  const carryInstagram = async (list) => {
+    const out = { added: 0, failed: [] };
+    for (const { playerId, handle, name } of list) {
+      try {
+        await igApi("contact-save", { playerId, username: handle, verificationMethod: "admin_manual", notes: "Carried over from the recruit record at promotion." });
+        out.added++;
+      } catch (e) {
+        out.failed.push(`@${handle} (${name}): ${e.message}`);
+      }
+    }
+    return out;
+  };
+  const igSummary = (r) => (r.added || r.failed.length
+    ? ` Instagram: ${r.added} added to Social as Pending${r.failed.length ? `; ${r.failed.length} not added (${r.failed.join("; ")})` : ""}.`
+    : "");
+  const planClass = async (cls) => {
+    setClassMessage("");
+    const playersSnap = await getDocs(collection(db, "players"));
+    const players = playersSnap.docs.map((d) => d.data());
+    const taken = new Set(players.map((p) => p.Slug).filter(Boolean));
+    const rows = allRecruits
+      .filter((r) => r.RecruitClass === cls && !r.promotedPlayerId)
+      .sort((a, b) => (a.Last || "").localeCompare(b.Last || ""))
+      .map((r) => ({ r, ...recruitToPlayer(r, { highSchools: highSchoolOptions, takenSlugs: taken, players }) }));
+    setClassPlan({ cls, rows, already: allRecruits.filter((r) => r.RecruitClass === cls && r.promotedPlayerId).length });
+  };
+  const promoteClass = async () => {
+    const rows = classPlan?.rows || [];
+    if (!rows.length) return;
+    if (!window.confirm(`Create ${rows.length} player pages for the ${classPlan.cls} recruiting class (draft class ${draftClassForRecruitClass(classPlan.cls)})?\n\nThey're public as soon as they're created.`)) return;
+    setClassPromoting(true);
+    const done = {};
+    try {
+      for (let i = 0; i < rows.length; i += 200) {
+        const batch = writeBatch(db);
+        rows.slice(i, i + 200).forEach(({ r, payload, slug }) => {
+          const ref = doc(collection(db, "players"));
+          batch.set(ref, { ...payload, updatedAt: serverTimestamp() });
+          batch.update(doc(db, "recruits", r.id), { promotedPlayerId: ref.id, promotedSlug: slug, promotedAt: serverTimestamp() });
+          done[r.id] = { promotedPlayerId: ref.id, promotedSlug: slug };
+        });
+        await batch.commit();
+      }
+      const ig = await carryInstagram(rows.filter(({ r }) => r.InstagramHandle)
+        .map(({ r }) => ({ playerId: done[r.id].promotedPlayerId, handle: r.InstagramHandle, name: `${r.First} ${r.Last}` })));
+      setClassMessage(`Promoted ${rows.length} recruits to player pages (draft class ${draftClassForRecruitClass(classPlan.cls)}).${igSummary(ig)}`);
+      setClassPlan(null);
+    } catch (e) {
+      console.error("Admin class promote error:", e);
+      setClassMessage(`Promotion stopped after ${Object.keys(done).length} — ${e.message}. Plan again to finish the rest.`);
+    } finally {
+      setAllRecruits((prev) => prev.map((r) => (done[r.id] ? { ...r, ...done[r.id] } : r)));
+      setClassPromoting(false);
+    }
+  };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "18px", alignItems: "start" }}>
@@ -6132,10 +6225,17 @@ function RecruitsSection() {
           <div style={{ color: GOLD, fontWeight: 900, fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Recruits
           </div>
+          {PROMOTABLE_RECRUIT_CLASSES.filter((cls) => allRecruits.some((r) => r.RecruitClass === cls && !r.promotedPlayerId)).map((cls) => (
+            <button key={cls} type="button" onClick={() => planClass(cls)} disabled={classPromoting}
+              title={`Plan player pages for every unpromoted ${cls} recruit (draft class ${draftClassForRecruitClass(cls)})`}
+              style={{ marginLeft: "auto", background: "#fff", color: BLUE, border: "none", borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer" }}>
+              Promote {cls} class…
+            </button>
+          ))}
           <button
             onClick={startNewRecruit}
             style={{
-              marginLeft: "auto", background: GOLD, color: "#fff", border: "none",
+              marginLeft: PROMOTABLE_RECRUIT_CLASSES.some((cls) => allRecruits.some((r) => r.RecruitClass === cls && !r.promotedPlayerId)) ? 0 : "auto", background: GOLD, color: "#fff", border: "none",
               borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "12px",
               textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer",
             }}
@@ -6143,6 +6243,63 @@ function RecruitsSection() {
             + Add Recruit
           </button>
         </div>
+
+        {classMessage && (
+          <div style={{ padding: "8px 14px", borderBottom: "1px solid #eee", fontSize: "13px", fontWeight: 800, color: /stopped/.test(classMessage) ? "#c0392b" : "#2e7d32" }}>
+            {classMessage}
+          </div>
+        )}
+
+        {classPlan && (
+          <div style={{ padding: "12px 14px", borderBottom: "2px solid " + BLUE, background: "#f6f9fd" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "8px" }}>
+              <div style={{ fontWeight: 900, color: BLUE, fontSize: "14px" }}>
+                Promote the {classPlan.cls} class → draft class {draftClassForRecruitClass(classPlan.cls)}
+              </div>
+              <span style={{ fontSize: "12px", fontWeight: 800, color: "#666" }}>
+                {classPlan.rows.length} to create{classPlan.already ? ` · ${classPlan.already} already promoted` : ""} · {classPlan.rows.filter((x) => x.hs).length} high schools matched · {classPlan.rows.filter((x) => x.warnings.length).length} to check
+              </span>
+              <span style={{ marginLeft: "auto", display: "flex", gap: "6px" }}>
+                <button type="button" onClick={() => setClassPlan(null)} disabled={classPromoting}
+                  style={{ background: "#fff", color: "#666", border: "2px solid #ccc", borderRadius: "6px", padding: "5px 10px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer" }}>Cancel</button>
+                <button type="button" onClick={promoteClass} disabled={classPromoting || !classPlan.rows.length}
+                  style={{ background: "#2e7d32", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 12px", fontWeight: 900, fontSize: "11px", textTransform: "uppercase", cursor: "pointer", opacity: classPromoting ? 0.6 : 1 }}>
+                  {classPromoting ? "Promoting…" : `Promote ${classPlan.rows.length}`}
+                </button>
+              </span>
+            </div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "#777", marginBottom: "8px" }}>
+              Nothing has been written yet. Each page gets School (commitment), high school + state (matched to High Schools), height/weight, grade (Flair) and notes. Film and scouting grades stay on the recruit. Pages are public once created.
+            </div>
+            <div style={{ maxHeight: "360px", overflowY: "auto", border: "1px solid #e3e7ee", borderRadius: "6px", background: "#fff" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                <thead>
+                  <tr style={{ position: "sticky", top: 0, background: "#fff" }}>
+                    {["Recruit", "Commit", "High school", "Slug", "Check"].map((h) => (
+                      <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: "10px", fontWeight: 900, color: "#888", textTransform: "uppercase", borderBottom: "2px solid #e3e7ee" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {classPlan.rows.map(({ r, hs, slug, warnings }) => (
+                    <tr key={r.id} style={{ borderBottom: "1px solid #f0f2f5", background: warnings.length ? "#fff8ee" : undefined }}>
+                      <td style={{ padding: "5px 8px", fontWeight: 800 }}>
+                        {r.First} {r.Last} <span style={{ color: "#888" }}>{r.Position}</span>
+                        {r.InstagramHandle && <span title="Becomes a Pending account in Admin → Social" style={{ marginLeft: "6px", color: "#c13584", fontWeight: 700 }}>@{r.InstagramHandle}</span>}
+                      </td>
+                      <td style={{ padding: "5px 8px" }}>{r.Commitment || "—"}</td>
+                      <td style={{ padding: "5px 8px" }}>
+                        {hs ? <>{hs.name}, {STATE_ABBR[hs.state] || hs.state} <span style={{ color: hs.how === "exact" ? "#2e7d32" : "#b45309", fontWeight: 900 }}>{hs.how === "exact" ? "✓" : hs.how}</span></> : <span style={{ color: "#c0392b", fontWeight: 800 }}>{r.HighSchool || "—"} (no match)</span>}
+                      </td>
+                      <td style={{ padding: "5px 8px", fontFamily: "monospace", fontSize: "11px", color: "#555" }}>{slug}</td>
+                      <td style={{ padding: "5px 8px", color: "#b45309", fontWeight: 700 }}>{warnings.join(" · ") || <span style={{ color: "#2e7d32" }}>OK</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div style={{ padding: "12px 14px", borderBottom: "1px solid #eee", display: "flex", flexDirection: "column", gap: "10px" }}>
           <input
@@ -6379,7 +6536,7 @@ function RecruitsSection() {
                 {formState.RecruitClass && (
                   <div style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
                     Draft Class: {draftClassForRecruitClass(formState.RecruitClass)}
-                    {formState.RecruitClass !== PROMOTABLE_RECRUIT_CLASS && " — not yet promotable (only " + PROMOTABLE_RECRUIT_CLASS + " recruits can be added to We-Draft today)."}
+                    {!PROMOTABLE_RECRUIT_CLASSES.includes(formState.RecruitClass) && " — not yet promotable (only " + PROMOTABLE_RECRUIT_CLASSES.join(" and ") + " recruits can be added to We-Draft today)."}
                   </div>
                 )}
               </FieldRow>
@@ -6431,6 +6588,25 @@ function RecruitsSection() {
                     </button>
                   )}
                 </div>
+              </FieldRow>
+              {/* Held here until promotion, which turns it into a Pending
+                  account in Admin → Social (instagramContacts); after that,
+                  Social is where it's managed. */}
+              <FieldRow label="Instagram">
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    value={formState.InstagramHandle || ""}
+                    onChange={(e) => handleFieldChange("InstagramHandle", e.target.value.trim().replace(/^@+/, ""))}
+                    placeholder="handle (no @)"
+                    disabled={!!selectedRecruit?.promotedPlayerId}
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  {formState.InstagramHandle && (
+                    <a href={`https://www.instagram.com/${formState.InstagramHandle}/`} target="_blank" rel="noopener noreferrer"
+                      style={{ flexShrink: 0, fontSize: "12px", fontWeight: 900, color: "#c13584" }}>@{formState.InstagramHandle} ↗</a>
+                  )}
+                </div>
+                {selectedRecruit?.promotedPlayerId && <div style={{ fontSize: "11px", fontWeight: 700, color: "#888", marginTop: "3px" }}>Promoted: manage it in Admin → Social.</div>}
               </FieldRow>
               <FieldRow label="Flag">
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -6696,7 +6872,7 @@ function RecruitsSection() {
                   <button
                     onClick={handlePromote}
                     disabled={!canPromote || promoting}
-                    title={canPromote ? "" : "Only " + PROMOTABLE_RECRUIT_CLASS + " recruits can be added to We-Draft today."}
+                    title={canPromote ? "" : "Only " + PROMOTABLE_RECRUIT_CLASSES.join(" and ") + " recruits can be added to We-Draft today."}
                     style={{
                       width: "100%", background: canPromote ? GOLD : "#eee", color: canPromote ? "#fff" : "#999",
                       border: "2px solid " + (canPromote ? BLUE : "#ddd"),
@@ -12417,7 +12593,7 @@ function TeamBrandingPane({ league }) {
       [cfg.groupField]: t[cfg.groupField] || "",
       [cfg.shortField]: t[cfg.shortField] || "",
       ...(cfg.hasNflAssociation ? { NFL: t.NFL || "" } : {}),
-      ...(league === "cfb" ? { FCS: !!t.FCS } : {}),
+      ...(league === "cfb" ? { Division: t.Division || (t.FCS ? "FCS" : "FBS") } : {}),
       Logo1: t.Logo1 || "",
       Logo2: t.Logo2 || "",
       Wordmark: t.Wordmark || "",
@@ -12446,7 +12622,7 @@ function TeamBrandingPane({ league }) {
       [cfg.groupField]: "",
       [cfg.shortField]: "",
       ...(cfg.hasNflAssociation ? { NFL: "" } : {}),
-      ...(league === "cfb" ? { FCS: false } : {}),
+      ...(league === "cfb" ? { Division: "FBS" } : {}),
       Logo1: "",
       Logo2: "",
       Wordmark: "",
@@ -12528,7 +12704,10 @@ function TeamBrandingPane({ league }) {
         [cfg.groupField]: formState[cfg.groupField].trim(),
         [cfg.shortField]: formState[cfg.shortField].trim(),
         ...(cfg.hasNflAssociation ? { NFL: formState.NFL.trim() } : {}),
-        ...(league === "cfb" ? { FCS: !!formState.FCS } : {}),
+        // Division (FBS / FCS / D2 / D3 / NAIA — filled from CFBD's team
+        // classification); FCS stays the "not FBS" flag every page reads
+        // (TeamPage.js's stripped-down layout, the FBS-only lists).
+        ...(league === "cfb" ? { Division: formState.Division, FCS: formState.Division !== "FBS" } : {}),
         Logo1: formState.Logo1.trim(),
         Logo2: formState.Logo2.trim(),
         Wordmark: formState.Wordmark.trim(),
@@ -12656,9 +12835,9 @@ function TeamBrandingPane({ league }) {
                       <div style={{ fontWeight: 900, fontSize: "13px", color: BLUE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {t[cfg.nameField] || "Untitled"}
                       </div>
-                      {t.FCS && (
+                      {(t.FCS || (t.Division && t.Division !== "FBS")) && (
                         <span style={{ flexShrink: 0, background: "#eee", color: "#666", fontSize: "9px", fontWeight: 900, padding: "1px 6px", borderRadius: "4px", letterSpacing: "0.04em" }}>
-                          FCS
+                          {t.Division || "FCS"}
                         </span>
                       )}
                     </div>
@@ -12780,16 +12959,15 @@ function TeamBrandingPane({ league }) {
               )}
               {league === "cfb" && (
                 <FieldRow label="Division">
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={!!formState.FCS}
-                      onChange={(e) => handleFieldChange("FCS", e.target.checked)}
-                    />
-                    <span style={{ fontSize: "13px", fontWeight: 700, color: "#444" }}>
-                      This is an FCS team (unchecked = FBS)
-                    </span>
-                  </label>
+                  <select
+                    value={formState.Division || "FBS"}
+                    onChange={(e) => handleFieldChange("Division", e.target.value)}
+                    style={inputStyle}
+                  >
+                    {[["FBS", "FBS"], ["FCS", "FCS"], ["D2", "Division II"], ["D3", "Division III"], ["NAIA", "NAIA"]].map(([v, label]) => (
+                      <option key={v} value={v}>{label}</option>
+                    ))}
+                  </select>
                 </FieldRow>
               )}
               <LogoUrlField
@@ -14920,6 +15098,7 @@ export default function AdminPanel() {
             {activeSection === "players" && <PlayerDataSection />}
             {activeSection === "videos" && <VideosSection initialTab={opened.section === "videos" ? opened.tab : null} />}
             {activeSection === "content" && <ContentSection initialTab={opened.section === "content" ? opened.tab : null} />}
+            {activeSection === "social" && <AdminSocial />}
             {activeSection === "analytics" && <AnalyticsSection />}
             {activeSection === "coaches" && <AdminCoachHistory />}
             {activeSection === "cfbschedule" && <CFBScheduleSection />}

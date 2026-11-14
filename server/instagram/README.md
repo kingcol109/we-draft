@@ -20,6 +20,9 @@ section (see **Public feed** below).
 | Analytics syncs | `sync.js` |
 | Pure metric helpers | `metrics.js` |
 | The Home page's public feed | `feed.js` (shown by `src/pages/HomeInstagram.jsx`) |
+| Admin → Social (player ↔ account associations) | `src/components/AdminSocial.jsx` |
+| Associations, senders, messages | `contacts.js` |
+| Messaging webhook | `api/instagram-webhook.js` |
 | Tests | `npm run instagram:test` |
 | Credential check (read-only) | `node scripts/instagramCheck.mjs` |
 
@@ -35,9 +38,13 @@ The Meta app **We-Draft Social** uses the *Instagram API with Unified Login*.
   `INSTAGRAM_USER_ID` directly. `/me/assigned_instagram_accounts` is empty
   because the token has no `business_management` scope, which is expected
   and harmless.
-- **Permissions:** `instagram_basic`, `instagram_content_publish` and
-  `instagram_manage_insights`. Standard Access covers this account, so no
-  App Review is needed.
+- **Permissions** (from `GET /me/permissions`, checked 2026-11-13):
+  `instagram_basic`, `instagram_content_publish`,
+  `instagram_manage_insights`, `instagram_manage_comments` and
+  `instagram_manage_messages`. Standard Access covers this account for
+  publishing and insights, so no App Review is needed for those.
+  `instagram_manage_messages` is what Admin → Social uses (see "Social:
+  player accounts").
 
 ## Environment
 
@@ -235,3 +242,155 @@ and follower count. There are no analytics in it.
   (their `oe=` parameter), so the hourly rewrite keeps them fresh. If an
   image still fails to load, the page drops that tile, and it hides the
   whole section when none are left.
+
+## Social: player accounts
+
+Admin → **Social** maps We-Draft players to their Instagram accounts. It is
+groundwork for messaging players later: interview questions, responses on
+their profiles, and articles. None of that is built yet.
+
+### Identity
+
+- **Username:** what an admin types in. It can change, so it is only a
+  *provisional* association.
+- **IGSID (Instagram-scoped user ID):** the permanent identity. Meta puts it
+  on every messaging webhook as `sender.id`.
+  - It is scoped to our Meta app and @wedraftsite. It is not a universal
+    Instagram ID.
+  - It cannot be looked up from a username. The only way to get one is for
+    the person to message @wedraftsite.
+- Nothing in the code invents an IGSID or links a sender to a player
+  automatically. An admin always confirms the match.
+
+### Statuses
+
+| `accountStatus` | Meaning |
+|---|---|
+| `pending` | A username has been entered, but there is no IGSID yet. |
+| `connected` | An IGSID is linked, after an admin confirmed which sender this is. |
+| `verified` | Connected, and an admin has confirmed the person is the player. This requires an IGSID. |
+| `inactive` | Disconnected or replaced. The record is kept for history and never deleted. |
+
+### Firestore
+
+All of these are admin read and server write (`firestore.rules`).
+
+| Path | Contents |
+|---|---|
+| `instagramContacts/{id}` | `playerId`, `playerName`, `playerSlug`, `instagramUsername`, `usernameLower`, `instagramScopedUserId`, `accountStatus`, `active`, `primary`, `verificationMethod` (how it was associated: `admin_manual`, `player_provided`, `school_roster`, `inbound_message`, `other`), `verifiedAt`/`verifiedBy`, `connectedAt`/`connectedBy`, `notes`, `createdAt`/`createdBy`, `lastUpdated`/`updatedBy`, `usernameHistory` [{ username, at, source: admin/meta }], and on inactive records `deactivatedAt`, `deactivatedReason` (disconnected/replaced), `replacedBy` and `replaces`. |
+| `instagramContacts/{id}/history/{auto}` | the audit trail: `action` (created, edited, linked, verified, username_changed, replaced, disconnected), `at`, `by` (an admin uid, or `meta`), and the details |
+| `instagramSenders/{igsid}` | everyone who has messaged us: `username` and `name` (from Meta), `usernameFetchedAt`, `profileError`, `firstMessageAt`, `lastMessageAt`, `messageCount`, `contactId`/`playerId` once linked, and `review` { `state`: needs_review, unmatched, matched or dismissed; `reason`; `suggestedContactId`; `conflictContactId` } |
+| `instagramMessages/{mid}` | each message keyed by Meta's message ID: `igsid`, `direction` (in/out), `text`, `attachments`, `replyToMid`, `timestamp`, `receivedAt`, `contactId`, `playerId`, `isDeleted`, `editedAt`. Future question and response records should reference `playerId`, `instagramContactId` and the `mid`. |
+| `igAnalytics/webhook` | `lastEventAt`, `lastCounts`, `lastErrorAt`, `lastError` |
+| `igAnalytics/dmSync` | `lastRunAt`, `lastResult` (senders, created, suggested, renamed, conflicts), `more` |
+
+**Integrity.** These rules are enforced in transactions in `contacts.js`.
+The page never writes these collections itself: it calls `api/instagram.js`
+actions `contact-*` and `sender-*`, which are admin-only.
+
+- A player has at most one active contact. Connecting a new one makes the
+  old one inactive, with `replacedBy` pointing to the new one.
+- A username, or an IGSID, is active on at most one player.
+- A contact's `playerId` never changes. Moving an account to another player
+  means disconnecting it and creating a new contact.
+
+### Flow
+
+1. **Manual association.** The admin picks a player, enters `@username`, and
+   saves. The contact is created as `pending`, with no IGSID.
+2. **People already in our DMs.** **Sync existing DMs** (API action
+   `senders-sync`) pages through `GET /{ig-user-id}/conversations?platform=instagram&fields=participants,updated_time`.
+   Each conversation lists the other person's IGSID and username, and every
+   one of them becomes an `instagramSenders` doc with `source: "dm_sync"`.
+   - Their messages aren't imported. Only new ones come in, through the
+     webhook.
+   - Re-running is safe. Existing senders are updated, and dismissed ones
+     stay dismissed.
+   - Checked against the live account on 2026-11-13: 39 conversations, one
+     page, every participant with a username.
+3. **They message @wedraftsite.** Meta POSTs to `/api/instagram-webhook`.
+   This needs the setup below.
+   - The signature is checked first.
+   - The message is stored once per `mid`. Meta's retries do nothing extra.
+   - The sender doc is created or updated.
+   - If the sender is already linked, the message gets their `playerId`.
+4. **Username lookup.** This runs for a new sender, and at most once a day
+   for each sender after that. The server scans the conversations for the
+   IGSID; Meta ignores a `user_id` filter there, but it's one call at our
+   size.
+   - If the sender isn't in any conversation, it falls back to the User
+     Profile API (`GET /{igsid}?fields=username,name`). That API refuses with
+     error #230 ("User consent is required") unless the person has recently
+     messaged us, so it is only a fallback.
+   - Wherever the username comes from, matching works the same. If exactly
+     one active, ID-less contact has that username, the sender becomes
+     **Needs review** and that contact is shown as the suggestion. Otherwise
+     the sender is **Unmatched**.
+5. **Admin confirms** (Account Management). There are three choices:
+   - **Confirm match:** saves the IGSID onto the suggested contact.
+   - **Link to player…:** links the sender to any player's contact, or
+     creates a new contact from the sender.
+   - **Not a player:** dismisses the sender.
+
+   A link sets the contact to `connected` and attributes the sender's
+   earlier messages to the player.
+6. **Username changes.** When a linked sender's username changes, the
+   contact's username follows. The IGSID stays the same, and the change is
+   recorded in `usernameHistory` and the history log.
+   - This happens on their next message, or when an admin clicks
+     **Refresh**.
+   - If another active contact already holds the new username, the
+     sender is flagged `username_conflict` instead.
+   - An admin can also correct a username with **Edit**.
+
+### Meta setup
+
+**Already in place** (checked against the live token on 2026-11-13):
+
+- `instagram_manage_messages` is granted on the System-user token in
+  `INSTAGRAM_ACCESS_TOKEN`. No new permission or token is needed.
+- The token reads @wedraftsite's DM conversations, including each
+  participant's IGSID and username. **Sync existing DMs** works today, with
+  no further setup.
+- The User Profile API refuses this token (#230) for people who haven't
+  messaged recently. That's why the username lookup uses the conversations
+  list first.
+
+**Still needed for live messages through the webhook.** None of these can be
+checked from code: they need the App Dashboard or the app secret. Until
+they're done, new DMs don't arrive by themselves, though **Sync existing
+DMs** still picks up the people.
+
+1. **Webhook.** In App Dashboard → Webhooks → Instagram, set:
+   - callback `https://we-draft.com/api/instagram-webhook`
+   - verify token = `INSTAGRAM_WEBHOOK_VERIFY_TOKEN`
+   - subscribed field `messages`. `message_edit` is also handled.
+
+   If a webhook is already subscribed for another purpose, its callback has
+   to become this one, since Meta allows one callback per object. If the
+   account's Page isn't subscribed to the app yet, subscribe it with
+   `POST /{page-id}/subscribed_apps?subscribed_fields=messages` and a Page
+   token.
+2. **Env (Vercel, server only):**
+   - `META_APP_SECRET`: the app secret, used to check `X-Hub-Signature-256`.
+     Every POST is refused while it's unset.
+   - `INSTAGRAM_WEBHOOK_VERIFY_TOKEN`: any long random string, the same one
+     entered in the dashboard.
+3. **Access level.** With Standard Access, Meta sends messaging webhooks only
+   for people who have a role on the app. To get live messages from players,
+   `instagram_manage_messages` needs **Advanced Access**, which means App
+   Review, and the app must be Live. Check the current level in App
+   Dashboard → App Review → Permissions and Features. **Sync existing DMs**
+   doesn't depend on it.
+4. **Instagram app setting.** On @wedraftsite, **Allow access to messages**
+   (Settings → Messages and story replies → Message controls → Connected
+   tools) must stay on. The conversations API working suggests it already is.
+
+### Not built yet
+
+- Sending messages. Replies must also respect Meta's 24-hour messaging
+  window.
+- The question bank, interviews and responses on profiles.
+- Articles from responses.
+- Message types other than text/attachments, edits and deletes: reactions,
+  postbacks and read receipts are ignored.

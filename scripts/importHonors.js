@@ -105,8 +105,10 @@ async function run() {
   const report = [];
   const batch = db.batch();
   for (const set of sets) {
-    // team 0 = no team named: plain "All-American".
-    const label = (team, pos) => `${team === 0 ? "" : `${TEAM[team] || `Team ${team}`} `}All-${set.conference}${SPOT_NOTE[pos] ? ` (${SPOT_NOTE[pos]})` : ""}`;
+    // team 0 = no team named: plain "All-American". A file's `title` replaces
+    // "All-{conference}" for honors that aren't a conference's
+    // ("Division II All-American" → "First-Team Division II All-American").
+    const label = (team, pos) => `${team === 0 ? "" : `${TEAM[team] || `Team ${team}`} `}${set.title || `All-${set.conference}`}${SPOT_NOTE[pos] ? ` (${SPOT_NOTE[pos]})` : ""}`;
     const roster = rosters.get(set.season);
     const r = { file: set.file, selections: set.selections.length, cfbd: 0, wd: 0, missed: [], nameOnly: [], unmappedSchools: new Set() };
     for (const [pos, name, school, team] of set.selections) {

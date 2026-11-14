@@ -37,7 +37,7 @@ const { run: importEspnHeadshots } = require("./importEspnHeadshots");
 // ACTIVE_YEARS) — the class that's drafted but not yet migrated into
 // `historical`, and the classes that are still prospects.
 const LATEST_DRAFT_YEAR = "2026";
-const ACTIVE_YEARS = ["2027", "2028", "2029"];
+const ACTIVE_YEARS = ["2027", "2028", "2029", "2030"]; // src/utils/prospectYears.js
 const MAX_DOC_BYTES = 900 * 1024; // under Firestore's 1 MiB doc cap
 const EVAL_READ_CHUNK = 100;
 const DRY_RUN = process.argv.includes("--dry-run");

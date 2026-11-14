@@ -1,5 +1,5 @@
 import {
-  currentDraftClass, activePortalSeason, nextFebFirstUTC, firstClassFor, lastClassFor, classTag, inFinalYear, movedInto, eligibilityInfo,
+  currentDraftClass, activePortalSeason, nextFebFirstUTC, firstClassFor, lastClassFor, classTag, inFinalYear, movedInto, eligibilityInfo, inHighSchool,
 } from "./eligibility";
 
 const at = (iso) => new Date(iso);
@@ -84,6 +84,15 @@ describe("eligibilityInfo (Nov 2026)", () => {
     expect(eligibilityInfo(back("transfer"), now)).toMatch(/did not declare/);
     // an admin correction isn't a decision to return
     expect(eligibilityInfo(back("fix"), now)).toMatch(/^Jeremiah Smith has 2 seasons/);
+  });
+  test("high school senior (a promoted 2027 recruit)", () => {
+    const p = { First: "Jaiden", Last: "Bryant", RecruitYear: "2027", Eligible: "2030", School: "Miami" };
+    expect(inHighSchool(p, now)).toBe(true);
+    expect(eligibilityInfo(p, now)).toBe("Jaiden Bryant is a high school senior in the class of 2027 and is committed to Miami. He can declare for the NFL Draft as early as 2030, and as late as 2032.");
+    // Once the class rolls over (May 2027) they're a college freshman.
+    expect(inHighSchool(p, at("2027-06-01T12:00:00Z"))).toBe(false);
+    expect(eligibilityInfo(p, at("2027-06-01T12:00:00Z"))).toMatch(/seasons of college eligibility left/);
+    expect(inHighSchool(js({ RecruitYear: "2026", Eligible: "2029" }), now)).toBe(false);
   });
   test("nothing to say", () => {
     expect(eligibilityInfo(js({ Eligible: "2027" }), now)).toBe(null);
